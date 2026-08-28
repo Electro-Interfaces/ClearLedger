@@ -1,9 +1,9 @@
 /**
  * Действия личной раскладки в строке работы: взять в день, отложить, положить
- * в кучку, пометить важным.
+ * в подборку, пометить важным.
  *
  * Одним компонентом на все экраны намеренно: раскладку трогают из очереди, из
- * «Сегодня» и из самой кучки, и три копии этих кнопок разошлись бы на первой же
+ * «Сегодня» и из самой подборки, и три копии этих кнопок разошлись бы на первой же
  * правке — а правило здесь одно и оно неочевидное.
  *
  * Что этот компонент НЕ делает: не меняет предмет. Срок, состояние и просрочка
@@ -178,7 +178,7 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               <FolderPlus className="mr-2 h-3.5 w-3.5" />
-              {listName ? `В кучке «${listName}»` : 'В мою кучку'}
+              {listName ? `В подборке «${listName}»` : 'В мою подборку'}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
               {(lists.data?.lists ?? []).map((l) => (
@@ -189,14 +189,14 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
               ))}
               {(lists.data?.lists.length ?? 0) === 0 && (
                 <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
-                  Кучек пока нет — заводятся в разделе «Моё»
+                  Подборок пока нет — заводятся в разделе «Моё»
                 </DropdownMenuLabel>
               )}
               {mark?.list_id && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => act.mutate({ dropList: true })}>
-                    Убрать из кучки
+                    Убрать из подборки
                   </DropdownMenuItem>
                 </>
               )}

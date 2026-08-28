@@ -1002,11 +1002,11 @@ async def calendar_action(
 # Личная раскладка (этап 14 «Трека»)
 # ---------------------------------------------------------------------------
 # Очередь отвечает «что от меня ждут». Раскладка — «что я с этим решил»: взял в
-# день, отложил до даты, положил в свою кучку, пометил важным. Ничего в предмете
+# день, отложил до даты, положил в свою подборку, пометил важным. Ничего в предмете
 # при этом не меняется и никому, кроме хозяина, не видно; наружу видно
 # объективное — срок, состояние, просрочка.
 #
-# Кучка эксклюзивна: предмет лежит в одной или ни в одной. Иначе доска по кучкам
+# Подборка эксклюзивна: предмет лежит в одной или ни в одной. Иначе доска по подборкам
 # перестаёт быть доской — карточка висит в трёх колонках, и перенос становится
 # загадкой «переместить или добавить».
 
@@ -1052,10 +1052,10 @@ async def lists_mine(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Мои кучки со счётчиком и давностью обзора.
+    """Мои подборки со счётчиком и давностью обзора.
 
     Давность считается здесь, а не на экране: «не открывали 12 дней» — это
-    единственная механика, из-за которой кучка «потом» не превращается в
+    единственная механика, из-за которой подборка «потом» не превращается в
     кладбище, и она обязана быть свойством продукта, а не привычки человека.
     """
     from app.models import PersonalMark
@@ -1068,11 +1068,25 @@ async def lists_mine(
             PersonalMark.user_id == current_user.id,
             PersonalMark.list_id.is_not(None)).group_by(PersonalMark.list_id))).all())
     now = datetime.now(timezone.utc)
-    return {"lists": [{
-        "id": str(r.id), "name": r.name, "position": r.position,
-        "count": counts.get(r.id, 0),
-        "stale_days": ((now - r.reviewed_at).days if r.reviewed_at else None),
-    } for r in rows]}
+    today = now.date()
+    # Числа для пунктов навигации считаются здесь же, одним проходом: пункт,
+    # считающий себя сам, означает пять запросов на каждое открытие «Трека».
+    day, starred, deferred, loose = (await db.execute(select(
+        func.count().filter(PersonalMark.taken_for == today),
+        func.count().filter(PersonalMark.starred.is_(True)),
+        func.count().filter(PersonalMark.deferred_until > today),
+        func.count().filter(PersonalMark.list_id.is_(None)),
+    ).where(PersonalMark.company_id == cid,
+            PersonalMark.user_id == current_user.id))).one()
+    return {
+        "lists": [{
+            "id": str(r.id), "name": r.name, "position": r.position,
+            "count": counts.get(r.id, 0),
+            "stale_days": ((now - r.reviewed_at).days if r.reviewed_at else None),
+        } for r in rows],
+        "counts": {"day": day, "starred": starred,
+                   "deferred": deferred, "loose": loose},
+    }
 
 
 @router.post("/lists", status_code=status.HTTP_201_CREATED)
@@ -1081,14 +1095,14 @@ async def list_create(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Завести кучку. Имени достаточно: цвет и описание превратили бы движение
+    """Завести подборку. Имени достаточно: цвет и описание превратили бы движение
     руки в заполнение формы."""
     from app.models import PersonalList
 
     cid = await _assert_work(payload.company_id, current_user, db)
     rows = await _my_lists(db, cid, current_user)
     if any(r.name.lower() == payload.name.strip().lower() for r in rows):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Такая кучка уже есть")
+        raise HTTPException(status.HTTP_409_CONFLICT, "Такая подборка уже есть")
     row = PersonalList(company_id=cid, user_id=current_user.id,
                        name=payload.name.strip(), position=len(rows))
     db.add(row)
@@ -1104,9 +1118,9 @@ async def list_action(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Переименовать, отметить обзор или удалить кучку.
+    """Переименовать, отметить обзор или удалить подборку.
 
-    Удаление кучки не трогает предметы: у отметок обнуляется `list_id`, и работа
+    Удаление подборки не трогает предметы: у отметок обнуляется `list_id`, и работа
     возвращается в «Не разложено». Личная раскладка не вправе ничего удалять из
     работы компании — это её главное свойство.
     """
@@ -1115,7 +1129,7 @@ async def list_action(
     cid = await _assert_work(payload.company_id, current_user, db)
     row = await db.get(PersonalList, _uuid_or_400(list_id, "list_id"))
     if row is None or row.company_id != cid or row.user_id != current_user.id:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Кучка не найдена")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Подборка не найдена")
     if payload.delete:
         await db.delete(row)
         await db.commit()
@@ -1152,7 +1166,7 @@ async def place(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Разложить предмет у себя: в день, в кучку, под звезду или до даты."""
+    """Разложить предмет у себя: в день, в подборку, под звезду или до даты."""
     from app.services import placement
 
     cid = await _assert_work(payload.company_id, current_user, db)
@@ -1162,7 +1176,7 @@ async def place(
 
         lst = await db.get(PersonalList, _uuid_or_400(payload.list_id, "list_id"))
         if lst is None or lst.company_id != cid or lst.user_id != current_user.id:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Кучка не найдена")
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Подборка не найдена")
         list_id = lst.id
 
     try:
@@ -1191,7 +1205,7 @@ async def placed(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Что лежит в кучке, в дне, в отложенном или под звездой.
+    """Что лежит в подборке, в дне, в отложенном или под звездой.
 
     Строка уходит отсюда сама, по факту действия: закрытое поручение и
     выведенный документ не показываются. Убирать руками нечего — необходимость
@@ -1208,7 +1222,7 @@ async def placed(
                                      PersonalMark.user_id == current_user.id)
     if scope == "list":
         if not list_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не сказано, какая кучка")
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не сказано, какая подборка")
         sel = sel.where(PersonalMark.list_id == _uuid_or_400(list_id, "list"))
     elif scope == "day":
         sel = sel.where(PersonalMark.taken_for == today)

@@ -128,10 +128,12 @@ export function DocsWorkPage() {
     )
   }
 
-  if (view === 'lists') {
+  // Подборки, «Важное» и «Отложено» — один экран с разным отбором: строка,
+  // действия и пустые состояния у них общие, и три копии разошлись бы.
+  if (view === 'lists' || view === 'starred' || view === 'deferred') {
     return (
       <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
-        <ListsPage />
+        <ListsPage mode={view} />
       </Suspense>
     )
   }

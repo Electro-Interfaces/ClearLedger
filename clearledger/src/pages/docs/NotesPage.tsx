@@ -165,7 +165,7 @@ export function NotesPage() {
   const ничегоНеНайдено = !пусто && дни.length === 0
 
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col gap-4 px-4 py-4">
+    <div className="flex h-full min-h-0 w-full max-w-5xl flex-col gap-4 px-4 py-4">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-lg font-semibold text-foreground">

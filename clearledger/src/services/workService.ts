@@ -162,9 +162,9 @@ export async function moveWork(
  * и просрочка остаются такими же, какими их видит компания.
  * ------------------------------------------------------------------------ */
 
-/** Отметка человека на предмете: кучка, день, отложение, важность. */
+/** Отметка человека на предмете: подборка, день, отложение, важность. */
 export interface PersonalMark {
-  /** Кучка эксклюзивна: предмет лежит в одной или ни в одной. */
+  /** Подборка эксклюзивна: предмет лежит в одной или ни в одной. */
   list_id: string | null
   /** На какой день взят. Прошлая дата — уже не «мой день». */
   taken_for: string | null
@@ -177,13 +177,13 @@ export interface PersonalMark {
   position: number
 }
 
-/** Именованная кучка человека. */
+/** Именованная подборка человека. */
 export interface PersonalListRow {
   id: string
   name: string
   position: number
   count: number
-  /** Сколько дней кучку не открывали. `null` — ни разу не отмечали обзор. */
+  /** Сколько дней подборку не открывали. `null` — ни разу не отмечали обзор. */
   stale_days: number | null
 }
 
@@ -204,15 +204,25 @@ export function targetRef(item: { kind: 'doc' | 'task'; id: string }): string {
   return `${item.kind}:${item.id}`
 }
 
+/** Числа у пунктов личного раздела. Считаются вместе с подборками одним запросом:
+ *  пункт, который считает себя сам, — это пять запросов на открытие «Трека». */
+export interface PersonalCounts {
+  day: number
+  starred: number
+  deferred: number
+  loose: number
+}
+
 export async function myLists(companyId: string) {
-  return get<{ lists: PersonalListRow[] }>('/api/work/lists', { company_id: companyId })
+  return get<{ lists: PersonalListRow[]; counts: PersonalCounts }>(
+    '/api/work/lists', { company_id: companyId })
 }
 
 export async function createList(companyId: string, name: string) {
   return post<PersonalListRow>('/api/work/lists', { company_id: companyId, name })
 }
 
-/** Переименовать, отметить обзор или удалить кучку. Удаление не трогает
+/** Переименовать, отметить обзор или удалить подборку. Удаление не трогает
  *  предметы: работа возвращается в «Не разложено». */
 export async function listAction(companyId: string, id: string, data: {
   name?: string; reviewed?: boolean; delete?: boolean
@@ -242,7 +252,7 @@ export async function place(companyId: string, ref: string, data: {
   })
 }
 
-/** Что лежит в кучке, в дне, в отложенном или под звездой. Закрытая работа
+/** Что лежит в подборке, в дне, в отложенном или под звездой. Закрытая работа
  *  отсюда уходит сама — убирать руками нечего. */
 export async function placed(companyId: string, opts: {
   scope?: 'list' | 'day' | 'carry' | 'deferred' | 'starred' | 'loose'; listId?: string

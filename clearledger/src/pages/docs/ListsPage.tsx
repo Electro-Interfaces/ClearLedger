@@ -1,25 +1,30 @@
 /**
- * «Мои кучки» — личная группировка работы: и своих записей, и чужих предметов.
+ * Личная раскладка: подборка, «Важное», «Отложено».
  *
- * Кучка не метка и не проект. Метка живёт в общем справочнике компании и меняет
+ * Подборка не метка и не проект. Метка живёт в общем справочнике компании и меняет
  * сам предмет: повесив её на чужой документ, человек поменял его для всех.
- * Кучка не трогает предмет ничем — в ней лежит ссылка, и видит её только
+ * Подборка не трогает предмет ничем — в ней лежит ссылка, и видит её только
  * хозяин. Поэтому в неё можно положить документ, визу и чужое поручение, чего
  * не даёт почти ни один трекер.
  *
- * Кучка не представление. Представление отвечает «всё, что подходит под
- * условие», и пересобирается само; кучка отвечает «то, что я сюда положил», и
- * стоит, пока её не тронули. Оба нужны, и в навигации они рядом — значит
- * различие обязано читаться из подписи, иначе первый же человек заведёт кучку
- * вместо отбора.
+ * Подборка не представление. Представление отвечает «всё, что подходит под
+ * условие», и пересобирается само; подборка — «то, что я сюда положил», и стоит,
+ * пока её не тронули. Оба нужны, и в навигации они рядом — значит различие
+ * обязано читаться из подписи.
  *
- * Кучка ЭКСКЛЮЗИВНА: предмет лежит в одной или ни в одной. Иначе доска по
- * кучкам перестаёт быть доской — карточка висит в трёх колонках, и перенос
+ * Подборка ЭКСКЛЮЗИВНА: предмет лежит в одной или ни в одной. Иначе доска по
+ * подборкам перестаёт быть доской — карточка висит в трёх колонках, и перенос
  * становится загадкой «переместить или добавить».
+ *
+ * Сами подборки стоят пунктами раздела, а не вкладками внутри этого экрана: личная
+ * группировка не должна лежать на уровень глубже, чем работа компании.
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, FolderOpen, Loader2, Pencil, Plus, Star, Trash2, X } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import {
+  Check, EyeOff, FolderOpen, Loader2, Pencil, Plus, Star, Trash2, X,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,16 +32,35 @@ import { QueryError } from '@/components/common/QueryError'
 import { useCompany } from '@/contexts/CompanyContext'
 import { PlacedList } from '@/components/docs/PlacedList'
 import * as workService from '@/services/workService'
-import { cn } from '@/lib/utils'
 
-/** Отбор, который человек выбирает сверху. `list` — конкретная кучка. */
-type Выбор = { kind: 'list'; id: string } | { kind: 'starred' } | { kind: 'loose' }
+/** Что показываем: свои подборки, помеченное важным или спрятанное до даты. */
+export type ListsMode = 'lists' | 'starred' | 'deferred'
 
-export function ListsPage() {
+const ЗАГОЛОВКИ: Record<ListsMode, { title: string; hint: string }> = {
+  lists: {
+    title: 'Подборки',
+    hint: 'Своя группировка работы: сюда кладут и свою запись, и чужой документ '
+      + 'или поручение. Видите только вы, и на сам предмет это не влияет — срок '
+      + 'и состояние остаются общими.',
+  },
+  starred: {
+    title: 'Важное',
+    hint: 'Помеченное лично вами. Важность личная и приоритет предмета не '
+      + 'меняет: приоритет ставит постановщик, и поднять его у чужой визы никто '
+      + 'не вправе.',
+  },
+  deferred: {
+    title: 'Отложено',
+    hint: 'Спрятано только у вас и до названной даты. Срок компании шёл всё это '
+      + 'время и не менялся; просроченное спрятать нельзя вовсе.',
+  },
+}
+
+export function ListsPage({ mode = 'lists' }: { mode?: ListsMode }) {
   const { company } = useCompany()
   const qc = useQueryClient()
+  const [params, setParams] = useSearchParams()
   const companyId = company?.id ?? ''
-  const [выбор, setВыбор] = useState<Выбор>({ kind: 'starred' })
   const [новая, setНовая] = useState('')
   const [заводим, setЗаводим] = useState(false)
   const [переименование, setПереименование] = useState('')
@@ -47,21 +71,25 @@ export function ListsPage() {
     enabled: !!companyId,
   })
   const lists = q.data?.lists ?? []
-  const текущая = выбор.kind === 'list'
-    ? lists.find((l) => l.id === выбор.id) ?? null : null
+  const выбрана = mode === 'lists' ? params.get('list') : null
+  const текущая = lists.find((l) => l.id === выбрана) ?? null
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['personal-lists', companyId] })
     void qc.invalidateQueries({ queryKey: ['placed', companyId] })
   }
+  const открыть = (id: string | null) => setParams((p) => {
+    const n = new URLSearchParams(p)
+    n.set('view', 'lists')
+    if (id) n.set('list', id)
+    else n.delete('list')
+    return n
+  }, { replace: true })
 
   const create = useMutation({
     mutationFn: () => workService.createList(companyId, новая.trim()),
-    onSuccess: (row) => {
-      setНовая(''); setЗаводим(false); refresh()
-      setВыбор({ kind: 'list', id: row.id })
-    },
-    onError: (e: Error) => toast.error(e.message || 'Кучка не завелась'),
+    onSuccess: (row) => { setНовая(''); setЗаводим(false); refresh(); открыть(row.id) },
+    onError: (e: Error) => toast.error(e.message || 'Подборка не завелась'),
   })
 
   const act = useMutation({
@@ -70,7 +98,7 @@ export function ListsPage() {
     }) => workService.listAction(companyId, id, data),
     onSuccess: (_r, vars) => {
       setПереименование('')
-      if (vars.data.delete) setВыбор({ kind: 'starred' })
+      if (vars.data.delete) открыть(null)
       refresh()
     },
     onError: (e: Error) => toast.error(e.message || 'Не получилось'),
@@ -78,63 +106,27 @@ export function ListsPage() {
 
   if (!companyId) return null
 
+  const шапка = текущая
+    ? { title: текущая.name, hint: ЗАГОЛОВКИ.lists.hint }
+    : ЗАГОЛОВКИ[mode]
+  const Значок = mode === 'starred' ? Star : mode === 'deferred' ? EyeOff : FolderOpen
+
   return (
-    <div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col gap-4 px-4 py-4">
+    <div className="flex h-full min-h-0 w-full max-w-5xl flex-col gap-4 px-4 py-4">
       <header>
         <h1 className="flex items-center gap-2 text-lg font-semibold text-foreground">
-          <FolderOpen className="h-4.5 w-4.5 text-primary" />Мои кучки
+          <Значок className="h-4.5 w-4.5 text-primary" />{шапка.title}
         </h1>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Своя группировка работы: сюда можно положить и свою запись, и чужой
-          документ или поручение. Видите только вы, и на сам предмет это не
-          влияет — срок и состояние остаются общими.
-        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{шапка.hint}</p>
       </header>
 
       {q.isError && (
-        <QueryError message="Кучки не загрузились" onRetry={() => void q.refetch()} />
+        <QueryError message="Подборки не загрузились" onRetry={() => void q.refetch()} />
       )}
 
-      <div className="flex flex-wrap items-center gap-1">
-        <Чип активен={выбор.kind === 'starred'} onClick={() => setВыбор({ kind: 'starred' })}>
-          <Star className="mr-1 h-3 w-3" />Важное
-        </Чип>
-        {lists.map((l) => (
-          <Чип key={l.id} активен={выбор.kind === 'list' && выбор.id === l.id}
-            onClick={() => setВыбор({ kind: 'list', id: l.id })}
-            подпись={l.count ? String(l.count) : undefined}>
-            {l.name}
-          </Чип>
-        ))}
-        <Чип активен={выбор.kind === 'loose'} onClick={() => setВыбор({ kind: 'loose' })}>
-          Не разложено
-        </Чип>
-        {заводим ? (
-          <span className="inline-flex items-center gap-1">
-            <Input value={новая} autoFocus placeholder="Название кучки"
-              onChange={(e) => setНовая(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && новая.trim()) create.mutate()
-                if (e.key === 'Escape') { setЗаводим(false); setНовая('') }
-              }}
-              className="h-7 w-[170px] text-xs" />
-            <Button size="sm" className="h-7 px-2 text-xs"
-              disabled={!новая.trim() || create.isPending} onClick={() => create.mutate()}>
-              {create.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Завести'}
-            </Button>
-            <Button size="sm" variant="ghost" className="h-7 px-2"
-              onClick={() => { setЗаводим(false); setНовая('') }}>
-              <X className="h-3 w-3" />
-            </Button>
-          </span>
-        ) : (
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
-            onClick={() => setЗаводим(true)}>
-            <Plus className="mr-1 h-3 w-3" />Новая кучка
-          </Button>
-        )}
-      </div>
-
+      {/* Действия над выбранной подборкой. Обзор здесь же: единственные личные
+          списки, где «потом» не превращается в кладбище, — те, у которых он
+          встроен в продукт, а не оставлен привычке. */}
       {текущая && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
           {переименование ? (
@@ -154,8 +146,6 @@ export function ListsPage() {
               <Pencil className="h-3 w-3" />Переименовать
             </button>
           )}
-          {/* Обзор — механика, а не привычка: единственные списки, где «потом»
-              не превращается в кладбище, — те, у которых обзор встроен. */}
           <button type="button"
             onClick={() => act.mutate({ id: текущая.id, data: { reviewed: true } })}
             className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
@@ -163,9 +153,9 @@ export function ListsPage() {
           </button>
           <button type="button"
             onClick={() => act.mutate({ id: текущая.id, data: { delete: true } })}
-            title="Кучка исчезнет, работа останется: предметы вернутся в «Не разложено»"
+            title="Подборка исчезнет, работа останется: предметы вернутся в «Не разложено»"
             className="inline-flex items-center gap-1 text-muted-foreground hover:text-red-600 dark:hover:text-red-400">
-            <Trash2 className="h-3 w-3" />Удалить кучку
+            <Trash2 className="h-3 w-3" />Удалить подборку
           </button>
           {текущая.stale_days !== null && текущая.stale_days > 13 && (
             <span className="text-amber-600 dark:text-amber-400">
@@ -176,33 +166,113 @@ export function ListsPage() {
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {выбор.kind === 'list' ? (
-          <PlacedList companyId={companyId} scope="list" listId={выбор.id}
-            onChanged={refresh}
-            empty="В этой кучке пусто. Кладут сюда из строки работы — в очереди, в реестре или в «Сегодня»." />
-        ) : выбор.kind === 'starred' ? (
+        {mode === 'starred' ? (
           <PlacedList companyId={companyId} scope="starred" onChanged={refresh}
-            empty="Ничего не помечено важным. Важность личная: приоритет предмета ставит постановщик, а звезда — вы." />
+            empty="Ничего не помечено важным. Звезда личная: приоритет предмета ставит постановщик, а важность для себя — вы." />
+        ) : mode === 'deferred' ? (
+          <PlacedList companyId={companyId} scope="deferred" onChanged={refresh}
+            empty="Ничего не отложено." />
+        ) : текущая ? (
+          <PlacedList companyId={companyId} scope="list" listId={текущая.id}
+            onChanged={refresh}
+            empty="В этой подборке пусто. Кладут сюда из строки работы — в очереди, в реестре или в «Сегодня»." />
         ) : (
-          <PlacedList companyId={companyId} scope="loose" onChanged={refresh}
-            empty="Всё, что вы трогали, разложено по кучкам." />
+          <Обзор lists={lists} loading={q.isLoading} companyId={companyId}
+            onOpen={открыть} onChanged={refresh}
+            заводим={заводим} setЗаводим={setЗаводим}
+            новая={новая} setНовая={setНовая}
+            create={() => create.mutate()} creating={create.isPending} />
         )}
       </div>
     </div>
   )
 }
 
-function Чип({ активен, подпись, onClick, children }: {
-  активен: boolean; подпись?: string; onClick: () => void; children: React.ReactNode
+/** Список подборок, когда ни одна не выбрана: завести новую и посмотреть, что
+ *  вообще не разложено. */
+function Обзор({
+  lists, loading, companyId, onOpen, onChanged, заводим, setЗаводим, новая,
+  setНовая, create, creating,
+}: {
+  lists: workService.PersonalListRow[]
+  loading: boolean
+  companyId: string
+  onOpen: (id: string) => void
+  onChanged: () => void
+  заводим: boolean
+  setЗаводим: (v: boolean) => void
+  новая: string
+  setНовая: (v: string) => void
+  create: () => void
+  creating: boolean
 }) {
   return (
-    <button type="button" onClick={onClick} aria-pressed={активен}
-      className={cn('inline-flex items-center rounded-md px-2.5 py-1 text-xs transition-colors',
-        активен ? 'bg-primary text-primary-foreground'
-          : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
-      {children}
-      {подпись && <span className="ml-1.5 tabular-nums opacity-70">{подпись}</span>}
-    </button>
+    <div className="space-y-4">
+      <div>
+        {заводим ? (
+          <div className="flex items-center gap-1.5">
+            <Input value={новая} autoFocus placeholder="Название подборки"
+              onChange={(e) => setНовая(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && новая.trim()) create()
+                if (e.key === 'Escape') { setЗаводим(false); setНовая('') }
+              }}
+              className="h-8 w-[220px] text-sm" />
+            <Button size="sm" className="h-8 px-3 text-xs"
+              disabled={!новая.trim() || creating} onClick={create}>
+              {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Завести'}
+            </Button>
+            <Button size="sm" variant="ghost" className="h-8 px-2"
+              onClick={() => { setЗаводим(false); setНовая('') }}>
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        ) : (
+          <Button size="sm" variant="outline" className="h-8 px-3 text-xs"
+            onClick={() => setЗаводим(true)}>
+            <Plus className="mr-1 h-3.5 w-3.5" />Новая подборка
+          </Button>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center gap-2 px-1 py-4 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />Смотрим подборки…
+        </div>
+      ) : lists.length > 0 ? (
+        <div className="overflow-hidden rounded-lg border">
+          {lists.map((l) => (
+            <button key={l.id} type="button" onClick={() => onOpen(l.id)}
+              className="flex w-full items-center gap-2 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted/40">
+              <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate text-sm">{l.name}</span>
+              {l.stale_days !== null && l.stale_days > 13 && (
+                <span className="shrink-0 text-[11px] text-amber-600 dark:text-amber-400">
+                  не открывали {l.stale_days} дн.
+                </span>
+              )}
+              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                {l.count}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+          Подборок пока нет. Заведите первую — и складывайте в неё что угодно:
+          свою запись, чужое поручение, документ на визе.
+        </p>
+      )}
+
+      <section>
+        <h2 className="mb-1.5 text-sm font-medium text-foreground">Не разложено</h2>
+        <p className="mb-1.5 text-[11px] text-muted-foreground">
+          То, что вы уже трогали — брали в день или помечали, — но никуда не положили.
+        </p>
+        <PlacedList companyId={companyId} scope="loose" onChanged={onChanged}
+          empty="Пусто: всё, что трогали, разложено." />
+      </section>
+    </div>
   )
 }
 

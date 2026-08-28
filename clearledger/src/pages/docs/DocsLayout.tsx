@@ -17,8 +17,19 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
 import { DocsScopeBar } from '@/components/docs/DocsScopeBar'
 import * as tasksService from '@/services/tasksService'
+import * as workService from '@/services/workService'
 
-export interface DocsView { key: string; label: string; hint: string }
+export interface DocsView {
+  key: string
+  label: string
+  hint: string
+  /** Заголовок группы, под которым пункт стоит. Пункты одной группы идут
+   *  подряд: заголовок печатается при её смене. */
+  group?: string
+  /** Какое число показать справа. Числа личного приходят одним запросом
+   *  вместе с подборками — считать их поштучно значит пять запросов на открытие. */
+  badge?: 'day' | 'starred' | 'deferred'
+}
 
 /** Пункты по разделам. Каждый — свой вопрос, с которым приходят отдельно. */
 export const DOCS_VIEWS: Record<string, DocsView[]> = {
@@ -33,16 +44,21 @@ export const DOCS_VIEWS: Record<string, DocsView[]> = {
   // (день, календарь, записи), ниже — то, что ждут от него. Делить по движку
   // бессмысленно: приходят с вопросом «что у меня», а не «что в документах».
   // Порядок пунктов и есть эта группировка, поэтому он не алфавитный.
+  // Граница внутри раздела проходит не по движку, а по тому, чьё это решение.
+  // Сверху — то, что человек ведёт сам: день, календарь, записи, своя раскладка.
+  // Ниже — то, что принесла компания и отменить нельзя. Между ними подборки: они и
+  // есть место, где чужой предмет становится разложенным по-своему.
   '/docs/work': [
-    { key: 'today', label: 'Сегодня', hint: 'день целиком: сроки и напоминания' },
-    { key: 'calendar', label: 'Календарь', hint: 'месяц и неделя: встречи и сроки вместе' },
-    { key: 'notes', label: 'Записная книжка', hint: 'что записал себе — без сроков и чужих глаз' },
-    { key: 'lists', label: 'Мои кучки', hint: 'своя группировка работы: и записи, и чужие документы' },
-    { key: 'mine-all', label: 'Моя очередь', hint: 'всё, что ждёт меня, по срочности' },
-    { key: 'errands', label: 'Поручения', hint: 'работа, которую делаю я и которую поручил' },
-    { key: 'approvals', label: 'Визы', hint: 'документы, которые ждут моего согласования' },
-    { key: 'acquaints', label: 'Ознакомиться', hint: 'приказы и распоряжения, доведённые до меня' },
-    { key: 'mine', label: 'Мои документы', hint: 'где я автор или ответственный' },
+    { key: 'today', label: 'Сегодня', hint: 'день целиком: что взял, что принесли, напоминания', group: 'Веду сам', badge: 'day' },
+    { key: 'calendar', label: 'Календарь', hint: 'месяц и неделя: встречи и сроки вместе', group: 'Веду сам' },
+    { key: 'notes', label: 'Записная книжка', hint: 'что записал себе — без сроков и чужих глаз', group: 'Веду сам' },
+    { key: 'starred', label: 'Важное', hint: 'помеченное лично: важность своя, приоритет предмета ставит постановщик', group: 'Веду сам', badge: 'starred' },
+    { key: 'deferred', label: 'Отложено', hint: 'спрятанное у себя до даты — срок компании при этом не менялся', group: 'Веду сам', badge: 'deferred' },
+    { key: 'mine-all', label: 'Моя очередь', hint: 'всё, что ждёт меня, по срочности', group: 'Ждут от меня' },
+    { key: 'errands', label: 'Поручения', hint: 'работа, которую делаю я и которую поручил', group: 'Ждут от меня' },
+    { key: 'approvals', label: 'Визы', hint: 'документы, которые ждут моего согласования', group: 'Ждут от меня' },
+    { key: 'acquaints', label: 'Ознакомиться', hint: 'приказы и распоряжения, доведённые до меня', group: 'Ждут от меня' },
+    { key: 'mine', label: 'Мои документы', hint: 'где я автор или ответственный', group: 'Ждут от меня' },
   ],
   // Раздел «Компания» — то же самое, но по всем: где стоит работа целиком.
   '/docs/company': [
@@ -123,6 +139,32 @@ export function DocsLayout() {
   const saved = route === '/docs/company' ? (savedQ.data?.views ?? []) : []
   const savedView = params.get('view') === 'work' ? params.get('saved') : null
 
+  // Подборки человека — такие же пункты раздела, как «Сегодня». Держать их внутри
+  // одного экрана вкладками значит спрятать личную группировку на уровень
+  // глубже, чем работу компании: тогда ею не пользуются.
+  const listsQ = useQuery({
+    queryKey: ['personal-lists', company?.id ?? ''],
+    queryFn: () => workService.myLists(company!.id),
+    enabled: route === '/docs/work' && !!company?.id,
+    staleTime: 60 * 1000,
+  })
+  const myLists = route === '/docs/work' ? (listsQ.data?.lists ?? []) : []
+  const counts = listsQ.data?.counts
+  const openList = params.get('view') === 'lists' ? params.get('list') : null
+  const числоУ = (view: DocsView) => (view.badge && counts
+    ? counts[view.badge] : 0)
+
+  /** Открыть подборку: тот же экран подборок, но с выбранной. */
+  const openMyList = (id: string | null) => setParams((p) => {
+    const n = new URLSearchParams(p)
+    n.set('view', 'lists')
+    if (id) n.set('list', id)
+    else n.delete('list')
+    n.delete('doc')
+    n.delete('task')
+    return n
+  }, { replace: true })
+
   // Отбор открывается на общей ленте: он её и описывает.
   const openSaved = (id: string, query: Record<string, string>) => setParams((p) => {
     const n = new URLSearchParams(p)
@@ -171,6 +213,7 @@ export function DocsLayout() {
     n.delete('task')
     n.delete('tab')
     n.delete('page')
+    n.delete('list')
     return n
   }, { replace: true })
 
@@ -206,6 +249,23 @@ export function DocsLayout() {
                 {v.name}
               </button>
             ))}
+            {myLists.map((l) => (
+              <button key={l.id} type="button" onClick={() => openMyList(l.id)}
+                aria-current={openList === l.id ? 'page' : undefined}
+                className={cn('min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs transition-colors',
+                  openList === l.id
+                    ? 'bg-primary/10 font-medium text-primary'
+                    : 'text-muted-foreground/80')}>
+                {l.name}{l.count > 0 && <span className="ml-1 tabular-nums opacity-70">{l.count}</span>}
+              </button>
+            ))}
+            {route === '/docs/work' && (
+              <button type="button" onClick={() => openMyList(null)}
+                aria-current={active === 'lists' && !openList ? 'page' : undefined}
+                className="min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs text-muted-foreground/80">
+                + Подборка
+              </button>
+            )}
           </nav>
           <div className="pointer-events-none absolute inset-y-0 right-0 flex w-12 items-center justify-end bg-gradient-to-l from-card via-card/90 to-transparent pr-1">
             <button type="button" aria-label="Показать следующие пункты раздела"
@@ -244,16 +304,61 @@ export function DocsLayout() {
               <PanelLeftClose className="h-4 w-4" />
             </button>
           </div>
-          {views.map((v) => (
-            <button key={v.key} type="button" onClick={() => open(v.key)} title={v.hint}
-              aria-current={v.key === active ? 'page' : undefined}
-              className={cn('rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
-                v.key === active && !savedView
-                  ? 'bg-primary/10 font-medium text-primary'
-                  : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
-              {v.label}
-            </button>
+          {views.map((v, i) => (
+            <div key={v.key}>
+              {v.group && v.group !== views[i - 1]?.group && (
+                <div className={cn('px-3 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground/70',
+                  i > 0 && 'mt-3')}>
+                  {v.group}
+                </div>
+              )}
+              <button type="button" onClick={() => open(v.key)} title={v.hint}
+                aria-current={v.key === active ? 'page' : undefined}
+                className={cn('flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
+                  v.key === active && !savedView && !openList
+                    ? 'bg-primary/10 font-medium text-primary'
+                    : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
+                <span className="flex-1 truncate">{v.label}</span>
+                {числоУ(v) > 0 && (
+                  <span className="shrink-0 text-[11px] tabular-nums opacity-70">{числоУ(v)}</span>
+                )}
+              </button>
+            </div>
           ))}
+          {route === '/docs/work' && (
+            <>
+              <div className="mt-3 px-3 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground/70">
+                Подборки
+              </div>
+              {myLists.map((l) => (
+                <button key={l.id} type="button" onClick={() => openMyList(l.id)}
+                  aria-current={openList === l.id ? 'page' : undefined}
+                  title={l.stale_days !== null && l.stale_days > 13
+                    ? `Не открывали ${l.stale_days} дн.`
+                    : 'Своя подборка: видите только вы'}
+                  className={cn('flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
+                    openList === l.id
+                      ? 'bg-primary/10 font-medium text-primary'
+                      : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
+                  <span className="flex-1 truncate">{l.name}</span>
+                  {l.stale_days !== null && l.stale_days > 13 && (
+                    <span className="shrink-0 text-amber-600 dark:text-amber-400" aria-hidden>·</span>
+                  )}
+                  {l.count > 0 && (
+                    <span className="shrink-0 text-[11px] tabular-nums opacity-70">{l.count}</span>
+                  )}
+                </button>
+              ))}
+              <button type="button" onClick={() => openMyList(null)}
+                aria-current={active === 'lists' && !openList ? 'page' : undefined}
+                className={cn('rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
+                  active === 'lists' && !openList
+                    ? 'bg-primary/10 font-medium text-primary'
+                    : 'text-muted-foreground/80 hover:bg-accent/40 hover:text-foreground')}>
+                {myLists.length ? '+ Ещё подборка' : '+ Завести подборку'}
+              </button>
+            </>
+          )}
           {saved.length > 0 && (
             <>
               <div className="mt-3 px-3 pb-1 text-[11px] uppercase tracking-wide text-muted-foreground/70">
