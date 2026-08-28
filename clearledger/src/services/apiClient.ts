@@ -26,7 +26,19 @@ if (demoParam === '0') sessionStorage.removeItem(DEMO_KEY)
 
 /** Изолированный показ оригинального интерфейса на синтетических данных. */
 export const isDemoPath = (): boolean => DEMO_PATH_PATTERN.test(window.location.pathname)
-export const isDemoMode = (): boolean => isDemoPath() || sessionStorage.getItem(DEMO_KEY) === '1'
+export const isDemoMode = (): boolean => {
+  if (isDemoPath()) return true
+  if (sessionStorage.getItem(DEMO_KEY) !== '1') return false
+  // Флаг `?demo=1` живёт во вкладке, и человек, открывший демо-ссылку, а затем
+  // вошедший в своё пространство в той же вкладке, продолжал смотреть синтетику
+  // вместо собственных данных — молча, без единого признака. Настоящий вход
+  // снимает демо: своих данных он ждёт, а не показа.
+  if (localStorage.getItem(TOKEN_KEY)) {
+    sessionStorage.removeItem(DEMO_KEY)
+    return false
+  }
+  return true
+}
 
 /** API сконфигурирован? */
 export const isApiEnabled = (): boolean => isDemoMode() || !!BASE_URL

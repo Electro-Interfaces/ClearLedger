@@ -696,7 +696,9 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
   // без него кнопка говорит «здесь что-то есть, открой и посмотри».
   const пусто = {
     объект: !task.object_id,
-    метки: !task.labels.length,
+    // Метки скрыты только там, где справочник вообще есть: иначе «Ещё поля · 4»
+    // раскрывали три, и четвёртого человек не находил.
+    метки: labels.length > 0 && !task.labels.length,
     круг: task.visibility === 'company',
     наблюдатели: !task.watchers.length,
   }

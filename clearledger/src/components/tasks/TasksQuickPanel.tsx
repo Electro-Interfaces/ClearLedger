@@ -243,7 +243,10 @@ export function TasksQuickPanel({ compact = false }: {
       errands: by('do'),
       own: by('own'),
       assigned: open(assignedQ.data?.tasks),
-      watching: (watchingQ.data?.tasks ?? []).length,
+      // Живая работа, как и у остальных чисел: закрытое «наблюдаемое» ни о чём
+      // не говорит, а разные числа под одним словом в пульте и в меню — говорят,
+      // что одному из них верить нельзя.
+      watching: open(watchingQ.data?.tasks),
       starred: listsQ.data?.counts.starred ?? 0,
       deferred: listsQ.data?.counts.deferred ?? 0,
       notes: 0,

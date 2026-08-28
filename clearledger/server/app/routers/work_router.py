@@ -1250,8 +1250,11 @@ async def list_action(
     if payload.reviewed:
         row.reviewed_at = datetime.now(timezone.utc)
     await db.commit()
+    # Давность обзора считается так же, как в списке: `None` тут означало бы «ни
+    # разу не открывали» у подборки, которую вчера просмотрели.
+    now = datetime.now(timezone.utc)
     return {"id": str(row.id), "name": row.name, "position": row.position,
-            "stale_days": 0 if payload.reviewed else None}
+            "stale_days": (now - row.reviewed_at).days if row.reviewed_at else None}
 
 
 async def _due_of(db: AsyncSession, cid: uuid.UUID, target_ref: str):

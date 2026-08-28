@@ -13,7 +13,7 @@
  * «Сегодня» и в очереди.
  */
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   addDays, addMonths, addWeeks, eachDayOfInterval, endOfMonth, endOfWeek, format,
   isSameDay, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek,
@@ -36,6 +36,7 @@ const ЧАС = 60 * 60 * 1000
 export function CalendarPage() {
   const { company } = useCompany()
   const companyId = company?.id ?? ''
+  const qc = useQueryClient()
   const [mode, setMode] = useState<Mode>('month')
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()))
   const [openEvent, setOpenEvent] = useState<CalendarEvent | null>(null)
@@ -137,7 +138,14 @@ export function CalendarPage() {
       {(newAt || openEvent) && (
         <EventDialog companyId={companyId} event={openEvent} startAt={newAt}
           onClose={() => { setNewAt(null); setOpenEvent(null) }}
-          onChanged={() => { void eventsQ.refetch() }} />
+          // Календарь живёт в трёх местах: экран, док рельсы и пульт «Трека».
+          // Обновлять только свой запрос значит оставить два других со вчерашней
+          // картиной — встреча, собранная здесь, не появится ни там, ни там.
+          onChanged={() => {
+            void eventsQ.refetch()
+            void qc.invalidateQueries({ queryKey: ['calendar'] })
+            void qc.invalidateQueries({ queryKey: ['events'] })
+          }} />
       )}
     </div>
   )
