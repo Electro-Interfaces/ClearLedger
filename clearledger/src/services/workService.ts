@@ -267,6 +267,13 @@ export async function placed(companyId: string, opts: {
   })
 }
 
+/** Кому человек чаще всего поручает: плашки быстрого переназначения в календаре
+ *  рельсы. Считается по его же постановкам за три месяца — у каждого свой. */
+export async function frequentAssignees(companyId: string) {
+  return get<{ people: { id: string; name: string; count: number }[] }>(
+    '/api/work/frequent', { company_id: companyId })
+}
+
 /** Сегодняшнее число в местном виде `YYYY-MM-DD` — им сервер помечает день.
  *  Через `toISOString` считать нельзя: у Владивостока это уже завтра. */
 export function todayKey(d: Date = new Date()): string {

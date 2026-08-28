@@ -860,6 +860,9 @@ async def calendar_list(
     company_id: str = Query(...),
     date_from: datetime = Query(..., alias="from"),
     date_to: datetime = Query(..., alias="to"),
+    # Поиск словами: «когда была планёрка по экосистеме» без него решается перебором
+    # месяцев глазами — и человеком, и агентом.
+    q: str | None = Query(None, max_length=200),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -868,16 +871,103 @@ async def calendar_list(
     from app.models import CalendarEvent
 
     cid = await _assert_work(company_id, current_user, db)
+    sel = select(CalendarEvent).where(
+        CalendarEvent.company_id == cid,
+        _my_events_clause(current_user.id),
+        CalendarEvent.starts_at < date_to,
+        CalendarEvent.ends_at > date_from)
+    if q and q.strip():
+        игла = f"%{q.strip()}%"
+        sel = sel.where(or_(CalendarEvent.title.ilike(игла),
+                            CalendarEvent.description.ilike(игла),
+                            CalendarEvent.location.ilike(игла)))
     rows = list((await db.execute(
-        select(CalendarEvent).where(
-            CalendarEvent.company_id == cid,
-            _my_events_clause(current_user.id),
-            CalendarEvent.starts_at < date_to,
-            CalendarEvent.ends_at > date_from)
-        .order_by(CalendarEvent.starts_at).limit(_LIST_LIMIT))).scalars())
+        sel.order_by(CalendarEvent.starts_at).limit(_LIST_LIMIT))).scalars())
     parts = await _attendees(db, [r.id for r in rows])
     return {"events": [_event_out(r, parts.get(r.id, []), current_user.id) for r in rows],
             "total": len(rows)}
+
+
+@router.get("/calendar/busy")
+async def calendar_busy(
+    company_id: str = Query(...),
+    date_from: datetime = Query(..., alias="from"),
+    date_to: datetime = Query(..., alias="to"),
+    # Кого проверяем: список id через запятую. Пусто — только себя.
+    user_ids: str | None = Query(None, max_length=2000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Кто когда занят в окне — «свободно/занято», а не чужой календарь.
+
+    Отдаём ТОЛЬКО интервалы: начало, конец, признак «весь день». Ни названий, ни
+    участников, ни места. Это принципиально: чтобы предложить время, знать предмет
+    чужой встречи не нужно, а показать его значило бы открыть чужой календарь тому,
+    кого туда не звали.
+
+    Отменённые встречи занятостью не считаются: место освободилось.
+    """
+    from app.models import CalendarAttendee, CalendarEvent
+
+    cid = await _assert_work(company_id, current_user, db)
+    ids = {current_user.id}
+    for chunk in (user_ids or "").split(","):
+        if chunk.strip():
+            ids.add(_uuid_or_400(chunk.strip(), "user_ids"))
+    # Только люди этой организации: чужую занятость не отдаём даже интервалами.
+    свои = set((await db.execute(select(UserCompany.user_id).where(
+        UserCompany.company_id == cid, UserCompany.user_id.in_(ids)))).scalars())
+
+    rows = (await db.execute(
+        select(CalendarEvent, CalendarAttendee.user_id)
+        .join(CalendarAttendee, CalendarAttendee.event_id == CalendarEvent.id)
+        .where(CalendarEvent.company_id == cid,
+               CalendarEvent.status != "cancelled",
+               CalendarAttendee.user_id.in_(свои),
+               CalendarAttendee.response != "declined",
+               CalendarEvent.starts_at < date_to,
+               CalendarEvent.ends_at > date_from)
+        .order_by(CalendarEvent.starts_at).limit(_LIST_LIMIT))).all()
+
+    занято: dict[str, list] = {str(u): [] for u in свои}
+    for ev, uid in rows:
+        занято[str(uid)].append({
+            "starts_at": ev.starts_at, "ends_at": ev.ends_at, "all_day": ev.all_day,
+        })
+    people = {str(u.id): u.name for u in (await db.execute(
+        select(User).where(User.id.in_(свои)))).scalars()}
+    return {
+        "from": date_from, "to": date_to,
+        "people": [{"user_id": uid, "name": people.get(uid, "—"), "busy": ivs}
+                   for uid, ivs in занято.items()],
+    }
+
+
+@router.get("/calendar/{event_id}")
+async def calendar_card(
+    event_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Одна встреча целиком: состав, ответы участников, место, ссылка на конференцию.
+
+    Без неё карточку приходилось выуживать из выборки периода — то есть знать
+    заранее, в каком месяце искать.
+    """
+    from app.models import CalendarAttendee, CalendarEvent
+
+    cid = await _assert_work(company_id, current_user, db)
+    ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
+    if ev is None or ev.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
+    parts = (await _attendees(db, [ev.id])).get(ev.id, [])
+    # Видеть встречу вправе организатор и приглашённые. Правило то же, что у выборки
+    # (`_my_events_clause`): прямая ссылка не должна обходить то, что закрывает список.
+    if ev.organizer_id != current_user.id and not any(
+            a.user_id == current_user.id for a in parts):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша встреча")
+    return _event_out(ev, parts, current_user.id)
 
 
 @router.post("/calendar", status_code=status.HTTP_201_CREATED)
@@ -1207,6 +1297,40 @@ async def place(
     await db.commit()
     return {"target_ref": payload.target_ref,
             "mark": placement.out(row) if row is not None else None}
+
+
+@router.get("/frequent")
+async def frequent_assignees(
+    company_id: str = Query(...),
+    limit: int = Query(6, ge=1, le=12),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Кому этот человек чаще всего поручает работу.
+
+    Считается по его же постановкам за три месяца, а не по справочнику: список
+    «кому кинуть» должен состоять из тех, кому кидают, и у кладовщика он другой,
+    чем у главного бухгалтера. Пусто у новичка — это нормальное состояние, а не
+    ошибка: тогда рядом просто нет быстрых плашек.
+    """
+    since = datetime.now(timezone.utc) - timedelta(days=90)
+    cid = await _assert_work(company_id, current_user, db)
+    rows = (await db.execute(
+        select(Task.assignee_id, func.count().label("n")).where(
+            Task.company_id == cid, Task.author_id == current_user.id,
+            Task.assignee_id.is_not(None),
+            Task.assignee_id != current_user.id,
+            Task.created_at >= since)
+        .group_by(Task.assignee_id).order_by(func.count().desc()).limit(limit))).all()
+    ids = [r[0] for r in rows]
+    if not ids:
+        return {"people": []}
+    people = {u.id: u for u in (await db.execute(
+        select(User).where(User.id.in_(ids)))).scalars()}
+    return {"people": [{
+        "id": str(i), "name": (people[i].name or people[i].email or "—"),
+        "count": n,
+    } for i, n in rows if i in people]}
 
 
 @router.get("/placed")
