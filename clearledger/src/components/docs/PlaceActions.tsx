@@ -199,33 +199,28 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
               )}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <FolderPlus className="mr-2 h-3.5 w-3.5" />
-              {listName ? `В подборке «${listName}»` : 'В мою подборку'}
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              {(lists.data?.lists ?? []).map((l) => (
-                <DropdownMenuItem key={l.id} onClick={() => act.mutate({ listId: l.id })}>
-                  {l.name}
-                  {l.id === mark?.list_id && <span className="ml-auto text-xs">✓</span>}
-                </DropdownMenuItem>
-              ))}
-              {(lists.data?.lists.length ?? 0) === 0 && (
-                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                  Подборок пока нет — заводятся в разделе «Моё»
-                </DropdownMenuLabel>
-              )}
-              {mark?.list_id && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => act.mutate({ dropList: true })}>
-                    Убрать из подборки
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          <DropdownMenuSeparator />
+          {/* Подборки перечислены сразу: их две-три, и подменю ради них стоило
+              лишнего движения на каждое действие. */}
+          <DropdownMenuLabel className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+            <FolderPlus className="h-3.5 w-3.5" />В подборку
+          </DropdownMenuLabel>
+          {(lists.data?.lists ?? []).map((l) => (
+            <DropdownMenuItem key={l.id} onClick={() => act.mutate({ listId: l.id })}>
+              {l.name}
+              {l.id === mark?.list_id && <span className="ml-auto text-xs">✓</span>}
+            </DropdownMenuItem>
+          ))}
+          {(lists.data?.lists.length ?? 0) === 0 && (
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground/70">
+              Подборок пока нет — заводятся в разделе «Моё»
+            </DropdownMenuLabel>
+          )}
+          {mark?.list_id && (
+            <DropdownMenuItem onClick={() => act.mutate({ dropList: true })}>
+              Убрать из подборки «{listName}»
+            </DropdownMenuItem>
+          )}
           {mark && (
             <>
               <DropdownMenuSeparator />

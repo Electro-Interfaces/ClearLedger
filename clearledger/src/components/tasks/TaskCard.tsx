@@ -13,8 +13,8 @@ import { useSupportContext } from '@/contexts/SupportContext'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, ArrowRight, CheckCircle2, ChevronRight, Clock, Eye, EyeOff, Link2,
-  Loader2, Lock, Mail, MessagesSquare, Paperclip, Pin, Plus, RefreshCw, Send, Trash2,
-  X,
+  ListChecks, Loader2, Lock, Mail, MessagesSquare, Paperclip, Pin, Plus, RefreshCw,
+  Send, Trash2, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -202,8 +202,20 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           </button>
         )}
 
+        {/* Быстрые добавления: четыре видимые кнопки ведут туда, где действие
+            и происходит. Прятать их под одну «Добавить» — ошибка, за которую
+            Jira получила отдельный разбор: чище на вид, дороже в работе. */}
+        {live && (
+          <div className="mt-4 flex flex-wrap items-center gap-1.5">
+            <QuickAdd icon={Paperclip} label="Файл" onClick={() => fileRef.current?.click()} />
+            <QuickAdd icon={ListChecks} label="Пункт" onClick={() => setTab('work')} />
+            <QuickAdd icon={Link2} label="Связь" onClick={() => setTab('links')} />
+            <QuickAdd icon={Clock} label="Время" onClick={() => setTab('time')} />
+          </div>
+        )}
+
         <Tabs value={tab} onValueChange={setTab}
-          className={cn('mt-6', tab === 'chat' && 'flex min-h-0 flex-1 flex-col')}>
+          className={cn('mt-4', tab === 'chat' && 'flex min-h-0 flex-1 flex-col')}>
           {/* Вкладки вместо одной длинной колонки: у задачи с полусотней ходов
               история — отдельная работа, и ради неё не нужно прокручивать
               чек-лист и файлы. */}
@@ -224,7 +236,12 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             <TabsTrigger value="files" className="flex-none px-0 text-sm">
               Файлы{t.attachments.length ? ` · ${t.attachments.length}` : ''}
             </TabsTrigger>
-            <TabsTrigger value="feed" className="flex-none px-0 text-sm">История · {t.events.length}</TabsTrigger>
+            {/* Не «История»: в этом потоке и движение работы, и реплики —
+                единая лента, к которой пришли YouTrack и GitLab. Чат причастных
+                («Обсуждение») стоит отдельно намеренно: это разговор, а не след. */}
+            <TabsTrigger value="feed" className="flex-none px-0 text-sm">
+              Ход работы · {t.events.length}
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="work" className="space-y-5 pt-4">
@@ -1451,6 +1468,19 @@ function ExternalSystem({ task, companyId, live, onChanged }: {
 }
 
 /* ── Мелочи ──────────────────────────────────────────────────────────── */
+
+/** Кнопка быстрого добавления: значок и слово, потому что действие только
+ *  значком не читается — это правило подачи пространства. */
+function QuickAdd({ icon: Icon, label, onClick }: {
+  icon: typeof Paperclip; label: string; onClick: () => void
+}) {
+  return (
+    <button type="button" onClick={onClick}
+      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+      <Icon className="h-3.5 w-3.5" />{label}
+    </button>
+  )
+}
 
 function Section({ title, hint, action, children }: {
   title: string
