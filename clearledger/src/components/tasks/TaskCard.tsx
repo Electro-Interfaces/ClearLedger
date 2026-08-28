@@ -197,7 +197,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           // реестр чатов пространства, который параметр не читает: обычного человека
           // он не пускал вовсе, администратора приводил в таблицу без разговора.
           <button type="button" onClick={() => openInteraction('chat', `room:${origin}`)}
-            className="mt-2 text-[11px] text-muted-foreground hover:text-foreground hover:underline">
+            className="mt-2 text-xs text-muted-foreground hover:text-foreground hover:underline">
             задача из обсуждения — открыть разговор
           </button>
         )}
@@ -208,23 +208,23 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
               история — отдельная работа, и ради неё не нужно прокручивать
               чек-лист и файлы. */}
           <TabsList variant="line" className="h-9 w-full justify-start gap-5 border-b border-border/60">
-            <TabsTrigger value="work" className="flex-none px-0 text-[13px]">Работа</TabsTrigger>
+            <TabsTrigger value="work" className="flex-none px-0 text-sm">Работа</TabsTrigger>
             {/* На узком экране свойства живут вкладкой, на широком — колонкой
                 справа: там они нужны постоянно, а не по клику. */}
-            <TabsTrigger value="attrs" className="flex-none px-0 text-[13px] xl:hidden">Свойства</TabsTrigger>
-            <TabsTrigger value="chat" className="flex-none px-0 text-[13px]">
+            <TabsTrigger value="attrs" className="flex-none px-0 text-sm xl:hidden">Свойства</TabsTrigger>
+            <TabsTrigger value="chat" className="flex-none px-0 text-sm">
               Обсуждение
             </TabsTrigger>
-            <TabsTrigger value="links" className="flex-none px-0 text-[13px]">
+            <TabsTrigger value="links" className="flex-none px-0 text-sm">
               Связи{t.subtasks.total ? ` · ${t.subtasks.total}` : ''}
             </TabsTrigger>
-            <TabsTrigger value="time" className="flex-none px-0 text-[13px]">
+            <TabsTrigger value="time" className="flex-none px-0 text-sm">
               Время{t.time.spent ? ` · ${t.time.spent_text}` : ''}
             </TabsTrigger>
-            <TabsTrigger value="files" className="flex-none px-0 text-[13px]">
+            <TabsTrigger value="files" className="flex-none px-0 text-sm">
               Файлы{t.attachments.length ? ` · ${t.attachments.length}` : ''}
             </TabsTrigger>
-            <TabsTrigger value="feed" className="flex-none px-0 text-[13px]">История · {t.events.length}</TabsTrigger>
+            <TabsTrigger value="feed" className="flex-none px-0 text-sm">История · {t.events.length}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="work" className="space-y-5 pt-4">
@@ -305,7 +305,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             {([['all', 'всё'], ['talk', 'разговор'], ['move', 'движение'],
                ['meta', 'правки и время']] as const).map(([k, label]) => (
               <button key={k} type="button" onClick={() => setFeedKind(k)}
-                className={cn('rounded px-1.5 py-0.5 text-[11px] transition-colors',
+                className={cn('rounded px-1.5 py-0.5 text-xs transition-colors',
                   feedKind === k
                     ? 'bg-primary/10 font-medium text-primary'
                     : 'text-muted-foreground hover:text-foreground')}>
@@ -417,9 +417,14 @@ function Header({ task, companyId, onRename, onBack }: {
         <WorkIdentity itemKey={tasksService.taskKey(task)} type={task.type}
           state={task.state} stateName={task.state_name}
           extra={task.project} />
-        <span className="text-[11px] text-muted-foreground">
-          {STATUS_LABEL[task.status] ?? task.status}
-        </span>
+        {/* Колонка работы уже названа рядом (`WorkIdentity`), и повторять её
+            статусом значит поставить два слова об одном. Показываем статус,
+            только когда он добавляет: закрыта, отменена. */}
+        {task.status !== 'open' && (
+          <span className="text-xs text-muted-foreground">
+            {STATUS_LABEL[task.status] ?? task.status}
+          </span>
+        )}
         {/* Откуда работа: человек, пришедший из карточки проекта, должен видеть
             это и уметь вернуться. Без ссылки связь односторонняя. */}
         {task.subject_ref && (
@@ -427,7 +432,7 @@ function Header({ task, companyId, onRename, onBack }: {
         )}
         {task.labels.map((l) => (
           <span key={l.id}
-            className="rounded border border-border/60 bg-muted/40 px-1 py-px text-[11px]">
+            className="rounded border border-border/60 bg-muted/40 px-1 py-px text-xs">
             {l.name}
           </span>
         ))}
@@ -505,7 +510,7 @@ function Description({ task, disabled, onSave }: {
   return (
     <Section title="Описание" action={!disabled && (
       <button type="button" onClick={() => { setText(task.description ?? ''); setEditing(true) }}
-        className="text-[11px] text-muted-foreground hover:text-foreground">изменить</button>
+        className="text-xs text-muted-foreground hover:text-foreground">изменить</button>
     )}>
       {task.description ? (
         <RichText text={task.description} className="text-sm text-foreground/90" />
@@ -514,7 +519,7 @@ function Description({ task, disabled, onSave }: {
       ) : (
         // Пустое место должно звать, а не сообщать о пустоте.
         <button type="button" onClick={() => { setText(''); setEditing(true) }}
-          className="w-full rounded-lg border border-dashed px-3 py-4 text-left text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
+          className="w-full rounded-lg border border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
           Добавить описание: что именно, где, к какому результату. Скриншот — Ctrl+V.
         </button>
       )}
@@ -547,7 +552,8 @@ function Checklist({ task, companyId, live, onChanged }: {
   const items = task.checklist_items ?? []
 
   return (
-    <Section title={`Чек-лист${items.length ? ` · ${task.checklist.done} из ${task.checklist.total}` : ''}`}>
+    <Section title={`Чек-лист${items.length ? ` · ${task.checklist.done} из ${task.checklist.total}` : ''}`}
+      hint={items.length ? undefined : 'разбейте работу на шаги — прогресс виден в списке'}>
       <div className="space-y-1">
         {items.map((c) => (
           <div key={c.id} className="flex items-center gap-2">
@@ -564,10 +570,8 @@ function Checklist({ task, companyId, live, onChanged }: {
             )}
           </div>
         ))}
-        {items.length === 0 && (
-          <p className="text-xs text-muted-foreground">
-            {live ? 'Разбейте работу на шаги — прогресс будет виден в списке.' : 'Пунктов нет.'}
-          </p>
+        {items.length === 0 && !live && (
+          <p className="text-xs text-muted-foreground">Пунктов нет.</p>
         )}
       </div>
       {live && (
@@ -709,7 +713,7 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
             {labels.map((l) => (
               <button key={l.id} type="button" disabled={!live || label.isPending}
                 onClick={() => label.mutate({ id: l.id, on: !own.has(l.id) })}
-                className={cn('rounded border px-1.5 py-0.5 text-[11px] transition-colors',
+                className={cn('rounded border px-1.5 py-0.5 text-xs transition-colors',
                   own.has(l.id)
                     ? 'border-primary/40 bg-primary/10 text-primary'
                     : 'text-muted-foreground hover:bg-muted/60')}>
@@ -733,13 +737,13 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
             </SelectContent>
           </Select>
           {task.visibility === 'personal' && (
-            <span className="inline-flex items-center gap-1 rounded border border-primary/40 bg-primary/5 px-1.5 py-0.5 text-[11px] text-primary">
+            <span className="inline-flex items-center gap-1 rounded border border-primary/40 bg-primary/5 px-1.5 py-0.5 text-xs text-primary">
               <Lock className="h-3 w-3" />
               личная запись: не видит никто, включая администратора
             </span>
           )}
           {task.visibility === 'private' && (
-            <span className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/5 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-400">
+            <span className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/5 px-1.5 py-0.5 text-xs text-amber-700 dark:text-amber-400">
               <Lock className="h-3 w-3" />
               видят автор, исполнитель, наблюдатели и администратор
             </span>
@@ -771,7 +775,7 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
           )}
           {live && (
             <Select onValueChange={(v) => watch.mutate({ userId: v, on: true })}>
-              <SelectTrigger className="h-7 w-[150px] text-[11px]">
+              <SelectTrigger className="h-7 w-[150px] text-xs">
                 <SelectValue placeholder="+ наблюдатель" />
               </SelectTrigger>
               <SelectContent>
@@ -782,7 +786,7 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
           )}
         </div>
       </div>
-      <dl className="mt-5 space-y-1.5 border-t pt-3 text-[11px] text-muted-foreground">
+      <dl className="mt-5 space-y-1.5 border-t pt-3 text-xs text-muted-foreground">
         <div className="flex justify-between gap-2">
           <dt>Автор</dt>
           <dd className="text-right text-foreground/80">{task.author ?? '—'}</dd>
@@ -806,7 +810,7 @@ function Field({ label, hint, tone, children }: {
     <div>
       <FieldLabel>{label}</FieldLabel>
       <div className="mt-1.5">{children}</div>
-      {hint && <p className={cn('mt-1 text-[11px] font-medium', tone)}>{hint}</p>}
+      {hint && <p className={cn('mt-1 text-xs font-medium', tone)}>{hint}</p>}
     </div>
   )
 }
@@ -814,7 +818,7 @@ function Field({ label, hint, tone, children }: {
 /** Подпись поля: один кегль и один регистр на всю колонку. */
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
-    <span className="text-[11px] uppercase tracking-wide text-muted-foreground/70">
+    <span className="text-xs uppercase tracking-wide text-muted-foreground/70">
       {children}
     </span>
   )
@@ -856,7 +860,7 @@ function CodeRefs({ taskId, companyId, live }: {
       <div className="space-y-1">
         {rows.map((row) => (
           <div key={row.id} className="flex items-center gap-2 text-xs">
-            <span className="w-[92px] shrink-0 text-[11px] text-muted-foreground">
+            <span className="w-[92px] shrink-0 text-xs text-muted-foreground">
               {CODE_KIND_LABEL[row.kind] ?? 'ссылка'}
             </span>
             <a href={row.url} target="_blank" rel="noreferrer"
@@ -864,7 +868,7 @@ function CodeRefs({ taskId, companyId, live }: {
               {row.title}
             </a>
             {row.repo && (
-              <span className="truncate text-[11px] text-muted-foreground">{row.repo}</span>
+              <span className="truncate text-xs text-muted-foreground">{row.repo}</span>
             )}
             {live && (
               <button type="button" aria-label={`Отвязать ${row.title}`}
@@ -951,12 +955,12 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
   return (
     <Section title="Связи и подзадачи" action={live && (
       <button type="button" onClick={() => setAdding((v) => !v)}
-        className="text-[11px] text-muted-foreground hover:text-foreground">
+        className="text-xs text-muted-foreground hover:text-foreground">
         {adding ? 'отмена' : 'связать'}
       </button>
     )}>
       {adding && (
-        <div className="mb-2 space-y-2 rounded-md border border-dashed p-2">
+        <div className="mb-2 space-y-2 rounded-md border border-border p-2">
           <div className="flex gap-2">
             <Select value={kind} onValueChange={(v) => setKind(v as LinkKind)}>
               <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
@@ -986,7 +990,7 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
             {kind === 'subtask' && query.trim().length >= 3 && (
               <button type="button" disabled={createChild.isPending}
                 onClick={() => createChild.mutate()}
-                className="flex w-full items-center gap-2 rounded border border-dashed px-1.5 py-1 text-left text-xs hover:bg-muted/60">
+                className="flex w-full items-center gap-2 rounded border border-border px-1.5 py-1 text-left text-xs hover:bg-muted/60">
                 <Plus className="h-3 w-3 shrink-0 text-muted-foreground" />
                 <span className="truncate">
                   Завести подзадачу «{query.trim()}»
@@ -995,14 +999,14 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
             )}
             {query.trim().length >= 2 && found.data?.tasks.length === 0
               && kind !== 'subtask' && (
-              <p className="text-[11px] text-muted-foreground">Ничего не нашлось.</p>
+              <p className="text-xs text-muted-foreground">Ничего не нашлось.</p>
             )}
           </div>
         </div>
       )}
       {kids.length > 0 && (
         <div className="mb-3">
-          <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+          <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
             <span>Подзадачи</span>
             <span>{kids.filter((k) => k.status !== 'open').length} из {kids.length} закрыто</span>
           </div>
@@ -1038,7 +1042,7 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
               className="truncate text-left hover:underline">
               <span className="font-medium">№{l.number}</span> {l.title}
             </button>
-            <span className={cn('shrink-0 text-[11px]',
+            <span className={cn('shrink-0 text-xs',
               l.status === 'open' ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
               {STATUS_LABEL[l.status] ?? l.status}
             </span>
@@ -1094,7 +1098,7 @@ function TimePanel({ task, companyId, live, onChanged, onEstimate }: {
     <Section title="Время" action={live && !editEstimate && (
       <button type="button"
         onClick={() => { setEstimateText(time.estimate_text.replace(' ', '')); setEditEstimate(true) }}
-        className="text-[11px] text-muted-foreground hover:text-foreground">
+        className="text-xs text-muted-foreground hover:text-foreground">
         {time.estimate == null ? 'поставить оценку' : 'изменить оценку'}
       </button>
     )}>
@@ -1124,7 +1128,7 @@ function TimePanel({ task, companyId, live, onChanged, onEstimate }: {
           </span>
         </span>
         {over && (
-          <span className="text-[11px] text-amber-600 dark:text-amber-400">
+          <span className="text-xs text-amber-600 dark:text-amber-400">
             больше оценки на {Math.round((time.spent - (time.estimate ?? 0)) / 60 * 10) / 10} ч
           </span>
         )}
@@ -1199,7 +1203,7 @@ function External({ task, companyId, live, onChanged }: {
   return (
     <Section title="Внешние участники" action={live && (
       <button type="button" onClick={() => setAdding((v) => !v)}
-        className="text-[11px] text-muted-foreground hover:text-foreground">
+        className="text-xs text-muted-foreground hover:text-foreground">
         {adding ? 'отмена' : 'поручить наружу'}
       </button>
     )}>
@@ -1213,7 +1217,7 @@ function External({ task, companyId, live, onChanged }: {
       )}
 
       {adding && (
-        <div className="mb-2 space-y-2 rounded-md border border-dashed p-2">
+        <div className="mb-2 space-y-2 rounded-md border border-border p-2">
           <div className="grid gap-2 sm:grid-cols-2">
             <Input value={email} onChange={(e) => setEmail(e.target.value)}
               placeholder="Почта подрядчика" className="h-7 text-xs" type="email" />
@@ -1232,7 +1236,7 @@ function External({ task, companyId, live, onChanged }: {
                 : <Send className="mr-1.5 h-3 w-3" />}
               Отправить письмом
             </Button>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               Ответ вернётся сюда репликой с пометкой «письмом».
             </span>
           </div>
@@ -1264,13 +1268,13 @@ function External({ task, companyId, live, onChanged }: {
         )}
       </div>
       {task.reply_address && task.participants.length > 0 && (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">
+        <p className="mt-1.5 text-xs text-muted-foreground">
           Адрес ответа: {task.reply_address}
         </p>
       )}
       {!task.reply_address && adding && (
         // Канал, который не настроен, обязан честно говорить о себе.
-        <p className="mt-1.5 text-[11px] text-amber-600 dark:text-amber-400">
+        <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-400">
           В пространстве не настроен ящик приёма — письмо отправить некуда.
         </p>
       )}
@@ -1334,14 +1338,14 @@ function ExternalSystem({ task, companyId, live, onChanged }: {
         <span className="text-xs text-muted-foreground">Внешняя система</span>
         {live && (
           <button type="button" onClick={() => setAdding((v) => !v)}
-            className="text-[11px] text-muted-foreground hover:text-foreground">
+            className="text-xs text-muted-foreground hover:text-foreground">
             {adding ? 'отмена' : 'связать с работой'}
           </button>
         )}
       </div>
 
       {adding && (
-        <div className="mb-2 space-y-2 rounded-md border border-dashed p-2">
+        <div className="mb-2 space-y-2 rounded-md border border-border p-2">
           <Select value={key} onValueChange={setKey}>
             <SelectTrigger className="h-7 text-xs">
               <SelectValue placeholder={connectorsQ.isLoading
@@ -1356,7 +1360,7 @@ function ExternalSystem({ task, companyId, live, onChanged }: {
             </SelectContent>
           </Select>
           {!connectorsQ.isLoading && usable.length === 0 && (
-            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+            <p className="text-xs text-amber-600 dark:text-amber-400">
               У компании нет живых подключений к внешним системам. Их заводят в
               приложении-владельце, а не здесь.
             </p>
@@ -1422,14 +1426,22 @@ function ExternalSystem({ task, companyId, live, onChanged }: {
 
 /* ── Мелочи ──────────────────────────────────────────────────────────── */
 
-function Section({ title, action, children }: {
-  title: string; action?: React.ReactNode; children: React.ReactNode
+function Section({ title, hint, action, children }: {
+  title: string
+  /** Зачем эта секция — строкой рядом с названием, а не абзацем под ним:
+   *  объяснение занимает место ровно там, где его читают один раз. */
+  hint?: string
+  action?: React.ReactNode
+  children: React.ReactNode
 }) {
   return (
     <div>
-      <div className="mb-1.5 flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">{title}</span>
-        {action}
+      <div className="mb-1.5 flex items-baseline gap-2">
+        <span className="shrink-0 text-xs text-muted-foreground">{title}</span>
+        {hint && (
+          <span className="truncate text-xs text-muted-foreground/70">{hint}</span>
+        )}
+        <span className="ml-auto shrink-0">{action}</span>
       </div>
       {children}
     </div>
@@ -1457,11 +1469,11 @@ function SubjectLink({ companyId, refKey }: { companyId: string; refKey: string 
   if (!found?.name) return null
   const label = `${found.kind === 'site' ? 'проект' : ''} ${found.name}`.trim()
   return found.url ? (
-    <a href={found.url} className="text-[11px] text-blue-400 hover:underline"
+    <a href={found.url} className="text-xs text-blue-400 hover:underline"
       title="Открыть предмет работы">
       {label}
     </a>
   ) : (
-    <span className="text-[11px] text-muted-foreground">{label}</span>
+    <span className="text-xs text-muted-foreground">{label}</span>
   )
 }
