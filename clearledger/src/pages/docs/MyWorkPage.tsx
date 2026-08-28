@@ -25,6 +25,7 @@ import * as tasksService from '@/services/tasksService'
 import * as docsService from '@/services/docsService'
 import { dt } from '@/components/tasks/taskWords'
 import { PlaceActions } from '@/components/docs/PlaceActions'
+import { DragHandle } from '@/components/docs/DragHandle'
 import { cn } from '@/lib/utils'
 
 const REASON_ICON = {
@@ -162,15 +163,10 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
   const canFinish = item.reason === 'do' || item.reason === 'unassigned'
     || (item.reason === 'acquaint' && item.acquaint_id)
   return (
-    <div
-      // Перетаскивание в календарь рельсы: бросок ставит дату РАБОТЫ, а срок
-      // предмета остаётся тем же — личный план не двигает обязательство.
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData('text/plain', workService.targetRef(item))
-        e.dataTransfer.effectAllowed = 'move'
-      }}
-      className="flex cursor-grab items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40 active:cursor-grabbing">
+    <div className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
+      {/* Ручка — единственное, за что строку уносят: остальное остаётся текстом
+          и кнопками, которые нажимают. */}
+      <DragHandle targetRef={workService.targetRef(item)} />
       <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <button type="button" onClick={onOpen} className="flex-1 text-left">
         <div className="text-sm leading-snug">{item.title}</div>

@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router-dom'
 import { FileText, ListChecks, Loader2, NotebookPen } from 'lucide-react'
 import { QueryError } from '@/components/common/QueryError'
 import { PlaceActions } from '@/components/docs/PlaceActions'
+import { DragHandle } from '@/components/docs/DragHandle'
 import * as workService from '@/services/workService'
 import type { PlacedItem } from '@/services/workService'
 import { dt } from '@/components/tasks/taskWords'
@@ -72,13 +73,8 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
         const overdue = Boolean(item.due_at && new Date(item.due_at) < new Date())
         return (
           <div key={`${item.kind}-${item.id}`}
-            // Строку можно унести в календарь рельсы: там она встанет на день.
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData('text/plain', workService.targetRef(item))
-              e.dataTransfer.effectAllowed = 'move'
-            }}
-            className="flex cursor-grab items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40 active:cursor-grabbing">
+            className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
+            <DragHandle targetRef={workService.targetRef(item)} />
             <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             <button type="button" onClick={() => navigate(href(item))}
               className="min-w-0 flex-1 text-left">

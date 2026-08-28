@@ -479,8 +479,10 @@ export function DocsLayout() {
                     openList === l.id
                       ? 'bg-primary/10 font-medium text-primary'
                       : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
+                  {/* Видна всегда: порядок подборок меняют мышью, и знать об
+                      этом надо до того, как случайно навёл курсор. */}
                   <GripVertical
-                    className="absolute left-1.5 h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-40"
+                    className="absolute left-1.5 h-3.5 w-3.5 opacity-30 transition-opacity group-hover:opacity-70"
                     aria-hidden />
                   <span className="flex-1 truncate">{l.name}</span>
                   {l.stale_days !== null && l.stale_days > 13 && (
