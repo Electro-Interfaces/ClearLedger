@@ -41,6 +41,9 @@ function reportMetricLabel(value: docsService.DocBoardReportMetric): string {
   }[value]
 }
 
+const TriagePage = lazy(() => import('./TriagePage')
+  .then((m) => ({ default: m.TriagePage })))
+
 export function DocsCompanyPage() {
   const { company } = useCompany()
   const [params, setParams] = useSearchParams()
@@ -96,6 +99,14 @@ export function DocsCompanyPage() {
   if (view === 'plan') {
     return <Suspense fallback={<Loading />}><SprintPlanPage /></Suspense>
   }
+  if (view === 'triage') {
+    return (
+      <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
+        <TriagePage />
+      </Suspense>
+    )
+  }
+
   if (view === 'work') {
     return <Suspense fallback={<Loading />}><WorkListPage /></Suspense>
   }

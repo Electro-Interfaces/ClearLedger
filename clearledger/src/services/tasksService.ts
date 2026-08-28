@@ -243,6 +243,8 @@ export interface TaskActionResult extends SpaceTask {
 
 export type TaskScope = 'open' | 'mine' | 'assigned' | 'watching' | 'overdue'
   | 'today' | 'waiting' | 'closed' | 'all'
+  /** На разбор: живая работа без исполнителя — её надо взять, отдать или закрыть. */
+  | 'triage'
 
 export interface TaskFilters {
   objectId?: string; projectId?: string; typeId?: string; assigneeId?: string; authorId?: string

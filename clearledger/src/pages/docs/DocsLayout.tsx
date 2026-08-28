@@ -76,6 +76,7 @@ export const DOCS_VIEWS: Record<string, DocsView[]> = {
   // Раздел «Компания» — то же самое, но по всем: где стоит работа целиком.
   '/docs/company': [
     { key: 'work', label: 'Вся работа', hint: 'документы и поручения одной лентой' },
+    { key: 'triage', label: 'Разбор', hint: 'работа без исполнителя: взять, поручить или закрыть', badge: 'triage' },
     { key: 'docs', label: 'Документы на доске', hint: 'где застряло согласование и кого ждут' },
     { key: 'errands', label: 'Поручения компании', hint: 'вся работа с отбором, поиском и выгрузкой' },
     { key: 'work-board', label: 'Доска работы', hint: 'общие колонки: документы и поручения вместе' },
@@ -168,6 +169,13 @@ export function DocsLayout() {
   // Ключи запросов те же, что у «Моей очереди», пульта и записной книжки:
   // react-query отдаёт числа из общего кэша, а не ходит на сервер второй раз.
   const личное = route === '/docs/work' && !!company?.id
+  // Разбор считается и в «Компании»: число у пункта отвечает на вопрос «есть ли
+  // там что-то», ради которого иначе пришлось бы открывать экран.
+  const триажQ = useQuery({
+    queryKey: ['tasks', company?.id ?? '', 'triage', '', '', ''],
+    queryFn: () => tasksService.listTasks(company!.id, 'triage'),
+    enabled: route === '/docs/company' && !!company?.id, staleTime: 60 * 1000,
+  })
   const mineQ = useQuery({
     queryKey: ['work-mine', company?.id ?? ''],
     queryFn: () => workService.myWork(company!.id),
@@ -239,8 +247,10 @@ export function DocsLayout() {
       // Просроченное — отдельное число: «12, из них 3 горят» это два разных
       // ответа, и одним числом они не заменяются.
       overdue: mine.filter((r) => r.overdue).length,
+      triage: (триажQ.data?.tasks ?? []).length,
     } as Record<string, number>
-  }, [mineQ.data, assignedQ.data, watchingQ.data, notesQ.data, listsQ.data])
+  }, [mineQ.data, assignedQ.data, watchingQ.data, notesQ.data, listsQ.data,
+      триажQ.data])
 
   const числоУ = (view: DocsView) => (view.badge ? счёт[view.badge] ?? 0 : 0)
 

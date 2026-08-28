@@ -739,6 +739,11 @@ async def list_tasks(
     elif scope == "assigned":
         sel = sel.where(Task.status == "open", Task.author_id == current_user.id,
                         or_(Task.assignee_id.is_(None), Task.assignee_id != current_user.id))
+    elif scope == "triage":
+        # На разбор: живая работа, у которой нет исполнителя. Такое поручение
+        # существует, но не лежит ни у кого в очереди — его надо взять, отдать
+        # или закрыть, и для этого нужно место, где оно видно всем сразу.
+        sel = sel.where(Task.status == "open", Task.assignee_id.is_(None))
     elif scope == "watching":
         sel = sel.where(Task.id.in_(
             select(TaskWatcher.task_id).where(TaskWatcher.user_id == current_user.id)))
