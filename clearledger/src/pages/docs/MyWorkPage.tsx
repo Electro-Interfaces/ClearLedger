@@ -166,7 +166,8 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
     <div className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
       {/* Ручка — единственное, за что строку уносят: остальное остаётся текстом
           и кнопками, которые нажимают. */}
-      <DragHandle targetRef={workService.targetRef(item)} />
+      <DragHandle targetRef={workService.targetRef(item)}
+        label={`${item.key} ${item.title}`} />
       <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
       <button type="button" onClick={onOpen} className="flex-1 text-left">
         <div className="text-sm leading-snug">{item.title}</div>

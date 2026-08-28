@@ -213,6 +213,7 @@ export function RightDock() {
             {canApp('conf') && (
               <button onClick={startConference} disabled={confBusy}
                 title="Видеоконференция — создать и скопировать ссылку"
+                onDragOver={(e) => { e.dataTransfer.dropEffect = 'none' }}
                 className={cn(RAIL_PRIMARY, confBusy && 'opacity-60')}>
                 <Video className="size-5" />
                 <span>Встреча</span>
@@ -227,7 +228,12 @@ export function RightDock() {
             <div className="my-2 h-px w-8 bg-border" role="separator" />
             {tabs.filter((t) => !t.primary).map((t) => (
               <RailButton key={t.key} tab={t} active={section === t.key} badge={badgeOf(t.key)}
-                onClick={() => openFromRail(t.key)} />
+                onClick={() => openFromRail(t.key)}
+                // Агент — единственный, кому предмет доносят целиком: он
+                // открывается с готовым вопросом об этой самой работе.
+                onDropItem={t.key === 'auditor'
+                  ? (ref, label) => openInteraction('auditor', `предмет:${ref}|${label}`)
+                  : undefined} />
             ))}
           </>
         )}
@@ -297,13 +303,50 @@ function InfoDockPanel() {
 const RAIL_BASE = 'relative flex min-h-[52px] w-16 flex-col items-center justify-center gap-1 rounded-lg px-1 py-1.5 text-center text-xs leading-tight transition-colors'
 const RAIL_PRIMARY = `${RAIL_BASE} border border-primary/30 bg-primary/10 text-primary hover:bg-primary hover:text-white dark:bg-primary/20 dark:border-primary/50`
 
-function RailButton({ tab, active, badge, primary, onClick }: {
+/** Сколько держать перетаскиваемое над кнопкой, чтобы она открылась. Полсекунды
+ *  отделяют намерение от пролёта курсора к соседней кнопке. */
+const ПОДЕРЖАТЬ = 500
+
+function RailButton({ tab, active, badge, primary, onClick, onDropItem }: {
   tab: Tab; active: boolean; badge: number; primary?: boolean; onClick: () => void
+  /** Бросок предмета на саму кнопку: у агента это «займись вот этим». */
+  onDropItem?: (ref: string, label: string) => void
 }) {
+  const [ждём, setЖдём] = useState(false)
+  const таймер = useRef<number | null>(null)
+
+  const отмена = useCallback(() => {
+    if (таймер.current) window.clearTimeout(таймер.current)
+    таймер.current = null
+    setЖдём(false)
+  }, [])
+
+  // Слушатель снимается при размонтировании: иначе кнопка, исчезнувшая вместе с
+  // рельсой, открыла бы панель уже после ухода курсора.
+  useEffect(() => отмена, [отмена])
+
   return (
     <button onClick={onClick} title={`${tab.label} — открыть справа`}
       aria-current={active ? 'true' : undefined}
+      onDragEnter={() => {
+        if (active || таймер.current) return
+        setЖдём(true)
+        таймер.current = window.setTimeout(() => { отмена(); onClick() }, ПОДЕРЖАТЬ)
+      }}
+      // Разрешаем бросок над кнопкой, чтобы курсор не показывал «нельзя», пока
+      // панель открывается: сам бросок примет уже открытая панель.
+      onDragOver={(e) => e.preventDefault()}
+      onDragLeave={отмена}
+      onDrop={(e) => {
+        отмена()
+        if (!onDropItem) return
+        const ref = e.dataTransfer.getData('text/plain')
+        if (!/^(task|doc):[0-9a-f-]{36}$/.test(ref)) return
+        e.preventDefault()
+        onDropItem(ref, e.dataTransfer.getData('text/x-elsy-label') || ref)
+      }}
       className={cn(primary ? RAIL_PRIMARY : RAIL_BASE,
+        ждём && 'ring-2 ring-primary',
         !primary && (active
           ? 'bg-primary/10 text-primary'
           : 'text-muted-foreground hover:bg-accent hover:text-foreground'),

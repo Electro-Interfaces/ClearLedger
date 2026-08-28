@@ -117,6 +117,9 @@ export async function uploadFile(companyId: string, file: File): Promise<Auditor
 export interface AuditorMethod {
   id: string
   name: string
+  /** Откуда метод: `space` — завели здесь, в работе; `external` — приехал с
+   *  инструментом (общие умения Claude Code: документы, таблицы, создание навыков). */
+  scope?: 'space' | 'external'
   description: string
   /** Раздел «Чем проверено» заполнен — метод перестал быть гипотезой. */
   verified: boolean

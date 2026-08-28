@@ -190,7 +190,9 @@ const TASKS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
  * чтобы найти документ, а не чтобы посмотреть справочник видов.
  */
 const DOCS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
-  { to: '/docs', label: 'Реестры', icon: FolderOpen },
+  // Разрез назван явно: голый /docs ведёт в «Моё» — приложение открывают с
+  // вопросом «что на мне», а не «покажи журнал входящих».
+  { to: '/docs?view=incoming', label: 'Реестры', icon: FolderOpen },
   { to: '/docs/work', label: 'Моё', icon: ListChecks },
   { to: '/docs/company', label: 'Компания', icon: Building2 },
   { to: '/docs/overview', label: 'Обзор', icon: BarChart3 },

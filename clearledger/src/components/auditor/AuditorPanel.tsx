@@ -16,6 +16,7 @@ import { DictateButton } from './DictateButton'
 import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/info/Markdown'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useSupportContext } from '@/contexts/SupportContext'
 import { productForPath } from '@/config/spaceProducts'
 import * as auditor from '@/services/spaceAuditorService'
 import { cn } from '@/lib/utils'
@@ -145,6 +146,15 @@ export function AuditorPanel() {
     queryKey: ['auditor-prompts', companyId],
     queryFn: () => auditor.getPrompts(companyId), enabled: !!companyId, staleTime: 60_000, retry: false,
   })
+
+  // Предмет, бро́шенный на кнопку агента: панель открывается с готовым вопросом
+  // об этой работе, а не с пустым полем и номером в голове у человека.
+  const { interactionContext } = useSupportContext()
+  useEffect(() => {
+    const m = /^предмет:(task|doc):([0-9a-f-]{36})\|(.*)$/s.exec(interactionContext ?? '')
+    if (!m) return
+    setInput((prev) => (prev.trim() ? prev : `${m[3]} — что с этим делать?`))
+  }, [interactionContext])
 
   const product = productForPath(pathname)
   const context = useMemo<auditor.AuditorContext>(() => ({

@@ -50,7 +50,9 @@ const MessagesPage = lazy(() => import('@/pages/MessagesPage').then((m) => ({ de
 const TicketsAppPage = lazy(() => import('@/pages/TicketsAppPage').then((m) => ({ default: m.TicketsAppPage })))
 const TasksRegulation = lazy(() => import('@/pages/tasks/TasksRegulation').then((m) => ({ default: m.TasksRegulation })))
 const DocsLayout = lazy(() => import('@/pages/docs/DocsLayout').then((m) => ({ default: m.DocsLayout })))
-const DocsRegistryPage = lazy(() => import('@/pages/docs/DocsRegistryPage').then((m) => ({ default: m.DocsRegistryPage })))
+// Вход в «Трек» ведёт в «Моё»: реестр открывается тем же адресом с названным
+// разрезом, и прежние ссылки живы — разрез в них уже есть.
+const DocsHome = lazy(() => import('@/pages/docs/DocsRegistryPage').then((m) => ({ default: m.DocsHome })))
 const DocsSetupPage = lazy(() => import('@/pages/docs/DocsSetupPage').then((m) => ({ default: m.DocsSetupPage })))
 const DocsCompanyPage = lazy(() => import('@/pages/docs/DocsCompanyPage').then((m) => ({ default: m.DocsCompanyPage })))
 const DocsOverviewPage = lazy(() => import('@/pages/docs/DocsOverviewPage').then((m) => ({ default: m.DocsOverviewPage })))
@@ -325,7 +327,7 @@ const router = createBrowserRouter([
             path: '/docs',
             element: <RequireApp code="docs"><LazyPage><DocsLayout /></LazyPage></RequireApp>,
             children: [
-              { index: true, element: <LazyPage><DocsRegistryPage /></LazyPage> },
+              { index: true, element: <DocsHome /> },
               { path: 'work', element: <LazyPage><DocsWorkPage /></LazyPage> },
               { path: 'company', element: <LazyPage><DocsCompanyPage /></LazyPage> },
               // Прежний адрес поручений: ведёт в «На мне», где они теперь живут.

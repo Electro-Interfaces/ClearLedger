@@ -6,7 +6,7 @@
  * пользователь не теряет очередь и может последовательно разбирать документы.
  */
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   BookmarkPlus, ChevronLeft, ChevronRight, FilePlus2, Search,
@@ -549,3 +549,16 @@ function StatusPill({ status }: { status: string }) {
 }
 
 export default DocsRegistryPage
+
+/**
+ * Что открывается по голому `/docs`.
+ *
+ * Приложение открывают с вопросом «что на мне», а не «покажи журнал входящих»,
+ * поэтому вход ведёт в «Моё». Реестр остаётся по тому же адресу с названным
+ * разрезом (`?view=incoming`), и все прежние ссылки живы: разрез в них уже есть.
+ */
+export function DocsHome() {
+  const [params] = useSearchParams()
+  if (!params.get('view')) return <Navigate to="/docs/work" replace />
+  return <DocsRegistryPage />
+}

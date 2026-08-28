@@ -600,7 +600,8 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject
                         checked={picked.has(t.id)} onCheckedChange={() => toggle(t.id)} />
                       {/* Отсюда работу раскидывают в календарь рельсы: на день —
                           срок, на человека — поручение. */}
-                      <DragHandle targetRef={`task:${t.id}`} />
+                      <DragHandle targetRef={`task:${t.id}`}
+                        label={`${tasksService.taskKey(t)} ${t.title}`} />
                     </div>
                   </td>
                   <td className="whitespace-nowrap p-2.5 align-top font-medium">

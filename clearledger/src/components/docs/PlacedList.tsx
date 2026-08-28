@@ -74,7 +74,8 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
         return (
           <div key={`${item.kind}-${item.id}`}
             className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
-            <DragHandle targetRef={workService.targetRef(item)} />
+            <DragHandle targetRef={workService.targetRef(item)}
+              label={`${item.key} ${item.title}`} />
             <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             <button type="button" onClick={() => navigate(href(item))}
               className="min-w-0 flex-1 text-left">

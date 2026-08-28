@@ -16,7 +16,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Bot, CheckCircle2, ClipboardList, FlaskConical, Download, GitCommitHorizontal, ListChecks, Loader2, MessageSquare, Plus, Save, SlidersHorizontal, TerminalSquare, Upload, UserRound, Wrench } from 'lucide-react'
+import { BookOpen, Bot, CheckCircle2, ClipboardList, FlaskConical, Download, GitCommitHorizontal, ListChecks, Loader2, MessageSquare, Plus, Save, SlidersHorizontal, TerminalSquare, Upload, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -40,11 +40,12 @@ const VIEWS = [
   { key: 'methods', label: 'Методы', icon: Wrench, hint: 'чему научили: как отвечать на класс вопросов' },
   { key: 'chat', label: 'Разговор', icon: MessageSquare, hint: 'спросить про данные пространства' },
   { key: 'knowledge', label: 'Знание', icon: BookOpen, hint: 'что он знает об этой компании' },
-  // Личная карточка — рядом со знанием, а не только в профиле учётной записи: человек
-  // правит её тем же движением, каким смотрит, что агент вообще знает. Приходят сюда
-  // ровно тогда, когда агент ответил не так, как хотелось.
-  { key: 'me', label: 'Моя карточка', icon: UserRound, hint: 'что агент знает лично обо мне' },
-  { key: 'setup', label: 'Настройка', icon: SlidersHorizontal, hint: 'режим, указания компании, модели' },
+  // Настройки — это про ТОГО, КТО СЕЙЧАС РАБОТАЕТ с агентом: сверху его личная
+  // карточка (текст, который агент читает в начале каждого разговора с ним), ниже —
+  // настройки пространства для тех, кому они доступны. Двумя пунктами это разъезжалось:
+  // человек правил карточку в одном месте, а режим ответа — в другом, хотя приходит
+  // он с одним вопросом: «настроить агента под себя».
+  { key: 'setup', label: 'Настройки', icon: SlidersHorizontal, hint: 'моя карточка, режим ответа, указания пространства' },
   { key: 'runs', label: 'Журнал', icon: ClipboardList, hint: 'что спрашивали и что он нашёл' },
 ] as const
 
@@ -142,7 +143,6 @@ export function AuditorWorkspace({ view: viewIn, onView }: {
           {view === 'skills' && <SkillsView />}
           {view === 'methods' && <MethodsView />}
           {view === 'knowledge' && <KnowledgeView />}
-          {view === 'me' && <MyCardView />}
           {view === 'setup' && <SetupView />}
           {view === 'runs' && <RunsView />}
           {view === 'workshop' && <AuditorTerminal />}
@@ -323,6 +323,26 @@ function MethodsView() {
 
   const methods = data ?? []
   const verified = methods.filter((m) => m.verified).length
+  // Свои и пришедшие с инструментом — разные вещи, и в одном списке они путают:
+  // «Разбор обращения» мы завели под свою работу, а «Работа с .docx» приехала сама
+  // и к предмету пространства отношения не имеет.
+  const LAYERS = [
+    {
+      scope: 'space' as const,
+      title: 'Методы пространства',
+      hint: 'Чему научили здесь, на своей работе. Растут вместе с делом, лежат файлами '
+        + 'в рабочей папке агента под версиями и выгружаются в поставку.',
+      empty: 'Методов пока нет. Первый появится после разбора в мастерской.',
+    },
+    {
+      scope: 'external' as const,
+      title: 'Внешние навыки',
+      hint: 'Общие умения, пришедшие с инструментом: работа с документами и таблицами, '
+        + 'создание новых навыков. Про предмет пространства они ничего не знают.',
+      empty: 'Внешних навыков не подключено. Они кладутся в домашнюю папку агента '
+        + '(~/.claude/skills) и доступны в мастерской.',
+    },
+  ]
 
   return (
     <div className="h-full overflow-y-auto p-4">
@@ -352,14 +372,20 @@ function MethodsView() {
       </div>
 
       {isLoading && <div className="mt-4 text-sm text-muted-foreground">Загружаю…</div>}
-      {!isLoading && !methods.length && (
-        <div className="mt-4 rounded-lg border border-border/60 bg-card/50 px-3 py-6 text-center text-sm text-muted-foreground">
-          Методов пока нет. Первый появится после разбора в мастерской.
-        </div>
-      )}
 
-      <div className="mt-4 space-y-2">
-        {methods.map((m) => (
+      {!isLoading && LAYERS.map((layer) => {
+        const items = methods.filter((m) => (m.scope ?? 'space') === layer.scope)
+        return (
+      <section key={layer.scope} className="mt-6 max-w-3xl">
+        <h2 className="text-sm font-semibold">{layer.title}</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{layer.hint}</p>
+        {!items.length && (
+          <p className="mt-2 rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
+            {layer.empty}
+          </p>
+        )}
+        <div className="mt-2 space-y-2">
+        {items.map((m) => (
           <div key={m.id} className="rounded-lg border border-border/60 bg-card px-3 py-2">
             <button type="button" onClick={() => setOpen(open === m.id ? null : m.id)}
               className="flex w-full items-start gap-2 text-left">
@@ -400,7 +426,10 @@ function MethodsView() {
             )}
           </div>
         ))}
-      </div>
+        </div>
+      </section>
+        )
+      })}
     </div>
   )
 }
@@ -696,6 +725,16 @@ function KnowledgeAdd({ companyId, topics, onDone }: {
 
 /** Настройка: режим, постоянные указания компании и выбор моделей. */
 function SetupView() {
+  return (
+    <div className="h-full overflow-y-auto">
+      <MyCardView />
+      <SpaceSetupView />
+    </div>
+  )
+}
+
+/** Настройки пространства: режим ответа, постоянные указания, модели. */
+function SpaceSetupView() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   const { data, isLoading, error, refetch } = useQuery({

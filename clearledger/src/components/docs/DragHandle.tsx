@@ -11,9 +11,12 @@
 import { GripVertical } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export function DragHandle({ targetRef, title, className }: {
+export function DragHandle({ targetRef, label, title, className }: {
   /** Предмет словарём пространства: `task:<uuid>`, `doc:<uuid>`. */
   targetRef: string
+  /** Как предмет называется вслух: «№11 Пример задачи». Уносится вместе со
+   *  ссылкой, чтобы агент открылся с готовым вопросом, а не с номером. */
+  label?: string
   title?: string
   className?: string
 }) {
@@ -22,6 +25,7 @@ export function DragHandle({ targetRef, title, className }: {
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData('text/plain', targetRef)
+        if (label) e.dataTransfer.setData('text/x-elsy-label', label)
         e.dataTransfer.effectAllowed = 'move'
         e.stopPropagation()
       }}
