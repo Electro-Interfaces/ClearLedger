@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-28T13:30:00+03:00",
+  "title": "Design System: Пространство ElsyPlus",
+  "extensions": {
+    "colorMeta": {
+      "primary-light": {
+        "role": "primary",
+        "displayName": "Рабочий синий (светлая тема)",
+        "canonical": "hsl(226 71% 40%)",
+        "tonalRamp": ["hsl(226 71% 15%)", "hsl(226 71% 25%)", "hsl(226 71% 32%)", "hsl(226 71% 40%)", "hsl(226 71% 52%)", "hsl(226 71% 66%)", "hsl(226 71% 82%)", "hsl(226 71% 95%)"]
+      },
+      "primary-dark": {
+        "role": "primary",
+        "displayName": "Рабочий синий (тёмная тема)",
+        "canonical": "hsl(217 91% 60%)",
+        "tonalRamp": ["hsl(217 91% 15%)", "hsl(217 91% 25%)", "hsl(217 91% 35%)", "hsl(217 91% 45%)", "hsl(217 91% 60%)", "hsl(217 91% 72%)", "hsl(217 91% 84%)", "hsl(217 91% 95%)"]
+      },
+      "surface-dark": {
+        "role": "neutral",
+        "displayName": "Лестница поверхностей (тёмная тема)",
+        "canonical": "#19202d",
+        "tonalRamp": ["#070e1b", "#0c1320", "#151c29", "#19202d", "#1e2533", "#232a38", "#2e3543", "#323948"]
+      },
+      "surface-light": {
+        "role": "neutral",
+        "displayName": "Лестница поверхностей (светлая тема)",
+        "canonical": "#f8f9ff",
+        "tonalRamp": ["#0d1c2e", "#444653", "#757684", "#c4c5d5", "#d5e3fc", "#dce9ff", "#f8f9fc", "#ffffff"]
+      },
+      "success-dark": {
+        "role": "status",
+        "displayName": "Зелёный статуса",
+        "canonical": "hsl(152 58% 45%)",
+        "tonalRamp": ["hsl(152 58% 15%)", "hsl(152 58% 22%)", "hsl(152 69% 31%)", "hsl(152 58% 38%)", "hsl(152 58% 45%)", "hsl(152 58% 60%)", "hsl(152 58% 78%)", "hsl(152 58% 92%)"]
+      },
+      "warning-dark": {
+        "role": "status",
+        "displayName": "Янтарь предупреждения",
+        "canonical": "hsl(42 92% 58%)",
+        "tonalRamp": ["hsl(42 92% 18%)", "hsl(42 92% 28%)", "hsl(42 93% 40%)", "hsl(45 93% 47%)", "hsl(42 92% 58%)", "hsl(42 92% 70%)", "hsl(42 92% 84%)", "hsl(42 92% 95%)"]
+      },
+      "error-dark": {
+        "role": "status",
+        "displayName": "Красный ошибки",
+        "canonical": "hsl(0 72% 62%)",
+        "tonalRamp": ["hsl(0 60% 15%)", "hsl(0 55% 25%)", "hsl(0 43% 44%)", "hsl(0 69% 52%)", "hsl(0 72% 62%)", "hsl(0 72% 74%)", "hsl(0 72% 86%)", "hsl(0 72% 95%)"]
+      }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Заголовок", "purpose": "Имя приложения и названия разделов. Единственное место веб-шрифта Manrope." },
+      "body": { "displayName": "Основной", "purpose": "Списки, формы, кнопки. Системный шрифт — быстрый старт на медленном канале." },
+      "meta": { "displayName": "Мета", "purpose": "Контекст под названием: компания и версия, проект · стадия · срок. Нижняя ступень шкалы." },
+      "numeric": { "displayName": "Номер", "purpose": "Номера поручений и коды объектов: их сравнивают глазами, поэтому моноширинный." }
+    },
+    "shadows": [
+      { "name": "soft", "value": "0 1px 3px rgba(13,28,46,0.06), 0 1px 2px rgba(13,28,46,0.04)", "purpose": "Карточка на поверхности раздела (светлая тема)." },
+      { "name": "soft-dark", "value": "0 2px 8px rgba(0,0,0,0.25)", "purpose": "То же в тёмной теме, где глубину в основном несёт лестница поверхностей." },
+      { "name": "medium", "value": "0 4px 12px rgba(13,28,46,0.08), 0 1px 3px rgba(13,28,46,0.05)", "purpose": "Поднятая панель, поповер." },
+      { "name": "large", "value": "0 8px 32px rgba(0,0,0,0.45)", "purpose": "Окно взаимодействия поверх рабочей области." },
+      { "name": "primary-glow", "value": "0 4px 12px hsl(226 71% 40% / 0.2)", "purpose": "Единственная окрашенная тень — под кнопкой первичного действия." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Переходы состояний по умолчанию." },
+      { "name": "duration-fast", "value": "200ms", "purpose": "Hover и фокус на кнопках и строках списка." },
+      { "name": "accordion", "value": "0.2s ease-out", "purpose": "Раскрытие групп и аккордеонов." },
+      { "name": "reduced-motion", "value": "prefers-reduced-motion: reduce → без переходов", "purpose": "Движение отключается системной настройкой." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "md", "value": "768px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "touch", "value": "(hover: none) and (pointer: coarse)" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Кнопка первичного действия",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Единственное главное действие экрана или строки: поставить, поручить, сохранить.",
+      "html": "<button class=\"ds-btn-primary\">Поставить</button>",
+      "css": ".ds-btn-primary { display:inline-flex; align-items:center; gap:8px; height:44px; padding:0 20px; border:none; border-radius:12px; background:var(--color-primary, hsl(226 71% 40%)); color:#fff; font:500 14px/1 'Segoe UI', system-ui, sans-serif; box-shadow:0 4px 12px hsl(226 71% 40% / .2); transition:background .2s cubic-bezier(.4,0,.2,1), box-shadow .2s; cursor:pointer } .ds-btn-primary:hover { background:hsl(226 71% 36%); box-shadow:0 6px 16px hsl(226 71% 40% / .25) } .ds-btn-primary:focus-visible { outline:2px solid var(--color-ring, hsl(226 71% 40%)); outline-offset:2px } .ds-btn-primary:disabled { opacity:.5; cursor:default }"
+    },
+    {
+      "name": "Кнопка с рамкой",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Второстепенное действие рядом с первичным: открыть приложение, отменить, повторить.",
+      "html": "<button class=\"ds-btn-outline\">Открыть «Трек»</button>",
+      "css": ".ds-btn-outline { display:inline-flex; align-items:center; gap:6px; height:40px; padding:0 16px; border:1px solid var(--color-border, hsl(216 20% 88%)); border-radius:12px; background:var(--color-card, #fff); color:var(--color-foreground, hsl(218 60% 12%)); font:500 14px/1 'Segoe UI', system-ui, sans-serif; transition:background .2s, border-color .2s; cursor:pointer } .ds-btn-outline:hover { background:#f8f9fc; border-color:hsl(216 20% 80%) } .ds-btn-outline:focus-visible { outline:2px solid var(--color-ring, hsl(226 71% 40%)); outline-offset:2px }"
+    },
+    {
+      "name": "Строка быстрой постановки",
+      "kind": "custom",
+      "refersTo": "input",
+      "description": "Ввод + выбор адресата + действие одной строкой. Каждый элемент имеет рамку и имя: прозрачных «подсказок в цвет фона» здесь быть не должно.",
+      "html": "<div class=\"ds-quickrow\"><svg class=\"ds-quickrow-icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M12 5v14M5 12h14\"/></svg><input class=\"ds-quickrow-input\" placeholder=\"Записать задачу себе — Enter поставит\"><span class=\"ds-quickrow-label\">кому</span><select class=\"ds-quickrow-select\"><option>себе</option></select><button class=\"ds-btn-primary ds-quickrow-btn\">Поставить</button></div>",
+      "css": ".ds-quickrow { display:flex; align-items:center; gap:8px; padding:8px 16px; border-bottom:1px solid var(--color-border, hsl(216 20% 88%)); background:var(--color-card, #fff) } .ds-quickrow-icon { width:14px; height:14px; flex:none; color:hsl(230 10% 46%) } .ds-quickrow-input { flex:1; min-width:0; height:32px; border:none; background:transparent; color:var(--color-foreground, hsl(218 60% 12%)); font:400 14px/1 'Segoe UI', system-ui, sans-serif; outline:none } .ds-quickrow-label { font:400 12px/1 'Segoe UI', system-ui, sans-serif; color:hsl(230 10% 46%) } .ds-quickrow-select { height:32px; max-width:208px; padding:0 8px; border:1px solid var(--color-border, hsl(216 20% 88%)); border-radius:8px; background:var(--color-card, #fff); color:var(--color-foreground, hsl(218 60% 12%)); font:400 14px/1 'Segoe UI', system-ui, sans-serif } .ds-quickrow-btn { height:32px; padding:0 16px }"
+    },
+    {
+      "name": "Строка списка работы",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Единица списка: номер, название, мета-строка и бейдж срочности. Действие на месте появляется в hover, но доступно с клавиатуры.",
+      "html": "<div class=\"ds-row\"><button class=\"ds-row-check\" aria-label=\"Закрыть задачу\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M20 6L9 17l-5-5\"/></svg></button><span class=\"ds-row-key\">TRK-42</span><span class=\"ds-row-main\"><span class=\"ds-row-title\">Согласовать смету по подстанции</span><span class=\"ds-row-meta\">Проект РГ · согласование · срок завтра</span></span><span class=\"ds-row-badge\">важно</span></div>",
+      "css": ".ds-row { display:flex; align-items:flex-start; gap:8px; padding:8px; border-radius:12px; transition:background .2s } .ds-row:hover { background:hsl(224 100% 96%) } .ds-row-check { flex:none; width:20px; height:20px; margin-top:2px; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--color-border, hsl(216 20% 88%)); border-radius:8px; background:transparent; color:transparent; cursor:pointer } .ds-row:hover .ds-row-check { color:hsl(226 71% 40%); border-color:hsl(226 71% 40%) } .ds-row-check svg { width:14px; height:14px } .ds-row-key { flex:none; margin-top:2px; font:400 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color:hsl(230 10% 46%) } .ds-row-main { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px } .ds-row-title { font:500 14px/1.4 'Segoe UI', system-ui, sans-serif; color:var(--color-foreground, hsl(218 60% 12%)); overflow:hidden; text-overflow:ellipsis; white-space:nowrap } .ds-row-meta { font:400 12px/1.4 'Segoe UI', system-ui, sans-serif; color:hsl(230 10% 46%) } .ds-row-badge { flex:none; height:20px; padding:0 6px; display:inline-flex; align-items:center; border:1px solid var(--color-border, hsl(216 20% 88%)); border-radius:6px; font:400 12px/1 'Segoe UI', system-ui, sans-serif; color:hsl(230 10% 46%) }"
+    },
+    {
+      "name": "Вкладки разрезов",
+      "kind": "nav",
+      "refersTo": "tab-active",
+      "description": "Переключение разреза одного и того же списка: на мне · горит · я поставил · наблюдаю.",
+      "html": "<div class=\"ds-tabs\"><button class=\"ds-tab ds-tab--active\">На мне</button><button class=\"ds-tab\">Горит</button><button class=\"ds-tab\">Я поставил</button><button class=\"ds-tab\">Наблюдаю</button></div>",
+      "css": ".ds-tabs { display:flex; gap:4px } .ds-tab { height:26px; padding:0 10px; border:none; border-radius:8px; background:transparent; color:hsl(230 10% 46%); font:500 12px/1 'Segoe UI', system-ui, sans-serif; cursor:pointer; transition:background .2s, color .2s } .ds-tab:hover { background:hsl(224 100% 96%); color:var(--color-foreground, hsl(218 60% 12%)) } .ds-tab--active, .ds-tab--active:hover { background:var(--color-primary, hsl(226 71% 40%)); color:#fff } .ds-tab:focus-visible { outline:2px solid var(--color-ring, hsl(226 71% 40%)); outline-offset:2px }"
+    },
+    {
+      "name": "Пустое состояние",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Объясняет пустоту словами и говорит, где завести первую запись. Без иллюстраций и примеров-заглушек.",
+      "html": "<div class=\"ds-empty\"><div class=\"ds-empty-mark\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M11 12h9M11 18h9M11 6h9M3 12l2 2 4-4M3 6l2 2 4-4M3 18l2 2 4-4\"/></svg></div><p class=\"ds-empty-text\">На вас сейчас ничего не назначено. Записать новую можно строкой выше, а вся работа компании — в «Треке».</p></div>",
+      "css": ".ds-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:24px; text-align:center } .ds-empty-mark { width:56px; height:56px; display:inline-flex; align-items:center; justify-content:center; border-radius:16px; background:hsl(226 71% 40% / .1); color:hsl(226 71% 40%) } .ds-empty-mark svg { width:28px; height:28px } .ds-empty-text { max-width:24rem; margin:0; font:400 14px/1.5 'Segoe UI', system-ui, sans-serif; color:hsl(230 10% 46%) }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Рабочее хозяйство компании",
+    "overview": "Пространство ElsyPlus — среда, в которой сотрудник заказчика проводит рабочий день: шапка с именем компании и версией, левая рельса разделов, рабочая область и окна взаимодействия поверх неё. Режим — Operate: человек пришёл сделать работу, а не рассматривать интерфейс, поэтому плотность, одинаковость и предсказуемость важнее выразительности.\n\nТёмная и светлая темы равнозначны: каждый токен определён в обеих. Глубину даёт лестница поверхностей (--di-*), а не тени — в тёмной теме тень почти не читается. Цвет несёт одну роль: рабочий синий означает действие или текущий выбор, статусные цвета приглушены до контраста, который выдерживает таблицу из сорока строк.\n\nХарактер держится на точности деталей: моноширинный номер поручения, мета-строка через «·», рамка у каждого элемента управления. Украшений нет — их место занимает то, что человек читает глазами каждый день.",
+    "keyCharacteristics": [
+      "Operate-режим: плотные списки, одинаковые строки, предсказуемые места действий",
+      "Две равнозначные темы, один набор ролей токенов",
+      "Глубина лестницей поверхностей, тень только подтверждает слой",
+      "Единственная окрашенная тень — под кнопкой первичного действия",
+      "Мета-строка через «·» как носитель контекста: компания · версия, проект · стадия · срок"
+    ],
+    "rules": [
+      { "name": "Элемент не прячется по условию", "body": "Если действие возможно, у него есть видимая граница, имя и постоянное место. Прозрачный селектор «в цвет фона» человек не находит глазом — это скрытое состояние, а не лаконичность.", "section": "colors" },
+      { "name": "Шкала оканчивается на 12px", "body": "18px заголовок, 14px основной текст и формы, 12px мета и номера. Ниже не опускаемся: 10–11px читаются хуже соседней меты и не выдерживают работу пальцем.", "section": "typography" },
+      { "name": "Глубина лестницей, а не тенью", "body": "Каждый следующий слой берёт поверхность на ступень выше по --di-*; тень подтверждает переход, но не создаёт его.", "section": "elevation" },
+      { "name": "Развилка по способу ввода", "body": "Мобильные правила живут в (hover: none) and (pointer: coarse), а не в брейкпоинтах ширины: планшет держат в руках так же, как телефон, а узкое окно на ноутбуке остаётся десктопом.", "section": "elevation" }
+    ],
+    "dos": [
+      "Держать оба варианта темы в одном определении токена и проверять контраст в обеих",
+      "Называть последствие в подписи: «Enter поставит», «Поручить», «Закрыть период»",
+      "Показывать элемент всегда, а пустоту объяснять словами",
+      "Держать плотность списков под курсор, а размеры целей — под палец",
+      "Брать номера и идентификаторы моноширинным"
+    ],
+    "donts": [
+      "Прозрачные элементы управления в цвет фона",
+      "Действие только иконкой без доступного имени",
+      "Бренд компании в названии продукта («РусГидро Учёт»)",
+      "Пустая плитка приложения, которого в профиле нет",
+      "Неоновые статусные цвета и цвет как единственный признак состояния",
+      "Собственные hex мимо токенов и шрифты помимо Manrope и системного"
+    ]
+  }
+}
