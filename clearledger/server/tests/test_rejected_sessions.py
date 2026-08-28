@@ -8,6 +8,7 @@
 отбракованные молча поедут в выручку.
 """
 from app.services.asuim_normalize import map_payments, map_sessions
+from app.services.charge_sessions_normalize import is_meter_error
 
 ROW = {
     "id_сессии": "7739", "номер_станции": "623", "регион": "Красноярский край",
@@ -69,3 +70,31 @@ def test_payment_keeps_its_session_and_row():
     assert pay["session_ext_id"] == "177562"
     assert pay["amount"] == 94.5
     assert pay["raw"]["сумма_холда_руб."] == 173.88
+
+
+def test_meter_error_catches_impossible_energy():
+    """Тысячи кВт·ч за секунды — брак счётчика, а не рекордная зарядка.
+
+    Живые строки пилота: ЭЗС 584 «Овчинникова» 03.07.2026 (10 341 кВт·ч за
+    11 секунд, 226 468 ₽ при платеже 1007 ₽) и ЭЗС 549 09.03.2026
+    (12 788,7 кВт·ч за 0,2 мин).
+    """
+    assert is_meter_error(10341.0, 0.18) is True
+    assert is_meter_error(12788.7, 0.2) is True
+    assert is_meter_error(1805.3, 6.8) is True      # 15 900 кВт — тоже невозможно
+    assert is_meter_error(150.1, 0) is True         # мгновенная: столько не отпустить
+
+
+def test_real_charges_survive():
+    """Границу держат две живые группы, которые терять нельзя.
+
+    Долгие зарядки грузового транспорта (200 кВт·ч за 2,7 часа) и короткие
+    сессии с завышенной мощностью — у последних врёт длительность, а энергия
+    правдоподобна и платёж совпадает с суммой сессии рубль в рубль.
+    """
+    assert is_meter_error(200.7, 45.9) is False     # 262 кВт — в пределах 350
+    assert is_meter_error(200.0, 160.3) is False
+    assert is_meter_error(45.8, 2.77) is False      # 991 кВт, но энергия реальная
+    assert is_meter_error(2.5, 0.15) is False       # 9 секунд, 2,5 кВт·ч
+    assert is_meter_error(0, 0) is False
+    assert is_meter_error(None, None) is False

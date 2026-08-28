@@ -97,6 +97,36 @@ def _cut_key(user_type, charge_type, paid_at) -> str:
     return "ezs_app"
 
 
+# Предел отпуска: самая быстрая станция сети — 350 кВт. Порог по энергии отделяет
+# битые показания от коротких сессий с завышенной мощностью: у последних энергия
+# правдоподобна (до 46 кВт·ч) и платёж совпадает с суммой сессии рубль в рубль,
+# врёт только длительность — такую строку терять нельзя.
+_MAX_STATION_KW = 350.0
+_MAX_SESSION_KWH = 150.0
+
+
+def is_meter_error(energy_kwh, duration_min) -> bool:
+    """Показания счётчика физически невозможны для этой зарядки.
+
+    Счётчик станции изредка отдаёт мусор (разность показаний уезжает), и сессия
+    приходит с энергией в тысячи кВт·ч за секунды: 03.07.2026 на ЭЗС 584
+    «Овчинникова» — 10 341 кВт·ч за 11 секунд на 226 468 ₽ при фактическом
+    платеже 1007 ₽. Одна такая строка завысила день в 2,3 раза, десять по базе
+    пилота — на 805 тыс ₽ и 42 тыс кВт·ч.
+
+    Судим по отпуску, а не по деньгам: сумма считается из той же энергии по
+    тарифу и отдельного сигнала не несёт. Деньги при этом не теряются — платёж
+    с чеком ОФД остаётся в учёте (см. `ingest_payments`).
+    """
+    kwh = float(energy_kwh or 0)
+    if kwh <= _MAX_SESSION_KWH:
+        return False
+    minutes = float(duration_min or 0)
+    if minutes <= 0:                      # мгновенная сессия: столько не отпустить
+        return True
+    return kwh / (minutes / 60.0) > _MAX_STATION_KW
+
+
 def parse_sessions_xlsx(content: bytes) -> list[dict[str, Any]]:
     """Excel ChargeTransactions → список сырых сессий (L1 RAW), по индексам колонок."""
     import openpyxl
@@ -174,6 +204,7 @@ async def ingest_charge_sessions(
     created = skipped = errors = 0
     tests = 0                  # сессии тестовых станций — в учёт не берём
     rejected = 0               # отбракованные источником — тоже, но с журналом
+    meter_errors = 0           # с невозможными показаниями счётчика — туда же
     # Что уже лежит в журнале: повторная выгрузка не должна плодить дубли.
     known_rejected: set[str] = set((await db.execute(
         select(ChargeRejected.ext_id).where(ChargeRejected.company_id == company_id,
@@ -215,10 +246,15 @@ async def ingest_charge_sessions(
             if _num_class(row.get("station_code")) == "test":
                 tests += 1
                 continue
-            # Отбракованная источником зарядка в учёт не идёт: в витринах её быть
-            # не должно вовсе (решение МАГа 27.08.2026). Но и терять её нельзя —
-            # это материал разбора, поэтому строка ложится в журнал.
-            if row.get("suspicious"):
+            # Отбракованная зарядка в учёт не идёт, но и не теряется: строка
+            # ложится в журнал разбора. Причин две — пометка источника
+            # («подозрительная», решение МАГа 27.08.2026) и невозможные показания
+            # счётчика (`is_meter_error`); журнал у них общий, разводит `reason`.
+            reason = ("suspicious" if row.get("suspicious")
+                      else "meter_error"
+                      if is_meter_error(row.get("energy_kwh"), row.get("duration_min"))
+                      else None)
+            if reason:
                 if sid not in known_rejected:
                     known_rejected.add(sid)
                     db.add(ChargeRejected(
@@ -229,10 +265,13 @@ async def ingest_charge_sessions(
                         user_id=row.get("user_id"),
                         energy_kwh=row.get("energy_kwh") or 0.0,
                         amount=row.get("amount") or 0.0,
-                        status=row.get("result"), reason="suspicious",
+                        status=row.get("result"), reason=reason,
                         payload=row.get("raw"),
                     ))
-                rejected += 1
+                if reason == "meter_error":
+                    meter_errors += 1
+                else:
+                    rejected += 1
                 continue
             if sid in existing or sid in seen:
                 skipped += 1
@@ -326,6 +365,9 @@ async def ingest_charge_sessions(
         message += f"; сессий тестовых станций исключено: {tests}"
     if rejected:
         message += f"; отбраковано источником: {rejected} (в журнале разбора)"
+    if meter_errors:
+        message += (f"; с невозможными показаниями счётчика: {meter_errors} "
+                    f"(в журнале разбора, платежи по ним в учёте)")
     if heal.get("stations_created"):
         message += f"; станций заведено из сессий: {heal['stations_created']}"
     if renamed:
@@ -346,6 +388,7 @@ async def ingest_charge_sessions(
     await bump_version(db, company_id)  # инвалидировать кеш дашбордов «Продаж»
     return {"status": "success", "mode": mode, "created": created, "skipped": skipped,
             "errors": errors, "deleted": deleted, "tests": tests,
+            "rejected": rejected, "meter_errors": meter_errors,
             "stations_created": heal.get("stations_created", 0),
             "unmatched_stations": unmatched_stations,
             "unmatched_sessions": unmatched_sessions,

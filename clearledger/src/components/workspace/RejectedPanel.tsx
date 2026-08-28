@@ -1,11 +1,15 @@
 /**
- * Отбракованное источником — зарядки, которые витрина АСУиМ пометила как
- * недостоверные (колонка «подозрительная»).
+ * Отбракованные зарядки — те, которых в учёте нет. Причины две:
+ *  • «пометка источника» — витрина АСУиМ пометила строку колонкой
+ *    «подозрительная» (решение МАГа 27.08.2026 — «не показываем вообще»);
+ *    вместе с зарядкой из учёта уходит и её платёж;
+ *  • «показания счётчика» — отпуск физически невозможен (тысячи кВт·ч за
+ *    секунды). Здесь врёт счётчик, а не касса: платёж по такой зарядке
+ *    настоящий, с чеком ОФД, и в выручке он остаётся.
  *
- * В учёте этих строк нет вовсе: ни в сессиях, ни в платежах (решение МАГа
- * 27.08.2026 — «не показываем вообще»). Поэтому здесь принципиально не считают
- * выручку сети и не сравнивают с ней: экран отвечает на единственный вопрос —
- * где и у кого источник счёл транзакцию битой, и много ли этого.
+ * Выручку сети экран принципиально не считает и с ней не сравнивает: он
+ * отвечает на единственный вопрос — где и у кого данные оказались битыми
+ * и много ли этого.
  */
 import { useQuery } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
@@ -27,6 +31,11 @@ const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const money = (v: number) => `${nf0.format(Math.round(v))} ₽`
 const kwh = (v: number) => `${nf0.format(Math.round(v))} кВт·ч`
+
+const REASONS: Record<string, string> = {
+  suspicious: 'пометка источника',
+  meter_error: 'показания счётчика',
+}
 
 interface Props { companyId: string; dateFrom: string; dateTo: string }
 
@@ -50,8 +59,10 @@ export function RejectedPanel({ companyId, dateFrom, dateTo }: Props) {
   return (
     <div className="space-y-4 p-4">
       <p className="text-xs text-muted-foreground">
-        Зарядки, помеченные источником как недостоверные. В выручку, отпуск и надёжность
-        сети они не входят — этих строк нет в учёте. Здесь они собраны для разбора.
+        Зарядки с недостоверными данными: помеченные источником и те, чьи показания
+        счётчика физически невозможны. В выручку, отпуск и надёжность сети они не входят —
+        этих строк нет в учёте. Платёж уходит из учёта только вместе с зарядкой, помеченной
+        источником: у ошибки счётчика деньги настоящие, с чеком, и остаются в выручке.
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -110,6 +121,7 @@ export function RejectedPanel({ companyId, dateFrom, dateTo }: Props) {
             <th className="p-2 text-right font-medium">кВт·ч</th>
             <th className="p-2 text-right font-medium">Сумма</th>
             <th className="p-2 text-right font-medium">Оплачено</th>
+            <th className="p-2 text-left font-medium">Почему</th>
             <th className="p-2 text-left font-medium">Исход</th>
           </tr></thead>
           <tbody>
@@ -126,6 +138,7 @@ export function RejectedPanel({ companyId, dateFrom, dateTo }: Props) {
                 <td className="p-2 text-right tabular-nums">
                   {r.paidAmount == null ? '—' : money(r.paidAmount)}
                 </td>
+                <td className="p-2 whitespace-nowrap">{REASONS[r.reason] || r.reason}</td>
                 <td className="p-2 text-muted-foreground">{r.status || '—'}</td>
               </tr>
             ))}

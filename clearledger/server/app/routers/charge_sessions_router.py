@@ -329,10 +329,20 @@ async def rejected_summary(
                              .order_by(R.occurred_at.desc()).limit(limit))).scalars().all()
     # Платёж отбракованной зарядки лежит в журнале отдельной строкой — сводим их
     # по сессии, чтобы в реестре зарядка и её деньги стояли рядом.
-    pays = {p.session_ext_id: p for p in (await db.execute(
+    sids = [r.ext_id for r in rows] or ["—"]
+    pays = {p.session_ext_id: float(p.amount or 0) for p in (await db.execute(
         select(R).where(R.company_id == cid, R.kind == "payment",
-                        R.session_ext_id.in_([r.ext_id for r in rows] or ["—"]))
+                        R.session_ext_id.in_(sids))
     )).scalars().all()}
+    # У зарядки с битым счётчиком платёж остался в учёте — берём его оттуда.
+    # Без этого в реестре стоит «226 468 ₽ / оплачено —», хотя списан 1007 ₽,
+    # а именно разрыв между суммой и деньгами и есть предмет разбора.
+    from app.models import ChargePayment
+    for sid, amount in (await db.execute(
+        select(ChargePayment.session_ext_id, ChargePayment.amount)
+        .where(ChargePayment.company_id == cid, ChargePayment.session_ext_id.in_(sids))
+    )).all():
+        pays.setdefault(sid, float(amount or 0))
 
     return {
         "totals": {
@@ -351,7 +361,7 @@ async def rejected_summary(
             "stationCode": r.station_code, "userId": r.user_id,
             "energyKwh": float(r.energy_kwh or 0), "amount": float(r.amount or 0),
             "status": r.status, "reason": r.reason,
-            "paidAmount": float(pays[r.ext_id].amount or 0) if r.ext_id in pays else None,
+            "paidAmount": pays.get(r.ext_id),
         } for r in rows],
     }
 

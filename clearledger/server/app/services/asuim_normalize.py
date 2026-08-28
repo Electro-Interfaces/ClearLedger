@@ -458,11 +458,18 @@ async def ingest_payments(
     # Сессии, отбракованные источником, и то, что по ним уже занесено в журнал.
     # Вместе со станцией и объектом: у платежа своей станции нет, он наследует её
     # от зарядки — иначе отбор по региону покажет зарядки без их же платежей.
+    #
+    # Только пометка источника (`suspicious`): у зарядки с битым счётчиком
+    # (`meter_error`) деньги настоящие — списание прошло, чек ОФД выбит, и на
+    # той же сессии 03.07.2026 платёж составил 1007 ₽ против 226 468 ₽ мусорной
+    # суммы. Увести такой платёж в журнал значило бы вычесть из выручки реально
+    # полученные деньги; врут показания счётчика, а не касса.
     rejected_sessions: dict[str, tuple[str | None, str | None]] = {
         row[0]: (row[1], row[2]) for row in (await db.execute(
             select(ChargeRejected.session_ext_id, ChargeRejected.station_code,
                    ChargeRejected.location_id)
-            .where(ChargeRejected.company_id == company_id, ChargeRejected.kind == "session")
+            .where(ChargeRejected.company_id == company_id, ChargeRejected.kind == "session",
+                   ChargeRejected.reason == "suspicious")
         )).all() if row[0]
     }
     known_rejected: set[str] = set((await db.execute(
