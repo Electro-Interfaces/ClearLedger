@@ -74,11 +74,11 @@ export function MobileBottomNav() {
     items = PULSE_ITEMS
   } else if (pathname === '/docs' || pathname.startsWith('/docs/')) {
     items = [
-      { label: 'Реестры', path: '/docs?view=incoming', icon: FileText },
+      { label: 'Документы', path: '/docs?view=incoming', icon: FileText },
       { label: 'Моё', path: '/docs/work?view=today', icon: ListChecks },
       { label: 'Компания', path: '/docs/company?view=docs', icon: Building2 },
       { label: 'Обзор', path: '/docs/overview?view=docs', icon: Activity },
-      { label: 'Регламент', path: '/docs/regulation?view=templates', icon: CalendarDays },
+      { label: 'Настройка', path: '/docs/setup?view=templates', icon: CalendarDays },
     ].map((item) => ({ ...item, path: withGlobalFilter(item.path, search) }))
   } else if (product) {
     // Раздел рабочей области живёт в URL (`?mode=`), поэтому полосе хватает ссылки —

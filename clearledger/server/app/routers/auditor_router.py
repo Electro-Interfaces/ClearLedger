@@ -19,12 +19,14 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, assert_company_product, get_current_user
+from app import audit
+from app.audit import log_audit
 from app.database import get_db
 from app.models import AuditorRun, AuditorSetting, User, UserCompany
 
@@ -81,6 +83,41 @@ async def _get_or_default(cid: uuid.UUID, db: AsyncSession) -> AuditorSetting | 
     return (await db.execute(
         select(AuditorSetting).where(AuditorSetting.company_id == cid)
     )).scalar_one_or_none()
+
+
+class EventIn(BaseModel):
+    """След действия агента, которое меняет его самого или даёт человеку власть.
+
+    Сервис агента живёт в своём контейнере и своей базы не имеет: журнал прогонов и
+    события пишутся сюда же, в пространство, — иначе «кто входил в мастерскую» и «кто
+    правил знание» восстанавливается только по томy одного стека, то есть никак.
+    """
+
+    action: str = Field(..., max_length=50, pattern=r"^auditor\.[a-z._-]+$")
+    target: str | None = Field(None, max_length=300)
+    details: dict[str, Any] | None = None
+
+
+@router.post("/events", status_code=status.HTTP_201_CREATED)
+async def add_event(
+    payload: EventIn,
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Записать событие агента в журнал пространства.
+
+    Отдельной ручкой, а не через журнал прогонов: прогон — это вопрос и ответ, а вход
+    в мастерскую вопросом не является, но именно он даёт человеку shell в контейнере.
+    Право проверяется как у всех: продукт подключён компании и человек в ней состоит.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "auditor")
+    await log_audit(db, actor=current_user, company_id=cid, action=payload.action,
+                    target=payload.target, details=payload.details)
+    await db.commit()
+    # 201 с телом, а не 204: FastAPI не даёт «нет содержимого» вместе с возвращаемым
+    # значением, а функция обязана что-то вернуть — иначе воркер не поднимается вовсе.
+    return {"status": "ok"}
 
 
 @router.get("/settings", response_model=SettingsOut)

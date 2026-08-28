@@ -32,10 +32,8 @@ import * as workService from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { cn } from '@/lib/utils'
 
-/** Сколько дней вперёд показываем. Тридцать — горизонт, на который реально
- *  переносят: дальше срок ставят в карточке, обдумав. Сетка округляет их до
- *  пяти недель, чтобы недели остались неделями. */
-const ДНЕЙ = 30
+/** Пять недель от понедельника текущей: горизонт, на который реально переносят,
+ *  а дальше срок ставят в карточке, обдумав. Недели остаются неделями. */
 const НЕДЕЛИ = 5
 const ДНИ_НЕДЕЛИ = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс']
 
@@ -62,7 +60,9 @@ export function CalendarDock() {
   const сегодня = useMemo(() => startOfDay(new Date()), [])
 
   const события = useQuery({
-    queryKey: ['calendar', companyId, 'dock'],
+    // Границы окна — часть ключа: вкладка, оставленная открытой через полночь,
+    // иначе продолжает показывать вчерашнюю сетку.
+    queryKey: ['calendar', companyId, 'dock', workService.todayKey(дни[0])],
     queryFn: () => workService.listEvents(companyId,
       дни[0].toISOString(), addDays(дни[0], НЕДЕЛИ * 7).toISOString()),
     enabled: !!companyId,
@@ -143,9 +143,9 @@ export function CalendarDock() {
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex shrink-0 items-center gap-2 border-b border-border/50 px-3 py-2">
         <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
-        <span className="flex-1 text-sm font-medium">
-          Ближайшие {ДНЕЙ} дней
-        </span>
+        {/* Пять недель от понедельника текущей: вперёд остаётся от 28 до 34 дней,
+            и обещать ровно тридцать — неправда. */}
+        <span className="flex-1 text-sm font-medium">Пять недель</span>
       </header>
 
       <p className="shrink-0 px-3 pt-2 text-xs text-muted-foreground">

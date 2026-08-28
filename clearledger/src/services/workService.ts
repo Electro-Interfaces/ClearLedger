@@ -105,6 +105,12 @@ export function workHref(item: WorkItem): string {
     : `/docs/company?view=errands&task=${item.id}`
 }
 
+/** Сегодняшнее число в местном виде `YYYY-MM-DD` — им сервер помечает день.
+ *  Через `toISOString` считать нельзя: у Владивостока это уже завтра. */
+export function todayKey(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 /** Строка очереди «На мне»: предмет плюс род действия, которого он от меня ждёт. */
 export interface MyWorkItem {
   kind: 'doc' | 'task'
@@ -136,7 +142,7 @@ export async function myWork(companyId: string) {
   return get<{
     mine: MyWorkItem[]
     buckets: { code: MyWorkItem['bucket']; name: string }[]
-  }>('/api/work/mine', { company_id: companyId })
+  }>('/api/work/mine', { company_id: companyId, today: todayKey() })
 }
 
 /** Куда ведёт строка очереди: виза открывается в карточке документа. */
@@ -216,7 +222,7 @@ export interface PersonalCounts {
 
 export async function myLists(companyId: string) {
   return get<{ lists: PersonalListRow[]; counts: PersonalCounts }>(
-    '/api/work/lists', { company_id: companyId })
+    '/api/work/lists', { company_id: companyId, today: todayKey() })
 }
 
 export async function createList(companyId: string, name: string) {
@@ -264,6 +270,9 @@ export async function placed(companyId: string, opts: {
   return get<{ items: PlacedItem[] }>('/api/work/placed', {
     company_id: companyId, scope: opts.scope ?? 'list', list: opts.listId,
     on: opts.on,
+    // Какой день сейчас у ЧЕЛОВЕКА: у пространства от Владивостока до Москвы
+    // единого «сегодня» нет, и сервер не должен его выдумывать.
+    today: todayKey(),
   })
 }
 
@@ -274,11 +283,6 @@ export async function frequentAssignees(companyId: string) {
     '/api/work/frequent', { company_id: companyId })
 }
 
-/** Сегодняшнее число в местном виде `YYYY-MM-DD` — им сервер помечает день.
- *  Через `toISOString` считать нельзя: у Владивостока это уже завтра. */
-export function todayKey(d: Date = new Date()): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 
 
 /* ---------------------------------------------------------------------------

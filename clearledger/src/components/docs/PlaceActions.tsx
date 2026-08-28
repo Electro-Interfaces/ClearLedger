@@ -30,7 +30,9 @@ import { cn } from '@/lib/utils'
  *  вопрос «когда вернуться», и считать его человеку не должно приходиться. */
 function nextWeekday(target: number): string {
   const d = new Date()
-  d.setDate(d.getDate() + ((target - d.getDay() + 7) || 7))
+  // Остаток по семи обязателен: без него в воскресенье «до понедельника»
+  // означало понедельник СЛЕДУЮЩЕЙ недели — плюс восемь дней вместо одного.
+  d.setDate(d.getDate() + (((target - d.getDay() + 7) % 7) || 7))
   return workService.todayKey(d)
 }
 

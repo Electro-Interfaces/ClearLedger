@@ -201,14 +201,6 @@ export function DocsLayout() {
     queryFn: () => tasksService.listTasks(company!.id, 'watching'),
     enabled: личное, staleTime: 60 * 1000,
   })
-  const notesQ = useQuery({
-    queryKey: ['notes', company?.id ?? ''],
-    queryFn: () => tasksService.listTasks(company!.id, 'all', {
-      visibility: 'personal', sort: '-created', limit: 200,
-    }),
-    enabled: личное, staleTime: 60 * 1000,
-  })
-
   // Порядок подборок человек задаёт сам. Позиции отправляются только тем, у кого
   // они изменились: перекладывание одной строки не должно означать запрос на
   // каждую подборку в списке.
@@ -247,11 +239,12 @@ export function DocsLayout() {
       queue: mine.length,
       approvals: по('approve'),
       acquaints: по('acquaint'),
-      errands: по('do') + по('unassigned'),
+      // Экран «Поручений» показывает работу НА МНЕ (scope=mine). Прибавлять сюда
+      // своё без исполнителя значит обещать в меню число, которого на экране нет.
+      errands: по('do'),
       own: по('own'),
       assigned: (assignedQ.data?.tasks ?? []).filter((t) => t.status === 'open').length,
       watching: (watchingQ.data?.tasks ?? []).filter((t) => t.status === 'open').length,
-      notes: (notesQ.data?.tasks ?? []).filter((t) => t.status === 'open').length,
       starred: c?.starred ?? 0,
       deferred: c?.deferred ?? 0,
       // Просроченное — отдельное число: «12, из них 3 горят» это два разных
@@ -259,8 +252,7 @@ export function DocsLayout() {
       overdue: mine.filter((r) => r.overdue).length,
       triage: (триажQ.data?.tasks ?? []).length,
     } as Record<string, number>
-  }, [mineQ.data, assignedQ.data, watchingQ.data, notesQ.data, listsQ.data,
-      триажQ.data])
+  }, [mineQ.data, assignedQ.data, watchingQ.data, listsQ.data, триажQ.data])
 
   const числоУ = (view: DocsView) => (view.badge ? счёт[view.badge] ?? 0 : 0)
 
@@ -296,7 +288,12 @@ export function DocsLayout() {
     // Сверяемся со ВСЕМИ пунктами раздела, включая скрытые: `views` их не
     // содержит, и вид «Подборки» считался бы неизвестным — эффект переписывал бы
     // адрес на каждом рендере, хотя вид верный.
-    const known = (DOCS_VIEWS[route] ?? []).some((view) => view.key === requested)
+    // Скрытые пункты знаем, а недоступные по правам — нет: адрес с чужим видом
+    // (ссылка на «Исполнительскую дисциплину» неадминистратору) обязан
+    // переписаться, иначе экран показывает одно, а адрес говорит другое.
+    const known = (DOCS_VIEWS[route] ?? [])
+      .filter((view) => view.key !== 'discipline' || isCompanyAdmin)
+      .some((view) => view.key === requested)
     if (!requested || known) return
     setParams((current) => {
       const next = new URLSearchParams(current)
@@ -307,7 +304,7 @@ export function DocsLayout() {
       next.delete('page')
       return next
     }, { replace: true })
-  }, [active, params, route, setParams])
+  }, [active, params, route, setParams, isCompanyAdmin])
 
   useEffect(() => {
     if (!narrow) return

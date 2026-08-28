@@ -226,7 +226,12 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             Jira получила отдельный разбор: чище на вид, дороже в работе. */}
         {live && (
           <div className="mt-4 flex flex-wrap items-center gap-1.5">
-            <QuickAdd icon={Paperclip} label="Файл" onClick={() => fileRef.current?.click()} />
+            {/* Поле выбора файла живёт во вкладке «Файлы», а неактивные вкладки
+                Radix размонтирует: без перехода ссылка пуста и кнопка молчит. */}
+            <QuickAdd icon={Paperclip} label="Файл" onClick={() => {
+              setTab('files')
+              queueMicrotask(() => fileRef.current?.click())
+            }} />
             <QuickAdd icon={ListChecks} label="Пункт" onClick={() => setTab('work')} />
             <QuickAdd icon={Link2} label="Связь" onClick={() => setTab('links')} />
             <QuickAdd icon={Clock} label="Время" onClick={() => setTab('time')} />

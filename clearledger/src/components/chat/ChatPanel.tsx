@@ -1272,7 +1272,7 @@ function ProcessFromMessageDialog({ message, companyId, onClose, onDone }: {
           {!templatesQ.isLoading && !templatesQ.isError && templates.length === 0 && (
             <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
               Доступных шаблонов процессов нет. Их создают в
-              «Трек → Регламент → Шаблоны».
+              «Трек → Настройка → Шаблоны».
             </p>
           )}
           {selected && (

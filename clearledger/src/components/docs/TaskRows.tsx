@@ -20,7 +20,6 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { SearchPicker } from '@/components/tasks/SearchPicker'
 import { QueryError } from '@/components/common/QueryError'
 import { DragHandle } from '@/components/docs/DragHandle'
-import { PlaceActions } from '@/components/docs/PlaceActions'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as tasksService from '@/services/tasksService'
 import type { SpaceTask, TaskScope } from '@/services/tasksService'
@@ -66,11 +65,22 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
   const bulk = useMutation({
     mutationFn: async (data: (t: SpaceTask) => Parameters<typeof tasksService.taskAction>[1]) => {
       const выбранные = (q.data?.tasks ?? []).filter((t) => picked.has(t.id))
-      for (const t of выбранные) await tasksService.taskAction(t.id, data(t))
-      return выбранные.length
+      // Отказ на одной задаче не отменяет остальные и не прячет то, что уже
+      // применилось: иначе человек видит старый список, повторяет действие и
+      // продлевает половину пачки дважды.
+      const итог = await Promise.allSettled(выбранные.map(
+        (t) => tasksService.taskAction(t.id, data(t))))
+      return {
+        done: итог.filter((r) => r.status === 'fulfilled').length,
+        total: выбранные.length,
+      }
     },
-    onSuccess: (n) => { setPicked(new Set()); refresh(); toast.success(`Готово: ${n}`) },
-    onError: (e: Error) => toast.error(e.message || 'Не применилось ко всем'),
+    onSettled: () => { setPicked(new Set()); refresh() },
+    onSuccess: ({ done, total }) => {
+      if (done === total) toast.success(`Готово: ${done}`)
+      else toast.warning(`Применилось ${done} из ${total} — остальные отказали`)
+    },
+    onError: (e: Error) => toast.error(e.message || 'Не применилось'),
   })
 
   /** Продлить: от собственного срока задачи, а у бессрочной — от сегодня. */
@@ -149,7 +159,7 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
             </span>
           </div>
           {rows.map((t) => (
-            <Row key={t.id} task={t} companyId={companyId} busy={close.isPending}
+            <Row key={t.id} task={t} busy={close.isPending}
               picked={picked.has(t.id)}
               onPick={() => setPicked((prev) => {
                 const next = new Set(prev)
@@ -158,7 +168,7 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
                 return next
               })}
               onOpen={() => navigate(`/docs/company?view=errands&task=${t.id}`)}
-              onChanged={refresh} onClose={() => close.mutate(t.id)} />
+              onClose={() => close.mutate(t.id)} />
           ))}
         </div>
       )}
@@ -166,10 +176,10 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
   )
 }
 
-function Row({ task, companyId, busy, picked, onPick, onOpen, onChanged, onClose }: {
-  task: SpaceTask; companyId: string; busy: boolean
+function Row({ task, busy, picked, onPick, onOpen, onClose }: {
+  task: SpaceTask; busy: boolean
   picked: boolean; onPick: () => void
-  onOpen: () => void; onChanged: () => void; onClose: () => void
+  onOpen: () => void; onClose: () => void
 }) {
   const ref = `task:${task.id}`
   return (
@@ -194,8 +204,11 @@ function Row({ task, companyId, busy, picked, onPick, onOpen, onChanged, onClose
         task.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
         {task.due_at ? dt(task.due_at) : 'без срока'}
       </span>
-      <PlaceActions companyId={companyId} targetRef={ref} mark={undefined}
-        onChanged={onChanged} />
+      {/* Личных действий здесь нет намеренно: отметка раскладки в проекцию
+          `/api/tasks` не входит, а кнопки по пустой отметке врали бы состоянием
+          — солнце не залито у взятого в день, «убрать из подборки» не
+          показывается. Раскладка живёт там, где отметка приходит с данными:
+          в очереди, в «Сегодня» и в подборках. */}
       <Button size="sm" variant="ghost" className="h-8 shrink-0 px-2" disabled={busy}
         title="Закрыть работу" onClick={onClose}>
         <Check className="h-3.5 w-3.5" />

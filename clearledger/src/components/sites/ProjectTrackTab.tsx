@@ -119,7 +119,7 @@ export function ProjectTrackTab({ site, companyId }: {
             ))}
             {!templatesQ.isLoading && ready.length === 0 && (
               <DropdownMenuItem disabled className="text-[11px]">
-                Заготовки не заведены — «Трек» → «Регламент» → «Шаблоны»
+                Заготовки не заведены — «Трек» → «Настройка» → «Шаблоны»
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />

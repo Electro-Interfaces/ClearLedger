@@ -397,6 +397,10 @@ _REASONS: tuple[tuple[str, str], ...] = (
 async def work_mine(
     company_id: str = Query(...),
     limit: int = Query(200, ge=1, le=_LIST_LIMIT),
+    # Местная дата человека. Пространство растянуто от Владивостока до Москвы, и
+    # единого «сегодня» у него нет: во Владивостоке рабочее утро наступает,
+    # когда по UTC ещё вчера. Пусто — считаем по UTC, как раньше.
+    today: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -449,6 +453,10 @@ async def work_mine(
     task_rows = (await db.execute(
         select(Task).where(
             Task.company_id == cid, _visible_to(current_user, admin),
+            # Записная книжка в общую очередь не входит: «личное» в названии
+            # раздела должно оставаться правдой, а второе условие ниже (своё без
+            # исполнителя) без этого фильтра втянуло бы её целиком.
+            _not_personal(),
             Task.status == "open",
             or_(Task.assignee_id == current_user.id,
                 and_(Task.assignee_id.is_(None),
@@ -512,7 +520,7 @@ async def work_mine(
     marks = await placement.marks_for(
         db, cid, current_user.id,
         [f"{i['kind']}:{i['id']}" for i in items.values()])
-    today = now.date()
+    сегодня = today or now.date()
 
     rows = []
     for item in items.values():
@@ -520,8 +528,8 @@ async def work_mine(
         rows.append({**item, "bucket": bucket(item.get("due_at")),
                      "overdue": bucket(item.get("due_at")) == "overdue",
                      "mark": placement.out(mark),
-                     "in_day": bool(mark and mark.taken_for == today),
-                     "hidden": placement.hidden(mark, today)})
+                     "in_day": bool(mark and mark.taken_for == сегодня),
+                     "hidden": placement.hidden(mark, сегодня)})
     order = {"overdue": 0, "today": 1, "week": 2, "later": 3}
     rows.sort(key=lambda r: (order[r["bucket"]], r.get("due_at") or "9999"))
     return {
@@ -1149,6 +1157,7 @@ async def _my_lists(db: AsyncSession, cid: uuid.UUID, user: User):
 @router.get("/lists")
 async def lists_mine(
     company_id: str = Query(...),
+    today: date | None = Query(None, description="местная дата человека"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1168,13 +1177,13 @@ async def lists_mine(
             PersonalMark.user_id == current_user.id,
             PersonalMark.list_id.is_not(None)).group_by(PersonalMark.list_id))).all())
     now = datetime.now(timezone.utc)
-    today = now.date()
+    сегодня = today or now.date()
     # Числа для пунктов навигации считаются здесь же, одним проходом: пункт,
     # считающий себя сам, означает пять запросов на каждое открытие «Трека».
     day, starred, deferred, loose = (await db.execute(select(
-        func.count().filter(PersonalMark.taken_for == today),
+        func.count().filter(PersonalMark.taken_for == сегодня),
         func.count().filter(PersonalMark.starred.is_(True)),
-        func.count().filter(PersonalMark.deferred_until > today),
+        func.count().filter(PersonalMark.deferred_until > сегодня),
         func.count().filter(PersonalMark.list_id.is_(None)),
     ).where(PersonalMark.company_id == cid,
             PersonalMark.user_id == current_user.id))).one()
@@ -1339,6 +1348,7 @@ async def placed(
     list_id: str | None = Query(None, alias="list"),
     scope: str = Query("list", pattern="^(list|day|carry|deferred|starred|loose)$"),
     on: date | None = Query(None, description="день для scope=day; пусто — сегодня"),
+    today: date | None = Query(None, description="местная дата человека"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1354,7 +1364,10 @@ async def placed(
     from app.services import placement
 
     cid = await _assert_work(company_id, current_user, db)
-    today = datetime.now(timezone.utc).date()
+    # `on` называет день, о котором спрашивают (календарь), `today` — какой день
+    # сейчас у человека. Разные вопросы: первый про экран, второй про часовой
+    # пояс, и подменять один другим нельзя.
+    сегодня = today or datetime.now(timezone.utc).date()
     sel = select(PersonalMark).where(PersonalMark.company_id == cid,
                                      PersonalMark.user_id == current_user.id)
     if scope == "list":
@@ -1364,15 +1377,15 @@ async def placed(
     elif scope == "day":
         # Календарь спрашивает про конкретный день, «Сегодня» — про сегодняшний:
         # это один и тот же вопрос с разной датой, и второго разреза не нужно.
-        sel = sel.where(PersonalMark.taken_for == (on or today))
+        sel = sel.where(PersonalMark.taken_for == (on or сегодня))
     elif scope == "carry":
         # Вчерашнее, взятое и не закрытое. Само в новый день не переезжает:
         # сброс работает только там, где рядом стоит утренний вопрос «вчера
         # осталось столько — переносим?», иначе человек молча теряет невзятое.
         sel = sel.where(PersonalMark.taken_for.is_not(None),
-                        PersonalMark.taken_for < today)
+                        PersonalMark.taken_for < сегодня)
     elif scope == "deferred":
-        sel = sel.where(PersonalMark.deferred_until > today)
+        sel = sel.where(PersonalMark.deferred_until > сегодня)
     elif scope == "starred":
         sel = sel.where(PersonalMark.starred.is_(True))
     else:

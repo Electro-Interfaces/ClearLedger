@@ -158,7 +158,10 @@ export function DocsWorkPage() {
         : { title: 'Наблюдаю', hint: 'Чужая работа, за которой слежу со стороны', empty: 'Вы ни за чем не следите.', scope: 'watching' as const }
     return (
       <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
-        <TaskRows scope={мета.scope} title={мета.title} hint={мета.hint} empty={мета.empty} />
+        {/* Ключ по разрезу: при переходе в другой список компонент пересоздаётся,
+            и выбор строк не переезжает туда, где этих строк нет. */}
+        <TaskRows key={мета.scope} scope={мета.scope} title={мета.title}
+          hint={мета.hint} empty={мета.empty} />
       </Suspense>
     )
   }
