@@ -10,11 +10,14 @@
  * ручка переноса, название с метой, срок, личные действия, закрытие. Четвёртой
  * разновидности строки в продукте нет и не заводится.
  */
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Check, Eye, ListChecks, Loader2, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { SearchPicker } from '@/components/tasks/SearchPicker'
 import { QueryError } from '@/components/common/QueryError'
 import { DragHandle } from '@/components/docs/DragHandle'
 import { PlaceActions } from '@/components/docs/PlaceActions'
@@ -51,8 +54,37 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
     onError: (e: Error) => toast.error(e.message || 'Не закрылось'),
   })
 
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const people = useQuery({
+    queryKey: ['task-people', companyId],
+    queryFn: () => tasksService.listTaskPeople(companyId),
+    enabled: !!companyId, staleTime: 5 * 60 * 1000,
+  })
+
+  /** Действие над пачкой. Идём по одной задаче: у каждой свои права и свой
+   *  след, и общий запрос «примени ко всем» их бы обошёл. */
+  const bulk = useMutation({
+    mutationFn: async (data: (t: SpaceTask) => Parameters<typeof tasksService.taskAction>[1]) => {
+      const выбранные = (q.data?.tasks ?? []).filter((t) => picked.has(t.id))
+      for (const t of выбранные) await tasksService.taskAction(t.id, data(t))
+      return выбранные.length
+    },
+    onSuccess: (n) => { setPicked(new Set()); refresh(); toast.success(`Готово: ${n}`) },
+    onError: (e: Error) => toast.error(e.message || 'Не применилось ко всем'),
+  })
+
+  /** Продлить: от собственного срока задачи, а у бессрочной — от сегодня. */
+  const продлить = (дней: number) => bulk.mutate((t) => {
+    const от = t.due_at ? new Date(t.due_at) : new Date()
+    от.setDate(от.getDate() + дней)
+    от.setHours(18, 0, 0, 0)
+    return { companyId, dueAt: от.toISOString() }
+  })
+
+  const rows = useMemo(() => q.data?.tasks ?? [], [q.data])
+  const все = rows.length > 0 && rows.every((t) => picked.has(t.id))
+
   if (!companyId) return null
-  const rows = q.data?.tasks ?? []
 
   return (
     <div className="space-y-4 p-4">
@@ -62,6 +94,35 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
         </h1>
         <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">{hint}</p>
       </div>
+
+      {/* Панель видна только при выборе: постоянная полоса действий над пустым
+          выбором занимает место и предлагает то, чего нет. */}
+      {picked.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2">
+          <span className="text-sm font-medium text-primary">Выбрано: {picked.size}</span>
+          <span className="text-xs text-muted-foreground">продлить на</span>
+          {[1, 3, 7].map((d) => (
+            <Button key={d} size="sm" variant="outline" className="h-8 px-2 text-xs"
+              disabled={bulk.isPending} onClick={() => продлить(d)}>
+              {d} дн.
+            </Button>
+          ))}
+          <SearchPicker
+            items={(people.data?.people ?? []).map((p) => ({
+              id: p.id, name: p.name, party: p.partyType }))}
+            value="" onChange={(v) => bulk.mutate(() => ({ companyId, assigneeId: v }))}
+            placeholder="Поручить" emptyLabel="Не назначен"
+            searchPlaceholder="Фамилия или имя…" className="w-[190px]" />
+          <Button size="sm" variant="outline" className="h-8 px-2 text-xs"
+            disabled={bulk.isPending}
+            onClick={() => bulk.mutate(() => ({ companyId, status: 'done' }))}>
+            <Check className="mr-1 h-3.5 w-3.5" />Закрыть
+          </Button>
+          <Button size="sm" variant="ghost" className="ml-auto h-8 px-2 text-xs"
+            onClick={() => setPicked(new Set())}>Снять выбор</Button>
+          {bulk.isPending && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+        </div>
+      )}
 
       {q.isLoading ? (
         <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
@@ -75,8 +136,27 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
         </p>
       ) : (
         <div className="overflow-hidden rounded-lg border">
+          {/* Выбрать всё — там же, где выбирают строку: искать эту кнопку в
+              другом месте человек не должен. */}
+          <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1.5">
+            <Checkbox aria-label="Выбрать все"
+              checked={все && rows.length > 0}
+              onCheckedChange={(v) => setPicked(v
+                ? new Set(rows.map((t) => t.id))
+                : new Set())} />
+            <span className="text-xs text-muted-foreground">
+              {все && rows.length > 0 ? 'все выбраны' : `строк: ${rows.length}`}
+            </span>
+          </div>
           {rows.map((t) => (
             <Row key={t.id} task={t} companyId={companyId} busy={close.isPending}
+              picked={picked.has(t.id)}
+              onPick={() => setPicked((prev) => {
+                const next = new Set(prev)
+                if (next.has(t.id)) next.delete(t.id)
+                else next.add(t.id)
+                return next
+              })}
               onOpen={() => navigate(`/docs/company?view=errands&task=${t.id}`)}
               onChanged={refresh} onClose={() => close.mutate(t.id)} />
           ))}
@@ -86,13 +166,17 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
   )
 }
 
-function Row({ task, companyId, busy, onOpen, onChanged, onClose }: {
+function Row({ task, companyId, busy, picked, onPick, onOpen, onChanged, onClose }: {
   task: SpaceTask; companyId: string; busy: boolean
+  picked: boolean; onPick: () => void
   onOpen: () => void; onChanged: () => void; onClose: () => void
 }) {
   const ref = `task:${task.id}`
   return (
-    <div className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
+    <div className={cn('flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40',
+      picked && 'bg-primary/5')}>
+      <Checkbox checked={picked} onCheckedChange={onPick}
+        aria-label={`Выбрать ${tasksService.taskKey(task)}`} />
       <DragHandle targetRef={ref} label={`${tasksService.taskKey(task)} ${task.title}`} />
       <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
         <div className="truncate text-sm leading-snug">{task.title}</div>
