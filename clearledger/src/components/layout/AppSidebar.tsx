@@ -192,11 +192,14 @@ const TASKS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
 const DOCS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
   // Разрез назван явно: голый /docs ведёт в «Моё» — приложение открывают с
   // вопросом «что на мне», а не «покажи журнал входящих».
-  { to: '/docs?view=incoming', label: 'Реестры', icon: FolderOpen },
+  // Раздел называется тем, что за ним лежит, а не тем, как оно показано:
+  // «Реестры» — это способ подачи, а ищут глазами «Документы».
+  { to: '/docs?view=incoming', label: 'Документы', icon: FolderOpen },
   { to: '/docs/work', label: 'Моё', icon: ListChecks },
   { to: '/docs/company', label: 'Компания', icon: Building2 },
-  { to: '/docs/overview', label: 'Обзор', icon: BarChart3 },
-  { to: '/docs/regulation', label: 'Регламент', icon: Settings2 },
+  { to: '/docs/overview', label: 'Отчёты', icon: BarChart3 },
+  // «Регламент» и «Настройка» стояли рядом с одной иконкой и делили одно и то
+  // же — правила работы. Шаблоны и расписания переехали в «Настройку» группой.
   { to: '/docs/setup', label: 'Настройка', icon: Settings2 },
 ]
 

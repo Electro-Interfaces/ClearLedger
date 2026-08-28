@@ -648,9 +648,12 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
  * открывался пустым: динамический импорт находил модуль, но не находил в нём
  * компонента.
  */
-export function TasksRegulation() {
+export function TasksRegulation({ view: outer }: { view?: string } = {}) {
   const { companyId } = useCompany()
-  const view = useDocsView('/docs/regulation')
+  // Экраны регламента переехали в «Настройку», но прежний маршрут остался
+  // рабочим: разрез приходит снаружи, а без него берётся из старого адреса.
+  const routed = useDocsView('/docs/regulation')
+  const view = outer ?? routed
   if (view === 'views') return <ViewsSection companyId={companyId} scope="doc" />
   if (view === 'recurrences') return <RecurrencesSection companyId={companyId} />
   return <TemplatesSection companyId={companyId} />

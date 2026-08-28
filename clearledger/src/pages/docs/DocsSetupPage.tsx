@@ -7,7 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
-import { useId, useState } from 'react'
+import { lazy, Suspense, useId, useState } from 'react'
 import { Card } from '@/components/ui/card'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -15,6 +15,8 @@ import {
   AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
+const TasksRegulation = lazy(() => import('@/pages/tasks/TasksRegulation')
+  .then((m) => ({ default: m.TasksRegulation })))
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
@@ -77,6 +79,17 @@ export function DocsSetupPage() {
   // Проекты и типы задач настраиваются здесь же, а не в снятом с лаунчера
   // разделе «Задачи»: когда механизмы перенесли в «Трек», настройку забыли,
   // и попасть в неё можно было только прямым адресом /tasks-legacy/setup.
+  // Шаблоны, расписания и представления переехали сюда из «Регламента»: это
+  // такие же правила работы, и отдельный раздел ради трёх пунктов только
+  // добавлял выбор «а где искать».
+  if (view === 'templates' || view === 'recurrences' || view === 'views') {
+    return (
+      <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
+        <TasksRegulation view={view} />
+      </Suspense>
+    )
+  }
+
   if (view === 'projects') {
     return <ProjectsSection companyId={company.id} />
   }
