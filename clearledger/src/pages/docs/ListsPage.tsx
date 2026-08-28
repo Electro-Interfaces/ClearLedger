@@ -67,7 +67,9 @@ export function ListsPage({ mode = 'lists' }: { mode?: ListsMode }) {
   const [params, setParams] = useSearchParams()
   const companyId = company?.id ?? ''
   const [новая, setНовая] = useState('')
-  const [заводим, setЗаводим] = useState(false)
+  // Пришли по плюсу из меню — поле открыто сразу: искать на экране ещё одну
+  // кнопку с тем же смыслом человек не должен.
+  const [заводим, setЗаводим] = useState(() => params.get('new') === '1')
   const [переименование, setПереименование] = useState('')
   const [правим, setПравим] = useState<string | null>(null)
   const [имя, setИмя] = useState('')

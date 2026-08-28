@@ -226,10 +226,10 @@ export async function createList(companyId: string, name: string) {
 /** Переименовать, отметить обзор или удалить подборку. Удаление не трогает
  *  предметы: работа возвращается в «Не разложено». */
 export async function listAction(companyId: string, id: string, data: {
-  name?: string; reviewed?: boolean; delete?: boolean
+  name?: string; position?: number; reviewed?: boolean; delete?: boolean
 }) {
   return post(`/api/work/lists/${id}`, {
-    company_id: companyId, name: data.name,
+    company_id: companyId, name: data.name, position: data.position,
     reviewed: data.reviewed, delete: data.delete,
   })
 }

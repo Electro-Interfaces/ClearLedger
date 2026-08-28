@@ -8,10 +8,13 @@
  * «Пульса» — это такое же приложение Ядра, и человек, перешедший оттуда, не
  * должен заметить смены правил.
  */
-import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useSearchParams } from 'react-router-dom'
-import { ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import {
+  ChevronRight, GripVertical, PanelLeftClose, PanelLeftOpen, Plus,
+} from 'lucide-react'
+import { toast } from 'sonner'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
@@ -26,9 +29,9 @@ export interface DocsView {
   /** Заголовок группы, под которым пункт стоит. Пункты одной группы идут
    *  подряд: заголовок печатается при её смене. */
   group?: string
-  /** Какое число показать справа. Числа личного приходят одним запросом
-   *  вместе с подборками — считать их поштучно значит пять запросов на открытие. */
-  badge?: 'day' | 'starred' | 'deferred'
+  /** Ключ числа в сводке раздела (`useSectionCounts`). Пусто — пункт без
+   *  счётчика: число, которое всегда ноль, читается как поломка. */
+  badge?: string
   /** Пункт есть в адресе и в проверке вида, но в меню не рисуется: его место
    *  занимает что-то живое — например, сами подборки человека. Без такого
    *  пункта `useDocsView` считает вид неизвестным и молча откатывает его на
@@ -54,18 +57,18 @@ export const DOCS_VIEWS: Record<string, DocsView[]> = {
   // Ниже — то, что принесла компания и отменить нельзя. Между ними подборки: они и
   // есть место, где чужой предмет становится разложенным по-своему.
   '/docs/work': [
-    { key: 'today', label: 'Сегодня', hint: 'день целиком: что взял, что принесли, напоминания', group: 'Веду сам', badge: 'day' },
+    { key: 'today', label: 'Сегодня', hint: 'день целиком: что взял, что принесли, напоминания', group: 'Веду сам', badge: 'hot' },
     { key: 'calendar', label: 'Календарь', hint: 'месяц и неделя: встречи и сроки вместе', group: 'Веду сам' },
-    { key: 'notes', label: 'Записная книжка', hint: 'что записал себе — без сроков и чужих глаз', group: 'Веду сам' },
+    { key: 'notes', label: 'Записная книжка', hint: 'что записал себе — без сроков и чужих глаз', group: 'Веду сам', badge: 'notes' },
     { key: 'starred', label: 'Важное', hint: 'помеченное лично: важность своя, приоритет предмета ставит постановщик', group: 'Веду сам', badge: 'starred' },
     { key: 'deferred', label: 'Отложено', hint: 'спрятанное у себя до даты — срок компании при этом не менялся', group: 'Веду сам', badge: 'deferred' },
-    { key: 'assigned', label: 'Я поставил', hint: 'что поручил другим — с меня спросят результат', group: 'Веду сам' },
-    { key: 'watching', label: 'Наблюдаю', hint: 'чужая работа, за которой слежу со стороны', group: 'Веду сам' },
-    { key: 'mine-all', label: 'Моя очередь', hint: 'всё, что ждёт меня, по срочности', group: 'Ждут от меня' },
-    { key: 'errands', label: 'Поручения', hint: 'работа, которую делаю я и которую поручил', group: 'Ждут от меня' },
-    { key: 'approvals', label: 'Визы', hint: 'документы, которые ждут моего согласования', group: 'Ждут от меня' },
-    { key: 'acquaints', label: 'Ознакомиться', hint: 'приказы и распоряжения, доведённые до меня', group: 'Ждут от меня' },
-    { key: 'mine', label: 'Мои документы', hint: 'где я автор или ответственный', group: 'Ждут от меня' },
+    { key: 'assigned', label: 'Я поставил', hint: 'что поручил другим — с меня спросят результат', group: 'Веду сам', badge: 'assigned' },
+    { key: 'watching', label: 'Наблюдаю', hint: 'чужая работа, за которой слежу со стороны', group: 'Веду сам', badge: 'watching' },
+    { key: 'mine-all', label: 'Моя очередь', hint: 'всё, что ждёт меня, по срочности', group: 'Ждут от меня', badge: 'queue' },
+    { key: 'errands', label: 'Поручения', hint: 'работа, которую делаю я и которую поручил', group: 'Ждут от меня', badge: 'errands' },
+    { key: 'approvals', label: 'Визы', hint: 'документы, которые ждут моего согласования', group: 'Ждут от меня', badge: 'approvals' },
+    { key: 'acquaints', label: 'Ознакомиться', hint: 'приказы и распоряжения, доведённые до меня', group: 'Ждут от меня', badge: 'acquaints' },
+    { key: 'mine', label: 'Мои документы', hint: 'где я автор или ответственный', group: 'Ждут от меня', badge: 'own' },
     { key: 'lists', label: 'Подборки', hint: 'свои подборки: завести, переименовать, удалить', hidden: true },
   ],
   // Раздел «Компания» — то же самое, но по всем: где стоит работа целиком.
@@ -125,6 +128,7 @@ export function DocsLayout() {
   const { pathname } = useLocation()
   const [params, setParams] = useSearchParams()
   const { company, isCompanyAdmin } = useCompany()
+  const qc = useQueryClient()
   const narrow = useMaxWidth(1024)
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1')
@@ -157,17 +161,95 @@ export function DocsLayout() {
     staleTime: 60 * 1000,
   })
   const myLists = route === '/docs/work' ? (listsQ.data?.lists ?? []) : []
-  const counts = listsQ.data?.counts
   const openList = params.get('view') === 'lists' ? params.get('list') : null
-  const числоУ = (view: DocsView) => (view.badge && counts
-    ? counts[view.badge] : 0)
+
+  // Ключи запросов те же, что у «Моей очереди», пульта и записной книжки:
+  // react-query отдаёт числа из общего кэша, а не ходит на сервер второй раз.
+  const личное = route === '/docs/work' && !!company?.id
+  const mineQ = useQuery({
+    queryKey: ['work-mine', company?.id ?? ''],
+    queryFn: () => workService.myWork(company!.id),
+    enabled: личное, staleTime: 60 * 1000,
+  })
+  const assignedQ = useQuery({
+    queryKey: ['tasks', company?.id ?? '', 'assigned', '', '', ''],
+    queryFn: () => tasksService.listTasks(company!.id, 'assigned'),
+    enabled: личное, staleTime: 60 * 1000,
+  })
+  const watchingQ = useQuery({
+    queryKey: ['tasks', company?.id ?? '', 'watching', '', '', ''],
+    queryFn: () => tasksService.listTasks(company!.id, 'watching'),
+    enabled: личное, staleTime: 60 * 1000,
+  })
+  const notesQ = useQuery({
+    queryKey: ['notes', company?.id ?? ''],
+    queryFn: () => tasksService.listTasks(company!.id, 'all', {
+      visibility: 'personal', sort: '-created', limit: 200,
+    }),
+    enabled: личное, staleTime: 60 * 1000,
+  })
+
+  // Порядок подборок человек задаёт сам. Позиции отправляются только тем, у кого
+  // они изменились: перекладывание одной строки не должно означать запрос на
+  // каждую подборку в списке.
+  const [drag, setDrag] = useState<string | null>(null)
+  const reorder = useMutation({
+    mutationFn: async (order: string[]) => {
+      const было = new Map(myLists.map((l, i) => [l.id, i]))
+      await Promise.all(order.map((id, i) => (было.get(id) === i
+        ? null
+        : workService.listAction(company!.id, id, { position: i })))
+        .filter(Boolean))
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['personal-lists', company?.id ?? ''] })
+    },
+    onError: () => toast.error('Порядок не сохранился'),
+  })
+
+  /** Переставить подборку на место другой (или на N шагов клавишами). */
+  const переставить = (id: string, куда: number) => {
+    const ids = myLists.map((l) => l.id)
+    const из = ids.indexOf(id)
+    if (из < 0 || куда < 0 || куда >= ids.length || куда === из) return
+    ids.splice(куда, 0, ids.splice(из, 1)[0])
+    reorder.mutate(ids)
+  }
+
+  const счёт = useMemo(() => {
+    // Спрятанное человеком в числа не идёт: он его убрал с глаз, и счётчик,
+    // считающий скрытое, спорит с самим смыслом отложения.
+    const mine = (mineQ.data?.mine ?? []).filter((r) => !r.hidden)
+    const по = (reason: string) => mine.filter((r) => r.reason === reason).length
+    const c = listsQ.data?.counts
+    return {
+      hot: mine.filter((r) => r.bucket === 'overdue' || r.bucket === 'today').length,
+      queue: mine.length,
+      approvals: по('approve'),
+      acquaints: по('acquaint'),
+      errands: по('do') + по('unassigned'),
+      own: по('own'),
+      assigned: (assignedQ.data?.tasks ?? []).filter((t) => t.status === 'open').length,
+      watching: (watchingQ.data?.tasks ?? []).filter((t) => t.status === 'open').length,
+      notes: (notesQ.data?.tasks ?? []).filter((t) => t.status === 'open').length,
+      starred: c?.starred ?? 0,
+      deferred: c?.deferred ?? 0,
+      // Просроченное — отдельное число: «12, из них 3 горят» это два разных
+      // ответа, и одним числом они не заменяются.
+      overdue: mine.filter((r) => r.overdue).length,
+    } as Record<string, number>
+  }, [mineQ.data, assignedQ.data, watchingQ.data, notesQ.data, listsQ.data])
+
+  const числоУ = (view: DocsView) => (view.badge ? счёт[view.badge] ?? 0 : 0)
 
   /** Открыть подборку: тот же экран подборок, но с выбранной. */
-  const openMyList = (id: string | null) => setParams((p) => {
+  const openMyList = (id: string | null, заводим = false) => setParams((p) => {
     const n = new URLSearchParams(p)
     n.set('view', 'lists')
     if (id) n.set('list', id)
     else n.delete('list')
+    if (заводим) n.set('new', '1')
+    else n.delete('new')
     n.delete('doc')
     n.delete('task')
     return n
@@ -331,6 +413,12 @@ export function DocsLayout() {
                     ? 'bg-primary/10 font-medium text-primary'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
                 <span className="flex-1 truncate">{v.label}</span>
+                {(v.badge === 'queue' || v.badge === 'hot') && счёт.overdue > 0 && (
+                  <span className="shrink-0 text-xs tabular-nums text-red-600 dark:text-red-400"
+                    title={`Просрочено: ${счёт.overdue}`}>
+                    {счёт.overdue}
+                  </span>
+                )}
                 {числоУ(v) > 0 && (
                   <span className="shrink-0 text-xs tabular-nums opacity-70">{числоУ(v)}</span>
                 )}
@@ -339,19 +427,54 @@ export function DocsLayout() {
           ))}
           {route === '/docs/work' && (
             <>
-              <div className="mt-3 px-3 pb-1 text-xs uppercase tracking-wide text-muted-foreground/70">
-                Подборки
+              {/* Черта отделяет данное системой от собранного человеком: выше —
+                  разрезы, которые он не заводил, ниже — его подборки. Заголовок
+                  «Подборки» над подборками повторял бы очевидное, поэтому он
+                  здесь работает: открывает экран подборок, а плюс заводит новую. */}
+              <div className="mt-3 flex items-center gap-1 border-t border-border pt-2">
+                <button type="button" onClick={() => openMyList(null)}
+                  aria-current={active === 'lists' && !openList ? 'page' : undefined}
+                  title="Все подборки: завести, переименовать, удалить"
+                  className={cn('flex-1 rounded-md px-3 py-1 text-left text-xs uppercase tracking-wide transition-colors',
+                    active === 'lists' && !openList
+                      ? 'font-medium text-primary'
+                      : 'text-muted-foreground/70 hover:text-foreground')}>
+                  Подборки
+                </button>
+                <button type="button" onClick={() => openMyList(null, true)}
+                  aria-label="Завести подборку" title="Завести подборку"
+                  className="rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-accent/40 hover:text-foreground">
+                  <Plus className="h-4 w-4" />
+                </button>
               </div>
-              {myLists.map((l) => (
+              {myLists.map((l, i) => (
                 <button key={l.id} type="button" onClick={() => openMyList(l.id)}
+                  draggable
+                  onDragStart={() => setDrag(l.id)}
+                  onDragOver={(e) => { if (drag && drag !== l.id) e.preventDefault() }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    if (drag) переставить(drag, i)
+                    setDrag(null)
+                  }}
+                  onDragEnd={() => setDrag(null)}
+                  // Клавиатура умеет то же самое: перетаскивание мышью не должно
+                  // быть единственным способом задать порядок.
+                  onKeyDown={(e) => {
+                    if (!e.altKey) return
+                    if (e.key === 'ArrowUp') { e.preventDefault(); переставить(l.id, i - 1) }
+                    if (e.key === 'ArrowDown') { e.preventDefault(); переставить(l.id, i + 1) }
+                  }}
                   aria-current={openList === l.id ? 'page' : undefined}
                   title={l.stale_days !== null && l.stale_days > 13
-                    ? `Не открывали ${l.stale_days} дн.`
-                    : 'Своя подборка: видите только вы'}
-                  className={cn('flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors',
+                    ? `Не открывали ${l.stale_days} дн. · Alt+↑↓ или перетаскиванием — порядок`
+                    : 'Своя подборка: видите только вы. Alt+↑↓ или перетаскиванием — порядок'}
+                  className={cn('group flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors',
+                    drag === l.id && 'opacity-50',
                     openList === l.id
                       ? 'bg-primary/10 font-medium text-primary'
                       : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
+                  <GripVertical className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-40" aria-hidden />
                   <span className="flex-1 truncate">{l.name}</span>
                   {l.stale_days !== null && l.stale_days > 13 && (
                     <span className="shrink-0 text-amber-600 dark:text-amber-400" aria-hidden>·</span>
@@ -361,16 +484,12 @@ export function DocsLayout() {
                   )}
                 </button>
               ))}
-              {/* Один вход, а не три: экран подборок и есть место, где их
-                  заводят, переименовывают и удаляют. */}
-              <button type="button" onClick={() => openMyList(null)}
-                aria-current={active === 'lists' && !openList ? 'page' : undefined}
-                className={cn('rounded-md px-3 py-1.5 text-left text-sm transition-colors',
-                  active === 'lists' && !openList
-                    ? 'bg-primary/10 font-medium text-primary'
-                    : 'text-muted-foreground/80 hover:bg-accent/40 hover:text-foreground')}>
-                {myLists.length ? 'Все подборки' : 'Завести подборку'}
-              </button>
+              {myLists.length === 0 && (
+                <button type="button" onClick={() => openMyList(null, true)}
+                  className="rounded-md px-3 py-1.5 text-left text-sm text-muted-foreground/80 transition-colors hover:bg-accent/40 hover:text-foreground">
+                  Завести подборку
+                </button>
+              )}
             </>
           )}
           {saved.length > 0 && (

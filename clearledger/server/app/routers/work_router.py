@@ -1026,6 +1026,9 @@ class ListIn(BaseModel):
 class ListAction(BaseModel):
     company_id: str
     name: str | None = Field(None, min_length=1, max_length=60)
+    # Место в списке: человек раскладывает свои подборки по важности, и порядок
+    # хранится, а не пересчитывается по имени или дате.
+    position: int | None = Field(None, ge=0, le=999)
     delete: bool = False
     reviewed: bool = False
 
@@ -1143,10 +1146,12 @@ async def list_action(
         return {"deleted": True}
     if payload.name:
         row.name = payload.name.strip()
+    if payload.position is not None:
+        row.position = payload.position
     if payload.reviewed:
         row.reviewed_at = datetime.now(timezone.utc)
     await db.commit()
-    return {"id": str(row.id), "name": row.name,
+    return {"id": str(row.id), "name": row.name, "position": row.position,
             "stale_days": 0 if payload.reviewed else None}
 
 
