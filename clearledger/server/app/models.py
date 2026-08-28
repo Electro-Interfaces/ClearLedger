@@ -10178,6 +10178,108 @@ class CalendarAttendee(Base):
     )
 
 
+class PersonalList(Base):
+    """Именованная кучка человека: «Ремонт офиса», «Прочитать», «Разобрать».
+
+    Не метка и не проект. Метка живёт в общем справочнике компании и меняет сам
+    предмет — повесив её на чужой документ, человек поменял его для всех.
+    Кучка не трогает предмет ничем: в ней лежит ссылка, видит её только хозяин,
+    и положить в неё можно и свою запись, и чужое поручение, и визу.
+
+    Имени достаточно: цвет, иконка и описание — украшения, из-за которых
+    заведение списка становится делом, а не движением руки.
+    """
+    __tablename__ = "personal_lists"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(60), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Когда кучку последний раз открывали. Единственный продукт, где «потом» не
+    # превращается в кладбище, — тот, где обзор встроен в модель, а не оставлен
+    # привычке. По этой отметке считается «не открывали N дней».
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "company_id", "name", name="uq_personal_lists_name"),
+    )
+
+
+class PersonalMark(Base):
+    """Как человек разложил у себя предмет пространства.
+
+    Строка на пару «человек — предмет», и в ней три ответа об одном и том же:
+    в какой моей кучке лежит (`list_id`), когда я им занимаюсь (`taken_for`,
+    `deferred_until`) и важен ли он мне (`starred`). Тремя таблицами это не
+    отвечается: кучка ЭКСКЛЮЗИВНА — предмет лежит в одной или ни в одной, —
+    а «сегодня» и «важно» стоят поверх и с кучкой не спорят. Так и доска по
+    кучкам однозначна: перенос карточки есть перенос, а не загадка
+    «переместить или добавить». Кому предмет нужен сразу в двух разрезах, для
+    этого есть представления: они собираются правилом и пересекаться вправе.
+
+    Ничего в предмете эта строка не меняет и никому, кроме хозяина, не видна —
+    ни администратору пространства, ни постановщику. Наружу видно объективное:
+    срок, состояние, просрочка. То, что человек решил заняться этим в четверг,
+    не отчётность. И `defer_count` наверх не уходит никогда: увидев его,
+    перестают откладывать и начинают закрывать формально.
+
+    Дата, а не отметка «в дне»: ночной проход не нужен — вчерашнее число само
+    перестаёт быть сегодняшним.
+    """
+    __tablename__ = "personal_marks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Предмет: `task:<uuid>`, `doc:<uuid>` — тот же словарь `<вид>:<ключ>`, что
+    # у напоминания и у связей документа. Третьего механизма привязки к предмету
+    # в пространстве не заводим.
+    target_ref: Mapped[str] = mapped_column(String(120), nullable=False)
+    list_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("personal_lists.id", ondelete="SET NULL"),
+        nullable=True)
+    # На какой день человек взял предмет. Прошлое число — не «мой день»: взятое
+    # вчера и не сделанное приходит утром отдельной строкой, а не тянется само.
+    taken_for: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    # До какого дня предмет не показывается в раскладке. Личное сокрытие, а не
+    # перенос срока: срок предмета общий и остаётся на месте, просрочка идёт по
+    # расписанию компании.
+    deferred_until: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    starred: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Сколько раз откладывали. Показывается хозяину и меняет ПРЕДЛОЖЕНИЕ, а не
+    # текст: на измеренных данных отклонивший первое напоминание серии отклоняет
+    # следующие в 88% случаев, поэтому повторять то же самое бессмысленно.
+    defer_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Ручной порядок внутри кучки. Живёт только здесь: общий ранг — та самая
+    # причина, по которой в чужих трекерах заводят дублирующий личный проект.
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "company_id", "target_ref",
+                         name="uq_personal_marks_target"),
+        Index("ix_personal_marks_day", "user_id", "company_id", "taken_for"),
+    )
+
+
+
 class TaskView(Base):
     """Сохранённый отбор реестра: «Мои просрочки», «Работа по объекту 208».
 

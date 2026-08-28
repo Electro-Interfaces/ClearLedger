@@ -30,6 +30,8 @@ const TodayPage = lazy(() => import('./TodayPage')
   .then((module) => ({ default: module.TodayPage })))
 const CalendarPage = lazy(() => import('./CalendarPage')
   .then((module) => ({ default: module.CalendarPage })))
+const ListsPage = lazy(() => import('./ListsPage')
+  .then((module) => ({ default: module.ListsPage })))
 const MINE_PAGE_SIZE = 200
 
 export function DocsWorkPage() {
@@ -122,6 +124,14 @@ export function DocsWorkPage() {
     return (
       <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
         <NotesPage />
+      </Suspense>
+    )
+  }
+
+  if (view === 'lists') {
+    return (
+      <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
+        <ListsPage />
       </Suspense>
     )
   }

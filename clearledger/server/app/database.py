@@ -3995,6 +3995,22 @@ async def create_all() -> None:
             "ALTER TABLE calendar_events ADD CONSTRAINT ck_calendar_event_span "
             "CHECK (ends_at > starts_at)"))
 
+        # v2.76: личная раскладка работы (этап 14 «Трека»). Таблицы заводит
+        # `create_all`; здесь — уникальность пары «человек — предмет» и индекс
+        # дня. Уникальность стоит в базе, а не только в сервисе: раскладку
+        # трогают из строки очереди, с доски и из карточки, и две отметки на
+        # один предмет означали бы, что предмет лежит в двух кучках сразу —
+        # ровно то, из-за чего перенос на доске перестал бы быть переносом.
+        for stmt in (
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_personal_marks_target "
+            "ON personal_marks (user_id, company_id, target_ref)",
+            "CREATE INDEX IF NOT EXISTS ix_personal_marks_day "
+            "ON personal_marks (user_id, company_id, taken_for)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_personal_lists_name "
+            "ON personal_lists (user_id, company_id, name)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

@@ -121,6 +121,14 @@ export interface MyWorkItem {
   state?: string
   acting_for?: string | null
   acquaint_id?: string
+  /** Как человек разложил этот предмет у себя. Пусто — не разложен, и это
+   *  нормальное состояние, а не незаполненные поля. */
+  mark?: PersonalMark | null
+  /** Взят в сегодняшний день. */
+  in_day?: boolean
+  /** Отложен до будущего дня: строка остаётся в выдаче, но своему месту в
+   *  сегодняшнем списке уже не принадлежит. */
+  hidden?: boolean
 }
 
 export async function myWork(companyId: string) {
@@ -143,6 +151,111 @@ export async function moveWork(
   kind: 'doc' | 'task', id: string, companyId: string, state: WorkState,
 ) {
   return post(`/api/work/${kind}/${id}/move`, { company_id: companyId, state })
+}
+
+
+/* ---------------------------------------------------------------------------
+ * Личная раскладка (этап 14 «Трека»)
+ *
+ * Очередь отвечает «что от меня ждут», раскладка — «что я с этим решил». Она
+ * ничего не меняет в предмете и не видна никому, кроме хозяина: срок, состояние
+ * и просрочка остаются такими же, какими их видит компания.
+ * ------------------------------------------------------------------------ */
+
+/** Отметка человека на предмете: кучка, день, отложение, важность. */
+export interface PersonalMark {
+  /** Кучка эксклюзивна: предмет лежит в одной или ни в одной. */
+  list_id: string | null
+  /** На какой день взят. Прошлая дата — уже не «мой день». */
+  taken_for: string | null
+  /** До какого дня спрятан у себя. Срок предмета при этом не двигается. */
+  deferred_until: string | null
+  starred: boolean
+  /** Сколько раз откладывали. Показывается хозяину и меняет предложение, а не
+   *  текст; наверх не уходит никогда. */
+  defer_count: number
+  position: number
+}
+
+/** Именованная кучка человека. */
+export interface PersonalListRow {
+  id: string
+  name: string
+  position: number
+  count: number
+  /** Сколько дней кучку не открывали. `null` — ни разу не отмечали обзор. */
+  stale_days: number | null
+}
+
+/** Строка раскладки: предмет плюс отметка на нём. */
+export interface PlacedItem {
+  kind: 'doc' | 'task'
+  id: string
+  title: string
+  key: string
+  due_at: string | null
+  /** Личная запись из записной книжки, а не работа компании. */
+  personal: boolean
+  mark: PersonalMark | null
+}
+
+/** Предмет словарём пространства: `task:<uuid>`, `doc:<uuid>`. */
+export function targetRef(item: { kind: 'doc' | 'task'; id: string }): string {
+  return `${item.kind}:${item.id}`
+}
+
+export async function myLists(companyId: string) {
+  return get<{ lists: PersonalListRow[] }>('/api/work/lists', { company_id: companyId })
+}
+
+export async function createList(companyId: string, name: string) {
+  return post<PersonalListRow>('/api/work/lists', { company_id: companyId, name })
+}
+
+/** Переименовать, отметить обзор или удалить кучку. Удаление не трогает
+ *  предметы: работа возвращается в «Не разложено». */
+export async function listAction(companyId: string, id: string, data: {
+  name?: string; reviewed?: boolean; delete?: boolean
+}) {
+  return post(`/api/work/lists/${id}`, {
+    company_id: companyId, name: data.name,
+    reviewed: data.reviewed, delete: data.delete,
+  })
+}
+
+/** Разложить предмет у себя. Переданное меняется, остальное стоит.
+ *
+ *  Отложение может вернуться отказом: просроченное не прячется, а дата дальше
+ *  срока обрезается днём срока. Сообщение сервера показываем как есть — оно и
+ *  объясняет человеку правило. */
+export async function place(companyId: string, ref: string, data: {
+  listId?: string; dropList?: boolean; takenFor?: string; dropDay?: boolean
+  deferUntil?: string; undefer?: boolean; starred?: boolean
+  position?: number; clear?: boolean
+}) {
+  return post<{ target_ref: string; mark: PersonalMark | null }>('/api/work/place', {
+    company_id: companyId, target_ref: ref,
+    list_id: data.listId, drop_list: data.dropList,
+    taken_for: data.takenFor, drop_day: data.dropDay,
+    defer_until: data.deferUntil, undefer: data.undefer,
+    starred: data.starred, position: data.position, clear: data.clear,
+  })
+}
+
+/** Что лежит в кучке, в дне, в отложенном или под звездой. Закрытая работа
+ *  отсюда уходит сама — убирать руками нечего. */
+export async function placed(companyId: string, opts: {
+  scope?: 'list' | 'day' | 'carry' | 'deferred' | 'starred' | 'loose'; listId?: string
+} = {}) {
+  return get<{ items: PlacedItem[] }>('/api/work/placed', {
+    company_id: companyId, scope: opts.scope ?? 'list', list: opts.listId,
+  })
+}
+
+/** Сегодняшнее число в местном виде `YYYY-MM-DD` — им сервер помечает день.
+ *  Через `toISOString` считать нельзя: у Владивостока это уже завтра. */
+export function todayKey(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 

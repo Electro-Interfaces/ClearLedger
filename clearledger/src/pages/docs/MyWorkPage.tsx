@@ -24,18 +24,28 @@ import type { MyWorkItem } from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import * as docsService from '@/services/docsService'
 import { dt } from '@/components/tasks/taskWords'
+import { PlaceActions } from '@/components/docs/PlaceActions'
 import { cn } from '@/lib/utils'
 
 const REASON_ICON = {
   approve: Stamp, acquaint: Eye, do: ListChecks, own: FileText,
 } as const
 
-export function MyWorkPage({ buckets: only, heading = true }: {
+export function MyWorkPage({ buckets: only, heading = true, hideDeferred = false,
+  hideTaken = false }: {
   /** Какие корзины показывать. Пусто — все. «Сегодня» берёт две первые: там
    *  вопрос не «что на мне вообще», а «что на мне сегодня». */
   buckets?: MyWorkItem['bucket'][]
   /** Заголовок печатает вызывающий экран, когда очередь у него не единственное. */
   heading?: boolean
+  /** Спрятанное человеком до будущего дня не показывать. Включается там, где
+   *  спрашивают «что сегодня»; в полной очереди отложенное остаётся видимым —
+   *  иначе его нельзя ни найти, ни вернуть. */
+  hideDeferred?: boolean
+  /** Взятое в день не повторять: на экране «Сегодня» оно уже стоит выше
+   *  отдельной полосой, и вторая строка того же предмета читается как две
+   *  разные работы. */
+  hideTaken?: boolean
 } = {}) {
   const { company } = useCompany()
   const qc = useQueryClient()
@@ -67,7 +77,8 @@ export function MyWorkPage({ buckets: only, heading = true }: {
     onError: (e) => toast.error((e as Error).message),
   })
 
-  const all = q.data?.mine ?? []
+  const all = (q.data?.mine ?? []).filter(
+    (r) => (!hideDeferred || !r.hidden) && (!hideTaken || !r.in_day))
   const rows = only?.length ? all.filter((r) => only.includes(r.bucket)) : all
   const buckets = (q.data?.buckets ?? []).filter((b) => !only?.length || only.includes(b.code))
 
@@ -108,7 +119,7 @@ export function MyWorkPage({ buckets: only, heading = true }: {
             <div className="overflow-hidden rounded-lg border">
               {group.map((item) => (
                 <Line key={`${item.kind}-${item.id}-${item.reason}`} item={item}
-                  busy={act.isPending}
+                  busy={act.isPending} companyId={company.id} onChanged={refresh}
                   onOpen={() => navigate(workService.myWorkHref(item))}
                   onDone={() => act.mutate(item)} />
               ))}
@@ -120,8 +131,9 @@ export function MyWorkPage({ buckets: only, heading = true }: {
   )
 }
 
-function Line({ item, busy, onOpen, onDone }: {
-  item: MyWorkItem; busy: boolean; onOpen: () => void; onDone: () => void
+function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
+  item: MyWorkItem; busy: boolean; companyId: string
+  onChanged: () => void; onOpen: () => void; onDone: () => void
 }) {
   const Icon = REASON_ICON[item.reason]
   // Кнопка показана только там, где действие правда доступно строкой: визу
@@ -137,12 +149,20 @@ function Line({ item, busy, onOpen, onDone }: {
           <span>{item.reason_name}</span>
           {item.note && <span>{item.note}</span>}
           {item.acting_for && <span>за коллегу</span>}
+          {item.in_day && <span className="text-amber-600 dark:text-amber-400">в моём дне</span>}
+          {item.hidden && (
+            <span title={`Скрыто у вас до ${item.mark?.deferred_until}. Срок компании не менялся`}>
+              скрыто до {item.mark?.deferred_until}
+            </span>
+          )}
         </div>
       </button>
       <span className={cn('shrink-0 text-[11px] tabular-nums',
         item.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
         {item.due_at ? dt(item.due_at) : 'без срока'}
       </span>
+      <PlaceActions companyId={companyId} targetRef={workService.targetRef(item)}
+        mark={item.mark} onChanged={onChanged} />
       {canFinish ? (
         <Button size="sm" variant="ghost" className="h-7 px-2" disabled={busy}
           title={item.reason === 'do' ? 'Закрыть работу' : 'Отметить ознакомление'}

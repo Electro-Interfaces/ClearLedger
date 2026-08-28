@@ -27,7 +27,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -496,10 +496,25 @@ async def work_mine(
             return "week"
         return "later"
 
+    # Личная раскладка кладётся поверх очереди одним запросом (этап 14).
+    # Отложенное человеком не выбрасывается из выдачи, а помечается: экран
+    # решает, показать его в «Отложено» или спрятать из сегодняшнего списка.
+    # Выбросить здесь значило бы, что отложенное нельзя ни увидеть, ни вернуть.
+    from app.services import placement
+
+    marks = await placement.marks_for(
+        db, cid, current_user.id,
+        [f"{i['kind']}:{i['id']}" for i in items.values()])
+    today = now.date()
+
     rows = []
     for item in items.values():
+        mark = marks.get(f"{item['kind']}:{item['id']}")
         rows.append({**item, "bucket": bucket(item.get("due_at")),
-                     "overdue": bucket(item.get("due_at")) == "overdue"})
+                     "overdue": bucket(item.get("due_at")) == "overdue",
+                     "mark": placement.out(mark),
+                     "in_day": bool(mark and mark.taken_for == today),
+                     "hidden": placement.hidden(mark, today)})
     order = {"overdue": 0, "today": 1, "week": 2, "later": 3}
     rows.sort(key=lambda r: (order[r["bucket"]], r.get("due_at") or "9999"))
     return {
@@ -981,3 +996,274 @@ async def calendar_action(
     parts = (await _attendees(db, [ev.id])).get(ev.id, [])
     await db.commit()
     return _event_out(ev, parts, current_user.id)
+
+
+# ---------------------------------------------------------------------------
+# Личная раскладка (этап 14 «Трека»)
+# ---------------------------------------------------------------------------
+# Очередь отвечает «что от меня ждут». Раскладка — «что я с этим решил»: взял в
+# день, отложил до даты, положил в свою кучку, пометил важным. Ничего в предмете
+# при этом не меняется и никому, кроме хозяина, не видно; наружу видно
+# объективное — срок, состояние, просрочка.
+#
+# Кучка эксклюзивна: предмет лежит в одной или ни в одной. Иначе доска по кучкам
+# перестаёт быть доской — карточка висит в трёх колонках, и перенос становится
+# загадкой «переместить или добавить».
+
+
+class ListIn(BaseModel):
+    company_id: str
+    name: str = Field(min_length=1, max_length=60)
+
+
+class ListAction(BaseModel):
+    company_id: str
+    name: str | None = Field(None, min_length=1, max_length=60)
+    delete: bool = False
+    reviewed: bool = False
+
+
+class PlaceIn(BaseModel):
+    """Одно движение раскладки. Переданное меняется, остальное стоит."""
+    company_id: str
+    target_ref: str = Field(min_length=3, max_length=120)
+    list_id: str | None = None
+    drop_list: bool = False
+    taken_for: date | None = None
+    drop_day: bool = False
+    defer_until: date | None = None
+    undefer: bool = False
+    starred: bool | None = None
+    position: int | None = None
+    clear: bool = False
+
+
+async def _my_lists(db: AsyncSession, cid: uuid.UUID, user: User):
+    from app.models import PersonalList
+
+    return list((await db.execute(select(PersonalList).where(
+        PersonalList.company_id == cid, PersonalList.user_id == user.id)
+        .order_by(PersonalList.position, PersonalList.created_at))).scalars())
+
+
+@router.get("/lists")
+async def lists_mine(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Мои кучки со счётчиком и давностью обзора.
+
+    Давность считается здесь, а не на экране: «не открывали 12 дней» — это
+    единственная механика, из-за которой кучка «потом» не превращается в
+    кладбище, и она обязана быть свойством продукта, а не привычки человека.
+    """
+    from app.models import PersonalMark
+
+    cid = await _assert_work(company_id, current_user, db)
+    rows = await _my_lists(db, cid, current_user)
+    counts = dict((await db.execute(
+        select(PersonalMark.list_id, func.count()).where(
+            PersonalMark.company_id == cid,
+            PersonalMark.user_id == current_user.id,
+            PersonalMark.list_id.is_not(None)).group_by(PersonalMark.list_id))).all())
+    now = datetime.now(timezone.utc)
+    return {"lists": [{
+        "id": str(r.id), "name": r.name, "position": r.position,
+        "count": counts.get(r.id, 0),
+        "stale_days": ((now - r.reviewed_at).days if r.reviewed_at else None),
+    } for r in rows]}
+
+
+@router.post("/lists", status_code=status.HTTP_201_CREATED)
+async def list_create(
+    payload: ListIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Завести кучку. Имени достаточно: цвет и описание превратили бы движение
+    руки в заполнение формы."""
+    from app.models import PersonalList
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    rows = await _my_lists(db, cid, current_user)
+    if any(r.name.lower() == payload.name.strip().lower() for r in rows):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Такая кучка уже есть")
+    row = PersonalList(company_id=cid, user_id=current_user.id,
+                       name=payload.name.strip(), position=len(rows))
+    db.add(row)
+    await db.commit()
+    return {"id": str(row.id), "name": row.name, "position": row.position,
+            "count": 0, "stale_days": None}
+
+
+@router.post("/lists/{list_id}")
+async def list_action(
+    list_id: str,
+    payload: ListAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Переименовать, отметить обзор или удалить кучку.
+
+    Удаление кучки не трогает предметы: у отметок обнуляется `list_id`, и работа
+    возвращается в «Не разложено». Личная раскладка не вправе ничего удалять из
+    работы компании — это её главное свойство.
+    """
+    from app.models import PersonalList
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    row = await db.get(PersonalList, _uuid_or_400(list_id, "list_id"))
+    if row is None or row.company_id != cid or row.user_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Кучка не найдена")
+    if payload.delete:
+        await db.delete(row)
+        await db.commit()
+        return {"deleted": True}
+    if payload.name:
+        row.name = payload.name.strip()
+    if payload.reviewed:
+        row.reviewed_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"id": str(row.id), "name": row.name,
+            "stale_days": 0 if payload.reviewed else None}
+
+
+async def _due_of(db: AsyncSession, cid: uuid.UUID, target_ref: str):
+    """Срок предмета — он ограничивает отложение. Личное сокрытие не вправе
+    уносить работу за её собственный срок."""
+    kind, _, key = target_ref.partition(":")
+    try:
+        oid = uuid.UUID(key)
+    except ValueError:
+        return None
+    if kind == "task":
+        row = await db.get(Task, oid)
+    elif kind == "doc":
+        row = await db.get(DocCard, oid)
+    else:
+        return None
+    return row.due_at if row is not None and row.company_id == cid else None
+
+
+@router.post("/place")
+async def place(
+    payload: PlaceIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Разложить предмет у себя: в день, в кучку, под звезду или до даты."""
+    from app.services import placement
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    list_id = None
+    if payload.list_id:
+        from app.models import PersonalList
+
+        lst = await db.get(PersonalList, _uuid_or_400(payload.list_id, "list_id"))
+        if lst is None or lst.company_id != cid or lst.user_id != current_user.id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Кучка не найдена")
+        list_id = lst.id
+
+    try:
+        row = await placement.put(
+            db, cid, current_user.id, payload.target_ref,
+            list_id=list_id, taken_for=payload.taken_for,
+            deferred_until=payload.defer_until, starred=payload.starred,
+            position=payload.position, clear=payload.clear,
+            drop_day=payload.drop_day, undefer=payload.undefer,
+            due_at=(await _due_of(db, cid, payload.target_ref)
+                    if payload.defer_until else None))
+    except placement.DeferRefused as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    if row is not None and payload.drop_list:
+        row.list_id = None
+    await db.commit()
+    return {"target_ref": payload.target_ref,
+            "mark": placement.out(row) if row is not None else None}
+
+
+@router.get("/placed")
+async def placed(
+    company_id: str = Query(...),
+    list_id: str | None = Query(None, alias="list"),
+    scope: str = Query("list", pattern="^(list|day|carry|deferred|starred|loose)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Что лежит в кучке, в дне, в отложенном или под звездой.
+
+    Строка уходит отсюда сама, по факту действия: закрытое поручение и
+    выведенный документ не показываются. Убирать руками нечего — необходимость
+    уборки и есть то, из-за чего личные списки зарастают.
+    """
+    from app.models import PersonalMark
+    from app.routers.docs_router import _readable_doc_clause
+    from app.routers.tasks_router import _is_admin, _visible_to
+    from app.services import placement
+
+    cid = await _assert_work(company_id, current_user, db)
+    today = datetime.now(timezone.utc).date()
+    sel = select(PersonalMark).where(PersonalMark.company_id == cid,
+                                     PersonalMark.user_id == current_user.id)
+    if scope == "list":
+        if not list_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не сказано, какая кучка")
+        sel = sel.where(PersonalMark.list_id == _uuid_or_400(list_id, "list"))
+    elif scope == "day":
+        sel = sel.where(PersonalMark.taken_for == today)
+    elif scope == "carry":
+        # Вчерашнее, взятое и не закрытое. Само в новый день не переезжает:
+        # сброс работает только там, где рядом стоит утренний вопрос «вчера
+        # осталось столько — переносим?», иначе человек молча теряет невзятое.
+        sel = sel.where(PersonalMark.taken_for.is_not(None),
+                        PersonalMark.taken_for < today)
+    elif scope == "deferred":
+        sel = sel.where(PersonalMark.deferred_until > today)
+    elif scope == "starred":
+        sel = sel.where(PersonalMark.starred.is_(True))
+    else:
+        sel = sel.where(PersonalMark.list_id.is_(None))
+    marks = list((await db.execute(sel.order_by(
+        PersonalMark.position, PersonalMark.created_at).limit(_LIST_LIMIT))).scalars())
+    if not marks:
+        return {"items": []}
+
+    by_kind: dict[str, dict[uuid.UUID, PersonalMark]] = {"task": {}, "doc": {}}
+    for m in marks:
+        kind, _, key = m.target_ref.partition(":")
+        if kind in by_kind:
+            try:
+                by_kind[kind][uuid.UUID(key)] = m
+            except ValueError:
+                continue
+
+    items: list[dict[str, Any]] = []
+    if by_kind["task"]:
+        admin = await _is_admin(db, cid, current_user)
+        for t in (await db.execute(select(Task).where(
+                Task.company_id == cid, Task.id.in_(by_kind["task"]),
+                Task.status == "open", _visible_to(current_user, admin)))).scalars():
+            items.append({
+                "kind": "task", "id": str(t.id), "title": t.title,
+                "key": f"№{t.number}",
+                "due_at": t.due_at.isoformat() if t.due_at else None,
+                "personal": t.visibility == "personal",
+                "mark": placement.out(by_kind["task"][t.id]),
+            })
+    if by_kind["doc"]:
+        clause = await _readable_doc_clause(db, cid, current_user)
+        for d in (await db.execute(select(DocCard).where(
+                DocCard.company_id == cid, DocCard.id.in_(by_kind["doc"]),
+                DocCard.status.in_(("draft", "registered", "in_force")),
+                clause))).scalars():
+            items.append({
+                "kind": "doc", "id": str(d.id), "title": d.title,
+                "key": d.reg_number or "черновик",
+                "due_at": d.due_at.isoformat() if d.due_at else None,
+                "personal": False,
+                "mark": placement.out(by_kind["doc"][d.id]),
+            })
+    items.sort(key=lambda r: ((r["mark"] or {}).get("position", 0),
+                              r.get("due_at") or "9999"))
+    return {"items": items}
