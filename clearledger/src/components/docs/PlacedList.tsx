@@ -78,7 +78,7 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
               e.dataTransfer.setData('text/plain', workService.targetRef(item))
               e.dataTransfer.effectAllowed = 'move'
             }}
-            className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
+            className="flex cursor-grab items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40 active:cursor-grabbing">
             <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
             <button type="button" onClick={() => navigate(href(item))}
               className="min-w-0 flex-1 text-left">

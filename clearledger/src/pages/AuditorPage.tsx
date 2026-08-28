@@ -13,7 +13,7 @@
  * Не путать с `pages/partner/AuditorPage.tsx`: тот из партнёрского контура и
  * обслуживает внешние инстансы ClearLedger.
  */
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { BookOpen, Bot, CheckCircle2, ClipboardList, FlaskConical, Download, GitCommitHorizontal, ListChecks, Loader2, MessageSquare, Plus, Save, SlidersHorizontal, TerminalSquare, Upload, UserRound, Wrench } from 'lucide-react'
@@ -28,11 +28,17 @@ import { cn } from '@/lib/utils'
 import * as auditor from '@/services/spaceAuditorService'
 
 const VIEWS = [
-  { key: 'chat', label: 'Разговор', icon: MessageSquare, hint: 'спросить про данные пространства' },
+  // Наверху, над чертой, — то, чем агента ДЕЛАЮТ: мастерская (настоящий Claude Code в
+  // его рабочей папке), каталог навыков-ручек и методы, которым его научили. Ниже
+  // черты — то, ради чего он существует: разговор, знание, личная карточка, настройка
+  // и журнал. Раньше всё шло одним списком, и «Мастерская» стояла последней, хотя
+  // именно с неё начинается работа над агентом.
+  { key: 'workshop', label: 'Мастерская', icon: TerminalSquare, hint: 'Claude Code в рабочей папке агента', admin: true },
   { key: 'skills', label: 'Навыки', icon: ListChecks, hint: 'чем ему разрешено пользоваться' },
-  // Методы и знание — то, что агент НАЖИЛ, в отличие от навыков-ручек, которые приходят
-  // с образом. Их и надо видеть отдельно: по ним понятно, растёт он или стоит.
+  // Методы — то, что агент НАЖИЛ, в отличие от навыков-ручек, которые приходят с
+  // образом: по ним понятно, растёт он или стоит.
   { key: 'methods', label: 'Методы', icon: Wrench, hint: 'чему научили: как отвечать на класс вопросов' },
+  { key: 'chat', label: 'Разговор', icon: MessageSquare, hint: 'спросить про данные пространства' },
   { key: 'knowledge', label: 'Знание', icon: BookOpen, hint: 'что он знает об этой компании' },
   // Личная карточка — рядом со знанием, а не только в профиле учётной записи: человек
   // правит её тем же движением, каким смотрит, что агент вообще знает. Приходят сюда
@@ -40,9 +46,6 @@ const VIEWS = [
   { key: 'me', label: 'Моя карточка', icon: UserRound, hint: 'что агент знает лично обо мне' },
   { key: 'setup', label: 'Настройка', icon: SlidersHorizontal, hint: 'режим, указания компании, модели' },
   { key: 'runs', label: 'Журнал', icon: ClipboardList, hint: 'что спрашивали и что он нашёл' },
-  // Мастерская — НАСТОЯЩИЙ Claude Code в терминале, без нашей прослойки. Отдельный
-  // раздел, а не тумблер в чате: это другой инструмент, а не другой режим ответа.
-  { key: 'workshop', label: 'Мастерская', icon: TerminalSquare, hint: 'Claude Code в рабочей папке агента', admin: true },
 ] as const
 
 /** Оценка ответа в журнале. Цвета альфа-шкалой — один класс на обе темы. */
@@ -107,7 +110,8 @@ export function AuditorWorkspace({ view: viewIn, onView }: {
       <nav data-zone="Пункты раздела" data-zone-side
         className="flex w-52 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card px-2.5 py-3 max-lg:hidden">
         {views.map((v) => (
-          <button key={v.key} type="button" onClick={() => open(v.key)} title={v.hint}
+          <Fragment key={v.key}>
+          <button type="button" onClick={() => open(v.key)} title={v.hint}
             aria-current={v.key === view ? 'page' : undefined}
             className={cn('flex items-center gap-2 rounded-md px-3 py-1.5 text-left text-[13px] transition-colors',
               v.key === view
@@ -116,6 +120,8 @@ export function AuditorWorkspace({ view: viewIn, onView }: {
             <v.icon className="size-4 shrink-0" />
             {v.label}
           </button>
+          {v.key === 'methods' && <div className="my-1.5 border-t border-border" />}
+          </Fragment>
         ))}
       </nav>
 

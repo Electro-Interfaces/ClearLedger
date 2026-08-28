@@ -588,10 +588,18 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject
                     }
                   }}
                   onClick={() => onOpen(t.id)}
+                  // Строку уносят в календарь правой рельсы: там бросок на день
+                  // ставит срок, на плашку человека — поручает ему. Список задач
+                  // и есть то место, откуда работу раскидывают.
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', `task:${t.id}`)
+                    e.dataTransfer.effectAllowed = 'move'
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(t.id) }
                   }}
-                  className={cn('cursor-pointer border-t transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                  className={cn('cursor-grab border-t transition-colors active:cursor-grabbing hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                     cursor != null && tasks[cursor]?.id === t.id && 'bg-primary/10')}>
                   <td className="p-2.5 align-top" onClick={(e) => e.stopPropagation()}>
                     <Checkbox aria-label={`Отметить ${tasksService.taskKey(t)}`}
