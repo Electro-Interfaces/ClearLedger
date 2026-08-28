@@ -20,8 +20,6 @@ import { useDocsView } from './DocsLayout'
 import { DocsErrorState } from '@/components/docs/DocsQueryState'
 import { formatDate } from '@/lib/formatDate'
 
-const TasksWorkPage = lazy(() => import('@/pages/tasks/TasksWorkPage')
-  .then((module) => ({ default: module.TasksWorkPage })))
 const MyWorkPage = lazy(() => import('./MyWorkPage')
   .then((module) => ({ default: module.MyWorkPage })))
 const NotesPage = lazy(() => import('./NotesPage')
@@ -30,6 +28,8 @@ const TodayPage = lazy(() => import('./TodayPage')
   .then((module) => ({ default: module.TodayPage })))
 const CalendarPage = lazy(() => import('./CalendarPage')
   .then((module) => ({ default: module.CalendarPage })))
+const TaskRows = lazy(() => import('@/components/docs/TaskRows')
+  .then((module) => ({ default: module.TaskRows })))
 const ListsPage = lazy(() => import('./ListsPage')
   .then((module) => ({ default: module.ListsPage })))
 const MINE_PAGE_SIZE = 200
@@ -146,10 +146,19 @@ export function DocsWorkPage() {
     )
   }
 
+  // Личные разрезы показываются строкой, как «Моя очередь»: в разделе «Моё»
+  // человек спрашивает одно — что за работа и что с ней сделать. Реестр с
+  // колонками, отбором и выделением пачкой отвечает на другой вопрос и живёт в
+  // «Компании»; двух подач одного и того же в одном разделе быть не должно.
   if (view === 'errands' || view === 'assigned' || view === 'watching') {
+    const мета = view === 'errands'
+      ? { title: 'Поручения', hint: 'Работа, которую выполняю я', empty: 'На вас поручений нет.', scope: 'mine' as const }
+      : view === 'assigned'
+        ? { title: 'Я поставил', hint: 'Работа, которую поручил другим, — с меня спросят результат', empty: 'Вы пока никому не поручали.', scope: 'assigned' as const }
+        : { title: 'Наблюдаю', hint: 'Чужая работа, за которой слежу со стороны', empty: 'Вы ни за чем не следите.', scope: 'watching' as const }
     return (
       <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
-        <TasksWorkPage embeddedView={view === 'errands' ? 'mine' : view} />
+        <TaskRows scope={мета.scope} title={мета.title} hint={мета.hint} empty={мета.empty} />
       </Suspense>
     )
   }
