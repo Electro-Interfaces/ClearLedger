@@ -613,6 +613,9 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
     queryFn: () => tasksService.listTaskVersions(companyId, task.project_id ?? undefined),
     enabled: !!task.project_id, staleTime: 5 * 60 * 1000,
   })
+  // Развернули ли хвост колонки. Живёт в карточке, а не в настройках: это
+  // разовое «покажи всё», а не предпочтение на всю жизнь.
+  const [ещё, setЕщё] = useState(false)
   const versions = versionsQ.data?.versions ?? []
   const sprintsQ = useQuery({
     queryKey: ['task-sprints', companyId, task.project_id],
@@ -627,6 +630,16 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
     onSuccess: onChanged,
     onError: (e) => toast.error((e as Error).message),
   })
+  // Что сейчас пусто и потому спрятано. Число на кнопке отвечает «а что там»:
+  // без него кнопка говорит «здесь что-то есть, открой и посмотри».
+  const пусто = {
+    объект: !task.object_id,
+    метки: !task.labels.length,
+    круг: task.visibility === 'company',
+    наблюдатели: !task.watchers.length,
+  }
+  const скрытыхПолей = Object.values(пусто).filter(Boolean).length
+
   const label = useMutation({
     mutationFn: (v: { id: string; on: boolean }) => tasksService.taskAction(task.id, {
       companyId, addLabelId: v.on ? v.id : undefined,
@@ -667,6 +680,7 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
               companyId, dueAt: new Date(`${e.target.value}T00:00`).toISOString(),
             })} />
         </Field>
+        {(ещё || !пусто.объект) && (
         <Field label="Объект">
           <SearchPicker items={(objectsQ.data ?? []).map((o) => ({
             id: o.id, name: o.name, hint: o.address }))}
@@ -676,6 +690,7 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
             searchPlaceholder="Номер, название или адрес…"
             loading={objectsQ.isLoading} width="w-[320px]" />
         </Field>
+        )}
         {task.project_id && (
           <>
             <Field label="Исправлено в версии">
@@ -706,8 +721,8 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
         )}
       </div>
 
-      {labels.length > 0 && (
-        <div className="mt-3">
+      {labels.length > 0 && (ещё || !пусто.метки) && (
+      <div className="mt-3">
           <FieldLabel>Метки</FieldLabel>
           <div className="mt-1.5 flex flex-wrap gap-1">
             {labels.map((l) => (
@@ -724,6 +739,7 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
         </div>
       )}
 
+      {(ещё || !пусто.круг) && (
       <div className="mt-3">
         <FieldLabel>Кто видит задачу</FieldLabel>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
@@ -750,7 +766,9 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
           )}
         </div>
       </div>
+      )}
 
+      {(ещё || !пусто.наблюдатели) && (
       <div className="mt-3">
         <FieldLabel>Наблюдатели</FieldLabel>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
@@ -786,6 +804,14 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
           )}
         </div>
       </div>
+      )}
+      {скрытыхПолей > 0 && (
+        <button type="button" onClick={() => setЕщё((v) => !v)}
+          className="mt-3 text-xs text-muted-foreground hover:text-foreground">
+          {ещё ? 'Свернуть пустые поля' : `Ещё поля · ${скрытыхПолей}`}
+        </button>
+      )}
+
       <dl className="mt-5 space-y-1.5 border-t pt-3 text-xs text-muted-foreground">
         <div className="flex justify-between gap-2">
           <dt>Автор</dt>
