@@ -10,9 +10,10 @@
  * правит и отменяет, приглашённый отвечает. Поля показываются всем — скрывать
  * от участника время и место значит прятать от него смысл приглашения.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ListPlus, Loader2, Video, X } from 'lucide-react'
+import { ListPlus, Loader2, Repeat, Video, X } from 'lucide-react'
+import { findSlots } from '@/lib/slots'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,7 +21,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import * as workService from '@/services/workService'
-import type { CalendarEvent, EventResponse } from '@/services/workService'
+import type { CalendarEvent, EventResponse, Recurrence } from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { cn } from '@/lib/utils'
 
@@ -36,6 +37,30 @@ const ОТВЕТЫ: { key: Exclude<EventResponse, 'pending'>; label: string }[] 
 
 const ОТВЕТ_СЛОВОМ: Record<EventResponse, string> = {
   pending: 'не ответил', accepted: 'будет', declined: 'не будет', tentative: 'может быть',
+}
+
+/** Повторения, которые люди действительно заводят. Полного RRULE тут нет и не
+ *  нужно: «каждый второй вторник месяца» в делопроизводстве не встречается, а
+ *  редактор такого правила стоит дороже самой серии. */
+type КлючПовтора = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly'
+
+const когда = new Intl.DateTimeFormat('ru-RU', {
+  weekday: 'short', day: 'numeric', month: 'short',
+  hour: '2-digit', minute: '2-digit',
+})
+
+const ПОВТОРЫ: { key: КлючПовтора; label: string; rule: Recurrence | null }[] = [
+  { key: 'none', label: 'Не повторяется', rule: null },
+  { key: 'daily', label: 'Каждый день', rule: { mode: 'daily' } },
+  { key: 'weekly', label: 'Каждую неделю', rule: { mode: 'weekly' } },
+  { key: 'biweekly', label: 'Раз в две недели', rule: { mode: 'weekly', interval: 2 } },
+  { key: 'monthly', label: 'Каждый месяц', rule: { mode: 'monthly' } },
+]
+
+function ключПовтора(r: Recurrence | null): КлючПовтора {
+  if (!r) return 'none'
+  if (r.mode === 'weekly' && (r.interval ?? 1) === 2) return 'biweekly'
+  return r.mode
 }
 
 export function EventDialog({ companyId, event, startAt, subjectRef, initialTitle,
@@ -79,8 +104,38 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
     setLocation(event.location ?? '')
     setConference(event.conference_url ?? '')
     setAttendees(event.attendees.map((a) => a.user_id))
+    setПовтор(ключПовтора(event.recurrence ?? null))
+    setUntil(event.recurrence_until ?? '')
   }, [event])
 
+  const [длительность, setДлительность] = useState(60)
+  const [ищем, setИщем] = useState(false)
+
+  // Окно поиска — две недели вперёд: дальше подбирают по договорённости, а не
+  // по сетке, и тащить месяц занятости ради этого незачем.
+  const [окноОт, окноДо] = (() => {
+    const н = new Date()
+    const к = new Date(н.getTime() + 14 * 24 * 3600_000)
+    return [н.toISOString(), к.toISOString()]
+  })()
+  const busyQ = useQuery({
+    queryKey: ['calendar-busy', companyId, attendees.slice().sort().join(',')],
+    queryFn: () => workService.calendarBusy(companyId, окноОт, окноДо, attendees),
+    enabled: false,
+  })
+  const кандидаты = useMemo(() => {
+    const люди = busyQ.data?.people ?? []
+    if (!люди.length) return []
+    return findSlots({
+      people: люди, requiredIds: люди.map((p) => p.user_id),
+      from: new Date(окноОт), to: new Date(окноДо), minutes: длительность,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busyQ.data, длительность])
+
+  const [повтор, setПовтор] = useState<КлючПовтора>(
+    () => ключПовтора(event?.recurrence ?? null))
+  const [until, setUntil] = useState(event?.recurrence_until ?? '')
   const [итог, setИтог] = useState('')
   const поручить = useMutation({
     mutationFn: () => tasksService.createTask({
@@ -113,12 +168,21 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
           conferenceUrl: conference.trim() || undefined,
           attendeeIds: attendees,
           subjectRef: subjectRef || undefined,
+          recurrence: ПОВТОРЫ.find((r) => r.key === повтор)?.rule ?? null,
+          recurrenceUntil: повтор === 'none' ? null : (until || null),
         })
       }
       return workService.eventAction(companyId, event!.id, {
         title: title.trim(), startsAt: начало, endsAt: конец,
         description: description.trim(), location: location.trim(),
         conferenceUrl: conference.trim(), attendeeIds: attendees,
+        // Серия правится только у головы: у порождённой встречи `recurrence`
+        // пуст, и слать пустой объект значило бы каждый раз снимать повторение
+        // с той, у которой его и не было.
+        ...(event!.series_id ? {} : {
+          recurrence: ПОВТОРЫ.find((r) => r.key === повтор)?.rule ?? {},
+          recurrenceUntil: повтор === 'none' ? null : (until || null),
+        }),
       })
     },
     onSuccess: () => { toast.success(новая ? 'Встреча собрана' : 'Сохранено'); onChanged(); onClose() },
@@ -196,6 +260,98 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
                 disabled={!мой} placeholder="https://…" />
             </div>
           </div>
+
+          {/* «Найти время» появляется, только когда есть кого искать: подбор по
+              одному себе — это просто календарь. Обязательными считаем всех
+              приглашённых: деления на обязательных и необязательных в составе
+              нет, а выдумывать его ради подбора значит завести понятие, которого
+              в продукте не существует. Занятость приходит интервалами, окно —
+              рабочими часами каждого; кто свободен, но ещё не работает, в
+              кандидаты не попадёт. */}
+          {мой && attendees.length > 0 && (
+            <div className="space-y-1.5 rounded-md border border-border p-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium">Найти время</span>
+                <select value={длительность}
+                  onChange={(e) => setДлительность(Number(e.target.value))}
+                  className="h-7 rounded border border-input bg-background px-1.5 text-xs">
+                  {[30, 60, 90, 120].map((m) => (
+                    <option key={m} value={m}>{m} мин</option>
+                  ))}
+                </select>
+                <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
+                  disabled={busyQ.isFetching}
+                  onClick={() => { setИщем(true); void busyQ.refetch() }}>
+                  {busyQ.isFetching
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : 'Подобрать'}
+                </Button>
+              </div>
+              {ищем && !busyQ.isFetching && (
+                кандидаты.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Общего окна на две недели вперёд нет. Уберите кого-то из
+                    состава или соберите короче.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {кандидаты.slice(0, 12).map((c) => (
+                      <button key={c.at} type="button"
+                        onClick={() => {
+                          const н = new Date(c.at)
+                          setStarts(local(н))
+                          setEnds(local(new Date(н.getTime() + длительность * 60_000)))
+                          setИщем(false)
+                        }}
+                        title={c.busyOptional.length
+                          ? `Заняты: ${c.busyOptional.join(', ')}`
+                          : 'Все свободны'}
+                        className={cn('rounded border px-2 py-0.5 text-xs hover:bg-accent',
+                          c.busyOptional.length
+                            ? 'border-amber-500/50 text-amber-700 dark:text-amber-400'
+                            : 'border-border')}>
+                        {когда.format(new Date(c.at))}
+                      </button>
+                    ))}
+                  </div>
+                )
+              )}
+            </div>
+          )}
+
+          {/* Повторение задаётся на голове серии. Порождённая встреча его не
+              показывает: у неё оно пусто, и предлагать «повторять» тому, что уже
+              есть повторение, значит завести серию внутри серии. */}
+          {мой && !event?.series_id && (
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1.5">
+                <Label>Повторять</Label>
+                <select value={повтор}
+                  onChange={(e) => setПовтор(e.target.value as КлючПовтора)}
+                  className="h-9 w-[200px] rounded-md border border-input bg-background px-3 text-sm">
+                  {ПОВТОРЫ.map((r) => (
+                    <option key={r.key} value={r.key}>{r.label}</option>
+                  ))}
+                </select>
+              </div>
+              {повтор !== 'none' && (
+                <div className="space-y-1.5">
+                  <Label>До</Label>
+                  <Input type="date" value={until} className="w-[170px]"
+                    onChange={(e) => setUntil(e.target.value)} />
+                  <p className="text-[11px] text-muted-foreground">
+                    Пусто — пока не выключите
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          {event?.series_id && (
+            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Repeat className="h-3.5 w-3.5" />
+              Встреча из серии. Правки и отмена коснутся только её.
+            </p>
+          )}
 
           <div className="space-y-1.5">
             <Label>Описание</Label>

@@ -358,6 +358,14 @@ export interface EventAttendee {
   comment: string | null
 }
 
+/** Правило повторения. Час и минута берутся у самой встречи: второе место, где
+ *  записано «в 10:00», разошлось бы с ней при первом переносе. */
+export interface Recurrence {
+  mode: 'daily' | 'weekly' | 'monthly'
+  /** Через сколько периодов. 2 при `weekly` — раз в две недели. */
+  interval?: number
+}
+
 export interface CalendarEvent {
   id: string
   title: string
@@ -371,6 +379,11 @@ export interface CalendarEvent {
   visibility: 'company' | 'private' | 'personal'
   /** `cancelled` — встречу отменили; из календаря она не исчезает. */
   status: 'planned' | 'cancelled'
+  /** Заполнено — это ГОЛОВА серии; у порождённых пусто. */
+  recurrence?: Recurrence | null
+  recurrence_until?: string | null
+  /** Голова серии, если встреча ею порождена. */
+  series_id?: string | null
   cancel_reason: string | null
   subject_ref: string | null
   organizer_id: string
@@ -395,10 +408,27 @@ export async function listEvents(companyId: string, from: string, to: string,
   })
 }
 
+/** Кто когда занят в окне — интервалы и рабочее окно, без названий и участников.
+ *  Чтобы предложить время, знать предмет чужой встречи не нужно. */
+export async function calendarBusy(companyId: string, from: string, to: string,
+  userIds: string[]) {
+  return get<{
+    from: string; to: string
+    people: {
+      user_id: string; name: string
+      tz: string | null; work_start: string | null; work_end: string | null
+      busy: { starts_at: string; ends_at: string; all_day: boolean }[]
+    }[]
+  }>('/api/work/calendar/busy', {
+    company_id: companyId, from, to, user_ids: userIds.join(','),
+  })
+}
+
 export async function createEvent(companyId: string, data: {
   title: string; startsAt: string; endsAt: string
   description?: string; location?: string; conferenceUrl?: string
   allDay?: boolean; tz?: string; attendeeIds?: string[]; subjectRef?: string
+  recurrence?: Recurrence | null; recurrenceUntil?: string | null
 }) {
   return post<CalendarEvent>('/api/work/calendar', {
     company_id: companyId, title: data.title,
@@ -410,6 +440,8 @@ export async function createEvent(companyId: string, data: {
     tz: data.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
     attendee_ids: data.attendeeIds ?? [],
     subject_ref: data.subjectRef || undefined,
+    recurrence: data.recurrence ?? undefined,
+    recurrence_until: data.recurrenceUntil || undefined,
   })
 }
 
@@ -420,6 +452,10 @@ export async function eventAction(companyId: string, id: string, data: {
   attendeeIds?: string[]
   cancel?: boolean; cancelReason?: string
   response?: Exclude<EventResponse, 'pending'>; comment?: string
+  /** Пустой объект снимает повторение; уже созданные встречи остаются —
+   *  они стоят в чужих календарях. */
+  recurrence?: Recurrence | Record<string, never> | null
+  recurrenceUntil?: string | null
 }) {
   return post<CalendarEvent>(`/api/work/calendar/${id}`, {
     company_id: companyId, title: data.title,
@@ -428,6 +464,8 @@ export async function eventAction(companyId: string, id: string, data: {
     conference_url: data.conferenceUrl,
     attendee_ids: data.attendeeIds,
     cancel: data.cancel, cancel_reason: data.cancelReason,
+    recurrence: data.recurrence ?? undefined,
+    recurrence_until: data.recurrenceUntil || undefined,
     response: data.response, comment: data.comment,
   })
 }

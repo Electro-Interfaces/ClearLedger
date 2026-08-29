@@ -26,7 +26,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+import calendar
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import String, and_, cast, func, or_, select, text
@@ -67,6 +68,13 @@ WARN_FRACTION = 0.25
 # нельзя, но неограниченная выборка по всем компаниям стека — способ
 # однажды вытащить в память полугодовой календарь.
 _MEETING_LIMIT = 500
+
+# На сколько вперёд материализуется серия и сколько встреч за проход.
+# Горизонт — чтобы занятость и подбор времени видели планёрки заранее;
+# предел за проход — чтобы включённая на год серия не вставила полсотни
+# строк одним заходом и не заперла таблицу.
+SERIES_HORIZON_DAYS = 60
+SERIES_MAX_PER_TICK = 40
 
 # Проходы, которые не шлют сами, а кладут повод в сводку окна.
 _WITH_BUCKET = frozenset({"reminders", "escalations", "acquaints",
@@ -440,6 +448,99 @@ async def run_approval_reminders(db, now: datetime, bucket: digest.Bucket) -> in
     return sent
 
 
+async def run_meeting_series(db, now: datetime) -> int:
+    """Материализовать повторяющиеся встречи вперёд, на горизонт.
+
+    Серия — не правило, разворачиваемое на чтении, а настоящие строки. Так
+    участники, ответы, занятость, отмена и правка ОДНОЙ встречи работают тем же
+    кодом, что у обычной: «изменить эту» — это правка строки, а не машина
+    исключений из серии, ради которой пришлось бы завести второй способ
+    существовать у каждой встречи.
+
+    Ответ переносится с головы серии, а не спрашивается заново: «буду на
+    планёрке» сказано один раз, и переспрашивать каждую неделю значит отправить
+    человеку пятьдесят два вопроса в год — ровно тот поток, от которого мы уходим
+    окнами доставки. Отказаться от одной встречи он по-прежнему может.
+    """
+    from app.models import CalendarAttendee, CalendarEvent
+
+    горизонт = now + timedelta(days=SERIES_HORIZON_DAYS)
+    головы = (await db.execute(
+        select(CalendarEvent).where(
+            CalendarEvent.recurrence.is_not(None),
+            CalendarEvent.status != "cancelled").limit(200))).scalars().all()
+    создано = 0
+    for head in головы:
+        правило = head.recurrence or {}
+        зона = space_time.zone(head.tz)
+        длительность = head.ends_at - head.starts_at
+        предел = None
+        if head.recurrence_until:
+            предел = datetime.combine(head.recurrence_until, time(23, 59),
+                                      tzinfo=зона)
+
+        # Последняя уже созданная встреча серии — от неё и продолжаем. Считать
+        # от головы значило бы каждый проход перебирать всю историю серии.
+        последняя = await db.scalar(
+            select(func.max(CalendarEvent.starts_at)).where(
+                or_(CalendarEvent.series_id == head.id,
+                    CalendarEvent.id == head.id)))
+        курсор = space_time.as_utc(последняя or head.starts_at)
+
+        участники = (await db.execute(select(CalendarAttendee).where(
+            CalendarAttendee.event_id == head.id))).scalars().all()
+
+        while True:
+            следующая = _next_occurrence(курсор, правило, зона)
+            if следующая is None or следующая > горизонт:
+                break
+            if предел is not None and следующая > предел:
+                break
+            if создано >= SERIES_MAX_PER_TICK:
+                break
+            копия = CalendarEvent(
+                company_id=head.company_id, organizer_id=head.organizer_id,
+                title=head.title, description=head.description,
+                starts_at=следующая, ends_at=следующая + длительность,
+                all_day=head.all_day, tz=head.tz, location=head.location,
+                conference_url=head.conference_url, visibility=head.visibility,
+                subject_ref=head.subject_ref, series_id=head.id)
+            db.add(копия)
+            await db.flush()
+            for a in участники:
+                db.add(CalendarAttendee(
+                    event_id=копия.id, user_id=a.user_id, role=a.role,
+                    response=a.response))
+            курсор = следующая
+            создано += 1
+    return создано
+
+
+def _next_occurrence(after: datetime, rule: dict, zone) -> datetime | None:
+    """Следующее повторение после указанного момента.
+
+    Час и минута берутся у самой встречи, а не у правила: серия задаётся
+    временем головы, и второе место, где записано «в 10:00», разошлось бы с ней
+    при первом же переносе.
+    """
+    шаг = max(1, int(rule.get("interval") or 1))
+    режим = str(rule.get("mode") or "weekly").lower()
+    здесь = after.astimezone(zone)
+    if режим == "daily":
+        return (здесь + timedelta(days=шаг)).astimezone(timezone.utc)
+    if режим == "weekly":
+        return (здесь + timedelta(weeks=шаг)).astimezone(timezone.utc)
+    if режим == "monthly":
+        # Через сложение дней, а не подменой номера месяца: 31-е есть не в
+        # каждом, и «каждое 31-е» иначе то пропадает, то уезжает на март.
+        месяц = здесь.month - 1 + шаг
+        год = здесь.year + месяц // 12
+        месяц = месяц % 12 + 1
+        день = min(здесь.day, calendar.monthrange(год, месяц)[1])
+        return здесь.replace(year=год, month=месяц, day=день).astimezone(timezone.utc)
+    return None
+
+
 async def run_meetings(db, now: datetime, bucket: digest.Bucket) -> int:
     """Сегодняшние встречи — поводом в утреннюю сводку.
 
@@ -719,7 +820,7 @@ async def tick() -> dict[str, int]:
     out = {"recurrences": 0, "reminders": 0, "escalations": 0,
            "acquaints": 0, "approvals": 0, "events": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0,
            "inbound_events": 0, "approval_delivery": 0, "personal": 0,
-           "meetings": 0, "digests": 0}
+           "series": 0, "meetings": 0, "digests": 0}
     # Поводы копятся весь проход и доставляются одним сообщением в конце: сводка
     # окна — это про число сообщений человеку, а не про удобство планировщика.
     bucket = digest.Bucket()
@@ -736,6 +837,7 @@ async def tick() -> dict[str, int]:
                         ("inbound_events", run_inbound_events),
                         ("approval_delivery", run_approval_delivery),
                         ("personal", run_personal_reminders),
+                        ("series", run_meeting_series),
                         ("meetings", run_meetings),
                         ("digests", run_digests)):
             try:

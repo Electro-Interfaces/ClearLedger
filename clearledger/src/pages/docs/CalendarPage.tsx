@@ -30,8 +30,9 @@ import * as tasksService from '@/services/tasksService'
 import type { SpaceTask } from '@/services/tasksService'
 import { cn } from '@/lib/utils'
 import { EventDialog } from '@/components/calendar/EventDialog'
+import { TimeGrid } from '@/components/calendar/TimeGrid'
 
-type Mode = 'month' | 'week'
+type Mode = 'month' | 'week' | 'day'
 
 const ЧАС = 60 * 60 * 1000
 
@@ -48,6 +49,10 @@ export function CalendarPage() {
   // Окно сетки, а не календарного месяца: месяц начинается с хвоста прошлого,
   // и встречи этих дней обязаны в него попасть.
   const { from, to, days } = useMemo(() => {
+    if (mode === 'day') {
+      const d = startOfDay(anchor)
+      return { from: d, to: d, days: [d] }
+    }
     const start = mode === 'month'
       ? startOfWeek(startOfMonth(anchor), { weekStartsOn: 1 })
       : startOfWeek(anchor, { weekStartsOn: 1 })
@@ -88,9 +93,10 @@ export function CalendarPage() {
   const events = (eventsQ.data?.events ?? []).filter(
     (e) => e.status !== 'cancelled' || new Date(e.ends_at).getTime() >= начало)
   const tasks = scope === 'mine' ? (tasksQ.data?.tasks ?? []) : []
-  const шаг = (вперёд: boolean) => setAnchor((d) => (mode === 'month'
-    ? addMonths(d, вперёд ? 1 : -1)
-    : addWeeks(d, вперёд ? 1 : -1)))
+  const шаг = (вперёд: boolean) => setAnchor((d) => (
+    mode === 'month' ? addMonths(d, вперёд ? 1 : -1)
+      : mode === 'day' ? addDays(d, вперёд ? 1 : -1)
+        : addWeeks(d, вперёд ? 1 : -1)))
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-4">
@@ -122,10 +128,10 @@ export function CalendarPage() {
             </Button>
           ))}
           <span className="mx-1 h-4 w-px bg-border" />
-          {(['month', 'week'] as Mode[]).map((m) => (
+          {(['month', 'week', 'day'] as Mode[]).map((m) => (
             <Button key={m} size="sm" variant={mode === m ? 'secondary' : 'ghost'}
               className="h-8 px-2.5 text-xs" onClick={() => setMode(m)}>
-              {m === 'month' ? 'Месяц' : 'Неделя'}
+              {m === 'month' ? 'Месяц' : m === 'week' ? 'Неделя' : 'День'}
             </Button>
           ))}
           <Button size="sm" className="h-8 px-3 text-xs"
@@ -139,6 +145,12 @@ export function CalendarPage() {
         </p>
       )}
 
+      {/* Неделя и день — почасовой сеткой: вопрос «когда именно» ячейками дня не
+          закрывается. Месяц остаётся ячейками — там спрашивают «что за месяц». */}
+      {mode !== 'month' ? (
+        <TimeGrid days={days} events={events} tasks={tasks}
+          onEvent={setOpenEvent} onAdd={(at) => setNewAt(at)} />
+      ) : (
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
         <div className="grid grid-cols-7 border-b border-border bg-muted/40">
           {days.slice(0, 7).map((d) => (
@@ -159,6 +171,8 @@ export function CalendarPage() {
           ))}
         </div>
       </div>
+
+      )}
 
       {(newAt || openEvent) && (
         <EventDialog companyId={companyId} event={openEvent} startAt={newAt}

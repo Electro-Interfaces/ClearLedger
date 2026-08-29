@@ -810,6 +810,11 @@ class EventIn(BaseModel):
     visibility: str = Field("company", pattern="^(company|private|personal)$")
     subject_ref: str | None = None
     attendee_ids: list[str] = Field(default_factory=list)
+    # Повторение: {"mode": "weekly", "interval": 1}. Час и минута берутся у самой
+    # встречи — второе место, где записано «в 10:00», разошлось бы с ней при
+    # первом переносе. Пусто — разовая встреча.
+    recurrence: dict | None = None
+    recurrence_until: date | None = None
 
 
 class EventAction(BaseModel):
@@ -829,6 +834,10 @@ class EventAction(BaseModel):
     attendee_ids: list[str] | None = None
     cancel: bool | None = None
     cancel_reason: str | None = None
+    # Правка серии: пустой словарь снимает повторение (созданные встречи
+    # остаются — они уже стоят в чужих календарях).
+    recurrence: dict | None = None
+    recurrence_until: date | None = None
     response: str | None = Field(None, pattern="^(accepted|declined|tentative)$")
     comment: str | None = None
 
@@ -840,6 +849,10 @@ def _event_out(ev, attendees: list, me: uuid.UUID) -> dict[str, Any]:
         "starts_at": ev.starts_at, "ends_at": ev.ends_at, "all_day": ev.all_day,
         "tz": ev.tz, "location": ev.location, "conference_url": ev.conference_url,
         "visibility": ev.visibility, "status": ev.status,
+        "recurrence": ev.recurrence,
+        "recurrence_until": (ev.recurrence_until.isoformat()
+                             if ev.recurrence_until else None),
+        "series_id": str(ev.series_id) if ev.series_id else None,
         "cancel_reason": ev.cancel_reason, "subject_ref": ev.subject_ref,
         "organizer_id": str(ev.organizer_id),
         "is_organizer": ev.organizer_id == me,
@@ -993,12 +1006,23 @@ async def calendar_busy(
         занято[str(uid)].append({
             "starts_at": ev.starts_at, "ends_at": ev.ends_at, "all_day": ev.all_day,
         })
-    people = {str(u.id): u.name for u in (await db.execute(
+    # Рабочее окно каждого — вместе с занятостью, одним ответом. Подбор времени
+    # без него предлагает восемь утра тому, кто начинает в десять, и полночь
+    # тому, кто во Владивостоке: свободно ≠ можно.
+    люди = {u.id: u for u in (await db.execute(
         select(User).where(User.id.in_(свои)))).scalars()}
     return {
         "from": date_from, "to": date_to,
-        "people": [{"user_id": uid, "name": people.get(uid, "—"), "busy": ivs}
-                   for uid, ivs in занято.items()],
+        "people": [{
+            "user_id": uid,
+            "name": (люди[uuid.UUID(uid)].name if uuid.UUID(uid) in люди else "—"),
+            "tz": (люди[uuid.UUID(uid)].tz if uuid.UUID(uid) in люди else None),
+            "work_start": (люди[uuid.UUID(uid)].work_start.strftime("%H:%M")
+                           if uuid.UUID(uid) in люди else None),
+            "work_end": (люди[uuid.UUID(uid)].work_end.strftime("%H:%M")
+                         if uuid.UUID(uid) in люди else None),
+            "busy": ivs,
+        } for uid, ivs in занято.items()],
     }
 
 
@@ -1049,7 +1073,9 @@ async def calendar_create(
         starts_at=payload.starts_at, ends_at=payload.ends_at,
         all_day=payload.all_day, tz=payload.tz, location=payload.location or None,
         conference_url=payload.conference_url or None,
-        visibility=payload.visibility, subject_ref=payload.subject_ref or None)
+        visibility=payload.visibility, subject_ref=payload.subject_ref or None,
+        recurrence=(payload.recurrence or None),
+        recurrence_until=payload.recurrence_until)
     db.add(ev)
     await db.flush()
 
@@ -1110,8 +1136,29 @@ async def calendar_action(
         ev.status = "cancelled"
         ev.cancel_reason = (payload.cancel_reason or "").strip() or None
         await reminders.drop_for(db, f"event:{ev.id}")
+        if ev.recurrence:
+            # Отменяя голову серии, гасим и продолжение: иначе завтра проход
+            # материализации заведёт следующую планёрку отменённой встречи.
+            # Уже созданные будущие отменяем тоже — они стоят в чужих календарях
+            # и должны показаться зачёркнутыми, а не пропасть.
+            ev.recurrence = None
+            for future in (await db.execute(select(CalendarEvent).where(
+                    CalendarEvent.series_id == ev.id,
+                    CalendarEvent.starts_at >= datetime.now(timezone.utc),
+                    CalendarEvent.status != "cancelled"))).scalars():
+                future.status = "cancelled"
+                future.cancel_reason = ev.cancel_reason
+                await reminders.drop_for(db, f"event:{future.id}")
         await db.commit()
         return _event_out(ev, parts, current_user.id)
+
+    if payload.recurrence is not None:
+        # Пустой словарь снимает повторение. Уже созданные встречи остаются: они
+        # стоят в чужих календарях, и «выключил серию — исчезли три планёрки»
+        # означает, что люди придут в пустую переговорную.
+        ev.recurrence = payload.recurrence or None
+    if payload.recurrence_until is not None:
+        ev.recurrence_until = payload.recurrence_until
 
     время_сдвинулось = False
     if payload.starts_at is not None or payload.ends_at is not None:

@@ -10159,6 +10159,23 @@ class CalendarEvent(Base):
     cancel_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
     # Предмет, вокруг которого встреча: `task:<uuid>`, `doc:<uuid>`.
     subject_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # ── Повторение ──────────────────────────────────────────────────────────
+    # Серия материализуется вперёд настоящими строками, а не разворачивается на
+    # чтении. Так участники, ответы, занятость, отмена и правка одной встречи
+    # работают тем же кодом, что у обычной: «изменить эту» — это правка строки, а
+    # не машина исключений из серии. Цена — фоновый проход, который у нас и так
+    # ходит каждые пять минут ради расписаний поручений.
+    #
+    # `recurrence` заполнен ТОЛЬКО у головы серии, у порождённых он пуст: иначе
+    # каждая порождённая начала бы порождать своё продолжение.
+    recurrence: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # До какого дня продолжать. Пусто — пока не выключат: планёрка не имеет
+    # конца, и требовать его при заведении значит выдумывать дату.
+    recurrence_until: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    # Голова серии. У самой головы пусто — по этому и отличаем.
+    series_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="CASCADE"),
+        nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -12414,4 +12431,153 @@ class SiteDemo(Base):
 
     __table_args__ = (
         UniqueConstraint("company_id", "code", name="uq_site_demo_code"),
+    )
+
+
+class ClientSpace(Base):
+    """Пространство, развёрнутое клиенту: его адрес и состояние.
+
+    Решение МАГа (29.08.2026): каждому клиенту разворачивается СВОЁ пространство, и
+    работает он с нами там. Поэтому кабинет сайта перестаёт быть местом работы —
+    он прихожая: пускает внутрь и даёт поговорить. Договоры, акты и сверки в кабинет
+    больше не возятся: у клиента они и так есть, в его собственном контуре.
+
+    Отсюда и эта запись. Кабинет спрашивает пространство «куда пускать этого
+    человека» и получает адрес отсюда, а не из настройки на своей стороне: адрес
+    контура — свойство клиента, а не сайта.
+
+    Состояние честное: пока стек разворачивается, кнопка в кабинете не появляется.
+    Дверь, которая ведёт в недоделанное, хуже отсутствующей двери.
+    """
+    __tablename__ = "client_spaces"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Наша компания — та, что обслуживает.
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Клиент, которому развёрнуто. Связь, а не строка с названием: у контрагента
+    # есть договоры и учёт, и по ним видно, за что этот контур.
+    counterparty_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Код стека поставки (`stacks/<slug>` в ecosystem-deploy) — по нему контур
+    # разворачивают и находят на ВМ.
+    slug: Mapped[str] = mapped_column(String(50), nullable=False)
+    domain: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    # planned — решили развернуть; deploying — разворачивается; active — работает;
+    # suspended — приостановлено (долг, окончание договора).
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="planned")
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "slug", name="uq_client_space_slug"),
+    )
+
+
+class PartnerSpace(Base):
+    """Другое пространство, с которым это связано: клиент или наш поставщик услуг.
+
+    Замысел МАГа (29.08.2026). Наши люди заведены в пространстве клиента и работают
+    внутри него — это ДОСТУП, и он остаётся: инженер должен видеть и править. Но
+    разговор — обращения, чат, документы — должен вестись из СВОЕГО пространства, а
+    не изнутри чужого. Иначе поддержка живёт в контуре заказчика, и у неё нет ни
+    своей очереди, ни своей истории, ни возможности обслуживать второго клиента.
+    Сегодня это временная мера, дальше поддержка целиком переезжает к себе.
+
+    Запись симметрична, и это не экономия, а условие правильности: оба конца —
+    экземпляры одного Ядра, и код доставки должен быть один. У клиента в этой
+    таблице лежим мы с ролью `vendor`, у нас — он с ролью `client`.
+
+    Секрет здесь не лежит: `secret_ref` — имя переменной окружения стека, как у
+    коннекторов (docs/CORE.md §7а). Ключ, уехавший в дамп базы, — это ключ, который
+    уже не наш.
+    """
+    __tablename__ = "eco_partner_spaces"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # `client` — их пространство, которое мы обслуживаем; `vendor` — наша служба
+    # поддержки, если эта запись стоит в контуре заказчика.
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="client")
+    # Код пространства-партнёра (`gig`, `elsyplus`) — совпадает с кодом стека.
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    # Куда стучаться: корень домена партнёра, без пути.
+    base_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # Имя переменной окружения с ключом партнёра (X-Cloud-API-Key для его приёмника).
+    secret_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # Клиент как контрагент нашего учёта — если он у нас заведён. У обратной записи
+    # (мы в контуре клиента) пусто: мы для него не контрагент этой таблицы.
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"),
+        nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", "role", name="uq_partner_space_code"),
+    )
+
+
+class PartnerMessage(Base):
+    """Сообщение между пространствами: обращение к поддержке и ответ на него.
+
+    Одна таблица на оба конца, потому что событие одно: человек из пространства
+    клиента написал в техподдержку, техподдержка ответила. У клиента это лента на
+    экране «Техподдержка», у нас — то же самое плюс зеркало в очереди Поддержки,
+    чтобы оператор видел разговор рядом со звонками и письмами.
+
+    `external_id` — идентификатор сообщения У ОТПРАВИТЕЛЯ. По нему повторная
+    доставка не плодит дублей: сеть рвётся, отправитель повторяет, и без ключа
+    идемпотентности лента набивается копиями.
+    """
+    __tablename__ = "eco_partner_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    partner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eco_partner_spaces.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # `out` — написали мы, `in` — написали нам. Направление считается ОТ ЭТОГО
+    # пространства: у обеих сторон одна и та же переписка читается зеркально.
+    direction: Mapped[str] = mapped_column(String(4), nullable=False)
+    # Кто написал: адрес и имя человека в его пространстве.
+    author_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    author_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    # Предмет разговора, если он привязан к чему-то в пространстве: заявка, объект.
+    subject_kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    subject_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # Ошибка последней попытки доставки — чтобы «не дошло» было видно, а не
+    # выяснялось через неделю от клиента.
+    delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("partner_id", "direction", "external_id",
+                         name="uq_partner_message_external"),
+        Index("idx_partner_messages_feed", "company_id", "partner_id", "created_at"),
     )

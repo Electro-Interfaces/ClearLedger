@@ -4035,6 +4035,24 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.78: повторяющиеся встречи (этап 16). Серия материализуется вперёд
+        # настоящими строками — так участники, ответы, занятость и отмена одной
+        # встречи работают тем же кодом, что у обычной, и машина исключений из
+        # серии не нужна вовсе.
+        for stmt in (
+            "ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS recurrence JSONB",
+            "ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS recurrence_until DATE",
+            "ALTER TABLE calendar_events ADD COLUMN IF NOT EXISTS series_id UUID "
+            "REFERENCES calendar_events(id) ON DELETE CASCADE",
+            "CREATE INDEX IF NOT EXISTS ix_calendar_events_series "
+            "ON calendar_events (series_id) WHERE series_id IS NOT NULL",
+            # По нему ходит проход материализации: голов серий единицы, а
+            # событий тысячи, и полный скан ради них не нужен.
+            "CREATE INDEX IF NOT EXISTS ix_calendar_events_recurring "
+            "ON calendar_events (company_id) WHERE recurrence IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (
