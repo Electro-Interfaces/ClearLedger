@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import * as siteService from '@/services/siteService'
-import { CONTENT_LABELS, siteTime } from '@/services/siteService'
+import { CONTENT_LABELS, FIELD_LABELS, siteTime } from '@/services/siteService'
 import { cn } from '@/lib/utils'
 
 type Json = unknown
@@ -67,7 +67,7 @@ function ObjectEditor({ value, onChange }: {
           || (typeof v === 'string' && v.length > 70)
         return (
           <div key={k} className={cn(wide && 'sm:col-span-2')}>
-            <label className="mb-1 block text-xs text-muted-foreground">{k}</label>
+            <label className="mb-1 block text-xs text-muted-foreground">{FIELD_LABELS[k] ?? k}</label>
             <ValueField value={v} onChange={(next) => onChange({ ...value, [k]: next })} />
           </div>
         )

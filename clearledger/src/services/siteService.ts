@@ -244,6 +244,36 @@ export const CONTENT_LABELS: Record<string, string> = {
   news: 'Новости и статьи',
   faq: 'Вопросы',
   settings: 'Контакты и SEO',
+  solutions: 'Решения',
+  partners: 'Партнёры',
+}
+
+/**
+ * Поля разделов словами. Ключи приходят с сайта такими, какие они в его коде
+ * (`title`, `q`, `tier`) — редактору всё равно, а человеку нет. Незнакомое поле
+ * показываем как есть: раздел откроется и без подписи.
+ */
+export const FIELD_LABELS: Record<string, string> = {
+  // группы
+  starts: 'С чего начинают', layers: 'Слои', examples: 'Готовые примеры',
+  types: 'Кто может стать партнёром', access: 'Что открывается партнёру',
+  hardware: 'Работа с производителями', integrations: 'Интеграции',
+  prices: 'Цены', bundle: 'Пакеты', articles: 'Статьи', posts: 'Новости',
+  // карточка
+  title: 'Заголовок', text: 'Текст', items: 'Пункты', name: 'Название',
+  slug: 'Адрес страницы', ru: 'По-русски', slogan: 'Слоган', purpose: 'Назначение',
+  who: 'Кому', what: 'Что даёт', note: 'Примечание', metric: 'Показатель',
+  cta: 'Надпись на кнопке', to: 'Куда ведёт', url: 'Ссылка', standalone: 'Работает отдельно',
+  // цены
+  price: 'Цена', tier: 'Уровень', category: 'Категория',
+  // новости и вопросы
+  date: 'Дата', tags: 'Метки', lead: 'Вводка', body: 'Текст', cover: 'Обложка',
+  preview: 'Анонс', rubric: 'Рубрика', featured: 'На главной', source: 'Источник',
+  cardImage: 'Картинка карточки', status: 'Состояние', q: 'Вопрос', a: 'Ответ',
+  // настройки
+  email: 'Почта', phone: 'Телефон', address: 'Адрес',
+  metrikaId: 'Счётчик Метрики', seoTitle: 'Заголовок для поиска',
+  seoDescription: 'Описание для поиска',
 }
 
 export const getContent = (companyId: string) =>
