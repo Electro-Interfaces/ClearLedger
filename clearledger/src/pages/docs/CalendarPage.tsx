@@ -160,8 +160,8 @@ export function CalendarPage() {
             </div>
           ))}
         </div>
-        <div className={cn('grid grid-cols-7',
-          mode === 'week' && 'h-[calc(100%-2rem)]')}>
+        {/* Ветка только месячная: неделя и день ушли в почасовую сетку выше. */}
+        <div className="grid grid-cols-7">
           {days.map((day) => (
             <DayCell key={day.toISOString()} day={day} mode={mode} anchor={anchor}
               events={events.filter((e) => пересекает(e, day))}

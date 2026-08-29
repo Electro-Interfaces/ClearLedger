@@ -30,11 +30,10 @@ const ОТВЕТ_СЛОВОМ: Record<string, string> = {
   declined: 'не будет', tentative: 'может быть',
 }
 
-export function GuestPanel({ companyId, eventId, title, startsAt }: {
+export function GuestPanel({ companyId, eventId, title }: {
   companyId: string
   eventId: string
   title: string
-  startsAt: string
 }) {
   const qc = useQueryClient()
   const [email, setEmail] = useState('')

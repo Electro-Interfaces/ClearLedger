@@ -520,7 +520,7 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
   })
   const kinds = useQuery({
     queryKey: ['doc-kinds', companyId],
-    queryFn: () => docsService.listDocKinds(companyId),
+    queryFn: () => docsService.listKinds(companyId),
     enabled: docOpen,
   })
 
@@ -811,7 +811,7 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
       </div>
 
       {docOpen && (
-        <NewDocDialog companyId={companyId} kinds={kinds.data?.kinds ?? []}
+        <NewDocDialog companyId={companyId} kinds={kinds.data ?? []}
           initialTitle={task.title}
           summary={task.description ?? task.preview ?? undefined}
           subjectRef={`task:${task.id}`}

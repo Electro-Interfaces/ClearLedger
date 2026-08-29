@@ -474,8 +474,7 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
 
         {!новая && мой && event!.status !== 'cancelled' && (
           <div className="mt-3">
-            <GuestPanel companyId={companyId} eventId={event!.id}
-              title={title} startsAt={event!.starts_at} />
+            <GuestPanel companyId={companyId} eventId={event!.id} title={title} />
           </div>
         )}
 
