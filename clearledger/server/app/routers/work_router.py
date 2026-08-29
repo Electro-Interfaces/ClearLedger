@@ -399,6 +399,7 @@ _REASONS: tuple[tuple[str, str], ...] = (
     ("approve", "виза"),
     ("acquaint", "ознакомиться"),
     ("do", "работа"),
+    ("own_note", "моя запись"),
     ("unassigned", "никому не поручено"),
     ("own", "мой документ"),
 )
@@ -425,7 +426,8 @@ async def work_mine(
     now = datetime.now(timezone.utc)
 
     from app.routers.docs_router import approvals_mine, my_acquaints
-    from app.routers.tasks_router import _is_admin, _not_personal, _visible_to
+    from app.routers.tasks_router import (
+        _is_admin, _my_dated_personal, _not_personal, _visible_to)
 
     admin = await _is_admin(db, cid, current_user)
     items: dict[tuple[str, str], dict[str, Any]] = {}
@@ -464,10 +466,13 @@ async def work_mine(
     task_rows = (await db.execute(
         select(Task).where(
             Task.company_id == cid, _visible_to(current_user, admin),
-            # Записная книжка в общую очередь не входит: «личное» в названии
-            # раздела должно оставаться правдой, а второе условие ниже (своё без
-            # исполнителя) без этого фильтра втянуло бы её целиком.
-            _not_personal(),
+            # Записная книжка целиком в очередь не входит: «личное» в названии
+            # раздела должно оставаться правдой, а условие «своё без исполнителя»
+            # без этого фильтра втянуло бы её всю. Но запись, которой человек
+            # ПОСТАВИЛ СРОК, входит: правило «без срока — заметка, со сроком —
+            # дело» держится именно на этом. Личной она не перестаёт быть —
+            # очередь своя, её видит только хозяин.
+            or_(_not_personal(), _my_dated_personal(current_user)),
             Task.status == "open",
             or_(Task.assignee_id == current_user.id,
                 and_(Task.assignee_id.is_(None),
@@ -482,7 +487,12 @@ async def work_mine(
     for t in task_rows:
         code = projects.get(t.project_id)
         route = (types[t.type_id].route if t.type_id in types else None) or []
-        put("task", str(t.id), "do" if t.assignee_id else "unassigned", {
+        # Своя запись со сроком — не «никому не поручено»: поручать её некому,
+        # она уже у того, кто её завёл. Отдельное слово, чтобы строка не читалась
+        # как забытая работа компании.
+        повод = ("own_note" if t.visibility == "personal"
+                 else "do" if t.assignee_id else "unassigned")
+        put("task", str(t.id), повод, {
             "title": t.title,
             "key": (f"{code}-{t.project_number}" if code and t.project_number
                     else f"№{t.number}"),

@@ -15,10 +15,19 @@ import { useCompany } from '@/contexts/CompanyContext'
 import * as docsService from '@/services/docsService'
 import type { DocKind } from '@/services/docsService'
 
-export function NewDocDialog({ companyId, kinds, defaultFamily, onClose, onCreated }: {
+export function NewDocDialog({ companyId, kinds, defaultFamily, initialTitle,
+  summary, subjectRef, onClose, onCreated }: {
   companyId: string
   kinds: DocKind[]
   defaultFamily?: string
+  /** Заготовка названия: документ, рождённый из записи, приходит с её текстом.
+   *  Переписывать его человек вправе — это черновик, а не перенос. */
+  initialTitle?: string
+  summary?: string
+  /** Откуда документ родился (`task:<uuid>`). Ссылка обратная: из карточки
+   *  документа видно запись, из которой он вырос, — иначе связь односторонняя и
+   *  через неделю никто не вспомнит, почему документ появился. */
+  subjectRef?: string
   onClose: () => void
   onCreated: (id: string) => void
 }) {
@@ -26,7 +35,7 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, onClose, onCreat
   // Вид подставляем по разделу, из которого пришли: в «Входящих» заводят входящее.
   const suited = defaultFamily ? kinds.filter((k) => k.family === defaultFamily) : kinds
   const [kindId, setKindId] = useState(suited[0]?.id ?? kinds[0]?.id ?? '')
-  const [title, setTitle] = useState('')
+  const [title, setTitle] = useState(initialTitle ?? '')
   const [counterparty, setCounterparty] = useState('')
   const [externalNumber, setExternalNumber] = useState('')
   const [externalDate, setExternalDate] = useState('')
@@ -41,6 +50,8 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, onClose, onCreat
     mutationFn: () => docsService.createDoc(companyId, {
       kind_id: kindId,
       title: title.trim(),
+      summary: summary || undefined,
+      subject_ref: subjectRef || undefined,
       organization_id: docOrganizationId || null,
       counterparty_name: counterparty.trim(),
       external_number: externalNumber.trim() || null,

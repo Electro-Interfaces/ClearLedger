@@ -19,11 +19,14 @@
  * в поле записи, а изображения видны миниатюрами в строке.
  */
 import { useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData, useMutation, useQuery, useQueryClient,
+} from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
-  Bell, CalendarClock, ImageOff, Loader2, Lock, NotebookPen, Paperclip,
-  Search, Send, X,
+  Bell, CalendarClock, FileText, History, ImageOff, Link as LinkIcon,
+  ListChecks, Loader2, Lock, Maximize2, NotebookPen, Paperclip, Pin,
+  Search, Send, UserPlus, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -31,11 +34,19 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { QueryError } from '@/components/common/QueryError'
 import { useCompany } from '@/contexts/CompanyContext'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { SearchPicker } from '@/components/tasks/SearchPicker'
+import { NewDocDialog } from '@/components/docs/NewDocDialog'
 import * as tasksService from '@/services/tasksService'
+import * as docsService from '@/services/docsService'
 import * as workService from '@/services/workService'
 import type { SpaceTask, TaskFile } from '@/services/tasksService'
 import { dtT } from '@/components/tasks/taskWords'
 import { humanSize, openAuthAttachment, useAuthBlob } from '@/lib/authFiles'
+import { nextEvening, nextMorning, toItems, toText } from '@/lib/noteText'
 import { cn } from '@/lib/utils'
 
 /** Локальное «сейчас + N часов» для поля datetime-local: значение по умолчанию. */
@@ -44,6 +55,15 @@ const localNow = (plusHours: number) => {
   d.setMinutes(0, 0, 0)
   return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
 }
+
+/** Что сейчас открыто в строке. Одно за раз: два раскрытых поля в строке
+ *  списка превращают её в форму. */
+type Режим = 'due' | 'remind' | 'assign' | 'link' | 'revisions' | null
+
+type ОперацияПункта =
+  | { kind: 'add'; text: string }
+  | { kind: 'toggle'; id: string; done: boolean }
+  | { kind: 'remove'; id: string }
 
 const время = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' })
 const деньМесяц = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' })
@@ -92,12 +112,20 @@ export function NotesPage() {
   const [отбор, setОтбор] = useState<Отбор>('all')
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Поиск спрашивает СЕРВЕР. Клиентский фильтр видел только заголовок и первые
+  // 200 символов описания у 200 загруженных строк — всё, что человек написал
+  // ниже, не находилось, и книжка тихо врала: «не нашлось» означало «не искали».
+  const слово = поиск.trim()
   const q = useQuery({
-    queryKey: ['notes', companyId],
+    queryKey: ['notes', companyId, слово],
     queryFn: () => tasksService.listTasks(companyId, 'all', {
       visibility: 'personal', sort: '-created', limit: 200,
+      q: слово || undefined,
     }),
     enabled: !!companyId,
+    // Прежняя выдача остаётся на экране, пока идёт запрос за новой: без этого
+    // список моргает пустотой на каждой букве.
+    placeholderData: keepPreviousData,
   })
 
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['notes', companyId] }) }
@@ -135,7 +163,6 @@ export function NotesPage() {
   }), [rows])
 
   const дни = useMemo(() => {
-    const слово = поиск.trim().toLowerCase()
     const видно = rows.filter((t) => {
       if (отбор === 'done') return t.status === 'done'
       if (отбор === 'due') return t.due_at && t.status !== 'done'
@@ -143,25 +170,36 @@ export function NotesPage() {
       // «Все» — открытое плюс закрытое за последние сутки: отметив галочку,
       // человек не должен видеть, как запись исчезает у него из-под руки.
       return t.status !== 'done' || закрытоНедавно(t.closed_at)
-    }).filter((t) => !слово
-      || t.title.toLowerCase().includes(слово)
-      || (t.preview ?? '').toLowerCase().includes(слово))
+    })
+
+    // Закреплённое — отдельной группой сверху, а не «сегодня, но повыше».
+    // Человек закрепляет запись именно затем, чтобы она не уезжала вниз вместе
+    // с днём, в который её завели. Закрепление — та же личная звезда, что в
+    // раскладке работы (`personal_marks.starred`): второй механизм «важного» у
+    // одного человека означал бы два разных ответа на один вопрос.
+    const закреплено = видно.filter((t) => t.mark?.starred)
+    const обычные = видно.filter((t) => !t.mark?.starred)
 
     const собрано: { key: string; label: string; rows: SpaceTask[] }[] = []
-    for (const t of видно) {
+    if (закреплено.length) {
+      собрано.push({ key: 'pinned', label: 'Закреплённые', rows: закреплено })
+    }
+    for (const t of обычные) {
       const iso = t.created_at ?? t.updated_at
       if (!iso) continue
       const key = деньКлюч(iso)
       const последний = собрано[собрано.length - 1]
-      if (последний?.key === key) последний.rows.push(t)
+      if (последний?.key === key && последний.key !== 'pinned') последний.rows.push(t)
       else собрано.push({ key, label: имяДня(iso), rows: [t] })
     }
     return собрано
-  }, [rows, отбор, поиск])
+  }, [rows, отбор])
 
   if (!companyId) return null
 
-  const пусто = rows.length === 0
+  // Пустая книжка и «по запросу ничего» — разные ответы, и путать их нельзя:
+  // человек, ищущий слово, решит, что потерял все записи.
+  const пусто = rows.length === 0 && !слово
   const ничегоНеНайдено = !пусто && дни.length === 0
 
   return (
@@ -194,7 +232,9 @@ export function NotesPage() {
         onDrop={(e) => {
           e.preventDefault(); setDragOver(false); addFiles(e.dataTransfer.files)
         }}>
-        <Textarea value={text} onChange={(e) => setText(e.target.value)}
+        {/* Курсор стоит в поле сразу: записную книжку открывают, чтобы записать,
+            а не чтобы сначала прицелиться мышью. */}
+        <Textarea value={text} onChange={(e) => setText(e.target.value)} autoFocus
           rows={2} placeholder="Что записать? Первая строка станет заголовком…"
           className="resize-none border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0"
           // Вставка изображения из буфера: скриншот попадает в запись без
@@ -312,7 +352,11 @@ export function NotesPage() {
                 <div className="divide-y divide-border/70">
                   {день.rows.map((t) => (
                     <NoteRow key={t.id} task={t} companyId={companyId}
-                      onChanged={refresh} onOpen={() => navigate(`/tasks/${t.id}`)} />
+                      onChanged={refresh}
+                      // Прежний адрес `/tasks/<id>` ведёт на редирект снятого
+                      // раздела, и номер записи по дороге теряется: карточка
+                      // открывалась не та, а список поручений.
+                      onOpen={() => navigate(`/docs/company?view=errands&task=${t.id}`)} />
                   ))}
                 </div>
               </section>
@@ -370,12 +414,28 @@ function Thumb({ file, companyId }: { file: TaskFile; companyId: string }) {
   )
 }
 
+/**
+ * Строка записи: сама запись и все её выходы в рабочий контур.
+ *
+ * Записная книжка — вспомогательный контур, и главное в ней не то, что запись
+ * можно завести, а то, что её можно ОТДАТЬ: поставить срок, поручить, превратить
+ * в документ, связать с чем-то. Без этих выходов книжка становится кладбищем
+ * мыслей рядом с работой, а не её преддверием.
+ *
+ * Правка идёт на месте и сохраняется сама. Пара к автосохранению — редакции:
+ * сохранять молча и не давать вернуться значит однажды потерять абзац навсегда.
+ */
 function NoteRow({ task, companyId, onChanged, onOpen }: {
   task: SpaceTask; companyId: string; onChanged: () => void; onOpen: () => void
 }) {
-  const [editing, setEditing] = useState<'due' | 'remind' | null>(null)
+  const navigate = useNavigate()
+  const [editing, setEditing] = useState<Режим>(null)
   const [value, setValue] = useState('')
+  const [draft, setDraft] = useState<string | null>(null)
+  const [newItem, setNewItem] = useState('')
+  const [docOpen, setDocOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const сохранение = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const act = useMutation({
     mutationFn: (data: Parameters<typeof tasksService.taskAction>[1]) =>
@@ -397,11 +457,102 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
     onSuccess: onChanged,
     onError: (e: Error) => toast.error(e.message || 'Файл не приложился'),
   })
+  // Закрепление — та же личная звезда, что в раскладке работы. Второй механизм
+  // «важного» у одного человека означал бы два разных ответа на один вопрос.
+  const pin = useMutation({
+    mutationFn: () => workService.place(companyId, `task:${task.id}`,
+      { starred: !task.mark?.starred }),
+    onSuccess: onChanged,
+    onError: (e: Error) => toast.error(e.message || 'Не закрепилось'),
+  })
+  const item = useMutation({
+    mutationFn: async (op: ОперацияПункта) => {
+      if (op.kind === 'add') return tasksService.addChecklistItem(task.id, companyId, op.text)
+      if (op.kind === 'toggle') {
+        return tasksService.updateChecklistItem(task.id, op.id, { companyId, done: op.done })
+      }
+      return tasksService.deleteChecklistItem(task.id, op.id, companyId)
+    },
+    onSuccess: () => { setNewItem(''); onChanged() },
+    onError: (e: Error) => toast.error(e.message || 'Пункт не сохранился'),
+  })
+
+  const пункты = task.checklist_items ?? []
+
+  /** Текст ↔ список. Обе стороны обратимы: превратив запись в список и передумав,
+   *  человек обязан получить свой текст назад, а не пустое поле. */
+  const превращение = useMutation({
+    mutationFn: async () => {
+      if (пункты.length) {
+        await tasksService.taskAction(task.id, {
+          companyId,
+          description: toText(пункты, task.description ?? task.preview ?? ''),
+        })
+        for (const i of пункты) {
+          await tasksService.deleteChecklistItem(task.id, i.id, companyId)
+        }
+        return
+      }
+      const строки = toItems(task.description ?? task.preview ?? '')
+      if (!строки.length) throw new Error('В записи нет строк, из которых вышел бы список')
+      for (const s of строки) await tasksService.addChecklistItem(task.id, companyId, s)
+      await tasksService.taskAction(task.id, { companyId, description: '' })
+    },
+    onSuccess: onChanged,
+    onError: (e: Error) => toast.error(e.message || 'Не превратилось'),
+  })
+
+  const people = useQuery({
+    queryKey: ['task-people', companyId],
+    queryFn: () => tasksService.listTaskPeople(companyId),
+    enabled: editing === 'assign', staleTime: 5 * 60 * 1000,
+  })
+  const соседи = useQuery({
+    queryKey: ['notes-neighbours', companyId],
+    queryFn: () => tasksService.listTasks(companyId, 'all',
+      { visibility: 'personal', sort: '-created', limit: 100 }),
+    enabled: editing === 'link', staleTime: 60 * 1000,
+  })
+  const revisions = useQuery({
+    queryKey: ['note-revisions', task.id],
+    queryFn: () => tasksService.noteRevisions(task.id, companyId),
+    enabled: editing === 'revisions',
+  })
+  const kinds = useQuery({
+    queryKey: ['doc-kinds', companyId],
+    queryFn: () => docsService.listDocKinds(companyId),
+    enabled: docOpen,
+  })
+
+  const link = useMutation({
+    mutationFn: (id: string) => tasksService.addTaskLink(task.id,
+      { companyId, relatedTaskId: id, kind: 'relates' }),
+    onSuccess: () => { setEditing(null); toast.success('Связал'); onChanged() },
+    onError: (e: Error) => toast.error(e.message || 'Не связалось'),
+  })
+
+  /** Автосохранение правки: гасим таймер и шлём один раз. Записную книжку
+   *  закрывают на полуслове, и «не нажал сохранить» здесь недопустимо. */
+  const отложенноеСохранение = (текст: string) => {
+    setDraft(текст)
+    if (сохранение.current) clearTimeout(сохранение.current)
+    сохранение.current = setTimeout(() => {
+      const [head, ...rest] = текст.trim().split('\n')
+      act.mutate({
+        companyId,
+        title: head.slice(0, 300) || 'Без названия',
+        description: rest.join('\n').trim(),
+      })
+    }, 1200)
+  }
 
   const done = task.status === 'done'
   const files = task.attachments ?? []
   const картинки = files.filter(изображение)
   const документы = files.filter((f) => !изображение(f))
+  const закреплено = !!task.mark?.starred
+  const текстЗаписи = [task.title, task.description ?? task.preview ?? '']
+    .filter(Boolean).join('\n')
 
   return (
     <article className={cn('group py-2.5', done && 'opacity-55')}>
@@ -409,14 +560,36 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
         <input type="checkbox" checked={done} className="mt-1 h-3.5 w-3.5 shrink-0"
           aria-label={done ? 'Вернуть в работу' : 'Отметить сделанным'}
           onChange={() => act.mutate({ companyId, status: done ? 'open' : 'done' })} />
-        <button onClick={onOpen} className="min-w-0 flex-1 text-left">
-          <p className={cn('text-sm text-foreground', done && 'line-through')}>{task.title}</p>
-          {task.preview && (
-            <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap text-xs text-muted-foreground">
-              {task.preview}
+        {draft !== null ? (
+          <Textarea value={draft} autoFocus rows={Math.min(12, draft.split('\n').length + 1)}
+            onChange={(e) => отложенноеСохранение(e.target.value)}
+            onBlur={() => {
+              if (сохранение.current) clearTimeout(сохранение.current)
+              const [head, ...rest] = draft.trim().split('\n')
+              act.mutate({
+                companyId, title: head.slice(0, 300) || 'Без названия',
+                description: rest.join('\n').trim(),
+              })
+              setDraft(null)
+            }}
+            className="min-w-0 flex-1 resize-none text-sm" />
+        ) : (
+          <button onClick={() => setDraft(текстЗаписи)}
+            className="min-w-0 flex-1 text-left">
+            <p className={cn('text-sm text-foreground', done && 'line-through')}>
+              {task.title}
             </p>
-          )}
-        </button>
+            {!пункты.length && task.preview && (
+              <p className="mt-0.5 line-clamp-4 whitespace-pre-wrap text-xs text-muted-foreground">
+                {task.preview}
+              </p>
+            )}
+          </button>
+        )}
+        {закреплено && (
+          <Pin className="mt-0.5 h-3 w-3 shrink-0 fill-current text-amber-600 dark:text-amber-400"
+            aria-label="закреплено" />
+        )}
         {task.created_at && (
           <time className="shrink-0 text-xs tabular-nums text-muted-foreground"
             dateTime={task.created_at}>
@@ -424,6 +597,34 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
           </time>
         )}
       </div>
+
+      {пункты.length > 0 && (
+        <ul className="mt-1.5 space-y-1 pl-6">
+          {пункты.map((i) => (
+            <li key={i.id} className="flex items-start gap-2 text-sm">
+              <input type="checkbox" checked={i.done} className="mt-1 h-3.5 w-3.5 shrink-0"
+                onChange={() => item.mutate({ kind: 'toggle', id: i.id, done: !i.done })} />
+              <span className={cn('min-w-0 flex-1', i.done && 'text-muted-foreground line-through')}>
+                {i.text}
+              </span>
+              <button onClick={() => item.mutate({ kind: 'remove', id: i.id })}
+                className="shrink-0 text-muted-foreground/60 hover:text-foreground"
+                aria-label="Убрать пункт">
+                <X className="h-3 w-3" />
+              </button>
+            </li>
+          ))}
+          <li>
+            <Input value={newItem} onChange={(e) => setNewItem(e.target.value)}
+              placeholder="Ещё пункт…" className="h-7 text-sm"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newItem.trim()) {
+                  item.mutate({ kind: 'add', text: newItem.trim() })
+                }
+              }} />
+          </li>
+        </ul>
+      )}
 
       {картинки.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1.5 pl-6">
@@ -457,8 +658,19 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
             {task.overdue && !done ? 'просрочено · ' : ''}{dtT(task.due_at)}
           </span>
         )}
-        {editing ? (
+
+        {editing === 'due' || editing === 'remind' ? (
           <span className="inline-flex flex-wrap items-center gap-1.5">
+            {editing === 'remind' && (
+              // Быстрые ответы на вопрос «когда»: точное время выбирают редко,
+              // а «вечером» и «завтра утром» — почти всегда.
+              <>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-xs"
+                  onClick={() => remind.mutate(nextEvening())}>Вечером</Button>
+                <Button size="sm" variant="outline" className="h-8 px-2 text-xs"
+                  onClick={() => remind.mutate(nextMorning())}>Завтра утром</Button>
+              </>
+            )}
             <Input type="datetime-local" value={value} autoFocus
               onChange={(e) => setValue(e.target.value)}
               className="h-8 w-[190px] text-xs" />
@@ -471,8 +683,65 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
             <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
               onClick={() => setEditing(null)}>Отмена</Button>
           </span>
+        ) : editing === 'assign' ? (
+          <span className="inline-flex flex-wrap items-center gap-1.5">
+            <SearchPicker
+              items={(people.data?.people ?? []).map((p) => ({
+                id: p.id, name: p.name, party: p.partyType }))}
+              value="" onChange={(v) => act.mutate(
+                { companyId, visibility: 'company', assigneeId: v })}
+              placeholder="Кому поручить" emptyLabel="Не назначен"
+              searchPlaceholder="Фамилия или имя…" className="w-[210px]"
+              loading={people.isLoading} />
+            <span className="text-muted-foreground">
+              запись станет поручением и уйдёт из книжки
+            </span>
+            <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
+              onClick={() => setEditing(null)}>Отмена</Button>
+          </span>
+        ) : editing === 'link' ? (
+          <span className="inline-flex flex-wrap items-center gap-1.5">
+            <SearchPicker
+              items={(соседи.data?.tasks ?? []).filter((n) => n.id !== task.id)
+                .map((n) => ({ id: n.id, name: n.title }))}
+              value="" onChange={(v) => link.mutate(v)}
+              placeholder="С какой записью" searchPlaceholder="Слово из записи…"
+              className="w-[240px]" loading={соседи.isLoading} />
+            <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
+              onClick={() => setEditing(null)}>Отмена</Button>
+          </span>
+        ) : editing === 'revisions' ? (
+          <div className="w-full space-y-1">
+            {revisions.isLoading && (
+              <span className="text-muted-foreground">Смотрю редакции…</span>
+            )}
+            {revisions.data?.revisions.length === 0 && (
+              <span className="text-muted-foreground">
+                Прежних редакций нет — запись ещё не правили
+              </span>
+            )}
+            {(revisions.data?.revisions ?? []).map((r) => (
+              <button key={r.id}
+                onClick={() => { setDraft(r.text); setEditing(null) }}
+                className="block w-full rounded border border-border px-2 py-1 text-left hover:border-primary/50">
+                <span className="text-muted-foreground">
+                  {r.at ? dtT(r.at) : '—'}
+                </span>
+                <span className="ml-2 line-clamp-2 whitespace-pre-wrap">{r.text}</span>
+              </button>
+            ))}
+            <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
+              onClick={() => setEditing(null)}>Закрыть</Button>
+          </div>
         ) : (
           <>
+            <button onClick={() => pin.mutate()} disabled={pin.isPending}
+              title={закреплено ? 'Открепить' : 'Закрепить наверху'}
+              className={cn('inline-flex items-center gap-1 hover:text-foreground',
+                закреплено ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+              <Pin className={cn('h-3 w-3', закреплено && 'fill-current')} />
+              {закреплено ? 'Открепить' : 'Закрепить'}
+            </button>
             <button onClick={() => { setValue(localNow(24)); setEditing('due') }}
               className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
               <CalendarClock className="h-3 w-3" />{task.due_at ? 'Перенести' : 'Срок'}
@@ -480,6 +749,13 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
             <button onClick={() => { setValue(localNow(1)); setEditing('remind') }}
               className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
               <Bell className="h-3 w-3" />Напомнить
+            </button>
+            <button onClick={() => превращение.mutate()} disabled={превращение.isPending}
+              title={пункты.length
+                ? 'Пункты снова станут строками текста'
+                : 'Каждая строка станет пунктом списка'}
+              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-50">
+              <ListChecks className="h-3 w-3" />{пункты.length ? 'В текст' : 'В список'}
             </button>
             <input ref={fileRef} type="file" className="hidden"
               onChange={(e) => {
@@ -494,16 +770,57 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
                 : <Paperclip className="h-3 w-3" />}
               Файл
             </button>
-            <button onClick={() => act.mutate({ companyId, visibility: 'company' })}
-              title="Запись становится обычным поручением: её увидит компания, и ей можно назначить исполнителя"
-              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
-              <Send className="h-3 w-3" />В работу
-            </button>
+
+            {/* Выходы в рабочий контур — за одним пунктом. Каждый из них
+                означает, что запись перестаёт быть личной, и такие действия не
+                должны стоять в одном ряду с «приложить файл». */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+                  <Send className="h-3 w-3" />В работу
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64">
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                  Запись выходит из личного контура
+                </DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => setEditing('assign')}>
+                  <UserPlus className="mr-2 h-3.5 w-3.5" />Поручить…
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => act.mutate({ companyId, visibility: 'company' })}>
+                  <Send className="mr-2 h-3.5 w-3.5" />Отдать компании без исполнителя
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setDocOpen(true)}>
+                  <FileText className="mr-2 h-3.5 w-3.5" />Создать документ…
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setEditing('link')}>
+                  <LinkIcon className="mr-2 h-3.5 w-3.5" />Связать с записью…
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setEditing('revisions')}>
+                  <History className="mr-2 h-3.5 w-3.5" />Прежние редакции
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={onOpen}>
+                  <Maximize2 className="mr-2 h-3.5 w-3.5" />Открыть карточкой
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         )}
       </div>
+
+      {docOpen && (
+        <NewDocDialog companyId={companyId} kinds={kinds.data?.kinds ?? []}
+          initialTitle={task.title}
+          summary={task.description ?? task.preview ?? undefined}
+          subjectRef={`task:${task.id}`}
+          onClose={() => setDocOpen(false)}
+          onCreated={(id) => { setDocOpen(false); onChanged(); navigate(`/docs?view=all&doc=${id}`) }} />
+      )}
     </article>
   )
 }
+
 
 export default NotesPage

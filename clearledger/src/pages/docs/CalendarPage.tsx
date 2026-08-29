@@ -19,7 +19,9 @@ import {
   isSameDay, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek,
 } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import { CalendarDays, ChevronLeft, ChevronRight, Loader2, MapPin, Video } from 'lucide-react'
+import {
+  CalendarDays, ChevronLeft, ChevronRight, Loader2, MapPin, NotebookPen, Video,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as workService from '@/services/workService'
@@ -61,10 +63,12 @@ export function CalendarPage() {
     enabled: !!companyId,
   })
   // Сроки — из реестра поручений: свой источник сроков разошёлся бы с очередью
-  // в первый же месяц.
+  // в первый же месяц. Разрез `my_due`, а не `mine`: в календаре стоят все МОИ
+  // сроки, включая свою датированную запись, — планировать день по половине
+  // картины нельзя. Порученное компанией и своё различаются знаком в ячейке.
   const tasksQ = useQuery({
     queryKey: ['calendar-tasks', companyId, from.toISOString(), to.toISOString()],
-    queryFn: () => tasksService.listTasks(companyId, 'mine', {
+    queryFn: () => tasksService.listTasks(companyId, 'my_due', {
       dueFrom: from.toISOString(), dueTo: addDays(to, 1).toISOString(), limit: 200,
     }),
     enabled: !!companyId,
@@ -167,7 +171,12 @@ function DayCell({ day, mode, anchor, events, tasks, onEvent, onAdd }: {
   onAdd: () => void
 }) {
   const свой = mode === 'week' || isSameMonth(day, anchor)
-  const просрочено = tasks.filter((t) => t.overdue).length
+  // Своё обязательство и порученное компанией считаются порознь. Одним числом
+  // они читаются как одно и то же, а это разные вещи: срок поручения ставила
+  // компания и спросит с человека она, срок записи он поставил себе сам.
+  const записи = tasks.filter((t) => t.visibility === 'personal')
+  const рабочие = tasks.filter((t) => t.visibility !== 'personal')
+  const просрочено = рабочие.filter((t) => t.overdue).length
   const видимые = mode === 'month' ? events.slice(0, 2) : events
 
   return (
@@ -210,10 +219,20 @@ function DayCell({ day, mode, anchor, events, tasks, onEvent, onAdd }: {
             +{events.length - 2} ещё
           </span>
         )}
-        {tasks.length > 0 && (
+        {рабочие.length > 0 && (
           <span className={cn('block px-1 text-[11px]',
             просрочено ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
-            {просрочено ? `${просрочено} просрочено` : `${tasks.length} ${срок(tasks.length)}`}
+            {просрочено ? `${просрочено} просрочено` : `${рабочие.length} ${срок(рабочие.length)}`}
+          </span>
+        )}
+        {/* Тихий знак: своё видно, но не спорит за внимание с обязательствами
+            перед компанией. Красным не красим даже просроченное — просрочить
+            обещание себе и обещание компании не одно и то же. */}
+        {записи.length > 0 && (
+          <span className="flex items-center gap-1 px-1 text-[11px] text-muted-foreground/70"
+            title={`Своих записей со сроком: ${записи.length}`}>
+            <NotebookPen className="h-3 w-3 shrink-0" />
+            {записи.length}
           </span>
         )}
       </div>

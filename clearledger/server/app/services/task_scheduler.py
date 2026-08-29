@@ -29,7 +29,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import String, and_, cast, or_, select, text
+from sqlalchemy import String, and_, cast, func, or_, select, text
 
 from app.auth import resolve_member_modules
 from app.database import async_session_factory
@@ -201,9 +201,13 @@ async def run_due_reminders(db, now: datetime, bucket: digest.Bucket) -> int:
     перестают читать, — а «завтра срок» не бывает срочнее сна.
     """
     soon = now + timedelta(days=1)
+    # Кому напоминаем: исполнителю, а у своей записи — автору. Личная запись
+    # исполнителя не имеет, и без этого `coalesce` она молча выпадала бы из
+    # выборки на самом соединении.
+    получатель = func.coalesce(Task.assignee_id, Task.author_id)
     rows = (await db.execute(
         select(Task)
-        .join(User, User.id == Task.assignee_id)
+        .join(User, User.id == получатель)
         .where(Task.status == "open", Task.due_at.is_not(None), Task.due_at <= soon,
                User.mail_only.is_(False),
                # Раз в сутки на задачу: «скоро срок» и «срок прошёл» — это два
@@ -211,10 +215,13 @@ async def run_due_reminders(db, now: datetime, bucket: digest.Bucket) -> int:
                or_(Task.reminded_at.is_(None), Task.reminded_at <= now - timedelta(days=1)),
                # Отданное наружу не напоминаем исполнителю: мяч не у него.
                or_(Task.waiting_for.is_(None), Task.waiting_for != "external"),
-               # Личная запись в сводку не попадает: человек завёл её себе, а
-               # сводка — это то, что компания просит у него. Свой срок —
-               # своим напоминанием (`PersonalReminder`).
-               Task.visibility != "personal"))).scalars().all()
+               # Своя запись со сроком напоминает о себе наравне с поручением:
+               # правило «без срока — заметка, со сроком — дело» иначе остаётся
+               # обещанием. Запрет на личное был верен, пока напоминание уходило
+               # ПИСЬМОМ на рабочий ящик; сводка приходит в личную комнату
+               # самого человека, где её не видит никто, включая администратора.
+               or_(Task.visibility != "personal",
+                   Task.author_id == получатель)))).scalars().all()
     sent = 0
     for t in rows:
         overdue = t.due_at < now
@@ -224,7 +231,7 @@ async def run_due_reminders(db, now: datetime, bucket: digest.Bucket) -> int:
         день = t.due_at.astimezone(
             space_time.zone(await bucket.tz(db, t.company_id))).strftime("%d.%m.%Y")
         bucket.add(
-            t.company_id, t.assignee_id, f"task-due:{t.id}",
+            t.company_id, t.assignee_id or t.author_id, f"task-due:{t.id}",
             (f"{'Просрочено' if overdue else 'Завтра срок'}: №{t.number} "
              f"«{t.title}» — {день}"),
             mark=lambda t=t: setattr(t, "reminded_at", now))

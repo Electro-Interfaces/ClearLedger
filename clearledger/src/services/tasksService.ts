@@ -16,6 +16,13 @@ export interface WorkColumnDef { code: WorkColumn; name: string }
 
 export interface TaskLabel { id: string; name: string; color: string }
 export interface TaskProgress { total: number; done: number }
+
+export interface ChecklistItem {
+  id: string
+  text: string
+  done: boolean
+  position: number
+}
 /** План и факт по времени: оценка задачи и сумма записей о работе. */
 export interface TaskTime {
   estimate: number | null; spent: number
@@ -135,6 +142,13 @@ export interface SpaceTask {
   closed_at: string | null
   labels?: TaskLabel[]
   checklist?: TaskProgress
+  /** Сами пункты — только у записной книжки: там список ЕСТЬ содержание
+   *  записи, а не признак «внутри что-то есть». */
+  checklist_items?: ChecklistItem[]
+  /** Текст ЦЕЛИКОМ — тоже только у записной книжки: её строку правят на
+   *  месте, и правка по обрезанному `preview` стёрла бы всё, что человек
+   *  написал ниже двухсотого знака. */
+  description?: string | null
   subtasks?: TaskSubtasks
   time?: TaskTime
   /** Как ЭТОТ человек разложил задачу у себя: день, подборка, звезда, сокрытие.
@@ -249,6 +263,9 @@ export type TaskScope = 'open' | 'mine' | 'assigned' | 'watching' | 'overdue'
   | 'today' | 'waiting' | 'closed' | 'all'
   /** На разбор: живая работа без исполнителя — её надо взять, отдать или закрыть. */
   | 'triage'
+  /** Всё, у чего МОЙ срок: порученное мне и своя датированная запись. Вопрос
+   *  календаря; «Поручения» спрашивают другое — что я выполняю. */
+  | 'my_due'
 
 export interface TaskFilters {
   objectId?: string; projectId?: string; typeId?: string; assigneeId?: string; authorId?: string
@@ -590,6 +607,13 @@ export async function updateChecklistItem(taskId: string, itemId: string, data: 
 
 export async function deleteChecklistItem(taskId: string, itemId: string, companyId: string) {
   return del(`/api/tasks/${taskId}/checklist/${itemId}?company_id=${encodeURIComponent(companyId)}`)
+}
+
+/** Прежние редакции записи: пара к автосохранению. Сохранять молча и не
+ *  давать вернуться — способ однажды потерять абзац навсегда. */
+export async function noteRevisions(taskId: string, companyId: string) {
+  return get<{ revisions: { id: string; at: string | null; text: string }[] }>(
+    `/api/tasks/${taskId}/revisions`, { company_id: companyId })
 }
 
 export async function addTaskLink(taskId: string, data: {

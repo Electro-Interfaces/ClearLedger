@@ -122,7 +122,7 @@ export interface MyWorkItem {
   id: string
   /** `approve` — виза, `acquaint` — ознакомление, `do` — работа,
    *  `unassigned` — своё поручение без исполнителя, `own` — мой документ. */
-  reason: 'approve' | 'acquaint' | 'do' | 'unassigned' | 'own'
+  reason: 'approve' | 'acquaint' | 'do' | 'unassigned' | 'own' | 'own_note'
   reason_name: string
   key: string
   title: string

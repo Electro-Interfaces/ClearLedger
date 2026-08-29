@@ -13,7 +13,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
-  Check, Eye, FileText, ListChecks, Loader2, Stamp, UserPlus,
+  Check, Eye, FileText, ListChecks, Loader2, NotebookPen, Stamp, UserPlus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,9 @@ const REASON_ICON = {
   approve: Stamp, acquaint: Eye, do: ListChecks, own: FileText,
   // Своё поручение, которое никому не отдали: работа есть, спрашивать не с кого.
   unassigned: UserPlus,
+  // Своя запись, которой поставили срок. Значок другой намеренно: обязательство
+  // перед собой и обязательство перед компанией нельзя путать в одном списке.
+  own_note: NotebookPen,
 } as const
 
 export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
@@ -72,7 +75,8 @@ export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
   // Действие в строке — то же самое, что в карточке: одна ручка, один след.
   const act = useMutation({
     mutationFn: async (item: MyWorkItem) => {
-      if (item.reason === 'do' || item.reason === 'unassigned') {
+      if (item.reason === 'do' || item.reason === 'unassigned'
+        || item.reason === 'own_note') {
         return tasksService.taskAction(item.id, {
           companyId: company.id, status: 'done',
         })
@@ -161,6 +165,7 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
   // Кнопка показана только там, где действие правда доступно строкой: визу
   // ставят в карточке, где видно лист согласования и предыдущие круги.
   const canFinish = item.reason === 'do' || item.reason === 'unassigned'
+    || item.reason === 'own_note'
     || (item.reason === 'acquaint' && item.acquaint_id)
   return (
     <div className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">

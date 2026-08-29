@@ -345,6 +345,10 @@ def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
         # открывая её. Целиком описание в строку не кладём — на двухстах строках
         # это сотни килобайт ради текста, который читают у одной.
         "preview": (t.description or "")[:200] or None,
+        # Записной книжке — текст ЦЕЛИКОМ (`extra["description"]` из `_extras`).
+        # Её строку правят на месте, а правка по обрезанному до двухсот знаков
+        # тексту молча стёрла бы всё, что человек написал ниже.
+        # Ключ приходит из `extra` и в обычном реестре отсутствует.
         # Предмет работы: по нему человек, открывший поручение из ленты проекта,
         # понимает, откуда оно, и возвращается назад. Без этого связь была
         # односторонней — из проекта в работу пройти можно, обратно нет.
@@ -410,7 +414,8 @@ async def _names(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[st
     } for t in tasks}
 
 
-async def _extras(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[str, Any]]:
+async def _extras(db: AsyncSession, tasks: list[Task], *,
+                  with_items: bool = False) -> dict[uuid.UUID, dict[str, Any]]:
     """Метки, прогресс чек-листа и число подзадач — пачкой на весь список.
 
     Это то, что видно прямо в строке списка: по галочкам «3 из 5» человек понимает,
@@ -434,6 +439,20 @@ async def _extras(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[s
         .where(TaskChecklistItem.task_id.in_(ids))
         .group_by(TaskChecklistItem.task_id))).all():
         check[tid] = {"total": total, "done": done}
+
+    # Сами пункты — только записной книжке (`with_items`). Там список покупок или
+    # шагов и ЕСТЬ содержание записи, а не признак «внутри что-то есть»: строка
+    # без пунктов означала бы, что за каждой галочкой надо открывать карточку.
+    # Общему реестру они не нужны — на двухстах задачах это лишние килобайты на
+    # строку ради того, чего в ней не показывают.
+    items: dict[uuid.UUID, list[dict]] = {i: [] for i in ids}
+    if with_items:
+        for row in (await db.execute(
+            select(TaskChecklistItem).where(TaskChecklistItem.task_id.in_(ids))
+            .order_by(TaskChecklistItem.position, TaskChecklistItem.created_at))
+        ).scalars():
+            items[row.task_id].append({"id": str(row.id), "text": row.text,
+                                       "done": row.done, "position": row.position})
 
     spent: dict[uuid.UUID, int] = {}
     for tid, total in (await db.execute(
@@ -467,6 +486,12 @@ async def _extras(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[s
     return {t.id: {
         "labels": labels.get(t.id, []),
         "checklist": check.get(t.id, {"total": 0, "done": 0}),
+        **({"checklist_items": items.get(t.id, []),
+            # Текст целиком — только записной книжке: её строку правят на месте,
+            # и правка по обрезанному `preview` стёрла бы всё ниже двухсотого
+            # знака. В общем реестре это сотни килобайт ради текста, который
+            # читают у одной строки из двухсот.
+            "description": t.description} if with_items else {}),
         "subtasks": kids.get(t.id, {"total": 0, "open": 0}),
         "attachments": files.get(t.id, []),
         "time": {
@@ -524,6 +549,12 @@ def _visible_to(user: User, is_admin: bool):
     )
 
 
+# Как часто снимается редакция записи. Чаще — «Ход работы» превращается в
+# поток «правка, правка, правка», и нужную редакцию в нём не найти; реже —
+# теряется абзац, стёртый пять минут назад.
+NOTE_REV_MINUTES = 10
+
+
 def _not_personal():
     """Отбор для общих списков: личные записи в работу компании не входят.
 
@@ -533,6 +564,21 @@ def _not_personal():
     тихо затопили бы общие списки — это главный способ провалить личный раздел.
     """
     return Task.visibility != "personal"
+
+
+def _my_dated_personal(user: User):
+    """Своя запись, у которой появился срок.
+
+    Правило «без срока — заметка, со сроком — дело» держится не на словах, а на
+    этом условии: как только человек поставил записи срок, она обязана появиться
+    там, где он смотрит свои обязательства, — в очереди, в календаре, в своей
+    сводке. Иначе срок остаётся надписью в книжке, а правило — обещанием.
+
+    Личной она при этом быть не перестаёт: видит её по-прежнему только автор, и
+    ни в реестр компании, ни на доску, ни в чужую сводку она не попадает.
+    """
+    return and_(Task.visibility == "personal", Task.author_id == user.id,
+                Task.due_at.is_not(None))
 
 
 async def _is_admin(db: AsyncSession, cid: uuid.UUID, user: User) -> bool:
@@ -651,7 +697,7 @@ async def _parse_query(db: AsyncSession, cid: uuid.UUID, user: User,
 @router.get("")
 async def list_tasks(
     company_id: str = Query(...),
-    scope: str = Query("open", pattern="^(open|mine|assigned|watching|overdue|today|waiting|closed|all)$"),
+    scope: str = Query("open", pattern="^(open|mine|my_due|assigned|watching|overdue|today|waiting|closed|all|triage)$"),
     # Личная лента запрашивается явно. Без параметра список отвечает про работу
     # компании, и личные записи в него не входят — иначе записная книжка одного
     # человека попадёт в реестр, доску и счётчики всех остальных.
@@ -734,6 +780,15 @@ async def list_tasks(
         # иначе список «что делать» наполняется тем, что делать сейчас нельзя.
         sel = sel.where(Task.status == "open", Task.assignee_id == current_user.id,
                         or_(Task.waiting_for.is_(None), Task.waiting_for != "external"))
+    elif scope == "my_due":
+        # Всё, у чего МОЙ срок: порученное мне и своя датированная запись.
+        # Отдельный разрез, а не расширение «мои»: «Поручения» отвечают на вопрос
+        # «что я выполняю», и записная книжка там не работа, а личное. Календарь
+        # же спрашивает именно про сроки — и своё обязательство в нём обязано
+        # стоять рядом с чужим, иначе человек планирует день по половине картины.
+        sel = sel.where(Task.status == "open", Task.due_at.is_not(None),
+                        or_(Task.assignee_id == current_user.id,
+                            _my_dated_personal(current_user)))
     elif scope == "waiting":
         sel = sel.where(Task.status == "open", Task.waiting_for == "external")
     elif scope == "assigned":
@@ -817,7 +872,9 @@ async def list_tasks(
 
     tasks = list((await db.execute(sel.limit(limit).offset(offset))).scalars())
     names = await _names(db, tasks)
-    extras = await _extras(db, tasks)
+    # Пункты чек-листа нужны только записной книжке: там они и есть содержание
+    # записи, а в общем реестре их не показывают.
+    extras = await _extras(db, tasks, with_items=(visibility == "personal"))
     # Личная отметка приезжает вместе со строкой, одним запросом на страницу.
     # Без неё действия раскладки в строке работали вслепую — солнце не залито у
     # взятого в день, «убрать из подборки» не появляется никогда, — и их
@@ -2349,13 +2406,42 @@ async def task_action(
                       t.due_at.strftime("%d.%m.%Y") if t.due_at else None,
                       payload.due_at.strftime("%d.%m.%Y"))
         t.due_at = payload.due_at
+    правка_текста = (
+        (payload.title is not None and payload.title.strip() != t.title)
+        or (payload.description is not None
+            and (payload.description or None) != t.description))
+    # У ЗАПИСИ текст и есть содержание, а правится она автосохранением. Значит
+    # нужны две вещи, которых нет у обычной задачи: откат и молчание в следе.
+    #
+    # Откат — снимок прежнего текста целиком (`note_rev`), потому что
+    # автосохранение без отката опасно: стёр абзац — вернуть нечем. Не чаще раза
+    # в десять минут, иначе история редакций превращается в поток, в котором
+    # нужную не найти.
+    #
+    # Молчание — обычная запись «правка» на каждое нажатие клавиши забила бы
+    # «Ход работы» целиком; для записи следом служит сам снимок.
+    личная = t.visibility == "personal"
+    if правка_текста and личная:
+        сейчас = datetime.now(timezone.utc)
+        последняя = (await db.execute(
+            select(TaskEvent.created_at)
+            .where(TaskEvent.task_id == t.id, TaskEvent.kind == "note_rev")
+            .order_by(TaskEvent.created_at.desc()).limit(1))).scalar_one_or_none()
+        if последняя is None or последняя <= сейчас - timedelta(minutes=NOTE_REV_MINUTES):
+            db.add(TaskEvent(task_id=t.id, kind="note_rev", user_id=current_user.id,
+                             from_value="редакция",
+                             note="\n".join(
+                                 x for x in (t.title, t.description) if x)))
+            logged = True
     if payload.title is not None and payload.title.strip() != t.title:
-        field_changed("заголовок", t.title, payload.title.strip())
+        if not личная:
+            field_changed("заголовок", t.title, payload.title.strip())
         t.title = payload.title.strip()
     if payload.description is not None and (payload.description or None) != t.description:
         # Текст описания в след не тащим — он бывает на восемь тысяч знаков;
         # важен факт правки и автор, сам текст виден в карточке.
-        field_changed("описание", "правка", "правка")
+        if not личная:
+            field_changed("описание", "правка", "правка")
         t.description = payload.description or None
     if payload.object_id is not None and (payload.object_id or None) != t.object_id:
         field_changed("объект", t.object_id, payload.object_id or None)
@@ -2685,6 +2771,39 @@ class LinkIn(BaseModel):
     company_id: str
     related_task_id: str
     kind: str = Field("relates", pattern="^(subtask|blocks|relates|duplicates)$")
+
+
+@router.get("/{task_id}/revisions")
+async def note_revisions(
+    task_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Прежние редакции записи: что было до правки.
+
+    Пара к автосохранению. Сохранять молча и не давать вернуться — способ
+    однажды потерять абзац навсегда, а «Ход работы» с записями «правка, правка»
+    на этот вопрос не отвечает: там факт, а не текст.
+
+    Только своё и только у записи: у обычной задачи текст правят осознанно и с
+    комментарием, и заводить ей вторую историю поверх следа незачем.
+    """
+    cid = await _assert_work(company_id, current_user, db)
+    t = await db.get(Task, _uuid_or_400(task_id, "task_id"))
+    if t is None or t.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Запись не найдена")
+    if t.visibility != "personal" or t.author_id != current_user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша запись")
+    rows = (await db.execute(
+        select(TaskEvent).where(TaskEvent.task_id == t.id,
+                                TaskEvent.kind == "note_rev")
+        .order_by(TaskEvent.created_at.desc()).limit(20))).scalars().all()
+    return {"revisions": [{
+        "id": str(r.id),
+        "at": r.created_at.isoformat() if r.created_at else None,
+        "text": r.note or "",
+    } for r in rows]}
 
 
 @router.post("/{task_id}/links", status_code=status.HTTP_201_CREATED)
