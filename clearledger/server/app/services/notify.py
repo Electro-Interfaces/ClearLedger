@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -70,7 +71,9 @@ async def _secretary(db: AsyncSession, company_id: uuid.UUID) -> User:
 
 
 async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
-                        text: str) -> bool:
+                        text: str, *, edit_message_id: uuid.UUID | None = None,
+                        ttl: int | None = None,
+                        urgency: str = "normal") -> uuid.UUID | None:
     """Сообщение лично человеку — мимо подписок компании.
 
     `dispatch` рассылает по `NotificationRule` в общую комнату «Оповещения», и
@@ -78,6 +81,15 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
     администратору не адресуется никогда, поэтому маршрут свой, а транспорт —
     тот же чат пространства: счётчик непрочитанного, «без звука» и web-push у
     него уже есть, и второй такой механизм начал бы расходиться с первым.
+
+    `edit_message_id` — править сказанное, а не говорить снова. Сводка окна
+    дописывается в то же сообщение: новое на каждый повод превращает личную
+    комнату в свалку, и напоминание тонет в ней ровно так же, как тонет
+    напоминание в ленте Slack. Пропавшее сообщение (комнату почистили) не
+    считается ошибкой — пишем новое.
+
+    Возвращает идентификатор сообщения: он и есть то, что правят в следующий
+    раз. `None` — доставка не состоялась.
     """
     from app.models import ChatMessage, ChatParticipant, ChatRoom
 
@@ -102,8 +114,20 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
         ])
         await db.flush()
 
-    db.add(ChatMessage(room_id=room.id, user_id=secretary.id,
-                       user_name=SECRETARY_NAME, type="text", content=text))
+    message = None
+    if edit_message_id is not None:
+        message = await db.get(ChatMessage, edit_message_id)
+        if message is not None and (message.room_id != room.id
+                                    or message.deleted_at is not None):
+            message = None
+    if message is not None:
+        message.content = text
+        message.is_edited = True
+        message.edited_at = datetime.now(timezone.utc)
+    else:
+        message = ChatMessage(room_id=room.id, user_id=secretary.id,
+                              user_name=SECRETARY_NAME, type="text", content=text)
+        db.add(message)
     await db.flush()
 
     # Открытую вкладку не дёргаем событием сокета: список чатов у неё и так
@@ -113,10 +137,11 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
     try:
         from app.services import web_push
 
-        web_push.push_room_async(room.id, SECRETARY_NAME, text, secretary.id)
+        web_push.push_room_async(room.id, SECRETARY_NAME, text, secretary.id,
+                                 ttl=ttl, urgency=urgency)
     except Exception as e:  # noqa: BLE001
         logger.debug("Напоминание не ушло в push: %s", e)
-    return True
+    return message.id
 
 
 # ---------------------------------------------------------------------------

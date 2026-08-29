@@ -29,12 +29,32 @@ type Draft = {
   name: string
   mobile: string
   office: string
+  tz: string
+  workStart: string
+  workEnd: string
   theme: ThemePreference
   level: UiLevel
   send: SendMode
   photo: File | null
   photoRemoved: boolean
 }
+
+/** Пояса России, в которых работают пространства. Список, а не свободный ввод:
+ *  имя IANA руками не наберут, а «Moscow» вместо «Europe/Moscow» сервер отобьёт.
+ *  Смещение в подписи — чтобы человек узнал свой пояс, не вспоминая его имени. */
+const ПОЯСА: { id: string; label: string }[] = [
+  { id: 'Europe/Kaliningrad', label: 'Калининград (UTC+2)' },
+  { id: 'Europe/Moscow', label: 'Москва, Санкт-Петербург (UTC+3)' },
+  { id: 'Europe/Samara', label: 'Самара (UTC+4)' },
+  { id: 'Asia/Yekaterinburg', label: 'Екатеринбург (UTC+5)' },
+  { id: 'Asia/Omsk', label: 'Омск (UTC+6)' },
+  { id: 'Asia/Krasnoyarsk', label: 'Красноярск (UTC+7)' },
+  { id: 'Asia/Irkutsk', label: 'Иркутск (UTC+8)' },
+  { id: 'Asia/Yakutsk', label: 'Якутск (UTC+9)' },
+  { id: 'Asia/Vladivostok', label: 'Владивосток (UTC+10)' },
+  { id: 'Asia/Magadan', label: 'Магадан (UTC+11)' },
+  { id: 'Asia/Kamchatka', label: 'Петропавловск-Камчатский (UTC+12)' },
+]
 
 /** Кем человек приходится этому пространству. Заполняет администратор. */
 const УЧАСТИЕ: Record<string, { label: string; hint: string }> = {
@@ -94,6 +114,9 @@ export function PersonalSettings() {
     name: user?.name ?? '',
     mobile: user?.phone_mobile ?? '',
     office: user?.phone_office ?? '',
+    tz: user?.tz ?? 'Europe/Moscow',
+    workStart: user?.work_start ?? '09:00',
+    workEnd: user?.work_end ?? '18:00',
     theme: themePref,
     level,
     send: sendMode,
@@ -116,6 +139,9 @@ export function PersonalSettings() {
   const dirty = draft.name.trim() !== (user?.name ?? '')
     || draft.mobile.trim() !== (user?.phone_mobile ?? '')
     || draft.office.trim() !== (user?.phone_office ?? '')
+    || draft.tz !== (user?.tz ?? 'Europe/Moscow')
+    || draft.workStart !== (user?.work_start ?? '09:00')
+    || draft.workEnd !== (user?.work_end ?? '18:00')
     || draft.theme !== themePref || draft.level !== level || draft.send !== sendMode
     || !!draft.photo || draft.photoRemoved
 
@@ -140,10 +166,16 @@ export function PersonalSettings() {
     try {
       // Сначала серверное — если оно не пройдёт, локальные настройки не должны
       // разъехаться с тем, что человек видит на других устройствах.
-      const тело: { name?: string; avatarUrl?: string; phoneMobile?: string; phoneOffice?: string } = {}
+      const тело: {
+        name?: string; avatarUrl?: string; phoneMobile?: string; phoneOffice?: string
+        tz?: string; workStart?: string; workEnd?: string
+      } = {}
       if (имя !== (user?.name ?? '')) тело.name = имя
       if (draft.mobile.trim() !== (user?.phone_mobile ?? '')) тело.phoneMobile = draft.mobile.trim()
       if (draft.office.trim() !== (user?.phone_office ?? '')) тело.phoneOffice = draft.office.trim()
+      if (draft.tz !== (user?.tz ?? 'Europe/Moscow')) тело.tz = draft.tz
+      if (draft.workStart !== (user?.work_start ?? '09:00')) тело.workStart = draft.workStart
+      if (draft.workEnd !== (user?.work_end ?? '18:00')) тело.workEnd = draft.workEnd
       if (draft.photoRemoved) тело.avatarUrl = ''
       else if (draft.photo) тело.avatarUrl = (await chat.uploadAttachment(draft.photo, company.id)).fileUrl
       if (Object.keys(тело).length) {
@@ -247,6 +279,50 @@ export function PersonalSettings() {
               </Label>
               <Input id="pers-off" value={draft.office} maxLength={40} inputMode="tel"
                 onChange={(e) => set('office', e.target.value)} placeholder="+7 812 000-00-00, доб. 123" />
+            </div>
+          </div>
+        </div>
+
+        {/* Когда человека можно трогать. Настройка не косметическая: по ней
+            планировщик решает, доставить регламентное сейчас или сдвинуть на
+            утро. Пространство растянуто от Владивостока до Москвы, и «за сутки
+            до срока» не бывает срочнее сна. */}
+        <div className="space-y-3 border-t pt-5">
+          <div>
+            <h3 className="text-sm font-medium">Рабочее время</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Сводка «Секретаря» приходит в начале дня и в середине, в вашем поясе.
+              Вне этих часов и по выходным регламентные напоминания ждут: они не
+              теряются, а сдвигаются на ближайшее рабочее окно. То, что вы поставили
+              себе сами, приходит точно в срок и в тишину.
+            </p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="space-y-1.5 sm:col-span-3">
+              <Label htmlFor="pers-tz" className="text-xs font-normal text-muted-foreground">
+                Часовой пояс
+              </Label>
+              <select id="pers-tz" value={draft.tz}
+                onChange={(e) => set('tz', e.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm">
+                {ПОЯСА.map((z) => (
+                  <option key={z.id} value={z.id}>{z.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pers-ws" className="text-xs font-normal text-muted-foreground">
+                Начало дня
+              </Label>
+              <Input id="pers-ws" type="time" value={draft.workStart}
+                onChange={(e) => set('workStart', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pers-we" className="text-xs font-normal text-muted-foreground">
+                Конец дня
+              </Label>
+              <Input id="pers-we" type="time" value={draft.workEnd}
+                onChange={(e) => set('workEnd', e.target.value)} />
             </div>
           </div>
         </div>

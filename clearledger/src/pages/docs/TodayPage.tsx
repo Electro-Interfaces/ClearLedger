@@ -17,6 +17,7 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import {
   Bell, Check, ChevronDown, ChevronRight, Clock3, EyeOff, Loader2, Sun,
 } from 'lucide-react'
@@ -215,6 +216,14 @@ function Row({ row, busy, onSnooze, onDone }: {
   row: PersonalReminder; busy: boolean
   onSnooze: (minutes: number) => void; onDone: () => void
 }) {
+  const navigate = useNavigate()
+  // Откладывали трижды — предлагаем другое, а не то же самое. На измеренных
+  // данных отклонивший первое напоминание серии отклоняет следующие в 88%
+  // случаев, и дело не в привыкании, а в перегрузке: повторять ту же кнопку
+  // бессмысленно. Решение живёт в карточке предмета — там и срок, и исполнитель,
+  // и чек-лист, на который работу разбивают.
+  const застряло = row.snooze_count > 2
+  const куда = workService.refHref(row.target_ref)
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border px-3 py-2 last:border-0">
       <span className="min-w-[12rem] flex-1 text-sm text-foreground">
@@ -223,19 +232,26 @@ function Row({ row, busy, onSnooze, onDone }: {
       <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
         <Clock3 className="h-3 w-3" />{dtT(row.remind_at)}
       </span>
-      {/* Сколько раз откладывали — единственный сигнал, который личный помощник
-          может вернуть человеку: отложенное шестой раз это дело, которого не
-          будет, и полезнее решить его судьбу, чем двигать дальше. */}
-      {row.snooze_count > 2 && (
+      {застряло && (
         <span className="text-xs text-amber-600 dark:text-amber-400">
-          откладывали {row.snooze_count} {раз(row.snooze_count)}
+          откладывали {row.snooze_count} {раз(row.snooze_count)} — перенесите срок,
+          передайте или снимите
         </span>
       )}
       <span className="flex items-center gap-1">
-        <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={busy}
-          onClick={() => onSnooze(60)}>Через час</Button>
-        <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={busy}
-          onClick={() => onSnooze(60 * 24)}>Завтра</Button>
+        {застряло ? (
+          куда && (
+            <Button size="sm" variant="outline" className="h-8 px-2 text-xs"
+              disabled={busy} onClick={() => navigate(куда)}>Заняться</Button>
+          )
+        ) : (
+          <>
+            <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={busy}
+              onClick={() => onSnooze(60)}>Через час</Button>
+            <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" disabled={busy}
+              onClick={() => onSnooze(60 * 24)}>Завтра</Button>
+          </>
+        )}
         <Button size="sm" variant="ghost" className="h-8 px-2" disabled={busy}
           title="Больше не напоминать" onClick={onDone}>
           <Check className="h-3.5 w-3.5" />

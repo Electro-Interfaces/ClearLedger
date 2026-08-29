@@ -342,6 +342,7 @@ export interface ChatUserProfile {
 /** Своё имя и фото — то, что человек меняет о себе сам. */
 export const updateMe = (body: {
   name?: string; avatarUrl?: string; phoneMobile?: string; phoneOffice?: string
+  tz?: string; workStart?: string; workEnd?: string
 }) => patch<{ ok: boolean; name: string; avatarUrl: string | null }>('/api/chat/me', body)
 
 export const getUserProfile = (userId: string) =>

@@ -2707,6 +2707,9 @@ async def user_profile(
         "lastSeenAt": u.last_seen_at.isoformat() if u.last_seen_at else None,
         "avatarUrl": u.avatar_url,
         "mailOnly": u.mail_only,
+        "tz": u.tz,
+        "workStart": u.work_start.strftime("%H:%M"),
+        "workEnd": u.work_end.strftime("%H:%M"),
     }
 
 
@@ -2719,6 +2722,12 @@ class MyProfileBody(BaseModel):
     # правит сам. "" — убрать номер.
     phoneMobile: str | None = None
     phoneOffice: str | None = None
+    # Когда его можно трогать. Правит сам и никто больше: рабочее окно — это про
+    # его жизнь, а не про его должность. Пояс — имя IANA («Asia/Vladivostok»), а
+    # не смещение: смещение меняется при переводе часов.
+    tz: str | None = None
+    workStart: str | None = None   # «09:00»
+    workEnd: str | None = None     # «18:00»
 
 
 @router.patch("/me")
@@ -2745,8 +2754,43 @@ async def update_me(
                            ("phone_office", body.phoneOffice)):
         if значение is not None:
             setattr(current_user, поле, значение.strip()[:40] or None)
+    if body.tz is not None:
+        # Неизвестное имя отбиваем здесь, а не молча заменяем умолчанием: там,
+        # где человек настраивает своё время, тихая подмена — самый верный
+        # способ получить «я же поставил Владивосток» через месяц.
+        from app.services import space_time
+
+        имя = body.tz.strip()
+        if space_time.zone(имя).key != имя:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Неизвестный часовой пояс: {имя}")
+        current_user.tz = имя
+    for поле, значение in (("work_start", body.workStart),
+                           ("work_end", body.workEnd)):
+        if значение is None:
+            continue
+        try:
+            setattr(current_user, поле, _time_of(значение))
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Время в формате ЧЧ:ММ") from exc
+    if current_user.work_start >= current_user.work_end:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Рабочий день должен заканчиваться позже, чем начинается")
     await db.commit()
-    return {"ok": True, "name": current_user.name, "avatarUrl": current_user.avatar_url}
+    return {"ok": True, "name": current_user.name, "avatarUrl": current_user.avatar_url,
+            "tz": current_user.tz,
+            "workStart": current_user.work_start.strftime("%H:%M"),
+            "workEnd": current_user.work_end.strftime("%H:%M")}
+
+
+def _time_of(value: str):
+    """«09:00» → time. Отдельной функцией, потому что зовётся дважды и обязана
+    одинаково отбивать мусор в обоих полях."""
+    from datetime import time as _time
+
+    ч, _, м = value.strip().partition(":")
+    return _time(int(ч), int(м or 0))
 
 
 # ── presence ─────────────────────────────────────────────────────────────────

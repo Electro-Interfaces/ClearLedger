@@ -4011,6 +4011,30 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.77: время пространства (этап 14б «Трека»). Пояс и рабочее окно у
+        # человека, пояс у организации. До этого сервер считал «сегодня» по UTC:
+        # в Москве это врало с полуночи до трёх, во Владивостоке — полсуток.
+        # Умолчания заданы server_default, поэтому существующие строки получают
+        # московское время без отдельного UPDATE — это и есть прежнее поведение
+        # для пилота, а не выдуманный UTC, в котором не работает никто.
+        for stmt in (
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS tz VARCHAR(64) "
+            "NOT NULL DEFAULT 'Europe/Moscow'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS work_start TIME "
+            "NOT NULL DEFAULT '09:00'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS work_end TIME "
+            "NOT NULL DEFAULT '18:00'",
+            "ALTER TABLE companies ADD COLUMN IF NOT EXISTS tz VARCHAR(64) "
+            "NOT NULL DEFAULT 'Europe/Moscow'",
+            # Сводка окна. Уникальность в базе, а не только в сервисе: сводку
+            # правят из планировщика, у которого несколько воркеров, и вторая
+            # строка на то же окно означала бы два сообщения вместо одного —
+            # ровно тот поток, ради ухода от которого окно и заведено.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_personal_digests_slot "
+            "ON personal_digests (company_id, user_id, slot_at)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

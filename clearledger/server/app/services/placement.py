@@ -105,7 +105,7 @@ async def put(db: AsyncSession, company_id: uuid.UUID, user_id: uuid.UUID,
               target_ref: str, *, list_id: uuid.UUID | None = None,
               taken_for: date | None = None, deferred_until: date | None = None,
               starred: bool | None = None, position: int | None = None,
-              due_at: datetime | str | None = None,
+              due_at: datetime | str | None = None, today: date | None = None,
               drop_day: bool = False, undefer: bool = False,
               clear: bool = False) -> PersonalMark | None:
     """Поставить или изменить отметку. Переданное меняется, остальное стоит.
@@ -150,7 +150,9 @@ async def put(db: AsyncSession, company_id: uuid.UUID, user_id: uuid.UUID,
         # одновременно означали бы, что предмет и в дне, и спрятан.
         row.deferred_until = None
     if deferred_until is not None:
-        row.deferred_until = clamp_defer(deferred_until, due_at)
+        # `today` — местный день ЧЕЛОВЕКА: он прячет предмет у себя, и «завтра»
+        # у него наступает по его часам, а не по серверным.
+        row.deferred_until = clamp_defer(deferred_until, due_at, today)
         row.taken_for = None
         row.defer_count += 1
     if starred is not None:

@@ -150,6 +150,17 @@ export async function myWork(companyId: string) {
   }>('/api/work/mine', { company_id: companyId, today: todayKey() })
 }
 
+/** Куда ведёт предмет, названный словарём пространства (`task:<uuid>`).
+ *  Пусто — вида не знаем, и вести человека наугад хуже, чем не вести. */
+export function refHref(targetRef: string): string | null {
+  const [kind, id] = targetRef.split(':')
+  if (!id) return null
+  if (kind === 'doc') return `/docs?view=all&doc=${id}`
+  if (kind === 'task') return `/docs/company?view=errands&task=${id}`
+  if (kind === 'event') return `/docs/work?view=calendar&event=${id}`
+  return null
+}
+
 /** Куда ведёт строка очереди: виза открывается в карточке документа. */
 export function myWorkHref(item: MyWorkItem): string {
   return item.kind === 'doc'

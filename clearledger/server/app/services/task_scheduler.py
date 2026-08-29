@@ -39,8 +39,8 @@ from app.models import (
     User, UserCompany,
 )
 from app.services import (
-    doc_approvals, doc_exchange, process_templates, space_events, task_mail,
-    work_state)
+    digest, doc_approvals, doc_exchange, process_templates, space_events,
+    space_time, task_mail, work_state)
 
 log = logging.getLogger("clearledger.tasks.scheduler")
 
@@ -54,6 +54,17 @@ BREAK_GLASS_LOCK_KEY = 0x0B6A55
 APPROVAL_LOCK_KEY = 0x0A9F00
 EVENTS_LOCK_KEY = 0x0E7E415
 PERSONAL_LOCK_KEY = 0x0FE250
+DIGEST_LOCK_KEY = 0x0D19E57
+
+# Доля срока реакции, оставшаяся к моменту предупреждения: последняя четверть.
+# Не фиксированный час: у типа со сроком реакции в два часа предупреждение за
+# час — это половина срока и шум, а у суточного за час до конца человек уже
+# ничего не успеет.
+WARN_FRACTION = 0.25
+
+# Проходы, которые не шлют сами, а кладут повод в сводку окна.
+_WITH_BUCKET = frozenset({"reminders", "escalations", "acquaints",
+                          "approvals", "digests"})
 
 
 def _tz(rule: dict) -> ZoneInfo:
@@ -182,39 +193,64 @@ async def run_recurrences(db, now: datetime) -> int:
     return made
 
 
-async def run_due_reminders(db, now: datetime) -> int:
-    """Напомнить исполнителю о сроке: за сутки до и в день просрочки."""
+async def run_due_reminders(db, now: datetime, bucket: digest.Bucket) -> int:
+    """Напомнить исполнителю о сроке: за сутки до и в день просрочки.
+
+    Не письмом и не сразу: повод кладётся в сводку окна (`services/digest.py`).
+    Письмо на каждый срок и было тем потоком, из-за которого напоминания
+    перестают читать, — а «завтра срок» не бывает срочнее сна.
+    """
     soon = now + timedelta(days=1)
     rows = (await db.execute(
-        select(Task, User.email, User.name)
+        select(Task)
         .join(User, User.id == Task.assignee_id)
         .where(Task.status == "open", Task.due_at.is_not(None), Task.due_at <= soon,
                User.mail_only.is_(False),
                # Раз в сутки на задачу: «скоро срок» и «срок прошёл» — это два
-               # письма за жизнь задачи, а не поток.
+               # повода за жизнь задачи, а не поток.
                or_(Task.reminded_at.is_(None), Task.reminded_at <= now - timedelta(days=1)),
                # Отданное наружу не напоминаем исполнителю: мяч не у него.
                or_(Task.waiting_for.is_(None), Task.waiting_for != "external"),
-               # Личная запись почтой не напоминает: человек завёл её себе, а
-               # письмо о ней уходит на рабочий ящик и делает личное видимым
-               # там, где человек его не заводил. Свой срок — своим
-               # напоминанием (`PersonalReminder`).
-               Task.visibility != "personal"))).all()
+               # Личная запись в сводку не попадает: человек завёл её себе, а
+               # сводка — это то, что компания просит у него. Свой срок —
+               # своим напоминанием (`PersonalReminder`).
+               Task.visibility != "personal"))).scalars().all()
     sent = 0
-    for t, email, name in rows:
+    for t in rows:
         overdue = t.due_at < now
-        subject = (f"Просрочена задача №{t.number}: {t.title}" if overdue
-                   else f"Завтра срок по задаче №{t.number}: {t.title}")
-        body = (f"{'Срок прошёл' if overdue else 'Срок'}: "
-                f"{t.due_at.strftime('%d.%m.%Y')}\n\n{t.description or ''}").strip()
-        task_mail.send_notice_async([email], subject, body)
-        t.reminded_at = now
+        # Срок датируется поясом ОРГАНИЗАЦИИ: он один на всех, кто работает по
+        # этому договору, и у получателя из Владивостока не должен наступать
+        # раньше, чем у московского коллеги.
+        день = t.due_at.astimezone(
+            space_time.zone(await bucket.tz(db, t.company_id))).strftime("%d.%m.%Y")
+        bucket.add(
+            t.company_id, t.assignee_id, f"task-due:{t.id}",
+            (f"{'Просрочено' if overdue else 'Завтра срок'}: №{t.number} "
+             f"«{t.title}» — {день}"),
+            mark=lambda t=t: setattr(t, "reminded_at", now))
         sent += 1
     return sent
 
 
-async def run_escalations(db, now: datetime) -> int:
-    """Сообщить старшему о задачах, на которые не откликнулись вовремя."""
+async def run_escalations(db, now: datetime, bucket: digest.Bucket) -> int:
+    """Сообщить старшему о задачах, на которые не откликнулись вовремя, —
+    предупредив исполнителя ДО этого.
+
+    Два решения, и оба против того, чтобы эскалацию заглушили.
+
+    **Предупреждение исполнителю.** Когда прошло три четверти срока реакции,
+    человек получает в сводку строку «если не приступить до 17:00, задача уйдёт
+    к N». Эскалация, о которой узнают постфактум, читается как донос, и её
+    начинают обходить — договариваться заранее мимо системы. Предупреждение
+    возвращает решение тому, кто ещё может его принять. Оно снабжено сроком
+    годности: доставить его после того, как задача ушла наверх, бессмысленно, и
+    сводка такую строку выбросит молча.
+
+    **Наверх адресуется ПРЕДМЕТ, а не человек.** Строка начинается с задачи и
+    её простоя, исполнитель — факт в конце, а не обвиняемый в начале. Плоская
+    схема «любая просрочка → руководителю» глушится за недели именно потому,
+    что читается как поток жалоб на людей.
+    """
     rows = (await db.execute(
         select(Task, TaskType)
         .join(TaskType, TaskType.id == Task.type_id)
@@ -229,33 +265,67 @@ async def run_escalations(db, now: datetime) -> int:
     sent = 0
     for t, ttype in rows:
         deadline = t.created_at + timedelta(hours=ttype.reaction_hours)
+        # Событие задачи — единственный след, по которому потом отвечают на
+        # вопрос «почему это ушло наверх» и «почему повторно не ушло».
+        следы = set((await db.execute(select(TaskEvent.kind).where(
+            TaskEvent.task_id == t.id,
+            TaskEvent.kind.in_(("escalate", "escalate_warn"))))).scalars())
+
         if now < deadline:
+            if now < deadline - timedelta(hours=ttype.reaction_hours * WARN_FRACTION):
+                continue
+            if "escalate_warn" in следы:
+                continue
+            target_id = ttype.escalate_to_id or t.author_id
+            target = await db.get(User, target_id) if target_id else None
+            assignee = await db.get(User, t.assignee_id)
+            когда = deadline.astimezone(
+                space_time.zone(assignee.tz if assignee else None)).strftime("%H:%M")
+            bucket.add(
+                t.company_id, t.assignee_id, f"escalate-warn:{t.id}",
+                (f"Ждёт вашего отклика: №{t.number} «{t.title}». Если не "
+                 f"приступить до {когда}, уйдёт к "
+                 f"{target.name if target else 'постановщику'}"),
+                mark=lambda t=t: db.add(TaskEvent(
+                    task_id=t.id, kind="escalate_warn",
+                    note="предупреждение исполнителю")),
+                expires_at=deadline)
+            sent += 1
             continue
-        # Эскалация — тоже событие задачи: без следа «почему пришло письмо
-        # начальнику» ответа нет ни у кого.
-        already = (await db.execute(select(TaskEvent.id).where(
-            TaskEvent.task_id == t.id, TaskEvent.kind == "escalate"))).scalar_one_or_none()
-        if already is not None:
+
+        if "escalate" in следы:
             continue
         target_id = ttype.escalate_to_id or t.author_id
         target = await db.get(User, target_id) if target_id else None
         assignee = await db.get(User, t.assignee_id)
-        db.add(TaskEvent(task_id=t.id, kind="escalate",
+        след = TaskEvent(task_id=t.id, kind="escalate",
                          actor_name=target.name if target else None,
                          to_value=target.name if target else "—",
-                         note=f"нет отклика {ttype.reaction_hours} ч"))
-        if target is not None and target.email and not target.mail_only:
-            task_mail.send_notice_async(
-                [target.email],
-                f"Нет отклика по задаче №{t.number}: {t.title}",
-                f"Исполнитель {assignee.name if assignee else '—'} не приступил за "
-                f"{ttype.reaction_hours} ч с постановки.")
+                         note=f"нет отклика {ttype.reaction_hours} ч")
+        if target is None or target.mail_only:
+            # Сказать некому: тип без старшего и задача без автора. След ставим
+            # сразу — иначе регламент будет пересматривать эту задачу вечно.
+            db.add(след)
+            sent += 1
+            continue
+        # След ставится ТОЛЬКО вместе с доставкой. Поставь его сразу — и ночная
+        # эскалация пометится случившейся, а утренняя сводка её уже не найдёт:
+        # старший не узнает никогда, а в карточке будет написано, что ушло.
+        bucket.add(
+            t.company_id, target.id, f"escalate:{t.id}",
+            (f"Без отклика {ttype.reaction_hours} ч: №{t.number} "
+             f"«{t.title}» (исполнитель — "
+             f"{assignee.name if assignee else '—'})"),
+            mark=lambda с=след: db.add(с))
         sent += 1
     return sent
 
 
-async def run_acquaint_reminders(db, now: datetime) -> int:
-    """Напомнить о документе за сутки до срока и затем не чаще раза в сутки."""
+async def run_acquaint_reminders(db, now: datetime, bucket: digest.Bucket) -> int:
+    """Напомнить о документе за сутки до срока и затем не чаще раза в сутки.
+
+    Повод идёт в сводку окна, а не письмом на каждое ознакомление.
+    """
     got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
                           {"ns": LOCK_NAMESPACE, "key": ACQUAINT_LOCK_KEY})
     if not got:
@@ -271,10 +341,12 @@ async def run_acquaint_reminders(db, now: datetime) -> int:
         .where(DocAcquaint.status == "pending", DocAcquaint.due_at.is_not(None),
                User.mail_only.is_(False),
                DocAcquaint.due_at <= soon,
+               # Раз в сутки на ознакомление. Отсева по «когда пробовали»
+               # больше нет: он сторожил повторную ОТПРАВКУ ПИСЬМА, а повод
+               # теперь просто кладётся в сводку, и та сама не повторяет
+               # сказанное внутри окна.
                or_(DocAcquaint.reminded_at.is_(None),
-                   DocAcquaint.reminded_at <= now - timedelta(days=1)),
-               or_(DocAcquaint.reminder_attempted_at.is_(None),
-                   DocAcquaint.reminder_attempted_at <= now - timedelta(hours=1))))).all()
+                   DocAcquaint.reminded_at <= now - timedelta(days=1))))).all()
     sent = 0
     for acquaint, doc, user, membership in rows:
         if not user.is_superadmin and membership.role != "admin":
@@ -282,33 +354,32 @@ async def run_acquaint_reminders(db, now: datetime) -> int:
             if (modules is not None and "docs" not in modules and not any(
                     key.startswith("docs:") for key in modules)):
                 continue
-        if not user.email:
-            continue
         overdue = acquaint.due_at < now
         number = doc.reg_number or "без номера"
-        ok, error = await task_mail.send_notice_checked(
-            [user.email],
-            f"{'Просрочено ознакомление' if overdue else 'Нужно ознакомиться'}: {doc.title}",
-            f"Документ {number}\nСрок: {acquaint.due_at.strftime('%d.%m.%Y')}\n\n"
-            "Откройте «Трек» → «На мне» → «Ознакомиться».")
-        acquaint.reminder_attempted_at = now
-        acquaint.reminder_error = error
-        if ok:
-            acquaint.reminded_at = now
-            sent += 1
+        день = acquaint.due_at.astimezone(space_time.zone(
+            await bucket.tz(db, acquaint.company_id))).strftime("%d.%m.%Y")
+        bucket.add(
+            acquaint.company_id, acquaint.user_id, f"acquaint:{acquaint.id}",
+            (f"{'Просрочено ознакомление' if overdue else 'Ознакомиться'}: "
+             f"«{doc.title}» ({number}) — до {день}"),
+            mark=lambda a=acquaint: setattr(a, "reminded_at", now))
+        sent += 1
     return sent
 
 
-async def run_approval_reminders(db, now: datetime) -> int:
+async def run_approval_reminders(db, now: datetime, bucket: digest.Bucket) -> int:
     """Напомнить согласующему о визе за сутки до срока и затем раз в сутки.
 
     Срок визы хранился с самого начала и не делал ничего: планировщик круг не
     читал, а `sla_hours` доезжал только до отчёта. Согласование останавливалось
     молча — ровно там, где документ ждёт одного человека.
 
-    Заместителю пишем тем же письмом. Виза за другого запрещена, но отпуск не
-    должен держать документ: заместитель визирует от своего имени, и узнать об
-    ожидании он обязан не позже того, кого замещает.
+    Заместителю тот же повод уходит в его сводку. Виза за другого запрещена, но
+    отпуск не должен держать документ: заместитель визирует от своего имени, и
+    узнать об ожидании он обязан не позже того, кого замещает.
+
+    Доставка — сводкой окна, а не письмом на каждую визу: письмо по поводу на
+    повод и было тем потоком, из-за которого напоминания перестают читать.
     """
     got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
                           {"ns": LOCK_NAMESPACE, "key": APPROVAL_LOCK_KEY})
@@ -326,10 +397,7 @@ async def run_approval_reminders(db, now: datetime) -> int:
                User.mail_only.is_(False),
                DocApproval.due_at <= soon,
                or_(DocApproval.reminded_at.is_(None),
-                   DocApproval.reminded_at <= now - timedelta(days=1)),
-               or_(DocApproval.reminder_attempted_at.is_(None),
-                   DocApproval.reminder_attempted_at
-                   <= now - timedelta(hours=1))))).all()
+                   DocApproval.reminded_at <= now - timedelta(days=1))))).all()
     sent = 0
     for approval, doc, user, membership in rows:
         if not user.is_superadmin and membership.role != "admin":
@@ -337,28 +405,25 @@ async def run_approval_reminders(db, now: datetime) -> int:
             if (modules is not None and "docs" not in modules and not any(
                     key.startswith("docs:") for key in modules)):
                 continue
-        if not user.email:
-            continue
-        addresses = [user.email]
-        for deputy_id in await doc_approvals.active_deputy_for(
-                db, approval.company_id, user.id):
-            deputy_mail = await db.scalar(
-                select(User.email).where(User.id == deputy_id))
-            if deputy_mail and deputy_mail not in addresses:
-                addresses.append(deputy_mail)
         overdue = approval.due_at < now
         number = doc.reg_number or "без номера"
-        ok, error = await task_mail.send_notice_checked(
-            addresses,
-            f"{'Просрочена виза' if overdue else 'Ожидает визы'}: {doc.title}",
-            f"Документ {number}\nШаг: {approval.step_name or 'согласование'}\n"
-            f"Срок: {approval.due_at.strftime('%d.%m.%Y %H:%M')}\n\n"
-            "Откройте «Трек» → «На мне» → «Визы».")
-        approval.reminder_attempted_at = now
-        approval.reminder_error = error
-        if ok:
-            approval.reminded_at = now
-            sent += 1
+        срок = approval.due_at.astimezone(space_time.zone(
+            await bucket.tz(db, approval.company_id))).strftime("%d.%m.%Y %H:%M")
+        строка = (f"{'Просрочена виза' if overdue else 'Виза'}: «{doc.title}» "
+                  f"({number}, {approval.step_name or 'согласование'}) — до {срок}")
+        bucket.add(approval.company_id, approval.assignee_id,
+                   f"approval:{approval.id}", строка,
+                   mark=lambda a=approval: setattr(a, "reminded_at", now))
+        # Заместителю — тем же поводом в его сводку. Виза за другого запрещена,
+        # но отпуск не должен держать документ: заместитель визирует от своего
+        # имени и узнать об ожидании обязан не позже того, кого замещает.
+        # Отметку «сказано» ставит только строка основного согласующего: иначе
+        # молчание заместителя гасило бы напоминание тому, кто визирует.
+        for deputy_id in await doc_approvals.active_deputy_for(
+                db, approval.company_id, user.id):
+            bucket.add(approval.company_id, deputy_id, f"approval:{approval.id}",
+                       f"{строка} (замещаете: {user.name})")
+        sent += 1
     return sent
 
 
@@ -551,8 +616,13 @@ async def run_personal_reminders(db, now: datetime) -> int:
         # человек его увидит, даже если сообщение не дошло.
         row.fired_at = now
         try:
-            await notify.notify_person(db, row.company_id, user,
-                                       await _reminder_text(db, row))
+            await notify.notify_person(
+                db, row.company_id, user, await _reminder_text(db, row),
+                # Человек сам назначил это время, поэтому тишину оно проходит:
+                # в тишину не пропускается регламентное, а не своё. Срок жизни
+                # push всё равно ограничиваем — вернувшийся из офлайна не
+                # должен получать вчерашнее как новое.
+                ttl=space_time.push_ttl(now, user.tz, user.work_end))
             sent += 1
         except Exception:  # noqa: BLE001 — одно напоминание не валит остальные
             log.exception("Личное напоминание %s не доставлено", row.id)
@@ -579,12 +649,29 @@ async def _reminder_text(db, row) -> str:
     return "Напоминание"
 
 
+async def run_digests(db, now: datetime, bucket: digest.Bucket) -> int:
+    """Разнести накопленное окнами доставки. Идёт последним в тике.
+
+    Последним не по вкусу: сводка обязана собраться из ВСЕГО, что нашёл
+    регламент за проход. Доставь её в середине — и человек получит визы одним
+    сообщением, а сроки задач вторым, то есть тот же поток, только из двух труб.
+    """
+    got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
+                          {"ns": LOCK_NAMESPACE, "key": DIGEST_LOCK_KEY})
+    if not got:
+        return 0
+    return await digest.deliver(db, now, bucket)
+
+
 async def tick() -> dict[str, int]:
     """Один проход регламента. Ошибка одной части не отменяет остальные."""
     now = datetime.now(timezone.utc)
     out = {"recurrences": 0, "reminders": 0, "escalations": 0,
            "acquaints": 0, "approvals": 0, "events": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0,
-           "inbound_events": 0, "approval_delivery": 0, "personal": 0}
+           "inbound_events": 0, "approval_delivery": 0, "personal": 0, "digests": 0}
+    # Поводы копятся весь проход и доставляются одним сообщением в конце: сводка
+    # окна — это про число сообщений человеку, а не про удобство планировщика.
+    bucket = digest.Bucket()
     async with async_session_factory() as db:
         for key, fn in (("recurrences", run_recurrences),
                         ("reminders", run_due_reminders),
@@ -597,9 +684,11 @@ async def tick() -> dict[str, int]:
                         ("project_reconcile", run_project_reconcile),
                         ("inbound_events", run_inbound_events),
                         ("approval_delivery", run_approval_delivery),
-                        ("personal", run_personal_reminders)):
+                        ("personal", run_personal_reminders),
+                        ("digests", run_digests)):
             try:
-                out[key] = await fn(db, now)
+                out[key] = await (fn(db, now, bucket) if key in _WITH_BUCKET
+                                  else fn(db, now))
                 await db.commit()
             except Exception:  # noqa: BLE001 — одна часть не валит остальные
                 log.exception("Регламент задач: сбой в «%s»", key)

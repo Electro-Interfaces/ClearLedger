@@ -31,6 +31,11 @@ export interface AuthUser {
   /** Контакты — правит сам человек. */
   phone_mobile?: string | null
   phone_office?: string | null
+  /** Имя IANA: по нему считается, когда человека можно трогать. */
+  tz?: string
+  /** Рабочее окно, «09:00». Вне его регламентное ждёт, а не будит. */
+  work_start?: string
+  work_end?: string
   /**
    * Место человека в пространстве — заполняет администратор.
    * party_type: internal — сотрудник организации пространства,

@@ -4,7 +4,7 @@ SQLAlchemy 2.0 ORM модели TradeLedger.
 """
 
 import uuid
-from datetime import date as date_type, datetime
+from datetime import date as date_type, datetime, time as time_type
 
 from sqlalchemy import (
     BigInteger,
@@ -22,6 +22,7 @@ from sqlalchemy import (
     Sequence,
     String,
     Text,
+    Time,
     UniqueConstraint,
     func,
     text,
@@ -47,6 +48,13 @@ class Company(Base):
     profile_id: Mapped[str] = mapped_column(String(50), nullable=False)
     color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Пояс организации. Срок «до 20-го» — обязательство перед компанией, и день
+    # у него один на всех: считай его по получателю, и Владивосток просрочен за
+    # семь часов до Москвы, работая по тому же договору.
+    tz: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="Europe/Moscow",
+        server_default=text("'Europe/Moscow'")
+    )
     cloud_api_key: Mapped[str | None] = mapped_column(String(128), nullable=True, unique=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -118,6 +126,23 @@ class User(Base):
     # (пароля нет, `login` такие учётки отклоняет).
     mail_only: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # Когда человека можно трогать. Пространство растянуто от Владивостока до
+    # Москвы, и регламентное напоминание не бывает срочнее сна: в тишину оно не
+    # пропускается, а сдвигается на начало ближайшего окна. Пояс — имя IANA, а
+    # не смещение: «каждый понедельник в 10:00» иначе уедет на час при переводе
+    # часов. Расчёты — `services/space_time.py`.
+    tz: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="Europe/Moscow",
+        server_default=text("'Europe/Moscow'")
+    )
+    work_start: Mapped[time_type] = mapped_column(
+        Time, nullable=False, default=lambda: time_type(9, 0),
+        server_default=text("'09:00'")
+    )
+    work_end: Mapped[time_type] = mapped_column(
+        Time, nullable=False, default=lambda: time_type(18, 0),
+        server_default=text("'18:00'")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -10178,6 +10203,56 @@ class CalendarAttendee(Base):
     )
 
 
+class PersonalDigest(Base):
+    """Сводка «Секретаря» за одно окно доставки.
+
+    Строка отвечает на единственный вопрос: какое сообщение править. Пока окно
+    то же, сводка та же — новые поводы дописываются в НЕЁ, а не приходят
+    отдельными сообщениями. Иначе личная комната становится свалкой, и
+    напоминание в ленте тонет ровно так же, как тонут напоминания в Slack, за
+    что их и ругают.
+
+    Почему поводы вообще копятся, а не летят по одному: на 1,27 млн напоминаний
+    измерено, что каждый лишний алерт в одной единице внимания снижает принятие
+    на 30%, а отклонивший ПЕРВОЕ напоминание серии отклоняет следующие в 88%
+    случаев. Гипотезу привыкания там проверяли отдельно и не подтвердили — дело
+    в перегрузке. Значит лечится числом сообщений, а не их текстом.
+
+    `slot_at` — момент открытия окна и одновременно ключ: два окна в день
+    (начало работы и середина), считаются от рабочего дня человека в его поясе.
+    """
+    __tablename__ = "personal_digests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    slot_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False)
+    # Сообщение, которое правим. Пропадёт (комнату почистили) — заведём новое:
+    # сводка не должна исчезать из-за уборки в чате.
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="SET NULL"),
+        nullable=True)
+    # Что уже сказано человеку в этом окне: ключи поводов через перевод строки.
+    # Хранится, чтобы правка не повторяла сказанное и чтобы «ничего нового» не
+    # приводило к переписыванию сообщения.
+    said: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("uq_personal_digests_slot", "company_id", "user_id", "slot_at",
+              unique=True),
+    )
+
+
 class PersonalList(Base):
     """Именованная подборка человека: «Ремонт офиса», «Прочитать», «Разобрать».
 
@@ -12253,4 +12328,90 @@ class UserSubstitution(Base):
         Index("idx_substitutions_period", "company_id", "user_id", "starts_on", "ends_on"),
         CheckConstraint("ends_on >= starts_on", name="ck_substitution_period"),
         CheckConstraint("user_id <> deputy_id", name="ck_substitution_self"),
+    )
+
+
+class SiteCabinetUser(Base):
+    """Доступ клиента в кабинет сайта: кто заходит, кем считается, что ему открыто.
+
+    Хозяин доступа — ПРОСТРАНСТВО, а не сайт: решение «этот человек видит наши
+    документы и наши стенды» принимает тот, кто ведёт клиента, и принимает один раз.
+    Сайт держит вход (код на почту, сессия, одноразовый пропуск в стенд) — это его
+    дело и его безопасность, — но состав людей и их уровень читает отсюда.
+
+    Клиент указывается СВЯЗЬЮ на контрагента пространства, а не строкой с названием
+    компании: у контрагента есть договоры, документы и акты сверки, и кабинет должен
+    показывать их, а не угадывать по совпадению написания.
+    """
+    __tablename__ = "site_cabinet_users"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Клиент, от имени которого человек входит. Пусто — обращение с улицы: заявку
+    # оставили до всякого договора, и показывать ему нечего, кроме общей витрины.
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"),
+        nullable=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    # guest — только витрина; client — свои документы; partner — ещё и материалы;
+    # admin — управление кабинетом на самом сайте. Слова те же, что у сайта: одно
+    # значение не должно называться по-разному на двух концах.
+    level: Mapped[str] = mapped_column(String(20), nullable=False, default="guest")
+    # Какие стенды открыты: пусто = все (звёздочка сайта), иначе список кодов.
+    demos: Mapped[list[str]] = mapped_column(
+        ARRAY(String(50)), nullable=False, default=list)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        # Один адрес — один доступ в пространстве: два доступа с разными уровнями
+        # означали бы, что ответ на «что ему видно» зависит от порядка выборки.
+        UniqueConstraint("company_id", "email", name="uq_site_cabinet_email"),
+    )
+
+
+class SiteDemo(Base):
+    """Демо-стенд, который показывают клиенту из кабинета.
+
+    Был списком в коде сайта (EP-project/server/demos.js): чтобы завести показ или
+    снять его с витрины, правили файл и выкатывали сервер. Стенд — не код, а решение
+    («этому клиенту показываем процессинг»), и решение должно приниматься галочкой.
+
+    Адрес стенда живёт здесь же, но САМ ПРОХОД остаётся за сайтом: одноразовый
+    пропуск, кука на путь и журнал — его механика, проверенная и работающая.
+    """
+    __tablename__ = "site_demos"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Стенд у нас: кромка сайта проксирует его под /demo-run/<code>/app/.
+    upstream_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Стенд ещё на своём адресе: ведём по пропуску, но адрес открыт напрямую.
+    external_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # С какого экрана открывать: показывают ради раздела, а не ради входа.
+    landing: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "code", name="uq_site_demo_code"),
     )

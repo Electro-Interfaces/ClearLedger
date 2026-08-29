@@ -51,24 +51,39 @@ async def get_or_create_keys(db: AsyncSession) -> ChatPushKeys:
     return keys
 
 
-def _send_one(private_pem: str, sub: dict, payload: str) -> None:
+def _send_one(private_pem: str, sub: dict, payload: str,
+              ttl: int | None = None, urgency: str = "normal") -> None:
     """Синхронная отправка одной подписке (pywebpush) — зовётся из потока."""
     from pywebpush import webpush  # ленивый импорт: тянет cryptography-цепочку
+    kw: dict = {}
+    if ttl is not None:
+        kw["ttl"] = ttl
+    if urgency and urgency != "normal":
+        kw["headers"] = {"Urgency": urgency}
     webpush(
         subscription_info=sub,
         data=payload,
         vapid_private_key=private_pem,
         vapid_claims={"sub": _VAPID_CLAIM_SUB},
         timeout=10,
+        **kw,
     )
 
 
 def push_room_async(room_id: uuid.UUID, title: str, body: str,
-                    exclude_user_id: uuid.UUID) -> None:
+                    exclude_user_id: uuid.UUID, *,
+                    ttl: int | None = None, urgency: str = "normal") -> None:
     """Разослать push участникам комнаты в фоне: не онлайн, не «без звука», не автор.
 
     Fire-and-forget со своей сессией: транзакцию вызывающего не держим, ошибки —
     только в лог. Протухшие подписки (404/410 от push-сервиса) удаляются.
+
+    `ttl` — сколько push имеет смысл ждать браузер. По умолчанию веб-push
+    хранится до четырёх недель, и вернувшийся из офлайна получает вчерашнее как
+    новое: напоминание о визе, доставленное через сутки, — шум, за который
+    выключают уведомления целиком. Сводка живёт до конца рабочего окна.
+    `urgency` — природа сообщения: `low` для регламентной сводки, чтобы телефон
+    не будил экран ради «за сутки до срока».
     """
     async def _run() -> None:
         from app.database import async_session_factory
@@ -103,7 +118,8 @@ def push_room_async(room_id: uuid.UUID, title: str, body: str,
                     info = {"endpoint": s.endpoint,
                             "keys": {"p256dh": s.p256dh, "auth": s.auth}}
                     try:
-                        await asyncio.to_thread(_send_one, keys.private_pem, info, payload)
+                        await asyncio.to_thread(_send_one, keys.private_pem, info,
+                                                payload, ttl, urgency)
                     except Exception as e:  # noqa: BLE001 — сторонний push-сервис
                         code = getattr(getattr(e, "response", None), "status_code", None)
                         if code in (404, 410):

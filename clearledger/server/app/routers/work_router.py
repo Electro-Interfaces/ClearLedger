@@ -41,7 +41,7 @@ from app.models import (
     DocCard, DocKind, DocLabelLink, DocRelation, ServiceLocation, Task, TaskLabel,
     TaskLabelLink, TaskProject, TaskType, User, UserCompany,
 )
-from app.services import placement, work_query, work_state
+from app.services import placement, space_time, work_query, work_state
 
 router = APIRouter(prefix="/work", tags=["Трек"])
 
@@ -531,7 +531,7 @@ async def work_mine(
     marks = await placement.marks_for(
         db, cid, current_user.id,
         [f"{i['kind']}:{i['id']}" for i in items.values()])
-    сегодня = today or now.date()
+    сегодня = today or space_time.local_date(now, current_user.tz)
 
     rows = []
     for item in items.values():
@@ -1188,7 +1188,7 @@ async def lists_mine(
             PersonalMark.user_id == current_user.id,
             PersonalMark.list_id.is_not(None)).group_by(PersonalMark.list_id))).all())
     now = datetime.now(timezone.utc)
-    сегодня = today or now.date()
+    сегодня = today or space_time.local_date(now, current_user.tz)
     # Числа для пунктов навигации считаются здесь же, одним проходом: пункт,
     # считающий себя сам, означает пять запросов на каждое открытие «Трека».
     day, starred, deferred, loose = (await db.execute(select(
@@ -1311,6 +1311,8 @@ async def place(
             deferred_until=payload.defer_until, starred=payload.starred,
             position=payload.position, clear=payload.clear,
             drop_day=payload.drop_day, undefer=payload.undefer,
+            today=space_time.local_date(datetime.now(timezone.utc),
+                                        current_user.tz),
             due_at=(await _due_of(db, cid, payload.target_ref)
                     if payload.defer_until else None))
     except placement.DeferRefused as exc:
@@ -1381,7 +1383,8 @@ async def placed(
     # `on` называет день, о котором спрашивают (календарь), `today` — какой день
     # сейчас у человека. Разные вопросы: первый про экран, второй про часовой
     # пояс, и подменять один другим нельзя.
-    сегодня = today or datetime.now(timezone.utc).date()
+    сегодня = today or space_time.local_date(
+        datetime.now(timezone.utc), current_user.tz)
     sel = select(PersonalMark).where(PersonalMark.company_id == cid,
                                      PersonalMark.user_id == current_user.id)
     if scope == "list":
