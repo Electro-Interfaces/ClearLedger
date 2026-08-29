@@ -5,7 +5,7 @@
  * всегда одной формы: содержимое плюс состояние связи, потому что «пусто» и
  * «связи нет» — разные ответы, и человек должен видеть, какой из них перед ним.
  */
-import { del, get, post } from './apiClient'
+import { del, get, post, put } from './apiClient'
 
 /** Общая обёртка ответа: данные и состояние связи с сайтом. */
 export interface SiteFeed<T> {
@@ -45,8 +45,31 @@ export interface SiteDemoEntry {
   created_at?: number | string
 }
 
+/** Заявка с формы витрины. */
+export interface SiteLead {
+  id: number
+  created_at: number
+  name: string | null
+  company: string | null
+  email: string | null
+  phone: string | null
+  interest: string | null
+  product: string | null
+  message: string | null
+  status: string
+}
+
+/** Состояния заявки словами. Коды держит сайт. */
+export const LEAD_STATUS_LABELS: Record<string, string> = {
+  new: 'Новая',
+  in_work: 'В работе',
+  quoted: 'КП отправлено',
+  closed: 'Закрыта',
+}
+
 export interface SiteSummary {
   requests: number
+  leads: number
   cabinets: number
   demos: number
   connected: boolean
@@ -65,6 +88,13 @@ export const getCabinets = (companyId: string) =>
 
 export const getDemos = (companyId: string) =>
   get<SiteFeed<SiteDemoEntry>>('/site/demos', { company_id: companyId })
+
+export const getLeads = (companyId: string) =>
+  get<SiteFeed<SiteLead>>('/site/leads', { company_id: companyId })
+
+export const setLeadStatus = (companyId: string, id: number, status: string) =>
+  post<{ ok?: boolean }>(
+    `/site/leads/${id}/status?company_id=${encodeURIComponent(companyId)}`, { status })
 
 /** Уровни доступа кабинета словами — на сайте они кодами. */
 export const LEVEL_LABELS: Record<string, string> = {
@@ -186,3 +216,40 @@ export const getClientSpaces = (companyId: string) =>
 
 export const saveClientSpace = (companyId: string, input: ClientSpaceInput) =>
   post<ClientSpace>(`/site/client-spaces?company_id=${encodeURIComponent(companyId)}`, input)
+
+// ── Витрина сайта ────────────────────────────────────────────────
+// Правки текстов и цен лежат на сайте, правятся отсюда. Состав разделов
+// говорит сам сайт: появится там новый — он приедет сюда без правки пространства.
+
+export interface ContentSection {
+  key: string
+  updated_at?: number | null
+  updated_by?: string | null
+  size?: number | null
+}
+
+export interface SiteContent {
+  keys: string[]
+  sections: ContentSection[]
+  values: Record<string, unknown>
+  connected: boolean
+  reason: string | null
+  url?: string
+}
+
+/** Разделы витрины словами. Незнакомый ключ показываем как есть. */
+export const CONTENT_LABELS: Record<string, string> = {
+  products: 'Продукты',
+  pricing: 'Цены',
+  news: 'Новости и статьи',
+  faq: 'Вопросы',
+  settings: 'Контакты и SEO',
+}
+
+export const getContent = (companyId: string) =>
+  get<SiteContent>('/site/content', { company_id: companyId })
+
+export const saveContent = (companyId: string, key: string, value: unknown) =>
+  put<{ ok?: boolean }>(
+    `/site/content/${encodeURIComponent(key)}?company_id=${encodeURIComponent(companyId)}`,
+    { value })

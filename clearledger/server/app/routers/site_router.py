@@ -21,8 +21,9 @@
 * `/site/pull/...` — сайт читает пространство тем же ключом. Сессии там нет и быть
   не может: спрашивает сервер сайта, а не человек.
 
-Что сюда НЕ переносится: страницы сайта, тексты и картинки. Это работа сайта, и
-редактор ей не нужен.
+Витрина сайта редактируется отсюда (решение МАГа 29.08.2026), но хранит правки
+сайт: пространство — рабочее место редактора, а не хранилище. Публичная страница
+не должна зависеть от того, жив ли внутренний контур. Картинки остаются у сайта.
 """
 from __future__ import annotations
 
@@ -48,11 +49,12 @@ router = APIRouter(prefix="/site", tags=["Сайт"])
 
 CONNECTOR_TYPE = "site"
 DEFAULT_TIMEOUT = 15.0
-# Ручки сайта. Читаем только чтение: пространство ничего на сайте не меняет.
+# Ручки сайта, которые читает экран сводки.
 PATHS = {
     "requests": "/api/admin/requests",
     "cabinets": "/api/admin/users",
     "demos": "/api/admin/demo-log",
+    "leads": "/api/admin/leads",
 }
 
 
@@ -88,35 +90,52 @@ def _token(conn: Connector) -> str:
     return os.getenv("SITE_SERVICE_TOKEN", "")
 
 
-async def _read(db: AsyncSession, cid: uuid.UUID, key: str) -> dict[str, Any]:
-    """Прочитать раздел сайта. Ответ всегда одной формы: данные + состояние связи."""
+async def _call(
+    db: AsyncSession, cid: uuid.UUID, path: str,
+    *, method: str = "GET", json_body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Сходить на сайт. Ответ всегда одной формы: данные + состояние связи.
+
+    Неудача связи — не ошибка пространства: экран должен открыться и сказать,
+    почему пусто, а не показать красную страницу приложения.
+    """
     conn = await _connector(db, cid)
     if conn is None or not conn.url:
-        return {"items": [], "connected": False,
+        return {"data": None, "connected": False,
                 "reason": "Сайт не подключён: заведите коннектор в «Подключениях»"}
     token = _token(conn)
     if not token:
-        return {"items": [], "connected": False,
+        return {"data": None, "connected": False,
                 "reason": "Нет служебного ключа сайта (SITE_SERVICE_TOKEN в окружении стека)"}
 
-    url = f"{conn.url.rstrip('/')}{PATHS[key]}"
+    url = f"{conn.url.rstrip('/')}{path}"
     try:
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            resp = await client.get(url, headers={"X-Space-Token": token})
+            resp = await client.request(
+                method, url, json=json_body,
+                headers={"X-Space-Token": token},
+            )
     except httpx.HTTPError as e:
-        return {"items": [], "connected": False, "reason": f"Сайт не отвечает: {e}"}
+        return {"data": None, "connected": False, "reason": f"Сайт не отвечает: {e}"}
     if resp.status_code == 403:
-        return {"items": [], "connected": False,
+        return {"data": None, "connected": False,
                 "reason": "Сайт не принял ключ пространства"}
     if resp.status_code >= 400:
-        return {"items": [], "connected": False,
+        return {"data": None, "connected": False,
                 "reason": f"Сайт ответил {resp.status_code}"}
     try:
         data = resp.json()
     except ValueError:
-        return {"items": [], "connected": False, "reason": "Сайт ответил не JSON"}
-    items = data if isinstance(data, list) else data.get("items", [])
-    return {"items": items, "connected": True, "reason": None, "url": conn.url}
+        return {"data": None, "connected": False, "reason": "Сайт ответил не JSON"}
+    return {"data": data, "connected": True, "reason": None, "url": conn.url}
+
+
+async def _read(db: AsyncSession, cid: uuid.UUID, key: str) -> dict[str, Any]:
+    """Прочитать раздел сайта списком."""
+    out = await _call(db, cid, PATHS[key])
+    data = out.pop("data")
+    out["items"] = data if isinstance(data, list) else (data or {}).get("items", [])
+    return out
 
 
 @router.get("/requests")
@@ -175,6 +194,85 @@ async def site_summary(
         else:
             out.setdefault("url", part.get("url"))
     return out
+
+
+class LeadStatusIn(BaseModel):
+    status: str
+
+
+@router.get("/leads")
+async def site_leads(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Заявки с форм витрины: кто оставил контакт и по какому продукту."""
+    cid = await assert_company_product(company_id, user, db, "site")
+    return await _read(db, cid, "leads")
+
+
+@router.post("/leads/{lead_id}/status")
+async def site_lead_status(
+    lead_id: int,
+    payload: LeadStatusIn,
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Перевести заявку в другое состояние. Список состояний держит сайт."""
+    cid = await assert_company_product(company_id, user, db, "site")
+    out = await _call(db, cid, f"/api/admin/leads/{lead_id}/status",
+                      method="POST", json_body={"status": payload.status})
+    if not out["connected"]:
+        raise HTTPException(502, out["reason"])
+    return out.get("data") or {"ok": True}
+
+
+# ── Витрина сайта ──────────────────────────────────────────────────
+# Тексты и цены витрины правятся здесь, а лежат на сайте. Страница собирается
+# из встроенной статики и накладывает правки сверху: падение пространства
+# не гасит витрину, просто некому её править.
+
+
+class ContentIn(BaseModel):
+    value: Any
+
+
+@router.get("/content")
+async def site_content(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Разделы витрины: что можно править и что там сейчас."""
+    cid = await assert_company_product(company_id, user, db, "site")
+    out = await _call(db, cid, "/api/admin/content")
+    data = out.pop("data") or {}
+    out["keys"] = data.get("keys", [])
+    out["sections"] = data.get("sections", [])
+    out["values"] = data.get("values", {})
+    return out
+
+
+@router.put("/content/{key}")
+async def site_content_save(
+    key: str,
+    payload: ContentIn,
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Записать раздел витрины.
+
+    Состав разделов и размер проверяет сайт: правила там, где данные. Здесь
+    важно другое — что правка не молча пропала: не дошло — говорим ошибкой.
+    """
+    cid = await assert_company_product(company_id, user, db, "site")
+    out = await _call(db, cid, f"/api/admin/content/{key}",
+                      method="PUT", json_body={"value": payload.value})
+    if not out["connected"]:
+        raise HTTPException(502, out["reason"])
+    return out.get("data") or {"ok": True}
 
 
 # ── Управление кабинетом: люди клиента и стенды ──────────────────────────────

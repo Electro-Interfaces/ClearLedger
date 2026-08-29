@@ -3,8 +3,9 @@
  *
  * Граница с сайтом проходит по хозяину данных, и вкладки идут по ней же:
  *
- *   Обращения · Показы                — рождаются НА САЙТЕ, здесь их читают.
+ *   Заявки · Обращения · Показы       — рождаются НА САЙТЕ, здесь их читают.
  *   Кабинеты · Пространства · Стенды  — ведутся ЗДЕСЬ, сайт их читает при входе.
+ *   Витрина                           — лежит на сайте, правится ЗДЕСЬ.
  *
  * Поэтому у первых есть состояние «связи нет» (и оно называется причиной, а не
  * пустой таблицей: пустая таблица врала бы, будто на сайте ничего не происходит),
@@ -26,14 +27,19 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import * as siteService from '@/services/siteService'
-import { LEVEL_LABELS, SPACE_STATUS_LABELS, siteTime } from '@/services/siteService'
+import {
+  LEAD_STATUS_LABELS, LEVEL_LABELS, SPACE_STATUS_LABELS, siteTime,
+} from '@/services/siteService'
+import { ShowcaseEditor } from './ShowcaseEditor'
 import * as referenceService from '@/services/referenceService'
 import { cn } from '@/lib/utils'
 
-type Tab = 'requests' | 'cabinets' | 'spaces' | 'stands' | 'shows'
+type Tab = 'leads' | 'requests' | 'showcase' | 'cabinets' | 'spaces' | 'stands' | 'shows'
 
 const TABS: { key: Tab; label: string; hint: string; owner: 'site' | 'space' }[] = [
+  { key: 'leads', label: 'Заявки', hint: 'кто оставил контакт на формах витрины', owner: 'site' },
   { key: 'requests', label: 'Обращения', hint: 'что написали из кабинета сайта', owner: 'site' },
+  { key: 'showcase', label: 'Витрина', hint: 'тексты, цены и контакты публичного сайта', owner: 'site' },
   { key: 'cabinets', label: 'Кабинеты', hint: 'кому открыт кабинет и что ему видно', owner: 'space' },
   { key: 'spaces', label: 'Пространства', hint: 'у кого развёрнут свой контур и в каком он состоянии', owner: 'space' },
   { key: 'stands', label: 'Стенды', hint: 'что вообще можно показать клиенту', owner: 'space' },
@@ -85,6 +91,17 @@ export function SitePage() {
     queryKey: ['site-demos', companyId],
     queryFn: () => siteService.getDemos(companyId),
     enabled: !!companyId && tab === 'shows',
+  })
+  const leads = useQuery({
+    queryKey: ['site-leads', companyId],
+    queryFn: () => siteService.getLeads(companyId),
+    enabled: !!companyId && tab === 'leads',
+  })
+  const setLeadStatus = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      siteService.setLeadStatus(companyId, id, status),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['site-leads', companyId] }),
+    onError: (e: Error) => toast.error(e.message || 'Состояние не сохранено'),
   })
 
   // Что ведётся здесь.
@@ -154,7 +171,9 @@ export function SitePage() {
   const [newSpace, setNewSpace] = useState({ client: '', slug: '', domain: '', status: 'active' })
 
   const counts: Record<Tab, number | undefined> = {
+    leads: summary.data?.leads,
     requests: summary.data?.requests,
+    showcase: undefined,
     cabinets: cabinets.data?.items.length,
     spaces: spaces.data?.items.length,
     stands: stands.data?.items.length,
@@ -176,9 +195,14 @@ export function SitePage() {
 
   // Причина связи касается только вкладок, которые читают сайт.
   const siteOwned = TABS.find((t) => t.key === tab)?.owner === 'site'
-  const reason = siteOwned
-    ? (tab === 'requests' ? requests.data?.reason : shows.data?.reason)
-      ?? summary.data?.reason ?? null
+  const feedReason: Partial<Record<Tab, string | null | undefined>> = {
+    leads: leads.data?.reason,
+    requests: requests.data?.reason,
+    shows: shows.data?.reason,
+  }
+  // Витрина говорит о связи сама — внутри своего редактора.
+  const reason = siteOwned && tab !== 'showcase'
+    ? (feedReason[tab] ?? summary.data?.reason ?? null)
     : null
 
   return (
@@ -229,6 +253,63 @@ export function SitePage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {tab === 'leads' && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Когда</TableHead>
+                  <TableHead>Кто</TableHead>
+                  <TableHead>Контакт</TableHead>
+                  <TableHead>Зачем</TableHead>
+                  <TableHead className="w-44">Состояние</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(leads.data?.items ?? []).map((l) => (
+                  <TableRow key={l.id}>
+                    <TableCell className="whitespace-nowrap">{siteTime(l.created_at)}</TableCell>
+                    <TableCell>
+                      <div>{l.name || 'Без имени'}</div>
+                      {l.company && (
+                        <div className="text-xs text-muted-foreground">{l.company}</div>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {l.email && <div>{l.email}</div>}
+                      {l.phone && <div className="text-muted-foreground">{l.phone}</div>}
+                    </TableCell>
+                    <TableCell className="max-w-md">
+                      {l.product && <div className="font-medium">{l.product}</div>}
+                      <div className="text-sm text-muted-foreground">{l.interest ?? '—'}</div>
+                      {l.message && (
+                        <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">
+                          {l.message}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <select
+                        value={l.status}
+                        onChange={(e) =>
+                          setLeadStatus.mutate({ id: l.id, status: e.target.value })}
+                        className="h-8 w-full rounded-md border bg-background px-2 text-sm"
+                      >
+                        {Object.entries(LEAD_STATUS_LABELS).map(([code, label]) => (
+                          <option key={code} value={code}>{label}</option>
+                        ))}
+                      </select>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!leads.isLoading && !(leads.data?.items ?? []).length && (
+                  <EmptyRow colSpan={5} text={reason ? 'Данные не прочитаны' : 'Заявок нет'} />
+                )}
+              </TableBody>
+            </Table>
+          )}
+
+          {tab === 'showcase' && <ShowcaseEditor companyId={companyId} />}
+
           {tab === 'requests' && (
             <Table>
               <TableHeader>
