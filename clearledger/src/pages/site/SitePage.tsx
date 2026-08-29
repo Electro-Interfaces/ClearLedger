@@ -16,10 +16,10 @@
  */
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Globe, PlugZap, Plus, Trash2 } from 'lucide-react'
+import { ExternalLink, PlugZap, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useCompany } from '@/contexts/CompanyContext'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -30,6 +30,7 @@ import * as siteService from '@/services/siteService'
 import {
   LEAD_STATUS_LABELS, LEVEL_LABELS, SPACE_STATUS_LABELS, siteTime,
 } from '@/services/siteService'
+import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { ShowcaseEditor } from './ShowcaseEditor'
 import * as referenceService from '@/services/referenceService'
 import { cn } from '@/lib/utils'
@@ -207,11 +208,16 @@ export function SitePage() {
 
   return (
     <div className="p-6">
-      <header className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Globe className="h-5 w-5 text-muted-foreground" />
-          <h1 className="text-xl font-semibold">Сайт</h1>
-        </div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <PanelViewTabs
+          tabs={TABS.map((t) => ({
+            k: t.key,
+            label: counts[t.key] !== undefined ? `${t.label} · ${counts[t.key]}` : t.label,
+          }))}
+          value={tab}
+          onChange={(k) => setTab(k as Tab)}
+          ariaLabel="Виды раздела «Сайт»"
+        />
         {summary.data?.url && (
           <a href={summary.data.url} target="_blank" rel="noreferrer"
              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground
@@ -220,39 +226,18 @@ export function SitePage() {
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
         )}
-      </header>
+      </div>
 
-      <nav className="mb-4 flex flex-wrap gap-1 border-b">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            title={t.hint}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'relative -mb-px border-b-2 px-3 py-2 text-sm transition-colors',
-              tab === t.key
-                ? 'border-primary font-medium text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t.label}
-            {counts[t.key] !== undefined && (
-              <span className="ml-1.5 text-xs text-muted-foreground">{counts[t.key]}</span>
-            )}
-          </button>
-        ))}
-      </nav>
+      {/* Чем занят вид — строкой, а не подсказкой при наведении: у семи вкладок
+          разный хозяин данных, и понимать это надо до клика, а не после. */}
+      <p className="mb-3 text-xs text-muted-foreground">
+        {TABS.find((t) => t.key === tab)?.hint}
+      </p>
 
       <ConnectionNote reason={reason} />
 
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">
-            {TABS.find((t) => t.key === tab)?.label}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           {tab === 'leads' && (
             <Table>
               <TableHeader>
