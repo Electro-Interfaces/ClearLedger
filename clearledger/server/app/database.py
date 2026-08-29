@@ -4119,6 +4119,17 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.83: осиротевшие отметки раскладки. `target_ref` — строка, внешнего
+        # ключа у неё нет (предмет полиморфный), и удалённая работа оставляла
+        # отметку навсегда. Условие показа теперь общее со списком; здесь —
+        # разовая уборка того, что накопилось.
+        await conn.execute(_sa.text(
+            "DELETE FROM personal_marks m WHERE "
+            " (m.target_ref LIKE 'task:%' AND NOT EXISTS ("
+            "   SELECT 1 FROM tasks t WHERE 'task:' || t.id = m.target_ref))"
+            " OR (m.target_ref LIKE 'doc:%' AND NOT EXISTS ("
+            "   SELECT 1 FROM doc_cards d WHERE 'doc:' || d.id = m.target_ref))"))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

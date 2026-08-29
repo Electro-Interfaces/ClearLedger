@@ -33,7 +33,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import (
-    Integer, String, Uuid, and_, delete, func, literal, or_, select)
+    Integer, String, Uuid, and_, cast, delete, func, literal, or_, select)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_product, get_current_user
@@ -1972,6 +1972,26 @@ async def template_delete(
     return {"deleted": True}
 
 
+async def _живые_предметы(db: AsyncSession, cid: uuid.UUID, user: User):
+    """Предметы, которые раскладка ВПРАВЕ показать: открытая работа и рабочие
+    редакции документов, доступные этому человеку.
+
+    Одним местом на счётчики и на сам список: разойдясь, они дают меню, которое
+    обещает больше, чем показывает экран, — и человек ищет пропавшую строку.
+    """
+    from app.routers.docs_router import _readable_doc_clause
+    from app.routers.tasks_router import _is_admin, _visible_to
+
+    admin = await _is_admin(db, cid, user)
+    задачи = select(literal("task:", String).concat(cast(Task.id, String))).where(
+        Task.company_id == cid, Task.status == "open", _visible_to(user, admin))
+    документы = select(literal("doc:", String).concat(cast(DocCard.id, String))).where(
+        DocCard.company_id == cid,
+        DocCard.status.in_(("draft", "registered", "in_force")),
+        await _readable_doc_clause(db, cid, user))
+    return задачи.union_all(документы)
+
+
 @router.get("/lists")
 async def lists_mine(
     company_id: str = Query(...),
@@ -1989,11 +2009,15 @@ async def lists_mine(
 
     cid = await _assert_work(company_id, current_user, db)
     rows = await _my_lists(db, cid, current_user)
+    живые = await _живые_предметы(db, cid, current_user)
     counts = dict((await db.execute(
         select(PersonalMark.list_id, func.count()).where(
             PersonalMark.company_id == cid,
             PersonalMark.user_id == current_user.id,
-            PersonalMark.list_id.is_not(None)).group_by(PersonalMark.list_id))).all())
+            PersonalMark.list_id.is_not(None),
+            # Тем же условием, что и числа ниже: подборка показывает живое, и её
+            # счётчик обязан показывать столько же.
+            PersonalMark.target_ref.in_(живые)).group_by(PersonalMark.list_id))).all())
     now = datetime.now(timezone.utc)
     сегодня = today or space_time.local_date(now, current_user.tz)
     # Числа для пунктов навигации считаются здесь же, одним проходом: пункт,
@@ -2004,7 +2028,13 @@ async def lists_mine(
         func.count().filter(PersonalMark.deferred_until > сегодня),
         func.count().filter(PersonalMark.list_id.is_(None)),
     ).where(PersonalMark.company_id == cid,
-            PersonalMark.user_id == current_user.id))).one()
+            PersonalMark.user_id == current_user.id,
+            # По ЖИВЫМ предметам, а не по строкам отметок. Отметка переживает
+            # свой предмет: `target_ref` — строка, внешнего ключа у неё нет и
+            # быть не может (предмет полиморфный), а закрытую работу экран не
+            # показывает намеренно — «строка уходит сама». Считай строки — и
+            # счётчик расходится с экраном при первом же закрытом поручении.
+            PersonalMark.target_ref.in_(живые)))).one()
     return {
         "lists": [{
             "id": str(r.id), "name": r.name, "position": r.position,
