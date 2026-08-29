@@ -155,7 +155,7 @@ export function CalendarPage() {
         <div className="grid grid-cols-7 border-b border-border bg-muted/40">
           {days.slice(0, 7).map((d) => (
             <div key={d.toISOString()}
-              className="px-2 py-1.5 text-center text-[11px] font-medium uppercase text-muted-foreground">
+              className="px-2 py-1.5 text-center text-[12px] font-medium uppercase text-muted-foreground">
               {format(d, 'EEEEEE', { locale: ru })}
             </div>
           ))}
@@ -236,7 +236,7 @@ function DayCell({ day, mode, anchor, events, tasks, onEvent, onAdd }: {
             title={e.status === 'cancelled'
               ? `Отменена${e.cancel_reason ? `: ${e.cancel_reason}` : ''}`
               : undefined}
-            className={cn('flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[11px]',
+            className={cn('flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[12px]',
               e.status === 'cancelled'
                 ? 'text-muted-foreground line-through decoration-red-500/60'
                 : e.my_response === 'declined'
@@ -255,12 +255,12 @@ function DayCell({ day, mode, anchor, events, tasks, onEvent, onAdd }: {
           </button>
         ))}
         {mode === 'month' && events.length > 2 && (
-          <span className="block px-1 text-[11px] text-muted-foreground">
+          <span className="block px-1 text-[12px] text-muted-foreground">
             +{events.length - 2} ещё
           </span>
         )}
         {рабочие.length > 0 && (
-          <span className={cn('block px-1 text-[11px]',
+          <span className={cn('block px-1 text-[12px]',
             просрочено ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
             {просрочено ? `${просрочено} просрочено` : `${рабочие.length} ${срок(рабочие.length)}`}
           </span>
@@ -269,7 +269,7 @@ function DayCell({ day, mode, anchor, events, tasks, onEvent, onAdd }: {
             перед компанией. Красным не красим даже просроченное — просрочить
             обещание себе и обещание компании не одно и то же. */}
         {записи.length > 0 && (
-          <span className="flex items-center gap-1 px-1 text-[11px] text-muted-foreground/70"
+          <span className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground/70"
             title={`Своих записей со сроком: ${записи.length}`}>
             <NotebookPen className="h-3 w-3 shrink-0" />
             {записи.length}

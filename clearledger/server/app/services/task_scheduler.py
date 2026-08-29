@@ -325,7 +325,13 @@ async def run_escalations(db, now: datetime, bucket: digest.Bucket) -> int:
                          note=f"нет отклика {ttype.reaction_hours} ч")
         if target is None or target.mail_only:
             # Сказать некому: тип без старшего и задача без автора. След ставим
-            # сразу — иначе регламент будет пересматривать эту задачу вечно.
+            # сразу — иначе регламент пересматривал бы эту задачу вечно, — но
+            # называем вещи своими именами. Прежняя запись утверждала «ушло к —»,
+            # то есть карточка сообщала о сработавшем регламенте, которого не
+            # было; по ней же повторный прогон отказывался пробовать снова.
+            след.to_value = "некому"
+            след.note = (f"нет отклика {ttype.reaction_hours} ч; "
+                         "получатель не назначен — эскалация не доставлена")
             db.add(след)
             sent += 1
             continue
@@ -564,9 +570,16 @@ async def run_meetings(db, now: datetime, bucket: digest.Bucket) -> int:
                # Отказавшийся получил бы напоминание о том, куда не идёт.
                CalendarAttendee.response != "declined")
         .limit(_MEETING_LIMIT))).all()
+    # Пояс ПОЛУЧАТЕЛЯ, а не организации: повод адресован конкретному человеку и
+    # читается его глазами. Поясом компании датируется СРОК — обязательство,
+    # одно на всех; время встречи так датировать нельзя, иначе владивостокскому
+    # участнику московская сводка напишет «в 10:00» о встрече, которая у него
+    # в 17:00.
+    люди = {u.id: u for u in (await db.execute(select(User).where(
+        User.id.in_({uid for _, uid in rows})))).scalars()} if rows else {}
     for ev, uid in rows:
         когда = ev.starts_at.astimezone(
-            space_time.zone(await bucket.tz(db, ev.company_id)))
+            space_time.zone(люди[uid].tz if uid in люди else None))
         bucket.add(
             ev.company_id, uid,
             f"meeting:{ev.id}:{когда.date().isoformat()}",

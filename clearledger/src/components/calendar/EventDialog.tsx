@@ -23,7 +23,9 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import * as workService from '@/services/workService'
-import type { CalendarEvent, EventResponse, Recurrence } from '@/services/workService'
+import type {
+  CalendarEvent, EventResponse, EventVisibility, Recurrence,
+} from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { cn } from '@/lib/utils'
 
@@ -45,6 +47,17 @@ const ОТВЕТ_СЛОВОМ: Record<EventResponse, string> = {
  *  нужно: «каждый второй вторник месяца» в делопроизводстве не встречается, а
  *  редактор такого правила стоит дороже самой серии. */
 type КлючПовтора = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly'
+
+/** Круги встречи — тот же словарь, что у поручения: человеку незачем помнить
+ *  два набора слов для одного вопроса. */
+const КРУГИ: { key: EventVisibility; label: string; hint: string }[] = [
+  { key: 'company', label: 'Вся компания',
+    hint: 'Встреча видна в общем календаре компании' },
+  { key: 'private', label: 'Только участники',
+    hint: 'Остальные видят лишь «занят» — ни темы, ни места' },
+  { key: 'personal', label: 'Только я',
+    hint: 'Личное время: не видит никто, включая администратора' },
+]
 
 const когда = new Intl.DateTimeFormat('ru-RU', {
   weekday: 'short', day: 'numeric', month: 'short',
@@ -95,6 +108,17 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
   const [conference, setConference] = useState(event?.conference_url ?? '')
   const [attendees, setAttendees] = useState<string[]>(
     () => (event?.attendees ?? []).map((a) => a.user_id))
+  // Кто позван «для сведения». Его занятость не блокирует подбор времени:
+  // иначе приглашённый руководитель закрывает все слоты, хотя встреча может
+  // пройти без него.
+  const [optional, setOptional] = useState<string[]>(
+    () => (event?.attendees ?? []).filter((a) => a.role === 'optional')
+      .map((a) => a.user_id))
+  // Круг встречи — тот же словарь, что у поручения. Без выбора всё уходило в
+  // `company`, и встреча, которую человек считал разговором пятерых,
+  // публиковалась всей компании.
+  const [visibility, setVisibility] = useState<EventVisibility>(
+    () => event?.visibility ?? 'company')
 
   // Смена встречи в родителе (открыли другую) — перезаполняем поля.
   useEffect(() => {
@@ -106,6 +130,9 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
     setLocation(event.location ?? '')
     setConference(event.conference_url ?? '')
     setAttendees(event.attendees.map((a) => a.user_id))
+    setOptional(event.attendees.filter((a) => a.role === 'optional')
+      .map((a) => a.user_id))
+    setVisibility(event.visibility ?? 'company')
     setПовтор(ключПовтора(event.recurrence ?? null))
     setUntil(event.recurrence_until ?? '')
   }, [event])
@@ -164,11 +191,14 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
     const люди = busyQ.data?.people ?? []
     if (!люди.length) return []
     return findSlots({
-      people: люди, requiredIds: люди.map((p) => p.user_id),
+      people: люди,
+      // Необязательные в отбор не входят — иначе встречу на пятерых не собрать
+      // никогда; их занятость показывается числом рядом с кандидатом.
+      requiredIds: люди.map((p) => p.user_id).filter((id) => !optional.includes(id)),
       from: new Date(окноОт), to: new Date(окноДо), minutes: длительность,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busyQ.data, длительность])
+  }, [busyQ.data, длительность, optional])
 
   const [повтор, setПовтор] = useState<КлючПовтора>(
     () => ключПовтора(event?.recurrence ?? null))
@@ -204,6 +234,8 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
           location: location.trim() || undefined,
           conferenceUrl: conference.trim() || undefined,
           attendeeIds: attendees,
+          optionalIds: optional,
+          visibility,
           subjectRef: subjectRef || undefined,
           recurrence: ПОВТОРЫ.find((r) => r.key === повтор)?.rule ?? null,
           recurrenceUntil: повтор === 'none' ? null : (until || null),
@@ -401,7 +433,7 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
                   <Label>До</Label>
                   <Input type="date" value={until} className="w-[170px]"
                     onChange={(e) => setUntil(e.target.value)} />
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-[12px] text-muted-foreground">
                     Пусто — пока не выключите
                   </p>
                 </div>
@@ -423,6 +455,27 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
           </div>
 
           <div className="space-y-1.5">
+            <Label>Кто видит встречу</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {КРУГИ.map((к) => (
+                <button key={к.key} type="button" disabled={!мой}
+                  onClick={() => setVisibility(к.key)}
+                  title={к.hint}
+                  className={cn('rounded-full border px-2.5 py-1 text-xs transition-colors',
+                    visibility === к.key
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border text-muted-foreground hover:bg-accent',
+                    !мой && 'opacity-60')}>
+                  {к.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[12px] text-muted-foreground">
+              {КРУГИ.find((к) => к.key === visibility)?.hint}
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
             <Label>Кого зовём</Label>
             {мой ? (
               <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto rounded border border-border p-2">
@@ -431,15 +484,30 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
                 )}
                 {люди.map((p) => {
                   const выбран = attendees.includes(p.id)
+                  const длясведения = optional.includes(p.id)
                   return (
                     <button key={p.id} type="button"
-                      onClick={() => setAttendees((v) => (выбран
-                        ? v.filter((x) => x !== p.id) : [...v, p.id]))}
+                      // Первое нажатие зовёт, второе делает необязательным,
+                      // третье убирает. Отдельный переключатель на каждого
+                      // превратил бы состав в форму.
+                      title={выбран
+                        ? (длясведения
+                          ? 'Для сведения — не блокирует подбор времени. Нажмите, чтобы убрать'
+                          : 'Обязательный. Нажмите, чтобы позвать для сведения')
+                        : 'Позвать'}
+                      onClick={() => {
+                        if (!выбран) { setAttendees((v) => [...v, p.id]); return }
+                        if (!длясведения) { setOptional((v) => [...v, p.id]); return }
+                        setAttendees((v) => v.filter((x) => x !== p.id))
+                        setOptional((v) => v.filter((x) => x !== p.id))
+                      }}
                       className={cn('rounded-full border px-2 py-0.5 text-xs transition-colors',
-                        выбран
+                        выбран && !длясведения
                           ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-border text-muted-foreground hover:bg-accent')}>
-                      {p.name}
+                          : выбран
+                            ? 'border-primary/50 bg-primary/15 text-foreground'
+                            : 'border-border text-muted-foreground hover:bg-accent')}>
+                      {p.name}{выбран && длясведения ? ' · для сведения' : ''}
                     </button>
                   )
                 })}
@@ -503,7 +571,7 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
                 </Button>
               </div>
             ))}
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-[12px] text-muted-foreground">
               Перенос обнулит согласия: «буду в 10» не равно «буду в 18».
             </p>
           </div>

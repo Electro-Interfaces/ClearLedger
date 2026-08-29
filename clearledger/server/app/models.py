@@ -10262,6 +10262,13 @@ class CalendarGuest(Base):
         DateTime(timezone=True), nullable=True)
     opened_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # Ссылка живёт конечное время. Без срока старое приглашение из пересланного
+    # письма, журнала браузера или утечки продолжает раскрывать встречу и
+    # материалы, пока кто-нибудь не вспомнит его отозвать. И правило «нет,
+    # отозвана и истекла отвечают одинаково» выполнить нечем, если состояния
+    # «истекла» не существует.
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     # Отозванная ссылка отвечает так же, как несуществующая: подсказывать, что
     # она когда-то была, незачем.
     revoked_at: Mapped[datetime | None] = mapped_column(
@@ -10363,6 +10370,15 @@ class CalendarPollVote(Base):
     vote: Mapped[str] = mapped_column(String(10), nullable=False, default="yes")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # «Ровно одно из двух полей» было обещанием в комментарии — база
+        # принимала и оба сразу, и ни одного. Сводка при этом считает СТРОКИ, и
+        # такая строка добавляла голос ниоткуда.
+        CheckConstraint(
+            "(user_id IS NOT NULL) <> (guest_id IS NOT NULL)",
+            name="ck_calendar_poll_vote_actor"),
+    )
 
 
 class CalendarDelegate(Base):

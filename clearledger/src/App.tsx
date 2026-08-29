@@ -254,9 +254,10 @@ const router = createBrowserRouter([
       // Документ по ссылке: четвёртый вход без учётки. Контрагент смотрит
       // реквизиты, скачивает файлы и подтверждает получение.
       { path: '/doc-share/:token', element: <LazyPage><DocSharePage /></LazyPage> },
-      // Приглашение на встречу: у гостя нет календаря — у него есть эта
-      // страница. Публичная, без входа, как и показ документа по ссылке.
-      { path: '/invite/:token', element: <LazyPage><InvitePage /></LazyPage> },
+      // Приглашение на ВСТРЕЧУ. Адрес именно `/meeting/`: `/invite/:token` уже
+      // занят приглашением в компанию, и одинаковый путь молча выигрывал первый
+      // — гость попадал на страницу вступления и встречи не видел вовсе.
+      { path: '/meeting/:token', element: <LazyPage><InvitePage /></LazyPage> },
       { path: '/doc-verify/:token', element: <LazyPage><DocVerifyPage /></LazyPage> },
       {
         path: '/',

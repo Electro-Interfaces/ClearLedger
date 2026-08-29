@@ -17,6 +17,7 @@ from app.models import (
     DocVersion, MailAttachment, MailMessage, Organization, User, UserCompany,
 )
 from app.routers import docs_router
+from app.services import digest
 from app.services import mail_routing, task_scheduler
 from tests.helpers import seed_company_id
 
@@ -765,42 +766,44 @@ async def test_подразделение_получает_ознакомлен�
     monkeypatch.setattr(
         task_scheduler.task_mail, "send_notice_checked", send_ok,
     )
-    sent = await task_scheduler.run_acquaint_reminders(db, now)
+    # Регламент больше не шлёт письмо на каждый повод: он кладёт повод в сводку
+    # окна, а доставляет её один проход в конце тика. Проверяем контракт,
+    # который есть, а не тот, что был.
+    bucket = digest.Bucket()
+    sent = await task_scheduler.run_acquaint_reminders(db, now, bucket)
     assert sent >= 1
-    assert any(person.email in emails and doc["title"] in subject
-               for emails, subject, _ in notices)
+    assert notices == [], "ознакомление ушло письмом мимо сводки"
+    строки = [line for lines in bucket.lines.values() for line in lines]
+    assert any(doc["title"] in line.text for line in строки), \
+        f"повода об ознакомлении нет в сводке: {[l.text for l in строки]}"
+    assert any(uid == person.id for _, uid in bucket.lines), \
+        "повод адресован не тому человеку"
+
     row = (await db.execute(select(DocAcquaint).where(
         DocAcquaint.doc_id == uuid.UUID(doc["id"]),
         DocAcquaint.user_id == person.id,
     ))).scalar_one()
-    assert row.reason == "department" and row.reminded_at is not None
+    assert row.reason == "department"
     assert row.created_by == uuid.UUID(me["id"])
+    # «Сказано» помечается ТОЛЬКО после доставки: сорванная сводка не должна
+    # оборачиваться молча потерянным поводом.
+    assert row.reminded_at is None, "повод помечен сказанным до доставки"
 
-    async def send_fail(emails, subject, text):
-        notices.append((emails, subject, text))
-        return False, "SMTP временно недоступен"
-
-    row.reminded_at = None
-    row.reminder_attempted_at = None
-    monkeypatch.setattr(task_scheduler.task_mail, "send_notice_checked", send_fail)
-    await db.commit()
-    sent = await task_scheduler.run_acquaint_reminders(db, now)
-    assert sent == 0
-    # Планировщик оставляет изменения в сессии, а коммитит их цикл регламента.
-    # Перечитать строку, не сохранив, значит стереть ровно то, что проверяем:
-    # причина сбоя ещё не в базе, и refresh вернул бы прежний NULL.
+    for line in строки:
+        if line.mark is not None:
+            line.mark()
     await db.commit()
     await db.refresh(row)
-    assert row.reminded_at is None
-    assert row.reminder_error == "SMTP временно недоступен"
+    assert row.reminded_at is not None, "после доставки повод не помечен"
 
+    # Человек вышел из компании — повод больше не собирается.
     membership = await db.get(UserCompany, (person.id, cid))
     await db.delete(membership)
-    row.reminder_attempted_at = None
-    notices.clear()
+    row.reminded_at = None
     await db.commit()
-    sent = await task_scheduler.run_acquaint_reminders(db, now)
-    assert sent == 0 and notices == []
+    пусто = digest.Bucket()
+    sent = await task_scheduler.run_acquaint_reminders(db, now, пусто)
+    assert sent == 0 and not пусто.lines
 
 
 async def test_новая_редакция_требует_нового_ознакомления(

@@ -549,7 +549,7 @@ async def test_регламент_шаблоны_расписания_эскал
     """
     from datetime import datetime, timedelta, timezone
 
-    from app.services import task_scheduler
+    from app.services import digest, task_scheduler
 
     me = await _me(auth_client)
     cid = seed_company_id(me)
@@ -639,13 +639,31 @@ async def test_регламент_шаблоны_расписания_эскал
         row2 = await db.get(Task, _uuid.UUID(fresh["id"]))
         row2.created_at = now - timedelta(hours=3)
         await db.commit()
-        sent = await task_scheduler.run_escalations(db, now)
+        bucket = digest.Bucket()
+        sent = await task_scheduler.run_escalations(db, now, bucket)
         await db.commit()
     assert sent == 1, f"эскалаций {sent}, а должна быть одна"
 
+    # След ставится ТОЛЬКО вместе с доставкой: после прохода его ещё нет.
+    # Иначе ночная эскалация помечалась бы случившейся, утренняя сводка её уже
+    # не нашла бы, и в карточке было бы написано «ушло» о том, чего не было.
     card = (await auth_client.get(f"/api/tasks/{stale['id']}",
                                   params={"company_id": cid})).json()
-    assert "escalate" in [e["kind"] for e in card["events"]], "след эскалации не записан"
+    assert "escalate" not in [e["kind"] for e in card["events"]], \
+        "след эскалации записан до доставки"
+    # Но повод собран и адресован конкретному человеку.
+    поводы = [line.key for lines in bucket.lines.values() for line in lines]
+    assert any(k == f"escalate:{stale['id']}" for k in поводы), \
+        f"повод эскалации не собран: {поводы}"
+
+    # Доставляем — и след появляется.
+    async with async_session_factory() as db:
+        for lines in bucket.lines.values():
+            for line in lines:
+                if line.mark is not None:
+                    line.mark()
+        await db.commit()
+
     card2 = (await auth_client.get(f"/api/tasks/{fresh['id']}",
                                    params={"company_id": cid})).json()
     assert "escalate" not in [e["kind"] for e in card2["events"]], "эскалация по взятой задаче"

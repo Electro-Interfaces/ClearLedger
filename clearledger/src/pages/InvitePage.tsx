@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { get, post } from '@/services/apiClient'
+import * as workService from '@/services/workService'
 import { cn } from '@/lib/utils'
 
 interface Приглашение {
@@ -95,6 +96,22 @@ export function InvitePage() {
       void обновить()
     },
     onError: (e: Error) => toast.error(e.message || 'Не отправилось'),
+  })
+
+  const опрос = useQuery({
+    queryKey: ['invite-poll', token],
+    queryFn: () => workService.invitePoll(token),
+    enabled: !!token,
+    retry: false,
+  })
+  const голос = useMutation({
+    mutationFn: (v: { optionId: string; vote: 'yes' | 'maybe' | 'no' }) =>
+      workService.inviteVote(token, v.optionId, v.vote),
+    onSuccess: () => {
+      toast.success('Голос принят')
+      void qc.invalidateQueries({ queryKey: ['invite-poll', token] })
+    },
+    onError: (e: Error) => toast.error(e.message || 'Голос не принят'),
   })
 
   if (q.isLoading) {
@@ -180,7 +197,37 @@ export function InvitePage() {
         </section>
       )}
 
-      {!и.cancelled && (
+      {/* Опрос времени. Без него согласование с партнёром теряет смысл ровно
+          там, где он нужнее всего: время выбирают с внешним участником, а не
+          между своими. */}
+      {опрос.data?.status === 'poll' && (опрос.data.options.length > 0) && (
+        <section className="space-y-1.5">
+          <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Выберите удобное время
+          </h2>
+          <ul className="space-y-1.5">
+            {опрос.data.options.map((o) => (
+              <li key={o.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="min-w-[10rem] flex-1 tabular-nums">
+                  {когда.format(new Date(o.starts_at))}
+                </span>
+                <span className="flex items-center gap-1">
+                  {([['yes', 'Подходит'], ['maybe', 'Возможно'],
+                     ['no', 'Не подходит']] as const).map(([k, л]) => (
+                    <Button key={k} size="sm" variant={o.my_vote === k ? 'default' : 'outline'}
+                      disabled={голос.isPending}
+                      onClick={() => голос.mutate({ optionId: o.id, vote: k })}>
+                      {л}
+                    </Button>
+                  ))}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {!и.cancelled && опрос.data?.status !== 'poll' && (
         <section className="space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
             {ОТВЕТЫ.map((r) => (

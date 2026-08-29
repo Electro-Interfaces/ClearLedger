@@ -48,6 +48,11 @@ from app.services import placement, space_time, work_query, work_state
 router = APIRouter(prefix="/work", tags=["Трек"])
 
 _LIST_LIMIT = 200
+# Занятость режется отдельным пределом и заведомо большим: обрыв здесь
+# означает не «показали не всё», а «предложили занятое время как
+# свободное». Пара «встреча — участник» на месяц у активного человека —
+# сотни строк, и общий предел списка тут мал.
+_BUSY_LIMIT = 2000
 
 
 async def _assert_work(company_ref: str, user: User, db: AsyncSession) -> uuid.UUID:
@@ -811,7 +816,14 @@ class EventIn(BaseModel):
     conference_url: str | None = None
     visibility: str = Field("company", pattern="^(company|private|personal)$")
     subject_ref: str | None = None
+    # Кого зовём. Пара «идентификатор — обязательность»: необязательный участник
+    # не должен блокировать подбор времени, иначе встречу на пятерых не собрать
+    # никогда. Простой список идентификаторов принимается тоже — все считаются
+    # обязательными.
     attendee_ids: list[str] = Field(default_factory=list)
+    optional_ids: list[str] = Field(default_factory=list)
+    # От чьего имени собираем: помощник ведёт календарь владельца.
+    on_behalf_of: str | None = None
     # Повторение: {"mode": "weekly", "interval": 1}. Час и минута берутся у самой
     # встречи — второе место, где записано «в 10:00», разошлось бы с ней при
     # первом переносе. Пусто — разовая встреча.
@@ -962,11 +974,19 @@ async def calendar_list(
         sel = sel.where(or_(CalendarEvent.title.ilike(игла),
                             CalendarEvent.description.ilike(игла),
                             CalendarEvent.location.ilike(игла)))
+    # `total` — сколько встреч ЕСТЬ, а не сколько поместилось. Считать длину
+    # обрезанного списка значит уверять человека, что за двухсотой строкой
+    # ничего нет: календарь молча терял хвост месяца.
+    всего = (await db.execute(
+        select(func.count()).select_from(sel.subquery()))).scalar_one()
     rows = list((await db.execute(
         sel.order_by(CalendarEvent.starts_at).limit(_LIST_LIMIT))).scalars())
     parts = await _attendees(db, [r.id for r in rows])
     return {"events": [_event_out(r, parts.get(r.id, []), current_user.id) for r in rows],
-            "total": len(rows)}
+            "total": всего,
+            # Признак усечения: без него экран не может честно сказать «показаны
+            # не все» и выглядит полным.
+            "truncated": всего > len(rows)}
 
 
 @router.get("/calendar/busy")
@@ -1011,8 +1031,12 @@ async def calendar_busy(
                CalendarAttendee.response != "declined",
                CalendarEvent.starts_at < date_to,
                CalendarEvent.ends_at > date_from)
-        .order_by(CalendarEvent.starts_at).limit(_LIST_LIMIT))).all()
+        .order_by(CalendarEvent.starts_at).limit(_BUSY_LIMIT))).all()
 
+    # Усечение занятости опаснее усечения списка: подбор времени объявил бы
+    # занятый интервал свободным. Предел поднят и о его достижении говорится
+    # вслух — молчаливое «свободно» тут хуже отказа.
+    обрезано = len(rows) >= _BUSY_LIMIT
     занято: dict[str, list] = {str(u): [] for u in свои}
     for ev, uid in rows:
         занято[str(uid)].append({
@@ -1025,6 +1049,7 @@ async def calendar_busy(
         select(User).where(User.id.in_(свои)))).scalars()}
     return {
         "from": date_from, "to": date_to,
+        "truncated": обрезано,
         "people": [{
             "user_id": uid,
             "name": (люди[uuid.UUID(uid)].name if uuid.UUID(uid) in люди else "—"),
@@ -1050,13 +1075,14 @@ async def calendar_ics(
     Нужна и своим: человек живёт в Outlook или в телефоне, и «есть в Треке» не
     значит «не занят» для того, кто зовёт его туда.
     """
-    from app.models import CalendarEvent
     from app.services import ics
 
     cid = await _assert_work(company_id, current_user, db)
-    ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
-    if ev is None or ev.company_id != cid:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
+    # Право участника, а не просто членство в компании. Соседняя карточка
+    # встречи это спрашивала, а файл отдавался всякому, кто знает UUID, — вместе
+    # с темой, описанием, местом и ссылкой на конференцию. Закрытые переговоры
+    # так утекали внутри компании.
+    ev = await _event_participant(db, cid, event_id, current_user)
     organizer = await db.get(User, ev.organizer_id)
     текст = ics.event_ics(
         uid=f"{ev.id}@trek.elsyplus", title=ev.title,
@@ -1113,8 +1139,20 @@ async def calendar_create(
     if payload.ends_at <= payload.starts_at:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Встреча не может кончаться раньше, чем начинается")
+    # Помощник собирает встречу ОТ ИМЕНИ владельца календаря: организатором
+    # становится владелец, иначе выданное полномочие бесполезно — секретарь
+    # заводил бы встречи на себя. Кто именно нажал, видно в журнале.
+    организатор = current_user.id
+    if payload.on_behalf_of:
+        владелец = _uuid_or_400(payload.on_behalf_of, "on_behalf_of")
+        if not await can_manage_calendar(db, cid, владелец, current_user):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Вам не доверяли вести этот календарь")
+        организатор = владелец
+        await log_audit(db, actor=current_user, company_id=cid,
+                        action="calendar.on_behalf", target=str(владелец))
     ev = CalendarEvent(
-        company_id=cid, organizer_id=current_user.id, title=payload.title.strip(),
+        company_id=cid, organizer_id=организатор, title=payload.title.strip(),
         description=payload.description or None,
         starts_at=payload.starts_at, ends_at=payload.ends_at,
         all_day=payload.all_day, tz=payload.tz, location=payload.location or None,
@@ -1125,7 +1163,10 @@ async def calendar_create(
     db.add(ev)
     await db.flush()
 
-    ids = {current_user.id} | {_uuid_or_400(i, "attendee_ids") for i in payload.attendee_ids}
+    необязательные = {_uuid_or_400(i, "optional_ids") for i in payload.optional_ids}
+    ids = ({организатор, current_user.id}
+           | {_uuid_or_400(i, "attendee_ids") for i in payload.attendee_ids}
+           | необязательные)
     # Зовём только людей этой компании: приглашение постороннему открыло бы ему
     # карточку встречи вместе с предметом и составом участников.
     свои = set((await db.execute(select(UserCompany.user_id).where(
@@ -1133,7 +1174,11 @@ async def calendar_create(
     for uid in ids & свои:
         db.add(CalendarAttendee(
             event_id=ev.id, user_id=uid,
-            response="accepted" if uid == current_user.id else "pending"))
+            # Необязательный участник не блокирует подбор времени: иначе
+            # приглашённый «для сведения» руководитель закрывает все слоты, хотя
+            # встреча может пройти без него.
+            role="optional" if uid in необязательные else "required",
+            response="accepted" if uid == организатор else "pending"))
     await db.flush()
     parts = await _attendees(db, [ev.id])
     await db.commit()
@@ -1193,9 +1238,12 @@ async def calendar_action(
         await db.commit()
         return _event_out(ev, parts, current_user.id)
 
-    if ev.organizer_id != current_user.id:
+    # Помощник ведёт календарь владельца: перенести и отменить встречу — ровно
+    # та работа, ради которой полномочие и выдают. Проверка та же, что у гостей и
+    # материалов, — второй способ спросить «вправе ли он» разошёлся бы с первым.
+    if not await can_manage_calendar(db, cid, ev.organizer_id, current_user):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Менять встречу может только тот, кто её собрал")
+                            "Менять встречу может тот, кто её собрал, или его помощник")
 
     if payload.cancel:
         # Не удаляем: встреча уже стоит в чужих календарях, и молча исчезнувшая
@@ -1219,6 +1267,14 @@ async def calendar_action(
         await db.commit()
         return _event_out(ev, parts, current_user.id)
 
+    if payload.recurrence is not None and ev.series_id is not None:
+        # Повторение живёт только у ГОЛОВЫ. Иначе порождённая встреча начинает
+        # порождать своё продолжение, и серия ветвится. Интерфейс это знает и
+        # поля не показывает, но правило обязано стоять на сервере: клиент у
+        # ручки не один.
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Это встреча из серии. Повторение задаётся у первой встречи серии")
     if payload.recurrence is not None:
         # Пустой словарь снимает повторение. Уже созданные встречи остаются: они
         # стоят в чужих календарях, и «выключил серию — исчезли три планёрки»
@@ -1326,6 +1382,10 @@ class GuestIn(BaseModel):
     company_id: str
     email: str = Field(min_length=3, max_length=255)
     name: str | None = Field(None, max_length=255)
+    # Сколько дней живёт ссылка. Тридцать по умолчанию: встречу назначают
+    # заранее, но не на полгода, а вечная ссылка раскрывает встречу и материалы
+    # ровно столько, сколько живёт чужой почтовый ящик.
+    days: int = Field(30, ge=1, le=180)
 
 
 class GuestAction(BaseModel):
@@ -1412,7 +1472,8 @@ async def guest_invite(
     guest = CalendarGuest(
         event_id=ev.id, email=почта,
         name=(payload.name or "").strip() or None,
-        token_hash=invite_router.token_hash(сырой), token_prefix=сырой[:8])
+        token_hash=invite_router.token_hash(сырой), token_prefix=сырой[:8],
+        expires_at=datetime.now(timezone.utc) + timedelta(days=payload.days))
     db.add(guest)
     await db.commit()
     return {"id": str(guest.id), "email": guest.email, "name": guest.name,

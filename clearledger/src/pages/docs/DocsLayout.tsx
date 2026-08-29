@@ -243,14 +243,17 @@ export function DocsLayout() {
       // своё без исполнителя значит обещать в меню число, которого на экране нет.
       errands: по('do'),
       own: по('own'),
-      assigned: (assignedQ.data?.tasks ?? []).filter((t) => t.status === 'open').length,
-      watching: (watchingQ.data?.tasks ?? []).filter((t) => t.status === 'open').length,
+      // `total` сервера, а не длина страницы: страница — это сто строк, и на
+      // малых данных совпадение выглядело правильным ответом. Оба разреза
+      // отсекают закрытое на сервере, поэтому доклеивать фильтр незачем.
+      assigned: assignedQ.data?.total ?? (assignedQ.data?.tasks ?? []).length,
+      watching: watchingQ.data?.total ?? (watchingQ.data?.tasks ?? []).length,
       starred: c?.starred ?? 0,
       deferred: c?.deferred ?? 0,
       // Просроченное — отдельное число: «12, из них 3 горят» это два разных
       // ответа, и одним числом они не заменяются.
       overdue: mine.filter((r) => r.overdue).length,
-      triage: (триажQ.data?.tasks ?? []).length,
+      triage: триажQ.data?.total ?? (триажQ.data?.tasks ?? []).length,
     } as Record<string, number>
   }, [mineQ.data, assignedQ.data, watchingQ.data, listsQ.data, триажQ.data])
 

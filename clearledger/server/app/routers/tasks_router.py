@@ -813,7 +813,10 @@ async def list_tasks(
         # или закрыть, и для этого нужно место, где оно видно всем сразу.
         sel = sel.where(Task.status == "open", Task.assignee_id.is_(None))
     elif scope == "watching":
-        sel = sel.where(Task.id.in_(
+        # Только живое: следят за работой, а не за архивом. Без этого условия
+        # `total` считал и закрытые, а экран показывал их вперемешку с живыми —
+        # два числа под одним словом, и верить нельзя ни одному.
+        sel = sel.where(Task.status == "open", Task.id.in_(
             select(TaskWatcher.task_id).where(TaskWatcher.user_id == current_user.id)))
     elif scope == "overdue":
         # Тот же смысл, что у флага `overdue` в выдаче: срок прошёл у ЖИВОЙ задачи.

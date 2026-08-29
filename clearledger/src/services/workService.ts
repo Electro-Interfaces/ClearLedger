@@ -348,6 +348,9 @@ export async function reminderAction(companyId: string, id: string, data: {
  * Календарь
  * ------------------------------------------------------------------------ */
 
+/** Круг видимости встречи — тот же словарь, что у поручения. */
+export type EventVisibility = 'company' | 'private' | 'personal'
+
 export type EventResponse = 'pending' | 'accepted' | 'declined' | 'tentative'
 
 export interface EventAttendee {
@@ -431,6 +434,11 @@ export async function createEvent(companyId: string, data: {
   title: string; startsAt: string; endsAt: string
   description?: string; location?: string; conferenceUrl?: string
   allDay?: boolean; tz?: string; attendeeIds?: string[]; subjectRef?: string
+  /** Позванные «для сведения»: их занятость не блокирует подбор времени. */
+  optionalIds?: string[]
+  visibility?: EventVisibility
+  /** От чьего имени собираем: помощник ведёт календарь владельца. */
+  onBehalfOf?: string
   recurrence?: Recurrence | null; recurrenceUntil?: string | null
 }) {
   return post<CalendarEvent>('/api/work/calendar', {
@@ -442,6 +450,9 @@ export async function createEvent(companyId: string, data: {
     all_day: data.allDay ?? false,
     tz: data.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
     attendee_ids: data.attendeeIds ?? [],
+    optional_ids: data.optionalIds ?? [],
+    visibility: data.visibility || undefined,
+    on_behalf_of: data.onBehalfOf || undefined,
     subject_ref: data.subjectRef || undefined,
     recurrence: data.recurrence ?? undefined,
     recurrence_until: data.recurrenceUntil || undefined,
@@ -533,6 +544,17 @@ export async function votePoll(companyId: string, eventId: string,
 export async function pickPoll(companyId: string, eventId: string, optionId: string) {
   return post(`/api/work/calendar/${eventId}/poll/pick`,
     { company_id: companyId, option_id: optionId })
+}
+
+/** Опрос времени глазами гостя: та же выдача, что внутри, — итог считается
+ *  один. Голоса своих и гостей лежат одной таблицей. */
+export async function invitePoll(token: string) {
+  return get<{ status: string; options: PollOption[] }>(`/api/invite/${token}/poll`)
+}
+
+export async function inviteVote(token: string, optionId: string,
+  vote: 'yes' | 'maybe' | 'no') {
+  return post(`/api/invite/${token}/poll/vote`, { option_id: optionId, vote })
 }
 
 export interface CalendarDelegate { id: string; user_id: string; name: string }

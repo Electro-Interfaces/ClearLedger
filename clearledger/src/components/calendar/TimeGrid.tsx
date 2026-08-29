@@ -52,7 +52,7 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd }: {
         <div className="w-12 shrink-0" />
         {days.map((d) => (
           <div key={d.toISOString()}
-            className="flex-1 px-2 py-1.5 text-center text-[11px] font-medium uppercase">
+            className="flex-1 px-2 py-1.5 text-center text-[12px] font-medium uppercase">
             <span className="text-muted-foreground">{format(d, 'EEEEEE', { locale: ru })}</span>
             <span className={cn('ml-1.5 tabular-nums',
               isToday(d) ? 'rounded bg-primary px-1 text-primary-foreground'
@@ -66,7 +66,7 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd }: {
       {/* Всёдневная полоса: командировки и СРОКИ. Срок здесь точкой — у него нет
           длительности, и место ему не в сетке часов. */}
       <div className="flex border-b border-border">
-        <div className="w-12 shrink-0 py-1 pr-1 text-right text-[10px] text-muted-foreground">
+        <div className="w-12 shrink-0 py-1 pr-1 text-right text-[12px] text-muted-foreground">
           весь день
         </div>
         {days.map((d) => {
@@ -79,7 +79,7 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd }: {
               className="min-h-[1.75rem] flex-1 space-y-0.5 border-l border-border p-0.5">
               {дневные.map((e) => (
                 <button key={e.id} onClick={() => onEvent(e)}
-                  className={cn('block w-full truncate rounded px-1 text-[11px]',
+                  className={cn('block w-full truncate rounded px-1 text-[12px]',
                     e.status === 'cancelled'
                       ? 'text-muted-foreground line-through'
                       : 'bg-primary/15 text-foreground hover:bg-primary/25')}>
@@ -87,14 +87,14 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd }: {
                 </button>
               ))}
               {рабочие.length > 0 && (
-                <span className={cn('block px-1 text-[11px]',
+                <span className={cn('block px-1 text-[12px]',
                   рабочие.some((t) => t.overdue)
                     ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
                   {рабочие.length} срок{рабочие.length > 1 ? 'ов' : ''}
                 </span>
               )}
               {записи.length > 0 && (
-                <span className="flex items-center gap-1 px-1 text-[11px] text-muted-foreground/70">
+                <span className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground/70">
                   <NotebookPen className="h-3 w-3 shrink-0" />{записи.length}
                 </span>
               )}
@@ -110,7 +110,7 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd }: {
             {ЧАСЫ.map((h) => (
               <div key={h} style={{ height: ЧАС_PX }}
                 className="relative border-b border-border/40">
-                <span className="absolute -top-1.5 right-1 text-[10px] tabular-nums text-muted-foreground">
+                <span className="absolute -top-1.5 right-1 text-[12px] tabular-nums text-muted-foreground">
                   {h === 0 ? '' : `${String(h).padStart(2, '0')}:00`}
                 </span>
               </div>
@@ -144,7 +144,7 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd }: {
                         left: `${(колонка / всего) * 100}%`,
                         width: `${(1 / всего) * 100}%`,
                       }}
-                      className={cn('absolute overflow-hidden rounded border px-1 py-0.5 text-left text-[11px] leading-tight',
+                      className={cn('absolute overflow-hidden rounded border px-1 py-0.5 text-left text-[12px] leading-tight',
                         e.status === 'cancelled'
                           ? 'border-border bg-muted/60 text-muted-foreground line-through'
                           : e.my_response === 'declined'

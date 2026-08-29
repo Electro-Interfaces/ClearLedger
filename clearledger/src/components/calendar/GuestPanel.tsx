@@ -62,7 +62,7 @@ export function GuestPanel({ companyId, eventId, title }: {
     }),
     onSuccess: (r) => {
       setEmail(''); setName('')
-      setСсылка({ email: r.email, url: `${window.location.origin}/invite/${r.token}` })
+      setСсылка({ email: r.email, url: `${window.location.origin}/meeting/${r.token}` })
       void обновить()
     },
     onError: (e: Error) => toast.error(e.message || 'Не позвалось'),
@@ -204,7 +204,7 @@ export function GuestPanel({ companyId, eventId, title }: {
           placeholder="Открыть документ гостям"
           searchPlaceholder="Название или номер…"
           className="w-full" loading={docsQ.isLoading} />
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-[12px] text-muted-foreground">
           Только зарегистрированные: наружу уходит номер. Каждый материал
           открывается отдельно и сохраняет собственные права.
         </p>

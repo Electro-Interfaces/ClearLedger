@@ -4091,6 +4091,19 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.81: находки аудита 29.08.2026. Срок у гостевого приглашения —
+        # без него старая ссылка раскрывает встречу до ручного отзыва. И
+        # ограничение на голос опроса: «ровно один актор» было комментарием, а
+        # база принимала строку с обоими полями и с ни одним.
+        for stmt in (
+            "ALTER TABLE calendar_guests ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ",
+            "ALTER TABLE calendar_poll_votes DROP CONSTRAINT IF EXISTS "
+            "ck_calendar_poll_vote_actor",
+            "ALTER TABLE calendar_poll_votes ADD CONSTRAINT ck_calendar_poll_vote_actor "
+            "CHECK ((user_id IS NOT NULL) <> (guest_id IS NOT NULL))",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

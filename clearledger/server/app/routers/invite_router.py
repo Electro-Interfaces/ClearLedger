@@ -51,7 +51,11 @@ async def _guest_or_404(db: AsyncSession, token: str) -> tuple[CalendarGuest, Ca
     guest = (await db.execute(select(CalendarGuest).where(
         CalendarGuest.token_hash == token_hash(token),
         CalendarGuest.revoked_at.is_(None)))).scalar_one_or_none()
-    if guest is None:
+    # «Нет», «отозвана» и «истекла» отвечают одинаково: подсказывать, что ссылка
+    # когда-то существовала, незачем. Без срока третьего состояния не было
+    # вовсе, и старая ссылка из пересланного письма работала вечно.
+    if guest is None or (guest.expires_at is not None
+                         and guest.expires_at <= datetime.now(timezone.utc)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Приглашение не найдено")
     ev = await db.get(CalendarEvent, guest.event_id)
     if ev is None:
@@ -152,6 +156,72 @@ async def invite_propose(token: str, payload: ProposeIn,
     await db.commit()
     return {"proposed_starts_at": guest.proposed_starts_at,
             "proposed_ends_at": guest.proposed_ends_at}
+
+
+@router.get("/{token}/poll")
+async def invite_poll(token: str, db: AsyncSession = Depends(get_db)):
+    """Варианты времени и голоса — гостю.
+
+    Опрос без внешних участников бессмыслен ровно там, где он нужнее всего:
+    время согласовывают с партнёром, а не между своими. Голоса своих и гостей
+    лежат одной таблицей, поэтому итог считается один — и здесь, и внутри.
+    """
+    from app.models import CalendarPollOption, CalendarPollVote
+
+    guest, ev = await _guest_or_404(db, token)
+    options = list((await db.execute(select(CalendarPollOption).where(
+        CalendarPollOption.event_id == ev.id)
+        .order_by(CalendarPollOption.starts_at))).scalars())
+    голоса = list((await db.execute(select(CalendarPollVote).where(
+        CalendarPollVote.option_id.in_([o.id for o in options])))).scalars()) \
+        if options else []
+    свод = {o.id: {"yes": 0, "maybe": 0, "no": 0} for o in options}
+    мой: dict[str, str] = {}
+    for v in голоса:
+        свод[v.option_id][v.vote] = свод[v.option_id].get(v.vote, 0) + 1
+        if v.guest_id == guest.id:
+            мой[str(v.option_id)] = v.vote
+    return {
+        "status": ev.status,
+        "options": [{
+            "id": str(o.id), "starts_at": o.starts_at, "ends_at": o.ends_at,
+            "votes": свод[o.id], "my_vote": мой.get(str(o.id)),
+        } for o in options],
+    }
+
+
+class GuestVoteIn(BaseModel):
+    option_id: str
+    vote: str = Field(pattern="^(yes|maybe|no)$")
+
+
+@router.post("/{token}/poll/vote")
+async def invite_vote(token: str, payload: GuestVoteIn,
+                      db: AsyncSession = Depends(get_db)):
+    """Голос гостя. Повторный меняет прежний, а не добавляет второй."""
+    import uuid as _uuid
+
+    from app.models import CalendarPollOption, CalendarPollVote
+
+    guest, ev = await _guest_or_404(db, token)
+    if ev.status == "cancelled":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Встреча отменена")
+    try:
+        oid = _uuid.UUID(payload.option_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вариант не найден") from None
+    opt = await db.get(CalendarPollOption, oid)
+    if opt is None or opt.event_id != ev.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вариант не найден")
+    строка = (await db.execute(select(CalendarPollVote).where(
+        CalendarPollVote.option_id == opt.id,
+        CalendarPollVote.guest_id == guest.id))).scalar_one_or_none()
+    if строка is None:
+        строка = CalendarPollVote(option_id=opt.id, guest_id=guest.id)
+        db.add(строка)
+    строка.vote = payload.vote
+    await db.commit()
+    return {"option_id": str(opt.id), "vote": строка.vote}
 
 
 @router.get("/{token}/ics")
