@@ -32,6 +32,7 @@ import * as tasksService from '@/services/tasksService'
 import { WorkIdentity } from '@/components/work/WorkIdentity'
 import * as docsService from '@/services/docsService'
 import { WorkTrace } from '@/components/work/WorkTrace'
+import { SubjectMeetings } from '@/components/calendar/SubjectMeetings'
 import type { LinkKind, LoadedTask, TaskVisibility } from '@/services/tasksService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { listSpaceConnectors } from '@/services/spaceConnectorsService'
@@ -875,6 +876,14 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
           {ещё ? 'Свернуть пустые поля' : `Ещё поля · ${скрытыхПолей}`}
         </button>
       )}
+
+      {/* Цепочка работы: предмет → встреча → решение → новые поручения. Обратный
+          ход был не пройден — собрать встречу по задаче было можно, а увидеть из
+          карточки, что собирались, нельзя. */}
+      <div className="mt-5 border-t pt-3">
+        <SubjectMeetings companyId={companyId} subjectRef={`task:${task.id}`}
+          title={task.title} />
+      </div>
 
       <dl className="mt-5 space-y-1.5 border-t pt-3 text-xs text-muted-foreground">
         <div className="flex justify-between gap-2">

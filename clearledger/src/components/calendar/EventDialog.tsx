@@ -12,7 +12,7 @@
  */
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Loader2, Video, X } from 'lucide-react'
+import { ListPlus, Loader2, Video, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -38,19 +38,26 @@ const ОТВЕТ_СЛОВОМ: Record<EventResponse, string> = {
   pending: 'не ответил', accepted: 'будет', declined: 'не будет', tentative: 'может быть',
 }
 
-export function EventDialog({ companyId, event, startAt, onClose, onChanged }: {
+export function EventDialog({ companyId, event, startAt, subjectRef, initialTitle,
+  onClose, onChanged }: {
   companyId: string
   /** Существующая встреча — правим её; иначе собираем новую. */
   event: CalendarEvent | null
   /** С какого времени предложить новую встречу (клик по дню). */
   startAt: Date | null
+  /** Предмет, ради которого собираются (`doc:<uuid>`, `task:<uuid>`). Ссылка
+   *  двусторонняя: из встречи видно предмет, из предмета — назначенные по нему
+   *  обсуждения. Без неё через месяц никто не вспомнит, зачем собирались. */
+  subjectRef?: string
+  /** Заготовка названия: обсуждение приходит с именем своего предмета. */
+  initialTitle?: string
   onClose: () => void
   onChanged: () => void
 }) {
   const новая = !event
   const мой = event?.is_organizer ?? true
 
-  const [title, setTitle] = useState(event?.title ?? '')
+  const [title, setTitle] = useState(event?.title ?? initialTitle ?? '')
   const [description, setDescription] = useState(event?.description ?? '')
   const [starts, setStarts] = useState(() => local(
     event ? new Date(event.starts_at) : (startAt ?? new Date())))
@@ -74,6 +81,20 @@ export function EventDialog({ companyId, event, startAt, onClose, onChanged }: {
     setAttendees(event.attendees.map((a) => a.user_id))
   }, [event])
 
+  const [итог, setИтог] = useState('')
+  const поручить = useMutation({
+    mutationFn: () => tasksService.createTask({
+      companyId, title: итог.trim().slice(0, 300),
+      subjectRef: `event:${event!.id}`,
+    }),
+    onSuccess: () => {
+      setИтог('')
+      toast.success('Поручение заведено — оно в «Разборе», пока не назначен исполнитель')
+      onChanged()
+    },
+    onError: (e: Error) => toast.error(e.message || 'Поручение не завелось'),
+  })
+
   const peopleQ = useQuery({
     queryKey: ['task-people', companyId],
     queryFn: () => tasksService.listTaskPeople(companyId),
@@ -91,6 +112,7 @@ export function EventDialog({ companyId, event, startAt, onClose, onChanged }: {
           location: location.trim() || undefined,
           conferenceUrl: conference.trim() || undefined,
           attendeeIds: attendees,
+          subjectRef: subjectRef || undefined,
         })
       }
       return workService.eventAction(companyId, event!.id, {
@@ -223,6 +245,31 @@ export function EventDialog({ companyId, event, startAt, onClose, onChanged }: {
             </p>
           )}
         </div>
+
+        {/* По итогам встречи — поручение. Исполнителя здесь не спрашиваем: на
+            совещании решают ЧТО, а кто — часто позже. Работа без исполнителя не
+            теряется, она попадает в «Разбор», где её берут, отдают или
+            закрывают с причиной. Ссылка на встречу остаётся в предмете
+            поручения: через месяц видно, где это решили. */}
+        {!новая && event!.status !== 'cancelled' && (
+          <div className="mt-3 space-y-1.5 border-t pt-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              По итогам
+            </p>
+            <div className="flex items-center gap-1.5">
+              <Input value={итог} onChange={(e) => setИтог(e.target.value)}
+                placeholder="Что решили сделать…" className="h-8 text-sm"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && итог.trim()) поручить.mutate()
+                }} />
+              <Button size="sm" variant="outline" className="h-8 shrink-0 px-2 text-xs"
+                disabled={!итог.trim() || поручить.isPending}
+                onClick={() => поручить.mutate()}>
+                <ListPlus className="mr-1 h-3.5 w-3.5" />Поручение
+              </Button>
+            </div>
+          </div>
+        )}
 
         <DialogFooter className="flex-wrap gap-2">
           {!новая && !мой && (

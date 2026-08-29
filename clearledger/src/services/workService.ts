@@ -381,9 +381,17 @@ export interface CalendarEvent {
 }
 
 /** Встречи периода: пересекающиеся с окном, а не начинающиеся в нём. */
-export async function listEvents(companyId: string, from: string, to: string) {
+export async function listEvents(companyId: string, from: string, to: string,
+  opts?: {
+    /** `mine` — мой календарь; `company` — общий календарь компании, и в нём
+     *  только встречи с кругом «вся компания». */
+    scope?: 'mine' | 'company'
+    /** Обсуждения по предмету: `doc:<uuid>`, `task:<uuid>`. */
+    subjectRef?: string
+  }) {
   return get<{ events: CalendarEvent[]; total: number }>('/api/work/calendar', {
     company_id: companyId, from, to,
+    scope: opts?.scope, subject_ref: opts?.subjectRef,
   })
 }
 

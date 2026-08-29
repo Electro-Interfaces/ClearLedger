@@ -6,6 +6,10 @@
  * вообще» и потому длинная; сюда человек заходит утром спросить «что сегодня»
  * — и список на два экрана этот вопрос не закрывает, а прячет.
  *
+ * Встречи стоят первыми и отдельно: они не «работа, которую можно взять или
+ * отложить», а каркас дня — часы, вокруг которых остальное и раскладывается.
+ * Смешать их с очередью значит предложить человеку отложить совещание.
+ *
  * Две полосы, а не одна, потому что у работы разное происхождение. Компания
  * приносит визы, поручения и сроки — отменить их человек не вправе. Свой день
  * он набирает сам: взять, отложить до даты, отдать. Прежний экран показывал
@@ -19,7 +23,8 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
-  Bell, Check, ChevronDown, ChevronRight, Clock3, EyeOff, Loader2, Sun,
+  Bell, CalendarDays, Check, ChevronDown, ChevronRight, Clock3, EyeOff,
+  Loader2, Sun, Video,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -29,6 +34,11 @@ import type { PersonalReminder } from '@/services/workService'
 import { PlacedList } from '@/components/docs/PlacedList'
 import { MyWorkPage } from './MyWorkPage'
 import { dtT } from '@/components/tasks/taskWords'
+import { cn } from '@/lib/utils'
+
+const время = new Intl.DateTimeFormat('ru-RU', {
+  hour: '2-digit', minute: '2-digit',
+})
 
 /** Как сегодня называется вслух: «понедельник, 25 августа». */
 const сегодня = () => new Date().toLocaleDateString('ru-RU', {
@@ -49,6 +59,7 @@ export function TodayPage() {
       </header>
 
       <Reminders companyId={companyId} />
+      <Meetings companyId={companyId} />
       <CarryOver companyId={companyId} />
 
       <section>
@@ -70,6 +81,81 @@ export function TodayPage() {
 
       <Deferred companyId={companyId} />
     </div>
+  )
+}
+
+
+/** Встречи сегодняшнего дня — каркас, вокруг которого раскладывается остальное.
+ *
+ *  Отменённая встреча не исчезает до конца своего дня: человек, увидевший её
+ *  утром, должен узнать, что она отменена, и почему. Молча пропавшая встреча
+ *  означает, что кто-то придёт в пустую переговорную.
+ */
+function Meetings({ companyId }: { companyId: string }) {
+  const navigate = useNavigate()
+  const [от, до] = (() => {
+    const н = new Date(); н.setHours(0, 0, 0, 0)
+    const к = new Date(н); к.setDate(к.getDate() + 1)
+    return [н.toISOString(), к.toISOString()]
+  })()
+
+  const q = useQuery({
+    queryKey: ['calendar', companyId, 'today', от],
+    queryFn: () => workService.listEvents(companyId, от, до),
+    enabled: !!companyId,
+  })
+
+  const rows = (q.data?.events ?? [])
+    .slice()
+    .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+  if (q.isLoading || rows.length === 0) return null
+
+  return (
+    <section>
+      <h2 className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-foreground">
+        <CalendarDays className="h-3.5 w-3.5 text-primary" />Встречи
+        <span className="text-xs font-normal text-muted-foreground">{rows.length}</span>
+      </h2>
+      <div className="overflow-hidden rounded-lg border border-border">
+        {rows.map((e) => {
+          const отменена = e.status === 'cancelled'
+          return (
+            <button key={e.id}
+              onClick={() => navigate(`/docs/work?view=calendar&event=${e.id}`)}
+              className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2 text-left last:border-0 hover:bg-muted/40">
+              <span className="w-[4.5rem] shrink-0 text-xs tabular-nums text-muted-foreground">
+                {e.all_day ? 'весь день' : время.format(new Date(e.starts_at))}
+              </span>
+              <span className={cn('min-w-[10rem] flex-1 text-sm',
+                отменена ? 'text-muted-foreground line-through' : 'text-foreground')}>
+                {e.title}
+              </span>
+              {отменена ? (
+                <span className="text-xs text-red-600 dark:text-red-400">
+                  отменена{e.cancel_reason ? ` · ${e.cancel_reason}` : ''}
+                </span>
+              ) : (
+                <>
+                  {e.location && (
+                    <span className="text-xs text-muted-foreground">{e.location}</span>
+                  )}
+                  {/* Своего ответа ещё нет — единственное, что от человека тут
+                      требуется. Остальные состояния молчат: они не действие. */}
+                  {e.my_response === 'pending' && !e.is_organizer && (
+                    <span className="text-xs text-amber-600 dark:text-amber-400">
+                      ответьте
+                    </span>
+                  )}
+                  {e.conference_url && (
+                    <Video className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                </>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 

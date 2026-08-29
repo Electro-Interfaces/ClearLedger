@@ -892,19 +892,49 @@ async def calendar_list(
     # Поиск словами: «когда была планёрка по экосистеме» без него решается перебором
     # месяцев глазами — и человеком, и агентом.
     q: str | None = Query(None, max_length=200),
+    # `mine` — мой календарь; `company` — общий календарь компании.
+    scope: str = Query("mine", pattern="^(mine|company)$"),
+    # Обсуждения ПО ПРЕДМЕТУ: `doc:<uuid>`, `task:<uuid>`.
+    subject_ref: str | None = Query(None, max_length=120),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Встречи периода — пересекающиеся с окном, а не начинающиеся в нём:
-    иначе командировка с прошлой недели пропадёт из этой."""
+    иначе командировка с прошлой недели пропадёт из этой.
+
+    Три вопроса, и у каждого свой круг.
+
+    `mine` — мой календарь: что я собрал и куда меня позвали. Всё остальное сюда
+    не подмешивается, иначе свои три встречи тонут в сотне чужих.
+
+    `company` — общий календарь компании, и в нём ТОЛЬКО встречи с кругом «вся
+    компания». Закрытые не появляются даже строкой «занято»: для планирования
+    есть `/calendar/busy`, который отдаёт интервалы и ничего больше, а общий
+    календарь — это витрина, и место в ней закрытому событию значило бы, что
+    круг видимости зависит от экрана.
+
+    `subject_ref` — обсуждения по предмету. Здесь круг шире моего: если человек
+    видит документ, факт назначенного по нему совещания — часть его истории, и
+    прятать его значит заставлять спрашивать в чате «мы вообще собирались?».
+    Но шире ровно на встречи компании: закрытая встреча остаётся закрытой.
+    """
     from app.models import CalendarEvent
 
     cid = await _assert_work(company_id, current_user, db)
+    if scope == "company":
+        круг = CalendarEvent.visibility == "company"
+    elif subject_ref:
+        круг = or_(_my_events_clause(current_user.id),
+                   CalendarEvent.visibility == "company")
+    else:
+        круг = _my_events_clause(current_user.id)
     sel = select(CalendarEvent).where(
         CalendarEvent.company_id == cid,
-        _my_events_clause(current_user.id),
+        круг,
         CalendarEvent.starts_at < date_to,
         CalendarEvent.ends_at > date_from)
+    if subject_ref:
+        sel = sel.where(CalendarEvent.subject_ref == subject_ref)
     if q and q.strip():
         игла = f"%{q.strip()}%"
         sel = sel.where(or_(CalendarEvent.title.ilike(игла),

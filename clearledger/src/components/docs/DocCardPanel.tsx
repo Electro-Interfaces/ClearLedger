@@ -21,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { SubjectMeetings } from '@/components/calendar/SubjectMeetings'
 import * as docsService from '@/services/docsService'
 import { WorkIdentity } from '@/components/work/WorkIdentity'
 import { ACTOR_KIND_LABEL, WorkTrace } from '@/components/work/WorkTrace'
@@ -801,7 +802,14 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
             onRemove={(versionId, reason) => tombstone.mutate({ versionId, reason })} />
         </TabsContent>
 
-        <TabsContent value="links" className="pt-3">
+        <TabsContent value="links" className="space-y-3 pt-3">
+          {/* Обсуждения стоят во «Связях», а не отдельной вкладкой: встреча по
+              документу — это такая же связь предмета, и восьмая вкладка ради неё
+              стоила бы дороже, чем даёт. */}
+          <Card className="p-3">
+            <SubjectMeetings companyId={companyId} subjectRef={`doc:${d.id}`}
+              title={d.title} />
+          </Card>
           <Card className="divide-y divide-border/60">
             {d.relations.map((relation) => (
               relation.target_ref.startsWith('task:') ? (

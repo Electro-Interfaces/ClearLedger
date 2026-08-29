@@ -41,6 +41,7 @@ export function CalendarPage() {
   const qc = useQueryClient()
   const [mode, setMode] = useState<Mode>('month')
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()))
+  const [scope, setScope] = useState<'mine' | 'company'>('mine')
   const [openEvent, setOpenEvent] = useState<CalendarEvent | null>(null)
   const [newAt, setNewAt] = useState<Date | null>(null)
 
@@ -57,9 +58,9 @@ export function CalendarPage() {
   }, [anchor, mode])
 
   const eventsQ = useQuery({
-    queryKey: ['calendar', companyId, from.toISOString(), to.toISOString()],
+    queryKey: ['calendar', companyId, scope, from.toISOString(), to.toISOString()],
     queryFn: () => workService.listEvents(companyId, from.toISOString(),
-      addDays(to, 1).toISOString()),
+      addDays(to, 1).toISOString(), { scope }),
     enabled: !!companyId,
   })
   // Сроки — из реестра поручений: свой источник сроков разошёлся бы с очередью
@@ -71,13 +72,22 @@ export function CalendarPage() {
     queryFn: () => tasksService.listTasks(companyId, 'my_due', {
       dueFrom: from.toISOString(), dueTo: addDays(to, 1).toISOString(), limit: 200,
     }),
-    enabled: !!companyId,
+    // Сроки стоят только в СВОЁМ календаре. В общем их быть не должно: срок —
+    // обязательство конкретного человека, и вывешивать чужие в витрину компании
+    // значит превратить календарь в табло исполнительской дисциплины.
+    enabled: !!companyId && scope === 'mine',
   })
 
   if (!companyId) return null
 
-  const events = (eventsQ.data?.events ?? []).filter((e) => e.status !== 'cancelled')
-  const tasks = tasksQ.data?.tasks ?? []
+  // Отменённая встреча не исчезает, пока её день не прошёл: человек, увидевший
+  // её вчера, должен узнать, что она отменена, и почему. Молча пропавшая встреча
+  // означает, что кто-то придёт в пустую переговорную. Прошедшие отменённые
+  // скрываем — они уже никого не подведут, а сетку засоряют.
+  const начало = startOfDay(new Date()).getTime()
+  const events = (eventsQ.data?.events ?? []).filter(
+    (e) => e.status !== 'cancelled' || new Date(e.ends_at).getTime() >= начало)
+  const tasks = scope === 'mine' ? (tasksQ.data?.tasks ?? []) : []
   const шаг = (вперёд: boolean) => setAnchor((d) => (mode === 'month'
     ? addMonths(d, вперёд ? 1 : -1)
     : addWeeks(d, вперёд ? 1 : -1)))
@@ -101,6 +111,17 @@ export function CalendarPage() {
           aria-label="Вперёд"><ChevronRight className="h-4 w-4" /></Button>
 
         <div className="ml-auto flex items-center gap-1">
+          {/* Общий календарь показывает только встречи с кругом «вся компания».
+              Закрытые не появляются в нём даже строкой «занято»: для планирования
+              есть занятость интервалами, а витрина, в которой видно чужое
+              закрытое, означала бы, что круг видимости зависит от экрана. */}
+          {([['mine', 'Мой'], ['company', 'Компании']] as const).map(([код, имя]) => (
+            <Button key={код} size="sm" variant={scope === код ? 'secondary' : 'ghost'}
+              className="h-8 px-2.5 text-xs" onClick={() => setScope(код)}>
+              {имя}
+            </Button>
+          ))}
+          <span className="mx-1 h-4 w-px bg-border" />
           {(['month', 'week'] as Mode[]).map((m) => (
             <Button key={m} size="sm" variant={mode === m ? 'secondary' : 'ghost'}
               className="h-8 px-2.5 text-xs" onClick={() => setMode(m)}>
@@ -198,10 +219,15 @@ function DayCell({ day, mode, anchor, events, tasks, onEvent, onAdd }: {
       <div className="mt-1 space-y-0.5">
         {видимые.map((e) => (
           <button key={e.id} onClick={() => onEvent(e)}
+            title={e.status === 'cancelled'
+              ? `Отменена${e.cancel_reason ? `: ${e.cancel_reason}` : ''}`
+              : undefined}
             className={cn('flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[11px]',
-              e.my_response === 'declined'
-                ? 'text-muted-foreground line-through'
-                : 'bg-primary/10 text-foreground hover:bg-primary/20')}>
+              e.status === 'cancelled'
+                ? 'text-muted-foreground line-through decoration-red-500/60'
+                : e.my_response === 'declined'
+                  ? 'text-muted-foreground line-through'
+                  : 'bg-primary/10 text-foreground hover:bg-primary/20')}>
             {!e.all_day && (
               <span className="shrink-0 tabular-nums text-muted-foreground">
                 {format(new Date(e.starts_at), 'HH:mm')}

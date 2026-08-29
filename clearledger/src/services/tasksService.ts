@@ -534,6 +534,10 @@ export async function createTask(data: {
   visibility?: TaskVisibility
   /** Своё напоминание о записи — ставится вместе с ней. */
   remindAt?: string
+  /** Откуда работа выросла: `event:<uuid>` у поручения по итогам встречи,
+   *  `doc:<uuid>` у работы по документу. Ссылка обратная — через месяц по ней
+   *  видно, на каком совещании это решили. */
+  subjectRef?: string
 }) {
   return post<SpaceTask>('/api/tasks', {
     company_id: data.companyId, title: data.title,
@@ -541,6 +545,7 @@ export async function createTask(data: {
     project_id: data.projectId || undefined,
     type_id: data.typeId || undefined, assignee_id: data.assigneeId || undefined,
     object_id: data.objectId || undefined, priority: data.priority || undefined,
+    subject_ref: data.subjectRef || undefined,
     due_at: data.dueAt || undefined,
     visibility: data.visibility || undefined,
     remind_at: data.remindAt || undefined,

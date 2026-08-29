@@ -62,9 +62,15 @@ DIGEST_LOCK_KEY = 0x0D19E57
 # ничего не успеет.
 WARN_FRACTION = 0.25
 
+# Сколько встреч за проход кладём в сводки. Предел, а не отбор: в
+# пространстве на сотню человек их за сутки десятки, и упереться в него
+# нельзя, но неограниченная выборка по всем компаниям стека — способ
+# однажды вытащить в память полугодовой календарь.
+_MEETING_LIMIT = 500
+
 # Проходы, которые не шлют сами, а кладут повод в сводку окна.
 _WITH_BUCKET = frozenset({"reminders", "escalations", "acquaints",
-                          "approvals", "digests"})
+                          "approvals", "meetings", "digests"})
 
 
 def _tz(rule: dict) -> ZoneInfo:
@@ -434,6 +440,43 @@ async def run_approval_reminders(db, now: datetime, bucket: digest.Bucket) -> in
     return sent
 
 
+async def run_meetings(db, now: datetime, bucket: digest.Bucket) -> int:
+    """Сегодняшние встречи — поводом в утреннюю сводку.
+
+    Встреча в сводке нужна не как напоминание за пять минут (для этого есть своё,
+    которое человек ставит сам), а как каркас дня: утром он должен увидеть, во
+    сколько его ждут, вместе со всем остальным, а не в отдельном сообщении.
+
+    Поэтому повод один на встречу и на день: ключ содержит дату, и вторая сводка
+    того же дня о ней не напомнит. Отменённые не берём — о них человек узнаёт из
+    самой отмены, и «в 15:00 совещание» о снятой встрече хуже молчания.
+    """
+    from app.models import CalendarAttendee, CalendarEvent
+
+    завтра = now + timedelta(days=1)
+    rows = (await db.execute(
+        select(CalendarEvent, CalendarAttendee.user_id)
+        .join(CalendarAttendee, CalendarAttendee.event_id == CalendarEvent.id)
+        .where(CalendarEvent.status != "cancelled",
+               CalendarEvent.starts_at >= now,
+               CalendarEvent.starts_at < завтра,
+               # Отказавшийся получил бы напоминание о том, куда не идёт.
+               CalendarAttendee.response != "declined")
+        .limit(_MEETING_LIMIT))).all()
+    for ev, uid in rows:
+        когда = ev.starts_at.astimezone(
+            space_time.zone(await bucket.tz(db, ev.company_id)))
+        bucket.add(
+            ev.company_id, uid,
+            f"meeting:{ev.id}:{когда.date().isoformat()}",
+            ("Весь день: " if ev.all_day
+             else f"В {когда.strftime('%H:%M')}: ") + f"«{ev.title}»"
+            + (f" · {ev.location}" if ev.location else ""),
+            # После начала встречи повод бессмыслен: сводка выбросит его молча.
+            expires_at=ev.starts_at)
+    return len(rows)
+
+
 async def run_event_delivery(db, now: datetime) -> int:
     """Разослать события пространства подписчикам и погасить молчащих.
 
@@ -675,7 +718,8 @@ async def tick() -> dict[str, int]:
     now = datetime.now(timezone.utc)
     out = {"recurrences": 0, "reminders": 0, "escalations": 0,
            "acquaints": 0, "approvals": 0, "events": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0,
-           "inbound_events": 0, "approval_delivery": 0, "personal": 0, "digests": 0}
+           "inbound_events": 0, "approval_delivery": 0, "personal": 0,
+           "meetings": 0, "digests": 0}
     # Поводы копятся весь проход и доставляются одним сообщением в конце: сводка
     # окна — это про число сообщений человеку, а не про удобство планировщика.
     bucket = digest.Bucket()
@@ -692,6 +736,7 @@ async def tick() -> dict[str, int]:
                         ("inbound_events", run_inbound_events),
                         ("approval_delivery", run_approval_delivery),
                         ("personal", run_personal_reminders),
+                        ("meetings", run_meetings),
                         ("digests", run_digests)):
             try:
                 out[key] = await (fn(db, now, bucket) if key in _WITH_BUCKET
