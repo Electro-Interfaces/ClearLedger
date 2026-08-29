@@ -19,6 +19,7 @@ import {
   BookOpen, Compass, Scale, FileSignature, HelpCircle,
   Activity, TrendingUp, Users, CalendarDays, LayoutDashboard,
   ListChecks, Building2, BarChart3, Settings2, FolderOpen,
+  Inbox, MonitorPlay, Presentation, Boxes,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -203,6 +204,25 @@ const DOCS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
   { to: '/docs/setup', label: 'Настройка', icon: Settings2 },
 ]
 
+/**
+ * Разделы «Сайта» (ecosystem-deploy/apps/site.yml). Сверху то, за чем приходят
+ * каждый день — что написали с сайта; ниже сама витрина; в конце вход клиента.
+ * Черта отделяет входящее от нашего: первое читают, второе правят.
+ *
+ * Экран пишется в `?view=`, как виды «Чатов»: на любой из семи можно дать
+ * ссылку. Раньше они стояли вкладками в шапке рабочей области — то есть у
+ * приложения не было собственной навигации, а в рельсе висело чужое меню Учёта.
+ */
+const SITE_SECTIONS: { view: string; label: string; icon: typeof Activity; sep?: boolean }[] = [
+  { view: 'requests', label: 'Обращения', icon: MessagesSquare },
+  { view: 'leads', label: 'Заявки', icon: Inbox },
+  { view: 'showcase', label: 'Витрина', icon: Megaphone, sep: true },
+  { view: 'cabinets', label: 'Кабинеты', icon: UserRound, sep: true },
+  { view: 'spaces', label: 'Пространства', icon: Boxes },
+  { view: 'stands', label: 'Стенды', icon: MonitorPlay },
+  { view: 'shows', label: 'Показы', icon: Presentation },
+]
+
 const CHAT_VIEWS: { key: string; label: string; icon: typeof MessagesSquare }[] = [
   { key: 'all', label: 'Все чаты', icon: MessagesSquare },
   { key: 'channel', label: 'Каналы', icon: Megaphone },
@@ -258,6 +278,31 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
   // по адресу, подсветка расходилась с экраном: открыт «Каталог», а выбранным
   // не выглядел никто.
   const { activeMode: openMode } = useActiveMode()
+  // Блок Ядра — один и тот же во всех приложениях Ядра (SPACE.md §4): функции
+  // пространства не принадлежат рабочему месту, и «Пульс», «Задачи», «Трек» и
+  // «Сайт» рисовали его четырьмя одинаковыми копиями. Копия одна.
+  const spaceBlock = (
+    <>
+      <SidebarSeparator className="my-2" />
+      <SidebarGroup className="py-0">
+        {!collapsed && (
+          <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+            Пространство
+          </p>
+        )}
+        <SidebarMenu>
+          {SPACE_PAGES.filter((x) => navByPath[x]).map((x) => navByPath[x]).map((item) => (
+            <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
+              collapsed={collapsed} onNavigate={onNavigate} />
+          ))}
+          {spaceLinksFor(company.profileId).filter((l) => canApp(l.app)).map((l) => (
+            <NavItem key={l.to} to={l.to} icon={l.icon} label={l.label}
+              collapsed={collapsed} onNavigate={onNavigate} />
+          ))}
+        </SidebarMenu>
+      </SidebarGroup>
+    </>
+  )
   // В продукте пространства («Финансы», «Данные», …) меню — только его разделы и
   // страницы: рабочее место не должно показывать чужие. Модулями Учёта пункты внутри не
   // фильтруются (у роли с ключом `finance` их нет, и «Документы» исчезли бы из
@@ -273,9 +318,6 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
     // Блок Ядра — как в любом рабочем месте (SPACE.md §4): функции пространства
     // одинаковы везде, и руководителю они нужны не меньше (посмотреть объект,
     // договор, людей и доступы). Ведут на общие адреса — «Пульс» их не присваивает.
-    const spaceItems = SPACE_PAGES
-      .filter((p) => navByPath[p])
-      .map((p) => navByPath[p])
     return (
       <>
         <SidebarGroup className="py-0">
@@ -289,24 +331,7 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
           </SidebarMenu>
         </SidebarGroup>
 
-        <SidebarSeparator className="my-2" />
-        <SidebarGroup className="py-0">
-          {!collapsed && (
-            <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-              Пространство
-            </p>
-          )}
-          <SidebarMenu>
-            {spaceItems.map((item) => (
-              <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
-                collapsed={collapsed} onNavigate={onNavigate} />
-            ))}
-            {spaceLinksFor(company.profileId).filter((l) => canApp(l.app)).map((l) => (
-              <NavItem key={l.to} to={l.to} icon={l.icon} label={l.label}
-                collapsed={collapsed} onNavigate={onNavigate} />
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
+        {spaceBlock}
       </>
     )
   }
@@ -316,9 +341,6 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
   // экране «Задач» висело меню Учёта — то есть своей навигации у продукта не было
   // вовсе, и человек не понимал, где он.
   if (pathname === '/tasks' || pathname.startsWith('/tasks/')) {
-    const spaceItems = SPACE_PAGES
-      .filter((p) => navByPath[p])
-      .map((p) => navByPath[p])
     return (
       <>
         <SidebarGroup className="py-0">
@@ -334,24 +356,7 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
           </SidebarMenu>
         </SidebarGroup>
 
-        <SidebarSeparator className="my-2" />
-        <SidebarGroup className="py-0">
-          {!collapsed && (
-            <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-              Пространство
-            </p>
-          )}
-          <SidebarMenu>
-            {spaceItems.map((item) => (
-              <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
-                collapsed={collapsed} onNavigate={onNavigate} />
-            ))}
-            {spaceLinksFor(company.profileId).filter((l) => canApp(l.app)).map((l) => (
-              <NavItem key={l.to} to={l.to} icon={l.icon} label={l.label}
-                collapsed={collapsed} onNavigate={onNavigate} />
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
+        {spaceBlock}
       </>
     )
   }
@@ -359,9 +364,6 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
   // «Трек» — документооборот и работа: такое же приложение Ядра, как «Пульс», и
   // раскладка у него такая же. Без своей ветки на экране висело бы меню Учёта.
   if (pathname === '/docs' || pathname.startsWith('/docs/')) {
-    const spaceItems = SPACE_PAGES
-      .filter((p) => navByPath[p])
-      .map((p) => navByPath[p])
     return (
       <>
         <SidebarGroup className="py-0">
@@ -375,24 +377,30 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
           </SidebarMenu>
         </SidebarGroup>
 
-        <SidebarSeparator className="my-2" />
+        {spaceBlock}
+      </>
+    )
+  }
+
+  // «Сайт» — рабочее место того, кто ведёт витрину. Семь экранов стояли вкладками
+  // в шапке рабочей области: за каждым приходят отдельно, значит по канону это
+  // пункты рельсы, а не углы одного разбора (SPACE.md §4).
+  if (pathname === '/site' || pathname.startsWith('/site/')) {
+    const view = new URLSearchParams(search).get('view') || 'requests'
+    return (
+      <>
         <SidebarGroup className="py-0">
-          {!collapsed && (
-            <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-              Пространство
-            </p>
-          )}
           <SidebarMenu>
-            {spaceItems.map((item) => (
-              <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
-                collapsed={collapsed} onNavigate={onNavigate} />
-            ))}
-            {spaceLinksFor(company.profileId).filter((l) => canApp(l.app)).map((l) => (
-              <NavItem key={l.to} to={l.to} icon={l.icon} label={l.label}
-                collapsed={collapsed} onNavigate={onNavigate} />
+            {SITE_SECTIONS.map((s) => (
+              <Fragment key={s.view}>
+                {s.sep && <SidebarSeparator className="my-1.5" />}
+                <NavItem to={`/site?view=${s.view}`} icon={s.icon} label={s.label}
+                  collapsed={collapsed} onNavigate={onNavigate} active={view === s.view} />
+              </Fragment>
             ))}
           </SidebarMenu>
         </SidebarGroup>
+        {spaceBlock}
       </>
     )
   }

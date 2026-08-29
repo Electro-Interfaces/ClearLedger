@@ -1,7 +1,7 @@
 /**
  * «Сайт» — рабочее место того, кто ведёт публичную витрину компании.
  *
- * Граница с сайтом проходит по хозяину данных, и вкладки идут по ней же:
+ * Граница с сайтом проходит по хозяину данных, и пункты рельсы идут по ней же:
  *
  *   Заявки · Обращения · Показы       — рождаются НА САЙТЕ, здесь их читают.
  *   Кабинеты · Пространства · Стенды  — ведутся ЗДЕСЬ, сайт их читает при входе.
@@ -15,6 +15,7 @@
  * прихожая; работает клиент в СВОЁМ пространстве, и бумаги у него там.
  */
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, PlugZap, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -30,7 +31,6 @@ import * as siteService from '@/services/siteService'
 import {
   LEAD_STATUS_LABELS, LEVEL_LABELS, SPACE_STATUS_LABELS, siteTime,
 } from '@/services/siteService'
-import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { ShowcaseEditor } from './ShowcaseEditor'
 import * as referenceService from '@/services/referenceService'
 import { cn } from '@/lib/utils'
@@ -75,7 +75,12 @@ function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
 export function SitePage() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
-  const [tab, setTab] = useState<Tab>('requests')
+  // Экран живёт в адресе, а выбирается в рельсе приложения (`AppSidebar`,
+  // SITE_SECTIONS): на «Заявки» дают ссылку и ставят закладку, как на любой
+  // другой пункт пространства.
+  const [params] = useSearchParams()
+  const view = params.get('view')
+  const tab: Tab = (TABS.some((t) => t.key === view) ? view : 'requests') as Tab
 
   // Что рождается на сайте.
   const summary = useQuery({
@@ -195,7 +200,8 @@ export function SitePage() {
   }, [stands.data])
 
   // Причина связи касается только вкладок, которые читают сайт.
-  const siteOwned = TABS.find((t) => t.key === tab)?.owner === 'site'
+  const active = TABS.find((t) => t.key === tab)
+  const siteOwned = active?.owner === 'site'
   const feedReason: Partial<Record<Tab, string | null | undefined>> = {
     leads: leads.data?.reason,
     requests: requests.data?.reason,
@@ -208,16 +214,21 @@ export function SitePage() {
 
   return (
     <div className="p-6">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <PanelViewTabs
-          tabs={TABS.map((t) => ({
-            k: t.key,
-            label: counts[t.key] !== undefined ? `${t.label} · ${counts[t.key]}` : t.label,
-          }))}
-          value={tab}
-          onChange={(k) => setTab(k as Tab)}
-          ariaLabel="Виды раздела «Сайт»"
-        />
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        {/* Заголовок экрана равен имени пункта рельсы (канон «Пульса» и «Трека»),
+            а строкой ниже — чем этот экран занят: у семи пунктов разный хозяин
+            данных, и понимать это надо до клика, а не после. */}
+        <div>
+          <h1 className="text-lg font-semibold">
+            {active?.label}
+            {counts[tab] !== undefined && (
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                {counts[tab]}
+              </span>
+            )}
+          </h1>
+          <p className="text-xs text-muted-foreground">{active?.hint}</p>
+        </div>
         {summary.data?.url && (
           <a href={summary.data.url} target="_blank" rel="noreferrer"
              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground
@@ -227,12 +238,6 @@ export function SitePage() {
           </a>
         )}
       </div>
-
-      {/* Чем занят вид — строкой, а не подсказкой при наведении: у семи вкладок
-          разный хозяин данных, и понимать это надо до клика, а не после. */}
-      <p className="mb-3 text-xs text-muted-foreground">
-        {TABS.find((t) => t.key === tab)?.hint}
-      </p>
 
       <ConnectionNote reason={reason} />
 

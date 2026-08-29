@@ -344,9 +344,10 @@ const router = createBrowserRouter([
               { path: 'setup', element: <LazyPage><DocsSetupPage /></LazyPage> },
             ],
           },
-          // «Сайт» — публичная витрина и кабинет клиента (elsyplus.ru). Разделы —
-          // вкладками внутри экрана: это один предмет под тремя углами, отдельного
-          // каркаса с левой колонкой ему не нужно.
+          // «Сайт» — публичная витрина и кабинет клиента (elsyplus.ru). Экран
+          // выбирается в рельсе приложения и пишется в `?view=` (SITE_SECTIONS в
+          // `AppSidebar`): за каждым из семи приходят отдельно, и вкладками в шапке
+          // они были не углом одного разбора, а спрятанной навигацией.
           {
             path: '/site',
             element: <RequireApp code="site"><LazyPage><SitePage /></LazyPage></RequireApp>,
