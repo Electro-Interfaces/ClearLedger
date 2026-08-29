@@ -57,6 +57,8 @@ const DocsSetupPage = lazy(() => import('@/pages/docs/DocsSetupPage').then((m) =
 const DocsCompanyPage = lazy(() => import('@/pages/docs/DocsCompanyPage').then((m) => ({ default: m.DocsCompanyPage })))
 const DocsOverviewPage = lazy(() => import('@/pages/docs/DocsOverviewPage').then((m) => ({ default: m.DocsOverviewPage })))
 const DocsWorkPage = lazy(() => import('@/pages/docs/DocsWorkPage').then((m) => ({ default: m.DocsWorkPage })))
+// «Сайт» — публичная витрина и кабинет клиента: данные ведёт сам сайт, экран их читает.
+const SitePage = lazy(() => import('@/pages/site/SitePage').then((m) => ({ default: m.SitePage })))
 const PulseAppPage = lazy(() => import('@/pulse/PulseAppPage').then((m) => ({ default: m.PulseAppPage })))
 const PulseBusinessPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseBusinessPage })))
 const PulseTeamPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseTeamPage })))
@@ -336,6 +338,13 @@ const router = createBrowserRouter([
               { path: 'regulation', element: <LazyPage><TasksRegulation /></LazyPage> },
               { path: 'setup', element: <LazyPage><DocsSetupPage /></LazyPage> },
             ],
+          },
+          // «Сайт» — публичная витрина и кабинет клиента (elsyplus.ru). Разделы —
+          // вкладками внутри экрана: это один предмет под тремя углами, отдельного
+          // каркаса с левой колонкой ему не нужно.
+          {
+            path: '/site',
+            element: <RequireApp code="site"><LazyPage><SitePage /></LazyPage></RequireApp>,
           },
           // «Пульс» — рабочее место руководителя (ecosystem-deploy/docs/PULSE.md):
           // разделы в рельсе приложения, их пункты — во второй колонке (PulseLayout),

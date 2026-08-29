@@ -103,6 +103,7 @@ from app.routers import (
     partner_router,
     docs_archive_router,
     docs_router,
+    site_router,
     work_router,
     tasks_router,
     tickets_router,
@@ -395,6 +396,7 @@ app.include_router(tasks_router.router, prefix=API_PREFIX)  # «Задачи»: 
 app.include_router(docs_archive_router.router, prefix=API_PREFIX)
 app.include_router(docs_router.router, prefix=API_PREFIX)  # «Трек»: документооборот и работа
 app.include_router(work_router.router, prefix=API_PREFIX)  # единый список работы
+app.include_router(site_router.router, prefix=API_PREFIX)  # «Сайт»: витрина и кабинет клиента
 # Показ документа контрагенту по ссылке: без авторизации, намеренно скупо.
 app.include_router(doc_share_router.router, prefix=API_PREFIX)
 app.include_router(pulse_router.router, prefix=API_PREFIX)
