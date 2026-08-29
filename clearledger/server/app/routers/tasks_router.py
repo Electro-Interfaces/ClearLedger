@@ -566,6 +566,14 @@ def _not_personal():
     return Task.visibility != "personal"
 
 
+# Разрезы, куда своя ДАТИРОВАННАЯ запись входит по определению. Общий отсев
+# «не личное» верен для реестра, доски и счётчиков компании, но здесь он
+# отменял смысл самого разреза: «мои сроки» переставали видеть запись, которой
+# человек поставил срок, и календарь показывал ноль сроков при живых записях.
+# Правило «без срока — заметка, со сроком — дело» держится на этом исключении.
+_ЛИЧНОЕ_ДОПУСТИМО = frozenset({"my_due"})
+
+
 def _my_dated_personal(user: User):
     """Своя запись, у которой появился срок.
 
@@ -779,7 +787,7 @@ async def list_tasks(
                              _visible_to(current_user, await _is_admin(db, cid, current_user)))
     if visibility:
         sel = sel.where(Task.visibility == visibility)
-    else:
+    elif scope not in _ЛИЧНОЕ_ДОПУСТИМО:
         sel = sel.where(_not_personal())
 
     if scope == "open":
@@ -1612,7 +1620,12 @@ async def create_task(
                                   "fix_version_id") if payload.fix_version_id else None
     route = _route_of(ttype)
     due = payload.due_at
-    if due is None and ttype is not None and ttype.due_days is not None:
+    # Срок по умолчанию берётся у типа — но НЕ у личной записи. «Без срока —
+    # заметка, со сроком — дело»: подставив срок за человека, продукт молча
+    # превращает записанную мысль в обязательство, и записная книжка начинает
+    # напоминать о себе тем, чего человек не обещал.
+    if (due is None and ttype is not None and ttype.due_days is not None
+            and payload.visibility != "personal"):
         due = datetime.now(timezone.utc) + timedelta(days=ttype.due_days)
     assignee = _uuid_or_400(payload.assignee_id, "assignee_id") if payload.assignee_id else None
     if assignee is not None and await db.get(UserCompany, (assignee, cid)) is None:

@@ -82,6 +82,12 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
               <div className="truncate text-sm leading-snug">{item.title}</div>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                 <span className="font-mono">{item.key}</span>
+                {/* Срок на узком экране — здесь: см. ту же правку в строке
+                    очереди. Название важнее даты, и обрезать надо дату. */}
+                <span className={cn('sm:hidden',
+                  overdue && 'text-red-600 dark:text-red-400')}>
+                  {item.due_at ? dt(item.due_at) : 'без срока'}
+                </span>
                 {item.personal && <span>своя запись</span>}
                 {item.mark?.starred && (
                   <span className="text-amber-600 dark:text-amber-400">важно</span>
@@ -94,7 +100,7 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
                 )}
               </div>
             </button>
-            <span className={cn('shrink-0 text-xs tabular-nums',
+            <span className={cn('hidden shrink-0 text-xs tabular-nums sm:inline',
               overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
               {item.due_at ? dt(item.due_at) : 'без срока'}
             </span>

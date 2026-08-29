@@ -179,3 +179,37 @@ async def test_голая_реплика_остаётся_репликой():
     payload = tasks_router.TaskAction(
         company_id=str(uuid.uuid4()), note="это уже сделано")
     assert not (payload.model_fields_set - {"company_id", "note"})
+
+
+async def test_запись_без_срока_срока_не_получает(auth_client, db):
+    """«Без срока — заметка». Тип поручения умеет подставлять срок по умолчанию,
+    и для работы компании это верно; личной записи он молча превращал мысль в
+    обязательство, о котором потом напоминал."""
+    cid = await _company(auth_client)
+    r = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Мысль без срока", "visibility": "personal"})
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["due_at"] is None, "личной записи подставили срок"
+
+
+async def test_датированная_запись_видна_в_моих_сроках(auth_client, db):
+    """«Со сроком — дело»: как только у записи появился срок, она обязана быть
+    там, где человек смотрит свои обязательства. Разрез `my_due` кормит
+    календарь, и общий отсев «не личное» отменял его смысл целиком."""
+    cid = await _company(auth_client)
+    r = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Запись, ставшая делом",
+        "visibility": "personal", "due_at": "2030-01-15T12:00:00Z"})
+    assert r.status_code in (200, 201), r.text
+    tid = r.json()["id"]
+
+    q = await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "my_due", "limit": 200})
+    assert q.status_code == 200, q.text
+    номера = [t["id"] for t in q.json()["tasks"]]
+    assert tid in номера, "датированная запись не попала в «мои сроки»"
+
+    # И обратная сторона: в общих разрезах её по-прежнему нет.
+    o = await auth_client.get("/api/tasks", params={
+        "company_id": cid, "scope": "open", "limit": 200})
+    assert tid not in [t["id"] for t in o.json()["tasks"]],         "личная запись попала в общий разрез"

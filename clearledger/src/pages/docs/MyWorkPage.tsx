@@ -178,6 +178,13 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
         <div className="text-sm leading-snug">{item.title}</div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           <span className="font-mono">{item.key}</span>
+          {/* На узком экране срок идёт сюда, в мету: в одной строке с названием
+              он вместе с кнопками съедал ширину, и название обрезалось до
+              «Добавит…» — список, в котором не прочитать, что за работа. */}
+          <span className={cn('sm:hidden',
+            item.overdue && 'text-red-600 dark:text-red-400')}>
+            {item.due_at ? dt(item.due_at) : 'без срока'}
+          </span>
           <span>{item.reason_name}</span>
           {item.note && <span>{item.note}</span>}
           {item.acting_for && <span>за коллегу</span>}
@@ -189,7 +196,7 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
           )}
         </div>
       </button>
-      <span className={cn('shrink-0 text-xs tabular-nums',
+      <span className={cn('hidden shrink-0 text-xs tabular-nums sm:inline',
         item.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
         {item.due_at ? dt(item.due_at) : 'без срока'}
       </span>
