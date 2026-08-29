@@ -443,6 +443,7 @@ export function SitePage() {
                         <TableHead>Адрес</TableHead>
                         <TableHead>Уровень</TableHead>
                         <TableHead>Компания</TableHead>
+                        <TableHead>Стенды</TableHead>
                         <TableHead>Был на сайте</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -453,7 +454,12 @@ export function SitePage() {
                           <TableCell>{LEVEL_LABELS[c.level ?? ''] ?? c.level ?? '—'}</TableCell>
                           <TableCell>{c.company ?? '—'}</TableCell>
                           <TableCell className="text-sm text-muted-foreground">
-                            {siteTime(c.last_login_at) || '—'}
+                            {!c.demos || c.demos === '*'
+                              ? 'все'
+                              : (Array.isArray(c.demos) ? c.demos.join(', ') : c.demos)}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {siteTime(c.last_seen) || '—'}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -622,7 +628,10 @@ export function SitePage() {
                   ))}
                   {!stands.isLoading && !(stands.data?.items ?? []).length && (
                     <EmptyRow colSpan={4}
-                              text="Стендов нет: показывать клиенту пока нечего" />
+                              text="Каталог пуст: стенды пока перечислены в коде сайта
+                                    (monitor, processing, link, space). Заведите их здесь —
+                                    и кабинет начнёт брать список отсюда, а показы получат
+                                    названия вместо кодов." />
                   )}
                 </TableBody>
               </Table>
@@ -641,7 +650,7 @@ export function SitePage() {
               <TableBody>
                 {(shows.data?.items ?? []).map((d, i) => (
                   <TableRow key={d.id ?? i}>
-                    <TableCell className="whitespace-nowrap">{siteTime(d.created_at)}</TableCell>
+                    <TableCell className="whitespace-nowrap">{siteTime(d.ts)}</TableCell>
                     <TableCell>{d.email ?? '—'}</TableCell>
                     <TableCell>
                       {standTitle.get(d.demo_id ?? '') ?? d.demo_id ?? '—'}

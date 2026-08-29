@@ -33,7 +33,9 @@ export interface SiteCabinet {
   company?: string | null
   note?: string | null
   created_at?: number | string
-  last_login_at?: number | string | null
+  /** Сайт зовёт это `last_seen`; какие стенды открыты — `demos` («*» = все). */
+  last_seen?: number | string | null
+  demos?: string | string[] | null
 }
 
 /** Запись журнала демо-стендов. */
@@ -42,7 +44,8 @@ export interface SiteDemoEntry {
   email?: string
   demo_id?: string
   ip?: string | null
-  created_at?: number | string
+  /** Метка времени показа: сайт пишет `ts`, миллисекундами. */
+  ts?: number | string
 }
 
 /** Заявка с формы витрины. */
