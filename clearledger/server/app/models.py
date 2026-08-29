@@ -10168,7 +10168,14 @@ class CalendarEvent(Base):
     #
     # `recurrence` заполнен ТОЛЬКО у головы серии, у порождённых он пуст: иначе
     # каждая порождённая начала бы порождать своё продолжение.
-    recurrence: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #
+    # `none_as_null` обязателен. Без него JSONB кладёт питоновский `None` как
+    # JSON-значение `null`, которое SQL-условию `IS NOT NULL` УДОВЛЕТВОРЯЕТ, — и
+    # головой серии становится каждая встреча пространства. Поймано на
+    # демонстрации: одна планёрка с повторением породила сорок копий чужих
+    # встреч за проход.
+    recurrence: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True)
     # До какого дня продолжать. Пусто — пока не выключат: планёрка не имеет
     # конца, и требовать его при заведении значит выдумывать дату.
     recurrence_until: Mapped[date_type | None] = mapped_column(Date, nullable=True)

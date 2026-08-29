@@ -44,7 +44,7 @@ def out(row: PersonalMark | None) -> dict | None:
         "deferred_until": (row.deferred_until.isoformat()
                            if row.deferred_until else None),
         "starred": row.starred,
-        "defer_count": row.defer_count,
+        "defer_count": row.defer_count or 0,
         "position": row.position,
     }
 
@@ -154,7 +154,10 @@ async def put(db: AsyncSession, company_id: uuid.UUID, user_id: uuid.UUID,
         # у него наступает по его часам, а не по серверным.
         row.deferred_until = clamp_defer(deferred_until, due_at, today)
         row.taken_for = None
-        row.defer_count += 1
+        # `default=0` у колонки применяется при ВСТАВКЕ, а не при создании
+        # объекта: у только что заведённой отметки счётчик ещё None, и
+        # первое же «не сегодня» по неразложенному предмету падало с 500.
+        row.defer_count = (row.defer_count or 0) + 1
     if starred is not None:
         row.starred = starred
     if position is not None:

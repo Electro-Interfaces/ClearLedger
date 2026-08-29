@@ -478,6 +478,10 @@ async def run_meeting_series(db, now: datetime) -> int:
     создано = 0
     for head in головы:
         правило = head.recurrence or {}
+        # Второй заслон к тому же: голова без внятного режима серией не
+        # считается. Один заслон здесь уже подводил.
+        if not isinstance(правило, dict) or not правило.get("mode"):
+            continue
         зона = space_time.zone(head.tz)
         длительность = head.ends_at - head.starts_at
         предел = None
@@ -530,7 +534,9 @@ def _next_occurrence(after: datetime, rule: dict, zone) -> datetime | None:
     при первом же переносе.
     """
     шаг = max(1, int(rule.get("interval") or 1))
-    режим = str(rule.get("mode") or "weekly").lower()
+    # Без явного режима повторения нет. Умолчание «неделя» выглядело удобным и
+    # означало, что любая строка с пустым правилом становится еженедельной.
+    режим = str(rule.get("mode") or "").lower()
     здесь = after.astimezone(zone)
     if режим == "daily":
         return (здесь + timedelta(days=шаг)).astimezone(timezone.utc)

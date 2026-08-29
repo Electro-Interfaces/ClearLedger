@@ -4104,6 +4104,21 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.82: JSON-значение `null` в `recurrence` — не то же, что SQL NULL, и
+        # условию `IS NOT NULL` оно УДОВЛЕТВОРЯЕТ. Из-за этого головой серии
+        # считалась каждая встреча пространства. Чиним и данные, и колонку:
+        # модель теперь пишет настоящий NULL (`none_as_null`).
+        for stmt in (
+            "UPDATE calendar_events SET recurrence = NULL "
+            "WHERE recurrence IS NOT NULL AND jsonb_typeof(recurrence) = 'null'",
+            # Копии, порождённые ложными сериями, узнаются по `series_id` у
+            # головы, которая серией не была. Убираем только их.
+            "DELETE FROM calendar_events c WHERE c.series_id IS NOT NULL AND EXISTS ("
+            "  SELECT 1 FROM calendar_events h WHERE h.id = c.series_id"
+            "    AND (h.recurrence IS NULL OR h.recurrence->>'mode' IS NULL))",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (
