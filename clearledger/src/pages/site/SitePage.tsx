@@ -3,12 +3,15 @@
  *
  * Граница с сайтом проходит по хозяину данных, и вкладки идут по ней же:
  *
- *   Обращения · Показы — рождаются НА САЙТЕ, здесь их читают.
- *   Кабинеты · Стенды  — ведутся ЗДЕСЬ, сайт их читает при входе.
+ *   Обращения · Показы                — рождаются НА САЙТЕ, здесь их читают.
+ *   Кабинеты · Пространства · Стенды  — ведутся ЗДЕСЬ, сайт их читает при входе.
  *
- * Поэтому у первых двух есть состояние «связи нет» (и оно называется причиной, а
- * не пустой таблицей: пустая таблица врала бы, будто на сайте ничего не происходит),
- * а вторые две правятся прямо в строке — это решения, а не отчёт.
+ * Поэтому у первых есть состояние «связи нет» (и оно называется причиной, а не
+ * пустой таблицей: пустая таблица врала бы, будто на сайте ничего не происходит),
+ * а вторые правятся прямо в строке — это решения, а не отчёт.
+ *
+ * Чего здесь нет намеренно: договоров, актов и сверок клиента. Кабинет сайта —
+ * прихожая; работает клиент в СВОЁМ пространстве, и бумаги у него там.
  */
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -23,15 +26,16 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import * as siteService from '@/services/siteService'
-import { LEVEL_LABELS, siteTime } from '@/services/siteService'
+import { LEVEL_LABELS, SPACE_STATUS_LABELS, siteTime } from '@/services/siteService'
 import * as referenceService from '@/services/referenceService'
 import { cn } from '@/lib/utils'
 
-type Tab = 'requests' | 'cabinets' | 'stands' | 'shows'
+type Tab = 'requests' | 'cabinets' | 'spaces' | 'stands' | 'shows'
 
 const TABS: { key: Tab; label: string; hint: string; owner: 'site' | 'space' }[] = [
   { key: 'requests', label: 'Обращения', hint: 'что написали из кабинета сайта', owner: 'site' },
   { key: 'cabinets', label: 'Кабинеты', hint: 'кому открыт кабинет и что ему видно', owner: 'space' },
+  { key: 'spaces', label: 'Пространства', hint: 'у кого развёрнут свой контур и в каком он состоянии', owner: 'space' },
   { key: 'stands', label: 'Стенды', hint: 'что вообще можно показать клиенту', owner: 'space' },
   { key: 'shows', label: 'Показы', hint: 'кому и когда открывали стенд', owner: 'site' },
 ]
@@ -97,7 +101,12 @@ export function SitePage() {
   const clients = useQuery({
     queryKey: ['counterparties', companyId],
     queryFn: () => referenceService.getCounterparties(companyId),
-    enabled: !!companyId && tab === 'cabinets',
+    enabled: !!companyId && (tab === 'cabinets' || tab === 'spaces'),
+  })
+  const spaces = useQuery({
+    queryKey: ['site-client-spaces', companyId],
+    queryFn: () => siteService.getClientSpaces(companyId),
+    enabled: !!companyId && (tab === 'spaces' || tab === 'cabinets'),
   })
 
   const saveCabinet = useMutation({
@@ -117,6 +126,15 @@ export function SitePage() {
     },
     onError: (e: Error) => toast.error(e.message || 'Не удалось закрыть'),
   })
+  const saveSpace = useMutation({
+    mutationFn: (input: siteService.ClientSpaceInput) =>
+      siteService.saveClientSpace(companyId, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['site-client-spaces', companyId] })
+      toast.success('Пространство записано')
+    },
+    onError: (e: Error) => toast.error(e.message || 'Не удалось записать'),
+  })
   const saveStand = useMutation({
     mutationFn: (input: siteService.DemoStandInput) =>
       siteService.saveDemoStand(companyId, input),
@@ -133,13 +151,23 @@ export function SitePage() {
   const [newLevel, setNewLevel] = useState('client')
   const [newClient, setNewClient] = useState('')
   const [newStand, setNewStand] = useState({ code: '', title: '', upstream: '' })
+  const [newSpace, setNewSpace] = useState({ client: '', slug: '', domain: '', status: 'active' })
 
   const counts: Record<Tab, number | undefined> = {
     requests: summary.data?.requests,
     cabinets: cabinets.data?.items.length,
+    spaces: spaces.data?.items.length,
     stands: stands.data?.items.length,
     shows: summary.data?.demos,
   }
+  // Клиент → адрес его контура: в кабинетах видно, есть ли человеку куда войти.
+  const spaceOf = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const s of spaces.data?.items ?? []) {
+      if (s.status === 'active' && s.domain) map.set(s.counterpartyId, s.domain)
+    }
+    return map
+  }, [spaces.data])
   const standTitle = useMemo(() => {
     const map = new Map<string, string>()
     for (const s of stands.data?.items ?? []) map.set(s.code, s.title)
@@ -281,6 +309,7 @@ export function SitePage() {
                     <TableHead>Уровень</TableHead>
                     <TableHead>Клиент</TableHead>
                     <TableHead>Стенды</TableHead>
+                    <TableHead>Пространство</TableHead>
                     <TableHead className="w-10" />
                   </TableRow>
                 </TableHeader>
@@ -297,6 +326,9 @@ export function SitePage() {
                           ? c.demos.map((d) => standTitle.get(d) ?? d).join(', ')
                           : 'все'}
                       </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {spaceOf.get(c.counterpartyId ?? '') ?? '—'}
+                      </TableCell>
                       <TableCell>
                         <Button variant="ghost" size="sm" title="Закрыть доступ"
                                 onClick={() => dropCabinet.mutate(c.id)}>
@@ -306,7 +338,102 @@ export function SitePage() {
                     </TableRow>
                   ))}
                   {!cabinets.isLoading && !(cabinets.data?.items ?? []).length && (
-                    <EmptyRow colSpan={5} text="Доступов нет: кабинет пока никому не открыт" />
+                    <EmptyRow colSpan={6} text="Доступов нет: кабинет пока никому не открыт" />
+                  )}
+                </TableBody>
+              </Table>
+            </>
+          )}
+
+          {tab === 'spaces' && (
+            <>
+              <p className="mb-4 max-w-3xl text-sm text-muted-foreground">
+                Каждому клиенту разворачивается своё пространство — работает он там.
+                Кабинет сайта только открывает в него дверь, и появляется она, лишь
+                когда контур перешёл в состояние «работает».
+              </p>
+              <div className="mb-4 flex flex-wrap items-end gap-2">
+                <div className="w-72">
+                  <label className="mb-1 block text-xs text-muted-foreground">Клиент</label>
+                  <select
+                    value={newSpace.client}
+                    onChange={(e) => setNewSpace({ ...newSpace, client: e.target.value })}
+                    className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                  >
+                    <option value="">— выберите клиента</option>
+                    {(clients.data ?? []).map((c) => (
+                      <option key={c.id} value={c.id}>{c.shortName || c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="w-40">
+                  <label className="mb-1 block text-xs text-muted-foreground">Код стека</label>
+                  <Input value={newSpace.slug} placeholder="gig"
+                         onChange={(e) => setNewSpace({ ...newSpace, slug: e.target.value })} />
+                </div>
+                <div className="w-64">
+                  <label className="mb-1 block text-xs text-muted-foreground">Домен</label>
+                  <Input value={newSpace.domain} placeholder="gig.dataworker.ru"
+                         onChange={(e) => setNewSpace({ ...newSpace, domain: e.target.value })} />
+                </div>
+                <div className="w-52">
+                  <label className="mb-1 block text-xs text-muted-foreground">Состояние</label>
+                  <select
+                    value={newSpace.status}
+                    onChange={(e) => setNewSpace({ ...newSpace, status: e.target.value })}
+                    className="h-9 w-full rounded-md border bg-background px-2 text-sm"
+                  >
+                    {Object.entries(SPACE_STATUS_LABELS).map(([k, v]) => (
+                      <option key={k} value={k}>{v}</option>
+                    ))}
+                  </select>
+                </div>
+                <Button
+                  disabled={!newSpace.client || !newSpace.slug || saveSpace.isPending}
+                  onClick={() => {
+                    saveSpace.mutate({
+                      counterparty_id: newSpace.client,
+                      slug: newSpace.slug.trim().toLowerCase(),
+                      domain: newSpace.domain.trim(),
+                      status: newSpace.status,
+                    })
+                    setNewSpace({ client: '', slug: '', domain: '', status: 'active' })
+                  }}
+                >
+                  <Plus className="mr-1 h-4 w-4" /> Записать
+                </Button>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Клиент</TableHead>
+                    <TableHead>Код стека</TableHead>
+                    <TableHead>Домен</TableHead>
+                    <TableHead>Состояние</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(spaces.data?.items ?? []).map((s) => (
+                    <TableRow key={s.id}>
+                      <TableCell>{s.counterpartyName ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{s.slug}</TableCell>
+                      <TableCell>
+                        {s.domain
+                          ? (
+                            <a href={`https://${s.domain}`} target="_blank" rel="noreferrer"
+                               className="inline-flex items-center gap-1 hover:underline">
+                              {s.domain}
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )
+                          : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell>{SPACE_STATUS_LABELS[s.status] ?? s.status}</TableCell>
+                    </TableRow>
+                  ))}
+                  {!spaces.isLoading && !(spaces.data?.items ?? []).length && (
+                    <EmptyRow colSpan={4}
+                              text="Пространств нет: ни одному клиенту контур пока не развёрнут" />
                   )}
                 </TableBody>
               </Table>

@@ -153,3 +153,36 @@ export const getDemoStands = (companyId: string) =>
 
 export const saveDemoStand = (companyId: string, input: DemoStandInput) =>
   post<DemoStand>(`/site/demo-stands?company_id=${encodeURIComponent(companyId)}`, input)
+
+/** Пространство, развёрнутое клиенту: его контур и состояние. */
+export interface ClientSpace {
+  id: string
+  slug: string
+  domain: string
+  status: string
+  note: string | null
+  counterpartyId: string
+  counterpartyName: string | null
+}
+
+export interface ClientSpaceInput {
+  counterparty_id: string
+  slug: string
+  domain?: string
+  status?: string
+  note?: string | null
+}
+
+/** Состояния контура словами. Пока не `active` — кнопки в кабинете нет. */
+export const SPACE_STATUS_LABELS: Record<string, string> = {
+  planned: 'Решено развернуть',
+  deploying: 'Разворачивается',
+  active: 'Работает',
+  suspended: 'Приостановлено',
+}
+
+export const getClientSpaces = (companyId: string) =>
+  get<{ items: ClientSpace[] }>('/site/client-spaces', { company_id: companyId })
+
+export const saveClientSpace = (companyId: string, input: ClientSpaceInput) =>
+  post<ClientSpace>(`/site/client-spaces?company_id=${encodeURIComponent(companyId)}`, input)

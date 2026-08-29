@@ -10213,10 +10213,102 @@ class CalendarAttendee(Base):
     responded_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
     comment: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # Предложенное этим участником время. Отказ без встречного предложения
+    # оставляет организатора гадать, когда человеку удобно, и переписка уходит
+    # в чат, где её потом не найти.
+    proposed_starts_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    proposed_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("uq_calendar_attendees", "event_id", "user_id", unique=True),
         Index("ix_calendar_attendees_user", "user_id"),
+    )
+
+
+class CalendarGuest(Base):
+    """Внешний участник встречи: почта и ссылка, без учётной записи.
+
+    Учётку гостю не заводим ни в каком виде. Почтовый участник (`users.mail_only`)
+    для этого не годится: он существует ради чата, состоит в компании и виден в
+    её составе — то есть ради одного приглашения человек получил бы место в
+    пространстве. Гость опознаётся одноразовой ссылкой, ровно как получатель
+    документа в `doc_share`, и живёт только рядом со своей встречей.
+
+    Токен хранится хешем: показать ссылку повторно нельзя, и это её главное
+    свойство. Рядом лежат первые символы — по ним в журнале видно, какую именно
+    ссылку открывали, не зная её самой.
+    """
+    __tablename__ = "calendar_guests"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    token_prefix: Mapped[str] = mapped_column(String(8), nullable=False)
+    # pending | accepted | declined | tentative — тот же словарь, что у своих.
+    response: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    comment: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    proposed_starts_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    proposed_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # Отозванная ссылка отвечает так же, как несуществующая: подсказывать, что
+    # она когда-то была, незачем.
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_calendar_guests_event_email", "event_id", "email", unique=True),
+    )
+
+
+class CalendarMaterial(Base):
+    """Материал, ОТКРЫТЫЙ гостям этой встречи.
+
+    Приглашение само по себе не открывает ничего. Позвать человека обсудить
+    договор и дать ему договор — разные решения, и второе принимается явно, по
+    одному материалу: иначе состав встречи молча становится списком доступа.
+
+    Каждый материал сохраняет собственные права: для документа заводится своя
+    гостевая ссылка (`doc_share`), и отзыв её не отменяет встречу, а отмена
+    встречи не отзывает её. Связь здесь — про то, ЧТО показали, а не про то,
+    чем открыли.
+    """
+    __tablename__ = "calendar_materials"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Словарь предмета: `doc:<uuid>`. Задачи и записи наружу не открываем —
+    # у них нет ни редакции, ни номера, ни снимка, то есть нечего показывать
+    # так, чтобы через месяц было понятно, что именно видел человек.
+    target_ref: Mapped[str] = mapped_column(String(120), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Гостевая ссылка на документ, если она заведена.
+    share_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True)
+    share_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_calendar_materials", "event_id", "target_ref", unique=True),
     )
 
 

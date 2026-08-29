@@ -4,10 +4,14 @@
 
 * **Вход держит сайт** (elsyplus.ru): код на почту, сессия в куке, одноразовый
   пропуск в стенд, журнал показов. Это его механика и его безопасность.
-* **Содержимое ведёт пространство**: кто из клиента вхож в кабинет и с каким
-  уровнем, какие стенды ему открыты, какие у него договоры и документы. Решение
-  «этот человек видит наши бумаги» принимает тот, кто ведёт клиента, и принимает
-  один раз — в пространстве, где у клиента уже есть карточка, договоры и учёт.
+* **Содержимое ведёт пространство**: кто вхож в кабинет и с каким уровнем, какие
+  стенды ему открыты, есть ли у него СВОЁ пространство и куда его пускать.
+
+Кабинет — прихожая, а не рабочее место (решение МАГа 29.08.2026). Каждому клиенту
+разворачивается своё пространство, и работает он там. Поэтому договоры, акты и
+сверки в кабинет НЕ возятся: они у клиента и так есть, в его собственном контуре, и
+возить их второй раз значит заводить вторую правду. В кабинете остаётся ровно две
+вещи: дверь в своё пространство и разговор с нами.
 
 Отсюда два направления, и оба в этом файле:
 
@@ -36,8 +40,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_product, get_current_user
 from app.database import get_db
 from app.models import (
-    Connector, Contract, Counterparty, Organization, SiteCabinetUser, SiteDemo, User,
+    ClientSpace, Connector, Counterparty, SiteCabinetUser, SiteDemo, User,
 )
+from app.services import space_projection
 
 router = APIRouter(prefix="/site", tags=["Сайт"])
 
@@ -389,6 +394,17 @@ async def pull_cabinet(
     if row.counterparty_id:
         client = (await db.execute(select(Counterparty).where(
             Counterparty.id == row.counterparty_id))).scalar_one_or_none()
+    # Дверь в собственный контур клиента. Пока стек разворачивается, адреса не
+    # отдаём: кнопка, ведущая в недоделанное, хуже отсутствующей кнопки.
+    space = None
+    if row.counterparty_id:
+        space_row = (await db.execute(select(ClientSpace).where(
+            ClientSpace.company_id == cid,
+            ClientSpace.counterparty_id == row.counterparty_id,
+            ClientSpace.status == "active",
+        ))).scalars().first()
+        if space_row and space_row.domain:
+            space = {"domain": space_row.domain, "slug": space_row.slug}
     return {
         "email": addr, "level": row.level, "known": True,
         "company": client.short_name or client.name if client else None,
@@ -396,6 +412,7 @@ async def pull_cabinet(
         "inn": client.inn if client else None,
         # Пусто = все стенды: у сайта это звёздочка, форму ответа держим общей.
         "demos": list(row.demos or []),
+        "space": space,
     }
 
 
@@ -416,48 +433,147 @@ async def pull_demos(
     } for r in res.scalars().all()]}
 
 
-@router.get("/pull/docs")
-async def pull_docs(
+# ── Пространства клиентов ────────────────────────────────────────────────────
+# У кого какой контур и в каком он состоянии. Кабинет спрашивает адрес отсюда:
+# контур принадлежит клиенту, а не сайту.
+
+
+class ClientSpaceIn(BaseModel):
+    counterparty_id: str
+    slug: str
+    domain: str = ""
+    status: str = "planned"
+    note: str | None = None
+
+
+SPACE_STATUSES = {"planned", "deploying", "active", "suspended"}
+
+
+def _space_card(row: ClientSpace, client: Counterparty | None) -> dict[str, Any]:
+    return {
+        "id": str(row.id), "slug": row.slug, "domain": row.domain,
+        "status": row.status, "note": row.note,
+        "counterpartyId": str(row.counterparty_id),
+        "counterpartyName": client.short_name or client.name if client else None,
+    }
+
+
+@router.get("/client-spaces")
+async def client_spaces(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """У кого развёрнуто пространство и в каком оно состоянии."""
+    cid = await assert_company_product(company_id, user, db, "site")
+    res = await db.execute(
+        select(ClientSpace, Counterparty)
+        .outerjoin(Counterparty, Counterparty.id == ClientSpace.counterparty_id)
+        .where(ClientSpace.company_id == cid).order_by(ClientSpace.slug)
+    )
+    return {"items": [_space_card(row, client) for row, client in res.all()]}
+
+
+@router.post("/client-spaces")
+async def client_space_save(
+    payload: ClientSpaceIn,
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Записать пространство клиента. Ключ — код стека: он же имя каталога поставки."""
+    cid = await assert_company_product(company_id, user, db, "site")
+    slug = payload.slug.strip().lower()
+    if not slug:
+        raise HTTPException(400, "Нужен код стека")
+    if payload.status not in SPACE_STATUSES:
+        raise HTTPException(400, f"Неизвестное состояние: {payload.status}")
+
+    row = (await db.execute(select(ClientSpace).where(
+        ClientSpace.company_id == cid, ClientSpace.slug == slug))).scalar_one_or_none()
+    if row is None:
+        row = ClientSpace(company_id=cid, slug=slug)
+        db.add(row)
+    row.counterparty_id = uuid.UUID(payload.counterparty_id)
+    row.domain = payload.domain.strip()
+    row.status = payload.status
+    row.note = payload.note
+    await db.commit()
+    await db.refresh(row)
+    client = (await db.execute(select(Counterparty).where(
+        Counterparty.id == row.counterparty_id))).scalar_one_or_none()
+    return _space_card(row, client)
+
+
+# ── Гостевая переписка ───────────────────────────────────────────────────────
+# Написавший из кабинета — такой же обратившийся, как позвонивший. Поэтому своего
+# движка переписки нет: сообщение уходит в Поддержку тредом канала `web`, и оператор
+# видит его в общей очереди. Ядро здесь посредник: у сайта один собеседник —
+# пространство, у пространства — своя Поддержка.
+
+
+class GuestMessageIn(BaseModel):
+    email: str
+    body: str
+    name: str | None = None
+
+
+async def _support_call(
+    db: AsyncSession, cid: uuid.UUID, method: str, path: str,
+    *, params: dict[str, Any] | None = None, json_body: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Служебный вызов Поддержки от имени пространства."""
+    try:
+        app_row, link, token = await space_projection._target(db, cid, "support")
+    except space_projection.ProjectionError as e:
+        raise HTTPException(503, str(e)) from e
+    url = f"{space_projection._internal_base_url(app_row, 'support')}{path}"
+    body = dict(json_body or {})
+    query_params = dict(params or {})
+    if method == "POST":
+        body["companyId"] = link.external_company_id
+    else:
+        query_params["companyId"] = link.external_company_id
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        resp = await client.request(
+            method, url, params=query_params or None, json=body if method == "POST" else None,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    if resp.status_code >= 400:
+        raise HTTPException(resp.status_code, space_projection._error_text(resp))
+    return resp.json()
+
+
+@router.post("/push/message")
+async def push_message(
+    payload: GuestMessageIn,
+    x_space_token: str | None = Header(None, alias="X-Space-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Гость написал из кабинета — кладём в очередь Поддержки."""
+    cid = await _pull_company(db, x_space_token)
+    text = payload.body.strip()
+    if not text:
+        raise HTTPException(400, "Пустое сообщение")
+    return await _support_call(db, cid, "POST", "/api/v1/eco/inbox/web", json_body={
+        "email": payload.email.strip().lower(), "name": payload.name, "body": text,
+    })
+
+
+@router.get("/pull/thread")
+async def pull_thread(
     email: str = Query(...),
     x_space_token: str | None = Header(None, alias="X-Space-Token"),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Документы клиента для его кабинета: пока договоры пространства.
-
-    Отбор идёт от ДОСТУПА, а не от параметра запроса: сайт называет адрес человека,
-    клиента определяет пространство. Иначе кабинет мог бы попросить чужие бумаги,
-    подставив другой ИНН.
-
-    Акты, сверки и счета добавляются следующим шагом — они лежат в нормализованном
-    слое, и их срез требует своего отбора по периоду.
-    """
+    """Лента переписки для кабинета: что человек писал и что ему ответили."""
     cid = await _pull_company(db, x_space_token)
-    addr = email.strip().lower()
-    row = (await db.execute(select(SiteCabinetUser).where(
-        SiteCabinetUser.company_id == cid, SiteCabinetUser.email == addr,
-    ))).scalar_one_or_none()
-    if row is None or not row.is_active or not row.counterparty_id:
-        return {"items": [], "company": None}
-    if row.level == "guest":
-        # Гостю бумаг не показываем, даже если клиент у него проставлен.
-        return {"items": [], "company": None}
-
-    client = (await db.execute(select(Counterparty).where(
-        Counterparty.id == row.counterparty_id))).scalar_one_or_none()
-    res = await db.execute(
-        select(Contract, Organization)
-        .outerjoin(Organization, Organization.id == Contract.organization_id)
-        .where(Contract.company_id == cid,
-               Contract.counterparty_id == row.counterparty_id)
-        .order_by(Contract.date.desc())
-    )
-    items = [{
-        "kind": "contract",
-        "number": c.number,
-        "date": c.date,
-        "title": c.title or f"Договор № {c.number}",
-        "vendor": org.name if org else None,
-        "validUntil": c.valid_until,
-        "isClosed": c.is_closed,
-    } for c, org in res.all()]
-    return {"items": items, "company": client.short_name or client.name if client else None}
+    try:
+        return await _support_call(db, cid, "GET", "/api/v1/eco/inbox/web",
+                                   params={"email": email.strip().lower()})
+    except HTTPException as e:
+        # Поддержки в стеке может не быть вовсе — тогда переписки просто нет,
+        # и кабинет покажет форму обращения, а не ошибку.
+        if e.status_code == 503:
+            return {"threadId": None, "messages": [], "reason": e.detail}
+        raise
