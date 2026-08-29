@@ -32,10 +32,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import Integer, String, Uuid, and_, func, literal, or_, select
+from sqlalchemy import (
+    Integer, String, Uuid, and_, delete, func, literal, or_, select)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_product, get_current_user
+from app.audit import log_audit
 from app.database import get_db
 from app.models import (
     DocCard, DocKind, DocLabelLink, DocRelation, ServiceLocation, Task, TaskLabel,
@@ -1001,7 +1003,10 @@ async def calendar_busy(
         select(CalendarEvent, CalendarAttendee.user_id)
         .join(CalendarAttendee, CalendarAttendee.event_id == CalendarEvent.id)
         .where(CalendarEvent.company_id == cid,
-               CalendarEvent.status != "cancelled",
+               # Только назначенные: пока идёт опрос, времени у встречи нет, и
+               # шесть предложенных вариантов заняли бы всем участникам
+               # полнедели — то есть подбор перестал бы находить что-либо.
+               CalendarEvent.status == "planned",
                CalendarAttendee.user_id.in_(свои),
                CalendarAttendee.response != "declined",
                CalendarEvent.starts_at < date_to,
@@ -1337,18 +1342,40 @@ class MaterialIn(BaseModel):
     days: int = Field(30, ge=1, le=180)
 
 
+async def can_manage_calendar(db: AsyncSession, cid: uuid.UUID,
+                              owner_id: uuid.UUID, user: User) -> bool:
+    """Вправе ли человек вести календарь этого владельца.
+
+    Сам владелец — всегда. Помощник — если ему выдали полномочие: он действует
+    от СВОЕГО имени с пометкой «от имени N», и в журнале видно обоих. Общий
+    доступ к учётной записи решал бы ту же задачу и терял ответ на вопрос
+    «кто перенёс».
+    """
+    from app.models import CalendarDelegate
+
+    if owner_id == user.id:
+        return True
+    строка = (await db.execute(select(CalendarDelegate.id).where(
+        CalendarDelegate.company_id == cid,
+        CalendarDelegate.owner_id == owner_id,
+        CalendarDelegate.delegate_id == user.id,
+        CalendarDelegate.revoked_at.is_(None)))).scalar_one_or_none()
+    return строка is not None
+
+
 async def _event_of_organizer(db: AsyncSession, cid: uuid.UUID, event_id: str,
                               user: User):
-    """Встреча, которой этот человек распоряжается. Звать и открывать материалы
-    вправе тот, кто собрал: состав и то, что уходит наружу, — его решение."""
+    """Встреча, которой этот человек распоряжается: собранная им или та, чей
+    организатор выдал ему полномочие вести свой календарь."""
     from app.models import CalendarEvent
 
     ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
     if ev is None or ev.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
-    if ev.organizer_id != user.id:
+    if not await can_manage_calendar(db, cid, ev.organizer_id, user):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Звать и открывать материалы может тот, кто собрал встречу")
+                            "Звать и открывать материалы может тот, кто собрал "
+                            "встречу, или его помощник")
     return ev
 
 
@@ -1530,6 +1557,358 @@ async def material_close(
     await db.delete(row)
     await db.commit()
     return {"closed": True}
+
+
+class PollIn(BaseModel):
+    company_id: str
+    # Варианты времени. Три-шесть — то, что человек способен сравнить; двадцать
+    # означают, что организатор не выбирал, а свалил выбор на других.
+    options: list[dict] = Field(min_length=2, max_length=8)
+
+
+class VoteIn(BaseModel):
+    company_id: str
+    option_id: str
+    vote: str = Field(pattern="^(yes|maybe|no)$")
+
+
+class PickIn(BaseModel):
+    company_id: str
+    option_id: str
+
+
+@router.post("/calendar/{event_id}/poll", status_code=status.HTTP_201_CREATED)
+async def poll_open(
+    event_id: str,
+    payload: PollIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Превратить встречу в опрос времени.
+
+    Опрос — состояние встречи, а не отдельная сущность: гости, материалы, файл
+    для чужого календаря и отмена продолжают работать тем же кодом. Пока идёт
+    опрос, встреча занятостью не считается — иначе шесть предложенных вариантов
+    заняли бы всем участникам полнедели.
+    """
+    from app.models import CalendarPollOption
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    ev = await _event_of_organizer(db, cid, event_id, current_user)
+    if ev.status == "cancelled":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Встреча отменена")
+    await db.execute(delete(CalendarPollOption).where(
+        CalendarPollOption.event_id == ev.id))
+    for o in payload.options:
+        начало = o.get("starts_at")
+        конец = o.get("ends_at")
+        if not начало or not конец:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "У варианта нужны начало и конец")
+        н = datetime.fromisoformat(str(начало))
+        к = datetime.fromisoformat(str(конец))
+        if к <= н:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Конец варианта не может быть раньше начала")
+        db.add(CalendarPollOption(event_id=ev.id, starts_at=н, ends_at=к))
+    ev.status = "poll"
+    await db.commit()
+    return {"status": ev.status, "options": len(payload.options)}
+
+
+@router.get("/calendar/{event_id}/poll")
+async def poll_read(
+    event_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Варианты и голоса. Видит всякий, кого позвали: голосование и есть их дело."""
+    from app.models import CalendarAttendee, CalendarEvent, CalendarPollOption, CalendarPollVote
+
+    cid = await _assert_work(company_id, current_user, db)
+    ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
+    if ev is None or ev.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
+    свой = ev.organizer_id == current_user.id or (await db.execute(
+        select(CalendarAttendee.id).where(
+            CalendarAttendee.event_id == ev.id,
+            CalendarAttendee.user_id == current_user.id))).scalar_one_or_none()
+    if not свой:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша встреча")
+    options = list((await db.execute(select(CalendarPollOption).where(
+        CalendarPollOption.event_id == ev.id)
+        .order_by(CalendarPollOption.starts_at))).scalars())
+    голоса = (await db.execute(select(CalendarPollVote).where(
+        CalendarPollVote.option_id.in_([o.id for o in options])))).scalars().all() \
+        if options else []
+    свод: dict[uuid.UUID, dict[str, int]] = {
+        o.id: {"yes": 0, "maybe": 0, "no": 0} for o in options}
+    мой: dict[str, str] = {}
+    for v in голоса:
+        свод[v.option_id][v.vote] = свод[v.option_id].get(v.vote, 0) + 1
+        if v.user_id == current_user.id:
+            мой[str(v.option_id)] = v.vote
+    return {
+        "status": ev.status,
+        "options": [{
+            "id": str(o.id), "starts_at": o.starts_at, "ends_at": o.ends_at,
+            "votes": свод[o.id], "my_vote": мой.get(str(o.id)),
+        } for o in options],
+    }
+
+
+@router.post("/calendar/{event_id}/poll/vote")
+async def poll_vote(
+    event_id: str,
+    payload: VoteIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Свой голос за вариант. Повторное нажатие меняет его, а не добавляет
+    второй: «за вторник шестеро» должно означать шестерых."""
+    from app.models import CalendarPollOption, CalendarPollVote
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    opt = await db.get(CalendarPollOption, _uuid_or_400(payload.option_id, "option_id"))
+    if opt is None or str(opt.event_id) != event_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вариант не найден")
+    await _event_participant(db, cid, event_id, current_user)
+    строка = (await db.execute(select(CalendarPollVote).where(
+        CalendarPollVote.option_id == opt.id,
+        CalendarPollVote.user_id == current_user.id))).scalar_one_or_none()
+    if строка is None:
+        строка = CalendarPollVote(option_id=opt.id, user_id=current_user.id)
+        db.add(строка)
+    строка.vote = payload.vote
+    await db.commit()
+    return {"option_id": str(opt.id), "vote": строка.vote}
+
+
+@router.post("/calendar/{event_id}/poll/pick")
+async def poll_pick(
+    event_id: str,
+    payload: PickIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Выбрать вариант: опрос кончился, встреча получила время.
+
+    Варианты снимаются, а согласия обнуляются: голос «подходит» это готовность
+    рассмотреть, а не обещание прийти. Оставить их значило бы записать людей на
+    встречу, о которой они ещё не знают.
+    """
+    from app.models import CalendarAttendee, CalendarPollOption
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    ev = await _event_of_organizer(db, cid, event_id, current_user)
+    opt = await db.get(CalendarPollOption, _uuid_or_400(payload.option_id, "option_id"))
+    if opt is None or opt.event_id != ev.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вариант не найден")
+    ev.starts_at, ev.ends_at = opt.starts_at, opt.ends_at
+    ev.status = "planned"
+    await db.execute(delete(CalendarPollOption).where(
+        CalendarPollOption.event_id == ev.id))
+    for a in (await db.execute(select(CalendarAttendee).where(
+            CalendarAttendee.event_id == ev.id))).scalars():
+        a.response = "pending"
+        a.responded_at = None
+    await db.commit()
+    return {"starts_at": ev.starts_at, "ends_at": ev.ends_at, "status": ev.status}
+
+
+async def _event_participant(db: AsyncSession, cid: uuid.UUID, event_id: str,
+                             user: User):
+    """Встреча, к которой человек имеет отношение: организатор или приглашённый."""
+    from app.models import CalendarAttendee, CalendarEvent
+
+    ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
+    if ev is None or ev.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
+    if ev.organizer_id == user.id:
+        return ev
+    есть = (await db.execute(select(CalendarAttendee.id).where(
+        CalendarAttendee.event_id == ev.id,
+        CalendarAttendee.user_id == user.id))).scalar_one_or_none()
+    if есть is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша встреча")
+    return ev
+
+
+# ── Делегирование ──────────────────────────────────────────────────────────
+class DelegateIn(BaseModel):
+    company_id: str
+    delegate_id: str
+
+
+@router.get("/calendar-delegates")
+async def delegates_list(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Кому я доверил вести свой календарь и чьи календари веду я."""
+    from app.models import CalendarDelegate
+
+    cid = await _assert_work(company_id, current_user, db)
+    rows = (await db.execute(select(CalendarDelegate).where(
+        CalendarDelegate.company_id == cid,
+        CalendarDelegate.revoked_at.is_(None),
+        or_(CalendarDelegate.owner_id == current_user.id,
+            CalendarDelegate.delegate_id == current_user.id)))).scalars().all()
+    имена = {u.id: u.name for u in (await db.execute(select(User).where(
+        User.id.in_({r.owner_id for r in rows} | {r.delegate_id for r in rows}))
+    )).scalars()} if rows else {}
+    return {
+        "mine": [{"id": str(r.id), "user_id": str(r.delegate_id),
+                  "name": имена.get(r.delegate_id, "—")}
+                 for r in rows if r.owner_id == current_user.id],
+        "for_others": [{"id": str(r.id), "user_id": str(r.owner_id),
+                        "name": имена.get(r.owner_id, "—")}
+                       for r in rows if r.delegate_id == current_user.id],
+    }
+
+
+@router.post("/calendar-delegates", status_code=status.HTTP_201_CREATED)
+async def delegate_add(
+    payload: DelegateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Доверить помощнику вести свой календарь.
+
+    Полномочие выдаёт ТОЛЬКО владелец календаря — ни администратор, ни сам
+    помощник: иначе «ведение календаря» становится способом получить доступ
+    без ведома того, чей он.
+    """
+    from app.models import CalendarDelegate
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    кому = _uuid_or_400(payload.delegate_id, "delegate_id")
+    if кому == current_user.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Свой календарь вы и так ведёте")
+    if await db.get(UserCompany, (кому, cid)) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Человек не в этой компании")
+    строка = (await db.execute(select(CalendarDelegate).where(
+        CalendarDelegate.company_id == cid,
+        CalendarDelegate.owner_id == current_user.id,
+        CalendarDelegate.delegate_id == кому))).scalar_one_or_none()
+    if строка is None:
+        строка = CalendarDelegate(company_id=cid, owner_id=current_user.id,
+                                  delegate_id=кому, created_by=current_user.id)
+        db.add(строка)
+    строка.revoked_at = None
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="calendar.delegate", target=str(кому))
+    await db.commit()
+    return {"id": str(строка.id)}
+
+
+@router.post("/calendar-delegates/{delegate_id}/revoke")
+async def delegate_revoke(
+    delegate_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Забрать полномочие. Отзывает владелец календаря."""
+    from app.models import CalendarDelegate
+
+    cid = await _assert_work(company_id, current_user, db)
+    строка = await db.get(CalendarDelegate, _uuid_or_400(delegate_id, "delegate_id"))
+    if строка is None or строка.company_id != cid or строка.owner_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Полномочие не найдено")
+    строка.revoked_at = datetime.now(timezone.utc)
+    await log_audit(db, actor=current_user, company_id=cid,
+                    action="calendar.delegate.revoke", target=str(строка.delegate_id))
+    await db.commit()
+    return {"revoked": True}
+
+
+# ── Заготовки встреч ───────────────────────────────────────────────────────
+class TemplateIn(BaseModel):
+    company_id: str
+    name: str = Field(min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=300)
+    description: str | None = None
+    duration_minutes: int = Field(60, ge=5, le=8 * 60)
+    location: str | None = None
+    attendee_ids: list[str] = Field(default_factory=list)
+    recurrence: dict | None = None
+
+
+@router.get("/calendar-templates")
+async def templates_list(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Заготовки встреч компании: планёрка, приёмка, разбор."""
+    from app.models import CalendarTemplate
+
+    cid = await _assert_work(company_id, current_user, db)
+    rows = (await db.execute(select(CalendarTemplate).where(
+        CalendarTemplate.company_id == cid)
+        .order_by(CalendarTemplate.name))).scalars().all()
+    return {"templates": [{
+        "id": str(t.id), "name": t.name, "title": t.title,
+        "description": t.description, "duration_minutes": t.duration_minutes,
+        "location": t.location,
+        "attendee_ids": (t.attendee_ids or {}).get("ids", []),
+        "recurrence": t.recurrence,
+    } for t in rows]}
+
+
+@router.post("/calendar-templates", status_code=status.HTTP_201_CREATED)
+async def template_add(
+    payload: TemplateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сохранить заготовку. Состав хранится списком идентификаторов: заготовка —
+    черновик, и ссылочная целостность на уволившегося мешала бы больше, чем
+    помогала."""
+    from app.models import CalendarTemplate
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    есть = (await db.execute(select(CalendarTemplate).where(
+        CalendarTemplate.company_id == cid,
+        func.lower(CalendarTemplate.name) == payload.name.strip().lower()
+    ))).scalar_one_or_none()
+    if есть is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Заготовка с таким именем есть")
+    row = CalendarTemplate(
+        company_id=cid, name=payload.name.strip(), title=payload.title.strip(),
+        description=payload.description or None,
+        duration_minutes=payload.duration_minutes,
+        location=payload.location or None,
+        attendee_ids={"ids": payload.attendee_ids},
+        recurrence=payload.recurrence or None,
+        created_by=current_user.id)
+    db.add(row)
+    await db.commit()
+    return {"id": str(row.id), "name": row.name}
+
+
+@router.post("/calendar-templates/{template_id}/delete")
+async def template_delete(
+    template_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Убрать заготовку. Встречи, собранные по ней, не трогаются: они уже живут
+    сами по себе."""
+    from app.models import CalendarTemplate
+
+    cid = await _assert_work(company_id, current_user, db)
+    row = await db.get(CalendarTemplate, _uuid_or_400(template_id, "template_id"))
+    if row is None or row.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заготовка не найдена")
+    await db.delete(row)
+    await db.commit()
+    return {"deleted": True}
 
 
 @router.get("/lists")

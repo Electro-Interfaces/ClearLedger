@@ -10312,6 +10312,134 @@ class CalendarMaterial(Base):
     )
 
 
+class CalendarPollOption(Base):
+    """Вариант времени в опросе.
+
+    Опрос — не отдельная сущность рядом со встречей, а СОСТОЯНИЕ встречи
+    (`status = "poll"`) плюс несколько вариантов. Так гости, материалы, ответы,
+    файл для чужого календаря и отмена работают тем же кодом: выбрав вариант,
+    организатор не «создаёт встречу из опроса», а проставляет ей время.
+
+    Отдельная сущность потребовала бы своих гостей, своих ссылок и своего
+    приглашения — то есть второй встречи, которая почти встреча.
+    """
+    __tablename__ = "calendar_poll_options"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    starts_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class CalendarPollVote(Base):
+    """Голос за вариант: подходит · возможно · не подходит.
+
+    Голосуют и свои, и гости, и хранится это одной таблицей: вопрос у них
+    одинаковый, а две таблицы означали бы два места, где считается итог, и два
+    ответа на «сколько человек может во вторник».
+
+    Ровно одно из полей `user_id` / `guest_id` заполнено — кто именно голосовал.
+    """
+    __tablename__ = "calendar_poll_votes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    option_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendar_poll_options.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    guest_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendar_guests.id", ondelete="CASCADE"),
+        nullable=True)
+    # yes | maybe | no
+    vote: Mapped[str] = mapped_column(String(10), nullable=False, default="yes")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class CalendarDelegate(Base):
+    """Право вести чужой календарь.
+
+    Это ПОЛНОМОЧИЕ, а не доступ к учётной записи: помощник действует от своего
+    имени с пометкой «от имени N», и в журнале видно обоих. Общий доступ к
+    аккаунту решал бы ту же задачу и терял ответ на вопрос «кто перенёс».
+
+    Полномочие узкое: собрать, перенести, отменить встречу и позвать участников.
+    Оно не даёт ни почты, ни документов, ни личной раскладки — календарь и
+    личное пространство это разные вещи, и «секретарь ведёт календарь» не
+    означает «секретарь видит записную книжку».
+    """
+    __tablename__ = "calendar_delegates"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Чей календарь ведут.
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Кто ведёт.
+    delegate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_calendar_delegates", "company_id", "owner_id", "delegate_id",
+              unique=True),
+    )
+
+
+class CalendarTemplate(Base):
+    """Заготовка встречи: планёрка, приёмка, разбор.
+
+    Не процесс и не расписание — просто набор полей, который надоело набирать
+    заново. Повторение здесь тоже поле: «планёрка по понедельникам» заводится
+    одним нажатием вместе со своей серией.
+
+    Состав хранится списком идентификаторов, а не связями: заготовка — черновик,
+    и ссылочная целостность на уволившегося участника мешала бы больше, чем
+    помогала. Отсутствующие при запуске просто отсеются.
+    """
+    __tablename__ = "calendar_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    location: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    attendee_ids: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    recurrence: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_calendar_templates_name", "company_id", "name", unique=True),
+    )
+
+
 class PersonalDigest(Base):
     """Сводка «Секретаря» за одно окно доставки.
 

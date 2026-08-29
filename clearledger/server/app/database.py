@@ -4072,6 +4072,25 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.80: опрос времени, делегирование и заготовки встреч (этап 16,
+        # шаг 3). Опрос — состояние встречи, а не отдельная сущность: иначе у
+        # него завелись бы свои гости, свои ссылки и своё приглашение.
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS ix_calendar_poll_options_event "
+            "ON calendar_poll_options (event_id)",
+            # Один голос человека за вариант. Без этого повторное нажатие
+            # копило бы голоса, и «за вторник шестеро» означало бы двоих.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_poll_vote_user "
+            "ON calendar_poll_votes (option_id, user_id) WHERE user_id IS NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_poll_vote_guest "
+            "ON calendar_poll_votes (option_id, guest_id) WHERE guest_id IS NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_delegates "
+            "ON calendar_delegates (company_id, owner_id, delegate_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_templates_name "
+            "ON calendar_templates (company_id, lower(name))",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

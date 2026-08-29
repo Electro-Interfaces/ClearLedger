@@ -12,7 +12,11 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { Camera, CornerDownLeft, Gauge, Loader2, Monitor, Moon, Sparkles, Sun, Trash2, User } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { SearchPicker } from '@/components/tasks/SearchPicker'
+import * as workService from '@/services/workService'
+import * as tasksService from '@/services/tasksService'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -70,6 +74,62 @@ const УЧАСТИЕ: Record<string, { label: string; hint: string }> = {
     label: 'Поддержка платформы',
     hint: 'Канал помощи по самой платформе: особый статус, свои права и доступы.',
   },
+}
+
+/** Помощники, ведущие мой календарь, и календари, которые веду я. */
+function CalendarDelegates({ companyId }: { companyId: string }) {
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: ['calendar-delegates', companyId],
+    queryFn: () => workService.calendarDelegates(companyId),
+    enabled: !!companyId,
+  })
+  const people = useQuery({
+    queryKey: ['task-people', companyId],
+    queryFn: () => tasksService.listTaskPeople(companyId),
+    enabled: !!companyId, staleTime: 5 * 60 * 1000,
+  })
+  const обновить = () =>
+    qc.invalidateQueries({ queryKey: ['calendar-delegates', companyId] })
+
+  const добавить = useMutation({
+    mutationFn: (userId: string) => workService.addCalendarDelegate(companyId, userId),
+    onSuccess: () => { toast.success('Полномочие выдано'); void обновить() },
+    onError: (e: Error) => toast.error(e.message || 'Не выдалось'),
+  })
+  const отозвать = useMutation({
+    mutationFn: (id: string) => workService.revokeCalendarDelegate(companyId, id),
+    onSuccess: () => { toast.success('Полномочие забрано'); void обновить() },
+    onError: (e: Error) => toast.error(e.message || 'Не отозвалось'),
+  })
+
+  const мои = q.data?.mine ?? []
+  const чужие = q.data?.for_others ?? []
+
+  return (
+    <div className="space-y-2">
+      {мои.map((d) => (
+        <div key={d.id} className="flex items-center gap-2 text-sm">
+          <span className="min-w-0 flex-1 truncate">{d.name}</span>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
+            disabled={отозвать.isPending} onClick={() => отозвать.mutate(d.id)}>
+            Забрать
+          </Button>
+        </div>
+      ))}
+      <SearchPicker
+        items={(people.data?.people ?? []).map((p) => ({
+          id: p.id, name: p.name, party: p.partyType }))}
+        value="" onChange={(id) => добавить.mutate(id)}
+        placeholder="Доверить помощнику" searchPlaceholder="Фамилия или имя…"
+        className="w-full" loading={people.isLoading} />
+      {чужие.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Вы ведёте календарь: {чужие.map((d) => d.name).join(', ')}
+        </p>
+      )}
+    </div>
+  )
 }
 
 /** Сегменты выбора — один язык на все настройки страницы. */
@@ -325,6 +385,23 @@ export function PersonalSettings() {
                 onChange={(e) => set('workEnd', e.target.value)} />
             </div>
           </div>
+        </div>
+
+        {/* Кто вправе вести мой календарь. Полномочие выдаёт ТОЛЬКО владелец —
+            ни администратор, ни сам помощник: иначе «ведение календаря» стало бы
+            способом получить доступ без ведома того, чей он. Это именно
+            полномочие, а не доступ к учётной записи: помощник действует от
+            своего имени, и в журнале видно обоих. */}
+        <div className="space-y-3 border-t pt-5">
+          <div>
+            <h3 className="text-sm font-medium">Кто ведёт мой календарь</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Помощник сможет собирать, переносить и отменять ваши встречи и звать
+              участников — от своего имени, с пометкой «от имени вас». Почты,
+              документов и записной книжки это не открывает.
+            </p>
+          </div>
+          <CalendarDelegates companyId={company.id} />
         </div>
 
         {/* Место в пространстве — сведения администратора, не личное дело */}

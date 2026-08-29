@@ -468,7 +468,7 @@ async def run_meeting_series(db, now: datetime) -> int:
     головы = (await db.execute(
         select(CalendarEvent).where(
             CalendarEvent.recurrence.is_not(None),
-            CalendarEvent.status != "cancelled").limit(200))).scalars().all()
+            CalendarEvent.status == "planned").limit(200))).scalars().all()
     создано = 0
     for head in головы:
         правило = head.recurrence or {}
@@ -558,7 +558,7 @@ async def run_meetings(db, now: datetime, bucket: digest.Bucket) -> int:
     rows = (await db.execute(
         select(CalendarEvent, CalendarAttendee.user_id)
         .join(CalendarAttendee, CalendarAttendee.event_id == CalendarEvent.id)
-        .where(CalendarEvent.status != "cancelled",
+        .where(CalendarEvent.status == "planned",
                CalendarEvent.starts_at >= now,
                CalendarEvent.starts_at < завтра,
                # Отказавшийся получил бы напоминание о том, куда не идёт.

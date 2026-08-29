@@ -381,7 +381,7 @@ export interface CalendarEvent {
   conference_url: string | null
   visibility: 'company' | 'private' | 'personal'
   /** `cancelled` — встречу отменили; из календаря она не исчезает. */
-  status: 'planned' | 'cancelled'
+  status: 'planned' | 'cancelled' | 'poll'
   /** Заполнено — это ГОЛОВА серии; у порождённых пусто. */
   recurrence?: Recurrence | null
   recurrence_until?: string | null
@@ -497,6 +497,95 @@ export async function openMaterial(companyId: string, eventId: string, targetRef
 
 export async function closeMaterial(companyId: string, eventId: string, id: string) {
   return post(`/api/work/calendar/${eventId}/materials/${id}/close`
+    + `?company_id=${encodeURIComponent(companyId)}`, {})
+}
+
+export interface PollOption {
+  id: string
+  starts_at: string
+  ends_at: string
+  votes: { yes: number; maybe: number; no: number }
+  my_vote: 'yes' | 'maybe' | 'no' | null
+}
+
+/** Опрос — СОСТОЯНИЕ встречи, а не отдельная сущность: гости, материалы,
+ *  файл для календаря и отмена продолжают работать тем же кодом. */
+export async function openPoll(companyId: string, eventId: string,
+  options: { starts_at: string; ends_at: string }[]) {
+  return post<{ status: string; options: number }>(
+    `/api/work/calendar/${eventId}/poll`,
+    { company_id: companyId, options })
+}
+
+export async function readPoll(companyId: string, eventId: string) {
+  return get<{ status: string; options: PollOption[] }>(
+    `/api/work/calendar/${eventId}/poll`, { company_id: companyId })
+}
+
+export async function votePoll(companyId: string, eventId: string,
+  optionId: string, vote: 'yes' | 'maybe' | 'no') {
+  return post(`/api/work/calendar/${eventId}/poll/vote`,
+    { company_id: companyId, option_id: optionId, vote })
+}
+
+/** Выбрать вариант: опрос кончился, встреча получила время. Согласия при этом
+ *  обнуляются — «подходит» это готовность рассмотреть, а не обещание прийти. */
+export async function pickPoll(companyId: string, eventId: string, optionId: string) {
+  return post(`/api/work/calendar/${eventId}/poll/pick`,
+    { company_id: companyId, option_id: optionId })
+}
+
+export interface CalendarDelegate { id: string; user_id: string; name: string }
+
+/** Кому я доверил вести свой календарь и чьи веду я. */
+export async function calendarDelegates(companyId: string) {
+  return get<{ mine: CalendarDelegate[]; for_others: CalendarDelegate[] }>(
+    '/api/work/calendar-delegates', { company_id: companyId })
+}
+
+export async function addCalendarDelegate(companyId: string, userId: string) {
+  return post('/api/work/calendar-delegates',
+    { company_id: companyId, delegate_id: userId })
+}
+
+export async function revokeCalendarDelegate(companyId: string, id: string) {
+  return post(`/api/work/calendar-delegates/${id}/revoke`
+    + `?company_id=${encodeURIComponent(companyId)}`, {})
+}
+
+export interface MeetingTemplate {
+  id: string
+  name: string
+  title: string
+  description: string | null
+  duration_minutes: number
+  location: string | null
+  attendee_ids: string[]
+  recurrence: Recurrence | null
+}
+
+export async function meetingTemplates(companyId: string) {
+  return get<{ templates: MeetingTemplate[] }>(
+    '/api/work/calendar-templates', { company_id: companyId })
+}
+
+export async function saveMeetingTemplate(companyId: string, data: {
+  name: string; title: string; description?: string
+  durationMinutes: number; location?: string
+  attendeeIds: string[]; recurrence?: Recurrence | null
+}) {
+  return post<{ id: string; name: string }>('/api/work/calendar-templates', {
+    company_id: companyId, name: data.name, title: data.title,
+    description: data.description || undefined,
+    duration_minutes: data.durationMinutes,
+    location: data.location || undefined,
+    attendee_ids: data.attendeeIds,
+    recurrence: data.recurrence ?? undefined,
+  })
+}
+
+export async function deleteMeetingTemplate(companyId: string, id: string) {
+  return post(`/api/work/calendar-templates/${id}/delete`
     + `?company_id=${encodeURIComponent(companyId)}`, {})
 }
 

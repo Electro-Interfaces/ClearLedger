@@ -12,9 +12,10 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ListPlus, Loader2, Repeat, Video, X } from 'lucide-react'
+import { BookmarkPlus, ListPlus, Loader2, Repeat, Video, X } from 'lucide-react'
 import { findSlots } from '@/lib/slots'
 import { GuestPanel } from '@/components/calendar/GuestPanel'
+import { PollPanel } from '@/components/calendar/PollPanel'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -108,6 +109,26 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
     setПовтор(ключПовтора(event.recurrence ?? null))
     setUntil(event.recurrence_until ?? '')
   }, [event])
+
+  const шаблоны = useQuery({
+    queryKey: ['meeting-templates', companyId],
+    queryFn: () => workService.meetingTemplates(companyId),
+    enabled: !!companyId,
+    staleTime: 5 * 60 * 1000,
+  })
+  const сохранитьЗаготовку = useMutation({
+    mutationFn: (имя: string) => workService.saveMeetingTemplate(companyId, {
+      name: имя, title: title.trim(),
+      description: description.trim() || undefined,
+      durationMinutes: Math.max(5, Math.round(
+        (new Date(ends).getTime() - new Date(starts).getTime()) / 60_000)),
+      location: location.trim() || undefined,
+      attendeeIds: attendees,
+      recurrence: ПОВТОРЫ.find((r) => r.key === повтор)?.rule ?? null,
+    }),
+    onSuccess: () => { toast.success('Заготовка сохранена'); void шаблоны.refetch() },
+    onError: (e: Error) => toast.error(e.message || 'Не сохранилось'),
+  })
 
   const [предлагаю, setПредлагаю] = useState(false)
   const предложения = (event?.attendees ?? []).filter((a) => a.proposed_starts_at)
@@ -277,6 +298,31 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
             </div>
           </div>
 
+          {/* Заготовка — просто набор полей, который надоело набирать заново.
+              Повторение здесь тоже поле: «планёрка по понедельникам» заводится
+              одним нажатием вместе со своей серией. */}
+          {новая && (шаблоны.data?.templates.length ?? 0) > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Заготовка:</span>
+              {(шаблоны.data?.templates ?? []).map((t) => (
+                <Button key={t.id} type="button" size="sm" variant="outline"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => {
+                    setTitle(t.title)
+                    setDescription(t.description ?? '')
+                    setLocation(t.location ?? '')
+                    setAttendees(t.attendee_ids)
+                    setДлительность(t.duration_minutes)
+                    setПовтор(ключПовтора(t.recurrence))
+                    const н = new Date(starts)
+                    setEnds(local(new Date(н.getTime() + t.duration_minutes * 60_000)))
+                  }}>
+                  {t.name}
+                </Button>
+              ))}
+            </div>
+          )}
+
           {/* «Найти время» появляется, только когда есть кого искать: подбор по
               одному себе — это просто календарь. Обязательными считаем всех
               приглашённых: деления на обязательных и необязательных в составе
@@ -418,6 +464,14 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
           )}
         </div>
 
+        {!новая && event!.status !== 'cancelled' && (
+          <div className="mt-3">
+            <PollPanel companyId={companyId} eventId={event!.id}
+              isOrganizer={мой} durationMinutes={длительность}
+              onChanged={onChanged} />
+          </div>
+        )}
+
         {!новая && мой && event!.status !== 'cancelled' && (
           <div className="mt-3">
             <GuestPanel companyId={companyId} eventId={event!.id}
@@ -521,6 +575,16 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
               disabled={отменить.isPending}
               onClick={() => отменить.mutate('')}>
               <X className="mr-1 h-3.5 w-3.5" />Отменить встречу
+            </Button>
+          )}
+          {мой && title.trim() && (
+            <Button size="sm" variant="ghost"
+              disabled={сохранитьЗаготовку.isPending}
+              onClick={() => {
+                const имя = window.prompt('Название заготовки', title.trim().slice(0, 60))
+                if (имя?.trim()) сохранитьЗаготовку.mutate(имя.trim())
+              }}>
+              <BookmarkPlus className="mr-1 h-3.5 w-3.5" />В заготовки
             </Button>
           )}
           <Button size="sm" variant="ghost" onClick={onClose}>Закрыть</Button>
