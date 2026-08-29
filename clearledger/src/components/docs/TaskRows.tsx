@@ -20,6 +20,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { SearchPicker } from '@/components/tasks/SearchPicker'
 import { QueryError } from '@/components/common/QueryError'
 import { DragHandle } from '@/components/docs/DragHandle'
+import { PlaceActions } from '@/components/docs/PlaceActions'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as tasksService from '@/services/tasksService'
 import type { SpaceTask, TaskScope } from '@/services/tasksService'
@@ -159,7 +160,7 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
             </span>
           </div>
           {rows.map((t) => (
-            <Row key={t.id} task={t} busy={close.isPending}
+            <Row key={t.id} task={t} companyId={companyId} busy={close.isPending}
               picked={picked.has(t.id)}
               onPick={() => setPicked((prev) => {
                 const next = new Set(prev)
@@ -168,7 +169,7 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
                 return next
               })}
               onOpen={() => navigate(`/docs/company?view=errands&task=${t.id}`)}
-              onClose={() => close.mutate(t.id)} />
+              onChanged={refresh} onClose={() => close.mutate(t.id)} />
           ))}
         </div>
       )}
@@ -176,10 +177,10 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
   )
 }
 
-function Row({ task, busy, picked, onPick, onOpen, onClose }: {
-  task: SpaceTask; busy: boolean
+function Row({ task, companyId, busy, picked, onPick, onOpen, onChanged, onClose }: {
+  task: SpaceTask; companyId: string; busy: boolean
   picked: boolean; onPick: () => void
-  onOpen: () => void; onClose: () => void
+  onOpen: () => void; onChanged: () => void; onClose: () => void
 }) {
   const ref = `task:${task.id}`
   return (
@@ -204,11 +205,12 @@ function Row({ task, busy, picked, onPick, onOpen, onClose }: {
         task.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
         {task.due_at ? dt(task.due_at) : 'без срока'}
       </span>
-      {/* Личных действий здесь нет намеренно: отметка раскладки в проекцию
-          `/api/tasks` не входит, а кнопки по пустой отметке врали бы состоянием
-          — солнце не залито у взятого в день, «убрать из подборки» не
-          показывается. Раскладка живёт там, где отметка приходит с данными:
-          в очереди, в «Сегодня» и в подборках. */}
+      {/* Отметка приходит вместе со строкой, поэтому кнопки говорят правду:
+          солнце залито у взятого в день, «убрать из подборки» видно только у
+          лежащего в ней. Без отметки они врали бы состоянием, и до неё их
+          здесь не было. */}
+      <PlaceActions companyId={companyId} targetRef={ref} mark={task.mark}
+        onChanged={onChanged} />
       <Button size="sm" variant="ghost" className="h-8 shrink-0 px-2" disabled={busy}
         title="Закрыть работу" onClick={onClose}>
         <Check className="h-3.5 w-3.5" />

@@ -41,8 +41,8 @@ from app.models import (
     User, UserCompany,
 )
 from app.services import (
-    process_templates, space_connectors, task_mail, task_scheduler, work_query,
-    work_state,
+    placement, process_templates, space_connectors, task_mail, task_scheduler,
+    work_query, work_state,
 )
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
@@ -818,8 +818,16 @@ async def list_tasks(
     tasks = list((await db.execute(sel.limit(limit).offset(offset))).scalars())
     names = await _names(db, tasks)
     extras = await _extras(db, tasks)
+    # Личная отметка приезжает вместе со строкой, одним запросом на страницу.
+    # Без неё действия раскладки в строке работали вслепую — солнце не залито у
+    # взятого в день, «убрать из подборки» не появляется никогда, — и их
+    # пришлось убрать. Разрезы «Я поставил» и «Наблюдаю» показываются теми же
+    # строками, что очередь, и личных действий в них быть не должно меньше.
+    marks = await placement.marks_for(
+        db, cid, current_user.id, [f"task:{t.id}" for t in tasks])
     return {
-        "tasks": [_task_out(t, names[t.id]["route"], names[t.id], extras[t.id])
+        "tasks": [{**_task_out(t, names[t.id]["route"], names[t.id], extras[t.id]),
+                   "mark": placement.out(marks.get(f"task:{t.id}"))}
                   for t in tasks],
         "total": total,
         "limit": limit,

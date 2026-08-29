@@ -38,6 +38,11 @@ export interface WorkItem {
   priority: string | null
   labels: { id: string; name: string; color: string }[]
   updated_at: string | null
+  /** Как ЭТОТ человек разложил предмет у себя. `null` — не разложен, и это
+   *  нормальное состояние. Приезжает вместе со строкой, одним запросом на всю
+   *  страницу: без отметки действия раскладки в списках работали вслепую, а
+   *  доска по личной оси не смогла бы построить колонки. */
+  mark: PersonalMark | null
 }
 
 export interface WorkQueryResult {

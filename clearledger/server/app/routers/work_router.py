@@ -41,7 +41,7 @@ from app.models import (
     DocCard, DocKind, DocLabelLink, DocRelation, ServiceLocation, Task, TaskLabel,
     TaskLabelLink, TaskProject, TaskType, User, UserCompany,
 )
-from app.services import work_query, work_state
+from app.services import placement, work_query, work_state
 
 router = APIRouter(prefix="/work", tags=["Трек"])
 
@@ -301,7 +301,7 @@ async def list_work(
 
     rows = (await db.execute(sel.limit(limit).offset(offset))).all()
     return {
-        "work": await _decorate(db, cid, rows, now),
+        "work": await _decorate(db, cid, rows, now, current_user.id),
         "total": total, "limit": limit, "offset": offset,
         "columns": [{"code": c, "name": work_state.COLUMN_NAMES[c]}
                     for c in work_state.COLUMNS],
@@ -310,7 +310,7 @@ async def list_work(
 
 
 async def _decorate(db: AsyncSession, cid: uuid.UUID, rows: list[Any],
-                    now: datetime) -> list[dict[str, Any]]:
+                    now: datetime, user_id: uuid.UUID) -> list[dict[str, Any]]:
     """Доклеить имена пачкой: страница списка не ходит в базу построчно."""
     if not rows:
         return []
@@ -371,6 +371,17 @@ async def _decorate(db: AsyncSession, cid: uuid.UUID, rows: list[Any],
             "labels": labels.get(r.id, []),
             "updated_at": r.updated_at.isoformat() if r.updated_at else None,
         })
+
+    # Личная отметка приезжает вместе со строкой, одним запросом на всю
+    # страницу. Без неё действия раскладки в списках работали вслепую: солнце не
+    # залито у взятого в день, «убрать из подборки» не появляется никогда — и
+    # по этой причине их пришлось из строк убрать. По ней же строится ось
+    # раскладки на доске: колонки считаются из уже полученных данных, второй
+    # выдачи для той же доски не заводим.
+    marks = await placement.marks_for(
+        db, cid, user_id, [f"{o['kind']}:{o['id']}" for o in out])
+    for o in out:
+        o["mark"] = placement.out(marks.get(f"{o['kind']}:{o['id']}"))
     return out
 
 
