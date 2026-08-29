@@ -16,6 +16,7 @@ import * as docsService from '@/services/docsService'
 import { DOC_FAMILY } from '@/services/docsService'
 import { useDocsView } from './DocsLayout'
 import { useDocsScope } from '@/hooks/useDocsScope'
+import { formatPeriod } from '@/lib/formatDate'
 import { DocsErrorState, DocsLoadingState } from '@/components/docs/DocsQueryState'
 
 const TasksOverviewPage = lazy(() => import('@/pages/tasks/TasksOverviewPage')
@@ -286,7 +287,7 @@ function Discipline({ report, loading, fetching, failed, retry, dateError,
       {report && !dateError && !failed && <>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <Metric label="Запущено в период" value={summary?.documents ?? 0}
-            hint={`${report.period.date_from} — ${report.period.date_to}`}
+            hint={formatPeriod(report.period.date_from, report.period.date_to)}
             to={(summary?.documents ?? 0) > 0 ? disciplineDetailUrl(report, 'started') : undefined} />
           <Metric label="Завершено" value={summary?.completed ?? 0}
             hint="финально согласовано"

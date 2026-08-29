@@ -309,7 +309,11 @@ export function WorkBoardPage() {
             const droppable = !!dragged && columnOf(dragged) !== col.code
               && !отказ(col, dragged)
             return (
-              <div key={col.code}
+              // `data-col` — единственный способ проверить перенос: настоящий
+              // drag браузер запускает своим механизмом, до которого прогон не
+              // дотягивается мышью, и события приходится слать руками — по
+              // адресуемой колонке.
+              <div key={col.code} data-col={col.code}
                 onDragOver={(e) => { e.preventDefault(); setOver(col.code) }}
                 onDragLeave={() => setOver((c) => (c === col.code ? null : c))}
                 onDrop={() => drop(col)}

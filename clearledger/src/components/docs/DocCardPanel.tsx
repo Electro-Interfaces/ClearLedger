@@ -34,6 +34,7 @@ import { DocApprovalTab } from './DocApprovalTab'
 import { DocFileWorkspace } from './DocFileWorkspace'
 import { DocSendTab } from './DocSendTab'
 import { openAuthAttachment } from '@/lib/authFiles'
+import { formatDate } from '@/lib/formatDate'
 import { useCompany } from '@/contexts/CompanyContext'
 import { DocRegisterDialog, type DocRegisterValues } from './DocRegisterDialog'
 import { DocErrandDialog } from './DocErrandDialog'
@@ -287,6 +288,9 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
   const registered = Boolean(d.reg_number)
   const actions = new Set(d.available_actions ?? [])
   const editable = actions.has('edit')
+  // Реплику отделяем от правки реквизитов: у действующего документа `edit`
+  // снят намеренно (его меняют новой редакцией), а история продолжает жить.
+  const canNote = actions.has('note')
   const approvalLocked = d.approval_status === 'pending'
   const signatureEvidence = d.signatures ?? []
   const canChangeFiles = editable && !approvalLocked && ['draft', 'registered'].includes(d.status)
@@ -382,7 +386,8 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
           <Fact label="Текущая редакция"
             value={d.current_revision ? `Редакция ${d.current_revision}` : 'Основной файл не приложен'} />
           <Fact label="Согласование" value={APPROVAL_LABEL[d.approval_status] ?? d.approval_status} />
-          <Fact label="Хранение" value={d.storage_until ? `До ${d.storage_until}` : 'Срок не зафиксирован'} />
+          <Fact label="Хранение"
+            value={d.storage_until ? `До ${formatDate(d.storage_until)}` : 'Срок не зафиксирован'} />
           <Fact label="Доступ"
             value={d.confidentiality === 'strict' ? 'Строгий'
               : d.confidentiality === 'private' ? 'Ограниченный' : 'Всё пространство'} />
@@ -687,18 +692,6 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
             </div>
           </Card>
 
-          <Card className="space-y-2 p-4">
-            <Label htmlFor={`doc-note-${d.id}`} className="text-xs">Реплика в историю</Label>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Input id={`doc-note-${d.id}`} value={note} onChange={(event) => setNote(event.target.value)}
-                placeholder="Что важно зафиксировать по документу" className="h-9"
-                disabled={!editable} />
-              <Button size="sm" variant="outline" disabled={!editable || !note.trim() || act.isPending}
-                onClick={() => act.mutate({ note: note.trim() })}>
-                Записать
-              </Button>
-            </div>
-          </Card>
         </TabsContent>
 
         <TabsContent value="processing" className="space-y-5 pt-3">
@@ -836,7 +829,32 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
           </Card>
         </TabsContent>
 
-        <TabsContent value="feed" className="pt-3">
+        <TabsContent value="feed" className="space-y-3 pt-3">
+          {/* Поле стояло на вкладке «Документ» — человек писал реплику там, а
+              искал её здесь, и между «записал» и «увидел» лежало переключение
+              вкладки. Пишем и читаем в одном месте. */}
+          <Card className="space-y-2 p-4">
+            <Label htmlFor={`doc-note-${d.id}`} className="text-xs">Реплика в историю</Label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input id={`doc-note-${d.id}`} value={note}
+                onChange={(event) => setNote(event.target.value)}
+                // Однострочное поле отправляется Enter'ом: целиться мышью в
+                // кнопку ради одной строки — лишнее движение.
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' || !canNote
+                      || !note.trim() || act.isPending) return
+                  event.preventDefault()
+                  act.mutate({ note: note.trim() })
+                }}
+                placeholder="Что важно зафиксировать по документу" className="h-9"
+                disabled={!canNote} />
+              <Button size="sm" variant="outline"
+                disabled={!canNote || !note.trim() || act.isPending}
+                onClick={() => act.mutate({ note: note.trim() })}>
+                Записать
+              </Button>
+            </div>
+          </Card>
           {/* Тот же компонент следа, что в карточке поручения (этап 13е):
               «что делали и кто» — один вопрос, и отвечать на него двумя
               разметками значит рассказывать одно и то же по-разному. */}
@@ -920,7 +938,11 @@ function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 bg-card px-3 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="truncate text-[13px] font-medium" title={value}>{value}</div>
+      {/* Не `truncate`: значения здесь — короткие фразы («Основной файл не
+          приложен»), и одна строка резала их на полуслове. Две строки вмещают
+          всё, что тут бывает, и не дают плитке расти без предела. */}
+      <div className="line-clamp-2 text-[13px] font-medium leading-snug"
+        title={value}>{value}</div>
     </div>
   )
 }

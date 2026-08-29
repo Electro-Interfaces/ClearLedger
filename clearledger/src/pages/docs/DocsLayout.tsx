@@ -91,7 +91,10 @@ export const DOCS_VIEWS: Record<string, DocsView[]> = {
   ],
   '/docs/overview': [
     { key: 'docs', label: 'По документам', hint: 'сколько на регистрации, на визах, просрочено' },
-    { key: 'discipline', label: 'Исполнительская дисциплина', hint: 'скорость согласования и задержки по людям' },
+    // Ряд отчётов назван одинаково («По…»), и длинное имя обрезалось
+    // многоточием — пункт меню, который нельзя дочитать, не пункт меню.
+    // Полное название стоит заголовком самого экрана.
+    { key: 'discipline', label: 'По дисциплине', hint: 'исполнительская дисциплина: скорость согласования и задержки по людям' },
     { key: 'errands', label: 'По поручениям', hint: 'итоги и разрезы по людям, типам и объектам' },
   ],
   '/docs/regulation': [
@@ -256,6 +259,11 @@ export function DocsLayout() {
       triage: триажQ.data?.total ?? (триажQ.data?.tasks ?? []).length,
     } as Record<string, number>
   }, [mineQ.data, assignedQ.data, watchingQ.data, listsQ.data, триажQ.data])
+
+  /** Просрочка показывается только у пунктов-очередей: у «Архива» красное
+   *  число значило бы, что просрочен архив. */
+  const горит = (view: DocsView) =>
+    (view.badge === 'queue' || view.badge === 'hot') ? счёт.overdue : 0
 
   const числоУ = (view: DocsView) => (view.badge ? счёт[view.badge] ?? 0 : 0)
 
@@ -438,14 +446,23 @@ export function DocsLayout() {
                     ? 'bg-primary/10 font-medium text-primary'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
                 <span className="flex-1 truncate">{v.label}</span>
-                {(v.badge === 'queue' || v.badge === 'hot') && счёт.overdue > 0 && (
+                {/* Два числа подряд сливаются: «1 3» человек читает как
+                    тринадцать, пока не заметит, что первое красное. Цвет —
+                    единственный носитель смысла только для того, кто его
+                    различает. Разделяем точкой и называем оба вслух. */}
+                {горит(v) > 0 && (
                   <span className="shrink-0 text-xs tabular-nums text-red-600 dark:text-red-400"
-                    title={`Просрочено: ${счёт.overdue}`}>
-                    {счёт.overdue}
+                    title={`Просрочено: ${горит(v)}`}>
+                    {горит(v)}
                   </span>
                 )}
+                {горит(v) > 0 && числоУ(v) > 0 && (
+                  <span aria-hidden="true"
+                    className="shrink-0 text-xs text-muted-foreground/50">·</span>
+                )}
                 {числоУ(v) > 0 && (
-                  <span className="shrink-0 text-xs tabular-nums opacity-70">{числоУ(v)}</span>
+                  <span className="shrink-0 text-xs tabular-nums opacity-70"
+                    title={`Всего: ${числоУ(v)}`}>{числоУ(v)}</span>
                 )}
               </button>
             </div>

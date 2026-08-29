@@ -749,6 +749,13 @@ async def _available_actions(db: AsyncSession, cid: uuid.UUID, d: DocCard,
         can_sign = user.id in deputies
     if can_edit and d.status in ("draft", "registered") and d.approval_status != "pending":
         actions.append("edit")
+    # Реплика в историю — отдельное действие, а не побочный эффект правки.
+    # `edit` снимается, как только документ вступил в силу, и витрина гасила
+    # вместе с реквизитами поле реплики — ровно тогда, когда записать
+    # «созвонились, срок перенесли» важнее всего. Круг людей тот же, привязки
+    # к состоянию нет: реплика ничего в документе не меняет.
+    if can_edit:
+        actions.append("note")
     if can_edit and d.status == "draft" and not d.reg_number:
         actions.append("register")
     if (can_edit and kind and kind.route and d.status in ("draft", "registered")
