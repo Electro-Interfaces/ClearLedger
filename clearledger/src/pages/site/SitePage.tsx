@@ -116,6 +116,14 @@ export function SitePage() {
     queryFn: () => siteService.getCabinetUsers(companyId),
     enabled: !!companyId && tab === 'cabinets',
   })
+  // Кто заведён В КАБИНЕТЕ САЙТА. До появления пространства доступы открывали
+  // прямо там, и в нашей таблице этих людей нет — а входят они каждый день.
+  // Показываем обе стороны: иначе экран уверяет, что кабинет никому не открыт.
+  const siteCabinets = useQuery({
+    queryKey: ['site-cabinets', companyId],
+    queryFn: () => siteService.getCabinets(companyId),
+    enabled: !!companyId && tab === 'cabinets',
+  })
   const stands = useQuery({
     queryKey: ['site-demo-stands', companyId],
     queryFn: () => siteService.getDemoStands(companyId),
@@ -185,6 +193,12 @@ export function SitePage() {
     stands: stands.data?.items.length,
     shows: summary.data?.demos,
   }
+  // Адреса сайта, которых нет в нашей таблице доступов.
+  const onSiteOnly = useMemo(() => {
+    const ours = new Set((cabinets.data?.items ?? []).map((c) => c.email.toLowerCase()))
+    return (siteCabinets.data?.items ?? [])
+      .filter((c) => c.email && !ours.has(c.email.toLowerCase()))
+  }, [cabinets.data, siteCabinets.data])
   // Клиент → адрес его контура: в кабинетах видно, есть ли человеку куда войти.
   const spaceOf = useMemo(() => {
     const map = new Map<string, string>()
@@ -409,10 +423,44 @@ export function SitePage() {
                     </TableRow>
                   ))}
                   {!cabinets.isLoading && !(cabinets.data?.items ?? []).length && (
-                    <EmptyRow colSpan={6} text="Доступов нет: кабинет пока никому не открыт" />
+                    <EmptyRow colSpan={6}
+                      text="Через пространство доступ пока никому не открывали" />
                   )}
                 </TableBody>
               </Table>
+
+              {onSiteOnly.length > 0 && (
+                <div className="mt-6">
+                  <p className="mb-2 text-sm font-medium">Заведены на самом сайте</p>
+                  <p className="mb-3 text-xs text-muted-foreground">
+                    Эти адреса открыли в админке сайта, минуя пространство. Они входят
+                    в кабинет, но клиента и стенды им отсюда не назначить — заведите
+                    доступ формой выше, и запись станет управляемой.
+                  </p>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Адрес</TableHead>
+                        <TableHead>Уровень</TableHead>
+                        <TableHead>Компания</TableHead>
+                        <TableHead>Был на сайте</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {onSiteOnly.map((c) => (
+                        <TableRow key={c.email}>
+                          <TableCell>{c.email}</TableCell>
+                          <TableCell>{LEVEL_LABELS[c.level ?? ''] ?? c.level ?? '—'}</TableCell>
+                          <TableCell>{c.company ?? '—'}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {siteTime(c.last_login_at) || '—'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </>
           )}
 

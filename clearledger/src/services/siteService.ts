@@ -78,23 +78,23 @@ export interface SiteSummary {
 }
 
 export const getSummary = (companyId: string) =>
-  get<SiteSummary>('/site/summary', { company_id: companyId })
+  get<SiteSummary>('/api/site/summary', { company_id: companyId })
 
 export const getRequests = (companyId: string) =>
-  get<SiteFeed<SiteRequest>>('/site/requests', { company_id: companyId })
+  get<SiteFeed<SiteRequest>>('/api/site/requests', { company_id: companyId })
 
 export const getCabinets = (companyId: string) =>
-  get<SiteFeed<SiteCabinet>>('/site/cabinets', { company_id: companyId })
+  get<SiteFeed<SiteCabinet>>('/api/site/cabinets', { company_id: companyId })
 
 export const getDemos = (companyId: string) =>
-  get<SiteFeed<SiteDemoEntry>>('/site/demos', { company_id: companyId })
+  get<SiteFeed<SiteDemoEntry>>('/api/site/demos', { company_id: companyId })
 
 export const getLeads = (companyId: string) =>
-  get<SiteFeed<SiteLead>>('/site/leads', { company_id: companyId })
+  get<SiteFeed<SiteLead>>('/api/site/leads', { company_id: companyId })
 
 export const setLeadStatus = (companyId: string, id: number, status: string) =>
   post<{ ok?: boolean }>(
-    `/site/leads/${id}/status?company_id=${encodeURIComponent(companyId)}`, { status })
+    `/api/site/leads/${id}/status?company_id=${encodeURIComponent(companyId)}`, { status })
 
 /** Уровни доступа кабинета словами — на сайте они кодами. */
 export const LEVEL_LABELS: Record<string, string> = {
@@ -169,20 +169,20 @@ export interface DemoStandInput {
 }
 
 export const getCabinetUsers = (companyId: string) =>
-  get<{ items: CabinetUser[] }>('/site/cabinet-users', { company_id: companyId })
+  get<{ items: CabinetUser[] }>('/api/site/cabinet-users', { company_id: companyId })
 
 export const saveCabinetUser = (companyId: string, input: CabinetUserInput) =>
-  post<CabinetUser>(`/site/cabinet-users?company_id=${encodeURIComponent(companyId)}`, input)
+  post<CabinetUser>(`/api/site/cabinet-users?company_id=${encodeURIComponent(companyId)}`, input)
 
 export const dropCabinetUser = (companyId: string, id: string) =>
   del<{ deleted: boolean }>(
-    `/site/cabinet-users/${id}?company_id=${encodeURIComponent(companyId)}`)
+    `/api/site/cabinet-users/${id}?company_id=${encodeURIComponent(companyId)}`)
 
 export const getDemoStands = (companyId: string) =>
-  get<{ items: DemoStand[] }>('/site/demo-stands', { company_id: companyId })
+  get<{ items: DemoStand[] }>('/api/site/demo-stands', { company_id: companyId })
 
 export const saveDemoStand = (companyId: string, input: DemoStandInput) =>
-  post<DemoStand>(`/site/demo-stands?company_id=${encodeURIComponent(companyId)}`, input)
+  post<DemoStand>(`/api/site/demo-stands?company_id=${encodeURIComponent(companyId)}`, input)
 
 /** Пространство, развёрнутое клиенту: его контур и состояние. */
 export interface ClientSpace {
@@ -212,10 +212,10 @@ export const SPACE_STATUS_LABELS: Record<string, string> = {
 }
 
 export const getClientSpaces = (companyId: string) =>
-  get<{ items: ClientSpace[] }>('/site/client-spaces', { company_id: companyId })
+  get<{ items: ClientSpace[] }>('/api/site/client-spaces', { company_id: companyId })
 
 export const saveClientSpace = (companyId: string, input: ClientSpaceInput) =>
-  post<ClientSpace>(`/site/client-spaces?company_id=${encodeURIComponent(companyId)}`, input)
+  post<ClientSpace>(`/api/site/client-spaces?company_id=${encodeURIComponent(companyId)}`, input)
 
 // ── Витрина сайта ────────────────────────────────────────────────
 // Правки текстов и цен лежат на сайте, правятся отсюда. Состав разделов
@@ -277,9 +277,9 @@ export const FIELD_LABELS: Record<string, string> = {
 }
 
 export const getContent = (companyId: string) =>
-  get<SiteContent>('/site/content', { company_id: companyId })
+  get<SiteContent>('/api/site/content', { company_id: companyId })
 
 export const saveContent = (companyId: string, key: string, value: unknown) =>
   put<{ ok?: boolean }>(
-    `/site/content/${encodeURIComponent(key)}?company_id=${encodeURIComponent(companyId)}`,
+    `/api/site/content/${encodeURIComponent(key)}?company_id=${encodeURIComponent(companyId)}`,
     { value })
