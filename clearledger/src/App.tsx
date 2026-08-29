@@ -86,6 +86,7 @@ const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default:
 const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })))
 const DocSharePage = lazy(() => import('@/pages/DocSharePage').then((m) => ({ default: m.DocSharePage })))
+const InvitePage = lazy(() => import('@/pages/InvitePage').then((m) => ({ default: m.InvitePage })))
 const DocVerifyPage = lazy(() => import('@/pages/DocVerifyPage').then((m) => ({ default: m.DocVerifyPage })))
 const ShowcaseLinkPage = lazy(() => import('@/pages/ShowcaseLinkPage')
   .then((m) => ({ default: m.ShowcaseLinkPage })))
@@ -253,6 +254,9 @@ const router = createBrowserRouter([
       // Документ по ссылке: четвёртый вход без учётки. Контрагент смотрит
       // реквизиты, скачивает файлы и подтверждает получение.
       { path: '/doc-share/:token', element: <LazyPage><DocSharePage /></LazyPage> },
+      // Приглашение на встречу: у гостя нет календаря — у него есть эта
+      // страница. Публичная, без входа, как и показ документа по ссылке.
+      { path: '/invite/:token', element: <LazyPage><InvitePage /></LazyPage> },
       { path: '/doc-verify/:token', element: <LazyPage><DocVerifyPage /></LazyPage> },
       {
         path: '/',

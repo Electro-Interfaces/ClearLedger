@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { ListPlus, Loader2, Repeat, Video, X } from 'lucide-react'
 import { findSlots } from '@/lib/slots'
+import { GuestPanel } from '@/components/calendar/GuestPanel'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -107,6 +108,21 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
     setПовтор(ключПовтора(event.recurrence ?? null))
     setUntil(event.recurrence_until ?? '')
   }, [event])
+
+  const [предлагаю, setПредлагаю] = useState(false)
+  const предложения = (event?.attendees ?? []).filter((a) => a.proposed_starts_at)
+  const предложить = useMutation({
+    mutationFn: () => workService.eventAction(companyId, event!.id, {
+      proposeStartsAt: new Date(starts).toISOString(),
+      proposeEndsAt: new Date(ends).toISOString(),
+    }),
+    onSuccess: () => {
+      setПредлагаю(false)
+      toast.success('Предложение отправлено организатору')
+      onChanged()
+    },
+    onError: (e: Error) => toast.error(e.message || 'Не отправилось'),
+  })
 
   const [длительность, setДлительность] = useState(60)
   const [ищем, setИщем] = useState(false)
@@ -402,6 +418,44 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
           )}
         </div>
 
+        {!новая && мой && event!.status !== 'cancelled' && (
+          <div className="mt-3">
+            <GuestPanel companyId={companyId} eventId={event!.id}
+              title={title} startsAt={event!.starts_at} />
+          </div>
+        )}
+
+        {/* Организатор видит встречные предложения и принимает их одним
+            нажатием. Само предложение время не двигало: перенос остаётся его
+            решением, иначе любой приглашённый переставлял бы чужие календари. */}
+        {!новая && мой && предложения.length > 0 && (
+          <div className="mt-3 space-y-1.5 rounded-md border border-amber-500/40 bg-amber-500/[0.05] p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
+              Предложили другое время
+            </p>
+            {предложения.map((a) => (
+              <div key={a.user_id} className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="min-w-[8rem] flex-1">{a.name || 'участник'}</span>
+                <span className="tabular-nums">
+                  {когда.format(new Date(a.proposed_starts_at!))}
+                </span>
+                {a.comment && <span className="text-muted-foreground">{a.comment}</span>}
+                <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
+                  onClick={() => {
+                    setStarts(local(new Date(a.proposed_starts_at!)))
+                    setEnds(local(new Date(a.proposed_ends_at!)))
+                    toast.info('Время подставлено — сохраните встречу, чтобы перенести')
+                  }}>
+                  Перенести на это
+                </Button>
+              </div>
+            ))}
+            <p className="text-[11px] text-muted-foreground">
+              Перенос обнулит согласия: «буду в 10» не равно «буду в 18».
+            </p>
+          </div>
+        )}
+
         {/* По итогам встречи — поручение. Исполнителя здесь не спрашиваем: на
             совещании решают ЧТО, а кто — часто позже. Работа без исполнителя не
             теряется, она попадает в «Разбор», где её берут, отдают или
@@ -428,7 +482,25 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
         )}
 
         <DialogFooter className="flex-wrap gap-2">
-          {!новая && !мой && (
+          {!новая && !мой && предлагаю && (
+            <div className="mr-auto flex w-full flex-wrap items-end gap-2">
+              <label className="space-y-1 text-xs text-muted-foreground">
+                Предлагаю с
+                <Input type="datetime-local" value={starts} className="w-[200px]"
+                  onChange={(e) => setStarts(e.target.value)} />
+              </label>
+              <label className="space-y-1 text-xs text-muted-foreground">
+                по
+                <Input type="datetime-local" value={ends} className="w-[200px]"
+                  onChange={(e) => setEnds(e.target.value)} />
+              </label>
+              <Button size="sm" disabled={предложить.isPending}
+                onClick={() => предложить.mutate()}>Отправить</Button>
+              <Button size="sm" variant="ghost"
+                onClick={() => setПредлагаю(false)}>Отмена</Button>
+            </div>
+          )}
+          {!новая && !мой && !предлагаю && (
             <div className="mr-auto flex items-center gap-1.5">
               {ОТВЕТЫ.map((r) => (
                 <Button key={r.key} size="sm" disabled={ответить.isPending}
@@ -437,6 +509,11 @@ export function EventDialog({ companyId, event, startAt, subjectRef, initialTitl
                   {r.label}
                 </Button>
               ))}
+              {/* Отказ без встречного предложения оставляет организатора гадать,
+                  когда человеку удобно, и переписка уходит в чат. */}
+              <Button size="sm" variant="ghost" onClick={() => setПредлагаю(true)}>
+                Другое время
+              </Button>
             </div>
           )}
           {!новая && мой && event!.status !== 'cancelled' && (

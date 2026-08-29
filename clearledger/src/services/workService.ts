@@ -356,6 +356,9 @@ export interface EventAttendee {
   role: 'required' | 'optional'
   response: EventResponse
   comment: string | null
+  /** Что участник предложил взамен. Время это не двигает — решает организатор. */
+  proposed_starts_at?: string | null
+  proposed_ends_at?: string | null
 }
 
 /** Правило повторения. Час и минута берутся у самой встречи: второе место, где
@@ -445,6 +448,58 @@ export async function createEvent(companyId: string, data: {
   })
 }
 
+export interface EventGuest {
+  id: string
+  email: string
+  name: string | null
+  response: 'pending' | 'accepted' | 'declined' | 'tentative'
+  comment: string | null
+  opened_at: string | null
+  proposed_starts_at: string | null
+  proposed_ends_at: string | null
+}
+
+export interface EventMaterial {
+  id: string
+  target_ref: string
+  title: string
+  url: string | null
+}
+
+/** Кого позвали снаружи и что им открыли. Токенов здесь нет: ссылка видна один
+ *  раз — в ответе на приглашение. */
+export async function eventGuests(companyId: string, eventId: string) {
+  return get<{ guests: EventGuest[]; materials: EventMaterial[] }>(
+    `/api/work/calendar/${eventId}/guests`, { company_id: companyId })
+}
+
+/** Позвать внешнего участника. Учётной записи ему не заводим: она дала бы место
+ *  в составе компании ради одной встречи. */
+export async function inviteGuest(companyId: string, eventId: string, data: {
+  email: string; name?: string
+}) {
+  return post<EventGuest & { token: string }>(
+    `/api/work/calendar/${eventId}/guests`,
+    { company_id: companyId, email: data.email, name: data.name })
+}
+
+export async function revokeGuest(companyId: string, eventId: string, guestId: string) {
+  return post(`/api/work/calendar/${eventId}/guests/${guestId}`,
+    { company_id: companyId, revoke: true })
+}
+
+/** Открыть гостям материал. Приглашение само по себе не открывает ничего:
+ *  позвать обсудить договор и дать договор — разные решения. */
+export async function openMaterial(companyId: string, eventId: string, targetRef: string) {
+  return post<EventMaterial>(`/api/work/calendar/${eventId}/materials`,
+    { company_id: companyId, target_ref: targetRef })
+}
+
+export async function closeMaterial(companyId: string, eventId: string, id: string) {
+  return post(`/api/work/calendar/${eventId}/materials/${id}/close`
+    + `?company_id=${encodeURIComponent(companyId)}`, {})
+}
+
 /** Правка, отмена или свой ответ — одной ручкой, как действие над задачей. */
 export async function eventAction(companyId: string, id: string, data: {
   title?: string; startsAt?: string; endsAt?: string
@@ -452,6 +507,9 @@ export async function eventAction(companyId: string, id: string, data: {
   attendeeIds?: string[]
   cancel?: boolean; cancelReason?: string
   response?: Exclude<EventResponse, 'pending'>; comment?: string
+  /** Встречное предложение участника. Время оно не двигает: перенос —
+   *  решение организатора. */
+  proposeStartsAt?: string; proposeEndsAt?: string
   /** Пустой объект снимает повторение; уже созданные встречи остаются —
    *  они стоят в чужих календарях. */
   recurrence?: Recurrence | Record<string, never> | null
@@ -464,6 +522,8 @@ export async function eventAction(companyId: string, id: string, data: {
     conference_url: data.conferenceUrl,
     attendee_ids: data.attendeeIds,
     cancel: data.cancel, cancel_reason: data.cancelReason,
+    propose_starts_at: data.proposeStartsAt,
+    propose_ends_at: data.proposeEndsAt,
     recurrence: data.recurrence ?? undefined,
     recurrence_until: data.recurrenceUntil || undefined,
     response: data.response, comment: data.comment,

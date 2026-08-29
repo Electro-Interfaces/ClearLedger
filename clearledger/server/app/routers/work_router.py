@@ -30,7 +30,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import Integer, String, Uuid, and_, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -840,6 +840,11 @@ class EventAction(BaseModel):
     recurrence_until: date | None = None
     response: str | None = Field(None, pattern="^(accepted|declined|tentative)$")
     comment: str | None = None
+    # Встречное предложение участника. Само по себе ничего не двигает: перенос —
+    # решение организатора. Отказ без предложения оставляет его гадать, когда
+    # человеку удобно, и переписка уходит в чат, где её потом не найти.
+    propose_starts_at: datetime | None = None
+    propose_ends_at: datetime | None = None
 
 
 def _event_out(ev, attendees: list, me: uuid.UUID) -> dict[str, Any]:
@@ -860,6 +865,8 @@ def _event_out(ev, attendees: list, me: uuid.UUID) -> dict[str, Any]:
         "attendees": [{
             "user_id": str(a.user_id), "name": getattr(a, "name", None), "role": a.role,
             "response": a.response, "comment": a.comment,
+            "proposed_starts_at": getattr(a, "proposed_starts_at", None),
+            "proposed_ends_at": getattr(a, "proposed_ends_at", None),
         } for a in attendees],
     }
 
@@ -1026,6 +1033,40 @@ async def calendar_busy(
     }
 
 
+@router.get("/calendar/{event_id}/ics")
+async def calendar_ics(
+    event_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Встреча файлом для внешнего календаря.
+
+    Нужна и своим: человек живёт в Outlook или в телефоне, и «есть в Треке» не
+    значит «не занят» для того, кто зовёт его туда.
+    """
+    from app.models import CalendarEvent
+    from app.services import ics
+
+    cid = await _assert_work(company_id, current_user, db)
+    ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
+    if ev is None or ev.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
+    organizer = await db.get(User, ev.organizer_id)
+    текст = ics.event_ics(
+        uid=f"{ev.id}@trek.elsyplus", title=ev.title,
+        starts_at=ev.starts_at, ends_at=ev.ends_at,
+        description=ev.description, location=ev.location,
+        url=ev.conference_url,
+        organizer_email=organizer.email if organizer else None,
+        organizer_name=organizer.name if organizer else None,
+        cancelled=ev.status == "cancelled",
+        sequence=1 if ev.status == "cancelled" else 0)
+    return Response(
+        content=текст, media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="meeting.ics"'})
+
+
 @router.get("/calendar/{event_id}")
 async def calendar_card(
     event_id: str,
@@ -1113,6 +1154,27 @@ async def calendar_action(
     приглашён = any(a.user_id == current_user.id for a in parts)
     if ev.organizer_id != current_user.id and not приглашён:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша встреча")
+
+    # Встречное предложение — второе (и последнее), что участник может сделать
+    # со встречей помимо ответа. Время оно не двигает: перенос остаётся решением
+    # организатора, иначе любой приглашённый переставлял бы чужие календари.
+    if payload.propose_starts_at is not None and payload.propose_ends_at is not None:
+        mine = next((a for a in parts if a.user_id == current_user.id), None)
+        if mine is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Предлагать время может только приглашённый")
+        if payload.propose_ends_at <= payload.propose_starts_at:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Конец не может быть раньше начала")
+        mine.proposed_starts_at = payload.propose_starts_at
+        mine.proposed_ends_at = payload.propose_ends_at
+        # Предложивший другое время считается отказавшимся от нынешнего: иначе в
+        # составе он выглядит согласившимся на час, который сам просит поменять.
+        mine.response = "declined"
+        mine.responded_at = datetime.now(timezone.utc)
+        mine.comment = payload.comment or None
+        await db.commit()
+        return _event_out(ev, parts, current_user.id)
 
     # Свой ответ — единственное, что участник может сделать со встречей.
     if payload.response is not None:
@@ -1250,6 +1312,224 @@ async def _my_lists(db: AsyncSession, cid: uuid.UUID, user: User):
     return list((await db.execute(select(PersonalList).where(
         PersonalList.company_id == cid, PersonalList.user_id == user.id)
         .order_by(PersonalList.position, PersonalList.created_at))).scalars())
+
+
+# ---------------------------------------------------------------------------
+# Партнёрский контур встречи: гость без учётной записи и открытые ему материалы
+# ---------------------------------------------------------------------------
+class GuestIn(BaseModel):
+    company_id: str
+    email: str = Field(min_length=3, max_length=255)
+    name: str | None = Field(None, max_length=255)
+
+
+class GuestAction(BaseModel):
+    company_id: str
+    revoke: bool = False
+
+
+class MaterialIn(BaseModel):
+    company_id: str
+    # Пока только документ: у него есть редакция, номер и снимок — то есть через
+    # месяц можно ответить, что именно человек видел. У задачи и записи такого
+    # нет, и открывать их наружу нечем.
+    target_ref: str = Field(pattern="^doc:[0-9a-fA-F-]{36}$")
+    days: int = Field(30, ge=1, le=180)
+
+
+async def _event_of_organizer(db: AsyncSession, cid: uuid.UUID, event_id: str,
+                              user: User):
+    """Встреча, которой этот человек распоряжается. Звать и открывать материалы
+    вправе тот, кто собрал: состав и то, что уходит наружу, — его решение."""
+    from app.models import CalendarEvent
+
+    ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
+    if ev is None or ev.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
+    if ev.organizer_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Звать и открывать материалы может тот, кто собрал встречу")
+    return ev
+
+
+@router.post("/calendar/{event_id}/guests", status_code=status.HTTP_201_CREATED)
+async def guest_invite(
+    event_id: str,
+    payload: GuestIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Позвать внешнего участника.
+
+    Учётной записи ему не заводим: она дала бы место в составе компании ради
+    одной встречи. Гость опознаётся одноразовой ссылкой, как получатель
+    документа, и токен виден ровно один раз — в этом ответе.
+    """
+    from app.models import CalendarGuest
+    from app.routers import invite_router
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    ev = await _event_of_organizer(db, cid, event_id, current_user)
+    почта = payload.email.strip().lower()
+    if "@" not in почта:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нужен адрес почты")
+    есть = (await db.execute(select(CalendarGuest).where(
+        CalendarGuest.event_id == ev.id,
+        func.lower(CalendarGuest.email) == почта,
+        CalendarGuest.revoked_at.is_(None)))).scalar_one_or_none()
+    if есть is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Этот адрес уже приглашён. Отзовите прежнюю ссылку, "
+                            "если нужна новая")
+    сырой = invite_router.new_token()
+    guest = CalendarGuest(
+        event_id=ev.id, email=почта,
+        name=(payload.name or "").strip() or None,
+        token_hash=invite_router.token_hash(сырой), token_prefix=сырой[:8])
+    db.add(guest)
+    await db.commit()
+    return {"id": str(guest.id), "email": guest.email, "name": guest.name,
+            "response": guest.response,
+            # Единственное место, где токен виден: дальше он живёт у гостя.
+            "token": сырой}
+
+
+@router.get("/calendar/{event_id}/guests")
+async def guest_list(
+    event_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Кого позвали снаружи и что они ответили. Токенов здесь нет и не будет."""
+    from app.models import CalendarGuest, CalendarMaterial
+
+    cid = await _assert_work(company_id, current_user, db)
+    ev = await _event_of_organizer(db, cid, event_id, current_user)
+    guests = list((await db.execute(select(CalendarGuest).where(
+        CalendarGuest.event_id == ev.id,
+        CalendarGuest.revoked_at.is_(None))
+        .order_by(CalendarGuest.created_at))).scalars())
+    materials = list((await db.execute(select(CalendarMaterial).where(
+        CalendarMaterial.event_id == ev.id)
+        .order_by(CalendarMaterial.created_at))).scalars())
+    return {
+        "guests": [{
+            "id": str(g.id), "email": g.email, "name": g.name,
+            "response": g.response, "comment": g.comment,
+            "opened_at": g.opened_at,
+            "proposed_starts_at": g.proposed_starts_at,
+            "proposed_ends_at": g.proposed_ends_at,
+        } for g in guests],
+        "materials": [{
+            "id": str(m.id), "target_ref": m.target_ref, "title": m.title,
+            "url": m.share_url,
+        } for m in materials],
+    }
+
+
+@router.post("/calendar/{event_id}/guests/{guest_id}")
+async def guest_action(
+    event_id: str,
+    guest_id: str,
+    payload: GuestAction,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отозвать приглашение. Строку не удаляем: ответ гостя — часть истории
+    встречи, а отозванная ссылка отвечает так же, как несуществующая."""
+    from app.models import CalendarGuest
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    ev = await _event_of_organizer(db, cid, event_id, current_user)
+    guest = await db.get(CalendarGuest, _uuid_or_400(guest_id, "guest_id"))
+    if guest is None or guest.event_id != ev.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Приглашение не найдено")
+    if payload.revoke:
+        guest.revoked_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"id": str(guest.id), "revoked": guest.revoked_at is not None}
+
+
+@router.post("/calendar/{event_id}/materials", status_code=status.HTTP_201_CREATED)
+async def material_open(
+    event_id: str,
+    payload: MaterialIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Открыть гостям материал встречи.
+
+    Приглашение само по себе не открывает ничего: позвать человека обсудить
+    договор и дать ему договор — разные решения. Каждый материал открывается
+    поимённо и СОХРАНЯЕТ СОБСТВЕННЫЕ ПРАВА: для документа заводится обычная
+    гостевая ссылка, отзыв которой не отменяет встречу, а отмена встречи не
+    отзывает её.
+    """
+    from app.models import CalendarMaterial, DocShareLink
+    from app.routers import doc_share_router, docs_router
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    ev = await _event_of_organizer(db, cid, event_id, current_user)
+    doc_id = payload.target_ref.split(":", 1)[1]
+    d = await docs_router._doc_or_404(db, cid, doc_id)
+    # Право открыть наружу — право отправлять, а не читать: показать документ
+    # партнёру и прочитать его самому это разные полномочия.
+    await docs_router._assert_doc_permission(db, cid, d, current_user, "send")
+    if not d.reg_number:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Сначала зарегистрируйте документ: наружу уходит номер")
+
+    сырой = doc_share_router.new_token()
+    link = DocShareLink(
+        company_id=cid, doc_id=d.id,
+        token_hash=doc_share_router.token_hash(сырой),
+        token_prefix=сырой[:8],
+        recipient_name=None, recipient_email=None,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=payload.days),
+        created_by=current_user.id)
+    link.version_snapshot, link.card_snapshot = await docs_router._share_snapshots(db, d)
+    db.add(link)
+    await db.flush()
+
+    row = CalendarMaterial(
+        event_id=ev.id, target_ref=payload.target_ref, title=d.title,
+        share_id=link.id, share_url="/doc-share/" + сырой,
+        created_by=current_user.id)
+    db.add(row)
+    await db.commit()
+    return {"id": str(row.id), "target_ref": row.target_ref,
+            "title": row.title, "url": row.share_url}
+
+
+@router.post("/calendar/{event_id}/materials/{material_id}/close")
+async def material_close(
+    event_id: str,
+    material_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Закрыть материал: снять его со встречи и отозвать его ссылку.
+
+    Отзываем именно ту ссылку, которую сами и завели, — не трогая прочие: у
+    документа их бывает несколько, и закрытие материала встречи не должно
+    отбирать документ у того, кому его отправляли отдельно.
+    """
+    from app.models import CalendarMaterial, DocShareLink
+
+    cid = await _assert_work(company_id, current_user, db)
+    ev = await _event_of_organizer(db, cid, event_id, current_user)
+    row = await db.get(CalendarMaterial, _uuid_or_400(material_id, "material_id"))
+    if row is None or row.event_id != ev.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Материал не найден")
+    if row.share_id:
+        link = await db.get(DocShareLink, row.share_id)
+        if link is not None and link.revoked_at is None:
+            link.revoked_at = datetime.now(timezone.utc)
+    await db.delete(row)
+    await db.commit()
+    return {"closed": True}
 
 
 @router.get("/lists")

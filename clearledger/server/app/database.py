@@ -4053,6 +4053,25 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.79: партнёрский контур календаря (этап 16, шаг 2). Гость без
+        # учётной записи и материалы, открытые ему явно. Таблицы заводит
+        # `create_all`; здесь уникальность и предложенное время у своих.
+        for stmt in (
+            "ALTER TABLE calendar_attendees ADD COLUMN IF NOT EXISTS "
+            "proposed_starts_at TIMESTAMPTZ",
+            "ALTER TABLE calendar_attendees ADD COLUMN IF NOT EXISTS "
+            "proposed_ends_at TIMESTAMPTZ",
+            # Один гость на встречу и почту: вторая строка означала бы две живые
+            # ссылки на одного человека, и отзыв одной ничего бы не закрыл.
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_guests_event_email "
+            "ON calendar_guests (event_id, lower(email))",
+            "CREATE INDEX IF NOT EXISTS ix_calendar_guests_token "
+            "ON calendar_guests (token_hash)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_materials "
+            "ON calendar_materials (event_id, target_ref)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.60: маршрут проекта выбирается человеком, а не берётся молча первым.
         # Пусто у всех существующих проектов — это и есть прежнее поведение.
         for stmt in (

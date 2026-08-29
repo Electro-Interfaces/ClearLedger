@@ -41,6 +41,9 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("/api/auth/register", "auth"),
     ("/api/invitations/accept", "invite"),
     ("/api/doc-share", "public_doc"),
+    # Приглашение на встречу: публичная ссылка без учётной записи, и
+    # перебор токенов по ней ограничивается так же, как по документу.
+    ("/api/invite/", "public_doc"),
     ("/api/showcase", "public_doc"),
 )
 
