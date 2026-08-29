@@ -600,7 +600,20 @@ async def _assert_actor(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -
 
     Работу двигает тот, у кого она в руках, — согласование каждого шага у
     постановщика убило бы смысл маршрута.
+
+    **Личная запись — исключение без исключений.** Её меняет только автор: ни
+    администратор, ни суперадминистратор. Это та же граница, что в
+    `_can_view_task`, и стоять она обязана здесь, а не в каждой из семнадцати
+    ручек, которые эту проверку зовут: забыть её в одной — то же самое, что не
+    делать вовсе. Слово «личное» в названии раздела должно быть правдой и на
+    ручках изменения, а не только на выборках.
     """
+    if t.visibility == "personal":
+        if t.author_id == user.id:
+            return
+        # 404, а не 403: подтверждать существование чужой личной записи тому,
+        # кто её видеть не должен, — уже утечка.
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
     if user.is_superadmin or user.id in (t.assignee_id, t.author_id):
         return
     m = await db.get(UserCompany, (user.id, cid))
@@ -2316,14 +2329,26 @@ async def task_action(
     """
     cid = await _assert_work(payload.company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
+    # Право ПРОСМОТРА — первым и всегда. Ручка действия его не спрашивала вовсе,
+    # и любой сотрудник компании, знающий UUID, получал в ответе всю карточку
+    # чужой личной записи. Комментарий ниже обещал «кто задачу видит, тот может
+    # в неё написать» — но видимость никто не проверял.
+    if not await _can_view_task(db, cid, current_user, t):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
+
     # Реплика — не действие над задачей. Кто задачу видит, тот может в неё
     # написать: коллега, заметивший «это уже сделано», не должен молчать
     # только потому, что работа не на нём (так же в YouTrack и Jira —
     # комментарий отделён от перехода). Всё остальное — по праву участника.
-    only_note = (payload.note is not None and not any((
-        payload.stage_code, payload.assignee_id, payload.status, payload.priority,
-        payload.due_at, payload.title, payload.description, payload.object_id,
-        payload.add_label_id, payload.remove_label_id)))
+    #
+    # Считается СТРУКТУРНО, по выставленным полям, а не перечислением. Список
+    # имён — денайлист, и он отстал от модели на шесть полей: `visibility`,
+    # `project_id`, `sprint_id`, `estimate` и обе версии проезжали мимо проверки
+    # права, если их прислать вместе с репликой. Сменой видимости так открывали
+    # чужую личную запись всей компании. Новое поле в `TaskAction` теперь
+    # закрыто по умолчанию, а не до тех пор, пока о нём вспомнят.
+    выставлено = payload.model_fields_set - {"company_id", "note"}
+    only_note = payload.note is not None and not выставлено
     if not only_note:
         await _assert_actor(db, cid, current_user, t)
 
