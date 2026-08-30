@@ -526,7 +526,8 @@ export async function listTaskTypes(companyId: string) {
 
 export async function createTask(data: {
   companyId: string; title: string; description?: string
-  projectId?: string; typeId?: string; assigneeId?: string; objectId?: string
+  projectId?: string
+  typeId?: string; assigneeId?: string; objectId?: string
   foundVersionId?: string; fixVersionId?: string
   priority?: string; dueAt?: string
   /** Круг с самого начала: выставлять его вторым вызовом значит на миг
@@ -558,6 +559,8 @@ export async function taskAction(id: string, data: {
   status?: string; priority?: string; dueAt?: string; note?: string
   title?: string; description?: string; objectId?: string | null
   projectId?: string
+  /** Задать тип живой работе: без него у неё нет маршрута. */
+  typeId?: string
   /** null = снять версию; undefined = не трогать. */
   fixVersionId?: string | null; foundVersionId?: string | null
   /** null = вернуть в бэклог; undefined = не трогать. */
@@ -574,6 +577,7 @@ export async function taskAction(id: string, data: {
     due_at: data.dueAt, note: data.note || undefined,
     title: data.title, description: data.description,
     object_id: data.objectId === null ? '' : data.objectId,
+    type_id: data.typeId,
     project_id: data.projectId,
     fix_version_id: data.fixVersionId === null ? '' : data.fixVersionId,
     found_version_id: data.foundVersionId === null ? '' : data.foundVersionId,

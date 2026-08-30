@@ -639,10 +639,16 @@ async def move_work(
         target = next((s.get("code") for i, s in enumerate(route)
                        if work_state.stage_column(s, i, len(route)) == payload.state), None)
         if target is None:
+            # Две разные беды, и раньше обе назывались одним словом. Без типа
+            # маршрута нет вовсе — и совет «добавьте стадию в маршрут» отправлял
+            # человека править то, чего не существует.
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                f"У типа «{ttype.name if ttype else 'поручение'}» нет стадии в колонке "
-                f"«{work_state.COLUMN_NAMES[payload.state]}» — добавьте её в маршрут")
+                (f"У типа «{ttype.name}» нет стадии в колонке "
+                 f"«{work_state.COLUMN_NAMES[payload.state]}» — добавьте её в маршрут")
+                if ttype else
+                "У этой работы не задан тип, а значит нет и маршрута, по которому "
+                "её двигать. Задайте тип в карточке")
         if task.status != "open":
             return await task_action(item_id, TaskAction(
                 company_id=str(cid), status="open", stage_code=target), db, current_user)

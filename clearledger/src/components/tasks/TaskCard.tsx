@@ -123,6 +123,14 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
   const origin = t.events.find(
     (e) => e.kind === 'created' && e.from && e.from.includes('-'))?.from ?? null
   const live = t.status === 'open'
+  // Типы нужны только для работы без типа — запрос ленивый.
+  const типы = useQuery({
+    queryKey: ['task-types', companyId],
+    queryFn: () => tasksService.listTaskTypes(companyId),
+    enabled: !t.type_id && t.status === 'open',
+    staleTime: 5 * 60 * 1000,
+  })
+
   const stageIndex = t.route.findIndex((s) => s.code === t.stage_code)
   const next = stageIndex >= 0 ? t.route[stageIndex + 1] : t.route[0]
   const shown = feedKind === 'all' ? t.events
@@ -195,6 +203,23 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           {live && next && !t.assignee_id && (
             <span className="text-xs text-amber-600 dark:text-amber-400">
               исполнитель не назначен
+            </span>
+          )}
+          {/* Работа без типа не двигается по доске никуда, кроме «Готово»:
+              маршрута у неё нет. Тип задавался только при постановке, и
+              исправить это было нечем — теперь можно прямо здесь. */}
+          {live && !t.type_id && (
+            <span className="inline-flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+              тип не задан — работа не пойдёт по маршруту
+              <select aria-label="Задать тип работы" defaultValue=""
+                className="h-7 rounded-md border border-input bg-background px-1.5 text-xs text-foreground"
+                onChange={(e) => e.target.value
+                  && act.mutate({ companyId, typeId: e.target.value })}>
+                <option value="">задать тип</option>
+                {(типы.data?.types ?? []).map((тип) => (
+                  <option key={тип.id} value={тип.id}>{тип.name}</option>
+                ))}
+              </select>
             </span>
           )}
           {live && (

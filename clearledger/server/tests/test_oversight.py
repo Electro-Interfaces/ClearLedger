@@ -285,3 +285,68 @@ async def test_толкать_некого_говорится_словами(aut
         app.dependency_overrides.pop(get_current_user, None)
     assert r.status_code == 409
     assert "Разбор" in r.json()["detail"], "отказ не сказал, где эта работа ждёт"
+
+
+async def test_работа_без_типа_говорит_правду_и_чинится(auth_client, db: AsyncSession):
+    """Прогон уткнулся в отказ доски, и виновато было не то, что называлось.
+
+    Сообщение звало править маршрут («у типа „поручение“ нет стадии»), хотя
+    «поручение» — запасное слово для случая, когда типа нет вообще. И исправить
+    было нечем: тип задавался только при постановке.
+    """
+    from app.models import Task, TaskType
+    from app.auth import get_current_user
+    from app.main import app
+
+    cid, люди = await _структура(db)
+    админ = await db.get(UserCompany, (люди["чужой"].id, cid))
+    админ.role = "admin"
+    тип = TaskType(company_id=cid, code=f"TP{uuid.uuid4().hex[:5].upper()}",
+                   name="Обычное поручение",
+                   route=[{"code": "s1", "name": "Постановка"},
+                          {"code": "s2", "name": "В работе"},
+                          {"code": "s3", "name": "Проверка"}],
+                   default_priority="medium")
+    db.add(тип)
+    await db.flush()
+    сирота = Task(company_id=cid, type_id=None, title="Заведено на бегу",
+                  status="open", visibility="company",
+                  author_id=люди["чужой"].id, assignee_id=люди["чужой"].id)
+    db.add(сирота)
+    await db.commit()
+
+    app.dependency_overrides[get_current_user] = lambda: люди["чужой"]
+    try:
+        r = await auth_client.post(f"/api/work/task/{сирота.id}/move",
+                                   json={"company_id": str(cid), "state": "in_work"})
+        assert r.status_code == 400
+        деталь = r.json()["detail"]
+        assert "не задан тип" in деталь, f"отказ винит не то: {деталь}"
+        assert "маршрут" not in деталь.split("Задайте")[0] or "нет и маршрута" in деталь
+
+        # И это чинится прямо здесь.
+        r = await auth_client.post(f"/api/tasks/{сирота.id}/action",
+                                   json={"company_id": str(cid), "type_id": str(тип.id)})
+        assert r.status_code == 200, f"тип не назначился: {r.text}"
+
+        r = await auth_client.post(f"/api/work/task/{сирота.id}/move",
+                                   json={"company_id": str(cid), "state": "in_work"})
+        assert r.status_code == 200, f"с типом работа всё равно не поехала: {r.text}"
+
+        # У закрытой тип не меняют: это переписывание её истории. Проверяем
+        # ДРУГИМ типом — повторное назначение того же ничего не меняет и
+        # отказывать в нём было бы придиркой.
+        другой = TaskType(company_id=cid, code=f"T2{uuid.uuid4().hex[:5].upper()}",
+                          name="Другое поручение",
+                          route=[{"code": "a", "name": "Начало"},
+                                 {"code": "b", "name": "Конец"}],
+                          default_priority="medium")
+        db.add(другой)
+        await db.commit()
+        await auth_client.post(f"/api/tasks/{сирота.id}/action",
+                               json={"company_id": str(cid), "status": "done"})
+        r = await auth_client.post(f"/api/tasks/{сирота.id}/action",
+                                   json={"company_id": str(cid), "type_id": str(другой.id)})
+        assert r.status_code == 409, "у закрытой работы сменили тип"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)

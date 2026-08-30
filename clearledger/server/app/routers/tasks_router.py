@@ -2332,6 +2332,10 @@ class TaskAction(BaseModel):
     title: str | None = Field(None, min_length=3, max_length=300)
     description: str | None = Field(None, max_length=8000)
     object_id: str | None = None
+    # Тип задавался только при постановке, и работа, заведённая быстрым
+    # способом, оставалась без маршрута навсегда: на доске она не двигалась
+    # никуда, кроме «Готово».
+    type_id: str | None = None
     project_id: str | None = None          # подобрать «ничью» задачу в проект
     # "" — снять версию: «оказалось, чинить не здесь» бывает чаще, чем хотелось бы.
     fix_version_id: str | None = None
@@ -2502,6 +2506,25 @@ async def task_action(
     if payload.object_id is not None and (payload.object_id or None) != t.object_id:
         field_changed("объект", t.object_id, payload.object_id or None)
         t.object_id = payload.object_id or None
+    # Тип задавался только при постановке: работа, заведённая быстрым способом,
+    # оставалась без маршрута навсегда и на доске не двигалась никуда, кроме
+    # «Готово». Меняем только у живой: у закрытой смена маршрута — переписывание
+    # её истории задним числом. Стадия ставится вместе с типом, иначе задача
+    # остаётся с кодом из прежнего маршрута и пропадает с доски.
+    if payload.type_id is not None and payload.type_id != str(t.type_id or ""):
+        if t.status != "open":
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "Тип меняют у живой работы: у закрытой это "
+                                "переписывание её истории")
+        новый = await db.get(TaskType, _uuid_or_400(payload.type_id, "type_id"))
+        if новый is None or новый.company_id != t.company_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Тип работы не найден")
+        field_changed("тип", None, новый.name)
+        t.type_id = новый.id
+        маршрут = новый.route or []
+        work_state.apply_stage(
+            t, маршрут, (маршрут[0] or {}).get("code") if маршрут else None)
+
     # Проект назначается только задаче, у которой его не было. Перенос между
     # проектами означал бы перевыпуск номера — `TF-42` в проекте `LG` не значит
     # ничего, — а старый номер к этому времени уже разошёлся по переписке.

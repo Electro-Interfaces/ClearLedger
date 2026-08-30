@@ -129,6 +129,13 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
     queryFn: () => tasksService.listTaskLabels(companyId),
     enabled: open, staleTime: 5 * 60 * 1000,
   })
+  // Тип по умолчанию — первый общий, а не «без типа». Работа без типа не имеет
+  // маршрута: на доске она стоит намертво и двигается только в «Готово». Быстрая
+  // постановка не должна рождать такую по умолчанию — «без типа» остаётся
+  // осознанным выбором в списке, а не тем, что получаешь, не глядя.
+  const типПоУмолчанию = (typesQ.data?.types ?? [])
+    .find((t) => t.is_active && !t.project_id)?.id ?? ''
+  const выбранныйТип = typeId || типПоУмолчанию
   const type = (typesQ.data?.types ?? []).find((t) => t.id === typeId)
 
   const reset = () => {
@@ -151,7 +158,9 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
         companyId, title: title.trim(),
         description: description.trim() || undefined,
         projectId: projectId || undefined,
-        typeId: typeId || undefined, assigneeId: assigneeId || undefined,
+        // Не `typeId`, а выбранный: умолчание должно уезжать на сервер,
+        // иначе в поле стоит тип, а работа рождается без него.
+        typeId: выбранныйТип || undefined, assigneeId: assigneeId || undefined,
         objectId: objectId || undefined, priority: priority || undefined,
         // Срок вводится вместе со временем: «сдать к 18:00» и «сдать в этот
         // день» — разные обещания, а форма умела только второе.
@@ -237,7 +246,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
             )}
             <div className="space-y-1.5">
               <Label>Тип</Label>
-              <Select value={typeId || 'none'}
+              <Select value={выбранныйТип || 'none'}
                 onValueChange={(v) => setTypeId(v === 'none' ? '' : v)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
