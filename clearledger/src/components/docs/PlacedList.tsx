@@ -105,7 +105,7 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
               {item.due_at ? dt(item.due_at) : 'без срока'}
             </span>
             <PlaceActions companyId={companyId} targetRef={workService.targetRef(item)}
-              mark={item.mark} onChanged={refresh} />
+              mark={item.mark} dueAt={item.due_at} onChanged={refresh} />
           </div>
         )
       })}

@@ -25,6 +25,7 @@ from app.auth import (
 from app.config import get_settings
 from app.database import async_session_factory, get_db
 from app.deps import capture_company_header, scope_company_id
+from app.services.service_accounts import not_service
 from app.models import (
     ChatFolder, ChatMessage, ChatMessageReaction, ChatParticipant, ChatPushSubscription,
     ChatPoll, ChatPollVote, ChatRoom, ChatTicketLink, Company, Counterparty,
@@ -289,6 +290,10 @@ async def ensure_company_rooms(user: User, cid: uuid.UUID, db: AsyncSession) -> 
             # которую он не подписывался.
             space_ids = set((await db.execute(select(User.id).where(
                 User.mail_only.is_(False),
+                # Служебные участники сюда не попадают: «Секретарь» приносит
+                # напоминания, но говорить не умеет, и в составе комнаты он
+                # выглядит сотрудником, которому можно написать.
+                not_service(),
                 or_(
                     User.company_id == cid,
                     User.id.in_(select(UserCompany.user_id).where(UserCompany.company_id == cid)),
@@ -3091,7 +3096,7 @@ async def admin_create_room(
     space_ids = set((await db.execute(select(User.id).where(or_(
         User.company_id == cid,
         User.id.in_(select(UserCompany.user_id).where(UserCompany.company_id == cid)),
-    )))).scalars().all())
+    ), not_service()))).scalars().all())
 
     def _uuid(s: str) -> uuid.UUID | None:
         try:
@@ -3144,7 +3149,7 @@ async def admin_add_people(
     space_ids = set((await db.execute(select(User.id).where(or_(
         User.company_id == cid,
         User.id.in_(select(UserCompany.user_id).where(UserCompany.company_id == cid)),
-    )))).scalars().all())
+    ), not_service()))).scalars().all())
     if body.everyone:
         wanted = space_ids
     else:

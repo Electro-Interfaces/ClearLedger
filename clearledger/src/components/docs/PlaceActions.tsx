@@ -45,10 +45,18 @@ const завтра = () => {
   return workService.todayKey(d)
 }
 
-export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }: {
+export function PlaceActions({
+  companyId, targetRef, mark, dueAt, onChanged, compact,
+}: {
   companyId: string
   targetRef: string
   mark: PersonalMark | null | undefined
+  /** Срок предмета. По нему считается, можно ли его прятать: сервер
+   *  отказывает, когда срок наступил или прошёл, и знать об этом надо ДО
+   *  нажатия, а не после. Передаётся сам срок, а не признак просрочки, —
+   *  признак отставал на день: у работы со сроком СЕГОДНЯ просрочки ещё нет,
+   *  а спрятать её уже нельзя. */
+  dueAt?: string | null
   onChanged: () => void
   /** В плотных списках звезда и день прячутся в меню. */
   compact?: boolean
@@ -102,6 +110,12 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
     // прошёл: просроченное не прячется»), а «не получилось» не объясняет ничего.
     onError: (e: Error) => toast.error(e.message || 'Не получилось'),
   })
+
+  /** Прятать нельзя, когда срок наступил или прошёл. Та же граница, что в
+   *  `placement.clamp_defer` на сервере: расхождение на день означало отказ
+   *  после нажатия — ровно то, чего эта проверка и должна избегать. */
+  const нельзяПрятать = !!dueAt
+    && workService.todayKey(new Date(dueAt)) <= workService.todayKey()
 
   const inDay = mark?.taken_for === workService.todayKey()
   /** День, на который человек запланировал работу, — включая сегодняшний.
@@ -216,9 +230,17 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
               прежнее «Не сегодня» звучало как планирование, а планированием не
               было. */}
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
+            {/* Просроченное не прячется: сервер откажет с объяснением, и
+                предлагать заведомо отклонённое значит учить человека не верить
+                меню. Причина стоит в подсказке — там, где её ищут. */}
+            <DropdownMenuSubTrigger disabled={нельзяПрятать}
+              title={нельзяПрятать
+                ? 'Срок уже наступил: такое не прячется — его закрывают, '
+                  + 'передают или переносят срок'
+                : undefined}>
               <CalendarClock className="mr-2 h-3.5 w-3.5" />
-              {deferred ? `Скрыто до ${shortDay(deferred)}` : 'Не показывать до'}
+              {нельзяПрятать ? 'Со сроком сегодня не прячется'
+                : deferred ? `Скрыто до ${shortDay(deferred)}` : 'Не показывать до'}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
               <DropdownMenuItem onClick={() => act.mutate({ deferUntil: завтра() })}>

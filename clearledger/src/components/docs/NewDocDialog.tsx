@@ -61,6 +61,13 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, initialTitle,
     onError: (e) => toast.error(`Документ не заведён: ${(e as Error).message}`),
   })
 
+  /** Чего ждёт форма, или `null` — можно заводить. Порядок сверху вниз, как
+   *  в самой форме: человек ищет пропуск там, где на него укажут. */
+  const чегоНеХватает = !kindId ? 'Выберите вид документа'
+    : (organizations.length > 0 && !docOrganizationId) ? 'Выберите наше юрлицо — от него зависит журнал и номер'
+      : !title.trim() ? 'Впишите заголовок'
+        : null
+
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
       <DialogContent className="sm:max-w-lg">
@@ -126,13 +133,20 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, initialTitle,
             </div>
           )}
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Отмена</Button>
-          <Button onClick={() => create.mutate()}
-            disabled={!kindId || !title.trim() ||
-              (organizations.length > 0 && !docOrganizationId) || create.isPending}>
-            Завести
-          </Button>
+        <DialogFooter className="items-center gap-3 sm:justify-between">
+          {/* Чего не хватает — словами. Молча погасшая кнопка заставляет
+              человека гадать, а условие программе известно заранее. */}
+          <p className="text-xs text-muted-foreground" role="status">
+            {чегоНеХватает ?? ''}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>Отмена</Button>
+            <Button onClick={() => create.mutate()}
+              title={чегоНеХватает ?? undefined}
+              disabled={!!чегоНеХватает || create.isPending}>
+              Завести
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

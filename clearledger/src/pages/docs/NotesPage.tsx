@@ -563,6 +563,14 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
         {draft !== null ? (
           <Textarea value={draft} autoFocus rows={Math.min(12, draft.split('\n').length + 1)}
             onChange={(e) => отложенноеСохранение(e.target.value)}
+            // Esc закрывает правку — как и везде в продукте. Сохраняет, а не
+            // отменяет: уход фокусом уже сохраняет, и два разных исхода у двух
+            // способов выйти из одного поля — ловушка, а не выбор.
+            onKeyDown={(e) => {
+              if (e.key !== 'Escape') return
+              e.preventDefault()
+              e.currentTarget.blur()
+            }}
             onBlur={() => {
               if (сохранение.current) clearTimeout(сохранение.current)
               const [head, ...rest] = draft.trim().split('\n')

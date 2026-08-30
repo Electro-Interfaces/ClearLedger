@@ -23,6 +23,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SubjectMeetings } from '@/components/calendar/SubjectMeetings'
 import * as docsService from '@/services/docsService'
+import * as tasksService from '@/services/tasksService'
 import { WorkIdentity } from '@/components/work/WorkIdentity'
 import { ACTOR_KIND_LABEL, WorkTrace } from '@/components/work/WorkTrace'
 import { DOC_STATUS } from '@/services/docsService'
@@ -110,6 +111,13 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
 }) {
   const qc = useQueryClient()
   const { organizations, isCompanyAdmin } = useCompany()
+  // Кого можно назначить подписантом. Та же ручка, что у выбора исполнителя:
+  // служебных участников она не отдаёт — робот не подпишет.
+  const people = useQuery({
+    queryKey: ['task-people', companyId],
+    queryFn: () => tasksService.listTaskPeople(companyId),
+    staleTime: 5 * 60 * 1000,
+  })
   const fileRef = useRef<HTMLInputElement>(null)
   const [registerOpen, setRegisterOpen] = useState(false)
   const [note, setNote] = useState('')
@@ -605,6 +613,26 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
                 ))}
               </select>}
             </Field>
+            {/* Без подписанта документ не ввести в действие: право `sign`
+                есть только у него и у его заместителя. Поле стояло в модели и
+                в ручке, а назначить его было нечем — и всякий заведённый
+                руками документ застревал в «Зарегистрирован» навсегда. */}
+            <Field label="Подписант">
+              {(controlId) => <select id={controlId} value={d.signatory_id ?? ''}
+                disabled={!editable}
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
+                onChange={(event) => act.mutate({ signatory_id: event.target.value })}>
+                <option value="">Не назначен</option>
+                {(people.data?.people ?? []).map((человек) => (
+                  <option key={человек.id} value={человек.id}>{человек.name}</option>
+                ))}
+              </select>}
+            </Field>
+            {!d.signatory_id && editable && (
+              <p className="text-xs text-amber-700 dark:text-amber-400 sm:col-span-2">
+                Подписант не назначен — без него документ не ввести в действие.
+              </p>
+            )}
             <Field label="Заголовок">
               {(controlId) => <Input id={controlId} defaultValue={d.title} required aria-required="true"
                 className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"

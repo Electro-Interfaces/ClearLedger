@@ -176,7 +176,12 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             «Выполнена» ему не место. */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {live && next && (
-            <Button size="sm" className="h-8" disabled={act.isPending}
+            // `data-role` — единственный способ адресовать эту кнопку: она
+            // называется именем следующего этапа, а оно у каждого маршрута
+            // своё. Искать её по тексту значит перечислять все этапы всех
+            // типов работы и промахиваться на первом же новом.
+            <Button size="sm" className="h-8" data-role="advance"
+              disabled={act.isPending}
               onClick={() => act.mutate({
                 companyId, stageCode: next.code, note: note || undefined,
               })}>

@@ -210,7 +210,7 @@ function Row({ task, companyId, busy, picked, onPick, onOpen, onChanged, onClose
           лежащего в ней. Без отметки они врали бы состоянием, и до неё их
           здесь не было. */}
       <PlaceActions companyId={companyId} targetRef={ref} mark={task.mark}
-        onChanged={onChanged} />
+        dueAt={task.due_at} onChanged={onChanged} />
       <Button size="sm" variant="ghost" className="h-8 shrink-0 px-2" disabled={busy}
         title="Закрыть работу" onClick={onClose}>
         <Check className="h-3.5 w-3.5" />

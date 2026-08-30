@@ -217,7 +217,7 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
         item.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
         {item.due_at ? dt(item.due_at) : 'без срока'}
       </span>
-      <PlaceActions companyId={companyId} targetRef={workService.targetRef(item)}
+      <PlaceActions companyId={companyId} dueAt={item.due_at} targetRef={workService.targetRef(item)}
         mark={item.mark} onChanged={onChanged} />
       {canFinish ? (
         <Button size="sm" variant="ghost" className="h-7 px-2" disabled={busy}

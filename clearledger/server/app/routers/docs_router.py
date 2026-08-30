@@ -43,6 +43,7 @@ from app.auth import (
 )
 from app.config import get_settings
 from app.database import get_db
+from app.services.service_accounts import not_service
 from app.models import (
     ChatRoom, Company, CompanyRole, Contract, Counterparty, Department, DocAccessGrant,
     DocApproval,
@@ -1163,7 +1164,7 @@ async def list_kind_subjects(
     await _assert_admin(db, cid, current_user)
     people = (await db.execute(select(User.id, User.name, User.email).join(
         UserCompany, UserCompany.user_id == User.id,
-    ).where(UserCompany.company_id == cid).order_by(
+    ).where(UserCompany.company_id == cid, not_service()).order_by(
         User.name.asc().nullslast(), User.email))).all()
     roles = (await db.execute(select(CompanyRole.id, CompanyRole.name).where(
         CompanyRole.company_id == cid).order_by(CompanyRole.name))).all()
@@ -1506,7 +1507,7 @@ async def list_access_subjects(
     await _assert_manage_doc_access(db, cid, doc, current_user)
     people = (await db.execute(select(User.id, User.name, User.email).join(
         UserCompany, UserCompany.user_id == User.id,
-    ).where(UserCompany.company_id == cid).order_by(
+    ).where(UserCompany.company_id == cid, not_service()).order_by(
         User.name.asc().nullslast(), User.email))).all()
     roles = (await db.execute(select(CompanyRole.id, CompanyRole.name).where(
         CompanyRole.company_id == cid).order_by(CompanyRole.name))).all()
@@ -4699,9 +4700,13 @@ async def _supersede_pending_acquaints(db: AsyncSession, doc_id: uuid.UUID) -> N
 async def _docs_members(db: AsyncSession, cid: uuid.UUID,
                         user_ids: set[uuid.UUID] | None = None,
                         department_id: uuid.UUID | None = None) -> dict[uuid.UUID, User]:
+    # Служебные участники («Процесс», «Секретарь») сюда не попадают: они не
+    # ознакомятся, не завизируют и не откроют карточку — им нечем. Видимыми
+    # авторами событий они при этом остаются.
     statement = (select(User, UserCompany)
                  .join(UserCompany, UserCompany.user_id == User.id)
-                 .where(UserCompany.company_id == cid, User.mail_only.is_(False)))
+                 .where(UserCompany.company_id == cid, User.mail_only.is_(False),
+                        not_service()))
     if user_ids is not None:
         if not user_ids:
             return {}

@@ -38,11 +38,25 @@ async def test_служебных_не_предлагают_в_исполнит�
     assert "Процесс" not in имена, (
         "служебный участник предлагается в исполнители — работу можно поручить роботу")
 
-    состав = await auth_client.get("/api/users", params={"company_id": cid})
-    if состав.status_code == 200:
-        assert not any(is_service_account(type("U", (), u)())
-                       for u in состав.json() if u.get("email")), (
-            "служебный участник числится в составе пространства")
+    # ВСЕ списки, из которых человека ВЫБИРАЮТ. Первая правка закрыла два, а
+    # прогон маршрута нашёл третий: в редакторе вида документа «Процесс» стоял
+    # кандидатом на визу. Круг, назначенный роботу, не подпишет никто —
+    # документ встанет намертво. Поэтому проверяем весь список сразу.
+    ручки = [
+        ("/api/users", {"company_id": cid}, None),
+        ("/api/docs/kinds/subjects", {"company_id": cid}, "people"),
+        ("/api/docs/acquaint/subjects", {"company_id": cid}, "people"),
+    ]
+    for путь, параметры, ключ in ручки:
+        r = await auth_client.get(путь, params=параметры)
+        if r.status_code != 200:
+            continue
+        тело = r.json()
+        строки = тело if ключ is None else тело.get(ключ, [])
+        имена = {str(x.get("name", "")) for x in строки if isinstance(x, dict)}
+        assert not (имена & {"Процесс", "Секретарь"}), (
+            f"{путь} предлагает служебного участника как человека: "
+            f"{sorted(имена & {'Процесс', 'Секретарь'})}")
 
 
 async def test_работа_без_исполнителя_уходит_в_разбор(db: AsyncSession):
