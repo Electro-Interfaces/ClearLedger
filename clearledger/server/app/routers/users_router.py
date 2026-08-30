@@ -115,6 +115,7 @@ async def _resp(
     contract_ids: list[str] | None = None
     department_id: str | None = None
     department_name: str | None = None
+    app_roles: dict[str, str] | None = None
     if scope_cid is not None:
         m = await db.get(UserCompany, (u.id, scope_cid))
         if m is not None:
@@ -137,6 +138,7 @@ async def _resp(
             # Основание допуска — справка, а не права: отдаём всем, включая админов.
             contract_ids = [str(x) for x in (getattr(m, "contract_ids", None) or [])] or None
             party_type = getattr(m, "party_type", None) or "internal"
+            app_roles = getattr(m, "app_roles", None) or None
             if m.organization_id is not None:
                 org = await db.get(Counterparty, m.organization_id)
                 if org is not None:
@@ -156,6 +158,7 @@ async def _resp(
         contract_ids=contract_ids,
         department_id=department_id, department_name=department_name,
         party_type=party_type, organization_id=org_id, organization_name=org_name,
+        app_roles=app_roles,
         is_superadmin=u.is_superadmin, last_seen_at=u.last_seen_at, companies=memberships,
         has_station_pin=bool(u.station_pin_hash),
     )
@@ -270,7 +273,7 @@ async def update_user(
     # Роль/должность/принадлежность/подразделение — per-company (нужен company_id).
     if (payload.role is not None or payload.position is not None
             or payload.party_type is not None or payload.organization_id is not None
-            or payload.department_id is not None):
+            or payload.department_id is not None or payload.app_roles is not None):
         if not payload.company_id:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Укажите company_id для роли/должности")
         membership = await db.get(UserCompany, (uid, cid))
@@ -290,6 +293,18 @@ async def update_user(
                 membership.organization_id = None
             await log_audit(db, actor=current_user, company_id=cid, action="member.party",
                             target=target.email, details={"partyType": payload.party_type})
+        if payload.app_roles is not None:
+            # Правим точечно: пришло про «support» — трогаем только его, чужие
+            # назначения не сбиваем. Пустая строка снимает своё.
+            current = dict(getattr(membership, "app_roles", None) or {})
+            for app_code, app_role in payload.app_roles.items():
+                if app_role:
+                    current[app_code] = app_role
+                else:
+                    current.pop(app_code, None)
+            membership.app_roles = current or None
+            await log_audit(db, actor=current_user, company_id=cid, action="member.app_role",
+                            target=target.email, details={"appRoles": current})
         if payload.organization_id is not None:
             membership.organization_id = await resolve_org_id(payload.organization_id, cid, db)
         if payload.department_id is not None:

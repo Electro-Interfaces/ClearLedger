@@ -276,10 +276,14 @@ async def _users_payload(
     out: list[dict[str, Any]] = []
     for user, membership in rows:
         space_role = "admin" if (user.is_superadmin or membership.role == "admin") else membership.role
+        # Названная роль в приложении бьёт карту: карта знает только «админ и
+        # остальные», а в службе поддержки разработчик и оператор — разные люди
+        # с разными рабочими местами. Не названа — считаем по карте, как раньше.
+        named = (membership.app_roles or {}).get(app_code)
         out.append({
             "email": user.email,
             "name": user.name or user.email,
-            "role": role_map.get(space_role, default_role),
+            "role": named or role_map.get(space_role, default_role),
             "spaceRole": space_role,
             "isActive": True,
         })

@@ -147,6 +147,9 @@ class UserAdminUpdate(BaseModel):
     organization_id: str | None = None
     # Подразделение по штатной структуре (departments.id); "" → вне структуры.
     department_id: str | None = None
+    # Кем человек работает в приложении: {"support": "developer"}. Пустое значение
+    # у кода приложения снимает назначение — роль снова считается картой.
+    app_roles: dict[str, str] | None = None
 
 
 class CompanyMembership(BaseModel):
@@ -258,6 +261,9 @@ class UserAdminResponse(BaseModel):
     contract_ids: list[str] | None = None  # основание допуска: договоры (справка, не права)
     department_id: str | None = None       # подразделение штатной структуры
     department_name: str | None = None     # имя подразделения (для UI)
+    # Кем человек работает в приложениях: {"support": "developer"}. Пусто — роль
+    # приложения считается его картой по роли пространства.
+    app_roles: dict[str, str] | None = None
     is_superadmin: bool
     last_seen_at: datetime | None = None   # последний вход/активность — для состава и карточки
     companies: list[CompanyMembership] = []
