@@ -261,6 +261,29 @@ export async function listAction(companyId: string, id: string, data: {
  *  Отложение может вернуться отказом: просроченное не прячется, а дата дальше
  *  срока обрезается днём срока. Сообщение сервера показываем как есть — оно и
  *  объясняет человеку правило. */
+/** Адрес ленты подписки на свой календарь: его вставляют в Google, Apple
+ *  или Outlook. Ключ живёт в самом адресе — календарные клиенты входить
+ *  никуда не умеют. */
+export async function calendarFeed(): Promise<{ url: string; note?: string }> {
+  return get<{ url: string; note?: string }>('/api/work/calendar/feed')
+}
+
+/** Сменить ключ: прежняя ссылка перестаёт работать. */
+export async function rotateCalendarFeed(): Promise<{ url: string }> {
+  return post<{ url: string }>('/api/work/calendar/feed/rotate', {})
+}
+
+/** На какие дни человек наметил себе работу: `{"2026-09-03": 2}`.
+ *
+ *  Отдельно от сроков намеренно: срок ждёт компания, план — только хозяин.
+ *  Числом, а не списком: в масштабе месяца ячейка отвечает на «сколько». */
+export async function planDays(companyId: string, from: string, to: string):
+  Promise<Record<string, number>> {
+  const r = await get<{ days: Record<string, number> }>(
+    '/api/work/plan', { company_id: companyId, from, to })
+  return r.days
+}
+
 export async function place(companyId: string, ref: string, data: {
   listId?: string; dropList?: boolean; takenFor?: string; dropDay?: boolean
   deferUntil?: string; undefer?: boolean; starred?: boolean

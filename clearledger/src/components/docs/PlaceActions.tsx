@@ -13,7 +13,9 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarClock, FolderPlus, MoreHorizontal, Star, Sun, X } from 'lucide-react'
+import {
+  CalendarCheck, CalendarClock, FolderPlus, MoreHorizontal, Star, Sun, X,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,6 +26,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import * as workService from '@/services/workService'
 import type { PersonalMark } from '@/services/workService'
+import { shortDay } from '@/lib/personalDay'
 import { cn } from '@/lib/utils'
 
 /** Ближайший день недели вперёд: «в понедельник» — самый частый ответ на
@@ -51,7 +54,9 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
   compact?: boolean
 }) {
   const qc = useQueryClient()
-  const [pickingDate, setPickingDate] = useState(false)
+  /** Что именно выбирают днём: запланировать работу или спрятать до даты.
+   *  Поле ввода одно, намерения два — и путать их нельзя. */
+  const [pickingDate, setPickingDate] = useState<'plan' | 'defer' | null>(null)
   const [date, setDate] = useState('')
 
   const lists = useQuery({
@@ -64,7 +69,7 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
     mutationFn: (data: Parameters<typeof workService.place>[2]) =>
       workService.place(companyId, targetRef, data),
     onSuccess: (res) => {
-      setPickingDate(false)
+      setPickingDate(null)
       // Ответ сервера — уже посчитанная отметка: кладём её в очередь и в списки
       // раскладки, не дожидаясь повторной загрузки. Иначе открытое меню
       // продолжает называть подборку, из которой предмет только что убрали.
@@ -99,6 +104,9 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
   })
 
   const inDay = mark?.taken_for === workService.todayKey()
+  /** День, на который человек запланировал работу, — включая сегодняшний.
+   *  Отличается от `inDay` тем, что отвечает на «когда», а не «сейчас ли». */
+  const planned = mark?.taken_for ?? null
   const deferred = mark?.deferred_until ?? null
   const listName = lists.data?.lists.find((l) => l.id === mark?.list_id)?.name
 
@@ -123,14 +131,18 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
   )
 
   if (pickingDate) {
+    const планирую = pickingDate === 'plan'
     return (
       <span className="inline-flex items-center gap-1">
         <Input type="date" value={date} autoFocus className="h-8 w-[150px] text-xs"
           onChange={(e) => setDate(e.target.value)} />
         <Button size="sm" className="h-8 px-2 text-xs" disabled={!date || act.isPending}
-          onClick={() => act.mutate({ deferUntil: date })}>Скрыть</Button>
+          onClick={() => act.mutate(планирую
+            ? { takenFor: date } : { deferUntil: date })}>
+          {планирую ? 'Займусь' : 'Скрыть'}
+        </Button>
         <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
-          onClick={() => setPickingDate(false)}>Отмена</Button>
+          onClick={() => setPickingDate(null)}>Отмена</Button>
       </span>
     )
   }
@@ -164,19 +176,59 @@ export function PlaceActions({ companyId, targetRef, mark, onChanged, compact }:
               </DropdownMenuItem>
             </>
           )}
+          {/* Планирование: предмет остаётся на виду и встаёт на выбранный день.
+              Стоит выше сокрытия намеренно — это обычный ответ на «когда», а
+              прячут реже. */}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <CalendarCheck className="mr-2 h-3.5 w-3.5" />
+              {planned
+                ? (planned === workService.todayKey() ? 'Займусь сегодня'
+                  : `Займусь ${shortDay(planned)}`)
+                : 'Займусь'}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              <DropdownMenuItem
+                onClick={() => act.mutate({ takenFor: workService.todayKey() })}>
+                Сегодня
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => act.mutate({ takenFor: завтра() })}>
+                Завтра
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => act.mutate({ takenFor: nextWeekday(1) })}>
+                В понедельник
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => { setDate(завтра()); setPickingDate('plan') }}>
+                Выбрать день…
+              </DropdownMenuItem>
+              {planned && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => act.mutate({ dropDay: true })}>
+                    Снять план
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          {/* Сокрытие: предмет уходит с глаз до даты. Названо тем, что делает, —
+              прежнее «Не сегодня» звучало как планирование, а планированием не
+              было. */}
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
               <CalendarClock className="mr-2 h-3.5 w-3.5" />
-              {deferred ? `Скрыто до ${deferred}` : 'Не сегодня'}
+              {deferred ? `Скрыто до ${shortDay(deferred)}` : 'Не показывать до'}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent>
               <DropdownMenuItem onClick={() => act.mutate({ deferUntil: завтра() })}>
-                До завтра
+                Завтра
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => act.mutate({ deferUntil: nextWeekday(1) })}>
-                До понедельника
+                Понедельника
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { setDate(завтра()); setPickingDate(true) }}>
+              <DropdownMenuItem
+                onClick={() => { setDate(завтра()); setPickingDate('defer') }}>
                 Выбрать день…
               </DropdownMenuItem>
               {deferred && (

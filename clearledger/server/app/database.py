@@ -4119,6 +4119,15 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.86: ключ ленты подписки на свой календарь.
+        for stmt in (
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS"
+            " calendar_feed_token VARCHAR(64)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS users_calendar_feed_token_uq"
+            " ON users (calendar_feed_token) WHERE calendar_feed_token IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.85: работа, доставшаяся служебному участнику. Маршрут заводил
         # поручение, исполнителя никто не называл, и оно оставалось на том, кто
         # завёл, — на «Процессе». Работа висела на роботе вместо «Разбора», и

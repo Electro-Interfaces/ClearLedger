@@ -36,6 +36,9 @@ from sqlalchemy import (
     Integer, String, Uuid, and_, cast, delete, func, literal, or_, select)
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import logging
+import secrets
+
 from app.auth import assert_company_product, get_current_user
 from app.audit import log_audit
 from app.database import get_db
@@ -43,7 +46,10 @@ from app.models import (
     DocCard, DocKind, DocLabelLink, DocRelation, ServiceLocation, Task, TaskLabel,
     TaskLabelLink, TaskProject, TaskType, User, UserCompany,
 )
+from app.config import settings
 from app.services import placement, space_time, work_query, work_state
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/work", tags=["Трек"])
 
@@ -1063,6 +1069,91 @@ async def calendar_busy(
     }
 
 
+@router.get("/calendar/feed")
+async def calendar_feed_link(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Адрес ленты подписки. Заводится при первом обращении."""
+    if not current_user.calendar_feed_token:
+        current_user.calendar_feed_token = secrets.token_urlsafe(32)
+        await db.commit()
+    база = settings.app_public_url.rstrip("/")
+    return {
+        "url": f"{база}/api/work/calendar/feed/{current_user.calendar_feed_token}.ics",
+        # Честная оговорка вместо обещания: Google обновляет подписки раз в
+        # 12–48 часов независимо от того, что мы напишем в REFRESH-INTERVAL.
+        "note": "Календари обновляют подписку не сразу: Google — раз в 12–48 часов, "
+                "Apple и Outlook — чаще. Правка встречи доедет с задержкой.",
+    }
+
+
+@router.post("/calendar/feed/rotate")
+async def calendar_feed_rotate(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сменить ключ: прежняя ссылка перестаёт работать.
+
+    Нужна затем, что ссылка на ленту — это доступ ко всем встречам человека без
+    пароля. Отдать её и потом передумать можно только так.
+    """
+    current_user.calendar_feed_token = secrets.token_urlsafe(32)
+    await db.commit()
+    база = settings.app_public_url.rstrip("/")
+    return {"url": f"{база}/api/work/calendar/feed/"
+                   f"{current_user.calendar_feed_token}.ics"}
+
+
+@router.get("/calendar/feed/{token}.ics")
+async def calendar_feed(token: str, db: AsyncSession = Depends(get_db)):
+    """Лента встреч человека для внешнего календаря.
+
+    Без заголовка авторизации намеренно: календарные клиенты его не шлют и
+    входить никуда не умеют — ключ живёт в самом адресе. Поэтому и отдаём
+    только СВОИ встречи владельца ключа, и ничего, кроме них.
+
+    Окно ограничено: год назад и год вперёд. Полная история пухла бы без предела
+    и загружалась бы каждым клиентом при каждом обновлении подписки.
+    """
+    from app.models import CalendarAttendee, CalendarEvent
+    from app.services import ics as ics_service
+
+    if not token or len(token) < 20:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Лента не найдена")
+    хозяин = (await db.execute(select(User).where(
+        User.calendar_feed_token == token))).scalar_one_or_none()
+    if хозяин is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Лента не найдена")
+
+    now = datetime.now(timezone.utc)
+    строки = (await db.execute(
+        select(CalendarEvent)
+        .where(CalendarEvent.starts_at >= now - timedelta(days=365),
+               CalendarEvent.starts_at <= now + timedelta(days=365),
+               or_(CalendarEvent.organizer_id == хозяин.id,
+                   CalendarEvent.id.in_(select(CalendarAttendee.event_id).where(
+                       CalendarAttendee.user_id == хозяин.id))))
+        .order_by(CalendarEvent.starts_at))).scalars().all()
+
+    база = settings.app_public_url.rstrip("/")
+    файл = ics_service.calendar_ics([{
+        "uid": f"{e.id}@trek",
+        "title": e.title,
+        "starts_at": e.starts_at,
+        "ends_at": e.ends_at,
+        "description": e.description,
+        "location": e.location,
+        "url": f"{база}/docs/work?view=calendar&event={e.id}",
+        "cancelled": e.status == "cancelled",
+    } for e in строки], name="Трек")
+    return Response(content=файл, media_type="text/calendar; charset=utf-8",
+                    headers={"Content-Disposition": 'inline; filename="trek.ics"',
+                             # Клиенты и без того обновляются редко; посредникам
+                             # кэшировать личную ленту незачем.
+                             "Cache-Control": "no-store"})
+
+
 @router.get("/calendar/{event_id}/ics")
 async def calendar_ics(
     event_id: str,
@@ -1476,10 +1567,68 @@ async def guest_invite(
         expires_at=datetime.now(timezone.utc) + timedelta(days=payload.days))
     db.add(guest)
     await db.commit()
+
+    # Письмо, а не «скопируйте ссылку и пошлите сами». Внешний участник по
+    # переданной руками ссылке не приходит, а календарь, из которого нельзя
+    # позвать наружу, корпоративным не считают. В письме лежит сам календарный
+    # объект — от него в почте берутся кнопки «Принять · Может быть ·
+    # Отклонить». Провал доставки встречу не отменяет: токен уже выписан и
+    # виден в ответе, организатор передаст ссылку сам.
+    отправлено = await _письмо_гостю(db, ev, guest, сырой, current_user)
     return {"id": str(guest.id), "email": guest.email, "name": guest.name,
-            "response": guest.response,
+            "response": guest.response, "mailed": отправлено,
             # Единственное место, где токен виден: дальше он живёт у гостя.
             "token": сырой}
+
+
+async def _письмо_гостю(db: AsyncSession, ev, guest, token: str,
+                        organizer: User) -> bool:
+    """Приглашение или его отмена — письмом с календарным вложением.
+
+    Ошибку доставки глотаем намеренно и говорим о ней полем `mailed`: почтовый
+    сервер лежит отдельно от пространства, и его недоступность не должна
+    отменять приглашение, которое человек уже сделал.
+    """
+    from app.services import email_service, ics
+
+    ссылка = f"{settings.app_public_url.rstrip('/')}/meeting/{token}"
+    отменена = ev.status == "cancelled"
+    когда = space_time.as_utc(ev.starts_at).astimezone(space_time.zone(ev.tz))
+    подпись = когда.strftime("%d.%m.%Y в %H:%M")
+
+    файл = ics.event_ics(
+        uid=f"{ev.id}@trek", title=ev.title,
+        starts_at=ev.starts_at, ends_at=ev.ends_at,
+        description=ev.description, location=ev.location, url=ссылка,
+        organizer_email=organizer.email, organizer_name=organizer.name,
+        attendees=[(guest.email, guest.name)],
+        invite=not отменена, cancelled=отменена,
+        sequence=1 if отменена else 0)
+
+    тема = (f"Отменено: {ev.title}" if отменена
+            else f"Приглашение: {ev.title} — {подпись}")
+    текст = (
+        (f"Встреча «{ev.title}» {подпись} отменена.\n"
+         if отменена else
+         f"Вас приглашают на встречу «{ev.title}».\nКогда: {подпись}"
+         + (f"\nГде: {ev.location}" if ev.location else "") + "\n")
+        + f"\nОтветить и посмотреть подробности: {ссылка}\n")
+    html = (
+        f'<div style="font-family:system-ui,sans-serif;line-height:1.5">'
+        f'<p style="font-size:16px"><b>{ev.title}</b></p>'
+        f'<p>{"Встреча отменена." if отменена else "Вас приглашают на встречу."}<br>'
+        f'Когда: {подпись}'
+        + (f'<br>Где: {ev.location}' if ev.location else '')
+        + f'</p><p><a href="{ссылка}" style="color:#2563eb">'
+          f'{"Посмотреть" if отменена else "Ответить на приглашение"}</a></p></div>')
+    try:
+        return await email_service.send_meeting_invite(
+            guest.email, subject=тема, text=текст, html=html, ics=файл,
+            method="CANCEL" if отменена else "REQUEST")
+    except Exception:
+        log.warning("Письмо гостю %s по встрече %s не ушло", guest.email, ev.id,
+                    exc_info=True)
+        return False
 
 
 @router.get("/calendar/{event_id}/guests")
@@ -2199,6 +2348,44 @@ async def frequent_assignees(
         "id": str(i), "name": (people[i].name or people[i].email or "—"),
         "count": n,
     } for i, n in rows if i in people]}
+
+
+@router.get("/plan")
+async def plan_days(
+    company_id: str = Query(...),
+    date_from: date = Query(..., alias="from"),
+    date_to: date = Query(..., alias="to"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """На какие дни человек наметил себе работу — числом на день.
+
+    Личный план и срок — разные вещи, и в календаре они стоят порознь: срок это
+    обязательство перед компанией, план — ответ хозяина на вопрос «когда я этим
+    займусь». Отсюда и отдельная ручка: подмешать план к срокам значило бы
+    сказать, что кто-то ждёт работу в этот день.
+
+    Считаем только ЖИВЫЕ предметы — тем же условием, что и счётчики раскладки:
+    отметка переживает свой предмет, и закрытое поручение иначе продолжало бы
+    занимать день в календаре.
+    """
+    from app.models import PersonalMark
+
+    cid = await _assert_work(company_id, current_user, db)
+    if date_to < date_from:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Конец периода раньше начала")
+    живые = await _живые_предметы(db, cid, current_user)
+    строки = (await db.execute(
+        select(PersonalMark.taken_for, func.count())
+        .where(PersonalMark.company_id == cid,
+               PersonalMark.user_id == current_user.id,
+               PersonalMark.taken_for.is_not(None),
+               PersonalMark.taken_for >= date_from,
+               PersonalMark.taken_for <= date_to,
+               PersonalMark.target_ref.in_(живые))
+        .group_by(PersonalMark.taken_for))).all()
+    return {"days": {d.isoformat(): n for d, n in строки}}
 
 
 @router.get("/placed")

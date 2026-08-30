@@ -13,15 +13,18 @@
  * «Сегодня» и в очереди.
  */
 import { useMemo, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   addDays, addMonths, addWeeks, eachDayOfInterval, endOfMonth, endOfWeek, format,
   isSameDay, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek,
 } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import {
-  CalendarDays, ChevronLeft, ChevronRight, Loader2, MapPin, NotebookPen, Video,
+  CalendarCheck, CalendarDays, ChevronLeft, ChevronRight, Eye, EyeOff, Loader2,
+  MapPin, NotebookPen, Rss, Video,
 } from 'lucide-react'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as workService from '@/services/workService'
@@ -43,6 +46,16 @@ export function CalendarPage() {
   const [mode, setMode] = useState<Mode>('month')
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()))
   const [scope, setScope] = useState<'mine' | 'company'>('mine')
+  // Показывать ли сроки в сетке недели. Выбор человека, и он переживает
+  // перезагрузку: переключать его каждое открытие никто не станет. Чтение в
+  // try — приватное окно и запрет на данные сайта роняют доступ к хранилищу.
+  const [showDue, setShowDue] = useState(() => {
+    try { return localStorage.getItem('calendar-hide-due') !== '1' } catch { return true }
+  })
+  const переключитьСроки = () => setShowDue((v) => {
+    try { localStorage.setItem('calendar-hide-due', v ? '1' : '0') } catch { /* пусто */ }
+    return !v
+  })
   const [openEvent, setOpenEvent] = useState<CalendarEvent | null>(null)
   const [newAt, setNewAt] = useState<Date | null>(null)
 
@@ -82,6 +95,15 @@ export function CalendarPage() {
     // значит превратить календарь в табло исполнительской дисциплины.
     enabled: !!companyId && scope === 'mine',
   })
+  // Личный план: на какие дни человек сам наметил себе работу. Отдельный
+  // запрос, а не подмешивание к срокам, — потому что это разные обещания:
+  // срок ждёт компания, план не ждёт никто, кроме самого человека.
+  const planQ = useQuery({
+    queryKey: ['calendar-plan', companyId, from.toISOString(), to.toISOString()],
+    queryFn: () => workService.planDays(companyId, workService.todayKey(from),
+      workService.todayKey(to)),
+    enabled: !!companyId && scope === 'mine',
+  })
 
   if (!companyId) return null
 
@@ -93,6 +115,7 @@ export function CalendarPage() {
   const events = (eventsQ.data?.events ?? []).filter(
     (e) => e.status !== 'cancelled' || new Date(e.ends_at).getTime() >= начало)
   const tasks = scope === 'mine' ? (tasksQ.data?.tasks ?? []) : []
+  const план = scope === 'mine' ? (planQ.data ?? {}) : {}
   const шаг = (вперёд: boolean) => setAnchor((d) => (
     mode === 'month' ? addMonths(d, вперёд ? 1 : -1)
       : mode === 'day' ? addDays(d, вперёд ? 1 : -1)
@@ -134,6 +157,22 @@ export function CalendarPage() {
               {m === 'month' ? 'Месяц' : m === 'week' ? 'Неделя' : 'День'}
             </Button>
           ))}
+          {/* Сроки убираются только там, где они мешают: в сетке недели и дня
+              полоса с двумя десятками точек съедает верх, и человек, который
+              пришёл расставить встречи, смотрит сквозь неё. В месяце срок
+              стоит числом в ячейке и никому не мешает — там выключать нечего. */}
+          {mode !== 'month' && scope === 'mine' && (
+            <Button size="sm" variant="ghost" className="h-8 px-2.5 text-xs"
+              aria-pressed={showDue} onClick={переключитьСроки}
+              title={showDue
+                ? 'Скрыть сроки — останутся только встречи'
+                : 'Показать сроки во всёдневной полосе'}>
+              {showDue ? <Eye className="mr-1 h-3.5 w-3.5" />
+                : <EyeOff className="mr-1 h-3.5 w-3.5" />}
+              Сроки
+            </Button>
+          )}
+          <FeedLink />
           <Button size="sm" className="h-8 px-3 text-xs"
             onClick={() => setNewAt(new Date())}>Встреча</Button>
         </div>
@@ -148,7 +187,7 @@ export function CalendarPage() {
       {/* Неделя и день — почасовой сеткой: вопрос «когда именно» ячейками дня не
           закрывается. Месяц остаётся ячейками — там спрашивают «что за месяц». */}
       {mode !== 'month' ? (
-        <TimeGrid days={days} events={events} tasks={tasks}
+        <TimeGrid days={days} events={events} tasks={showDue ? tasks : []}
           onEvent={setOpenEvent} onAdd={(at) => setNewAt(at)} />
       ) : (
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
@@ -166,6 +205,7 @@ export function CalendarPage() {
             <DayCell key={day.toISOString()} day={day} mode={mode} anchor={anchor}
               events={events.filter((e) => пересекает(e, day))}
               tasks={tasks.filter((t) => t.due_at && isSameDay(new Date(t.due_at), day))}
+              намечено={план[workService.todayKey(day)] ?? 0}
               onEvent={setOpenEvent}
               onAdd={() => setNewAt(new Date(day.getTime() + 10 * ЧАС))} />
           ))}
@@ -199,9 +239,12 @@ function пересекает(e: CalendarEvent, day: Date): boolean {
   return начало < по && конец > с
 }
 
-function DayCell({ day, mode, anchor, events, tasks, onEvent, onAdd }: {
+function DayCell({ day, mode, anchor, events, tasks, намечено, onEvent, onAdd }: {
   day: Date; mode: Mode; anchor: Date
   events: CalendarEvent[]; tasks: SpaceTask[]
+  /** Сколько работы человек сам наметил на этот день. Не срок: срок ждёт
+   *  компания, план — только он сам. */
+  намечено: number
   onEvent: (e: CalendarEvent) => void
   onAdd: () => void
 }) {
@@ -275,8 +318,90 @@ function DayCell({ day, mode, anchor, events, tasks, onEvent, onAdd }: {
             {записи.length}
           </span>
         )}
+        {/* План на день: сколько работы человек сам наметил на это число.
+            Своим знаком и своим словом — «намечено», а не «срок»: срок ждёт
+            компания, план не ждёт никто. Потому и не краснеет никогда. */}
+        {намечено > 0 && (
+          <span className="flex items-center gap-1 px-1 text-[12px] text-sky-700/80 dark:text-sky-300/80"
+            title={`Вы наметили себе работы: ${намечено}. Срок компании это не меняет`}>
+            <CalendarCheck className="h-3 w-3 shrink-0" />
+            намечено {намечено}
+          </span>
+        )}
       </div>
     </div>
+  )
+}
+
+/**
+ * Лента подписки: свой календарь «Трека» там, где человек живёт остальным
+ * временем, — в телефоне, в Outlook, в Google.
+ *
+ * Односторонняя намеренно. Двусторонняя синхронизация это петли, дубли,
+ * состояние на каждый календарь и хранение заголовков чужих встреч; лента даёт
+ * девять десятых пользы за сотую долю сложности.
+ *
+ * Оговорка про задержку стоит рядом со ссылкой, а не в справке: человек,
+ * поправивший встречу и не увидевший правки в телефоне через минуту, решит,
+ * что сломалось, — и будет прав, если мы промолчали.
+ */
+function FeedLink() {
+  const qc = useQueryClient()
+  const [открыт, setОткрыт] = useState(false)
+  const q = useQuery({
+    queryKey: ['calendar-feed'],
+    queryFn: () => workService.calendarFeed(),
+    enabled: открыт,
+    staleTime: Infinity,
+  })
+  const сменить = useMutation({
+    mutationFn: () => workService.rotateCalendarFeed(),
+    onSuccess: (r) => {
+      qc.setQueryData(['calendar-feed'], r)
+      toast.success('Ключ сменён — прежняя ссылка больше не работает')
+    },
+  })
+
+  return (
+    <Popover open={открыт} onOpenChange={setОткрыт}>
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="ghost" className="h-8 px-2.5 text-xs"
+          title="Показывать этот календарь в телефоне или Outlook">
+          <Rss className="mr-1 h-3.5 w-3.5" />Подписка
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-96 space-y-2">
+        <p className="text-xs font-medium">Ваш календарь во внешнем клиенте</p>
+        <p className="text-xs text-muted-foreground">
+          Вставьте адрес в Google Календарь, Apple Календарь или Outlook как
+          подписку по ссылке. Встречи будут видны только для чтения.
+        </p>
+        {q.isLoading && <p className="text-xs text-muted-foreground">Собираю адрес…</p>}
+        {q.data && (
+          <>
+            <input readOnly value={q.data.url} onFocus={(e) => e.target.select()}
+              className="w-full rounded border border-input bg-muted/40 px-2 py-1 font-mono text-[11px]" />
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(q.data.url)
+                  toast.success('Адрес скопирован')
+                }}>Скопировать</Button>
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
+                disabled={сменить.isPending}
+                title="Прежняя ссылка перестанет работать"
+                onClick={() => сменить.mutate()}>Сменить ключ</Button>
+            </div>
+            {q.data.note && (
+              <p className="text-[11px] text-muted-foreground">{q.data.note}</p>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              Адрес открывает ваши встречи без пароля — не публикуйте его.
+            </p>
+          </>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 }
 

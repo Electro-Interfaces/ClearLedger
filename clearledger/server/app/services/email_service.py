@@ -156,6 +156,61 @@ async def send_notice(
     return True
 
 
+async def send_meeting_invite(
+    to_email: str, *, subject: str, text: str, html: str,
+    ics: str, method: str = "REQUEST",
+) -> bool:
+    """Приглашение на встречу с самим календарным объектом внутри (iMIP).
+
+    Вложение идёт двумя способами разом, и это не перестраховка: почтовые
+    клиенты расходятся. Outlook и Apple Mail показывают кнопки «Принять», когда
+    календарь лежит частью `text/calendar; method=REQUEST` в теле письма;
+    Gmail и часть мобильных читают его как файл `invite.ics`. Приложить одним
+    способом значит потерять половину получателей.
+
+    `METHOD` в вложении обязан совпадать с заголовком `method=` — расхождение
+    заставляет клиента считать письмо повреждённым и молча его не показывать.
+    """
+    if not settings.smtp_host:
+        logger.warning("[mail:dev] приглашение на встречу для %s: %s",
+                       to_email, subject)
+        return False
+
+    import aiosmtplib
+
+    msg = EmailMessage()
+    msg["From"] = settings.smtp_from
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    from_domain = parseaddr(settings.smtp_from)[1].split("@")[-1] or "localhost"
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=from_domain)
+    msg.set_content(text)
+    msg.add_alternative(html, subtype="html")
+    # Часть тела: отсюда клиент берёт кнопки ответа.
+    msg.add_alternative(ics, subtype="calendar",
+                        params={"method": method, "charset": "UTF-8"})
+    # И файлом: для тех, кто кнопок не показывает, но календарь открыть умеет.
+    msg.add_attachment(ics.encode("utf-8"), maintype="text", subtype="calendar",
+                       filename="invite.ics",
+                       params={"method": method, "charset": "UTF-8"})
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    common = dict(
+        hostname=settings.smtp_host, port=settings.smtp_port,
+        username=settings.smtp_user or None, password=settings.smtp_password or None,
+        tls_context=ctx, timeout=20,
+    )
+    if settings.smtp_secure:
+        await aiosmtplib.send(msg, use_tls=True, **common)
+    else:
+        await aiosmtplib.send(msg, start_tls=True, **common)
+    logger.info("Приглашение на встречу отправлено: %s (%s)", to_email, method)
+    return True
+
+
 def reset_link(token: str) -> str:
     base = settings.app_public_url.rstrip("/")
     return f"{base}/reset-password/{token}"

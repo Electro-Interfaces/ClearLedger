@@ -26,6 +26,7 @@ import * as docsService from '@/services/docsService'
 import { dt } from '@/components/tasks/taskWords'
 import { PlaceActions } from '@/components/docs/PlaceActions'
 import { DragHandle } from '@/components/docs/DragHandle'
+import { planLabel, shortDay } from '@/lib/personalDay'
 import { cn } from '@/lib/utils'
 
 const REASON_ICON = {
@@ -188,10 +189,26 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
           <span>{item.reason_name}</span>
           {item.note && <span>{item.note}</span>}
           {item.acting_for && <span>за коллегу</span>}
-          {item.in_day && <span className="text-amber-600 dark:text-amber-400">в моём дне</span>}
+          {/* День личного плана словами: «в моём дне» отвечало только про
+              сегодня, и запланированное на четверг выглядело неразложенным —
+              человек планировал его заново. */}
+          {(() => {
+            const план = planLabel(item.mark?.taken_for)
+            if (!план) return null
+            return (
+              <span className={план.carried
+                ? 'text-muted-foreground'
+                : 'text-amber-600 dark:text-amber-400'}
+                title={план.carried
+                  ? 'План был на этот день и не выполнен. Срок компании не менялся'
+                  : 'Ваш план. Срок компании он не двигает'}>
+                {план.text}
+              </span>
+            )
+          })()}
           {item.hidden && (
             <span title={`Скрыто у вас до ${item.mark?.deferred_until}. Срок компании не менялся`}>
-              скрыто до {item.mark?.deferred_until}
+              скрыто до {shortDay(item.mark?.deferred_until ?? '')}
             </span>
           )}
         </div>

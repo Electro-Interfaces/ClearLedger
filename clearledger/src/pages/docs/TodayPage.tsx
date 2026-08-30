@@ -28,7 +28,9 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
+import { dayLoad } from '@/lib/dayLoad'
 import * as workService from '@/services/workService'
 import type { PersonalReminder } from '@/services/workService'
 import { PlacedList } from '@/components/docs/PlacedList'
@@ -56,6 +58,7 @@ export function TodayPage() {
       <header>
         <h1 className="text-lg font-semibold text-foreground">Сегодня</h1>
         <p className="mt-0.5 text-xs text-muted-foreground first-letter:uppercase">{сегодня()}</p>
+        <DayLoad companyId={companyId} />
       </header>
 
       <Reminders companyId={companyId} />
@@ -81,6 +84,49 @@ export function TodayPage() {
 
       <Deferred companyId={companyId} />
     </div>
+  )
+}
+
+
+/**
+ * Сколько дня уже занято.
+ *
+ * Считает только то, что известно наверняка: часы встреч реальны, рабочее окно
+ * человек задал сам, намеченных дел ровно столько, сколько он наметил. Про их
+ * длительность молчим — оценку трудоёмкости в документообороте не заполняют, и
+ * выдуманные часы обесценили бы и настоящие.
+ *
+ * Строка ничего не двигает и ничего не предлагает. Она отвечает на вопрос,
+ * который человек задаёт себе сам, глядя на список: «влезет ли».
+ */
+function DayLoad({ companyId }: { companyId: string }) {
+  const { user } = useAuth()
+  const [от, до] = (() => {
+    const н = new Date(); н.setHours(0, 0, 0, 0)
+    const к = new Date(н); к.setDate(к.getDate() + 1)
+    return [н.toISOString(), к.toISOString()]
+  })()
+  // Тот же ключ, что у списка встреч ниже: запрос уйдёт один.
+  const события = useQuery({
+    queryKey: ['calendar', companyId, 'today', от],
+    queryFn: () => workService.listEvents(companyId, от, до),
+    enabled: !!companyId,
+  })
+  const день = workService.todayKey()
+  const план = useQuery({
+    queryKey: ['calendar-plan', companyId, день, день],
+    queryFn: () => workService.planDays(companyId, день, день),
+    enabled: !!companyId,
+  })
+
+  const н = dayLoad(события.data?.events ?? [], план.data?.[день] ?? 0,
+    new Date(), user?.work_start, user?.work_end)
+  if (!н.text) return null
+  return (
+    <p className={cn('mt-1 text-xs',
+      н.перегруз ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground')}>
+      {н.text}
+    </p>
   )
 }
 

@@ -144,6 +144,12 @@ class User(Base):
         Time, nullable=False, default=lambda: time_type(18, 0),
         server_default=text("'18:00'")
     )
+    # Ключ ленты подписки на свой календарь. Хранится, а не вычисляется из
+    # идентификатора: вычисленный нельзя сменить, а утёкшая ссылка на календарь
+    # показывает все встречи человека. Пусто — лентой не пользовались.
+    calendar_feed_token: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

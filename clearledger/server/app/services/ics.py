@@ -55,19 +55,28 @@ def event_ics(*, uid: str, title: str, starts_at: datetime, ends_at: datetime,
               description: str | None = None, location: str | None = None,
               url: str | None = None, organizer_email: str | None = None,
               organizer_name: str | None = None,
+              attendees: list[tuple[str, str | None]] | None = None,
+              invite: bool = False,
               cancelled: bool = False, sequence: int = 0) -> str:
     """Одна встреча файлом.
 
     `SEQUENCE` и `STATUS:CANCELLED` — то, чем отмена доезжает до чужого
     календаря. Прислать отмену тем же `UID` с большим `SEQUENCE` значит убрать
     встречу у получателя; прислать новый `UID` значит оставить у него обе.
+
+    `invite=True` превращает файл в приглашение (`METHOD:REQUEST`): почтовый
+    клиент показывает «Принять · Может быть · Отклонить» только у него, у
+    `PUBLISH` кнопок не бывает — это «вот встреча, положи себе». Приглашение
+    без `ATTENDEE` тоже кнопок не даёт: клиенту нужно увидеть В СПИСКЕ себя,
+    иначе он считает, что письмо не про него.
     """
+    метод = ("CANCEL" if cancelled else "REQUEST" if invite else "PUBLISH")
     строки = [
         "BEGIN:VCALENDAR",
         "VERSION:2.0",
         "PRODID:-//ElsyPlus//Trek//RU",
         "CALSCALE:GREGORIAN",
-        "METHOD:CANCEL" if cancelled else "METHOD:PUBLISH",
+        f"METHOD:{метод}",
         "BEGIN:VEVENT",
         f"UID:{uid}",
         f"DTSTAMP:{_stamp(datetime.now(timezone.utc))}",
@@ -86,5 +95,53 @@ def event_ics(*, uid: str, title: str, starts_at: datetime, ends_at: datetime,
     if organizer_email:
         имя = _escape(organizer_name or organizer_email)
         строки.append(f"ORGANIZER;CN={имя}:mailto:{organizer_email}")
+    for почта, имя_гостя in (attendees or []):
+        # `RSVP=TRUE` — просьба ответить, `NEEDS-ACTION` — ответа ещё не было.
+        # Без них клиент показывает встречу как уже принятую, и человек не
+        # понимает, что от него чего-то ждут.
+        строки.append(
+            f"ATTENDEE;CN={_escape(имя_гостя or почта)};ROLE=REQ-PARTICIPANT;"
+            f"PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:{почта}")
     строки += ["END:VEVENT", "END:VCALENDAR"]
     return "\r\n".join(_fold(s) for s in строки) + "\r\n"
+
+
+def calendar_ics(events: list[dict], *, name: str = "Трек") -> str:
+    """Много встреч одним календарём — для ленты подписки.
+
+    `X-WR-CALNAME` не входит в стандарт, но именно его читают Google, Apple и
+    Outlook, показывая имя подписки. Без него лента называется у человека своим
+    адресом, и три подписки становятся неразличимы.
+
+    `REFRESH-INTERVAL` — просьба, а не обязательство: Google обновляет подписки
+    раз в 12–48 часов, и обещать человеку большее нечестно.
+    """
+    строки = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//ElsyPlus//Trek//RU",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{_escape(name)}",
+        "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
+        "X-PUBLISHED-TTL:PT1H",
+    ]
+    for e in events:
+        строки += [
+            "BEGIN:VEVENT",
+            f"UID:{e['uid']}",
+            f"DTSTAMP:{_stamp(datetime.now(timezone.utc))}",
+            f"DTSTART:{_stamp(e['starts_at'])}",
+            f"DTEND:{_stamp(e['ends_at'])}",
+            f"SUMMARY:{_escape(e['title'])}",
+            f"STATUS:{'CANCELLED' if e.get('cancelled') else 'CONFIRMED'}",
+        ]
+        if e.get("description"):
+            строки.append(f"DESCRIPTION:{_escape(e['description'])}")
+        if e.get("location"):
+            строки.append(f"LOCATION:{_escape(e['location'])}")
+        if e.get("url"):
+            строки.append(f"URL:{_escape(e['url'])}")
+        строки.append("END:VEVENT")
+    строки.append("END:VCALENDAR")
+    return "\r\n".join(_fold(x) for x in строки) + "\r\n"
