@@ -614,6 +614,29 @@ class GuestMessageIn(BaseModel):
     email: str
     body: str
     name: str | None = None
+    topic: str | None = None
+
+
+# ── Темы разговора ───────────────────────────────────────────────────────────
+# Раньше переписка была одна на человека: он писал «в никуда», а оператор гадал,
+# про договор это или про поломку. Темы делят её на понятные разговоры и сразу
+# кладут обращение в правильную очередь — тему выбирает сам написавший.
+#
+# Гостю набор ОДИН И ТОТ ЖЕ: ему нечего обсуждать, кроме того, что мы показываем.
+# Клиенту — свой: к базовым темам добавляются те, что уже начаты по нему (их
+# заводит оператор), поэтому набор у каждого клиента получается собственный.
+GUEST_TOPICS: list[tuple[str, str]] = [
+    ("general", "Общие вопросы"),
+    ("demo", "Демо и стенды"),
+]
+CLIENT_TOPICS: list[tuple[str, str]] = [
+    ("support", "Поддержка"),
+    ("contract", "Договор и счета"),
+    ("rollout", "Внедрение"),
+]
+# Тред без кода темы — переписка, заведённая до тем. Она остаётся человеку видна
+# под своим прежним названием: молча спрятать начатый разговор нельзя.
+LEGACY_TOPIC_TITLE = "Переписка"
 
 
 async def _support_call(
@@ -653,25 +676,83 @@ async def push_message(
     text = payload.body.strip()
     if not text:
         raise HTTPException(400, "Пустое сообщение")
+    topic = (payload.topic or "").strip() or None
+    # Название темы подставляем СВОЁ по коду, а не берём из запроса: заголовок
+    # обращения видит оператор в очереди, и писать его должен не браузер гостя.
+    known = dict(GUEST_TOPICS) | dict(CLIENT_TOPICS)
     return await _support_call(db, cid, "POST", "/api/v1/eco/inbox/web", json_body={
         "email": payload.email.strip().lower(), "name": payload.name, "body": text,
+        "topic": topic,
+        "topicTitle": known.get(topic) if topic else None,
     })
 
 
 @router.get("/pull/thread")
 async def pull_thread(
     email: str = Query(...),
+    topic: str | None = Query(None),
     x_space_token: str | None = Header(None, alias="X-Space-Token"),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Лента переписки для кабинета: что человек писал и что ему ответили."""
+    """Лента одного разговора: что человек писал по этой теме и что ему ответили.
+
+    Без темы — последняя переписка, как было до разделения на темы.
+    """
     cid = await _pull_company(db, x_space_token)
+    params: dict[str, Any] = {"email": email.strip().lower()}
+    if topic is not None:
+        params["topic"] = topic.strip()
     try:
-        return await _support_call(db, cid, "GET", "/api/v1/eco/inbox/web",
-                                   params={"email": email.strip().lower()})
+        return await _support_call(db, cid, "GET", "/api/v1/eco/inbox/web", params=params)
     except HTTPException as e:
         # Поддержки в стеке может не быть вовсе — тогда переписки просто нет,
         # и кабинет покажет форму обращения, а не ошибку.
         if e.status_code == 503:
             return {"threadId": None, "messages": [], "reason": e.detail}
         raise
+
+
+@router.get("/pull/topics")
+async def pull_topics(
+    email: str = Query(...),
+    level: str = Query("guest"),
+    x_space_token: str | None = Header(None, alias="X-Space-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Набор разговоров человека: предустановленный по уровню плюс уже начатые.
+
+    Уровень называет САЙТ — он держит вход и знает, кем человек вошёл. Пространство
+    решает только, что этому уровню полагается: иначе набор тем пришлось бы держать
+    в двух местах и они разошлись бы на первой же правке.
+    """
+    cid = await _pull_company(db, x_space_token)
+    base = CLIENT_TOPICS if level.strip().lower() in {"client", "partner"} else GUEST_TOPICS
+    topics: list[dict[str, Any]] = [
+        {"code": code, "title": title, "lastAt": None, "status": None, "preview": None}
+        for code, title in base
+    ]
+    by_code = {card["code"]: card for card in topics}
+
+    try:
+        started = await _support_call(db, cid, "GET", "/api/v1/eco/inbox/web/threads",
+                                      params={"email": email.strip().lower()})
+    except HTTPException as e:
+        # Поддержки может не быть — набор тем от этого не пропадает, просто про
+        # начатые разговоры мы ничего не знаем.
+        if e.status_code == 503:
+            return {"topics": topics, "reason": e.detail}
+        raise
+
+    for row in started.get("threads") or []:
+        code = (row.get("topic") or "").strip()
+        card = by_code.get(code)
+        if card is None:
+            # Разговор, которого нет в наборе уровня: его завёл оператор или он
+            # остался с прежних времён. Показываем под его собственным названием.
+            card = {"code": code, "title": row.get("subject") or LEGACY_TOPIC_TITLE}
+            topics.append(card)
+            by_code[code] = card
+        card["lastAt"] = row.get("last_message_at")
+        card["status"] = row.get("status")
+        card["preview"] = row.get("preview")
+    return {"topics": topics}
