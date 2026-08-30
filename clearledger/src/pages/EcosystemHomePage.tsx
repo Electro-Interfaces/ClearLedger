@@ -12,6 +12,7 @@
  * Классификация слоя приходит с бэкенда (`layer` в /api/sso/apps), не хардкодится по коду.
  */
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -36,6 +37,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { listSsoApps, type SsoApp } from '@/services/ssoService'
+import { listPartnerSpaces, visitPartnerSpace } from '@/services/partnerSpaceService'
 import { useOpenApp } from '@/hooks/useOpenApp'
 import {
   READINESS_LABEL, SPACE_PRODUCTS, productReadiness, type Readiness,
@@ -400,6 +402,31 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
    *  откроется. Способ входа виден значком «вход отдельный» в углу, а пока подпись занимала
    *  «Открывается по ссылке», описание из реестра не доходило до человека вовсе — и
    *  «Конференции» молчали о том, что вход без регистрации, прямо в браузере. */
+  // Пространства клиентов: инженер входит туда СВОЕЙ учётной записью, пропуском.
+  // Стол — единственное место, где это уместно: вход к заказчику не раздел учёта и
+  // не настройка контейнера, а такой же переход, как открыть приложение.
+  const partnerSpaces = useQuery({
+    queryKey: ['partner-spaces', company.id],
+    queryFn: () => listPartnerSpaces(company.id),
+    enabled: isApiEnabled() && !!company.id,
+    staleTime: 5 * 60_000,
+  })
+  const clientSpaces = (partnerSpaces.data?.items || [])
+    .filter((p) => p.role === 'client' && p.isActive && p.linked)
+  const [visiting, setVisiting] = useState<string | null>(null)
+
+  async function openSpace(code: string) {
+    setVisiting(code)
+    try {
+      const res = await visitPartnerSpace(code, company.id)
+      // Пропуск живёт две минуты — открываем сразу, «на потом» он не годится.
+      window.location.href = res.url
+    } catch (e) {
+      setVisiting(null)
+      toast.error('Не удалось войти', { description: (e as Error).message })
+    }
+  }
+
   function renderProductTile(a: SsoApp) {
     const isOptional = a.mode === 'internal' && !a.route
     const description = a.description
@@ -457,6 +484,21 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
         {services.length > 0 && (
           <Section title="Сервисы экосистемы" hint="общие для всех приложений" divider>
             {services.map(renderProductTile)}
+          </Section>
+        )}
+        {clientSpaces.length > 0 && (
+          <Section title="Пространства клиентов" hint="войти своей учётной записью" divider>
+            {clientSpaces.map((p) => (
+              <Tile
+                key={p.code}
+                title={p.name}
+                subtitle="Рабочее пространство клиента"
+                icon={Network}
+                availability="Войти по пропуску"
+                busy={visiting === p.code}
+                onClick={() => openSpace(p.code)}
+              />
+            ))}
           </Section>
         )}
         {management.length > 0 && (

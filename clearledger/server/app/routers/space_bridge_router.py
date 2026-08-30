@@ -221,6 +221,11 @@ async def partner_visit(
     одно пространство: открытый к одному клиенту, он не откроет дверь к другому.
     """
     cid, partner = await _partner_for_user(db, company_id, code, user)
+    # Пропуск выписывают своим. Внешний участник допущен в НАШЕ пространство, а не
+    # в пространство нашего клиента: там он никто, и открывать ему дверь нечем.
+    membership = await db.get(UserCompany, (user.id, cid))
+    if membership is not None and membership.party_type == "partner":
+        raise HTTPException(403, "Пропуск выписывается сотрудникам пространства")
     if not partner.is_active:
         raise HTTPException(409, "Связь с этим пространством выключена")
     if not partner.base_url:
