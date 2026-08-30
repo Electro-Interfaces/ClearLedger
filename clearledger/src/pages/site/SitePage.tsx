@@ -323,7 +323,8 @@ export function SitePage() {
           «Топлива» и «Эксплуатации». Карточка ей мешает: колонка пунктов должна
           стоять от края панели, а не внутри отступов карточки. */}
       {tab === 'showcase' ? (
-        <ShowcaseEditor companyId={companyId} sectionKey={part} />
+        <ShowcaseEditor companyId={companyId} sectionKey={part}
+                        siteUrl={summary.data?.url ?? null} />
       ) : (
       <Card>
         <CardContent className="pt-6">
