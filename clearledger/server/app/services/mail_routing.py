@@ -300,15 +300,58 @@ async def route(db: AsyncSession, cid, row: MailMessage, rule) -> str | None:
     return None
 
 
+# Ящики, за которыми нет человека: автоответчики, отчёты и служебные рассылки.
+# Обращение от них означало бы разговор, в котором некому отвечать, — а очередь
+# оператора живёт тем, что каждая строка в ней требует ответа.
+_ROBOT_LOCALPARTS = (
+    "noreply", "no-reply", "donotreply", "do-not-reply", "mailer-daemon",
+    "postmaster", "bounce", "bounces", "abuse", "dmarc", "dmarc-report",
+    "dmarcreport", "notification", "notifications", "automailer",
+)
+
+
+def is_robot_sender(address: str | None) -> bool:
+    """Письмо от машины, а не от человека."""
+    local = (address or "").split("@", 1)[0].strip().lower()
+    if not local:
+        return True
+    return any(local == p or local.startswith(f"{p}-") or local.startswith(f"{p}+")
+               or local.startswith(f"{p}.") for p in _ROBOT_LOCALPARTS)
+
+
 async def to_support_inbox(db: AsyncSession, cid, row: MailMessage) -> bool:
     """Письмо — в очередь обращений Поддержки.
 
     Не заявка и не документ: заявка всегда про объект, документ — про вложение, а
     человек просто написал. Разговор — это разговор, откуда бы он ни пришёл, и
     место у него одно: общая очередь, где лежат звонки и обращения из пространств.
+
+    Два отказа здесь важнее самой доставки:
+
+    * **робот.** Отчёт DMARC, автоответ «письмо не доставлено» и рассылка — не
+      обращение: отвечать на них некому, а в очереди каждая строка ждёт ответа.
+    * **свой же ящик.** Ответ поддержки уходит письмом; вернись он обращением —
+      получится разговор системы с собой, и петля будет расти сама.
+
+    Отказ не теряет письмо: оно уже сохранено в переписке компании, и человек его
+    там увидит.
     """
+    from sqlalchemy import func
+
     from app.models import MailAccount
     from app.services import support_mirror
+
+    sender = (row.from_email or "").strip().lower()
+    if is_robot_sender(sender):
+        logger.info("письмо %s: обращение не заводим, отправитель служебный (%s)",
+                    row.id, sender)
+        return False
+
+    own = await db.scalar(select(func.count()).select_from(MailAccount).where(
+        MailAccount.company_id == cid, func.lower(MailAccount.address) == sender))
+    if own:
+        logger.info("письмо %s: обращение не заводим, письмо от своего ящика", row.id)
+        return False
 
     account = await db.get(MailAccount, row.account_id) if row.account_id else None
     ok = await support_mirror.mirror_mail(
