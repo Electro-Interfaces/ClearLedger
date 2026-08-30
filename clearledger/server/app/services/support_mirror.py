@@ -46,7 +46,11 @@ async def mirror_incoming(
            f"/api/v1/eco/inbox/web")
     who = partner.name or partner.code
     payload = {
-        "companyId": link.external_company_id,
+        # Чья это очередь. У клиента компания в Поддержке своя — тогда обращение
+        # ложится к нему, и сроки с историей считаются по нему, а не общей кучей.
+        # Не сказано чья — падает в нашу, как было: терять обращение из-за
+        # незаполненной настройки нельзя.
+        "companyId": partner.support_company_id or link.external_company_id,
         # Адрес автора в его пространстве — по нему обращения одного человека
         # соберутся в один тред, как у звонившего собираются звонки.
         "email": message.author_email or f"{partner.code}@space.local",

@@ -76,6 +76,7 @@ STORE_RECEIPT_MIGRATION_DDL = (
     "INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS content_hash CHAR(64)",
     "ALTER TABLE space_inbound_keys ADD COLUMN IF NOT EXISTS station_id INTEGER",
+    "ALTER TABLE eco_partner_spaces ADD COLUMN IF NOT EXISTS support_company_id VARCHAR(120)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_space_inbound_key_station_active "
     "ON space_inbound_keys (company_id, station_id) "
     "WHERE station_id IS NOT NULL AND revoked_at IS NULL",

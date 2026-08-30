@@ -12771,6 +12771,16 @@ class PartnerSpace(Base):
     counterparty_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("counterparties.id", ondelete="SET NULL"),
         nullable=True)
+    # Чья это очередь в Поддержке: id компании клиента В ЕЁ базе.
+    #
+    # У пространства заказчика вопрос не стоит — компания там одна. У нас клиентов
+    # много, и «чьё обращение» — первый вопрос оператора: по нему считаются сроки
+    # договора, собирается история и делится работа. Пусто — обращение ложится в
+    # нашу собственную компанию (связка пространства), как было до разделения.
+    #
+    # Идентификатор чужой базы, поэтому строкой и без внешнего ключа: связь
+    # приложений держится значением, а не ссылкой между базами (docs/CORE.md §7).
+    support_company_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
