@@ -295,4 +295,24 @@ async def route(db: AsyncSession, cid, row: MailMessage, rule) -> str | None:
         return "ticket" if await to_ticket(db, cid, row, rule.set_object_id) else None
     if rule.action == "doc":
         return "doc" if await to_doc(db, cid, row) else None
+    if rule.action == "inbox":
+        return "inbox" if await to_support_inbox(db, cid, row) else None
     return None
+
+
+async def to_support_inbox(db: AsyncSession, cid, row: MailMessage) -> bool:
+    """Письмо — в очередь обращений Поддержки.
+
+    Не заявка и не документ: заявка всегда про объект, документ — про вложение, а
+    человек просто написал. Разговор — это разговор, откуда бы он ни пришёл, и
+    место у него одно: общая очередь, где лежат звонки и обращения из пространств.
+    """
+    from app.models import MailAccount
+    from app.services import support_mirror
+
+    account = await db.get(MailAccount, row.account_id) if row.account_id else None
+    ok = await support_mirror.mirror_mail(
+        db, cid, row, reply_inbox=account.address if account else None)
+    if not ok:
+        logger.warning("письмо %s: обращение не заведено", row.id)
+    return ok

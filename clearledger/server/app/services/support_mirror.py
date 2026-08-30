@@ -69,3 +69,49 @@ async def mirror_incoming(
     except httpx.HTTPError:
         return False
     return resp.status_code < 400
+
+
+async def mirror_mail(
+    db: AsyncSession, company_id: uuid.UUID, message, reply_inbox: str | None = None,
+) -> bool:
+    """Письмо клиента — в ту же очередь, где звонки и разговоры из пространств.
+
+    Два источника обращения — письмо и чат — должны запускать одно движение, иначе
+    оператору приходится помнить, где ещё посмотреть. Поэтому письмо не остаётся
+    строкой в переписке: оно встаёт в очередь каналом `email`.
+
+    В `meta` уезжает обратный адрес и ящик, которым отвечать: почтовые ящики и
+    подписи живут в Ядре, и ответ оператора вернётся сюда же, а не уйдёт из
+    Координатора своим каналом.
+    """
+    try:
+        app_row, link, token = await space_projection._target(db, company_id, "support")
+    except space_projection.ProjectionError:
+        return False
+
+    url = (f"{space_projection._internal_base_url(app_row, 'support')}"
+           f"/api/v1/eco/inbox/message")
+    body = (message.body_text or "").strip() or "(письмо без текста)"
+    payload = {
+        "companyId": link.external_company_id,
+        "email": message.from_email,
+        "name": message.from_name or message.from_email,
+        "body": body,
+        "channel": "email",
+        "subject": message.subject or "Письмо",
+        # Тема письма — ключ разговора: ответы на неё лягут в тот же тред, а новое
+        # письмо о другом заведёт свой, как и в кабинете сайта.
+        "topic": f"mail:{(message.subject or '').strip().lower()[:80]}",
+        "meta": {
+            "mail_message_id": str(message.id),
+            "mail_reply_to": message.from_email,
+            "mail_inbox": reply_inbox or "",
+        },
+    }
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.post(url, json=payload,
+                                     headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError:
+        return False
+    return resp.status_code < 400

@@ -52,6 +52,16 @@ class GuestVisit(BaseModel):
     space: str
 
 
+class MailReply(BaseModel):
+    """Ответ оператора, который надо отправить письмом с ящика пространства."""
+
+    to: str
+    subject: str = ""
+    body: str
+    inbox: str | None = None       # с какого ящика отвечаем; пусто — первый исходящий
+    external_id: str | None = None
+
+
 class SupportReply(BaseModel):
     """Ответ оператора, который Координатор просит доставить в пространство клиента."""
 
@@ -335,3 +345,48 @@ def _verify_visit(token: str, jwks: dict[str, Any], *, audience: str) -> dict[st
                       algorithms=["RS256"], audience=audience)
     except PyJWTError as e:
         raise HTTPException(403, f"Пропуск отклонён: {e}") from e
+
+
+@router.post("/eco/support/mail-reply")
+async def support_mail_reply(
+    payload: MailReply,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Отправить ответ оператора письмом.
+
+    Обращение пришло письмом, и ответ обязан уйти письмом — но почтовые ящики,
+    подписи и нити переписки живут в Ядре. Координатор просит отправить, Ядро
+    отправляет с того ящика, на который письмо пришло: человек получит ответ там
+    же, где писал, а копия ляжет в переписку компании.
+    """
+    from app.models import MailAccount
+    from app.services import mail_send
+
+    to = payload.to.strip()
+    body = payload.body.strip()
+    if "@" not in to or not body:
+        raise HTTPException(400, "Нужен адрес получателя и непустой текст")
+
+    stmt = select(MailAccount).where(
+        MailAccount.company_id == company.id,
+        MailAccount.is_active.is_(True),
+        MailAccount.mode != "in",
+    )
+    if payload.inbox:
+        stmt = stmt.where(MailAccount.address == payload.inbox)
+    account = (await db.execute(stmt)).scalars().first()
+    if account is None:
+        raise HTTPException(409, "В пространстве нет ящика для отправки")
+
+    subject = payload.subject.strip() or "Ответ поддержки"
+    if not subject.lower().startswith("re:"):
+        subject = f"Re: {subject}"
+    result = await mail_send.send_message(
+        db, company.id, account_id=account.id, to=[to],
+        subject=subject[:300], body=body, author="support")
+    if "error" in result:
+        # Очередь Координатора повторит: письмо не ушло, и молчать об этом нельзя.
+        raise HTTPException(502, str(result["error"]))
+    await db.commit()
+    return {"status": "sent", "messageId": result.get("messageId")}
