@@ -181,6 +181,11 @@ export function ShowcaseEditor({ companyId, sectionKey, siteUrl }: {
 
   const page = SECTION_PAGE[current]
   const pageUrl = siteUrl && page ? `${siteUrl.replace(/\/$/, '')}${page}` : null
+  // Предпросмотр идёт по адресу с меткой. Причина не в аналитике: пока страница
+  // отвечала редиректом 301 (постоянным!), браузеры его запомнили — и на чистый
+  // адрес продолжают ходить по памяти, показывая белый экран. Метка делает URL
+  // другим, и кэш прежнего редиректа к нему не применяется.
+  const frameUrl = pageUrl ? `${pageUrl}?from=space` : null
 
   return (
     <div>
@@ -230,7 +235,7 @@ export function ShowcaseEditor({ companyId, sectionKey, siteUrl }: {
         {mode === 'view' && pageUrl ? (
           // Ключ по времени правки: сохранили — страница перечитывается, иначе
           // человек смотрел бы на свой же старый текст и считал, что не доехало.
-          <iframe key={content.dataUpdatedAt} src={pageUrl} title="Страница сайта"
+          <iframe key={content.dataUpdatedAt} src={frameUrl ?? undefined} title="Страница сайта"
             className="h-[calc(100vh-16rem)] min-h-[30rem] w-full rounded-lg border bg-white" />
         ) : draft === null
           ? <p className="py-8 text-center text-muted-foreground">Раздел пуст</p>
