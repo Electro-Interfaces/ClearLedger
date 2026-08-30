@@ -39,6 +39,16 @@ class OutgoingMessage(BaseModel):
     subject_ref: str | None = None
 
 
+class SupportReply(BaseModel):
+    """Ответ оператора, который Координатор просит доставить в пространство клиента."""
+
+    partner_code: str
+    body: str
+    author_name: str | None = None
+    author_email: str | None = None
+    external_id: str | None = None
+
+
 @router.post("/eco/partner/message")
 async def accept_partner_message(
     request: Request,
@@ -69,6 +79,43 @@ async def accept_partner_message(
     if is_new and partner.role == "client":
         await support_mirror.mirror_incoming(db, company.id, partner, row)
     return {"status": "accepted" if is_new else "duplicate", "id": str(row.id)}
+
+
+@router.post("/eco/partner/outgoing")
+async def support_reply(
+    payload: SupportReply,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Ответ поддержки — в пространство клиента.
+
+    Обращение клиента доезжает до очереди Координатора зеркалом, и отвечает
+    оператор там же, где отвечает на звонки и письма. Но связь с чужим
+    пространством — адрес, ключ и лента — живёт в Ядре, и второй такой связи у
+    Координатора нет и заводить её незачем: он просит доставить, Ядро доставляет.
+
+    Зовут отсюда очередью с ретраями, поэтому `external_id` обязателен по смыслу:
+    без него повтор положит клиенту ту же реплику второй раз.
+    """
+    body = payload.body.strip()
+    if not body:
+        raise HTTPException(400, "Пустое сообщение")
+    partner = await partner_bridge.get_partner(db, company.id, payload.partner_code)
+    if partner is None:
+        raise HTTPException(404, f"Пространство «{payload.partner_code}» здесь не заведено")
+
+    self_code = (await db.execute(
+        select(Company.slug).where(Company.id == company.id))).scalar_one()
+    row = await partner_bridge.send(
+        db, company.id, partner, self_code=self_code, body=body,
+        author_email=payload.author_email, author_name=payload.author_name,
+        external_id=payload.external_id,
+    )
+    # Недоставленное — не отказ приёма: реплика записана в ленте, и повтор её не
+    # продублирует. Но звавшему говорим правду, чтобы очередь попробовала снова.
+    if row.delivery_error:
+        raise HTTPException(502, row.delivery_error)
+    return {"status": "sent", "id": str(row.id)}
 
 
 async def _partner_for_user(

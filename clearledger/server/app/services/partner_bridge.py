@@ -104,17 +104,33 @@ async def send(
     self_code: str, body: str,
     author_email: str | None = None, author_name: str | None = None,
     subject_kind: str | None = None, subject_ref: str | None = None,
+    external_id: str | None = None,
 ) -> PartnerMessage:
     """Отправить сообщение партнёру и записать его у себя.
 
     Порядок важен: сначала пишем к себе, потом отправляем. Если связь оборвётся,
     сообщение останется в ленте с пометкой, почему не дошло, — а не исчезнет
     вместе с ошибкой сети.
+
+    `external_id` — идентификатор сообщения у того, кто нас позвал (у Координатора
+    это его `inbox_messages.id`). Человек пишет один раз и ключа не имеет, а
+    Координатор шлёт очередью с ретраями: без ключа второй заход положил бы в
+    ленту клиента ту же реплику второй раз.
     """
+    if external_id:
+        already = (await db.execute(select(PartnerMessage).where(
+            PartnerMessage.partner_id == partner.id,
+            PartnerMessage.direction == "out",
+            PartnerMessage.external_id == external_id,
+        ))).scalars().first()
+        if already is not None:
+            return already
+
     row = PartnerMessage(
         company_id=company_id, partner_id=partner.id, direction="out",
         author_email=author_email, author_name=author_name, body=body.strip(),
         subject_kind=subject_kind, subject_ref=subject_ref,
+        external_id=external_id,
     )
     db.add(row)
     await db.commit()

@@ -5,10 +5,14 @@
 import {
   LifeBuoy, MessageCircle, Sparkles, Phone, Keyboard, FileText, Database, GitBranch,
 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { APP_VERSION } from '@/lib/appUpdate'
 import { ECOSYSTEM_TITLE } from '@/config/brand'
 import { useSupportContext } from '@/contexts/SupportContext'
+import { useCompany } from '@/contexts/CompanyContext'
+import { listPartnerSpaces } from '@/services/partnerSpaceService'
+import { VendorSupportPanel } from './VendorSupportPanel'
 
 export function ContactList() {
   const contacts = [
@@ -46,6 +50,18 @@ export function ContactList() {
  */
 export function TicketsPanel() {
   const { openInteraction } = useSupportContext()
+  const { companyId } = useCompany()
+  // Кто нас обслуживает: запись роли `vendor` в реестре партнёров. Её нет —
+  // пространство ещё ни с кем не связано, и разговаривать мосту не с кем.
+  const spaces = useQuery({
+    queryKey: ['partner-spaces', companyId],
+    queryFn: () => listPartnerSpaces(companyId),
+    enabled: !!companyId,
+    staleTime: 5 * 60_000,
+  })
+  const vendor = spaces.data?.items.find((p) => p.role === 'vendor' && p.isActive && p.linked)
+  if (vendor) return <VendorSupportPanel vendor={vendor} companyId={companyId} />
+
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 dark:bg-primary/20">

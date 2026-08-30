@@ -52,6 +52,11 @@ async def mirror_incoming(
         "email": message.author_email or f"{partner.code}@space.local",
         "name": f"{message.author_name or 'Сотрудник'} · {who}",
         "body": message.body,
+        # Чей это разговор — тредом, а не догадкой по тексту темы: по этой метке
+        # ответ оператора уедет обратно в пространство клиента, а не упрётся в
+        # отсутствующий канальный коннектор.
+        "partnerCode": partner.code,
+        "partnerName": who,
     }
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
