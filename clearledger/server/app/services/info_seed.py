@@ -27,6 +27,8 @@ from app.services.info_seed_shop import ARTICLES as SHOP_ARTICLES
 from app.services.info_seed_shop import CATEGORIES as SHOP_CATEGORIES
 from app.services.info_seed_station import ARTICLES as STATION_ARTICLES
 from app.services.info_seed_station import CATEGORIES as STATION_CATEGORIES
+from app.services.info_seed_track import ARTICLES as TRACK_ARTICLES
+from app.services.info_seed_track import CATEGORIES as TRACK_CATEGORIES
 from app.services.info_seed_office import ARTICLES as OFFICE_ARTICLES
 from app.services.info_seed_office import CATEGORIES as OFFICE_CATEGORIES
 from app.services.info_seed_office import PROFILE as OFFICE_PROFILE
@@ -775,7 +777,10 @@ async def seed_info(db: AsyncSession) -> dict[str, int]:
     """
     total = {"created": 0, "updated": 0, "renamed": 0}
     packs = [
-        (None, COMMON_CATEGORIES, COMMON_ARTICLES),
+        # «Трек» есть в каждом пространстве независимо от профиля, как «Чаты» и
+        # «Управление», поэтому его знание лежит в общем слое, а не в отраслевом.
+        (None, COMMON_CATEGORIES + TRACK_CATEGORIES,
+         COMMON_ARTICLES + TRACK_ARTICLES),
         (PROFILE, CATEGORIES, ARTICLES),
         # Топливный профиль ведёт «Топливо», «Магазин» и рабочее место АЗС. Пакеты
         # раздельные (их правят разные люди и в разное время), профиль один.

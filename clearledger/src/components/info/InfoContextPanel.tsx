@@ -38,7 +38,19 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
   // общую статью раздела, хотя вопросы у человека там разные.
   const sub = params.get('sub')
   const tab = params.get('ptab')
-  const sectionKey = sub && tab ? `${sub}:${tab}` : sub
+  // «Трек» разрезает себя не `?sub=`, а `?view=`, и до этой ветки подсказка в нём
+  // всегда получала пустой раздел: на «Разборе» и в «Нумераторах» показывалась
+  // одна общая статья приложения. Ключ собирается из последнего сегмента
+  // маршрута и вида: `work:today`, `company:triage`, `setup:kinds`.
+  const трековыйКлюч = () => {
+    const хвост = pathname.replace(/\/+$/, '').split('/').filter(Boolean)
+    const раздел = хвост.length > 1 ? хвост[1] : 'registry'
+    const вид = params.get('view')
+    return вид ? `${раздел}:${вид}` : раздел
+  }
+  const sectionKey = appCode === 'docs' && !sub
+    ? трековыйКлюч()
+    : sub && tab ? `${sub}:${tab}` : sub
 
   const ctx = useQuery({
     queryKey: ['info-ctx', companyId, appCode, sectionKey],
