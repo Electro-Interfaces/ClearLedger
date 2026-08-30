@@ -103,6 +103,37 @@ def sign_sso_token(*, user, company_id, companies: list[dict[str, Any]], aud: st
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})
 
 
+def sign_visit_token(*, user, space_code: str, self_code: str,
+                     ttl_seconds: int = 120) -> str | None:
+    """Пропуск нашего сотрудника в пространство партнёра.
+
+    Не handoff: тот выпускается ДЛЯ приложения внутри своего контура и проверяется
+    нашим же ключом. Здесь пропуск читает чужое Ядро — оно берёт наш публичный ключ
+    по адресу из своей записи о нас и по нему решает, пускать ли.
+
+    Аудитория — код принимающего пространства: пропуск, выписанный к одному
+    клиенту, не должен открывать дверь к другому.
+    """
+    key = _private_key()
+    if not key:
+        return None
+    now = int(time.time())
+    payload = {
+        "iss": settings.sso_issuer,
+        "aud": f"space:{space_code}",
+        "sub": str(user.id),
+        "email": user.email,
+        "name": getattr(user, "name", None),
+        # Откуда пришёл: по этому коду принимающая сторона находит свою запись о
+        # нас и проверяет, что связь включена и не отозвана.
+        "space": self_code,
+        "iat": now,
+        "nbf": now - 10,
+        "exp": now + ttl_seconds,
+    }
+    return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})
+
+
 def sign_service_token(*, aud: str, scope: str, ttl_seconds: int = 120) -> str | None:
     """Служебный (машинный) токен Ядра для приложения `aud`.
 

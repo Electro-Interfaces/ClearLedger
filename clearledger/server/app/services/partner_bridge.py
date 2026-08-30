@@ -36,6 +36,10 @@ from app.models import PartnerMessage, PartnerSpace
 DELIVERY_TIMEOUT = 15.0
 # Путь приёмника у партнёра. Совпадает с нашим: обе стороны — одно Ядро.
 INBOX_PATH = "/api/eco/partner/message"
+# Где у партнёра лежит его публичный ключ и куда приходит гость. Пути те же, что у
+# нас: оба конца — одно Ядро.
+JWKS_PATH = "/api/sso/jwks.json"
+VISIT_PATH = "/space-guest"
 
 
 class BridgeError(RuntimeError):
@@ -51,6 +55,25 @@ def partner_key(partner: PartnerSpace) -> str:
     if not partner.secret_ref:
         return ""
     return os.getenv(partner.secret_ref, "")
+
+
+async def partner_jwks(partner: PartnerSpace) -> dict[str, Any]:
+    """Публичные ключи партнёра — ими проверяется его пропуск.
+
+    Ключ берём у него самого, а не из своей настройки: он его меняет, и
+    переспросить дешевле, чем разбирать «почему инженер вдруг не входит».
+    """
+    if not partner.base_url:
+        raise BridgeError("У пространства не задан адрес")
+    url = f"{partner.base_url.rstrip('/')}{JWKS_PATH}"
+    try:
+        async with httpx.AsyncClient(timeout=DELIVERY_TIMEOUT) as client:
+            resp = await client.get(url)
+    except httpx.HTTPError as e:
+        raise BridgeError(f"Пространство недоступно: {e}") from e
+    if resp.status_code >= 400:
+        raise BridgeError(f"Пространство ответило {resp.status_code} на запрос ключей")
+    return resp.json()
 
 
 async def get_partner(

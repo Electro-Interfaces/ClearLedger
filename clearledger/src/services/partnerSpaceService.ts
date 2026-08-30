@@ -42,3 +42,8 @@ export const sendToPartner = (code: string, companyId: string, body: string) =>
   post<{ id: string; delivered: boolean; error: string | null }>(
     `/api/partner-space/${encodeURIComponent(code)}/message?company_id=${encodeURIComponent(companyId)}`,
     { body })
+
+/** Пропуск в пространство клиента: заходим туда своей учётной записью. */
+export const visitPartnerSpace = (code: string, companyId: string) =>
+  post<{ url: string; space: string; name: string }>(
+    `/api/partner-space/${encodeURIComponent(code)}/visit?company_id=${encodeURIComponent(companyId)}`)

@@ -18,7 +18,7 @@
 import type { ComponentType } from 'react'
 import {
   LayoutDashboard, Map, Users, History, Settings2,
-  KeyRound, MapPin, Library, Building2, Mail, Handshake, FileSignature,
+  KeyRound, MapPin, Library, Building2, Mail, Handshake, FileSignature, Network,
 } from 'lucide-react'
 
 export type AdminScope = 'eco' | 'company'
@@ -49,6 +49,9 @@ export const ecosystemSections: AdminSection[] = [
   { code: 'overview', label: 'Обзор', hint: 'Что требует внимания, люди, объекты, сервисы, активность', icon: LayoutDashboard },
   { code: 'companies', label: 'Организации', hint: 'Организации контейнера и подключение новых', icon: Building2 },
   { code: 'settings', label: 'Сервисы', hint: 'Единый вход, платформенные сервисы, каталог лаунчера', icon: Settings2 },
+  // Соседние пространства — уровень контейнера: связь между ними заводит тот, у
+  // кого оба конца и ключи, а не администратор одной организации.
+  { code: 'spaces', label: 'Пространства', hint: 'Связь с пространствами клиентов: переписка поддержки и вход инженера', icon: Network },
 ]
 
 /**

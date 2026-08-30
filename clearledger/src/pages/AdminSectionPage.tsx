@@ -17,6 +17,7 @@ import { CompanyProfileCard, OwnOrganizationCard } from '@/components/admin/Comp
 import { CoreOverview } from '@/components/admin/CoreOverview'
 import { CoreSettings } from '@/components/admin/CoreSettings'
 import { EcosystemCompanies } from '@/components/admin/EcosystemCompanies'
+import { PartnerSpaces } from '@/components/admin/PartnerSpaces'
 import { SpaceMap } from '@/components/admin/SpaceMap'
 import { SpaceObjects } from '@/components/admin/SpaceObjects'
 import { SpaceRefs } from '@/components/admin/SpaceRefs'
@@ -42,6 +43,7 @@ const ECO_SCREENS: Record<string, ComponentType> = {
   overview: CoreOverview,
   companies: EcosystemCompanies,
   settings: CoreSettings,
+  spaces: PartnerSpaces,
 }
 
 // ─── Уровень «Компания» ──────────────────────────────────────────────────────

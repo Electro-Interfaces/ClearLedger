@@ -85,6 +85,7 @@ const EcosystemHomePage = lazy(() => import('@/pages/EcosystemHomePage').then((m
 const LoginPage = lazy(() => import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage })))
 const AcceptInvitePage = lazy(() => import('@/pages/AcceptInvitePage').then((m) => ({ default: m.AcceptInvitePage })))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage').then((m) => ({ default: m.ResetPasswordPage })))
+const SpaceGuestPage = lazy(() => import('@/pages/SpaceGuestPage').then((m) => ({ default: m.SpaceGuestPage })))
 const DocSharePage = lazy(() => import('@/pages/DocSharePage').then((m) => ({ default: m.DocSharePage })))
 const InvitePage = lazy(() => import('@/pages/InvitePage').then((m) => ({ default: m.InvitePage })))
 const DocVerifyPage = lazy(() => import('@/pages/DocVerifyPage').then((m) => ({ default: m.DocVerifyPage })))
@@ -247,6 +248,9 @@ const router = createBrowserRouter([
       { path: '/login', element: <LazyPage><LoginPage /></LazyPage> },
       { path: '/invite/:token', element: <LazyPage><AcceptInvitePage /></LazyPage> },
       { path: '/reset-password/:token', element: <LazyPage><ResetPasswordPage /></LazyPage> },
+      // Пятый вход без учётки: инженер платформы приходит из своего пространства
+      // с подписанным пропуском. Учётку ему заводит сам вход, а не человек руками.
+      { path: '/space-guest', element: <LazyPage><SpaceGuestPage /></LazyPage> },
       // Витрина по ссылке: стоит рядом с приглашением и сбросом пароля — это
       // третий вход без учётки, и открывать его должен кто угодно с токеном.
       { path: '/showcase/:token', element: <LazyPage><ShowcaseLinkPage /></LazyPage> },
