@@ -268,7 +268,7 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
 }) {
   const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(false)   // 1С при запуске свёрнут
-  const { company, companyModules, canApp, canModule } = useCompany()
+  const { company, companyModules, canApp, canModule, oversees } = useCompany()
   const { pathname, search } = useLocation()
   // Разделы рабочей области — здесь же, рядом со страницами продукта: рабочий стол
   // теперь уровнем выше (пространство), и внутри продукта верхний уровень навигации
@@ -368,7 +368,13 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
       <>
         <SidebarGroup className="py-0">
           <SidebarMenu>
-            {DOCS_SECTIONS.map((s) => (
+            {/* «Компания» — раздел надзора: увидеть, у кого что висит, и
+                дотянуться. У кого нет подчинённых, у того нет и такой работы,
+                поэтому раздел не «скрыт по правам», а не показывается вовсе:
+                окно, через которое видно чужое и ничего нельзя сделать, только
+                сбивает. Признак считает сервер по штатной структуре. */}
+            {DOCS_SECTIONS.filter((s) => s.to !== '/docs/company' || oversees)
+              .map((s) => (
               <NavItem key={s.to} to={s.to} icon={s.icon} label={s.label}
                 collapsed={collapsed} onNavigate={onNavigate}
                 active={pathname === s.to

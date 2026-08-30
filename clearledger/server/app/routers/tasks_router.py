@@ -626,8 +626,16 @@ async def _assert_actor(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -
     if user.is_superadmin or user.id in (t.assignee_id, t.author_id):
         return
     m = await db.get(UserCompany, (user.id, cid))
-    if m is None or m.role != "admin":
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Задача не ваша")
+    if m is not None and m.role == "admin":
+        return
+    # Четвёртый, кто вправе вмешаться: руководитель, в чьём охвате стоит эта
+    # работа. Без него раздел «Компания» остаётся окном — видно, что висит, и
+    # ничего не сделать. Граница полномочия одна — охват: за пределами своей
+    # ветки руководитель такой же сотрудник, как все.
+    from app.services import oversight
+    if (await oversight.охват(db, cid, user)).входит(t.assignee_id):
+        return
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Задача не ваша")
 
 
 async def _can_view_task(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -> bool:

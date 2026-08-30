@@ -21,6 +21,7 @@ from app.auth import (
     verify_password,
 )
 from app.database import get_db
+from app.services import oversight
 from app.models import Company, Counterparty, User, UserCompany
 from app.services import email_service
 from app.utils import resolve_company_id
@@ -284,7 +285,7 @@ async def get_me(
         companies = (
             await db.execute(select(Company).order_by(Company.name))
         ).scalars().all()
-        briefs = [_brief(c, "admin") for c in companies]
+        briefs = [_brief(c, "admin", oversees=True) for c in companies]
     else:
         # Обычный — только свои, с ролью и ЭФФЕКТИВНЫМИ правами членства.
         rows = (
@@ -299,10 +300,13 @@ async def get_me(
         # у человека с ИМЕНОВАННОЙ ролью это поле NULL (набор лежит в самой роли), а
         # фронт читает NULL как «полный доступ» — то есть назначенная роль не
         # ограничивала ничего. admin-член видит всё.
+        # Надзор считается по штатной структуре: администратор смотрит за всей
+        # компанией, руководитель — за своим подразделением и всем, что ниже.
         briefs = [
             _brief(c, uc.role, None if uc.role == "admin" else await resolve_member_modules(uc, db),
                    None if uc.role == "admin" or not getattr(uc, "own_organization_id", None)
-                   else str(uc.own_organization_id))
+                   else str(uc.own_organization_id),
+                   oversees=await oversight.надзирает(db, c.id, current_user))
             for c, uc in rows
         ]
 
@@ -343,11 +347,11 @@ async def get_me(
 
 
 def _brief(c, role: str, modules: list[str] | None = None,
-           own_org: str | None = None) -> CompanyBrief:
+           own_org: str | None = None, oversees: bool = False) -> CompanyBrief:
     return CompanyBrief(
         id=str(c.id), slug=c.slug, name=c.name,
         short_name=c.short_name, color=c.color, profile_id=c.profile_id, role=role,
-        modules=modules, own_organization_id=own_org,
+        modules=modules, own_organization_id=own_org, oversees=oversees,
     )
 
 

@@ -44,7 +44,7 @@ const PULSE_ITEMS: BottomNavItem[] = [
  * возвращается к общим страницам: иначе она осталась бы пустой.
  */
 export function MobileBottomNav() {
-  const { company, companyModules, canApp, canModule } = useCompany()
+  const { company, companyModules, canApp, canModule, oversees } = useCompany()
   const { pathname, search } = useLocation()
   // Разделы рабочей области: без фильтра lockedModes (он живёт в контексте самой
   // области), поэтому продукт отбирает свои режимы сам — по списку из реестра.
@@ -76,7 +76,12 @@ export function MobileBottomNav() {
     items = [
       { label: 'Документы', path: '/docs?view=incoming', icon: FileText },
       { label: 'Моё', path: '/docs/work?view=today', icon: ListChecks },
-      { label: 'Компания', path: '/docs/company?view=docs', icon: Building2 },
+      // «Компания» — раздел надзора: у кого нет подчинённых, у того нет и
+      // такой работы. На телефоне это ещё важнее: полоса узкая, и лишний
+      // пункт отнимает место у тех, которыми пользуются.
+      ...(oversees
+        ? [{ label: 'Компания', path: '/docs/company?view=docs', icon: Building2 }]
+        : []),
       { label: 'Обзор', path: '/docs/overview?view=docs', icon: Activity },
       { label: 'Настройка', path: '/docs/setup?view=templates', icon: CalendarDays },
     ].map((item) => ({ ...item, path: withGlobalFilter(item.path, search) }))

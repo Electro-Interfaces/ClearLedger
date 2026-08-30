@@ -42,6 +42,10 @@ interface CompanyContextType {
   setOrganizationId: (id: string | null) => void
   companyRole: 'user' | 'admin'   // роль текущего пользователя в активной компании
   isCompanyAdmin: boolean         // admin в активной компании ИЛИ суперадмин
+  /** Надзирает ли человек за чужой работой: администратор — за всей компанией,
+   *  руководитель подразделения — за своей веткой, рядовой — ни за кем.
+   *  От этого зависит раздел «Компания». */
+  oversees: boolean
   // Что показывать в активной компании: права RBAC ∩ состав поставки (реестр Ядра).
   // null = ничто не ограничивает (полный доступ и реестр молчит).
   companyModules: string[] | null
@@ -212,6 +216,10 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     ? 'admin'
     : (activeRef?.role === 'admin' ? 'admin' : 'user')
   const isCompanyAdmin = !!user?.is_superadmin || companyRole === 'admin'
+  // Администратор надзирает всегда; остальным признак считает сервер по
+  // штатной структуре — здесь его не пересчитываем, иначе появится второй
+  // источник правды, и он разойдётся с первым.
+  const oversees = isCompanyAdmin || !!activeRef?.oversees
   // Модули активной компании = ПРАВА (RBAC) ∩ СОСТАВ ПОСТАВКИ (реестр Ядра).
   // Права: admin/суперадмин → null (полный доступ). Состав: что подключено компании
   // в /admin → «Приложения»; отключённый раздел не показываем и админу — он не куплен,
@@ -247,6 +255,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         setOrganizationId,
         companyRole,
         isCompanyAdmin,
+        oversees,
         companyModules,
         canApp,
         canModule,
