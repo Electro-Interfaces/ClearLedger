@@ -119,7 +119,7 @@ export function VersionsSection({ companyId }: { companyId: string }) {
           <Loader2 className="h-4 w-4 animate-spin" />Загрузка версий…
         </div>
       ) : q.isError ? (
-        <QueryError message="Не удалось загрузить версии" onRetry={() => void q.refetch()} />
+        <QueryError message="Не удалось загрузить версии" error={q.error} onRetry={() => void q.refetch()} />
       ) : versions.length === 0 ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
           В этом проекте версий пока нет. Заведите ближайшую — например{' '}
@@ -226,7 +226,7 @@ function VersionBody({ versionId, companyId, name }: {
     )
   }
   if (q.isError) {
-    return <QueryError message="Состав версии не загрузился" onRetry={() => void q.refetch()} />
+    return <QueryError message="Состав версии не загрузился" error={q.error} onRetry={() => void q.refetch()} />
   }
 
   const { done = [], left = [], found = [] } = q.data ?? {}

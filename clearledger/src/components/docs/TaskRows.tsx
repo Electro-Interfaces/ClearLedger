@@ -140,7 +140,7 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
           <Loader2 className="h-4 w-4 animate-spin" />Собираем список…
         </div>
       ) : q.isError ? (
-        <QueryError message="Список не загрузился" onRetry={() => void q.refetch()} />
+        <QueryError message="Список не загрузился" error={q.error} onRetry={() => void q.refetch()} />
       ) : rows.length === 0 ? (
         <p className="rounded-lg border border-border px-4 py-8 text-center text-sm text-muted-foreground">
           {empty}

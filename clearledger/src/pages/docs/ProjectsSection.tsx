@@ -77,7 +77,7 @@ export function ProjectsSection({ companyId }: { companyId: string }) {
           <Loader2 className="h-4 w-4 animate-spin" />Загрузка проектов…
         </div>
       ) : q.isError ? (
-        <QueryError message="Не удалось загрузить проекты" onRetry={() => void q.refetch()} />
+        <QueryError message="Не удалось загрузить проекты" error={q.error} onRetry={() => void q.refetch()} />
       ) : projects.length === 0 ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
           Проектов пока нет. Заведите первый — например <span className="font-mono">TF</span>{' '}

@@ -121,3 +121,37 @@ async def охват(db: AsyncSession, cid: uuid.UUID, user: User) -> Охват
 async def надзирает(db: AsyncSession, cid: uuid.UUID, user: User) -> bool:
     """Показывать ли этому человеку раздел «Компания»."""
     return (await охват(db, cid, user)).есть
+
+
+def в_охвате(о: Охват, колонка):
+    """SQL-условие «ответственный за этот предмет — в моём охвате».
+
+    `NULL` входит намеренно: работа без исполнителя висит именно потому, что её
+    никто не взял, и разбирать её — первое дело надзирающего. Спрятать её от
+    него значило бы оставить бесхозное вовсе без хозяина.
+    """
+    from sqlalchemy import false, or_, true
+
+    if о.вся_компания:
+        return true()
+    if not о.люди:
+        return false()
+    return or_(колонка.in_(о.люди), колонка.is_(None))
+
+
+async def assert_надзор(db: AsyncSession, cid: uuid.UUID, user: User) -> Охват:
+    """Пустить в надзорный разрез или отказать словами.
+
+    Отказ, а не пустой список: пустой экран человек читает как «работы нет», и
+    идёт спрашивать, почему у всех она есть, а у него нет.
+    """
+    from fastapi import HTTPException, status
+
+    о = await охват(db, cid, user)
+    if not о.есть:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Этот разрез — для тех, кто отвечает за чужую работу. "
+            "Своя работа целиком в разделе «Моё»",
+        )
+    return о

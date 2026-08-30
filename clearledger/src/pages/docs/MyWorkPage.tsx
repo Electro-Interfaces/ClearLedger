@@ -115,7 +115,7 @@ export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
           <Loader2 className="h-4 w-4 animate-spin" />Собираем очередь…
         </div>
       ) : q.isError ? (
-        <QueryError message="Очередь не загрузилась" onRetry={() => void q.refetch()} />
+        <QueryError message="Очередь не загрузилась" error={q.error} onRetry={() => void q.refetch()} />
       ) : rows.length === 0 ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
           {empty ?? (only?.length

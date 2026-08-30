@@ -157,3 +157,53 @@ async def test_личную_запись_не_трогает_и_надзираю
             await _assert_actor(db, cid, люди[кто], запись)
         assert ошибка.value.status_code == 404, (
             f"«{кто}» получил ответ о существовании чужой личной записи")
+
+
+async def test_лента_компании_сужена_охватом(auth_client, db: AsyncSession):
+    """Начальник отдела видит своих людей, а не всё пространство."""
+    from app.models import Task, TaskType
+    from app.auth import get_current_user
+    from app.main import app
+
+    cid, люди = await _структура(db)
+    тип = TaskType(company_id=cid, code=f"SC{uuid.uuid4().hex[:5].upper()}",
+                   name="Охват", route=[{"code": "new", "name": "Заведено"}],
+                   default_priority="medium")
+    db.add(тип)
+    await db.flush()
+    метка = uuid.uuid4().hex[:8]
+    for ключ in ("а", "б"):
+        db.add(Task(company_id=cid, type_id=тип.id,
+                    title=f"[{метка}] работа {ключ}", status="open",
+                    stage_code="new", visibility="company",
+                    author_id=люди[ключ].id, assignee_id=люди[ключ].id))
+    await db.commit()
+
+    async def лента(кто):
+        app.dependency_overrides[get_current_user] = lambda: кто
+        try:
+            r = await auth_client.get("/api/work", params={
+                "company_id": str(cid), "scope": "open", "limit": 200})
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+        return r
+
+    # Начальник отдела А видит своего и не видит соседнего.
+    r = await лента(люди["средний"])
+    assert r.status_code == 200, r.text
+    названия = {w["title"] for w in r.json()["work"]}
+    assert f"[{метка}] работа а" in названия, "свой подчинённый не показан"
+    assert f"[{метка}] работа б" not in названия, (
+        "соседний отдел виден — лента не сужена охватом")
+
+    # Начальник управления видит обоих: ветка идёт вниз целиком.
+    r = await лента(люди["крупный"])
+    названия = {w["title"] for w in r.json()["work"]}
+    assert {f"[{метка}] работа а", f"[{метка}] работа б"} <= названия
+
+    # Рядовому разрез не открывается вовсе — и отказ объясняет, почему.
+    r = await лента(люди["а"])
+    assert r.status_code == 403, "рядовой получил ленту компании"
+    assert "«Моё»" in r.json().get("detail", ""), (
+        "отказ не сказал, где искать свою работу"
+    )

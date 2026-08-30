@@ -130,7 +130,7 @@ export function ListsPage({ mode = 'lists' }: { mode?: ListsMode }) {
       </header>
 
       {q.isError && (
-        <QueryError message="Подборки не загрузились" onRetry={() => void q.refetch()} />
+        <QueryError message="Подборки не загрузились" error={q.error} onRetry={() => void q.refetch()} />
       )}
 
       {/* Действия над выбранной подборкой. Обзор здесь же: единственные личные

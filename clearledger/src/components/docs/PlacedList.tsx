@@ -56,7 +56,7 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
     )
   }
   if (q.isError) {
-    return <QueryError message="Раскладка не загрузилась" onRetry={() => void q.refetch()} />
+    return <QueryError message="Раскладка не загрузилась" error={q.error} onRetry={() => void q.refetch()} />
   }
   if (rows.length === 0) {
     return (

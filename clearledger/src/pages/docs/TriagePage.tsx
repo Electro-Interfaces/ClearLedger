@@ -75,7 +75,7 @@ export function TriagePage() {
       </header>
 
       {q.isError && (
-        <QueryError message="Разбор не загрузился" onRetry={() => void q.refetch()} />
+        <QueryError message="Разбор не загрузился" error={q.error} onRetry={() => void q.refetch()} />
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">

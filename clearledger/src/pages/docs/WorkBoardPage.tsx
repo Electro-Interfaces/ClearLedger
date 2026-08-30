@@ -301,7 +301,7 @@ export function WorkBoardPage() {
           <Loader2 className="h-4 w-4 animate-spin" />Собираем доску…
         </div>
       ) : q.isError ? (
-        <QueryError message="Доска не загрузилась" onRetry={() => void q.refetch()} />
+        <QueryError message="Доска не загрузилась" error={q.error} onRetry={() => void q.refetch()} />
       ) : (
         <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto pb-2">
           {columns.map((col) => {

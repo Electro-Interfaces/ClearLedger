@@ -121,6 +121,7 @@ let isRedirecting = false
 /** Страницы, доступные без сессии: увести отсюда на вход — значит сломать вход. */
 const PUBLIC_PAGES = [
   '/login', '/invite/', '/reset-password/', '/showcase/', '/demo/shop', '/doc-share/', '/doc-verify/',
+  '/space-guest',
 ]
 export function isPublicPage(pathname: string): boolean {
   const p = pathname.replace(/\/$/, '')
@@ -168,7 +169,13 @@ async function handleResponse<T>(res: Response): Promise<T> {
     }
 
     if (res.status === 403) {
-      throw new ApiError(403, 'Доступ запрещён. Проверьте права пользователя.')
+      // Объяснение сервера важнее общей фразы: «этот разрез — для тех, кто
+      // отвечает за чужую работу» говорит человеку, что делать, а «проверьте
+      // права пользователя» отправляет его звонить. Общая фраза остаётся
+      // запасной — на случай, когда сервер промолчал.
+      throw new ApiError(403, detail && detail !== res.statusText
+        ? detail
+        : 'Доступ запрещён. Проверьте права пользователя.')
     }
 
     throw new ApiError(res.status, detail)

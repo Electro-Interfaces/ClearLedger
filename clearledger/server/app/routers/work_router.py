@@ -46,8 +46,11 @@ from app.models import (
     DocCard, DocKind, DocLabelLink, DocRelation, ServiceLocation, Task, TaskLabel,
     TaskLabelLink, TaskProject, TaskType, User, UserCompany,
 )
+from sqlalchemy import true as _sa_true
+
 from app.config import settings
-from app.services import placement, space_time, work_query, work_state
+from app.services import (oversight, placement, space_time, work_query,
+                          work_state)
 
 log = logging.getLogger(__name__)
 
@@ -175,6 +178,12 @@ async def list_work(
     admin = await _is_admin(db, cid, current_user)
     doc_clause = await _readable_doc_clause(db, cid, current_user)
 
+    # Разрезы компании — надзорные: их открывает тот, кто отвечает за чужую
+    # работу, и видит он свою ветку, а не всё пространство. Личные разрезы
+    # (`mine`, `assigned`) отбираются по участию и этого условия не знают.
+    надзорный = scope in ("open", "done", "all")
+    о_надзоре = await oversight.assert_надзор(db, cid, current_user) if надзорный else None
+
     task_sel = select(
         Task.id.label("id"),
         literal("task", String).label("kind"),
@@ -199,7 +208,9 @@ async def list_work(
     # Личные записи в ленту компании не входят: здесь работа, а не чья-то
     # записная книжка. Право видеть своё у автора остаётся (`_visible_to`) —
     # это отбор, а не запрет.
-    ).where(Task.company_id == cid, _visible_to(current_user, admin), _not_personal())
+    ).where(Task.company_id == cid, _visible_to(current_user, admin), _not_personal(),
+            oversight.в_охвате(о_надзоре, Task.assignee_id) if о_надзоре
+            else _sa_true())
 
     # Имена колонок задаются явно у обеих половин: UNION берёт их у первой, и
     # при отборе только по документам подзапрос назывался бы `kind_id` вместо
@@ -225,7 +236,9 @@ async def list_work(
         literal(None, String).label("priority"),
         DocCard.created_at.label("created_at"),
         DocCard.updated_at.label("updated_at"),
-    ).where(DocCard.company_id == cid, doc_clause)
+    ).where(DocCard.company_id == cid, doc_clause,
+            oversight.в_охвате(о_надзоре, DocCard.responsible_id) if о_надзоре
+            else _sa_true())
 
     if kind == "task":
         parts = [task_sel]
@@ -678,13 +691,19 @@ async def work_summary(
 
     admin = await _is_admin(db, cid, current_user)
     doc_clause = await _readable_doc_clause(db, cid, current_user)
+    # Тот же охват, что у самой ленты: числа над списком обязаны считать то же,
+    # что список показывает. Две ручки, отвечающие на один вопрос разными
+    # числами, — это не оптимизация, а две правды.
+    о = await oversight.assert_надзор(db, cid, current_user)
     counts: dict[str, dict[str, int]] = {
         c: {"doc": 0, "task": 0} for c in work_state.COLUMNS}
 
     for model, clause, state_expr, key in (
-        (Task, and_(_visible_to(current_user, admin), _not_personal()),
+        (Task, and_(_visible_to(current_user, admin), _not_personal(),
+                    oversight.в_охвате(о, Task.assignee_id)),
          work_state.task_state_sql(Task), "task"),
-        (DocCard, doc_clause, work_state.doc_state_sql(DocCard), "doc"),
+        (DocCard, and_(doc_clause, oversight.в_охвате(о, DocCard.responsible_id)),
+         work_state.doc_state_sql(DocCard), "doc"),
     ):
         for value, count in (await db.execute(
             select(state_expr.label("state"), func.count())

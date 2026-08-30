@@ -1,5 +1,5 @@
 /**
- * Вся работа компании: документы и поручения одной лентой (этапы 13б и 13в).
+ * Документы и поручения компании: документы и поручения одной лентой (этапы 13б и 13в).
  *
  * Экран отвечает на вопрос «что у нас в работе», а не «что у нас в документах и
  * отдельно в поручениях». Род предмета — колонка строки и фильтр, а не отдельный
@@ -120,7 +120,7 @@ export function WorkListPage() {
     <div className="space-y-3 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold">Вся работа</h1>
+          <h1 className="text-lg font-semibold">Документы и поручения</h1>
           <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">
             Документы и поручения одной лентой. Род предмета — колонка и фильтр, а
             не отдельный раздел: «входящие» это отбор по виду документа.
@@ -229,7 +229,7 @@ export function WorkListPage() {
           <Loader2 className="h-4 w-4 animate-spin" />Собираем работу…
         </div>
       ) : listQ.isError ? (
-        <QueryError message="Не удалось загрузить работу" onRetry={() => void listQ.refetch()} />
+        <QueryError message="Не удалось загрузить работу" error={listQ.error} onRetry={() => void listQ.refetch()} />
       ) : items.length === 0 ? (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
           {hasFilter
