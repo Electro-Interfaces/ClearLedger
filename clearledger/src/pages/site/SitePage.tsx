@@ -255,6 +255,14 @@ export function SitePage() {
 
       <ConnectionNote reason={reason} />
 
+      {/* «Витрина» — не таблица, а рабочее место со своей второй колонкой, как у
+          «Топлива» и «Эксплуатации». Карточка ей мешает: колонка пунктов должна
+          стоять от края панели, а не внутри отступов карточки. */}
+      {tab === 'showcase' ? (
+        <div className="h-[calc(100vh-13rem)] min-h-[26rem] overflow-hidden rounded-lg border bg-card">
+          <ShowcaseEditor companyId={companyId} />
+        </div>
+      ) : (
       <Card>
         <CardContent className="pt-6">
           {tab === 'leads' && (
@@ -311,8 +319,6 @@ export function SitePage() {
               </TableBody>
             </Table>
           )}
-
-          {tab === 'showcase' && <ShowcaseEditor companyId={companyId} />}
 
           {tab === 'requests' && (
             <Table>
@@ -665,6 +671,7 @@ export function SitePage() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   )
 }

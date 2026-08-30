@@ -18,6 +18,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { CentralPanelLayout } from '@/components/workspace/CentralPanelLayout'
 import * as siteService from '@/services/siteService'
 import { CONTENT_LABELS, FIELD_LABELS, siteTime } from '@/services/siteService'
 import { cn } from '@/lib/utils'
@@ -156,23 +158,18 @@ export function ShowcaseEditor({ companyId }: { companyId: string }) {
     return <p className="py-8 text-center text-muted-foreground">Витрина не прочитана</p>
   }
 
+  // Разделы витрины — пункты ВТОРОЙ КОЛОНКИ, той же, что у «Топлива» и
+  // «Эксплуатации» (SPACE.md §«Разделы, пункты и табы»). Своя вёрстка списка
+  // здесь была ошибкой: пункт выглядел кнопкой действия, а рабочее место —
+  // непохожим на соседние.
   return (
-    <div className="grid gap-4 lg:grid-cols-[200px_1fr]">
-      <nav className="space-y-1">
-        {keys.map((k) => (
-          <button
-            key={k} type="button" onClick={() => setKey(k)}
-            className={cn('w-full rounded-md px-3 py-2 text-left text-sm transition-colors',
-              k === current
-                ? 'bg-primary font-semibold text-primary-foreground shadow-soft'
-                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground')}
-          >
-            {CONTENT_LABELS[k] ?? k}
-          </button>
-        ))}
-      </nav>
-
-      <div>
+    <CentralPanelLayout
+      items={keys.map((k) => ({ key: k, label: CONTENT_LABELS[k] ?? k }))}
+      activeKey={current}
+      onSelect={setKey}
+    >
+      <ScrollArea className="h-full">
+        <div className="p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
             {meta?.updated_at
@@ -195,7 +192,8 @@ export function ShowcaseEditor({ companyId }: { companyId: string }) {
         {draft === null
           ? <p className="py-8 text-center text-muted-foreground">Раздел пуст</p>
           : <ValueField value={draft} onChange={setDraft} />}
-      </div>
-    </div>
+        </div>
+      </ScrollArea>
+    </CentralPanelLayout>
   )
 }
