@@ -78,6 +78,17 @@ export async function login(email: string, password: string): Promise<TokenRespo
   return result
 }
 
+/**
+ * Сессия демо-показа: пространство открыли из кабинета сайта по одноразовому
+ * пропуску, и спрашивать пароль уже не у кого. Ручка отвечает только на стенде
+ * (там задан демо-пользователь) и только через кромку кабинета.
+ */
+export async function demoSession(): Promise<TokenResponse> {
+  const result = await api.post<TokenResponse>('/api/auth/demo-session', {})
+  api.setToken(result.access_token)
+  return result
+}
+
 /** Регистрация нового пользователя */
 export async function register(data: {
   email: string

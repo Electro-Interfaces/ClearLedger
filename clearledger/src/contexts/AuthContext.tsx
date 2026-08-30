@@ -56,7 +56,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!apiEnabled) return
     let alive = true
     const t = api.getToken()
-    if (!t) { setUser(null); setLoading(false); return }
+    if (!t) {
+      // Стенд, открытый из кабинета сайта, узнаётся по базовому пути сборки
+      // (/demo-run/<стенд>/app/). Отдельного флага не заводим: сборка под кабинет
+      // и есть признак показа, а лишняя переменная разъехалась бы с ней.
+      if (import.meta.env.BASE_URL.startsWith('/demo-run/')) {
+        authService.demoSession()
+          .then(() => authService.getMe())
+          .then((me) => { if (alive) { setUser(me); setTokenState(api.getToken()) } })
+          // Молча падаем на форму входа: показ без сессии — это неудобно,
+          // но экран ошибки посреди демонстрации хуже.
+          .catch(() => { if (alive) setUser(null) })
+          .finally(() => { if (alive) setLoading(false) })
+        return
+      }
+      setUser(null); setLoading(false); return
+    }
     authService.getMe()
       .then((me) => { if (alive) { setUser(me); setTokenState(t) } })
       .catch(() => { api.clearToken(); if (alive) { setUser(null); setTokenState(null) } })

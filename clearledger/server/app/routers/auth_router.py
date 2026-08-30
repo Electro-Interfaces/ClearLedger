@@ -4,12 +4,13 @@
 
 import hashlib
 import logging
+import os
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
@@ -112,6 +113,42 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     token = create_access_token(str(user.id), user.email)
     return TokenResponse(
         access_token=token,
+        user=_user_response(user),
+    )
+
+
+# ===== Демонстрационный вход =====
+# Стенд показывают клиенту из кабинета сайта: человек нажал «Открыть», кромка
+# погасила одноразовый пропуск — и он должен увидеть пространство, а не форму
+# входа. Пароль в такой цепочке спрашивать не у кого и незачем.
+#
+# Ручка живёт только там, где её включили окружением стека (`DEMO_SPACE_USER`), и
+# отвечает только на запросы, пришедшие через кромку кабинета (она проставляет
+# `X-Demo-Context: cabinet`). На рабочем пространстве переменной нет — ручка молчит
+# четырёхсотым, даже если кто-то узнает адрес.
+
+
+@router.post("/demo-session", response_model=TokenResponse)
+async def demo_session(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Сессия демо-пользователя для показа из кабинета сайта."""
+    email = (os.environ.get("DEMO_SPACE_USER") or "").strip().lower()
+    if not email:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Демо-вход не включён")
+    if request.headers.get("X-Demo-Context") != "cabinet":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Демо-вход — только из кабинета")
+
+    user = (await db.execute(select(User).where(
+        func.lower(User.email) == email))).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Демо-пользователь не заведён")
+
+    user.last_seen_at = datetime.now(timezone.utc)
+    await db.commit()
+    return TokenResponse(
+        access_token=create_access_token(str(user.id), user.email),
         user=_user_response(user),
     )
 

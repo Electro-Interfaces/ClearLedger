@@ -449,8 +449,62 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
     )
   }
 
+  /**
+   * Стол демонстрационного стенда.
+   *
+   * Рабочий стол показывает всё, чем компания пользуется, — плитки равнозначны, и
+   * это правильно для того, кто здесь работает. Человеку, которому показывают
+   * систему впервые, такой стол не отвечает на единственный его вопрос: с чего
+   * начать. Поэтому на стенде тот же каталог подан тремя зонами разного веса:
+   * что ставим сейчас, что идёт в комплекте, что можно добавить потом.
+   *
+   * Зоны считаются по данным, а не по списку кодов: «идёт в комплекте» — это
+   * продукт с рабочим маршрутом в этом стеке, «можно добавить» — заведённый в
+   * реестре, но без экранов. Список кодов разошёлся бы с составом стека на первой
+   * же выкатке.
+   */
+  function renderStandLayers() {
+    const optional = (a: SsoApp) => a.mode === 'internal' && !a.route
+    const monitor = all.find((a) => a.code === 'monitor')
+    const included = all.filter((a) => !optional(a) && a.code !== 'monitor')
+    const later = all.filter(optional)
+    return (
+      <>
+        <div className="mb-5 rounded-xl border border-primary/25 bg-primary/[0.06] p-4 sm:p-5">
+          <h2 className="text-base font-semibold sm:text-lg">
+            Единое пространство компании
+          </h2>
+          <p className="mt-1.5 max-w-3xl text-sm text-muted-foreground">
+            Один вход, одни люди и права, одна переписка — а продукты подключаются
+            по одному, когда нужны. Сейчас предлагается само пространство, в котором
+            вы находитесь, и «Монитор» — панель сети АЗС.
+          </p>
+          {monitor && (
+            <Button className="mt-3.5" onClick={() => openProduct(monitor)}
+                    disabled={busy === monitor.code}>
+              Открыть «Монитор»
+            </Button>
+          )}
+        </div>
+        <Section title="Уже внутри"
+                 hint="идёт вместе с пространством — подключать ничего не нужно">
+          {included.map(renderProductTile)}
+        </Section>
+        {later.length > 0 && (
+          <Section title="Можно добавить позже"
+                   hint="продукты экосистемы: по одному, когда понадобятся" divider>
+            {later.map(renderProductTile)}
+          </Section>
+        )}
+      </>
+    )
+  }
+
   /** Слои продуктов — общая часть стола и встроенной панели «Приложения». */
   function renderLayers() {
+    // Стенд узнаётся по базовому пути сборки: пространство отдаётся кабинетом
+    // сайта под /demo-run/<стенд>/app/, и другого признака показа не нужно.
+    if (import.meta.env.BASE_URL.startsWith('/demo-run/')) return renderStandLayers()
     return (
       <>
         {lead.length > 0 && (
