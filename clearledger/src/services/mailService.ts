@@ -129,7 +129,7 @@ export interface MailRule {
   subjectLike: string | null
   hasAttachment: boolean | null
   unknownSender: boolean | null
-  action: 'intake' | 'ticket' | 'chat' | 'task' | 'doc' | 'archive' | 'quarantine' | 'reject'
+  action: 'intake' | 'ticket' | 'chat' | 'task' | 'doc' | 'inbox' | 'archive' | 'quarantine' | 'reject'
   setCounterpartyId: string | null
   setContractId: string | null
   /** Куда доставить: комната чата для действия «в чат». */

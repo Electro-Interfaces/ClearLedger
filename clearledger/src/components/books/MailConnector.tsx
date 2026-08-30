@@ -958,6 +958,9 @@ const ACTIONS: { key: MailRule['action']; label: string }[] = [
   { key: 'chat', label: 'в чат' },
   { key: 'task', label: 'в задачу' },
   { key: 'doc', label: 'в документ «Трека»' },
+  // Человек просто написал: не заявка (та про объект) и не документ (тот про
+  // вложение) — разговор. Место у разговора одно: общая очередь поддержки.
+  { key: 'inbox', label: 'в очередь обращений' },
   { key: 'archive', label: 'в архив' },
   { key: 'quarantine', label: 'в карантин' },
   { key: 'reject', label: 'отклонить' },
