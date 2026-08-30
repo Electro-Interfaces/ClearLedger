@@ -164,7 +164,7 @@ export function QueryBar({ value, onChange, result, suggestions, className }: {
               className={cn('flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left text-xs',
                 idx === cursor ? 'bg-accent' : 'hover:bg-accent/60')}>
               <span className="font-mono">{it.text.trim()}</span>
-              <span className="truncate text-[11px] text-muted-foreground">{it.hint}</span>
+              <span className="truncate text-xs text-muted-foreground">{it.hint}</span>
             </button>
           ))}
         </div>
@@ -173,7 +173,7 @@ export function QueryBar({ value, onChange, result, suggestions, className }: {
       {/* Неузнанное показываем всегда: молча проглоченная опечатка сужает список,
           а человек читает это как «работы нет». */}
       {result?.unknown && result.unknown.length > 0 && (
-        <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
+        <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
           Не понял: {result.unknown.join(' · ')}
         </p>
       )}

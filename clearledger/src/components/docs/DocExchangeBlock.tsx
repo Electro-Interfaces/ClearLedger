@@ -91,7 +91,7 @@ export function DocExchangeBlock({ doc, companyId }: {
             `/api/docs/${doc.id}/export/download?company_id=${companyId}`, '_blank')}>
           <Download className="mr-1.5 h-4 w-4" />Скачать пакет
         </Button>
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           Документ, опись с реквизитами и лист согласования одним архивом
         </span>
       </div>

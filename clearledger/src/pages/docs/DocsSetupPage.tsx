@@ -152,7 +152,7 @@ export function DocsSetupPage() {
             <div key={k.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
               <div>
                 <div className="text-sm font-medium">{k.name}</div>
-                <div className="text-[11px] text-muted-foreground">
+                <div className="text-xs text-muted-foreground">
                   {k.number_template.replace('{prefix}', k.number_prefix || k.code)}
                   {' · '}{SCOPE_LABEL[k.number_scope] ?? k.number_scope}
                 </div>
@@ -202,14 +202,14 @@ export function DocsSetupPage() {
           <div key={k.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
             <div className="min-w-0">
               <div className="text-sm font-medium">{k.name}</div>
-              <div className="text-[11px] text-muted-foreground">
+              <div className="text-xs text-muted-foreground">
                 {DOC_FAMILY[k.family] ?? k.family}
                 {' · номер '}
                 {k.number_template.replace('{prefix}', k.number_prefix || k.code)}
                 {' · '}{SCOPE_LABEL[k.number_scope] ?? k.number_scope}
               </div>
               {k.description && (
-                <div className="pt-0.5 text-[11px] text-muted-foreground">{k.description}</div>
+                <div className="pt-0.5 text-xs text-muted-foreground">{k.description}</div>
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -471,7 +471,7 @@ function Cases({ companyId }: { companyId: string }) {
           <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
             <div className="min-w-0">
               <div className="text-sm font-medium">{item.year} · {item.index} · {item.title}</div>
-              <div className="text-[11px] text-muted-foreground">
+              <div className="text-xs text-muted-foreground">
                 {item.storage_term}{item.epk ? ' · ЭПК' : ''}
                 {item.organization_id
                   ? ` · ${organizationName.get(item.organization_id) ?? 'юрлицо'}` : ' · вся компания'}
@@ -607,7 +607,7 @@ function Substitutions({ companyId }: { companyId: string }) {
               <div className="text-sm">
                 {r.deputy} <span className="text-muted-foreground">замещает</span> {r.user}
               </div>
-              <div className="text-[11px] text-muted-foreground">
+              <div className="text-xs text-muted-foreground">
                 {r.starts_on} - {r.ends_on}
                 {r.basis ? ` · ${r.basis}` : ''}
                 {r.now ? ' · действует сейчас' : ''}
@@ -761,10 +761,10 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
               <div className="text-sm font-medium">{t.name}</div>
               <span className="font-mono text-xs text-muted-foreground">{t.code}</span>
             </div>
-            <div className="text-[11px] text-muted-foreground">
+            <div className="text-xs text-muted-foreground">
               выгрузка: {t.outbox_path || 'не указана'}
             </div>
-            <div className="text-[11px] text-muted-foreground">
+            <div className="text-xs text-muted-foreground">
               приём: {t.inbox_path || 'не указан'}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -798,12 +798,12 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
                 </Button>
               )}
             </div>
-            <div className="text-[11px] text-muted-foreground">
+            <div className="text-xs text-muted-foreground">
               {t.scan_enabled ? 'Автопроверка включена' : 'Автопроверка выключена'}
               {t.last_scan_at ? ` · последняя ${t.last_scan_at.slice(0, 16).replace('T', ' ')}` : ''}
             </div>
             {t.last_error && (
-              <div className="text-[11px] text-destructive">ошибка: {t.last_error}</div>
+              <div className="text-xs text-destructive">ошибка: {t.last_error}</div>
             )}
           </div>
         ))}

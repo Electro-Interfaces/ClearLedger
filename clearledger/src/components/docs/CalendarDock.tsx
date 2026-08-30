@@ -184,7 +184,7 @@ export function CalendarDock() {
                 {/* Первое число подписывает месяц: без этого пятая неделя висит
                     без ответа на вопрос «а это какой месяц». */}
                 {первыйВМесяце && !прошёл && (
-                  <span className="mt-0.5 text-[10px] uppercase leading-none opacity-70">
+                  <span className="mt-0.5 text-xs uppercase leading-none opacity-70">
                     {format(d, 'LLL', { locale: ru })}
                   </span>
                 )}

@@ -114,12 +114,12 @@ export function TaskChat({ taskId, taskNumber, selfName }: {
                 <div className={cn('max-w-[75%] rounded-lg px-3 py-1.5 text-xs',
                   own ? 'bg-primary/10' : 'bg-muted/60')}>
                   {!own && (
-                    <div className="mb-0.5 text-[11px] font-medium text-muted-foreground">
+                    <div className="mb-0.5 text-xs font-medium text-muted-foreground">
                       {m.userName ?? 'участник'}
                     </div>
                   )}
                   <div className="whitespace-pre-wrap text-foreground/90">{m.content}</div>
-                  <div className="mt-0.5 text-right text-[11px] text-muted-foreground">
+                  <div className="mt-0.5 text-right text-xs text-muted-foreground">
                     {dtT(m.createdAt)}
                   </div>
                 </div>

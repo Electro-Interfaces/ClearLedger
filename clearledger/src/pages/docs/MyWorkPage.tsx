@@ -169,7 +169,7 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
     || item.reason === 'own_note'
     || (item.reason === 'acquaint' && item.acquaint_id)
   return (
-    <div className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
+    <div className="group/строка flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
       {/* Ручка — единственное, за что строку уносят: остальное остаётся текстом
           и кнопками, которые нажимают. */}
       <DragHandle targetRef={workService.targetRef(item)}

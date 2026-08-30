@@ -42,7 +42,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import * as workService from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import type { WorkItem, WorkState } from '@/services/workService'
-import { dt, PRIORITY_TONE } from '@/components/tasks/taskWords'
+import { dt, PRIORITY_TONE, priorityWord } from '@/components/tasks/taskWords'
 import { columnOf as колонкаПредмета, type BoardAxis } from '@/lib/boardAxis'
 import { cn } from '@/lib/utils'
 
@@ -323,7 +323,7 @@ export function WorkBoardPage() {
                     && 'border-primary bg-primary/5 ring-1 ring-primary/30')}>
                 <div className="flex items-center gap-2 px-3 py-2.5">
                   <span className="text-[13px] font-medium">{col.name}</span>
-                  <span className={cn('ml-auto rounded-full px-1.5 py-0.5 text-[11px] tabular-nums',
+                  <span className={cn('ml-auto rounded-full px-1.5 py-0.5 text-xs tabular-nums',
                     cards.length ? 'bg-background text-muted-foreground'
                       : 'text-muted-foreground/50')}>
                     {cards.length}
@@ -339,7 +339,7 @@ export function WorkBoardPage() {
                       onOpen={() => navigate(workService.workHref(item))} />
                   ))}
                   {cards.length === 0 && (
-                    <div className="px-2 py-6 text-center text-[11px] text-muted-foreground/70">
+                    <div className="px-2 py-6 text-center text-xs text-muted-foreground/70">
                       Пусто
                     </div>
                   )}
@@ -348,7 +348,7 @@ export function WorkBoardPage() {
             )
           })}
           {axis === 'place' && (lists.data?.lists.length ?? 0) === 0 && (
-            <div className="w-[280px] shrink-0 self-start rounded-xl border border-dashed p-3 text-[11px] text-muted-foreground">
+            <div className="w-[280px] shrink-0 self-start rounded-xl border border-dashed p-3 text-xs text-muted-foreground">
               Подборок пока нет — заводятся в разделе «Моё». Пока их нет, доска
               раскладки показывает только день и отложенное.
             </div>
@@ -377,19 +377,23 @@ function Card({ item, dragging, showState, onDragStart, onDragEnd, onOpen }: {
       <div className="flex items-start gap-1.5">
         <Icon className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground"
           aria-label={item.kind === 'doc' ? 'документ' : 'поручение'} />
-        <span className={cn('flex-1 font-medium leading-snug',
-          item.priority && PRIORITY_TONE[item.priority])}>
-          {item.title}
-        </span>
-        <span className="shrink-0 font-mono text-[11px] text-muted-foreground/70">
+        <span className="flex-1 font-medium leading-snug">{item.title}</span>
+        <span className="shrink-0 font-mono text-xs text-muted-foreground/70">
           {item.key}
         </span>
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+        {/* Приоритет словом, а не цветом заголовка: карточка на доске и так
+            читается сверху вниз, и окрашенное название спорит с состоянием. */}
+        {item.priority && priorityWord(item.priority) && (
+          <span className={PRIORITY_TONE[item.priority]}>
+            {priorityWord(item.priority)}
+          </span>
+        )}
         {showState && (
           <span className="rounded bg-muted px-1 py-px">{item.state_name}</span>
         )}
-        {item.stage && <span>{item.stage}</span>}
+        {item.stage && item.stage !== item.state_name && <span>{item.stage}</span>}
         {item.responsible && <span>{item.responsible}</span>}
         {item.due_at && (
           <span className={cn(item.overdue && 'text-red-600 dark:text-red-400')}>

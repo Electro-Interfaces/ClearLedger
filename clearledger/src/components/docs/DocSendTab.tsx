@@ -141,7 +141,7 @@ export function DocSendTab({ doc, companyId, onChanged }: {
         <Button size="sm" onClick={() => share.mutate()} disabled={share.isPending}>
           Создать ссылку
         </Button>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Подтверждение по ссылке равнозначно отметке о получении только если такой
           порядок согласован с контрагентом в договоре.
         </p>
@@ -155,7 +155,7 @@ export function DocSendTab({ doc, companyId, onChanged }: {
             <div key={l.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
               <div className="min-w-0 text-sm">
                 <div>{l.recipient || 'без имени'}</div>
-                <div className="text-[11px] text-muted-foreground">
+                <div className="text-xs text-muted-foreground">
                   до {formatDate(l.expires_at)} · открытий {l.opened_count}
                   {l.acknowledged_at
                     ? ` · получение подтвердил ${l.acknowledged_by}`

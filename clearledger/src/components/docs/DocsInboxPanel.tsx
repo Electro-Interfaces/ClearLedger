@@ -127,7 +127,7 @@ export function DocsInboxPanel() {
                   <FileDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="truncate">{it.file_name}</span>
                 </button>
-                <div className="text-[11px] text-muted-foreground">
+                <div className="text-xs text-muted-foreground">
                   {it.target ? `${it.target} · ` : ''}
                   {Math.max(1, Math.round(it.size / 1024))} КБ
                   {it.found_at ? ` · ${it.found_at.slice(0, 16).replace('T', ' ')}` : ''}

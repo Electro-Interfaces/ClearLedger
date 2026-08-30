@@ -196,7 +196,7 @@ export function DocsOverviewPage() {
 
       <Card className="p-4">
         <div className="text-sm font-medium">Где стоит согласование</div>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Колонка — шаг маршрута. Вопрос «где документ застрял» это вопрос о шаге
           и о том, кого ждут.
         </p>
@@ -487,7 +487,7 @@ function Metric({ label, value, hint, tone, to }: {
         <CardTitle className={`text-2xl tabular-nums ${tone === 'danger' ? 'text-destructive' : ''}`}>
           {value}
         </CardTitle>
-        {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
       </CardHeader>
     </Card>
   )
@@ -506,7 +506,7 @@ function Tile({ label, value, hint, onClick }: {
       className="rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-accent/40">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="pt-0.5 text-2xl font-semibold">{value}</div>
-      <div className="pt-0.5 text-[11px] text-muted-foreground">{hint}</div>
+      <div className="pt-0.5 text-xs text-muted-foreground">{hint}</div>
     </button>
   )
 }

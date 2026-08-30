@@ -113,7 +113,7 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
                   Реквизиты и {state.snapshot.files.length} файл(а) · редакция{' '}
                   {state.snapshot.card.current_revision || 'без основного файла'}
                 </div>
-                <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground"
+                <div className="mt-1 truncate font-mono text-xs text-muted-foreground"
                   title={state.snapshot_sha256}>
                   SHA-256 {state.snapshot_sha256}
                 </div>
@@ -132,7 +132,7 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
                     <span className="truncate">{file.file_name}</span>
                     <span className="shrink-0 text-muted-foreground">ред. {file.revision}</span>
                   </span>
-                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground"
+                  <span className="shrink-0 font-mono text-xs text-muted-foreground"
                     title={file.sha256}>{file.sha256.slice(0, 12)}…</span>
                 </div>
               ))}

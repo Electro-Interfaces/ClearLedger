@@ -74,7 +74,7 @@ export function WorkTrace({ events, empty, renderBadge, renderActions, renderExt
             <span className="font-medium">{event.actor ?? 'система'}</span>
             <span className="text-muted-foreground">{event.action}</span>
             {renderBadge?.(event)}
-            <span className="ml-auto text-[11px] text-muted-foreground">
+            <span className="ml-auto text-xs text-muted-foreground">
               {stamp(event.at)}
             </span>
             {renderActions?.(event)}

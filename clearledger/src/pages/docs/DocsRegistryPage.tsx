@@ -222,7 +222,7 @@ export function DocsRegistryPage() {
               {(doc.labels ?? []).length > 0 && (
                 <span className="flex flex-wrap gap-1">
                   {(doc.labels ?? []).map((label) => (
-                    <span key={label.id} className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                    <span key={label.id} className="rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                       {label.name}
                     </span>
                   ))}

@@ -313,8 +313,12 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
   )
   const headerActions = (
     <>
+      {/* Обводкой, а не заливкой: синий в карточке принадлежит следующему
+          шагу в жизни документа. Отправка — это про исходящее и про конец
+          пути, и вести к ней взгляд первым делом значит показывать выход
+          прежде дороги. */}
       {registered && d.capabilities.send && (
-        <Button size="sm" onClick={() => setActiveTab('send')}>
+        <Button size="sm" variant="outline" onClick={() => setActiveTab('send')}>
           <Send className="mr-1.5 h-4 w-4" />Отправка
         </Button>
       )}
@@ -460,7 +464,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
           {actions.has('start_approval') && (
             <ConfirmActionDialog
               trigger={(
-                <Button size="sm" variant="outline" disabled={startApproval.isPending}>
+                <Button size="sm" disabled={startApproval.isPending}>
                   <Workflow className="mr-1.5 h-4 w-4" />На согласование
                 </Button>
               )}
@@ -795,7 +799,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
                           ? ` · замещает ${signature.represented_signer_name}` : ''}
                         {' · '}{formatEventTime(signature.signed_at)}
                       </div>
-                      <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground"
+                      <div className="mt-1 truncate font-mono text-xs text-muted-foreground"
                         title={signature.snapshot_sha256}>
                         SHA-256 {signature.snapshot_sha256}
                       </div>
@@ -892,7 +896,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
               // Машинное действие помечено словом: агент и чужая система в
               // ленте не должны выглядеть сотрудниками (этап 8).
               renderBadge={(event) => (ACTOR_KIND_LABEL[event.actorKind ?? 'user'] ? (
-                <span className="rounded border border-border/60 px-1 text-[11px] text-muted-foreground">
+                <span className="rounded border border-border/60 px-1 text-xs text-muted-foreground">
                   {ACTOR_KIND_LABEL[event.actorKind ?? 'user']}
                 </span>
               ) : null)}

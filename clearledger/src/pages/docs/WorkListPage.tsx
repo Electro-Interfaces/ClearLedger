@@ -30,7 +30,7 @@ import * as workService from '@/services/workService'
 import type { WorkItem } from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { QueryBar, type QuerySuggestions } from '@/components/tasks/QueryBar'
-import { dt, PRIORITY_TONE } from '@/components/tasks/taskWords'
+import { dt, PRIORITY_TONE, priorityWord } from '@/components/tasks/taskWords'
 import { cn } from '@/lib/utils'
 
 const PAGE = 50
@@ -150,7 +150,7 @@ export function WorkListPage() {
       {ref && (
         <div className="flex items-center gap-2 rounded-md bg-muted/30 px-2.5 py-1.5 text-xs">
           <span className="text-muted-foreground">Только по предмету</span>
-          <code className="rounded bg-background px-1.5 py-0.5 text-[11px]">{ref}</code>
+          <code className="rounded bg-background px-1.5 py-0.5 text-xs">{ref}</code>
           <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs"
             onClick={() => set({ ref: null })}>
             Показать всю работу
@@ -210,11 +210,11 @@ export function WorkListPage() {
               onClick={() => set({ state: state === c.code ? null : c.code })}
               className={cn('rounded-lg border px-2.5 py-1.5 text-left transition-colors',
                 state === c.code ? 'border-primary bg-primary/5' : 'hover:bg-muted/50')}>
-              <div className="text-[11px] text-muted-foreground">{c.name}</div>
+              <div className="text-xs text-muted-foreground">{c.name}</div>
               <div className="text-sm font-semibold tabular-nums">
                 {c.total ?? 0}
                 {c.docs !== undefined && (
-                  <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
                     {c.docs} док · {c.tasks} пор
                   </span>
                 )}
@@ -312,7 +312,7 @@ function SavedViews({ companyId, current, onApply }: {
     <div className="flex flex-wrap items-center gap-1.5">
       {views.map((v) => (
         <span key={v.id}
-          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]">
+          className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs">
           <button type="button" onClick={() => onApply(v.query as Record<string, string>)}>
             {v.name}
           </button>
@@ -335,7 +335,7 @@ function SavedViews({ companyId, current, onApply }: {
             onClick={() => setAdding(false)}><X className="h-3.5 w-3.5" /></Button>
         </span>
       ) : (
-        <Button size="sm" variant="ghost" className="h-7 text-[11px] text-muted-foreground"
+        <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground"
           onClick={() => setAdding(true)}>
           <BookmarkPlus className="mr-1 h-3.5 w-3.5" />Сохранить отбор
         </Button>
@@ -358,11 +358,16 @@ function Row({ item, onOpen }: { item: WorkItem; onOpen: () => void }) {
         </span>
       </td>
       <td className="px-3 py-2">
-        <div className={cn('font-medium leading-snug',
-          item.priority && PRIORITY_TONE[item.priority])}>
-          {item.title}
-        </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+        {/* Заголовок основным цветом. Приоритет ушёл в мету словом: красный
+            заголовок стоял рядом с красным сроком, и два красных на строке
+            означали разное — «важно» и «просрочено». */}
+        <div className="font-medium leading-snug">{item.title}</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+          {item.priority && priorityWord(item.priority) && (
+            <span className={PRIORITY_TONE[item.priority]}>
+              {priorityWord(item.priority)}
+            </span>
+          )}
           {item.type && <span>{item.type}</span>}
           {item.project && <span className="font-mono">{item.project}</span>}
           {item.object && <span>{item.object}</span>}
@@ -372,9 +377,11 @@ function Row({ item, onOpen }: { item: WorkItem; onOpen: () => void }) {
         </div>
       </td>
       <td className="px-3 py-2">
-        <Badge variant="outline" className="h-5 px-1.5 text-[10px]">{item.state_name}</Badge>
-        {item.stage && (
-          <div className="mt-0.5 text-[11px] text-muted-foreground">{item.stage}</div>
+        <Badge variant="outline" className="h-5 px-1.5 text-xs">{item.state_name}</Badge>
+        {/* Этап — только когда говорит новое: у поручений он часто зовётся так
+            же, как состояние, и «В работе» под «В работе» читалось опечаткой. */}
+        {item.stage && item.stage !== item.state_name && (
+          <div className="mt-0.5 text-xs text-muted-foreground">{item.stage}</div>
         )}
       </td>
       <td className="px-3 py-2 text-xs">{item.responsible ?? '—'}</td>

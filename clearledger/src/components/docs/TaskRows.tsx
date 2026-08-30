@@ -184,7 +184,7 @@ function Row({ task, companyId, busy, picked, onPick, onOpen, onChanged, onClose
 }) {
   const ref = `task:${task.id}`
   return (
-    <div className={cn('flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40',
+    <div className={cn('group/строка flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40',
       picked && 'bg-primary/5')}>
       <Checkbox checked={picked} onCheckedChange={onPick}
         aria-label={`Выбрать ${tasksService.taskKey(task)}`} />

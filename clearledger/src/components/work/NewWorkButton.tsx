@@ -83,13 +83,13 @@ export function NewWorkButton() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-[260px]">
-          <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
             Что заводим
           </DropdownMenuLabel>
           <DropdownMenuItem onSelect={() => setTaskSignal((n) => n + 1)}>
             <ListChecks className="mr-2 h-3.5 w-3.5" />
             <span className="flex-1">Поручение</span>
-            <span className="text-[11px] text-muted-foreground">N</span>
+            <span className="text-xs text-muted-foreground">N</span>
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setDocOpen(true)}>
             <FileText className="mr-2 h-3.5 w-3.5" />
@@ -98,7 +98,7 @@ export function NewWorkButton() {
           {ready.length > 0 && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
                 По шаблону
               </DropdownMenuLabel>
               {ready.map((template) => (
@@ -108,7 +108,7 @@ export function NewWorkButton() {
                     ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
                     : <Play className="mr-2 h-3.5 w-3.5" />}
                   <span className="flex-1 truncate">{template.name}</span>
-                  <span className="ml-2 shrink-0 text-[11px] text-muted-foreground">
+                  <span className="ml-2 shrink-0 text-xs text-muted-foreground">
                     {template.kind === 'document' ? 'документ' : 'поручение'}
                   </span>
                 </DropdownMenuItem>

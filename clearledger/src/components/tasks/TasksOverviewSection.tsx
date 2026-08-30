@@ -61,7 +61,7 @@ export function TasksOverviewSection({ companyId, days, onDays, onDrill }: {
             {d} дн
           </Button>
         ))}
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           «в работе» и «просрочено» — на сейчас, остальное — за период
         </span>
       </div>
@@ -97,7 +97,7 @@ export function TasksOverviewSection({ companyId, days, onDays, onDrill }: {
       <Card className="p-0">
         <div className="border-b px-4 py-2.5">
           <h3 className="text-sm font-medium">Что происходило</h3>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             След работы за {days} дн: кто передал, кто двинул, кто закрыл
           </p>
         </div>
@@ -124,9 +124,9 @@ export function TasksOverviewSection({ companyId, days, onDays, onDrill }: {
                       {' · '}
                       <span className="text-muted-foreground">№{e.number} {e.title}</span>
                     </span>
-                    {e.note && <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">«{e.note}»</span>}
+                    {e.note && <span className="mt-0.5 block truncate text-xs text-muted-foreground">«{e.note}»</span>}
                   </span>
-                  <span className="shrink-0 whitespace-nowrap text-[11px] text-muted-foreground">{dtT(e.created_at)}</span>
+                  <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">{dtT(e.created_at)}</span>
                 </button>
               )
             })}
@@ -146,7 +146,7 @@ function CutCard({ title, rows, empty, loading, onRow }: {
     <Card className="p-0">
       <div className="flex items-baseline justify-between border-b px-4 py-2.5">
         <h3 className="text-sm font-medium">{title}</h3>
-        <span className="text-[11px] text-muted-foreground">в работе · просроч. · закрыто</span>
+        <span className="text-xs text-muted-foreground">в работе · просроч. · закрыто</span>
       </div>
       {loading ? (
         <div className="p-6 text-sm text-muted-foreground">Загрузка…</div>

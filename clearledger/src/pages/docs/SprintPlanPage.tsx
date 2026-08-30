@@ -235,8 +235,8 @@ function Column({
         highlight && 'border-primary bg-primary/5 ring-1 ring-primary/30')}>
       <div className="flex items-baseline gap-2 px-3 py-2.5">
         <span className="text-[13px] font-medium">{title}</span>
-        <span className="flex-1 truncate text-[11px] text-muted-foreground">{hint}</span>
-        <span className="rounded-full bg-background px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+        <span className="flex-1 truncate text-xs text-muted-foreground">{hint}</span>
+        <span className="rounded-full bg-background px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
           {tasks.length}
         </span>
       </div>
@@ -265,18 +265,18 @@ function Column({
                 t.status !== 'open' && 'line-through')}>
                 {t.title}
               </span>
-              <span className="shrink-0 font-mono text-[11px] text-muted-foreground/70">
+              <span className="shrink-0 font-mono text-xs text-muted-foreground/70">
                 {taskKey(t)}
               </span>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
               {t.assignee && <span>{t.assignee}</span>}
               {t.stage && <span>{t.stage}</span>}
               {t.time?.estimate_text && t.time.estimate_text !== '—' && (
                 <span>оценка {t.time.estimate_text}</span>
               )}
               {t.fix_version && (
-                <Badge variant="outline" className="h-4 px-1 text-[10px]">{t.fix_version}</Badge>
+                <Badge variant="outline" className="h-4 px-1 text-xs">{t.fix_version}</Badge>
               )}
             </div>
           </div>

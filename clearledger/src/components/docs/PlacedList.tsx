@@ -19,6 +19,7 @@ import { DragHandle } from '@/components/docs/DragHandle'
 import * as workService from '@/services/workService'
 import type { PlacedItem } from '@/services/workService'
 import { dt } from '@/components/tasks/taskWords'
+import { shortDay } from '@/lib/personalDay'
 import { cn } from '@/lib/utils'
 
 type Scope = NonNullable<NonNullable<Parameters<typeof workService.placed>[1]>['scope']>
@@ -73,7 +74,7 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
         const overdue = Boolean(item.due_at && new Date(item.due_at) < new Date())
         return (
           <div key={`${item.kind}-${item.id}`}
-            className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
+            className="group/строка flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
             <DragHandle targetRef={workService.targetRef(item)}
               label={`${item.key} ${item.title}`} />
             <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -89,11 +90,12 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
                   {item.due_at ? dt(item.due_at) : 'без срока'}
                 </span>
                 {item.personal && <span>своя запись</span>}
-                {item.mark?.starred && (
-                  <span className="text-amber-600 dark:text-amber-400">важно</span>
-                )}
+                {/* Слова «важно» здесь нет: звезда справа стоит в постоянном
+                    столбце и различается формой — заполненная против пустой, —
+                    а мета-строка плавает по ширине. Из двух носителей одного
+                    состояния оставлен тот, по которому глаз ведёт вниз. */}
                 {item.mark?.deferred_until && scope !== 'deferred' && (
-                  <span>скрыто до {item.mark.deferred_until}</span>
+                  <span>скрыто до {shortDay(item.mark.deferred_until)}</span>
                 )}
                 {scope === 'deferred' && (item.mark?.defer_count ?? 0) > 0 && (
                   <span>откладывали {item.mark?.defer_count}</span>

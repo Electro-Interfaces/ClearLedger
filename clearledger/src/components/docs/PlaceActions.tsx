@@ -124,9 +124,23 @@ export function PlaceActions({
   const deferred = mark?.deferred_until ?? null
   const listName = lists.data?.lists.find((l) => l.id === mark?.list_id)?.name
 
+  /** Пустая отметка проступает при наведении и с клавиатуры; поставленная
+   *  видна всегда. Правый край строки — дорожка, по которой глаз ищет срок, и
+   *  два серых значка на каждой строке эту дорожку загораживают.
+   *
+   *  Там, где наведения не бывает (палец), видно всё: спрятать действие от
+   *  того, кто не может навести, значит убрать его. */
+  const тихо = (поставлено: boolean | undefined) => (поставлено ? '' : cn(
+    'opacity-0 transition-opacity',
+    'group-hover/строка:opacity-100 group-focus-within/строка:opacity-100',
+    'focus-visible:opacity-100',
+    '[@media(hover:none)]:opacity-100',
+  ))
+
   const кнопкаДня = (
     <Button size="sm" variant="ghost" disabled={act.isPending}
-      className={cn('h-8 px-2', inDay && 'text-amber-600 dark:text-amber-400')}
+      className={cn('h-8 px-2', тихо(inDay),
+        inDay && 'text-amber-600 dark:text-amber-400')}
       title={inDay ? 'Убрать из моего дня' : 'Взять в мой день'}
       onClick={() => act.mutate(inDay
         ? { dropDay: true }
@@ -137,7 +151,8 @@ export function PlaceActions({
 
   const кнопкаЗвезды = (
     <Button size="sm" variant="ghost" disabled={act.isPending}
-      className={cn('h-8 px-2', mark?.starred && 'text-amber-600 dark:text-amber-400')}
+      className={cn('h-8 px-2', тихо(mark?.starred),
+        mark?.starred && 'text-amber-600 dark:text-amber-400')}
       title={mark?.starred ? 'Снять важность' : 'Важно для меня'}
       onClick={() => act.mutate({ starred: !mark?.starred })}>
       <Star className={cn('h-3.5 w-3.5', mark?.starred && 'fill-current')} />

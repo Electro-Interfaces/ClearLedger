@@ -103,7 +103,7 @@ export function ProjectsSection({ companyId }: { companyId: string }) {
                   <td className="px-3 py-2">
                     <span className="font-mono font-semibold">{p.code}</span>
                     {p.is_archived && (
-                      <Badge variant="outline" className="ml-2 h-5 px-1.5 text-[10px]">архив</Badge>
+                      <Badge variant="outline" className="ml-2 h-5 px-1.5 text-xs">архив</Badge>
                     )}
                   </td>
                   <td className="px-3 py-2">

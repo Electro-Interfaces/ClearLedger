@@ -161,7 +161,7 @@ export function VersionsSection({ companyId }: { companyId: string }) {
                     </td>
                     <td className="px-3 py-2">
                       <Badge variant={v.state === 'released' ? 'default' : 'outline'}
-                        className="h-5 px-1.5 text-[10px]">
+                        className="h-5 px-1.5 text-xs">
                         {STATE_LABEL[v.state]}
                       </Badge>
                     </td>

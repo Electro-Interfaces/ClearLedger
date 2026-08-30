@@ -380,7 +380,7 @@ function FeedLink() {
         {q.data && (
           <>
             <input readOnly value={q.data.url} onFocus={(e) => e.target.select()}
-              className="w-full rounded border border-input bg-muted/40 px-2 py-1 font-mono text-[11px]" />
+              className="w-full rounded border border-input bg-muted/40 px-2 py-1 font-mono text-xs" />
             <div className="flex items-center gap-2">
               <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
                 onClick={() => {
@@ -393,9 +393,9 @@ function FeedLink() {
                 onClick={() => сменить.mutate()}>Сменить ключ</Button>
             </div>
             {q.data.note && (
-              <p className="text-[11px] text-muted-foreground">{q.data.note}</p>
+              <p className="text-xs text-muted-foreground">{q.data.note}</p>
             )}
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Адрес открывает ваши встречи без пароля — не публикуйте его.
             </p>
           </>

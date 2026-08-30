@@ -10,6 +10,16 @@ export const PRIORITY_LABEL: Record<string, string> = {
   low: 'низкая', medium: 'обычная', high: 'срочная', critical: 'критичная',
 }
 
+/** Приоритет, о котором стоит сказать вслух.
+ *
+ *  «Обычная» — значение по умолчанию: оно есть у большинства строк и потому не
+ *  различает их, а место в мете занимает на каждой. Ровно та же причина, по
+ *  которой из даты убран год. Говорим только про то, что выбивается: срочное,
+ *  критичное и — в другую сторону — низкое.
+ */
+export const priorityWord = (p: string | null | undefined): string | null =>
+  (!p || p === 'medium' ? null : PRIORITY_LABEL[p] ?? null)
+
 export const PRIORITY_TONE: Record<string, string> = {
   critical: 'text-red-600 dark:text-red-400',
   high: 'text-amber-600 dark:text-amber-400',
@@ -42,7 +52,19 @@ export const LINK_LABEL: Record<string, string> = {
   relates: 'связана', duplicates: 'дублирует', duplicated_by: 'дублируется',
 }
 
-export const dt = (s: string | null) => (s ? new Date(s).toLocaleDateString('ru-RU') : '—')
+/** Дата в строке списка: «31.08», а в другом году — «31.08.2025».
+ *
+ *  Год у всех строк одинаковый и потому не различает их, а место занимает на
+ *  каждой. Когда он не текущий — печатается: тогда он и есть то, что человек
+ *  должен заметить. */
+export const dt = (s: string | null) => {
+  if (!s) return '—'
+  const d = new Date(s)
+  if (isNaN(d.getTime())) return '—'
+  return d.getFullYear() === new Date().getFullYear()
+    ? d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+    : d.toLocaleDateString('ru-RU')
+}
 
 export const dtT = (s: string | null) => (s
   ? new Date(s).toLocaleString('ru-RU',

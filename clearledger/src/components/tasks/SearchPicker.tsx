@@ -97,7 +97,7 @@ export function SearchPicker({
                           {i.name}
                         </span>
                         {i.hint && (
-                          <span className="block truncate text-[11px] text-muted-foreground">
+                          <span className="block truncate text-xs text-muted-foreground">
                             {i.hint}
                           </span>
                         )}

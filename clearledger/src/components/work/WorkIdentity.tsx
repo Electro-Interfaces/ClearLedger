@@ -31,7 +31,7 @@ export function WorkStateBadge({ state, stateName, className }: {
   if (!state || !stateName) return null
   return (
     <Badge variant="outline"
-      className={cn('h-5 px-1.5 text-[11px] font-normal', STATE_TONE[state], className)}>
+      className={cn('h-5 px-1.5 text-xs font-normal', STATE_TONE[state], className)}>
       {stateName}
     </Badge>
   )

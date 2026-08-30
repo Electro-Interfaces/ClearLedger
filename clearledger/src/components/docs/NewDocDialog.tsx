@@ -82,7 +82,7 @@ export function NewDocDialog({ companyId, kinds, defaultFamily, initialTitle,
               ))}
             </select>
             {kind && (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Номер получит вид {kind.number_prefix || kind.code}-… при регистрации
               </p>
             )}

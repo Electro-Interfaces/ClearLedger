@@ -112,7 +112,7 @@ export function DocFileWorkspace({ versions, canDownload, sensitive, canRemove, 
                       <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       <span className="truncate">{version.file_name}</span>
                     </div>
-                    <div className="mt-0.5 pl-5 text-[11px] leading-4 text-muted-foreground">
+                    <div className="mt-0.5 pl-5 text-xs leading-4 text-muted-foreground">
                       {ROLE_LABEL[version.role] ?? version.role} · редакция {version.revision}
                       {version.is_current ? ' · действующая' : ''} · {humanSize(version.size)}
                     </div>

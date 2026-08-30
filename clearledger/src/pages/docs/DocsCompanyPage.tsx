@@ -182,12 +182,12 @@ export function DocsCompanyPage() {
                   className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <Card className="p-2.5 transition-colors hover:bg-accent/40">
                     <div className="text-[13px]">{d.title}</div>
-                    <div className="pt-0.5 text-[11px] text-muted-foreground">
+                    <div className="pt-0.5 text-xs text-muted-foreground">
                       {d.reg_number ?? 'без номера'}
                       {d.waiting ? ` · ждут ${d.waiting}` : ''}
                     </div>
                     {d.waiting_people.length > 0 && (
-                      <div className="pt-1 text-[11px] text-muted-foreground">
+                      <div className="pt-1 text-xs text-muted-foreground">
                         {d.waiting_people.map((person) => person.name).join(', ')}
                         {d.approval_due_at && (
                           <span className={d.approval_overdue ? ' font-medium text-destructive' : ''}>

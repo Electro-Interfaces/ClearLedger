@@ -253,7 +253,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
                 </SelectContent>
               </Select>
               {type && (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {type.route.map((s) => s.name).join(' → ')}
                   {type.due_days != null && ` · срок ${type.due_days} дн.`}
                 </p>
@@ -264,7 +264,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
                 <Label>Исполнитель</Label>
                 {me && assigneeId !== me && (
                   <button type="button" onClick={() => setAssigneeId(me)}
-                    className="text-[11px] text-primary hover:underline">мне</button>
+                    className="text-xs text-primary hover:underline">мне</button>
                 )}
               </div>
               <SearchPicker items={(peopleQ.data?.people ?? []).map((p) => ({
@@ -300,7 +300,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
                 </SelectContent>
               </Select>
               {visibility === 'personal' && (
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   Личная запись: не видна ни коллегам, ни администратору, и не
                   попадает в реестр компании.
                 </p>
@@ -310,7 +310,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
               <Label>Напомнить</Label>
               <Input type="datetime-local" value={remindAt}
                 onChange={(e) => setRemindAt(e.target.value)} />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Придёт лично вам в чат — почтой такое не рассылается.
               </p>
             </div>
@@ -352,7 +352,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
                   <button key={l.id} type="button"
                     onClick={() => setLabels((cur) => cur.includes(l.id)
                       ? cur.filter((x) => x !== l.id) : [...cur, l.id])}
-                    className={cn('rounded border px-1.5 py-0.5 text-[11px] transition-colors',
+                    className={cn('rounded border px-1.5 py-0.5 text-xs transition-colors',
                       labels.includes(l.id)
                         ? 'border-primary/40 bg-primary/10 text-primary'
                         : 'text-muted-foreground hover:bg-muted/60')}>
@@ -385,7 +385,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
                     <Paperclip className="mr-1.5 h-3 w-3" />Выбрать файлы
                   </Button>
                 </span>
-                <span className="flex items-center gap-1 text-[11px]">
+                <span className="flex items-center gap-1 text-xs">
                   <ImagePlus className="h-3 w-3" />
                   скриншот — Ctrl+V прямо в описание
                 </span>
