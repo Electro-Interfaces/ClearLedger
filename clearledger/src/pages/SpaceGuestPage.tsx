@@ -25,8 +25,17 @@ export function SpaceGuestPage() {
     if (once.current) return
     once.current = true
     // Пропуск приходит в хэше, а не в пути: так он не попадает ни в журнал
-    // сервера, ни в заголовок Referer при следующем переходе.
-    const params = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    // сервера, ни в заголовок Referer при следующем переходе. Из хэша его
+    // забирает `main.tsx` до первого рендера — здесь читаем перехваченное, а сам
+    // хэш остаётся запасным путём (прямое открытие без общей обвязки).
+    let raw = ''
+    try {
+      raw = sessionStorage.getItem('eco-space-pass') || ''
+      // Одноразовый: повтор с тем же пропуском всё равно упрётся в срок годности,
+      // а лежащий в хранилище ключ доступа — лишний след.
+      sessionStorage.removeItem('eco-space-pass')
+    } catch { /* приватный режим */ }
+    const params = new URLSearchParams(raw || window.location.hash.replace(/^#/, ''))
     const token = params.get('token')
     const space = params.get('space')
     if (!token || !space) { setError('В ссылке нет пропуска'); return }

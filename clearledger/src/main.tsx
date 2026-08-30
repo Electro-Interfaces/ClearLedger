@@ -7,6 +7,18 @@ import { initUiLevel } from './hooks/useUiLevel'
 import { isApiEnabled, isDemoMode } from './services/apiClient'
 import { initPwaInstall } from './lib/pwaInstall'
 
+// Пропуск инженера в чужое пространство приходит в хэше — и до страницы не доживает:
+// провайдер фильтра при старте пишет выборку в адрес через `replace`, а React Router
+// собирает новый URL из пути и query, теряя хэш. Забираем пропуск здесь, до первого
+// рендера, и сразу чистим адрес: в истории браузера ему делать нечего.
+if (window.location.pathname.replace(/\/$/, '').endsWith('/space-guest')
+    && window.location.hash.includes('token=')) {
+  try {
+    sessionStorage.setItem('eco-space-pass', window.location.hash.replace(/^#/, ''))
+  } catch { /* приватный режим — останется чтение из хэша */ }
+  history.replaceState(null, '', window.location.pathname)
+}
+
 // Chrome может выдать событие установки до того, как авторизация и React-обвязка
 // закончат загрузку. Сохраняем его сразу: событие одноразовое и повторно не приходит.
 if (!isDemoMode()) initPwaInstall()
