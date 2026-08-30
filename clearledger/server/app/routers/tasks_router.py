@@ -16,7 +16,7 @@ import hashlib
 import os
 import re
 import uuid
-from datetime import date as date_type, datetime, timedelta, timezone
+from datetime import date as date_type, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any
@@ -1699,6 +1699,11 @@ async def create_task(
 async def tasks_summary(
     company_id: str = Query(...),
     days: int = Query(30, ge=1, le=365),
+    # Период раздела «Отчёты». Отрезок нельзя выразить числом дней: «1–31 января»
+    # и «последний 31 день» — разные периоды, и подмена одного другим тихо
+    # показала бы не то, что выбрано в «Рабочем контуре».
+    date_from: date_type | None = Query(None),
+    date_to: date_type | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1713,7 +1718,14 @@ async def tasks_summary(
     """
     cid = await _assert_work(company_id, current_user, db)
     now = datetime.now(timezone.utc)
-    since = now - timedelta(days=days)
+    # Отрезок задаётся московскими сутками: делопроизводство живёт по ним, и
+    # граница периода не должна съезжать на три часа.
+    if date_from and date_to:
+        since = datetime.combine(date_from, time.min, _REPORT_TIMEZONE).astimezone(timezone.utc)
+        until = datetime.combine(date_to, time.max, _REPORT_TIMEZONE).astimezone(timezone.utc)
+    else:
+        since, until = now - timedelta(days=days), now
+    в_периоде = lambda колонка: and_(колонка >= since, колонка <= until)
     # Живые задачи целиком плюс закрытые за период: закрытые год назад в обзоре
     # не нужны, а «в работе» нужны все — просрочка не обязана попадать в окно.
     tasks = list((await db.execute(select(Task).where(
@@ -1722,14 +1734,15 @@ async def tasks_summary(
         # Обзор — про работу компании: личные записи раздули бы показатели
         # исполнителей тем, что к обязательствам отношения не имеет.
         _not_personal(),
-        or_(Task.status == "open", Task.closed_at >= since),
+        or_(Task.status == "open", в_периоде(Task.closed_at)),
     ))).scalars())
     names = await _names(db, tasks)
 
     open_t = [t for t in tasks if t.status == "open"]
     closed_t = [t for t in tasks if t.status != "open" and t.closed_at]
     overdue = [t for t in open_t if t.due_at and t.due_at < now]
-    created_period = [t for t in tasks if t.created_at and t.created_at >= since]
+    created_period = [t for t in tasks
+                      if t.created_at and since <= t.created_at <= until]
     # Среднее время прохождения — по закрытым за период: столько работа реально идёт
     # от постановки до завершения. Медиану не берём — на десятке задач она врёт сильнее.
     durations = [(t.closed_at - t.created_at).total_seconds() / 86400
@@ -1757,13 +1770,18 @@ async def tasks_summary(
     events = (await db.execute(
         select(TaskEvent, Task.number, Task.title)
         .join(Task, Task.id == TaskEvent.task_id)
-        .where(Task.company_id == cid, TaskEvent.created_at >= since)
+        .where(Task.company_id == cid, в_периоде(TaskEvent.created_at))
         .order_by(TaskEvent.created_at.desc()).limit(60))).all()
     actors = {r.id: r.name for r in (await db.execute(select(User).where(
         User.id.in_({e.user_id for e, _, _ in events if e.user_id})))).scalars()} if events else {}
 
     return {
         "days": days,
+        # Экран подписывает показатели периодом, а не числом дней: подпись «за
+        # 30 дн» под выбранным «1–31 августа» противоречила бы шапке раздела.
+        "period": {
+            "date_from": since.astimezone(_REPORT_TIMEZONE).date().isoformat(),
+            "date_to": until.astimezone(_REPORT_TIMEZONE).date().isoformat()},
         "totals": {
             "open": len(open_t),
             "overdue": len(overdue),

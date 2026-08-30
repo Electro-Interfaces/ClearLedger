@@ -336,6 +336,9 @@ export interface TaskActivity extends TaskEvent {
 }
 export interface TasksSummary {
   days: number
+  /** Границы периода, по которым посчитана сводка: экран подписывает показатели
+   *  ими, а не числом дней — «за 30 дн» под выбранным отрезком было бы неправдой. */
+  period?: { date_from: string; date_to: string }
   totals: {
     open: number; overdue: number; mine: number; unassigned: number
     created: number; done: number; avg_days: number | null
@@ -346,8 +349,14 @@ export interface TasksSummary {
   activity: TaskActivity[]
 }
 
-export async function tasksSummary(companyId: string, days: number) {
-  return get<TasksSummary>('/api/tasks/summary', { company_id: companyId, days })
+export async function tasksSummary(
+  companyId: string, days: number, period?: { from: string; to: string },
+) {
+  return get<TasksSummary>('/api/tasks/summary', {
+    company_id: companyId, days,
+    ...(period?.from && period?.to
+      ? { date_from: period.from, date_to: period.to } : {}),
+  })
 }
 
 export async function taskDetails(id: string, companyId: string) {

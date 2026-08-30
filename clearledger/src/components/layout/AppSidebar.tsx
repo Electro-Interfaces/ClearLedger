@@ -273,7 +273,7 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
 }) {
   const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(false)   // 1С при запуске свёрнут
-  const { company, companyModules, canApp, canModule, oversees } = useCompany()
+  const { company, companyModules, canApp, canModule, oversees, isCompanyAdmin } = useCompany()
   const { pathname, search } = useLocation()
   // Разделы рабочей области — здесь же, рядом со страницами продукта: рабочий стол
   // теперь уровнем выше (пространство), и внутри продукта верхний уровень навигации
@@ -378,7 +378,12 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
                 поэтому раздел не «скрыт по правам», а не показывается вовсе:
                 окно, через которое видно чужое и ничего нельзя сделать, только
                 сбивает. Признак считает сервер по штатной структуре. */}
-            {DOCS_SECTIONS.filter((s) => s.to !== '/docs/company' || oversees)
+            {/* «Настройка» рядовому отвечает одной карточкой «ведёт администратор»:
+                пункт рельсы, который ничего не открывает, — это ежедневный тупик.
+                Так же скрыта «Компания» тому, кто ни за кем не смотрит. */}
+            {DOCS_SECTIONS
+              .filter((s) => s.to !== '/docs/company' || oversees)
+              .filter((s) => s.to !== '/docs/setup' || isCompanyAdmin)
               .map((s) => (
               <NavItem key={s.to} to={s.to} icon={s.icon} label={s.label}
                 collapsed={collapsed} onNavigate={onNavigate}

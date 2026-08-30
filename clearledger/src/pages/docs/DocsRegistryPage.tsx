@@ -34,10 +34,13 @@ const VIEW_FILTER: Record<string, docsService.DocFilters> = {
   outgoing: { family: 'outgoing' },
   ord: { family: 'ord' },
   internal: { family: 'internal' },
+  contract: { family: 'contract' },
+  other: { family: 'other' },
   all: {},
 }
 
-const FILTER_KEYS = ['q', 'status', 'kind', 'label', 'date_from', 'date_to'] as const
+const FILTER_KEYS = ['q', 'status', 'kind', 'label', 'date_from', 'date_to',
+  'attention'] as const
 const PAGE_SIZE = 100
 
 export function DocsRegistryPage() {
@@ -59,6 +62,8 @@ export function DocsRegistryPage() {
   const labelFilter = params.get('label') ?? ''
   const dateFrom = params.get('date_from') ?? ''
   const dateTo = params.get('date_to') ?? ''
+  // Сужение, с которым пришли из обзора: «просроченные», «без номера».
+  const attention = params.get('attention') ?? ''
   const effectiveDateFrom = dateFrom || scope.period.from
   const effectiveDateTo = dateTo || scope.period.to
   const pageValue = Number(params.get('page'))
@@ -82,13 +87,14 @@ export function DocsRegistryPage() {
     status: statusFilter || undefined,
     kind_id: kindFilter || undefined,
     label_id: labelFilter || undefined,
+    attention: attention || undefined,
     date_from: effectiveDateFrom,
     date_to: effectiveDateTo,
     object_ids: scope.objectFilter,
     limit: PAGE_SIZE,
     offset: (page - 1) * PAGE_SIZE,
-  }), [deferredQ, effectiveDateFrom, effectiveDateTo, kindFilter, labelFilter, page,
-    scope.objectFilter, statusFilter, view])
+  }), [attention, deferredQ, effectiveDateFrom, effectiveDateTo, kindFilter,
+    labelFilter, page, scope.objectFilter, statusFilter, view])
 
   const listQ = useQuery({
     queryKey: ['docs', companyId, view, filters],
@@ -188,10 +194,21 @@ export function DocsRegistryPage() {
 
   const kinds = kindsQ.data ?? []
   const noKinds = kindsQ.isSuccess && kinds.length === 0
-  const title = DOC_FAMILY[VIEW_FILTER[view]?.family ?? ''] ?? 'Все документы'
+  const семейство = VIEW_FILTER[view]?.family
+  const title = DOC_FAMILY[семейство ?? ''] ?? 'Все документы'
+  // Виды ЭТОГО потока, а не вообще: «Договорные» пусты не потому, что период
+  // не тот, а потому что вида с таким потоком в компании не заводили. Прежняя
+  // проверка молчала, если в компании есть хоть один вид любого потока.
+  const видыПотока = семейство
+    ? kinds.filter((k) => k.family === семейство && k.is_active)
+    : kinds.filter((k) => k.is_active)
+  const нетВидовПотока = kindsQ.isSuccess && !!семейство && видыПотока.length === 0
   const emptyText = hasFilters
     ? 'По заданным условиям ничего не найдено'
-    : 'В рабочем контуре документов пока нет'
+    : нетВидовПотока
+      ? `Видов документов с потоком «${title}» ещё нет. Заведите вид в «Настройке» — `
+        + 'он задаёт правило нумерации, маршрут согласования и реквизиты карточки'
+      : 'В рабочем контуре документов пока нет'
 
   const registry = (
     <Card className="min-h-0 overflow-hidden">
@@ -331,7 +348,13 @@ export function DocsRegistryPage() {
                 aria-label="Поиск по документам и содержимому файлов"
                 className="h-9 w-full pl-7 text-sm sm:w-72" />
             </div>
-            <Button size="sm" onClick={() => setCreating(true)} disabled={kinds.length === 0}>
+            {/* Гаснет и называет причину: диалог, в котором нечего выбрать,
+                — тупик, а не форма. */}
+            <Button size="sm" onClick={() => setCreating(true)}
+              disabled={видыПотока.length === 0}
+              title={видыПотока.length === 0
+                ? `Нет ни одного вида с потоком «${title}» — заведите его в «Настройке»`
+                : undefined}>
               <FilePlus2 className="mr-1.5 h-4 w-4" />Завести
             </Button>
           </div>
@@ -395,6 +418,25 @@ export function DocsRegistryPage() {
             <span className="text-xs text-muted-foreground">Период взят из рабочего контура</span>
           )}
         </div>
+
+        {/* Пришли из обзора по цифре. Короткий список без этой строки читается
+            как «документы пропали»: человек идёт проверять данные вместо того,
+            чтобы делать по ним работу. */}
+        {attention && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/50 px-2.5 py-1">
+              <span className="text-muted-foreground">Из обзора:</span>
+              <span className="font-medium">
+                {docsService.DOC_ATTENTION[attention] ?? attention}
+              </span>
+              <button type="button" onClick={() => setFilter('attention', '')}
+                aria-label="Снять отбор из обзора"
+                className="rounded-full p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          </div>
+        )}
 
         {selectedIds.size > 0 && (
           <DocsBulkBar companyId={companyId} selectedIds={[...selectedIds]}

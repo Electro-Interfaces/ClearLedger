@@ -48,7 +48,7 @@ from app.models import (
     ChatRoom, Company, CompanyRole, Contract, Counterparty, Department, DocAccessGrant,
     DocApproval,
     DocBreakGlassAccess, DocCard,
-    DocCase, DocEvent, DocKind, DocRelation, DocAcquaint, DocExchangeTarget,
+    DocCase, DocCounter, DocEvent, DocKind, DocRelation, DocAcquaint, DocExchangeTarget,
     DocExport, DocInboxItem, DocLabelLink,
     DocShareLink, DocSignatureEvidence, UserSubstitution,
     DocVersion, EzsSite, Organization, ServiceLocation, SourceFile, Task, TaskEvent,
@@ -1203,6 +1203,59 @@ async def list_kinds(
     return {"kinds": [_kind_out(k) for k in rows]}
 
 
+@router.get("/counters")
+async def list_counters(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Где стоят счётчики регистрации.
+
+    Строка счётчика заводится первой регистрацией в своей области, поэтому у
+    заведённого, но ни разу не использованного вида её нет. Такой вид всё равно
+    показываем — с нулём: «строки нет» и «номеров не выдавали» для читателя одно
+    и то же, а пустой экран заставляет гадать, работает ли нумерация вообще.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    await _assert_admin(db, cid, current_user)
+    kinds = (await db.execute(select(DocKind).where(DocKind.company_id == cid)
+                              .order_by(DocKind.sort_order, DocKind.name))).scalars().all()
+    orgs = {
+        str(o.id): o.name for o in
+        (await db.execute(select(Organization).where(
+            Organization.company_id == cid))).scalars().all()
+    }
+    counters = (await db.execute(select(DocCounter).where(
+        DocCounter.company_id == cid))).scalars().all()
+
+    по_видам: dict[str, list[dict]] = {}
+    for c in counters:
+        код, _, хвост = c.scope_key.partition("|")
+        org_id, _, год = хвост.partition("|")
+        по_видам.setdefault(код, []).append({
+            "scope_key": c.scope_key,
+            "organization": orgs.get(org_id) if org_id != "-" else None,
+            "year": int(год) if год.isdigit() else None,
+            # `next_value` — уже выданный последний номер: следующий это +1.
+            "issued": c.next_value,
+            "next": c.next_value + 1,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        })
+
+    out = []
+    for k in kinds:
+        строки = sorted(по_видам.get(k.code, []),
+                        key=lambda r: (-(r["year"] or 0), r["organization"] or ""))
+        out.append({
+            "kind_id": str(k.id), "code": k.code, "name": k.name,
+            "prefix": k.number_prefix or k.code,
+            "template": k.number_template, "scope": k.number_scope,
+            "scopes": строки,
+            "issued": sum(r["issued"] for r in строки),
+        })
+    return {"counters": out}
+
+
 @router.post("/kinds", status_code=status.HTTP_201_CREATED)
 async def create_kind(
     payload: KindIn,
@@ -1937,6 +1990,9 @@ async def list_docs(
     mine: bool = Query(False),
     limit: int = Query(200, ge=1, le=_LIST_LIMIT),
     offset: int = Query(0, ge=0),
+    # За чем приходят из обзора: цифра плитки должна открывать ровно свой
+    # список, иначе отчёт обещает больше, чем делает.
+    attention: str | None = Query(None, max_length=20),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1980,6 +2036,26 @@ async def list_docs(
             DocRelation.doc_id == DocCard.id,
             DocRelation.target_ref == ref).exists()
         stmt = stmt.where(or_(DocCard.subject_ref == ref, related))
+    if attention:
+        # Просрочка — в московском времени: им живёт делопроизводство и им же
+        # считает экран. UTC разошёлся бы с человеком на три часа в сутки.
+        today = datetime.now(_BUSINESS_TIMEZONE).date()
+        отработанные = ("executed", "archived", "cancelled")
+        условие = {
+            "unnumbered": lambda: DocCard.reg_number.is_(None),
+            "returned": lambda: DocCard.approval_status == "rejected",
+            "pending": lambda: DocCard.approval_status == "pending",
+            "overdue": lambda: and_(
+                DocCard.due_at.is_not(None),
+                func.date(func.timezone("Europe/Moscow", DocCard.due_at)) < today,
+                DocCard.status.notin_(отработанные)),
+        }.get(attention)
+        if условие is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Неизвестный отбор: ожидается unnumbered, returned, pending "
+                "или overdue")
+        stmt = stmt.where(условие())
     if date_from:
         stmt = stmt.where(func.coalesce(DocCard.reg_date,
                                         func.date(DocCard.created_at)) >= date_from)

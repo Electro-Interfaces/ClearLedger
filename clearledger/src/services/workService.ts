@@ -275,6 +275,35 @@ export async function nudge(companyId: string, targetRef: string):
 /** Адрес ленты подписки на свой календарь: его вставляют в Google, Apple
  *  или Outlook. Ключ живёт в самом адресе — календарные клиенты входить
  *  никуда не умеют. */
+export interface CalendarPersonRow {
+  id: string
+  name: string
+  events: number
+  hours: number
+  declined: number
+  pending: number
+}
+
+export interface CalendarSummary {
+  period: { date_from: string; date_to: string }
+  totals: {
+    events: number; cancelled: number; hours: number; all_day: number
+    seats: number; declined: number; awaiting: number
+  }
+  by_organizer: { id: string | null; name: string; events: number; hours: number }[]
+  by_person: CalendarPersonRow[]
+  awaiting: { id: string; name: string; count: number }[]
+}
+
+/** Сводка по встречам: сколько времени компания проводит на совещаниях. */
+export async function calendarSummary(
+  companyId: string, from: string, to: string,
+) {
+  return get<CalendarSummary>('/api/work/calendar/summary', {
+    company_id: companyId, date_from: from, date_to: to,
+  })
+}
+
 export async function calendarFeed(): Promise<{ url: string; note?: string }> {
   return get<{ url: string; note?: string }>('/api/work/calendar/feed')
 }

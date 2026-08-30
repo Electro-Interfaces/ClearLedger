@@ -138,38 +138,7 @@ export function DocsSetupPage() {
   }
 
   if (view === 'counters') {
-    return (
-      <div className="space-y-3 px-4 py-4">
-        <div>
-          <h1 className="text-base font-semibold">Нумераторы</h1>
-          <p className="text-xs text-muted-foreground">
-            Область нумерации задаётся видом документа. Счётчик транзакционный:
-            отменённая регистрация возвращает номер, поэтому пропусков в журнале нет.
-          </p>
-        </div>
-        <Card className="divide-y divide-border/60">
-          {kinds.map((k) => (
-            <div key={k.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-              <div>
-                <div className="text-sm font-medium">{k.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  {k.number_template.replace('{prefix}', k.number_prefix || k.code)}
-                  {' · '}{SCOPE_LABEL[k.number_scope] ?? k.number_scope}
-                </div>
-              </div>
-              <span className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs">
-                {k.number_prefix || '—'}
-              </span>
-            </div>
-          ))}
-          {kinds.length === 0 && (
-            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-              Видов документов пока нет
-            </div>
-          )}
-        </Card>
-      </div>
-    )
+    return <Counters companyId={companyId} />
   }
 
   return (
@@ -231,6 +200,85 @@ export function DocsSetupPage() {
   )
 }
 
+/** Нумераторы: где стоит счёт регистрации по каждой области нумерации.
+ *
+ *  Отдельный экран от «Видов» оправдан ровно этим числом. Без него он повторял
+ *  соседний список и заставлял гадать, работает ли нумерация вообще.
+ */
+function Counters({ companyId }: { companyId: string }) {
+  const q = useQuery({
+    queryKey: ['doc-counters', companyId],
+    queryFn: () => docsService.listCounters(companyId),
+    enabled: !!companyId,
+  })
+  const rows = q.data?.counters ?? []
+
+  return (
+    <div className="space-y-3 px-4 py-4">
+      <div>
+        <h1 className="text-base font-semibold">Нумераторы</h1>
+        <p className="max-w-3xl text-xs text-muted-foreground">
+          Область нумерации задаёт вид документа: сквозная, по годам, по юрлицу.
+          Счётчик транзакционный — отменённая регистрация возвращает номер,
+          поэтому пропусков в журнале нет.
+        </p>
+      </div>
+
+      {q.isLoading && <DocsLoadingState>Читаем счётчики регистрации…</DocsLoadingState>}
+      {q.isError && (
+        <DocsErrorState error={q.error} title="Счётчики не загрузились"
+          detail="Значения не заменены нулями: показать «0» там, где номера выдавались, опаснее, чем не показать ничего."
+          onRetry={() => { void q.refetch() }} />
+      )}
+
+      {q.isSuccess && (
+        <Card className="divide-y divide-border/60">
+          {rows.map((k) => (
+            <div key={k.kind_id} className="px-3 py-2.5">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-sm font-medium">{k.name}</span>
+                <span className="font-mono text-xs text-muted-foreground">
+                  {k.template.replace('{prefix}', k.prefix)}
+                </span>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {SCOPE_LABEL[k.scope] ?? k.scope}
+              </div>
+              {k.scopes.length > 0 ? (
+                <div className="mt-1.5 space-y-0.5">
+                  {k.scopes.map((область) => (
+                    <div key={область.scope_key}
+                      className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs">
+                      <span className="text-muted-foreground">
+                        {[область.year, область.organization].filter(Boolean).join(' · ')
+                          || 'сквозной счёт'}
+                      </span>
+                      <span className="tabular-nums">
+                        выдано <span className="font-medium text-foreground">{область.issued}</span>
+                        {', следующий '}
+                        <span className="font-medium text-foreground">{область.next}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-1.5 text-xs text-muted-foreground">
+                  Номера ещё не выдавались — первый будет 1
+                </div>
+              )}
+            </div>
+          ))}
+          {rows.length === 0 && (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+              Видов документов пока нет: нумеровать нечего
+            </div>
+          )}
+        </Card>
+      )}
+    </div>
+  )
+}
+
 const LABEL_COLORS = [
   { value: 'slate', label: 'Серый', className: 'bg-slate-500' },
   { value: 'blue', label: 'Синий', className: 'bg-blue-500' },
@@ -241,6 +289,7 @@ const LABEL_COLORS = [
 
 function Labels({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
+  const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [color, setColor] = useState('slate')
   const labelsQ = useQuery({
@@ -253,6 +302,7 @@ function Labels({ companyId }: { companyId: string }) {
     onSuccess: () => {
       toast.success('Метка добавлена')
       setName('')
+      setAdding(false)
       qc.invalidateQueries({ queryKey: ['doc-labels', companyId] })
       qc.invalidateQueries({ queryKey: ['task-labels', companyId] })
     },
@@ -271,11 +321,16 @@ function Labels({ companyId }: { companyId: string }) {
 
   return (
     <div className="space-y-3 px-4 py-4">
-      <div>
-        <h1 className="text-base font-semibold">Метки</h1>
-        <p className="text-xs text-muted-foreground">
-          Справочник общий для документов и поручений: одинаковая метка означает одно и то же.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-base font-semibold">Метки</h1>
+          <p className="text-xs text-muted-foreground">
+            Справочник общий для документов и поручений: одинаковая метка означает одно и то же.
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setAdding((v) => !v)}>
+          <Plus className="mr-1 h-4 w-4" />Новая метка
+        </Button>
       </div>
 
       {labelsQ.isError && (
@@ -331,6 +386,7 @@ function Labels({ companyId }: { companyId: string }) {
         </Card>
       )}
 
+      {adding && (
       <Card className="space-y-3 p-4">
         <div className="text-sm font-medium">Новая метка</div>
         <div className="flex flex-wrap items-end gap-2">
@@ -354,14 +410,19 @@ function Labels({ companyId }: { companyId: string }) {
             onClick={() => create.mutate()}>
             Добавить
           </Button>
+          <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>
+            Отмена
+          </Button>
         </div>
       </Card>
+      )}
     </div>
   )
 }
 
 function Cases({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
+  const [adding, setAdding] = useState(false)
   const { organizations } = useCompany()
   const currentYear = new Date().getFullYear()
   const [form, setForm] = useState({
@@ -384,6 +445,7 @@ function Cases({ companyId }: { companyId: string }) {
     onSuccess: () => {
       toast.success('Дело заведено')
       setForm((current) => ({ ...current, index: '', title: '' }))
+      setAdding(false)
       qc.invalidateQueries({ queryKey: ['doc-cases', companyId] })
     },
     onError: (e) => toast.error((e as Error).message),
@@ -426,6 +488,10 @@ function Cases({ companyId }: { companyId: string }) {
             Закрытое дело остаётся в истории, но больше не принимает документы.
           </p>
         </div>
+        <div className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={() => setAdding((v) => !v)}>
+          <Plus className="mr-1 h-4 w-4" />Новое дело
+        </Button>
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button size="sm" variant="outline" disabled={rollover.isPending}>
@@ -447,6 +513,7 @@ function Cases({ companyId }: { companyId: string }) {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        </div>
       </div>
       {rowsQ.isError && (
         <Card role="alert" className="flex items-center justify-between gap-3 border-destructive/30 p-3 text-sm">
@@ -508,6 +575,7 @@ function Cases({ companyId }: { companyId: string }) {
         )}
       </Card>
 
+      {adding && (
       <Card className="space-y-3 p-4">
         <div className="text-sm font-medium">Новое дело</div>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -541,17 +609,22 @@ function Cases({ companyId }: { companyId: string }) {
             Экспертная комиссия
           </label>
         </div>
-        <Button size="sm" disabled={!valid || create.isPending}
-          onClick={() => create.mutate()}>
-          Завести дело
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" disabled={!valid || create.isPending}
+            onClick={() => create.mutate()}>
+            Завести дело
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>Отмена</Button>
+        </div>
       </Card>
+      )}
     </div>
   )
 }
 
 function Substitutions({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
+  const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({
     user_id: '', deputy_id: '', starts_on: '', ends_on: '', basis: '',
   })
@@ -572,6 +645,7 @@ function Substitutions({ companyId }: { companyId: string }) {
     onSuccess: () => {
       toast.success('Замещение назначено')
       setForm({ user_id: '', deputy_id: '', starts_on: '', ends_on: '', basis: '' })
+      setAdding(false)
       qc.invalidateQueries({ queryKey: ['doc-substitutions', companyId] })
     },
     onError: (e) => toast.error((e as Error).message),
@@ -591,13 +665,18 @@ function Substitutions({ companyId }: { companyId: string }) {
 
   return (
     <div className="space-y-3 px-4 py-4">
-      <div>
-        <h1 className="text-base font-semibold">Замещения</h1>
-        <p className="text-xs text-muted-foreground">
-          Визу за другого поставить нельзя - это подделка согласования. Но отпуск
-          не должен останавливать документ: заместитель визирует от своего имени,
-          и в листе видно обоих.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-base font-semibold">Замещения</h1>
+          <p className="max-w-3xl text-xs text-muted-foreground">
+            Визу за другого поставить нельзя — это подделка согласования. Но отпуск
+            не должен останавливать документ: заместитель визирует от своего имени,
+            и в листе видно обоих.
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setAdding((v) => !v)}>
+          <Plus className="mr-1 h-4 w-4" />Новое замещение
+        </Button>
       </div>
 
       <Card className="divide-y divide-border/60">
@@ -638,6 +717,7 @@ function Substitutions({ companyId }: { companyId: string }) {
         )}
       </Card>
 
+      {adding && (
       <Card className="space-y-3 p-4">
         <div className="text-sm font-medium">Новое замещение</div>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -680,18 +760,23 @@ function Substitutions({ companyId }: { companyId: string }) {
               placeholder="Приказ №12 от 14.08.2026 о возложении обязанностей" />
           </div>
         </div>
-        <Button size="sm" onClick={() => create.mutate()}
-          disabled={!peopleQ.isSuccess || !form.user_id || !form.deputy_id || !form.starts_on
-            || !form.ends_on || create.isPending}>
-          Назначить
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => create.mutate()}
+            disabled={!peopleQ.isSuccess || !form.user_id || !form.deputy_id || !form.starts_on
+              || !form.ends_on || create.isPending}>
+            Назначить
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>Отмена</Button>
+        </div>
       </Card>
+      )}
     </div>
   )
 }
 
 function ExchangeTargets({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
+  const [adding, setAdding] = useState(false)
   const [intervals, setIntervals] = useState<Record<string, string>>({})
   const [form, setForm] = useState({
     code: '', name: '', system: 'sedo', outbox_path: '', inbox_path: '',
@@ -708,6 +793,7 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
     onSuccess: () => {
       toast.success('Точка обмена заведена')
       setForm({ code: '', name: '', system: 'sedo', outbox_path: '', inbox_path: '' })
+      setAdding(false)
       qc.invalidateQueries({ queryKey: ['doc-exchange-targets', companyId] })
     },
     onError: (e) => toast.error((e as Error).message),
@@ -737,12 +823,17 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
 
   return (
     <div className="space-y-3 px-4 py-4">
-      <div>
-        <h1 className="text-base font-semibold">Обмен с корпоративными системами</h1>
-        <p className="text-xs text-muted-foreground">
-          Обмен идёт папками: согласованный документ кладётся пакетом в папку СЭД,
-          оттуда его забирает головная компания. Обратно так же.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-base font-semibold">Обмен с СЭД</h1>
+          <p className="max-w-3xl text-xs text-muted-foreground">
+            Обмен идёт папками: согласованный документ кладётся пакетом в папку СЭД,
+            оттуда его забирает головная компания. Обратно так же.
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setAdding((v) => !v)}>
+          <Plus className="mr-1 h-4 w-4" />Новая точка
+        </Button>
       </div>
 
       <Card className="divide-y divide-border/60">
@@ -815,6 +906,7 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
         )}
       </Card>
 
+      {adding && (
       <Card className="space-y-3 p-4">
         <div className="text-sm font-medium">Новая точка</div>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -830,11 +922,15 @@ function ExchangeTargets({ companyId }: { companyId: string }) {
             onChange={(v) => setForm({ ...form, inbox_path: v })}
             placeholder={`/exchange/${companyId}/in`} />
         </div>
-        <Button size="sm" onClick={() => create.mutate()}
-          disabled={!form.code.trim() || !form.name.trim() || create.isPending}>
-          Завести
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => create.mutate()}
+            disabled={!form.code.trim() || !form.name.trim() || create.isPending}>
+            Завести
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>Отмена</Button>
+        </div>
       </Card>
+      )}
     </div>
   )
 }

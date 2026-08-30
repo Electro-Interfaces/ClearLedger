@@ -8,29 +8,31 @@
  */
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useDocsScope } from '@/hooks/useDocsScope'
 import { TasksOverviewSection } from '@/components/tasks/TasksOverviewSection'
 
 export function TasksOverviewPage() {
   const { company } = useCompany()
   const navigate = useNavigate()
-  const [params, setParams] = useSearchParams()
-  const days = Number(params.get('days')) || 30
+  const [params] = useSearchParams()
+  const scope = useDocsScope()
+  // Период раздела «Отчёты». Явные даты в адресе остаются ради ссылок «вернуться
+  // к тому же отчёту», своего регулятора экран не держит.
+  const period = {
+    from: params.get('date_from') ?? scope.period.from,
+    to: params.get('date_to') ?? scope.period.to,
+  }
 
   return (
-    <div className="space-y-4 p-4">
+    <div className="space-y-4 px-4 py-4">
       <div>
-        <h1 className="text-lg font-semibold">Обзор</h1>
+        <h1 className="text-base font-semibold">Поручения</h1>
         <p className="mt-0.5 text-xs text-muted-foreground">
           Как идёт работа компании за период. Любая цифра — вход в реестр с этим
           же отбором.
         </p>
       </div>
-      <TasksOverviewSection companyId={company.id} days={days}
-        onDays={(d) => setParams((p) => {
-          const n = new URLSearchParams(p)
-          n.set('days', String(d))
-          return n
-        }, { replace: true })}
+      <TasksOverviewSection companyId={company.id} period={period}
         onDrill={(f) => {
           const n = new URLSearchParams({ view: 'registry' })
           // Обзор считает по всем задачам периода, поэтому и реестр открываем

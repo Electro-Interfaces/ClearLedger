@@ -1,18 +1,31 @@
 /**
- * Обзор «Трека»: как идут документы и поручения.
+ * Отчёты «Трека»: как идут документы и поручения.
  *
  * Два взгляда на одно рабочее место. По документам считаем то, за чем приходит
  * делопроизводитель: сколько без номера, сколько стоит на визах и у кого горит
  * срок. По поручениям показываем готовую сводку трекера — второй такой считать
  * незачем.
+ *
+ * Два правила на весь раздел.
+ *
+ * Период один и берётся из «Рабочего контура»: три отчёта с тремя своими
+ * регуляторами дат заставляли человека выяснять, какой из них он сейчас
+ * настроил. Каждый отчёт лишь объясняет, что он этим периодом отбирает.
+ *
+ * Любая цифра — вход в список с этим же отбором. Цифра, за которой не
+ * открывается предмет, отвечает на вопрос «сколько» и не даёт ответить на
+ * вопрос «а что с этим делать».
  */
-import { lazy, Suspense, useMemo } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { MetricTile } from '@/components/ui/metric-tile'
 import { Button } from '@/components/ui/button'
 import * as docsService from '@/services/docsService'
+import * as tasksService from '@/services/tasksService'
+import * as workService from '@/services/workService'
 import { DOC_FAMILY } from '@/services/docsService'
 import { useDocsView } from './DocsLayout'
 import { useDocsScope } from '@/hooks/useDocsScope'
@@ -63,16 +76,13 @@ export function DocsOverviewPage() {
   const navigate = useNavigate()
   const view = useDocsView('/docs/overview')
   const scope = useDocsScope()
-  const [params, setParams] = useSearchParams()
+  const [params] = useSearchParams()
   const companyId = company?.id ?? ''
+  // Период раздела. Явные `date_from`/`date_to` в адресе остаются ради ссылок
+  // «вернуться к тому же отчёту», но своего регулятора у экрана нет: он один на
+  // раздел и стоит в «Рабочем контуре».
   const dateFrom = params.get('date_from') ?? scope.period.from
   const dateTo = params.get('date_to') ?? scope.period.to
-  const setPeriodValue = (key: 'date_from' | 'date_to', value: string) => setParams((current) => {
-    const next = new URLSearchParams(current)
-    if (value) next.set(key, value)
-    else next.delete(key)
-    return next
-  }, { replace: true })
   const dateError = useMemo(() => {
     if (!dateFrom || !dateTo) return 'Укажите начало и окончание периода'
     if (dateFrom > dateTo) return 'Дата начала позже даты окончания'
@@ -92,6 +102,18 @@ export function DocsOverviewPage() {
     queryKey: ['docs-board', companyId, 'overview'],
     queryFn: () => docsService.board(companyId),
     enabled: !!companyId && view === 'docs' && scope.ready,
+  })
+  // Имена для разреза по ответственным: в реестре лежит только идентификатор.
+  const peopleQ = useQuery({
+    queryKey: ['task-people', companyId],
+    queryFn: () => tasksService.listTaskPeople(companyId),
+    enabled: !!companyId && view === 'docs',
+    staleTime: 5 * 60 * 1000,
+  })
+  const calendarQ = useQuery({
+    queryKey: ['calendar-summary', companyId, dateFrom, dateTo],
+    queryFn: () => workService.calendarSummary(companyId, dateFrom, dateTo),
+    enabled: !!companyId && view === 'calendar' && !dateError,
   })
   const disciplineQ = useQuery({
     queryKey: ['docs-discipline', companyId, dateFrom, dateTo],
@@ -118,6 +140,35 @@ export function DocsOverviewPage() {
     }
   }, [listQ.data])
 
+  // Разрезы журнала. Считаются по уже загруженному реестру периода: ходить за
+  // ними в базу незачем, а расхождение с цифрой «всего» стало бы возможным.
+  const разрезы = useMemo(() => {
+    const docs = listQ.data?.docs ?? []
+    const имена = new Map((peopleQ.data?.people ?? []).map((p) => [p.id, p.name]))
+    const собрать = (ключ: (d: docsService.DocCard) => [string, string] | null) => {
+      const acc = new Map<string, { key: string; label: string; count: number }>()
+      for (const d of docs) {
+        const пара = ключ(d)
+        if (!пара) continue
+        const [k, label] = пара
+        const строка = acc.get(k) ?? { key: k, label, count: 0 }
+        строка.count += 1
+        acc.set(k, строка)
+      }
+      return [...acc.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    }
+    return {
+      kinds: собрать((d) => (d.kind_id ? [d.kind_id, d.kind_name] : null)),
+      orgs: собрать((d) => (d.organization_name
+        ? [d.organization_name, d.organization_name] : null)),
+      parties: собрать((d) => (d.counterparty_name
+        ? [d.counterparty_name, d.counterparty_name] : null)),
+      people: собрать((d) => (d.responsible_id
+        ? [d.responsible_id, имена.get(d.responsible_id) ?? 'не из состава'] : null)),
+      sources: собрать((d) => [d.source || 'manual', DOC_SOURCE[d.source] ?? d.source]),
+    }
+  }, [listQ.data, peopleQ.data])
+
   if (view === 'errands') {
     return (
       <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка…</div>}>
@@ -125,16 +176,29 @@ export function DocsOverviewPage() {
       </Suspense>
     )
   }
+  if (view === 'calendar') {
+    return <Meetings report={calendarQ.data} loading={calendarQ.isLoading}
+      failed={calendarQ.isError} error={calendarQ.error}
+      retry={() => calendarQ.refetch()} dateError={dateError}
+      dateFrom={dateFrom} dateTo={dateTo} />
+  }
   if (view === 'discipline') {
     return <Discipline report={disciplineQ.data} loading={disciplineQ.isLoading}
       fetching={disciplineQ.isFetching} failed={disciplineQ.isError}
       retry={() => disciplineQ.refetch()} dateError={dateError}
-      dateFrom={dateFrom} dateTo={dateTo}
-      setDateFrom={(value) => setPeriodValue('date_from', value)}
-      setDateTo={(value) => setPeriodValue('date_to', value)} />
+      dateFrom={dateFrom} dateTo={dateTo} />
   }
 
   const columns = boardQ.data?.columns ?? []
+  // Список открывается тем же периодом, каким посчитана цифра: иначе реестр
+  // покажет другое число, и человек будет искать, кто из двух врёт.
+  const вРеестр = (extra: Record<string, string>) => `/docs?${new URLSearchParams({
+    view: 'all', date_from: dateFrom, date_to: dateTo, ...extra,
+  }).toString()}`
+  // «Без согласования» — не шаг маршрута, а его отсутствие: маршрут не
+  // запускали. В карточке про визы такая строка перевешивала все настоящие.
+  const безМаршрута = columns.find((c) => c.key === 'no_route')
+  const шагиМаршрута = columns.filter((c) => c.key !== 'no_route')
 
   return (
     <div className="space-y-4 px-4 py-4">
@@ -161,30 +225,41 @@ export function DocsOverviewPage() {
 
       {scope.ready && listQ.isSuccess && boardQ.isSuccess && <>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Tile label="Без номера" value={stats.draft}
+        <MetricTile label="Без номера" value={stats.draft}
           hint="заведены, но не зарегистрированы"
-          onClick={() => navigate('/docs?view=all')} />
-        <Tile label="На визах" value={stats.approving}
+          onClick={stats.draft > 0
+            ? () => navigate(вРеестр({ attention: 'unnumbered' })) : undefined} />
+        <MetricTile label="На визах" value={stats.approving}
           hint="идёт согласование"
-          onClick={() => navigate('/docs/work?view=approvals')} />
-        <Tile label="Возвращены" value={stats.returned}
+          onClick={stats.approving > 0
+            ? () => navigate(вРеестр({ attention: 'pending' })) : undefined} />
+        <MetricTile label="Возвращены" value={stats.returned}
           hint="отказ с замечанием, ждут доработки"
-          onClick={() => navigate('/docs?view=all')} />
-        <Tile label="Просрочены" value={stats.overdue}
+          tone={stats.returned > 0 ? 'warning' : undefined}
+          onClick={stats.returned > 0
+            ? () => navigate(вРеестр({ attention: 'returned' })) : undefined} />
+        <MetricTile label="Просрочены" value={stats.overdue}
           hint="срок исполнения прошёл"
-          onClick={() => navigate('/docs?view=all')} />
+          tone={stats.overdue > 0 ? 'danger' : undefined}
+          onClick={stats.overdue > 0
+            ? () => navigate(вРеестр({ attention: 'overdue' })) : undefined} />
       </div>
 
-      <Card className="p-4">
+      <Card className="gap-1.5 p-4">
         <div className="text-sm font-medium">По потокам</div>
-        <div className="mt-2 space-y-1">
+        <p className="text-xs text-muted-foreground">
+          Разрезы журнала: строка открывает свой раздел «Документов»
+        </p>
+        <div className="mt-2 space-y-0.5">
           {stats.byFamily.map(([family, count]) => (
-            <div key={family} className="flex items-center justify-between text-[13px]">
+            <Link key={family} to={`/docs?${new URLSearchParams({
+              view: family, date_from: dateFrom, date_to: dateTo }).toString()}`}
+              className="-mx-1.5 flex items-center justify-between rounded px-1.5 py-1 text-[13px] transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <span className="text-muted-foreground">
                 {DOC_FAMILY[family] ?? family}
               </span>
-              <span className="font-medium">{count}</span>
-            </div>
+              <span className="font-medium tabular-nums">{count}</span>
+            </Link>
           ))}
           {stats.byFamily.length === 0 && (
             <div className="py-4 text-center text-sm text-muted-foreground">
@@ -194,33 +269,59 @@ export function DocsOverviewPage() {
         </div>
       </Card>
 
-      <Card className="p-4">
-        <div className="text-sm font-medium">Где стоит согласование</div>
+      <Card className="gap-1.5 p-4">
+        <div className="text-sm font-medium">Где стоят визы</div>
         <p className="text-xs text-muted-foreground">
-          Колонка — шаг маршрута. Вопрос «где документ застрял» это вопрос о шаге
+          Строка — шаг маршрута. Вопрос «где документ застрял» это вопрос о шаге
           и о том, кого ждут.
         </p>
-        <div className="mt-2 space-y-1">
-          {columns.map((c) => (
+        <div className="mt-2 space-y-0.5">
+          {шагиМаршрута.map((c) => (
             <div key={c.key} className="flex items-center justify-between text-[13px]">
               <span className="text-muted-foreground">{c.name}</span>
-              <span className="font-medium">{c.docs.length}</span>
+              <span className="font-medium tabular-nums">{c.docs.length}</span>
             </div>
           ))}
-          {columns.length === 0 && (
+          {шагиМаршрута.length === 0 && (
             <div className="py-4 text-center text-sm text-muted-foreground">
-              Согласований пока нет
+              Ни один документ сейчас не в маршруте согласования
             </div>
           )}
         </div>
+        {!!безМаршрута?.docs.length && (
+          <p className="mt-3 border-t border-border/60 pt-2 text-xs text-muted-foreground">
+            Ещё {безМаршрута.docs.length}: маршрут согласования не запускали —
+            это не шаг, а его отсутствие
+          </p>
+        )}
+        <Link to="/docs/company?view=docs"
+          className="mt-3 inline-block text-xs text-primary hover:underline">
+          Открыть согласование целиком
+        </Link>
       </Card>
+
+      {/* Разрезы журнала: то, чем делопроизводство меряет свой месяц. Строка
+          ведёт в реестр с этим же отбором — общее правило раздела. */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Разрез title="По видам" hint="вид задаёт нумерацию и маршрут"
+          rows={разрезы.kinds} link={(r) => вРеестр({ kind: r.key })} />
+        <Разрез title="По юрлицам" hint="от чьего имени ведётся переписка"
+          rows={разрезы.orgs} />
+        <Разрез title="По корреспондентам" hint="с кем идёт переписка"
+          rows={разрезы.parties} link={(r) => вРеестр({ q: r.label })} />
+        <Разрез title="По ответственным" hint="за кем закреплён документ"
+          rows={разрезы.people}
+          empty="Ответственные не назначены" />
+        <Разрез title="Откуда пришли" hint="заведён руками, принят из почты или СЭД"
+          rows={разрезы.sources} />
+      </div>
       </>}
     </div>
   )
 }
 
 function Discipline({ report, loading, fetching, failed, retry, dateError,
-  dateFrom, dateTo, setDateFrom, setDateTo }: {
+  dateFrom, dateTo }: {
   report: docsService.ApprovalDisciplineReport | undefined
   loading: boolean
   fetching: boolean
@@ -229,38 +330,30 @@ function Discipline({ report, loading, fetching, failed, retry, dateError,
   dateError: string
   dateFrom: string
   dateTo: string
-  setDateFrom: (value: string) => void
-  setDateTo: (value: string) => void
 }) {
+  const navigate = useNavigate()
   const summary = report?.summary
   const estimated = report?.people.reduce((sum, row) => sum + row.estimated_decisions, 0) ?? 0
+  /** Показатель — вход в список: без перехода отчёт отвечает «сколько» и не даёт
+   *  ответить «что с этим делать». Ноль ведёт никуда: за ним нечего показывать. */
+  const вход = (сколько: number, куда: () => string) =>
+    (сколько > 0 ? () => navigate(куда()) : undefined)
   return (
     <div className="flex flex-col gap-4 px-4 py-4" aria-busy={loading || fetching}>
       <div>
         <h1 className="text-base font-semibold">Исполнительская дисциплина</h1>
         <p id="discipline-period-hint" className="max-w-3xl text-xs text-muted-foreground">
-          Период отбирает документы по первому запуску согласования, московское время.
-          Текущие ожидания и просрочки показываются по всей компании вне периода.
+          Период раздела ({formatPeriod(dateFrom, dateTo)}) отбирает документы по
+          первому запуску согласования, московское время. Текущие ожидания и
+          просрочки показываются по всей компании вне периода.
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-3" aria-describedby="discipline-period-hint">
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          С
-          <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)}
-            max={dateTo} className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground" />
-        </label>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          По
-          <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)}
-            min={dateFrom} className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground" />
-        </label>
-        {fetching && report && (
-          <span className="self-center text-xs text-muted-foreground" aria-live="polite">
-            Обновляем данные…
-          </span>
-        )}
-      </div>
+      {fetching && report && (
+        <span className="text-xs text-muted-foreground" aria-live="polite">
+          Обновляем данные…
+        </span>
+      )}
 
       {dateError && (
         <Card role="alert" className="p-4 text-sm text-destructive">{dateError}</Card>
@@ -285,32 +378,45 @@ function Discipline({ report, loading, fetching, failed, retry, dateError,
       )}
 
       {report && !dateError && !failed && <>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-          <Metric label="Запущено в период" value={summary?.documents ?? 0}
+        {/* Слева — что случилось за период, справа — что происходит сейчас.
+            Раньше семь плиток шли одним рядом, и «Сейчас просрочено» читалось
+            как часть той же воронки, хотя это другой момент времени. */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricTile label="Запущено в период" value={summary?.documents ?? 0}
             hint={formatPeriod(report.period.date_from, report.period.date_to)}
-            to={(summary?.documents ?? 0) > 0 ? disciplineDetailUrl(report, 'started') : undefined} />
-          <Metric label="Завершено" value={summary?.completed ?? 0}
+            onClick={вход(summary?.documents ?? 0, () => disciplineDetailUrl(report, 'started'))} />
+          <MetricTile label="Завершено" value={summary?.completed ?? 0}
             hint="финально согласовано"
-            to={(summary?.completed ?? 0) > 0 ? disciplineDetailUrl(report, 'completed') : undefined} />
-          <Metric label="Возвращено" value={summary?.returned ?? 0}
+            onClick={вход(summary?.completed ?? 0, () => disciplineDetailUrl(report, 'completed'))} />
+          <MetricTile label="Возвращено" value={summary?.returned ?? 0}
             hint="последний круг отклонён"
-            to={(summary?.returned ?? 0) > 0 ? disciplineDetailUrl(report, 'returned') : undefined} />
-          <Metric label="Отменено" value={summary?.cancelled ?? 0}
+            tone={(summary?.returned ?? 0) > 0 ? 'warning' : undefined}
+            onClick={вход(summary?.returned ?? 0, () => disciplineDetailUrl(report, 'returned'))} />
+          <MetricTile label="Отменено" value={summary?.cancelled ?? 0}
             hint="нет положительного исхода"
-            to={(summary?.cancelled ?? 0) > 0 ? disciplineDetailUrl(report, 'cancelled') : undefined} />
-          <Metric label="Сейчас ждут" value={report.backlog.pending}
-            hint="весь текущий backlog компании"
-            to={report.backlog.pending > 0 ? '/docs/company?view=docs&pending=1' : undefined} />
-          <Metric label="Сейчас просрочено" value={report.backlog.overdue}
-            hint="активная виза позже SLA" tone={report.backlog.overdue > 0 ? 'danger' : undefined}
-            to={report.backlog.overdue > 0 ? '/docs/company?view=docs&overdue=1' : undefined} />
-          <Metric label="С первого круга"
-            value={(summary?.first_pass_sample ?? 0) > 0 ? `${summary?.first_pass_rate}%` : '—'}
-            hint={(summary?.first_pass_sample ?? 0) > 0
-              ? `${summary?.first_pass_documents} из ${summary?.first_pass_sample}`
-              : 'нет завершённых первых кругов'}
-            to={(summary?.first_pass_documents ?? 0) > 0
-              ? disciplineDetailUrl(report, 'first_pass') : undefined} />
+            onClick={вход(summary?.cancelled ?? 0, () => disciplineDetailUrl(report, 'cancelled'))} />
+        </div>
+
+        <div>
+          <div className="pb-1.5 text-xs text-muted-foreground">
+            Сейчас, вне периода — на {formatAsOf(report.backlog.as_of)}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <MetricTile label="Сейчас ждут" value={report.backlog.pending}
+              hint="вся очередь виз компании сейчас"
+              onClick={вход(report.backlog.pending, () => '/docs/company?view=docs&pending=1')} />
+            <MetricTile label="Сейчас просрочено" value={report.backlog.overdue}
+              hint="активная виза позже SLA"
+              tone={report.backlog.overdue > 0 ? 'danger' : undefined}
+              onClick={вход(report.backlog.overdue, () => '/docs/company?view=docs&overdue=1')} />
+            <MetricTile label="С первого круга"
+              value={(summary?.first_pass_sample ?? 0) > 0 ? `${summary?.first_pass_rate}%` : '—'}
+              hint={(summary?.first_pass_sample ?? 0) > 0
+                ? `${summary?.first_pass_documents} из ${summary?.first_pass_sample} за период`
+                : 'нет завершённых первых кругов'}
+              onClick={вход(summary?.first_pass_documents ?? 0,
+                () => disciplineDetailUrl(report, 'first_pass'))} />
+          </div>
         </div>
 
         <div className="grid min-w-0 gap-4 xl:grid-cols-2">
@@ -473,41 +579,196 @@ function Discipline({ report, loading, fetching, failed, retry, dateError,
   )
 }
 
-function Metric({ label, value, hint, tone, to }: {
-  label: string
-  value: number | string
-  hint?: string
-  tone?: 'danger'
-  to?: string
-}) {
-  const card = (
-    <Card className={`h-full ${to ? 'transition-colors group-hover:bg-accent/40' : ''}`}>
-      <CardHeader>
-        <CardDescription>{label}</CardDescription>
-        <CardTitle className={`text-2xl tabular-nums ${tone === 'danger' ? 'text-destructive' : ''}`}>
-          {value}
-        </CardTitle>
-        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-      </CardHeader>
-    </Card>
-  )
-  return to ? (
-    <Link to={to} className="group rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-      {card}
-    </Link>
-  ) : card
+/** Откуда документ взялся. Слово вместо кода: `edo` в отчёте не читается. */
+const DOC_SOURCE: Record<string, string> = {
+  manual: 'заведён руками',
+  intake: 'принят из потока',
+  mail: 'пришёл почтой',
+  chat: 'создан из чата',
+  edo: 'принят из СЭД',
+  api: 'заведён программой',
 }
 
-function Tile({ label, value, hint, onClick }: {
-  label: string; value: number; hint: string; onClick: () => void
+/** Разрез журнала: строки со счётчиком, каждая — вход в реестр.
+ *
+ *  Хвост сворачивается: разрез из сорока корреспондентов перестаёт отвечать на
+ *  вопрос «с кем мы в основном переписываемся» и становится вторым реестром.
+ */
+function Разрез({ title, hint, rows, link, empty = 'Данных за период нет', limit = 7 }: {
+  title: string
+  hint: string
+  rows: { key: string; label: string; count: number }[]
+  link?: (row: { key: string; label: string; count: number }) => string
+  empty?: string
+  limit?: number
 }) {
+  const [весь, показать] = useState(false)
+  const видимые = весь ? rows : rows.slice(0, limit)
   return (
-    <button type="button" onClick={onClick}
-      className="rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-accent/40">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="pt-0.5 text-2xl font-semibold">{value}</div>
-      <div className="pt-0.5 text-xs text-muted-foreground">{hint}</div>
-    </button>
+    <Card className="gap-1.5 p-4">
+      <div className="text-sm font-medium">{title}</div>
+      <p className="text-xs text-muted-foreground">{hint}</p>
+      <div className="mt-1 space-y-0.5">
+        {видимые.map((r) => (
+          link ? (
+            <Link key={r.key} to={link(r)}
+              className="-mx-1.5 flex items-center justify-between gap-3 rounded px-1.5 py-1 text-[13px] transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <span className="min-w-0 truncate text-muted-foreground">{r.label}</span>
+              <span className="font-medium tabular-nums">{r.count}</span>
+            </Link>
+          ) : (
+            <div key={r.key} className="flex items-center justify-between gap-3 px-1.5 py-1 text-[13px]">
+              <span className="min-w-0 truncate text-muted-foreground">{r.label}</span>
+              <span className="font-medium tabular-nums">{r.count}</span>
+            </div>
+          )
+        ))}
+        {rows.length === 0 && (
+          <div className="py-3 text-center text-sm text-muted-foreground">{empty}</div>
+        )}
+      </div>
+      {rows.length > limit && (
+        <button type="button" onClick={() => показать((v) => !v)}
+          className="mt-1 self-start text-xs text-primary hover:underline">
+          {весь ? 'Свернуть' : `Ещё ${rows.length - limit}`}
+        </button>
+      )}
+    </Card>
+  )
+}
+
+/** Отчёт по встречам: третий вид работы «Трека».
+ *
+ *  Час участия и час встречи — разные величины: совещание на пятерых стоит
+ *  компании пять человеко-часов, и в разрезе по людям это пять строк. Экран
+ *  говорит это словами, иначе сумма по столбцу не сойдётся с итогом сверху.
+ */
+function Meetings({ report, loading, failed, error, retry, dateError, dateFrom, dateTo }: {
+  report: workService.CalendarSummary | undefined
+  loading: boolean
+  failed: boolean
+  error: unknown
+  retry: () => void
+  dateError: string
+  dateFrom: string
+  dateTo: string
+}) {
+  const t = report?.totals
+  return (
+    <div className="flex flex-col gap-4 px-4 py-4" aria-busy={loading}>
+      <div>
+        <h1 className="text-base font-semibold">Встречи</h1>
+        <p className="max-w-3xl text-xs text-muted-foreground">
+          Период раздела ({formatPeriod(dateFrom, dateTo)}) отбирает встречи,
+          пересекающиеся с ним. Считается общий календарь компании: закрытые и
+          личные встречи в отчёт не входят.
+        </p>
+      </div>
+
+      {dateError && <Card role="alert" className="p-4 text-sm text-destructive">{dateError}</Card>}
+      {failed && !dateError && (
+        <DocsErrorState error={error} title="Сводка по встречам не загрузилась"
+          detail="Часы не заменены нулями: показать «0 ч» там, где встречи были, хуже, чем не показать ничего."
+          onRetry={retry} />
+      )}
+      {loading && !report && !dateError && (
+        <DocsLoadingState>Считаем встречи и участие…</DocsLoadingState>
+      )}
+
+      {report && !dateError && !failed && <>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricTile label="Встреч" value={t?.events ?? 0}
+            hint={t?.all_day ? `из них на весь день: ${t.all_day}` : 'за период'} />
+          <MetricTile label="Часов" value={t?.hours ?? 0}
+            hint="без событий на весь день" />
+          <MetricTile label="Отменено" value={t?.cancelled ?? 0}
+            hint="встреча была назначена и снята"
+            tone={t?.cancelled ? 'warning' : undefined} />
+          <MetricTile label="Ждут ответа" value={t?.awaiting ?? 0}
+            hint="приглашения на будущие встречи"
+            tone={t?.awaiting ? 'warning' : undefined} />
+        </div>
+
+        <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+          <Card className="min-w-0">
+            <CardHeader>
+              <CardTitle>Кто сколько во встречах</CardTitle>
+              <CardDescription>
+                Участие, а не занятость: совещание на пятерых даёт пять строк
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="min-w-[440px] w-full text-sm">
+                  <thead className="text-xs text-muted-foreground">
+                    <tr><th scope="col" className="pb-2 text-left font-medium">Человек</th>
+                      <th scope="col" className="pb-2 text-right font-medium">Встреч</th>
+                      <th scope="col" className="pb-2 text-right font-medium">Часов</th>
+                      <th scope="col" className="pb-2 text-right font-medium">Отказов</th></tr>
+                  </thead>
+                  <tbody>
+                    {report.by_person.map((row) => (
+                      <tr key={row.id} className="border-t border-border">
+                        <td className="max-w-64 break-words py-2 pe-3">{row.name}</td>
+                        <td className="py-2 text-right tabular-nums">{row.events}</td>
+                        <td className="py-2 text-right font-medium tabular-nums">{row.hours}</td>
+                        <td className="py-2 text-right tabular-nums">{row.declined || 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {!report.by_person.length && (
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  За период встреч с участниками не было
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="min-w-0">
+            <CardHeader>
+              <CardTitle>Кто собирает</CardTitle>
+              <CardDescription>
+                Организаторы: сколько встреч назначено и на сколько часов
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-0.5">
+                {report.by_organizer.map((row) => (
+                  <div key={row.id ?? row.name}
+                    className="flex items-center justify-between gap-3 py-1 text-[13px]">
+                    <span className="min-w-0 truncate text-muted-foreground">{row.name}</span>
+                    <span className="tabular-nums">
+                      {row.events} · <span className="font-medium">{row.hours} ч</span>
+                    </span>
+                  </div>
+                ))}
+                {!report.by_organizer.length && (
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    За период никто не собирал встреч
+                  </p>
+                )}
+              </div>
+              {report.awaiting.length > 0 && (
+                <div className="mt-4 border-t border-border/60 pt-3">
+                  <div className="text-xs font-medium">Не ответили на приглашение</div>
+                  <p className="pb-1 text-xs text-muted-foreground">
+                    Только будущие встречи: по прошедшим спрашивать поздно
+                  </p>
+                  {report.awaiting.map((row) => (
+                    <div key={row.id} className="flex items-center justify-between py-0.5 text-[13px]">
+                      <span className="truncate text-muted-foreground">{row.name}</span>
+                      <span className="font-medium tabular-nums">{row.count}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </>}
+    </div>
   )
 }
 

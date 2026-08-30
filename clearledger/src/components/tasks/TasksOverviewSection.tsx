@@ -10,15 +10,13 @@ import { useQuery } from '@tanstack/react-query'
 import {
   ArrowRightLeft, CheckCircle2, MessageSquare, Plus, Route as RouteIcon,
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { MetricTile } from '@/components/ui/metric-tile'
 import { QueryError } from '@/components/common/QueryError'
 import { cn } from '@/lib/utils'
+import { formatPeriod } from '@/lib/formatDate'
 import * as tasksService from '@/services/tasksService'
 import type { TasksCut } from '@/services/tasksService'
-
-const PERIODS = [7, 30, 90]
 
 /** Значок события — словарь общий с карточкой задачи: один вид следа везде. */
 const KIND_ICON: Record<string, typeof Plus> = {
@@ -36,16 +34,17 @@ const STATUS_LABEL: Record<string, string> = {
 const dtT = (s: string | null) => (s ? new Date(s).toLocaleString('ru-RU',
   { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—')
 
-export function TasksOverviewSection({ companyId, days, onDays, onDrill }: {
+export function TasksOverviewSection({ companyId, period, onDrill }: {
   companyId: string
-  days: number
-  onDays: (d: number) => void
+  /** Период раздела «Отчёты». Своего регулятора экран не держит: их было три на
+   *  три соседних отчёта, и человек не знал, какой из них он сейчас настроил. */
+  period: { from: string; to: string }
   /** Провал в «Работу» с фильтром: обзор — вход в список, а не отдельный мир. */
   onDrill: (f: { scope?: string; assignee?: string; type?: string; object?: string }) => void
 }) {
   const q = useQuery({
-    queryKey: ['tasks-summary', companyId, days],
-    queryFn: () => tasksService.tasksSummary(companyId, days),
+    queryKey: ['tasks-summary', companyId, period.from, period.to],
+    queryFn: () => tasksService.tasksSummary(companyId, 30, period),
   })
   const s = q.data
 
@@ -53,18 +52,11 @@ export function TasksOverviewSection({ companyId, days, onDays, onDrill }: {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground">Период:</span>
-        {PERIODS.map((d) => (
-          <Button key={d} size="sm" variant={d === days ? 'default' : 'outline'} className="h-7 px-2.5 text-xs"
-            onClick={() => onDays(d)}>
-            {d} дн
-          </Button>
-        ))}
-        <span className="text-xs text-muted-foreground">
-          «в работе» и «просрочено» — на сейчас, остальное — за период
-        </span>
-      </div>
+      <p className="text-xs text-muted-foreground">
+        Период раздела ({formatPeriod(period.from, period.to)}) отбирает
+        поставленное, закрытое и след работы. «В работе» и «просрочено» — на
+        сейчас: горящее не обязано попадать в выбранное окно.
+      </p>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <MetricTile label="В работе" value={s?.totals.open ?? '—'} hint="активные задачи компании"
@@ -76,9 +68,9 @@ export function TasksOverviewSection({ companyId, days, onDays, onDrill }: {
         <MetricTile label="Без исполнителя" value={s?.totals.unassigned ?? '—'}
           tone={s && s.totals.unassigned > 0 ? 'warning' : undefined}
           hint="поставлена, но ни у кого не в руках" onClick={() => onDrill({ scope: 'open' })} />
-        <MetricTile label="Поставлено" value={s?.totals.created ?? '—'} hint={`новых за ${days} дн`} />
+        <MetricTile label="Поставлено" value={s?.totals.created ?? '—'} hint="новых за период" />
         <MetricTile label="Закрыто" value={s?.totals.done ?? '—'} hint={
-          s?.totals.avg_days != null ? `в среднем за ${s.totals.avg_days} дн` : `за ${days} дн`}
+          s?.totals.avg_days != null ? `в среднем за ${s.totals.avg_days} дн` : 'за период'}
           onClick={() => onDrill({ scope: 'closed' })} />
       </div>
 
@@ -98,7 +90,7 @@ export function TasksOverviewSection({ companyId, days, onDays, onDrill }: {
         <div className="border-b px-4 py-2.5">
           <h3 className="text-sm font-medium">Что происходило</h3>
           <p className="text-xs text-muted-foreground">
-            След работы за {days} дн: кто передал, кто двинул, кто закрыл
+            След работы за период: кто передал, кто двинул, кто закрыл
           </p>
         </div>
         {q.isLoading ? (

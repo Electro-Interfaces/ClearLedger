@@ -27,7 +27,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -1110,6 +1110,112 @@ async def calendar_list(
             # Признак усечения: без него экран не может честно сказать «показаны
             # не все» и выглядит полным.
             "truncated": всего > len(rows)}
+
+
+@router.get("/calendar/summary")
+async def calendar_summary(
+    company_id: str = Query(...),
+    date_from: date = Query(...),
+    date_to: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сколько времени компания проводит на встречах и кто кого не дождался.
+
+    Считаем по общему календарю: закрытые и личные встречи не участвуют даже
+    числом. Сумма часов по человеку — это его участие, а не занятость: одна
+    встреча на пятерых даёт пять человеко-часов, и в отчёте это разные строки.
+    """
+    from app.models import CalendarAttendee, CalendarEvent
+
+    cid = await _assert_work(company_id, current_user, db)
+    await oversight.assert_надзор(db, cid, current_user)
+
+    начало = datetime.combine(date_from, time.min, space_time.zone(None)).astimezone(timezone.utc)
+    конец = datetime.combine(date_to, time.max, space_time.zone(None)).astimezone(timezone.utc)
+    сейчас = datetime.now(timezone.utc)
+
+    события = list((await db.execute(select(CalendarEvent).where(
+        CalendarEvent.company_id == cid,
+        CalendarEvent.visibility == "company",
+        # Пересекающиеся с окном, а не начинающиеся в нём: командировка с
+        # прошлой недели относится и к этой.
+        CalendarEvent.starts_at < конец,
+        CalendarEvent.ends_at > начало))).scalars())
+    по_id = {e.id: e for e in события}
+
+    участия = list((await db.execute(select(CalendarAttendee).where(
+        CalendarAttendee.event_id.in_(по_id)))).scalars()) if по_id else []
+
+    люди = {}
+    нужны = ({e.organizer_id for e in события}
+             | {у.user_id for у in участия})
+    if нужны:
+        люди = {u.id: u.name for u in (await db.execute(
+            select(User).where(User.id.in_(нужны)))).scalars()}
+
+    def часы(e) -> float:
+        """Событие на весь день часами не меряем: восемь это или двадцать
+        четыре — вопрос трудового распорядка, а не календаря."""
+        if e.all_day or not (e.starts_at and e.ends_at):
+            return 0.0
+        return max(0.0, (e.ends_at - e.starts_at).total_seconds() / 3600)
+
+    живые = [e for e in события if e.status != "cancelled"]
+    отменено = len(события) - len(живые)
+
+    по_организаторам: dict = {}
+    for e in живые:
+        строка = по_организаторам.setdefault(e.organizer_id, {
+            "id": str(e.organizer_id) if e.organizer_id else None,
+            "name": люди.get(e.organizer_id) or "—", "events": 0, "hours": 0.0})
+        строка["events"] += 1
+        строка["hours"] += часы(e)
+
+    по_людям: dict = {}
+    без_ответа: dict = {}
+    отказов = 0
+    for у in участия:
+        e = по_id.get(у.event_id)
+        if e is None or e.status == "cancelled":
+            continue
+        строка = по_людям.setdefault(у.user_id, {
+            "id": str(у.user_id), "name": люди.get(у.user_id) or "—",
+            "events": 0, "hours": 0.0, "declined": 0, "pending": 0})
+        строка["events"] += 1
+        строка["hours"] += часы(e)
+        if у.response == "declined":
+            строка["declined"] += 1
+            отказов += 1
+        elif у.response == "pending":
+            строка["pending"] += 1
+            # Хвост по прошедшим встречам растёт вечно и топит настоящий.
+            if e.starts_at and e.starts_at > сейчас:
+                без_ответа[у.user_id] = без_ответа.get(у.user_id, 0) + 1
+
+    def порядок(строки, ключ="hours"):
+        return sorted(строки, key=lambda r: (-r[ключ], r["name"]))
+
+    return {
+        "period": {"date_from": date_from.isoformat(), "date_to": date_to.isoformat()},
+        "totals": {
+            "events": len(живые),
+            "cancelled": отменено,
+            "hours": round(sum(часы(e) for e in живые), 1),
+            "all_day": sum(1 for e in живые if e.all_day),
+            "seats": sum(r["events"] for r in по_людям.values()),
+            "declined": отказов,
+            "awaiting": sum(без_ответа.values()),
+        },
+        "by_organizer": порядок([
+            {**r, "hours": round(r["hours"], 1)} for r in по_организаторам.values()]),
+        "by_person": порядок([
+            {**r, "hours": round(r["hours"], 1)} for r in по_людям.values()]),
+        "awaiting": sorted(
+            [{"id": str(uid), "name": люди.get(uid) or "—", "count": n}
+             for uid, n in без_ответа.items()],
+            key=lambda r: (-r["count"], r["name"])),
+    }
 
 
 @router.get("/calendar/busy")

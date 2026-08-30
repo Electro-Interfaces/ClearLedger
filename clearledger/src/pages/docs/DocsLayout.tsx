@@ -46,6 +46,12 @@ export const DOCS_VIEWS: Record<string, DocsView[]> = {
     { key: 'outgoing', label: 'Исходящие', hint: 'что отправили сами' },
     { key: 'ord', label: 'Приказы', hint: 'приказы и распоряжения по компании' },
     { key: 'internal', label: 'Внутренние', hint: 'служебные записки и прочая переписка внутри' },
+    // Потоков в модели шесть, и вид с любым из них заводится из «Настройки».
+    // Пока пунктов было четыре, документы договорного и прочего потока
+    // проваливались из журнала: находились только во «Всех», без своего
+    // разреза и заголовка. Раздел делится по потоку — значит по всему потоку.
+    { key: 'contract', label: 'Договорные', hint: 'договоры, приложения и допсоглашения' },
+    { key: 'other', label: 'Прочие', hint: 'то, что не попало ни в один поток' },
     { key: 'all', label: 'Все документы', hint: 'единый реестр без разделения по потоку' },
   ],
   // Раздел «Моё» — личное рабочее место: сверху то, что человек ведёт сам
@@ -114,6 +120,9 @@ export const DOCS_VIEWS: Record<string, DocsView[]> = {
     // Полное название стоит заголовком самого экрана.
     { key: 'discipline', label: 'По дисциплине', hint: 'исполнительская дисциплина: скорость согласования и задержки по людям' },
     { key: 'errands', label: 'По поручениям', hint: 'итоги и разрезы по людям, типам и объектам' },
+    // Третий вид работы «Трека». Время на совещаниях компания тратила, а
+    // считала его только глазами по сетке календаря.
+    { key: 'calendar', label: 'По встречам', hint: 'сколько времени уходит на совещания и кто не ответил на приглашение' },
   ],
   '/docs/regulation': [
     { key: 'templates', label: 'Шаблоны', hint: 'заготовки документов и поручений с чек-листом' },
@@ -152,8 +161,10 @@ export function docsRouteOf(pathname: string): string {
 export function useDocsView(route: string): string {
   const [params] = useSearchParams()
   const { isCompanyAdmin } = useCompany()
+  // Надзорные отчёты — только тем, кто отвечает за чужую работу: сводка по
+  // людям это ответ на вопрос руководителя, а не общая витрина.
   const views = (DOCS_VIEWS[route] ?? []).filter(
-    (view) => view.key !== 'discipline' || isCompanyAdmin)
+    (view) => !['discipline', 'calendar'].includes(view.key) || isCompanyAdmin)
   const v = params.get('view')
   return v && views.some((x) => x.key === v) ? v : (views[0]?.key ?? '')
 }
@@ -170,7 +181,8 @@ export function DocsLayout() {
 
   const route = docsRouteOf(pathname)
   const views = (DOCS_VIEWS[route] ?? []).filter(
-    (view) => (view.key !== 'discipline' || isCompanyAdmin) && !view.hidden)
+    (view) => (!['discipline', 'calendar'].includes(view.key) || isCompanyAdmin)
+      && !view.hidden)
   const active = useDocsView(route)
 
   // Сохранённые отборы общей ленты — продолжение пунктов, а не отдельный экран:
@@ -417,7 +429,7 @@ export function DocsLayout() {
             </button>
           </div>
         </div>
-        <DocsScopeBar />
+        {route !== '/docs/setup' && <DocsScopeBar />}
         <div className="min-w-0 flex-1 overflow-y-auto px-3 py-3">
           <Outlet />
         </div>
@@ -577,7 +589,9 @@ export function DocsLayout() {
         </nav>
       )}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <DocsScopeBar />
+        {/* Настройка — про справочники: у них нет ни периода, ни объектов, и
+            кнопка «Создать» на экране видов заводит документ, а не вид. */}
+        {route !== '/docs/setup' && <DocsScopeBar />}
         <div className="min-h-0 flex-1 overflow-y-auto">
           <Outlet />
         </div>

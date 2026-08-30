@@ -371,8 +371,43 @@ export interface DocFilters {
   date_to?: string
   q?: string
   mine?: boolean
+  /** За чем пришли из обзора: unnumbered | returned | pending | overdue. */
+  attention?: string
   limit?: number
   offset?: number
+}
+
+/** Что показывает отбор из обзора. Слово в родительном падеже: подставляется
+ *  в «Отбор: просроченные» и в подпись пустого результата. */
+export const DOC_ATTENTION: Record<string, string> = {
+  unnumbered: 'без номера',
+  returned: 'возвращённые с визы',
+  pending: 'на визах',
+  overdue: 'просроченные',
+}
+
+export interface CounterScope {
+  scope_key: string
+  organization: string | null
+  year: number | null
+  issued: number
+  next: number
+  updated_at: string | null
+}
+
+export interface CounterRow {
+  kind_id: string
+  code: string
+  name: string
+  prefix: string
+  template: string
+  scope: string
+  scopes: CounterScope[]
+  issued: number
+}
+
+export async function listCounters(companyId: string) {
+  return get<{ counters: CounterRow[] }>('/api/docs/counters', { company_id: companyId })
 }
 
 /** Состояния документа: имя для человека и тон плашки. */
