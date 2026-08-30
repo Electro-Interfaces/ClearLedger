@@ -53,6 +53,7 @@ const EVENT_LABEL: Record<string, string> = {
   relation: 'связь',
   access: 'права доступа',
   comment: 'реплика',
+  nudge: 'напомнил',
   mail: 'письмо',
 }
 

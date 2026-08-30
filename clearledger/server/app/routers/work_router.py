@@ -678,6 +678,98 @@ async def move_work(
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неизвестный род предмета")
 
 
+class NudgeIn(BaseModel):
+    company_id: str
+    #: `task:<uuid>` или `doc:<uuid>` — тот же словарь предметов, что в раскладке.
+    ref: str = Field(..., max_length=120)
+    note: str | None = Field(None, max_length=300)
+
+
+@router.post("/nudge")
+async def nudge(
+    payload: NudgeIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Напомнить о работе тому, у кого она стоит.
+
+    Право: автор предмета или тот, в чьём охвате стоит ответственный. Толчок
+    ничего не меняет, но приходит человеку лично — и потому не должен быть
+    доступен каждому, кто предмет видит.
+
+    Себе не толкают: напоминание самому себе живёт в «Напомнить», и путать эти
+    два действия значит получать бессмысленные сообщения от самого себя.
+    """
+    from app.models import DocApproval, DocCard, DocEvent, Task, TaskEvent
+    from app.services import notify, oversight
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    род, _, сырой = payload.ref.partition(":")
+    if род not in ("task", "doc") or not сырой:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Непонятно, что подтолкнуть")
+    ident = _uuid_or_400(сырой, "ref")
+    о = await oversight.охват(db, cid, current_user)
+    кто = current_user.name or current_user.email
+
+    адресаты: list[uuid.UUID] = []
+    предмет = ""
+    if род == "task":
+        t = await db.get(Task, ident)
+        if t is None or t.company_id != cid:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Работа не найдена")
+        if t.visibility == "personal":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Работа не найдена")
+        if current_user.id != t.author_id and not о.входит(t.assignee_id):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Напоминать о чужой работе может её постановщик "
+                                "или тот, кто за неё отвечает")
+        if t.assignee_id is None:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "Напоминать некому: исполнитель не назначен. "
+                                "Работа ждёт в «Разборе»")
+        адресаты = [t.assignee_id]
+        предмет = f"№{t.number} {t.title}"
+        db.add(TaskEvent(task_id=t.id, kind="nudge", user_id=current_user.id,
+                         actor_name=кто, note=(payload.note or "").strip() or None))
+    else:
+        d = await db.get(DocCard, ident)
+        if d is None or d.company_id != cid:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Документ не найден")
+        # У документа в круге ждут визирующие, а не ответственный: толкать надо
+        # того, на ком работа стоит СЕЙЧАС.
+        ждут = list((await db.execute(select(DocApproval.assignee_id).where(
+            DocApproval.doc_id == d.id, DocApproval.status == "pending",
+            DocApproval.assignee_id.is_not(None)))).scalars().all())
+        адресаты = ждут or ([d.responsible_id] if d.responsible_id else [])
+        if not адресаты:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "Напоминать некому: у документа нет ни визы в "
+                                "работе, ни ответственного")
+        if current_user.id != d.author_id and not any(о.входит(a) for a in адресаты):
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Напоминать о чужом документе может его автор "
+                                "или тот, кто за него отвечает")
+        предмет = f"{d.reg_number or 'без номера'} {d.title}"
+        db.add(DocEvent(doc_id=d.id, kind="nudge", user_id=current_user.id,
+                        actor_name=кто, note=(payload.note or "").strip() or None))
+
+    приписка = f"\n{payload.note.strip()}" if (payload.note or "").strip() else ""
+    ушло = 0
+    for uid in адресаты:
+        if uid == current_user.id:
+            continue  # себе не толкают
+        человек = await db.get(User, uid)
+        if человек is None:
+            continue
+        await notify.notify_person(
+            db, cid, человек,
+            f"{кто} напоминает: {предмет}{приписка}",
+            urgency="normal")
+        ушло += 1
+    await db.commit()
+    return {"sent": ушло}
+
+
 @router.get("/summary")
 async def work_summary(
     company_id: str = Query(...),

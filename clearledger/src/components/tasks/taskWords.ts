@@ -89,6 +89,9 @@ export function eventText(e: { kind: string; from: string | null; to: string | n
     case 'field': return `${e.from ?? 'поле'} → ${e.to ?? '—'}`
     case 'delegate': return `поручил внешнему участнику: ${e.to ?? '—'}`
     case 'mail': return 'ответил письмом'
+    // Толчок обязан читаться в следе своим словом: «написал» скрыло бы, что это
+    // руководитель напомнил, а через месяц спросят именно об этом.
+    case 'nudge': return 'напомнил о работе'
     case 'external_stage': return `этап внешней системы: ${e.to ?? '—'}`
     default: return 'написал'
   }

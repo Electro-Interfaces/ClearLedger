@@ -27,7 +27,7 @@ const KIND_ICON: Record<string, typeof Plus> = {
 }
 const KIND_TEXT: Record<string, string> = {
   created: 'поставил задачу', stage: 'перевёл', assign: 'передал',
-  status: 'изменил статус', comment: 'написал',
+  status: 'изменил статус', comment: 'написал', nudge: 'напомнил',
 }
 const STATUS_LABEL: Record<string, string> = {
   open: 'в работе', done: 'выполнена', cancelled: 'отменена',

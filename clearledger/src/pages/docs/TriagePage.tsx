@@ -140,13 +140,18 @@ function TriageRow({ task, companyId, me, people, busy, onOpen, onAct }: {
           onClick={() => onAct({ companyId, assigneeId: me })}>
           <UserCheck className="mr-1 h-3.5 w-3.5" />Беру
         </Button>
+        {/* Подпись, а не голый значок: рядом стоит «Беру» словом, и два
+            решения одного веса, названные по-разному, читаются как разные по
+            важности. «Закрыть» остаётся значком намеренно — оно и должно быть
+            последним, к чему тянется рука. */}
         <Button size="sm" variant="ghost" className="h-8 shrink-0 px-2 text-xs"
           disabled={busy} title="Поручить другому"
           onClick={() => setКомуОткрыт((v) => !v)}>
-          <UserPlus className="h-3.5 w-3.5" />
+          <UserPlus className="mr-1 h-3.5 w-3.5" />Поручить
         </Button>
         <Button size="sm" variant="ghost" className="h-8 shrink-0 px-2 text-xs"
           disabled={busy} title="Закрыть как ненужное — с причиной"
+          aria-label="Закрыть как ненужное — с причиной"
           onClick={() => setПричина('')}>
           <X className="h-3.5 w-3.5" />
         </Button>

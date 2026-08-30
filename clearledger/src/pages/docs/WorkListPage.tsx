@@ -31,6 +31,7 @@ import type { WorkItem } from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { QueryBar, type QuerySuggestions } from '@/components/tasks/QueryBar'
 import { dt, PRIORITY_TONE, priorityWord } from '@/components/tasks/taskWords'
+import { NudgeButton } from '@/components/work/NudgeButton'
 import { cn } from '@/lib/utils'
 
 const PAGE = 50
@@ -246,11 +247,13 @@ export function WorkListPage() {
                 <th className="w-[150px] px-3 py-2 text-left font-medium">Состояние</th>
                 <th className="w-[150px] px-3 py-2 text-left font-medium">Ответственный</th>
                 <th className="w-[110px] px-3 py-2 text-left font-medium">Срок</th>
+                <th className="w-10 px-1 py-2" aria-label="Напомнить" />
               </tr>
             </thead>
             <tbody>
               {items.map((item) => (
                 <Row key={`${item.kind}-${item.id}`} item={item}
+                  companyId={company.id}
                   onOpen={() => navigate(workService.workHref(item))} />
               ))}
             </tbody>
@@ -344,10 +347,13 @@ function SavedViews({ companyId, current, onApply }: {
   )
 }
 
-function Row({ item, onOpen }: { item: WorkItem; onOpen: () => void }) {
+function Row({ item, companyId, onOpen }: {
+  item: WorkItem; companyId: string; onOpen: () => void
+}) {
   const Icon = item.kind === 'doc' ? FileText : ListChecks
   return (
-    <tr className="cursor-pointer border-t hover:bg-muted/40" onClick={onOpen}>
+    <tr className="group/строка cursor-pointer border-t hover:bg-muted/40"
+      onClick={onOpen}>
       <td className="px-3 py-2">
         <span className="inline-flex items-center gap-1.5">
           {/* Род — значок, а не раздел: человеку важно, что перед ним, но не
@@ -388,6 +394,17 @@ function Row({ item, onOpen }: { item: WorkItem; onOpen: () => void }) {
       <td className={cn('px-3 py-2 text-xs tabular-nums',
         item.overdue && 'text-red-600 dark:text-red-400')}>
         {item.due_at ? dt(item.due_at) : '—'}
+      </td>
+      {/* Толчок прямо из строки: это лента надзора, и человек сюда приходит
+          именно затем, чтобы найти застрявшее и напомнить. Открывать ради
+          этого карточку — три лишних движения на каждой строке. Значок
+          проступает при наведении: постоянный столбец колокольчиков на сорока
+          строках читается как тревога, которой нет. */}
+      <td className="w-10 px-1 py-2">
+        <NudgeButton companyId={companyId} compact
+          targetRef={`${item.kind}:${item.id}`}
+          className="opacity-0 transition-opacity group-hover/строка:opacity-100
+            focus-visible:opacity-100 [@media(hover:none)]:opacity-100" />
       </td>
     </tr>
   )

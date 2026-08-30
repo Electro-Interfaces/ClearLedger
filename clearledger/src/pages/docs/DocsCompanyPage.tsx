@@ -12,6 +12,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import * as docsService from '@/services/docsService'
+import { NudgeButton } from '@/components/work/NudgeButton'
 import { DocsInboxPanel } from '@/components/docs/DocsInboxPanel'
 import { DocsArchiveQueue } from '@/components/docs/DocsArchiveQueue'
 import { useDocsView } from './DocsLayout'
@@ -187,13 +188,22 @@ export function DocsCompanyPage() {
                       {d.waiting ? ` · ждут ${d.waiting}` : ''}
                     </div>
                     {d.waiting_people.length > 0 && (
-                      <div className="pt-1 text-xs text-muted-foreground">
-                        {d.waiting_people.map((person) => person.name).join(', ')}
-                        {d.approval_due_at && (
-                          <span className={d.approval_overdue ? ' font-medium text-destructive' : ''}>
-                            {` · виза до ${formatDate(d.approval_due_at)}`}
-                          </span>
-                        )}
+                      <div className="flex items-end justify-between gap-2 pt-1">
+                        <div className="min-w-0 text-xs text-muted-foreground">
+                          {d.waiting_people.map((person) => person.name).join(', ')}
+                          {d.approval_due_at && (
+                            <span className={d.approval_overdue ? ' font-medium text-destructive' : ''}>
+                              {` · виза до ${formatDate(d.approval_due_at)}`}
+                            </span>
+                          )}
+                        </div>
+                        {/* Экран отвечает на вопрос «где застряло и кого ждут»,
+                            и следующее движение человека всегда одно —
+                            напомнить. Толчок стоит рядом с именем того, кого
+                            ждут: адресат виден до нажатия. */}
+                        <NudgeButton companyId={companyId} compact
+                          targetRef={`doc:${d.id}`}
+                          className="-mb-1 -mr-1 shrink-0" />
                       </div>
                     )}
                   </Card>

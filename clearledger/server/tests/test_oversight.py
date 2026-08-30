@@ -207,3 +207,81 @@ async def test_лента_компании_сужена_охватом(auth_clie
     assert "«Моё»" in r.json().get("detail", ""), (
         "отказ не сказал, где искать свою работу"
     )
+
+
+async def test_подтолкнуть_может_надзирающий_и_постановщик(auth_client, db: AsyncSession):
+    """Толчок ничего не меняет в работе, но приходит человеку лично — и потому
+    доступен не каждому, кто эту работу видит."""
+    from app.models import Task, TaskEvent, TaskType
+    from app.auth import get_current_user
+    from app.main import app
+    from sqlalchemy import func
+
+    cid, люди = await _структура(db)
+    тип = TaskType(company_id=cid, code=f"NU{uuid.uuid4().hex[:5].upper()}",
+                   name="Толчок", route=[{"code": "new", "name": "Заведено"}],
+                   default_priority="medium")
+    db.add(тип)
+    await db.flush()
+    задача = Task(company_id=cid, type_id=тип.id, title="Работа Рядового А",
+                  status="open", stage_code="new", visibility="company",
+                  author_id=люди["крупный"].id, assignee_id=люди["а"].id)
+    db.add(задача)
+    await db.commit()
+    ссылка = f"task:{задача.id}"
+
+    async def толкнуть(кто):
+        app.dependency_overrides[get_current_user] = lambda: кто
+        try:
+            return await auth_client.post("/api/work/nudge", json={
+                "company_id": str(cid), "ref": ссылка})
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    r = await толкнуть(люди["средний"])
+    assert r.status_code == 200, f"начальник отдела не смог напомнить: {r.text}"
+    assert r.json()["sent"] == 1
+
+    # Постановщик — вправе всегда, даже вне охвата.
+    assert (await толкнуть(люди["крупный"])).status_code == 200
+
+    # Сосед по компании — нет.
+    r = await толкнуть(люди["чужой"])
+    assert r.status_code == 403, "чужой человек напомнил о не своей работе"
+
+    # Себе не толкают: адресат совпал с нажимающим — уходить некому.
+    r = await толкнуть(люди["а"])
+    assert r.status_code == 403, "исполнитель напомнил сам себе"
+
+    # След остался — ради него всё и делается.
+    толчков = (await db.execute(select(func.count()).select_from(TaskEvent).where(
+        TaskEvent.task_id == задача.id, TaskEvent.kind == "nudge"))).scalar()
+    assert толчков == 2, f"в следе {толчков} толчков вместо двух"
+
+
+async def test_толкать_некого_говорится_словами(auth_client, db: AsyncSession):
+    """Работа без исполнителя ждёт в «Разборе», а не напоминания."""
+    from app.models import Task, TaskType
+    from app.auth import get_current_user
+    from app.main import app
+
+    cid, люди = await _структура(db)
+    тип = TaskType(company_id=cid, code=f"NB{uuid.uuid4().hex[:5].upper()}",
+                   name="Бесхозное", route=[{"code": "new", "name": "Заведено"}],
+                   default_priority="medium")
+    db.add(тип)
+    await db.flush()
+    задача = Task(company_id=cid, type_id=тип.id, title="Никем не взято",
+                  status="open", stage_code="new", visibility="company",
+                  author_id=люди["крупный"].id, assignee_id=None)
+    db.add(задача)
+    await db.commit()
+
+    app.dependency_overrides[get_current_user] = lambda: люди["крупный"]
+    try:
+        r = await auth_client.post("/api/work/nudge", json={
+            "company_id": str(cid), "ref": f"task:{задача.id}"})
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+    assert r.status_code == 409
+    assert "Разбор" in r.json()["detail"], "отказ не сказал, где эта работа ждёт"
