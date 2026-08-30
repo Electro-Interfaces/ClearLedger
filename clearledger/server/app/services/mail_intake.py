@@ -139,7 +139,7 @@ def auth_verdict(msg: Message) -> tuple[str, str | None]:
     if "dmarc=fail" in low:
         return "fail", raw[:300]
     if "dmarc=pass" in low:
-        _, from_email = parseaddr(_decode(msg.get("From")))
+        _, from_email = sender_of(msg)
         from_domain = from_email.rsplit("@", 1)[-1].lower().rstrip(".") \
             if "@" in from_email else ""
         match = re.search(r"\bdmarc=pass\b[^;]*\bheader\.from=([^\s;]+)", low)
@@ -147,6 +147,26 @@ def auth_verdict(msg: Message) -> tuple[str, str | None]:
         if from_domain and aligned == from_domain:
             return "pass", raw[:300]
     return "unknown", raw[:300]
+
+
+def sender_of(msg: Message) -> tuple[str, str]:
+    """Имя и адрес отправителя письма.
+
+    `parseaddr` на «Иванов И.И., ООО Ромашка <ivanov@romashka.ru>» возвращает
+    пустую пару: запятую в имени он принимает за разделитель списка адресов и
+    ломается на первом же куске. Письмо при этом приходит «ни от кого» — не
+    опознаётся корреспондент, не срабатывают правила, обращение не заводится, и
+    всё это молча. Имя с запятой пишет каждый второй, поэтому разбираем строку
+    как список и берём из неё то, что похоже на адрес.
+    """
+    raw = msg.get("From") or ""
+    name, address = parseaddr(raw)
+    if "@" not in address:
+        pairs = [pair for pair in getaddresses([raw]) if "@" in pair[1]]
+        # Не нашли ничего похожего на адрес — отдаём пусто, а не обрывок имени:
+        # «отправитель не указан» честнее, чем отправитель по имени «Аноним».
+        name, address = pairs[-1] if pairs else (name, "")
+    return _decode(name), address
 
 
 def message_dedup_key(msg: Message) -> str:
@@ -467,7 +487,7 @@ async def _save_message(db: AsyncSession, account: MailAccount, uid: int,
     if exists:
         return False
 
-    from_name, from_email = parseaddr(_decode(msg.get("From")))
+    from_name, from_email = sender_of(msg)
 
     # Потолок на отправителя: лента — рабочий инструмент, и залить её рассылкой
     # не должно быть возможно. Письма сверх лимита не теряются — они просто не
