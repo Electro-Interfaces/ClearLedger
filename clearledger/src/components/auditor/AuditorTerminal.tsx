@@ -44,6 +44,12 @@ export function AuditorTerminal() {
   const termRef = useRef<Terminal | null>(null)
   const copyScreenRef = useRef<(() => void) | null>(null)
   const retryRef = useRef<number | undefined>(undefined)
+  // Последний размер, о котором знает сеанс. Сверяется со счётом xterm: расхождение
+  // в одну строку ломает всю картинку, а внешние размеры хоста при этом не меняются.
+  const sentSize = useRef({ cols: 0, rows: 0 })
+  // Сверка размера, доступная из шапки: кнопка «Перерисовать» сначала пересчитывает
+  // строки, и только потом просит кадр — иначе перерисовка ляжет по старому счёту.
+  const fitRef = useRef<(() => void) | null>(null)
 
   /**
    * Продиктованный текст печатается в приглашение — и фокус возвращается в терминал.
@@ -167,6 +173,7 @@ export function AuditorTerminal() {
         setError('')   // связь вернулась — старое сообщение об ошибке иначе висит навсегда
         tries.current = 0
         // Токен уходит ПЕРВЫМ СООБЩЕНИЕМ, а не в адресе: адрес попадает в логи кромки.
+        sentSize.current = { cols: term.cols, rows: term.rows }
         ws.send(JSON.stringify({
           type: 'start', token: getToken() ?? '', companyId: companyRef.current,
           cols: term.cols, rows: term.rows, fresh: freshRef.current, tab,
@@ -212,6 +219,30 @@ export function AuditorTerminal() {
       const tick = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'ping' }))
       }, 25_000)
+
+      // 🔴 Размер сверяем ещё раз — и потом сторожим.
+      //
+      // `fit()` считает строки по высоте контейнера, а вызывается он сразу после
+      // `open()`, когда раскладка может быть ещё не окончательной. Ошибка на одну
+      // строку не видна глазом, но ломает картинку целиком: tmux рисует кадр на 45
+      // строк, у клиента их 44, лишняя строка прокручивает экран — и текст ложится
+      // СТРОКОЙ ВЫШЕ курсора. Человек при этом печатает «мимо строки».
+      //
+      // ResizeObserver такое не ловит: внешние размеры хоста не менялись.
+      const sync = () => {
+        if (ws.readyState !== WebSocket.OPEN) return
+        try { fit.fit() } catch { return }
+        if (term.cols === sentSize.current.cols && term.rows === sentSize.current.rows) return
+        sentSize.current = { cols: term.cols, rows: term.rows }
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+      }
+      const settle = [
+        requestAnimationFrame(() => sync()),
+        window.setTimeout(sync, 300),
+        window.setTimeout(sync, 1500),
+      ]
+      const watch = setInterval(sync, 5000)
+      fitRef.current = sync
 
       term.onData((d) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'data', data: d })) })
 
@@ -298,16 +329,14 @@ export function AuditorTerminal() {
 
       // Размер окна должен доезжать до PTY: TUI рисует рамки по нему, и без ресайза
       // интерфейс разъезжается при первом же изменении ширины панели.
-      const ro = new ResizeObserver(() => {
-        try { fit.fit() } catch { /* элемент скрыт */ }
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
-        }
-      })
+      const ro = new ResizeObserver(() => sync())
       ro.observe(hostRef.current)
 
       cleanup = () => {
-        clearInterval(tick); ro.disconnect(); ws.close(); term.dispose()
+        clearInterval(tick); clearInterval(watch)
+        cancelAnimationFrame(settle[0]); settle.slice(1).forEach((id) => clearTimeout(id))
+        ro.disconnect(); ws.close(); term.dispose()
+        fitRef.current = null
         termRef.current = null   // иначе диктовка после ухода целится в уничтоженный терминал
       }
     })()
@@ -361,6 +390,19 @@ export function AuditorTerminal() {
               title="Скопировать весь видимый текст"
               className="rounded-md border border-border/60 px-2 py-0.5 hover:bg-accent hover:text-foreground">
               Копировать экран
+            </button>
+          )}
+          {/* Картинка разъехалась — попросить сеанс нарисовать её заново. Своей логики
+              здесь нет: tmux отдаёт кадр, который у него и так есть, а работа агента
+              не прерывается. Дешевле, чем «начать заново», и не теряет ничего. */}
+          {state === 'open' && (
+            <button type="button" onClick={() => {
+              try { fitRef.current?.() } catch { /* терминал уже закрыт */ }
+              wsRef.current?.send(JSON.stringify({ type: 'refresh' }))
+            }}
+              title="Перерисовать экран, если строки разъехались"
+              className="rounded-md border border-border/60 px-2 py-0.5 hover:bg-accent hover:text-foreground">
+              Перерисовать
             </button>
           )}
           {/* Отсоединение — не ошибка, а развилка: вернуть работу сюда или оставить там,
