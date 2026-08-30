@@ -767,7 +767,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
                           ? ` · замещает ${signature.represented_signer_name}` : ''}
                         {' · '}{formatEventTime(signature.signed_at)}
                       </div>
-                      <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground"
+                      <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground"
                         title={signature.snapshot_sha256}>
                         SHA-256 {signature.snapshot_sha256}
                       </div>
@@ -864,7 +864,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
               // Машинное действие помечено словом: агент и чужая система в
               // ленте не должны выглядеть сотрудниками (этап 8).
               renderBadge={(event) => (ACTOR_KIND_LABEL[event.actorKind ?? 'user'] ? (
-                <span className="rounded border border-border/60 px-1 text-[10px] text-muted-foreground">
+                <span className="rounded border border-border/60 px-1 text-[11px] text-muted-foreground">
                   {ACTOR_KIND_LABEL[event.actorKind ?? 'user']}
                 </span>
               ) : null)}

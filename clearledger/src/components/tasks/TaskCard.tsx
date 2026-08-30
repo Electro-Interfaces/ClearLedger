@@ -405,7 +405,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
                 // возможность дойти до оригинала, а не только до вычищенного текста.
                 if (!source || source.kind !== 'mail' || !source.to) return null
                 return (
-                  <div className="mt-0.5 text-[10px] text-muted-foreground">
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">
                     оригинал письма в архиве Поддержки: {source.to}
                   </div>
                 )
@@ -842,7 +842,7 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
               className="inline-flex items-center gap-1 rounded border border-border/60 bg-muted/30 px-1.5 py-0.5">
               <Eye className="h-3 w-3 text-muted-foreground" />
               {w.name}
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[11px] text-muted-foreground">
                 {w.reason === 'mention' ? 'по упоминанию' : ''}
               </span>
               {live && (
@@ -1348,7 +1348,7 @@ function External({ task, companyId, live, onChanged }: {
             <Mail className="h-3 w-3 shrink-0 text-muted-foreground" />
             <span className="font-medium">{p.name}</span>
             <span className="truncate text-muted-foreground">{p.channel_ref ?? p.email}</span>
-            <span className="shrink-0 rounded border border-border/60 px-1 py-px text-[10px] text-muted-foreground">
+            <span className="shrink-0 rounded border border-border/60 px-1 py-px text-[11px] text-muted-foreground">
               {p.channel === 'mail' ? 'письмом' : p.channel === 'connector' ? 'коннектор' : 'в пространстве'}
             </span>
             {live && (
@@ -1493,7 +1493,7 @@ function ExternalSystem({ task, companyId, live, onChanged }: {
               {r.external_status ?? 'состояние не получено'}
             </span>
             {r.last_sync_at && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-[11px] text-muted-foreground">
                 сверено {dtT(r.last_sync_at)}
               </span>
             )}

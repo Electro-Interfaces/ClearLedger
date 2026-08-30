@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_product, get_company_by_api_key, get_current_user
 from app.database import get_db
+from app.services.service_accounts import not_service
 from app.models import (
     Company, ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
     TaskEvent, TaskExternalRef, TaskLabel, TaskLabelLink, TaskLink, TaskParticipant,
@@ -929,10 +930,13 @@ async def list_people(
     cid = await _assert_work(company_id, current_user, db)
     # Принадлежность отдаём вместе с именем: поручая работу, надо видеть, свой это
     # человек или подрядчик, — задача внешнему участнику раскрывает ему внутреннее.
+    # Служебных участников («Процесс», «Секретарь») здесь нет: поручить работу
+    # роботу нельзя, а в списке выбора он выглядит сотрудником. В истории
+    # документа они по-прежнему видны — там они автор события, а не кандидат.
     rows = (await db.execute(
         select(User.id, User.name, User.email, UserCompany.party_type, User.avatar_url)
         .join(UserCompany, UserCompany.user_id == User.id)
-        .where(UserCompany.company_id == cid)
+        .where(UserCompany.company_id == cid, not_service())
         .order_by(User.name))).all()
     return {"people": [{"id": str(i), "name": n or (e or "—"),
                         "partyType": p or "internal", "avatarUrl": a}

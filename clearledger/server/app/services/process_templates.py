@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.service_accounts import is_service_account
 from app.models import (
     Contract, Counterparty, DocAccessGrant, DocCard, DocEvent, DocKind,
     Organization, ServiceLocation, Task, TaskChecklistItem, TaskEvent,
@@ -236,10 +237,17 @@ async def launch_task(
     if not route:
         raise ProcessTemplateError("У шаблона не задан маршрут процесса")
 
-    responsible = responsible_id or tpl.assignee_id or actor.id
-    if await db.get(UserCompany, (responsible, cid)) is None:
+    # Никого не назвали — работу берёт тот, кто её завёл. Для человека это
+    # верно: управляющий, заводя работу с рабочего места, берёт её себе. Для
+    # маршрута брать некому — у служебного участника нет рабочего места, и
+    # работа висела на «Процессе» вместо того, чтобы уйти в «Разбор».
+    # Работа без исполнителя не теряется: «Разбор» — её законное место.
+    responsible = responsible_id or tpl.assignee_id
+    if responsible is None and not is_service_account(actor):
+        responsible = actor.id
+    if responsible is not None and await db.get(UserCompany, (responsible, cid)) is None:
         raise ProcessTemplateError("Исполнитель не состоит в пространстве")
-    person = await db.get(User, responsible)
+    person = await db.get(User, responsible) if responsible else None
     summary_parts = [part.strip() for part in (tpl.description, summary_suffix)
                      if part and part.strip()]
     days = (tpl.due_days if tpl.due_days is not None

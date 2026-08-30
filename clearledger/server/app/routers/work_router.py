@@ -1735,15 +1735,21 @@ async def poll_vote(
     if opt is None or str(opt.event_id) != event_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Вариант не найден")
     await _event_participant(db, cid, event_id, current_user)
-    строка = (await db.execute(select(CalendarPollVote).where(
-        CalendarPollVote.option_id == opt.id,
-        CalendarPollVote.user_id == current_user.id))).scalar_one_or_none()
-    if строка is None:
-        строка = CalendarPollVote(option_id=opt.id, user_id=current_user.id)
-        db.add(строка)
-    строка.vote = payload.vote
+    # Upsert, а не «прочитать и вставить»: два нажатия подряд успевали оба не
+    # найти строку и оба вставить, и один человек считался двумя. Уникальность
+    # держит частичный индекс `calendar_poll_votes_user_uq`.
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    stmt = (pg_insert(CalendarPollVote)
+            .values(option_id=opt.id, user_id=current_user.id, vote=payload.vote)
+            .on_conflict_do_update(index_elements=[CalendarPollVote.option_id,
+                                                   CalendarPollVote.user_id],
+                                   index_where=CalendarPollVote.user_id.isnot(None),
+                                   set_={"vote": payload.vote})
+            .returning(CalendarPollVote.vote))
+    голос = (await db.execute(stmt)).scalar_one()
     await db.commit()
-    return {"option_id": str(opt.id), "vote": строка.vote}
+    return {"option_id": str(opt.id), "vote": голос}
 
 
 @router.post("/calendar/{event_id}/poll/pick")

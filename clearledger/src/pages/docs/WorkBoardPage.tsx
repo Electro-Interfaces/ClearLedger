@@ -381,7 +381,7 @@ function Card({ item, dragging, showState, onDragStart, onDragEnd, onOpen }: {
           item.priority && PRIORITY_TONE[item.priority])}>
           {item.title}
         </span>
-        <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+        <span className="shrink-0 font-mono text-[11px] text-muted-foreground/70">
           {item.key}
         </span>
       </div>

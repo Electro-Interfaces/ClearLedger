@@ -4119,6 +4119,35 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # v2.85: работа, доставшаяся служебному участнику. Маршрут заводил
+        # поручение, исполнителя никто не называл, и оно оставалось на том, кто
+        # завёл, — на «Процессе». Работа висела на роботе вместо «Разбора», и
+        # робот получал за неё сводку. Правило исправлено в `launch_task`;
+        # здесь — то, что успело накопиться. Автором «Процесс» остаётся: он и
+        # правда завёл эту работу, и стирать это значило бы врать в истории.
+        await conn.execute(_sa.text(
+            "UPDATE tasks SET assignee_id = NULL WHERE assignee_id IN ("
+            "  SELECT id FROM users WHERE email LIKE '%@space.local')"))
+
+        # v2.84: один голосующий — один голос за вариант. Ручка читала строку
+        # и вставляла, если не нашла: два нажатия подряд успевали оба не найти
+        # и оба вставить, и «за вторник шестеро» означало пятерых. Индексы
+        # частичные — голосует либо участник, либо гость, второе поле пусто.
+        # Дубли, накопленные до индекса, снимаем, оставляя последний голос.
+        for stmt in (
+            "DELETE FROM calendar_poll_votes v USING calendar_poll_votes d"
+            " WHERE v.option_id = d.option_id AND v.user_id = d.user_id"
+            "   AND v.user_id IS NOT NULL AND v.id < d.id",
+            "DELETE FROM calendar_poll_votes v USING calendar_poll_votes d"
+            " WHERE v.option_id = d.option_id AND v.guest_id = d.guest_id"
+            "   AND v.guest_id IS NOT NULL AND v.id < d.id",
+            "CREATE UNIQUE INDEX IF NOT EXISTS calendar_poll_votes_user_uq"
+            " ON calendar_poll_votes (option_id, user_id) WHERE user_id IS NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS calendar_poll_votes_guest_uq"
+            " ON calendar_poll_votes (option_id, guest_id) WHERE guest_id IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # v2.83: осиротевшие отметки раскладки. `target_ref` — строка, внешнего
         # ключа у неё нет (предмет полиморфный), и удалённая работа оставляла
         # отметку навсегда. Условие показа теперь общее со списком; здесь —

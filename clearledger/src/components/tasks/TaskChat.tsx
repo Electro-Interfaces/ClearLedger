@@ -119,7 +119,7 @@ export function TaskChat({ taskId, taskNumber, selfName }: {
                     </div>
                   )}
                   <div className="whitespace-pre-wrap text-foreground/90">{m.content}</div>
-                  <div className="mt-0.5 text-right text-[10px] text-muted-foreground">
+                  <div className="mt-0.5 text-right text-[11px] text-muted-foreground">
                     {dtT(m.createdAt)}
                   </div>
                 </div>

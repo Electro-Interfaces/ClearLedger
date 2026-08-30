@@ -213,15 +213,20 @@ async def invite_vote(token: str, payload: GuestVoteIn,
     opt = await db.get(CalendarPollOption, oid)
     if opt is None or opt.event_id != ev.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Вариант не найден")
-    строка = (await db.execute(select(CalendarPollVote).where(
-        CalendarPollVote.option_id == opt.id,
-        CalendarPollVote.guest_id == guest.id))).scalar_one_or_none()
-    if строка is None:
-        строка = CalendarPollVote(option_id=opt.id, guest_id=guest.id)
-        db.add(строка)
-    строка.vote = payload.vote
+    # Тот же upsert, что у участника: гость нажимает по ссылке из почты, и
+    # повтор запроса при плохой связи не должен удваивать его голос.
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    stmt = (pg_insert(CalendarPollVote)
+            .values(option_id=opt.id, guest_id=guest.id, vote=payload.vote)
+            .on_conflict_do_update(index_elements=[CalendarPollVote.option_id,
+                                                   CalendarPollVote.guest_id],
+                                   index_where=CalendarPollVote.guest_id.isnot(None),
+                                   set_={"vote": payload.vote})
+            .returning(CalendarPollVote.vote))
+    голос = (await db.execute(stmt)).scalar_one()
     await db.commit()
-    return {"option_id": str(opt.id), "vote": строка.vote}
+    return {"option_id": str(opt.id), "vote": голос}
 
 
 @router.get("/{token}/ics")

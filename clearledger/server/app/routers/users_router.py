@@ -20,6 +20,7 @@ from app.audit import log_audit
 from app.auth import get_current_user, hash_password, resolve_member_modules
 from app.business_access import normalize_business_grants
 from app.database import get_db
+from app.services.service_accounts import not_service
 from app.models import (
     Organization,ChatParticipant, ChatRoom, Contract, Counterparty, Company,
                         CompanyRole, Department, EdgeAgent, ServiceLocation, User,
@@ -174,7 +175,10 @@ async def list_users(
             await db.execute(
                 select(User)
                 .join(UserCompany, UserCompany.user_id == User.id)
-                .where(UserCompany.company_id == cid)
+                # Служебные участники в состав не входят: администратор ими не
+                # управляет (войти ими нельзя, заводятся сами), а в списке они
+                # завышают число сотрудников и попадают в выбор получателей.
+                .where(UserCompany.company_id == cid, not_service())
                 .order_by(User.email)
             )
         ).scalars().all()
