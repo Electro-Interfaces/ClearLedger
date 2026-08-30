@@ -15,7 +15,7 @@
  * прихожая; работает клиент в СВОЁМ пространстве, и бумаги у него там.
  */
 import { useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, PlugZap, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -29,7 +29,7 @@ import {
 } from '@/components/ui/table'
 import * as siteService from '@/services/siteService'
 import {
-  LEAD_STATUS_LABELS, LEVEL_LABELS, SPACE_STATUS_LABELS, siteTime,
+  CONTENT_LABELS, LEAD_STATUS_LABELS, LEVEL_LABELS, SPACE_STATUS_LABELS, siteTime,
 } from '@/services/siteService'
 import { ShowcaseEditor } from './ShowcaseEditor'
 import * as referenceService from '@/services/referenceService'
@@ -46,6 +46,17 @@ const TABS: { key: Tab; label: string; hint: string; owner: 'site' | 'space' }[]
   { key: 'stands', label: 'Стенды', hint: 'что вообще можно показать клиенту', owner: 'space' },
   { key: 'shows', label: 'Показы', hint: 'кому и когда открывали стенд', owner: 'site' },
 ]
+
+/** Разделы рельсы и их пункты: рельса называет раздел, вторая колонка — экран.
+ *  Порядок пунктов тот же, что был в рельсе до разделения. */
+const SECTIONS: { code: string; label: string; items: Tab[] }[] = [
+  { code: 'inbox', label: 'Входящее', items: ['requests', 'leads', 'shows'] },
+  { code: 'showcase', label: 'Витрина', items: ['showcase'] },
+  { code: 'clients', label: 'Клиенты', items: ['cabinets', 'spaces', 'stands'] },
+]
+
+const sectionOf = (tab: Tab) =>
+  SECTIONS.find((s) => s.items.includes(tab)) ?? SECTIONS[0]
 
 const LEVELS = ['guest', 'client', 'partner', 'admin']
 
@@ -81,6 +92,8 @@ export function SitePage() {
   const [params] = useSearchParams()
   const view = params.get('view')
   const tab: Tab = (TABS.some((t) => t.key === view) ? view : 'requests') as Tab
+  // Раздел витрины тоже живёт в адресе: на «Цены» дают ссылку так же, как на «Заявки».
+  const part = params.get('part') || ''
 
   // Что рождается на сайте.
   const summary = useQuery({
@@ -184,6 +197,13 @@ export function SitePage() {
   const [newStand, setNewStand] = useState({ code: '', title: '', upstream: '' })
   const [newSpace, setNewSpace] = useState({ client: '', slug: '', domain: '', status: 'active' })
 
+  // Тот же ключ запроса, что у редактора: данные читаются один раз на двоих.
+  const content = useQuery({
+    queryKey: ['site-content', companyId],
+    queryFn: () => siteService.getContent(companyId),
+    enabled: !!companyId && tab === 'showcase',
+  })
+
   const counts: Record<Tab, number | undefined> = {
     leads: summary.data?.leads,
     requests: summary.data?.requests,
@@ -226,15 +246,59 @@ export function SitePage() {
     ? (feedReason[tab] ?? summary.data?.reason ?? null)
     : null
 
+  // Пункты второй колонки: у «Входящего» и «Клиентов» это экраны раздела,
+  // у «Витрины» — её собственные разделы, и приходят они с сайта. Поэтому меню
+  // строится по данным: появится на сайте восьмой раздел — появится и пункт.
+  const section = sectionOf(tab)
+  const showcaseKeys = content.data?.keys ?? []
+  const menu = tab === 'showcase'
+    ? showcaseKeys.map((k, i) => ({
+        key: k, label: CONTENT_LABELS[k] ?? k, count: undefined as number | undefined,
+        to: `/site?view=showcase&part=${encodeURIComponent(k)}`,
+        current: part ? part === k : i === 0,
+      }))
+    : section.items.map((key) => {
+        const meta = TABS.find((x) => x.key === key)!
+        return {
+          key, label: meta.label, count: counts[key],
+          to: `/site?view=${key}`, current: key === tab,
+        }
+      })
+
   return (
-    <div className="p-6">
+    <div className="flex h-full min-h-0">
+      {/* Меню рабочей области — как в «Треке»: раздел выбирают в рельсе, экран
+          здесь. На узком экране колонка ложится лентой сверху. */}
+      <nav aria-label="Экраны раздела"
+        className="scrollbar-hide flex shrink-0 snap-x gap-0.5 overflow-x-auto border-b
+                   border-border bg-card px-2 py-2 lg:w-56 lg:flex-col lg:overflow-x-hidden
+                   lg:overflow-y-auto lg:border-b-0 lg:border-r lg:px-2.5 lg:py-3">
+        {menu.map((m) => (
+          <Link key={m.key} to={m.to}
+            aria-current={m.current ? 'page' : undefined}
+            className={cn('flex min-h-11 shrink-0 snap-start items-center gap-2 whitespace-nowrap',
+              'rounded-md px-3 py-1.5 text-sm transition-colors lg:min-h-0 lg:w-full',
+              m.current
+                ? 'bg-primary/10 font-medium text-primary'
+                : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
+            <span className="flex-1 truncate">{m.label}</span>
+            {m.count !== undefined && (
+              <span className="text-xs tabular-nums text-muted-foreground/70">{m.count}</span>
+            )}
+          </Link>
+        ))}
+      </nav>
+
+      <div className="min-w-0 flex-1 overflow-y-auto p-6">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         {/* Заголовок экрана равен имени пункта рельсы (канон «Пульса» и «Трека»),
             а строкой ниже — чем этот экран занят: у семи пунктов разный хозяин
             данных, и понимать это надо до клика, а не после. */}
         <div>
           <h1 className="text-lg font-semibold">
-            {active?.label}
+            {tab === 'showcase'
+              ? (menu.find((m) => m.current)?.label ?? active?.label)
+              : active?.label}
             {counts[tab] !== undefined && (
               <span className="ml-2 text-sm font-normal text-muted-foreground">
                 {counts[tab]}
@@ -259,9 +323,7 @@ export function SitePage() {
           «Топлива» и «Эксплуатации». Карточка ей мешает: колонка пунктов должна
           стоять от края панели, а не внутри отступов карточки. */}
       {tab === 'showcase' ? (
-        <div className="h-[calc(100vh-13rem)] min-h-[26rem] overflow-hidden rounded-lg border bg-card">
-          <ShowcaseEditor companyId={companyId} />
-        </div>
+        <ShowcaseEditor companyId={companyId} sectionKey={part} />
       ) : (
       <Card>
         <CardContent className="pt-6">
@@ -672,6 +734,7 @@ export function SitePage() {
         </CardContent>
       </Card>
       )}
+      </div>
     </div>
   )
 }

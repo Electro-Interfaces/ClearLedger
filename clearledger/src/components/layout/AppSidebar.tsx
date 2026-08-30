@@ -19,7 +19,7 @@ import {
   BookOpen, Compass, Scale, FileSignature, HelpCircle,
   Activity, TrendingUp, Users, CalendarDays, LayoutDashboard,
   ListChecks, Building2, BarChart3, Settings2, FolderOpen,
-  Inbox, MonitorPlay, Presentation, Boxes,
+  Inbox,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -213,15 +213,20 @@ const DOCS_SECTIONS: { to: string; label: string; icon: typeof Activity }[] = [
  * ссылку. Раньше они стояли вкладками в шапке рабочей области — то есть у
  * приложения не было собственной навигации, а в рельсе висело чужое меню Учёта.
  */
-const SITE_SECTIONS: { view: string; label: string; icon: typeof Activity; sep?: boolean }[] = [
-  { view: 'requests', label: 'Обращения', icon: MessagesSquare },
-  { view: 'leads', label: 'Заявки', icon: Inbox },
-  { view: 'showcase', label: 'Витрина', icon: Megaphone, sep: true },
-  { view: 'cabinets', label: 'Кабинеты', icon: UserRound, sep: true },
-  { view: 'spaces', label: 'Пространства', icon: Boxes },
-  { view: 'stands', label: 'Стенды', icon: MonitorPlay },
-  { view: 'shows', label: 'Показы', icon: Presentation },
+const SITE_SECTIONS: { code: string; label: string; icon: typeof Activity; views: string[] }[] = [
+  // Три раздела вместо семи пунктов подряд (SPACE.md: раздел — 2–4 на продукт).
+  // Делятся по хозяину данных: что приходит с сайта, чем мы правим сайт и кого
+  // мы туда пускаем. Экраны раздела стоят второй колонкой, как в «Треке».
+  { code: 'inbox', label: 'Входящее', icon: Inbox, views: ['requests', 'leads', 'shows'] },
+  { code: 'showcase', label: 'Витрина', icon: Megaphone, views: ['showcase'] },
+  { code: 'clients', label: 'Клиенты', icon: UserRound,
+    views: ['cabinets', 'spaces', 'stands'] },
 ]
+
+/** Раздел, которому принадлежит экран: рельса подсвечивается по адресу, а не по
+ *  отдельному параметру — тогда старые ссылки `?view=leads` открывают и раздел. */
+export const siteSectionOf = (view: string) =>
+  SITE_SECTIONS.find((s) => s.views.includes(view))?.code ?? 'inbox'
 
 const CHAT_VIEWS: { key: string; label: string; icon: typeof MessagesSquare }[] = [
   { key: 'all', label: 'Все чаты', icon: MessagesSquare },
@@ -393,16 +398,15 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
   // пункты рельсы, а не углы одного разбора (SPACE.md §4).
   if (pathname === '/site' || pathname.startsWith('/site/')) {
     const view = new URLSearchParams(search).get('view') || 'requests'
+    const section = siteSectionOf(view)
     return (
       <>
         <SidebarGroup className="py-0">
           <SidebarMenu>
             {SITE_SECTIONS.map((s) => (
-              <Fragment key={s.view}>
-                {s.sep && <SidebarSeparator className="my-1.5" />}
-                <NavItem to={`/site?view=${s.view}`} icon={s.icon} label={s.label}
-                  collapsed={collapsed} onNavigate={onNavigate} active={view === s.view} />
-              </Fragment>
+              <NavItem key={s.code} to={`/site?view=${s.views[0]}`} icon={s.icon}
+                label={s.label} collapsed={collapsed} onNavigate={onNavigate}
+                active={section === s.code} />
             ))}
           </SidebarMenu>
         </SidebarGroup>

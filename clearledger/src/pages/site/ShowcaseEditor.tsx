@@ -18,10 +18,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { CentralPanelLayout } from '@/components/workspace/CentralPanelLayout'
 import * as siteService from '@/services/siteService'
-import { CONTENT_LABELS, FIELD_LABELS, siteTime } from '@/services/siteService'
+import { FIELD_LABELS, siteTime } from '@/services/siteService'
 import { cn } from '@/lib/utils'
 
 type Json = unknown
@@ -115,18 +113,22 @@ function ListEditor({ value, onChange }: { value: Json[]; onChange: (v: Json) =>
   )
 }
 
-export function ShowcaseEditor({ companyId }: { companyId: string }) {
+/** Раздел витрины выбирают в меню рабочей области (`SitePage`), поэтому редактор
+ *  своего списка не держит: две колонки подряд читались бы как два меню. */
+export function ShowcaseEditor({ companyId, sectionKey }: {
+  companyId: string
+  sectionKey: string
+}) {
   const qc = useQueryClient()
   const content = useQuery({
     queryKey: ['site-content', companyId],
     queryFn: () => siteService.getContent(companyId),
     enabled: !!companyId,
   })
-  const [key, setKey] = useState<string>('')
   const [draft, setDraft] = useState<Json>(null)
 
   const keys = content.data?.keys ?? []
-  const current = key || keys[0] || ''
+  const current = keys.includes(sectionKey) ? sectionKey : (keys[0] ?? '')
   const saved = content.data?.values?.[current]
 
   // Черновик заводится от прочитанного и живёт, пока не сохранили: перерисовка
@@ -158,18 +160,8 @@ export function ShowcaseEditor({ companyId }: { companyId: string }) {
     return <p className="py-8 text-center text-muted-foreground">Витрина не прочитана</p>
   }
 
-  // Разделы витрины — пункты ВТОРОЙ КОЛОНКИ, той же, что у «Топлива» и
-  // «Эксплуатации» (SPACE.md §«Разделы, пункты и табы»). Своя вёрстка списка
-  // здесь была ошибкой: пункт выглядел кнопкой действия, а рабочее место —
-  // непохожим на соседние.
   return (
-    <CentralPanelLayout
-      items={keys.map((k) => ({ key: k, label: CONTENT_LABELS[k] ?? k }))}
-      activeKey={current}
-      onSelect={setKey}
-    >
-      <ScrollArea className="h-full">
-        <div className="p-4">
+    <div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
             {meta?.updated_at
@@ -192,8 +184,6 @@ export function ShowcaseEditor({ companyId }: { companyId: string }) {
         {draft === null
           ? <p className="py-8 text-center text-muted-foreground">Раздел пуст</p>
           : <ValueField value={draft} onChange={setDraft} />}
-        </div>
-      </ScrollArea>
-    </CentralPanelLayout>
+    </div>
   )
 }
