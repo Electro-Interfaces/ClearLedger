@@ -89,6 +89,20 @@ export interface AuditorRun {
 
 const BASE = '/auditor/api'
 
+/**
+ * 🔴 Состав агента, его методы, знание и история — ЗА ТОКЕНОМ, как и всё остальное.
+ *
+ * Раньше эти ручки отвечали кому угодно, и знание организации выкачивалось одним curl;
+ * 29.08.2026 сервис закрыл их членством в пространстве. Здесь же заголовки не появились,
+ * и разделы «Навыки», «Методы», «Знание» встретили человека надписью «аудитор не
+ * подключён» — при живом и здоровом агенте. Поэтому заголовки собираются В ОДНОМ месте:
+ * забыть их в новой ручке — значит повторить ту же историю.
+ */
+const agentHeaders = (companyId: string) => ({
+  Authorization: `Bearer ${getToken() ?? ''}`,
+  'X-Company-Id': companyId,
+})
+
 export interface AuditorFile { id: string; name: string; size: number }
 
 /**
@@ -155,23 +169,23 @@ export interface AuditorGrowth {
   subject: string
 }
 
-const readJson = async <T>(path: string, what: string): Promise<T> => {
-  const res = await fetch(`${BASE}${path}`)
+const readJson = async <T>(path: string, what: string, companyId: string): Promise<T> => {
+  const res = await fetch(`${BASE}${path}`, { headers: agentHeaders(companyId) })
   if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) {
     throw new Error(`${what} недоступны: аудитор не подключён`)
   }
   return res.json()
 }
 
-export const getMethods = () => readJson<AuditorMethod[]>('/methods', 'Методы')
-export const getGrowth = () => readJson<AuditorGrowth[]>('/growth', 'История')
+export const getMethods = (companyId: string) => readJson<AuditorMethod[]>('/methods', 'Методы', companyId)
+export const getGrowth = (companyId: string) => readJson<AuditorGrowth[]>('/growth', 'История', companyId)
 
 /**
  * Знание обоих слоёв. Компанию обязательно передаём: без неё вернётся только общий
  * слой пространства, и знание про эту организацию будет выглядеть отсутствующим.
  */
 export async function getKnowledge(companyId: string): Promise<AuditorKnowledge[]> {
-  const res = await fetch(`${BASE}/knowledge`, { headers: { 'X-Company-Id': companyId } })
+  const res = await fetch(`${BASE}/knowledge`, { headers: agentHeaders(companyId) })
   if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) {
     throw new Error('Знание недоступно: аудитор не подключён')
   }
@@ -220,7 +234,7 @@ export interface AuditorPrompt {
  * (`prompts.md` в своём слое), поэтому у каждой организации могут быть свои.
  */
 export async function getPrompts(companyId: string): Promise<AuditorPrompt[]> {
-  const res = await fetch(`${BASE}/prompts`, { headers: { 'X-Company-Id': companyId } })
+  const res = await fetch(`${BASE}/prompts`, { headers: agentHeaders(companyId) })
   if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return []
   return res.json()
 }
@@ -307,8 +321,8 @@ export async function dictate(audio: Blob): Promise<string> {
 }
 
 /** Каталог навыков — чем аудитор вообще умеет отвечать. */
-export async function getSkills(): Promise<AuditorSkill[]> {
-  const res = await fetch(`${BASE}/skills`)
+export async function getSkills(companyId: string): Promise<AuditorSkill[]> {
+  const res = await fetch(`${BASE}/skills`, { headers: agentHeaders(companyId) })
   // Тот же случай, что и в `ask`: без профиля в стеке сюда приходит index.html SPA
   // с кодом 200, и `res.json()` падал бы «Unexpected token <» вместо внятного ответа.
   if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) {

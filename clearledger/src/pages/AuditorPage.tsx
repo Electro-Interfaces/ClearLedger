@@ -154,8 +154,10 @@ export function AuditorWorkspace({ view: viewIn, onView }: {
 
 /** Разговор во всю ширину. Каталог рядом — чтобы было видно, о чём вообще спрашивать. */
 function ChatView() {
+  const { companyId } = useCompany()
   const { data: skills } = useQuery({
-    queryKey: ['auditor-skills'], queryFn: auditor.getSkills, staleTime: 10 * 60 * 1000, retry: false,
+    queryKey: ['auditor-skills', companyId], queryFn: () => auditor.getSkills(companyId),
+    enabled: !!companyId, staleTime: 10 * 60 * 1000, retry: false,
   })
   const groups = groupSkills(skills)
 
@@ -191,7 +193,10 @@ function ChatView() {
 function SkillsView() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
-  const skills = useQuery({ queryKey: ['auditor-skills'], queryFn: auditor.getSkills, retry: false })
+  const skills = useQuery({
+    queryKey: ['auditor-skills', companyId], queryFn: () => auditor.getSkills(companyId),
+    enabled: !!companyId, retry: false,
+  })
   const settings = useQuery({
     queryKey: ['auditor-settings', companyId],
     queryFn: () => auditor.getSettings(companyId), enabled: !!companyId,
@@ -315,7 +320,8 @@ function MethodsView() {
     queryFn: () => auditor.getSettings(companyId), enabled: !!companyId, retry: false,
   })
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['auditor-methods'], queryFn: auditor.getMethods, retry: false,
+    queryKey: ['auditor-methods', companyId], queryFn: () => auditor.getMethods(companyId),
+    enabled: !!companyId, retry: false,
   })
   const [open, setOpen] = useState<string | null>(null)
 
@@ -497,7 +503,8 @@ function KnowledgeView() {
     queryFn: () => auditor.getKnowledge(companyId), enabled: !!companyId, retry: false,
   })
   const { data: growth } = useQuery({
-    queryKey: ['auditor-growth'], queryFn: auditor.getGrowth, retry: false,
+    queryKey: ['auditor-growth', companyId], queryFn: () => auditor.getGrowth(companyId),
+    enabled: !!companyId, retry: false,
   })
   const [open, setOpen] = useState<string | null>(null)
   const reload = () => qc.invalidateQueries({ queryKey: ['auditor-knowledge', companyId] })
