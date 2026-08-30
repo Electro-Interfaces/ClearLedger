@@ -15,7 +15,7 @@ from fastapi import (
     APIRouter, BackgroundTasks, Depends, HTTPException, Request,
     status as http_status,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_company_by_api_key
@@ -282,6 +282,79 @@ async def company_work(
     if scope == "waiting":
         items = [i for i in items if i["waits"]]
     return {"scope": scope, "items": items, "total": len(items)}
+
+@router.get("/counterparties")
+async def counterparties_for_support(
+    q: str | None = None,
+    limit: int = 30,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Клиенты пространства — чтобы оператор опознал отправителя списком.
+
+    Письмо от неизвестного адреса приходит без корреспондента: оператор видит
+    адрес, а не компанию. Спросить «кто это» он может только у справочника Ядра —
+    справочник контрагентов один на пространство, и второй в Поддержке заводить
+    незачем.
+    """
+    from app.models import Counterparty
+
+    stmt = select(Counterparty).where(Counterparty.company_id == company.id)
+    text = (q or "").strip()
+    if text:
+        like = f"%{text.lower()}%"
+        stmt = stmt.where(func.lower(Counterparty.name).like(like)
+                          | func.lower(Counterparty.short_name).like(like)
+                          | Counterparty.inn.like(f"{text}%"))
+    rows = list((await db.execute(stmt.order_by(Counterparty.name).limit(
+        max(1, min(limit, 100))))).scalars().all())
+    return {"items": [{
+        "id": str(c.id),
+        "name": c.short_name or c.name,
+        "fullName": c.name,
+        "inn": c.inn,
+    } for c in rows]}
+
+
+@router.post("/support/learn-sender")
+async def learn_sender(
+    payload: dict[str, Any],
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Запомнить, чей это адрес, — по просьбе оператора из карточки обращения.
+
+    Обучение имеет обратную силу: человек размечает адрес именно тогда, когда
+    смотрит на непонятое письмо, и ждёт, что вся переписка встанет на место, а не
+    только следующее письмо. Тем же механизмом, что и разметка в самой переписке
+    (`mail_intake.learn_address`), — второго способа «узнать отправителя» быть не
+    должно, иначе они разойдутся.
+    """
+    from app.models import Counterparty
+    from app.services import mail_intake
+
+    address = str(payload.get("address") or "").strip().lower()
+    cp_id = str(payload.get("counterpartyId") or "").strip()
+    if "@" not in address or not cp_id:
+        raise HTTPException(http_status.HTTP_400_BAD_REQUEST,
+                            "Нужен адрес и клиент, за которым его запомнить")
+    try:
+        counterparty = await db.get(Counterparty, uuid.UUID(cp_id))
+    except (ValueError, TypeError):
+        raise HTTPException(http_status.HTTP_400_BAD_REQUEST, "Невалидный идентификатор клиента")
+    if counterparty is None or counterparty.company_id != company.id:
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND, "Клиент не найден в пространстве")
+
+    result = await mail_intake.learn_address(
+        db, company.id, address, counterparty.id,
+        user=str(payload.get("actor") or "support"))
+    await db.commit()
+    return {
+        "name": counterparty.short_name or counterparty.name,
+        "counterpartyId": str(counterparty.id),
+        **result,
+    }
+
 
 @router.get("/track/templates")
 async def track_templates(
