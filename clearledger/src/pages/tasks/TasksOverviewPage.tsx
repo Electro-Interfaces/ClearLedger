@@ -10,6 +10,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useDocsScope } from '@/hooks/useDocsScope'
 import { TasksOverviewSection } from '@/components/tasks/TasksOverviewSection'
+import { TrackExport } from '@/components/docs/TrackExport'
 
 export function TasksOverviewPage() {
   const { company } = useCompany()
@@ -25,12 +26,20 @@ export function TasksOverviewPage() {
 
   return (
     <div className="space-y-4 px-4 py-4">
-      <div>
-        <h1 className="text-base font-semibold">Поручения</h1>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Как идёт работа компании за период. Любая цифра — вход в реестр с этим
-          же отбором.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-base font-semibold">Поручения</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Как идёт работа компании за период. Любая цифра — вход в реестр с этим
+            же отбором.
+          </p>
+        </div>
+        <TrackExport
+          href={`/api/docs/reports/export?${new URLSearchParams({
+            report: 'errands', company_id: company.id,
+            date_from: period.from, date_to: period.to }).toString()}`}
+          fileName="Поручения Трека.xlsx"
+          hint="Итоги и разрезы по людям, типам и объектам — книгой Excel" />
       </div>
       <TasksOverviewSection companyId={company.id} period={period}
         onDrill={(f) => {

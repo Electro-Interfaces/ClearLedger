@@ -8,7 +8,7 @@ export function DocsScopeBar() {
   const scope = useDocsScope()
   const selectedObjects = scope.objectIds.length
   return (
-    <div className="shrink-0 border-b border-border/60 bg-muted/35 px-3 py-2 text-xs"
+    <div className="no-print shrink-0 border-b border-border/60 bg-muted/35 px-3 py-2 text-xs"
       aria-live="polite">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         {/* Кнопка создания стоит в шапке продукта, а не на отдельных экранах:

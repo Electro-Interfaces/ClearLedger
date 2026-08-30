@@ -112,3 +112,62 @@ async def test_нумератор_отдаёт_текущее_значение(a
     после = счёт((await auth_client.get("/api/docs/counters",
                                         params={"company_id": cid})).json())
     assert после == до + 1, f"счётчик не сдвинулся: было {до}, стало {после}"
+
+
+async def test_выгрузка_отчёта_открывается_книгой(auth_client: AsyncClient):
+    """Файл должен открываться Excel и называть себя.
+
+    Проверяем не «ответ 200», а то, что книга читается и первый лист говорит,
+    что это за отчёт и за какой период: файл без шапки через неделю в почте
+    неотличим от соседнего, и спор о цифре начинается с «а это по чему?».
+    """
+    import io as _io
+
+    from openpyxl import load_workbook
+
+    cid = await _company(auth_client)
+    for report in ("docs", "discipline", "errands", "calendar"):
+        r = await auth_client.get("/api/docs/reports/export", params={
+            "report": report, "company_id": cid,
+            "date_from": "2026-08-01", "date_to": "2026-08-31"})
+        assert r.status_code == 200, f"{report}: {r.text[:300]}"
+        assert "spreadsheetml" in r.headers["content-type"], report
+        # Имя по RFC 5987: без него кириллица не доедет до диска.
+        assert "filename*=UTF-8''" in r.headers["content-disposition"], report
+
+        wb = load_workbook(_io.BytesIO(r.content))
+        assert wb.sheetnames[0] == "Отчёт", f"{report}: шапки нет: {wb.sheetnames}"
+        подписи = [строка[0] for строка in wb["Отчёт"].iter_rows(values_only=True)]
+        assert "Период" in подписи and "Выгрузил" in подписи, report
+        assert len(wb.sheetnames) > 1, f"{report}: книга без данных"
+
+
+async def test_выгрузка_реестра_держит_отбор(auth_client: AsyncClient):
+    """Выгрузка «просроченных» не должна отдавать весь период.
+
+    Отбор из обзора приезжает в адрес выгрузки, и если ручка его не примет,
+    человек получит книгу на восемнадцать строк там, где на экране было три, —
+    и заметит это в лучшем случае на совещании.
+    """
+    import io as _io
+
+    from openpyxl import load_workbook
+
+    cid = await _company(auth_client)
+    kind = await _kind(auth_client, cid)
+    r = await auth_client.post("/api/docs", json={
+        "company_id": cid, "kind_id": kind["id"], "title": "[отчёт] выгрузка без номера"})
+    assert r.status_code == 201, r.text
+
+    def строк(content: bytes) -> int:
+        wb = load_workbook(_io.BytesIO(content))
+        # Лист «Реестр» без строки заголовков.
+        return wb["Реестр"].max_row - 1
+
+    общая = await auth_client.get("/api/docs/export", params={
+        "company_id": cid, "format": "xlsx"})
+    узкая = await auth_client.get("/api/docs/export", params={
+        "company_id": cid, "format": "xlsx", "attention": "unnumbered"})
+    assert общая.status_code == 200 and узкая.status_code == 200, узкая.text
+    все, без_номера = строк(общая.content), строк(узкая.content)
+    assert 0 < без_номера < все, f"отбор не сузил выгрузку: {без_номера} из {все}"

@@ -27,6 +27,7 @@ import { useDocsScope } from '@/hooks/useDocsScope'
 import { useDocsView } from './DocsLayout'
 import { DocsBulkBar } from '@/components/docs/DocsBulkBar'
 import { DocsErrorState, DocsLoadingState } from '@/components/docs/DocsQueryState'
+import { TrackExport } from '@/components/docs/TrackExport'
 import { formatDate } from '@/lib/formatDate'
 
 const VIEW_FILTER: Record<string, docsService.DocFilters> = {
@@ -348,6 +349,21 @@ export function DocsRegistryPage() {
                 aria-label="Поиск по документам и содержимому файлов"
                 className="h-9 w-full pl-7 text-sm sm:w-72" />
             </div>
+            {/* Выгрузка уходит с тем же отбором, каким посчитан список: сервер
+                листает реестр теми же условиями, а не повторяет их вторым кодом. */}
+            <TrackExport
+              href={`/api/docs/export?${new URLSearchParams({
+                company_id: companyId, format: 'xlsx',
+                date_from: effectiveDateFrom, date_to: effectiveDateTo,
+                ...(VIEW_FILTER[view]?.family ? { family: VIEW_FILTER[view].family! } : {}),
+                ...(attention ? { attention } : {}),
+                ...(statusFilter ? { status: statusFilter } : {}),
+                ...(kindFilter ? { kind_id: kindFilter } : {}),
+                ...(labelFilter ? { label_id: labelFilter } : {}),
+                ...(deferredQ ? { q: deferredQ } : {}),
+              }).toString()}`}
+              fileName="Реестр документов.xlsx"
+              hint="Реестр по текущему отбору — книгой Excel" />
             {/* Гаснет и называет причину: диалог, в котором нечего выбрать,
                 — тупик, а не форма. */}
             <Button size="sm" onClick={() => setCreating(true)}

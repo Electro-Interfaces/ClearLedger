@@ -43,6 +43,9 @@ from app.auth import (
 )
 from app.config import get_settings
 from app.database import get_db
+from openpyxl.styles import Alignment, Font
+
+from app.services.export_files import xlsx_response
 from app.services.service_accounts import not_service
 from app.models import (
     ChatRoom, Company, CompanyRole, Contract, Counterparty, Department, DocAccessGrant,
@@ -2116,6 +2119,18 @@ async def list_docs(
 # Потолок выгрузки. Реестр за год в компании — тысячи строк; десять тысяч
 # покрывают любой разумный отбор, а без границы одна кнопка выгружает всё
 # пространство целиком и держит соединение, пока его не оборвут.
+#: Слова вместо кодов в ячейке: «ord» и «edo» в Excel не читаются.
+DOC_FAMILY_RU = {
+    "incoming": "Входящие", "outgoing": "Исходящие",
+    "ord": "Приказы и распоряжения", "internal": "Внутренние",
+    "contract": "Договорные", "other": "Прочие",
+}
+DOC_SOURCE_RU = {
+    "manual": "заведён руками", "intake": "принят из потока",
+    "mail": "пришёл почтой", "chat": "создан из чата",
+    "edo": "принят из СЭД", "api": "заведён программой",
+}
+
 _EXPORT_LIMIT = 10_000
 _EXPORT_COLUMNS = (
     ("reg_number", "Регистрационный номер"),
@@ -2134,6 +2149,264 @@ _EXPORT_COLUMNS = (
 )
 
 
+def _описание_отбора(attention, q, status_, mine) -> str:
+    """Строка «что отобрано» для шапки книги. Файл без неё через неделю
+    неотличим от соседнего, и спор о цифре начинается с «а это по чему?»."""
+    куски = []
+    if attention:
+        куски.append({
+            "unnumbered": "без номера", "returned": "возвращённые с визы",
+            "pending": "на визах", "overdue": "просроченные",
+        }.get(attention, attention))
+    if status_:
+        куски.append(f"состояние: {status_}")
+    if q:
+        куски.append(f"поиск: {q}")
+    if mine:
+        куски.append("только мои")
+    return ", ".join(куски) or "без дополнительного отбора"
+
+
+def _лист_шапка(wb, название: str, date_from, date_to, user, отбор: str = "",
+                примечание: str = "") -> None:
+    """Первый лист книги: что это, за какой период, кто и когда выгрузил.
+
+    Ставится перед данными, а не после: человек открывает книгу на первом листе
+    и должен сразу видеть, что у него в руках.
+    """
+    ws = wb.create_sheet("Отчёт", 0)
+    период = (f"{date_from:%d.%m.%Y} — {date_to:%d.%m.%Y}"
+              if date_from and date_to else "весь период")
+    строки = [
+        ("Отчёт", название),
+        ("Период", период),
+        ("Отбор", отбор or "без дополнительного отбора"),
+        ("Выгрузил", user.name or user.email),
+        ("Выгружено", datetime.now(_BUSINESS_TIMEZONE).strftime("%d.%m.%Y %H:%M")),
+    ]
+    if примечание:
+        строки.append(("Как считается", примечание))
+    for подпись, значение in строки:
+        ws.append([подпись, значение])
+    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["B"].width = 96
+    for row in ws.iter_rows(min_col=1, max_col=1):
+        for cell in row:
+            cell.font = Font(bold=True)
+    for row in ws.iter_rows(min_col=2, max_col=2):
+        for cell in row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+
+def _оформить(ws, заголовок_строка: int = 1) -> None:
+    """Жирная шапка, закреплённая строка и ширина по содержимому.
+
+    Без ширины книга открывается столбцом «####», и первое, что делает человек, —
+    растягивает колонки руками. Это та же работа, от которой выгрузка избавляет.
+    """
+    from openpyxl.utils import get_column_letter
+
+    for cell in ws[заголовок_строка]:
+        cell.font = Font(bold=True)
+    ws.freeze_panes = ws.cell(row=заголовок_строка + 1, column=1)
+    for i, column in enumerate(ws.columns, 1):
+        длина = max((len(str(c.value)) for c in column if c.value is not None),
+                    default=0)
+        ws.column_dimensions[get_column_letter(i)].width = min(max(длина + 2, 10), 60)
+
+
+def _таблица(wb, имя: str, заголовки: list[str], строки: list[list]) -> None:
+    """Лист с одной таблицей. Пустая таблица тоже лист: отсутствие листа
+    читается как «забыли выгрузить», а пустой — как «за период ничего не было»."""
+    ws = wb.create_sheet(имя[:31])
+    ws.append(заголовки)
+    for строка in строки:
+        ws.append(строка)
+    if not строки:
+        ws.append(["За период данных нет"])
+    _оформить(ws)
+
+
+@router.get("/reports/export")
+async def export_report(
+    report: str = Query(..., pattern="^(docs|discipline|errands|calendar)$"),
+    company_id: str = Query(...),
+    date_from: date_type = Query(...),
+    date_to: date_type = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отчёт «Трека» книгой Excel — то, что уходит на совещание.
+
+    Книга собирается из ответа той же ручки, что рисует экран: пересчитать
+    заново значит завести второй источник правды, который разойдётся с первым на
+    первой же правке — и выгрузка начнёт тихо показывать не то, что видит
+    человек.
+
+    PDF здесь нет намеренно: его делает печать браузера («Сохранить как PDF»).
+    Серверная генерация потребовала бы шрифтовых пакетов в образе ради
+    правильной кириллицы — цена, которую в пространстве уже решили не платить.
+    """
+    from openpyxl import Workbook
+
+    await assert_company_product(company_id, current_user, db, "docs")
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    # Право на сам отчёт проверяет та ручка, которая его считает: надзорные
+    # («Дисциплина», «Встречи») откажут тому, кто не смотрит за чужой работой.
+    # Дублировать проверку здесь значит завести второе место, где её забудут.
+    собрать = {"docs": _книга_документы, "discipline": _книга_дисциплина,
+               "errands": _книга_поручения, "calendar": _книга_встречи}[report]
+    название, примечание = await собрать(
+        db, company_id, current_user, date_from, date_to, wb)
+
+    _лист_шапка(wb, название, date_from, date_to, current_user,
+                примечание=примечание)
+    период = f"{date_from:%d.%m.%Y} — {date_to:%d.%m.%Y}"
+    return xlsx_response(wb, f"{название} {период}.xlsx")
+
+
+async def _книга_документы(db, company_id, user, date_from, date_to, wb):
+    """Состояние журнала и его разрезы — то же, что на экране «По документам»."""
+    # Все параметры — явно. Вызванная напрямую, ручка получает в незаданном
+    # аргументе объект `Query(None)`, а не `None`, и разбор падает на первом же
+    # «Неверный kind_id». Соседняя выгрузка реестра делает так же.
+    page = await list_docs(
+        company_id=company_id, family=None, direction=None, status_=None,
+        kind_id=None, label_id=None, counterparty_id=None, responsible_id=None,
+        object_ids=None, ref=None, attention=None,
+        date_from=date_from, date_to=date_to, q=None, mine=False,
+        limit=_EXPORT_LIMIT, offset=0, db=db, current_user=user)
+    docs = page.get("docs") or []
+    сегодня = datetime.now(_BUSINESS_TIMEZONE).date().isoformat()
+    отработанные = ("executed", "archived", "cancelled")
+
+    _таблица(wb, "Показатели", ["Показатель", "Значение", "Что это"], [
+        ["Всего в периоде", len(docs), "документы по дате регистрации"],
+        ["Без номера", sum(1 for d in docs if not d.get("reg_number")),
+         "заведены, но не зарегистрированы"],
+        ["На визах", sum(1 for d in docs if d.get("approval_status") == "pending"),
+         "идёт согласование"],
+        ["Возвращены", sum(1 for d in docs if d.get("approval_status") == "rejected"),
+         "отказ с замечанием, ждут доработки"],
+        ["Просрочены", sum(1 for d in docs
+                           if (d.get("due_at") or "")[:10] < сегодня
+                           and (d.get("due_at"))
+                           and d.get("status") not in отработанные),
+         "срок исполнения прошёл"],
+    ])
+
+    def разрез(имя: str, ключ, подпись: str) -> None:
+        acc: dict = {}
+        for d in docs:
+            значение = ключ(d)
+            if значение:
+                acc[значение] = acc.get(значение, 0) + 1
+        _таблица(wb, имя, [подпись, "Документов"],
+                 sorted(([k, v] for k, v in acc.items()),
+                        key=lambda r: (-r[1], str(r[0]))))
+
+    разрез("По потокам", lambda d: DOC_FAMILY_RU.get(d.get("family"), d.get("family")), "Поток")
+    разрез("По видам", lambda d: d.get("kind_name"), "Вид")
+    разрез("По юрлицам", lambda d: d.get("organization_name"), "Юрлицо")
+    разрез("По корреспондентам", lambda d: d.get("counterparty_name"), "Корреспондент")
+    разрез("Откуда пришли", lambda d: DOC_SOURCE_RU.get(d.get("source"), d.get("source")),
+           "Источник")
+
+    _таблица(wb, "Документы", [title for _, title in _EXPORT_COLUMNS],
+             [[d.get(key) or "" for key, _ in _EXPORT_COLUMNS] for d in docs])
+    return ("Документы Трека",
+            "Период отбирает документы по дате регистрации, а незарегистрированные "
+            "— по дате заведения карточки.")
+
+
+async def _книга_дисциплина(db, company_id, user, date_from, date_to, wb):
+    r = await approval_discipline(company_id=company_id, date_from=date_from,
+                                 date_to=date_to, db=db, current_user=user)
+    s = r.get("summary") or {}
+    b = r.get("backlog") or {}
+    _таблица(wb, "Показатели", ["Показатель", "Значение", "Что это"], [
+        ["Запущено в период", s.get("documents", 0), "первый запуск согласования"],
+        ["Завершено", s.get("completed", 0), "финально согласовано"],
+        ["Возвращено", s.get("returned", 0), "последний круг отклонён"],
+        ["Отменено", s.get("cancelled", 0), "нет положительного исхода"],
+        ["С первого круга, %", s.get("first_pass_rate"),
+         f"{s.get('first_pass_documents')} из {s.get('first_pass_sample')}"],
+        ["Сейчас ждут", b.get("pending", 0), "вся очередь виз компании, вне периода"],
+        ["Сейчас просрочено", b.get("overdue", 0), "активная виза позже срока"],
+    ])
+    _таблица(wb, "Скорость по видам",
+             ["Вид", "Документов", "Среднее, ч", "Медиана, ч", "P90, ч"],
+             [[x["kind"], x["documents"], x["average_hours"], x["median_hours"],
+               x["p90_hours"]] for x in r.get("by_kind") or []])
+    _таблица(wb, "Кого сейчас ждут", ["Человек", "Ждут", "Просрочено"],
+             [[x["name"], x["pending"], x["overdue"]] for x in b.get("people") or []])
+    _таблица(wb, "Скорость решений",
+             ["Человек", "Документов", "Решений", "Поздних док.", "В замещении",
+              "Среднее, ч", "Медиана, ч", "P90, ч"],
+             [[x["name"], x["documents"], x["decisions"], x["late_documents"],
+               x["delegated_decisions"], x["average_hours"], x["median_hours"],
+               x["p90_hours"]] for x in r.get("people") or []])
+    return ("Исполнительская дисциплина",
+            "Период отбирает документы по первому запуску согласования, московское "
+            "время. Текущие ожидания и просрочки — по всей компании вне периода.")
+
+
+async def _книга_поручения(db, company_id, user, date_from, date_to, wb):
+    from app.routers.tasks_router import tasks_summary
+
+    r = await tasks_summary(company_id=company_id, days=30, date_from=date_from,
+                            date_to=date_to, db=db, current_user=user)
+    t = r.get("totals") or {}
+    _таблица(wb, "Показатели", ["Показатель", "Значение", "Что это"], [
+        ["В работе", t.get("open", 0), "активные задачи компании, на сейчас"],
+        ["Просрочено", t.get("overdue", 0), "срок прошёл, задача жива, на сейчас"],
+        ["Без исполнителя", t.get("unassigned", 0), "поставлена, но ни у кого не в руках"],
+        ["Поставлено", t.get("created", 0), "новых за период"],
+        ["Закрыто", t.get("done", 0), "за период"],
+        ["Среднее время, дн", t.get("avg_days"), "от постановки до закрытия"],
+    ])
+    for имя, ключ, подпись in (("Кто чем занят", "by_assignee", "Человек"),
+                               ("По типам", "by_type", "Тип"),
+                               ("По объектам", "by_object", "Объект")):
+        _таблица(wb, имя, [подпись, "В работе", "Просрочено", "Закрыто"],
+                 [[x["name"], x["open"], x["overdue"], x["done"]]
+                  for x in r.get(ключ) or []])
+    return ("Поручения Трека",
+            "Период отбирает поставленное и закрытое. «В работе» и «просрочено» — "
+            "на сейчас: горящее не обязано попадать в выбранное окно.")
+
+
+async def _книга_встречи(db, company_id, user, date_from, date_to, wb):
+    from app.routers.work_router import calendar_summary
+
+    r = await calendar_summary(company_id=company_id, date_from=date_from,
+                               date_to=date_to, db=db, current_user=user)
+    t = r.get("totals") or {}
+    _таблица(wb, "Показатели", ["Показатель", "Значение", "Что это"], [
+        ["Встреч", t.get("events", 0), "пересекающихся с периодом"],
+        ["Часов", t.get("hours", 0), "без событий на весь день"],
+        ["На весь день", t.get("all_day", 0), "часами не меряются"],
+        ["Отменено", t.get("cancelled", 0), "назначена и снята"],
+        ["Участий", t.get("seats", 0), "человеко-встречи"],
+        ["Отказов", t.get("declined", 0), "участник отказался"],
+        ["Ждут ответа", t.get("awaiting", 0), "приглашения на будущие встречи"],
+    ])
+    _таблица(wb, "Кто сколько во встречах",
+             ["Человек", "Встреч", "Часов", "Отказов", "Без ответа"],
+             [[x["name"], x["events"], x["hours"], x["declined"], x["pending"]]
+              for x in r.get("by_person") or []])
+    _таблица(wb, "Кто собирает", ["Организатор", "Встреч", "Часов"],
+             [[x["name"], x["events"], x["hours"]] for x in r.get("by_organizer") or []])
+    _таблица(wb, "Не ответили", ["Человек", "Приглашений"],
+             [[x["name"], x["count"]] for x in r.get("awaiting") or []])
+    return ("Встречи Трека",
+            "Считается общий календарь компании: закрытые и личные встречи в отчёт "
+            "не входят. Часы по человеку — участие, а не занятость: совещание на "
+            "пятерых даёт пять человеко-часов.")
+
+
 @router.get("/export")
 async def export_docs(
     company_id: str = Query(...),
@@ -2150,6 +2423,10 @@ async def export_docs(
     date_to: date_type | None = Query(None),
     q: str | None = Query(None),
     mine: bool = Query(False),
+    # Тот же отбор, с которым пришли из обзора. Без него выгрузка «просроченных»
+    # молча отдавала бы весь период — то есть не то, что на экране.
+    attention: str | None = Query(None, max_length=20),
+    fmt: str = Query("csv", alias="format", pattern="^(csv|xlsx)$"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2171,7 +2448,7 @@ async def export_docs(
             company_id=company_id, family=family, direction=direction,
             status_=status_, kind_id=kind_id, label_id=label_id,
             counterparty_id=counterparty_id, responsible_id=responsible_id,
-            object_ids=object_ids, ref=ref, date_from=date_from,
+            object_ids=object_ids, ref=ref, attention=attention, date_from=date_from,
             date_to=date_to, q=q, mine=mine,
             limit=_LIST_LIMIT, offset=offset, db=db, current_user=current_user)
         chunk = page.get("docs") or []
@@ -2182,6 +2459,28 @@ async def export_docs(
 
     truncated = len(rows) > _EXPORT_LIMIT
     rows = rows[:_EXPORT_LIMIT]
+    stamp = datetime.now(_BUSINESS_TIMEZONE).strftime("%Y%m%d-%H%M")
+
+    if fmt == "xlsx":
+        # Excel открывает и CSV, но склеивать из него сводную неудобно, а
+        # совещание идёт по книге. Формат выбирает вызывающий: у CSV остаётся
+        # своё применение — загрузка в чужую систему.
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Реестр"
+        _лист_шапка(wb, "Реестр документов", date_from, date_to, current_user,
+                    отбор=_описание_отбора(attention, q, status_, mine))
+        ws.append([title for _, title in _EXPORT_COLUMNS])
+        for card in rows:
+            ws.append([card.get(key) or "" for key, _ in _EXPORT_COLUMNS])
+        if truncated:
+            ws.append([f"Показаны первые {_EXPORT_LIMIT} строк отбора; "
+                       "сузьте период или отбор"])
+        _оформить(ws)
+        return xlsx_response(wb, f"Реестр документов {stamp}.xlsx")
+
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
     writer.writerow([title for _, title in _EXPORT_COLUMNS])
@@ -2192,7 +2491,6 @@ async def export_docs(
         writer.writerow([f"Показаны первые {_EXPORT_LIMIT} строк отбора; "
                          "сузьте период или отбор"])
     body = "﻿" + buffer.getvalue()
-    stamp = datetime.now(_BUSINESS_TIMEZONE).strftime("%Y%m%d-%H%M")
     return Response(
         content=body.encode("utf-8"),
         media_type="text/csv; charset=utf-8",

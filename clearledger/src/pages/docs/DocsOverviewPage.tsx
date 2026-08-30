@@ -31,6 +31,7 @@ import { useDocsView } from './DocsLayout'
 import { useDocsScope } from '@/hooks/useDocsScope'
 import { formatPeriod } from '@/lib/formatDate'
 import { DocsErrorState, DocsLoadingState } from '@/components/docs/DocsQueryState'
+import { TrackExport } from '@/components/docs/TrackExport'
 
 const TasksOverviewPage = lazy(() => import('@/pages/tasks/TasksOverviewPage')
   .then((m) => ({ default: m.TasksOverviewPage })))
@@ -56,6 +57,12 @@ function formatAsOf(value: string): string {
     timeZone: BUSINESS_TIME_ZONE, day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   }).format(new Date(value))
+}
+
+/** Адрес выгрузки: тот же отбор, каким посчитан экран. */
+function экспорт(report: string, companyId: string, from: string, to: string): string {
+  return `/api/docs/reports/export?${new URLSearchParams({
+    report, company_id: companyId, date_from: from, date_to: to }).toString()}`
 }
 
 function disciplineDetailUrl(
@@ -180,13 +187,13 @@ export function DocsOverviewPage() {
     return <Meetings report={calendarQ.data} loading={calendarQ.isLoading}
       failed={calendarQ.isError} error={calendarQ.error}
       retry={() => calendarQ.refetch()} dateError={dateError}
-      dateFrom={dateFrom} dateTo={dateTo} />
+      companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
   }
   if (view === 'discipline') {
     return <Discipline report={disciplineQ.data} loading={disciplineQ.isLoading}
       fetching={disciplineQ.isFetching} failed={disciplineQ.isError}
       retry={() => disciplineQ.refetch()} dateError={dateError}
-      dateFrom={dateFrom} dateTo={dateTo} />
+      companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} />
   }
 
   const columns = boardQ.data?.columns ?? []
@@ -202,12 +209,17 @@ export function DocsOverviewPage() {
 
   return (
     <div className="space-y-4 px-4 py-4">
-      <div>
-        <h1 className="text-base font-semibold">Документы</h1>
-        <p className="text-xs text-muted-foreground">
-          {!scope.ready ? 'Рабочий контур ещё не применён'
-            : listQ.isLoading || boardQ.isLoading ? 'Загрузка…' : `Всего в периоде: ${stats.total}`}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h1 className="text-base font-semibold">Документы</h1>
+          <p className="text-xs text-muted-foreground">
+            {!scope.ready ? 'Рабочий контур ещё не применён'
+              : listQ.isLoading || boardQ.isLoading ? 'Загрузка…' : `Всего в периоде: ${stats.total}`}
+          </p>
+        </div>
+        <TrackExport href={экспорт('docs', companyId, dateFrom, dateTo)}
+          fileName="Документы Трека.xlsx"
+          hint="Показатели, разрезы и сам реестр — книгой Excel" />
       </div>
 
       {(listQ.isError || boardQ.isError) && (
@@ -321,7 +333,8 @@ export function DocsOverviewPage() {
 }
 
 function Discipline({ report, loading, fetching, failed, retry, dateError,
-  dateFrom, dateTo }: {
+  companyId, dateFrom, dateTo }: {
+  companyId: string
   report: docsService.ApprovalDisciplineReport | undefined
   loading: boolean
   fetching: boolean
@@ -340,13 +353,18 @@ function Discipline({ report, loading, fetching, failed, retry, dateError,
     (сколько > 0 ? () => navigate(куда()) : undefined)
   return (
     <div className="flex flex-col gap-4 px-4 py-4" aria-busy={loading || fetching}>
-      <div>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
         <h1 className="text-base font-semibold">Исполнительская дисциплина</h1>
         <p id="discipline-period-hint" className="max-w-3xl text-xs text-muted-foreground">
           Период раздела ({formatPeriod(dateFrom, dateTo)}) отбирает документы по
           первому запуску согласования, московское время. Текущие ожидания и
           просрочки показываются по всей компании вне периода.
         </p>
+        </div>
+        <TrackExport href={экспорт('discipline', companyId, dateFrom, dateTo)}
+          fileName="Исполнительская дисциплина.xlsx"
+          hint="Скорость по видам, кого ждут и скорость решений — книгой Excel" />
       </div>
 
       {fetching && report && (
@@ -643,26 +661,33 @@ function Разрез({ title, hint, rows, link, empty = 'Данных за пе
  *  компании пять человеко-часов, и в разрезе по людям это пять строк. Экран
  *  говорит это словами, иначе сумма по столбцу не сойдётся с итогом сверху.
  */
-function Meetings({ report, loading, failed, error, retry, dateError, dateFrom, dateTo }: {
+function Meetings({ report, loading, failed, error, retry, dateError,
+  companyId, dateFrom, dateTo }: {
   report: workService.CalendarSummary | undefined
   loading: boolean
   failed: boolean
   error: unknown
   retry: () => void
   dateError: string
+  companyId: string
   dateFrom: string
   dateTo: string
 }) {
   const t = report?.totals
   return (
     <div className="flex flex-col gap-4 px-4 py-4" aria-busy={loading}>
-      <div>
-        <h1 className="text-base font-semibold">Встречи</h1>
-        <p className="max-w-3xl text-xs text-muted-foreground">
-          Период раздела ({formatPeriod(dateFrom, dateTo)}) отбирает встречи,
-          пересекающиеся с ним. Считается общий календарь компании: закрытые и
-          личные встречи в отчёт не входят.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h1 className="text-base font-semibold">Встречи</h1>
+          <p className="max-w-3xl text-xs text-muted-foreground">
+            Период раздела ({formatPeriod(dateFrom, dateTo)}) отбирает встречи,
+            пересекающиеся с ним. Считается общий календарь компании: закрытые и
+            личные встречи в отчёт не входят.
+          </p>
+        </div>
+        <TrackExport href={экспорт('calendar', companyId, dateFrom, dateTo)}
+          fileName="Встречи Трека.xlsx"
+          hint="Участие, организаторы и неотвеченные приглашения — книгой Excel" />
       </div>
 
       {dateError && <Card role="alert" className="p-4 text-sm text-destructive">{dateError}</Card>}

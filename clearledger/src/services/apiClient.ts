@@ -87,6 +87,42 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY)
 }
 
+/**
+ * Скачать файл выгрузки по адресу API.
+ *
+ * Имя берётся из ответа сервера, а не из аргумента: сервер собирает его по
+ * RFC 5987 и умеет кириллицу («Реестр документов 20260831.xlsx»), а подставленное
+ * здесь имя эту работу перечеркнёт и вернёт папку одинаковых файлов. Аргумент —
+ * запасной вариант на случай, если заголовка нет.
+ */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}${path}`, { headers: headers() })
+  if (!res.ok) {
+    // Тело ошибки — это JSON с `detail`, а не файл: показать человеку причину
+    // отказа лучше, чем сохранить на диск страницу с ошибкой.
+    let причина = `Выгрузка не удалась (${res.status})`
+    try {
+      const тело = await res.json()
+      if (тело?.detail) причина = String(тело.detail)
+    } catch { /* тело не JSON — остаётся код ответа */ }
+    throw new ApiError(res.status, причина)
+  }
+  const заголовок = res.headers.get('Content-Disposition') ?? ''
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(заголовок)
+  const ascii = /filename="([^"]+)"/i.exec(заголовок)
+  const имя = utf8 ? decodeURIComponent(utf8[1]) : ascii?.[1] ?? fallbackName
+
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = имя
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export class ApiError extends Error {
   status: number
   detail: string
