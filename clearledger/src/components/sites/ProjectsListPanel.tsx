@@ -8,7 +8,7 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTabParams } from '@/hooks/useTabParams'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -20,7 +20,7 @@ import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-reac
 import { ExportButton } from './ExportButton'
 import {
   getSites, getRouteNodes, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner,
-  PHASE_META, STAGE_META, FUNNEL_STAGES, type SiteStage, type SiteRow,
+  PHASE_META, STAGE_META, FUNNEL_STAGES, type SiteStage,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
 import { useOpenProject } from './useOpenProject'
@@ -28,8 +28,91 @@ import { NewProjectDialog } from './NewProjectDialog'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const PAGE = 100
+/** Порция колонки доски: столько карточек стадии подтягивается за одну прокрутку. */
+const COLUMN_PAGE = 50
 const today = () => new Date().toISOString().slice(0, 10)
-const BOARD_STAGES: SiteStage[] = [...FUNNEL_STAGES, 'on_hold', 'archive']
+
+/** Отбор доски без стадии: стадию каждая колонка подставляет свою. */
+type BoardFilters = Omit<Parameters<typeof getSites>[0], 'companyId' | 'stage' | 'page' | 'pageSize'>
+
+/**
+ * Колонка доски: своя стадия, свой запрос, свой скролл.
+ *
+ * Раньше доска раскладывала по колонкам одну страницу общего списка, и остаток
+ * стадии человек добирал переключением страниц внизу — просьба сотрудников
+ * РусГидро 31.08.2026 была ровно про это. Теперь колонка грузит свою стадию сама
+ * и добирает следующую порцию по прокрутке, а счётчик в шапке показывает всю
+ * стадию, а не сколько её попало на страницу.
+ */
+function StageColumn({ companyId, stage, filters, onOpen }: {
+  companyId: string; stage: SiteStage; filters: BoardFilters; onOpen: (id: string) => void
+}) {
+  const q = useInfiniteQuery({
+    queryKey: ['pr-board', companyId, stage, filters],
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
+      getSites({ ...filters, companyId, stage, page: pageParam, pageSize: COLUMN_PAGE }),
+    getNextPageParam: (last, all) => (all.length * COLUMN_PAGE < last.total ? all.length + 1 : undefined),
+  })
+  const total = q.data?.pages[0]?.total ?? 0
+  const list = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data])
+  // Пустая стадия колонки не занимает: воронка из девяти стадий иначе растянулась
+  // бы вбок пустотой, ради которой доску пришлось бы листать вправо.
+  if (!q.isLoading && !q.isError && total === 0) return null
+
+  return (
+    <div className="min-w-[240px] max-w-[280px] flex-1 rounded-lg border border-border bg-muted/20">
+      <div className="px-2.5 py-1.5 border-b flex items-center justify-between">
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium">
+          <span className={`h-2 w-2 rounded-full ${STAGE_META[stage]?.dot ?? 'bg-zinc-400'}`} />
+          {STAGE_META[stage]?.label ?? stage}
+        </span>
+        <span className="font-mono text-xs text-muted-foreground">
+          {q.isLoading ? '…' : nf0.format(total)}
+        </span>
+      </div>
+      <div className="p-1.5 space-y-1.5 max-h-[70vh] overflow-y-auto"
+        onScroll={(e) => {
+          const el = e.currentTarget
+          if (el.scrollHeight - el.scrollTop - el.clientHeight < 240
+              && q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage()
+        }}>
+        {list.map((s) => {
+          const late = !!s.nextActionDue && s.nextActionDue < today()
+          return (
+            <button key={s.id} type="button" onClick={() => onOpen(s.id)}
+              className="w-full text-left rounded-md border border-border bg-background px-2 py-1.5 hover:border-primary/50 transition-colors">
+              <div className="flex items-center justify-between gap-1">
+                <span className="font-mono text-xs text-muted-foreground">{s.projectNo ?? '—'}</span>
+                {late && <span className="text-xs text-red-600 dark:text-red-400">просрочен шаг</span>}
+              </div>
+              <div className="text-sm truncate" title={s.fullAddress ?? s.address ?? ''}>
+                {s.title || s.address || s.installPlace || s.city || '—'}
+              </div>
+              <div className="text-xs text-muted-foreground truncate">
+                {s.city ?? s.region ?? ''}{s.ownerName ? ` · ${s.ownerName}` : ' · без ответственного'}
+              </div>
+            </button>
+          )
+        })}
+        {(q.isLoading || q.isFetchingNextPage) && (
+          <div className="flex justify-center py-3">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        )}
+        {/* Обрыв связи и пустая стадия — разные вещи: молча схлопнуть колонку
+            значит показать воронку без стадии, которой на самом деле полно. */}
+        {q.isError && (
+          <div className="px-1 py-2 text-xs space-y-1">
+            <div className="text-muted-foreground">Стадия не загрузилась</div>
+            <button type="button" className="text-primary hover:underline"
+              onClick={() => void q.refetch()}>повторить</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 /**
  * Доска по стадиям — «где скопилось» вместо «что с проектом».
@@ -39,18 +122,9 @@ const BOARD_STAGES: SiteStage[] = [...FUNNEL_STAGES, 'on_hold', 'archive']
  * карточки мышью его бы обошло. Клик открывает проект, где переход делается
  * с проверкой.
  */
-function StageBoard({ rows, onOpen }: { rows: SiteRow[]; onOpen: (id: string) => void }) {
-  const byStage = useMemo(() => {
-    const m = new Map<string, SiteRow[]>()
-    for (const r of rows) {
-      const list = m.get(r.stage) ?? []
-      list.push(r)
-      m.set(r.stage, list)
-    }
-    return m
-  }, [rows])
-  const stages = BOARD_STAGES.filter((s) => (byStage.get(s)?.length ?? 0) > 0)
-
+function StageBoard({ companyId, stages, filters, onOpen }: {
+  companyId: string; stages: SiteStage[]; filters: BoardFilters; onOpen: (id: string) => void
+}) {
   if (stages.length === 0) {
     return (
       <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
@@ -60,45 +134,9 @@ function StageBoard({ rows, onOpen }: { rows: SiteRow[]; onOpen: (id: string) =>
   }
   return (
     <div className="flex gap-2 overflow-x-auto pb-2">
-      {stages.map((st) => {
-        const list = byStage.get(st) ?? []
-        return (
-          <div key={st} className="min-w-[240px] max-w-[280px] flex-1 rounded-lg border border-border bg-muted/20">
-            <div className="px-2.5 py-1.5 border-b flex items-center justify-between">
-              <span className="inline-flex items-center gap-1.5 text-sm font-medium">
-                <span className={`h-2 w-2 rounded-full ${STAGE_META[st]?.dot ?? 'bg-zinc-400'}`} />
-                {STAGE_META[st]?.label ?? st}
-              </span>
-              <span className="font-mono text-xs text-muted-foreground">{list.length}</span>
-            </div>
-            <div className="p-1.5 space-y-1.5 max-h-[70vh] overflow-y-auto">
-              {list.slice(0, 50).map((s) => {
-                const late = !!s.nextActionDue && s.nextActionDue < today()
-                return (
-                  <button key={s.id} type="button" onClick={() => onOpen(s.id)}
-                    className="w-full text-left rounded-md border border-border bg-background px-2 py-1.5 hover:border-primary/50 transition-colors">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="font-mono text-xs text-muted-foreground">{s.projectNo ?? '—'}</span>
-                      {late && <span className="text-xs text-red-600 dark:text-red-400">просрочен шаг</span>}
-                    </div>
-                    <div className="text-sm truncate" title={s.fullAddress ?? s.address ?? ''}>
-                      {s.title || s.address || s.installPlace || s.city || '—'}
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate">
-                      {s.city ?? s.region ?? ''}{s.ownerName ? ` · ${s.ownerName}` : ' · без ответственного'}
-                    </div>
-                  </button>
-                )
-              })}
-              {list.length > 50 && (
-                <div className="px-1 py-1 text-xs text-muted-foreground">
-                  показаны первые 50 из {list.length} — сузьте фильтр
-                </div>
-              )}
-            </div>
-          </div>
-        )
-      })}
+      {stages.map((st) => (
+        <StageColumn key={st} companyId={companyId} stage={st} filters={filters} onOpen={onOpen} />
+      ))}
     </div>
   )
 }
@@ -158,6 +196,20 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
 
   // Выбранная стадия: из URL (приход из воронки) либо из отбора реестра.
   const stagePick = stageFromUrl || f.stage
+
+  // Колонки доски: выбранный отбор сужает набор стадий, по умолчанию — вся воронка.
+  // Приостановленные и архив колонками не показываются, пока их не выбрали явно:
+  // доска отвечает на вопрос «где скопилась работа», а не «что мы закрыли».
+  const boardStages = useMemo<SiteStage[]>(() => {
+    if (closed) return ['archive']
+    if (stagePick) return [stagePick as SiteStage]
+    if (phase && stagesOfPhase.length > 0) return stagesOfPhase as SiteStage[]
+    return FUNNEL_STAGES
+  }, [closed, stagePick, phase, stagesOfPhase])
+  const boardFilters = useMemo(() => ({
+    region: region || undefined, ownerId: ownerId || undefined, overdue,
+    search: search || undefined, risk: risk || undefined, node: node || undefined,
+  }), [region, ownerId, overdue, search, risk, node])
 
   const q = useQuery({
     queryKey: ['pr-projects', companyId, phase, stagePick, node, ownerId, region, closed, overdue, search, risk, page],
@@ -366,8 +418,12 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
             {STAGE_META[stageFromUrl as SiteStage]?.label ?? stageFromUrl} ✕
           </button>
         )}
+        {/* Счётчик считает весь отбор, а не текущую страницу: «100 проектов» при
+            271 в выдаче читается как потеря данных. Исключение — фильтр по этапу
+            из нескольких стадий: он досеивается на клиенте, и честно только видимое. */}
         <span className="text-xs text-muted-foreground ml-auto">
-          {q.isLoading ? '…' : `${nf0.format(rows.length)} проектов`}
+          {q.isLoading ? '…'
+            : `${nf0.format(phase && stagesOfPhase.length > 1 ? rows.length : total)} проектов`}
         </span>
       </div>
 
@@ -397,7 +453,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
       {/* Три колонки прочерков — не отчёт, а тишина: реестр молчит о том, что у
           проектов нет ни ведущего, ни следующего шага. Говорим числом и даём
           действие прямо здесь, вместо того чтобы менеджер листал строки. */}
-      {!q.isLoading && ownerless > 0 && picked.size === 0 && (
+      {view === 'table' && !q.isLoading && ownerless > 0 && picked.size === 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm">
           <span>
             Без ответственного {nf0.format(ownerless)} из {nf0.format(rows.length)} на странице —
@@ -410,8 +466,9 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         </div>
       )}
 
-      {view === 'board' && !q.isLoading && (
-        <StageBoard rows={rows} onOpen={openProject} />
+      {view === 'board' && (
+        <StageBoard companyId={companyId} stages={boardStages} filters={boardFilters}
+          onOpen={openProject} />
       )}
 
       <Card className={view === 'board' ? 'hidden' : undefined}>
@@ -527,7 +584,8 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         </CardContent>
       </Card>
 
-      {pages > 1 && !phase && (
+      {/* Страницы — только у таблицы: на доске остаток стадии добирается прокруткой колонки. */}
+      {view === 'table' && pages > 1 && !phase && (
         <div className="flex items-center justify-end gap-2 text-sm">
           <Button variant="outline" size="sm" className="h-8 px-2" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button>
           <span className="text-muted-foreground">стр. {page} из {pages}</span>
