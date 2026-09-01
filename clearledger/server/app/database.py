@@ -912,6 +912,607 @@ async def _ensure_active_group_readiness(db_engine) -> None:
         await conn.execute(text(ACTIVE_GROUP_READINESS_DDL))
 
 
+# v2.44: артикул сети — человекочитаемый ключ карточки.
+#
+# Решение МАГа 30.08.2026 (`edge/docs/identifikatory-tovara.html`). Девять цифр,
+# смысла не несёт, выдаётся один раз при рождении карточки и не меняется
+# никогда. Логика номера — `app/services/sku.py`.
+#
+# Всё в `DO $$` с проверкой `to_regclass`: схема `edge` создаётся отдельным
+# набором SQL-файлов и на пустой базе может ещё не существовать.
+SKU_MIGRATION_DDL = (
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.item') IS NOT NULL THEN
+            ALTER TABLE edge.item ADD COLUMN IF NOT EXISTS sku VARCHAR(9);
+            -- Уникальность пока глобальная по инсталляции — как у активного
+            -- штрихкода. В `edge.item` нет company_id (домультитенантная
+            -- схема), и делать вид, что мультитенантность есть, вреднее, чем
+            -- честный глобальный индекс: появится колонка — индекс станет
+            -- составным одной строкой.
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_edge_item_sku
+                ON edge.item (sku) WHERE sku IS NOT NULL;
+        END IF;
+    END $$
+    """,
+    # Прежние коды карточки: короткий код ЦБ, станционный с префиксом АЗС,
+    # артикул проигравшей стороны после слияния дублей.
+    #
+    # Они не удаляются и не переиспользуются: по ним ищут (человек помнит
+    # старый номер, он напечатан на прошлогоднем ценнике и стоит в документах,
+    # которые уже проведены), но не печатают. Ровно этого механизма не хватило
+    # в истории со слиянием, не пережившим поздний перенос из 1С.
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.item') IS NOT NULL THEN
+            CREATE TABLE IF NOT EXISTS edge.item_code (
+                id       bigserial PRIMARY KEY,
+                item_id  bigint NOT NULL REFERENCES edge.item(id) ON DELETE CASCADE,
+                code     text   NOT NULL,
+                kind     text   NOT NULL,
+                note     text,
+                added_at timestamptz NOT NULL DEFAULT now()
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_edge_item_code
+                ON edge.item_code (item_id, code);
+            CREATE INDEX IF NOT EXISTS ix_edge_item_code_code
+                ON edge.item_code (code);
+        END IF;
+    END $$
+    """,
+    # Счётчик центрального пула. Одна строка; выдача идёт под FOR UPDATE.
+    #
+    # Отдельной таблицей, а не `max(sku)+1`: максимум пришлось бы считать по
+    # всему справочнику, он не отражает выданные, но ещё не записанные номера,
+    # и при двух одновременных заведениях карточки оба получили бы один номер —
+    # ровно та беда, что живёт сейчас в выдаче кодов кассы.
+    """
+    CREATE TABLE IF NOT EXISTS edge_sku_counter (
+        scope      VARCHAR(20) PRIMARY KEY,
+        next_value BIGINT NOT NULL
+    )
+    """,
+    "INSERT INTO edge_sku_counter (scope, next_value) VALUES ('center', 10000000) "
+    "ON CONFLICT (scope) DO NOTHING",
+    # Блоки, нарезанные станциям. Станция чеканит номер внутри своего блока
+    # офлайн — карточка заводится, пока накладная в руках, и номер сразу
+    # окончательный: «временных» кодов с перенумерацией не бывает, иначе
+    # поплыли бы ссылки в уже проведённых документах.
+    """
+    CREATE TABLE IF NOT EXISTS edge_sku_block (
+        id           UUID PRIMARY KEY,
+        company_id   UUID NOT NULL,
+        station_id   SMALLINT NOT NULL,
+        block_from   BIGINT NOT NULL,
+        block_to     BIGINT NOT NULL,
+        next_value   BIGINT NOT NULL,
+        issued_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+        exhausted_at TIMESTAMPTZ,
+        CONSTRAINT ck_edge_sku_block_range
+            CHECK (block_from <= block_to AND next_value >= block_from)
+    )
+    """,
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_edge_sku_block "
+    "ON edge_sku_block (company_id, station_id, block_from)",
+    # Открытых блоков у станции может быть два: текущий и запасной. Больше не
+    # нужно, меньше опасно — станция без связи не должна остаться без номеров.
+    "CREATE INDEX IF NOT EXISTS ix_edge_sku_block_open "
+    "ON edge_sku_block (company_id, station_id) WHERE exhausted_at IS NULL",
+    # Сверка каталога станции с сетевым: одна строка на станцию, последнее
+    # состояние. История не нужна — сверка идёт каждым тактом станции, и
+    # интересен ответ «сейчас расходится вот это», а не когда началось.
+    """
+    CREATE TABLE IF NOT EXISTS edge_catalog_check (
+        company_id         UUID NOT NULL,
+        station_id         SMALLINT NOT NULL,
+        checked_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+        taken_at           TIMESTAMPTZ,
+        station_items      INTEGER NOT NULL DEFAULT 0,
+        center_items       INTEGER NOT NULL DEFAULT 0,
+        drafts_pending     INTEGER NOT NULL DEFAULT 0,
+        missing_in_center  JSONB NOT NULL DEFAULT '[]'::jsonb,
+        missing_on_station JSONB NOT NULL DEFAULT '[]'::jsonb,
+        PRIMARY KEY (company_id, station_id)
+    )
+    """,
+    # Сверка «касса ↔ учёт» станции — снимок для надзора сети.
+    #
+    # Центр остаток кассы NeftoMS сам не видит (он с АЗС), поэтому станция шлёт
+    # состояние сверки пакетом cash_state своим тактом. Одна строка на станцию
+    # (UPSERT), как edge_catalog_check. Направление уже разложено на станции:
+    # above — касса выше учёта (разбор), below — окно разнесения, raw — сырьё.
+    # above_items держит сам список разбора (позиции «касса выше»), обрезанный
+    # станцией до лимита.
+    """
+    CREATE TABLE IF NOT EXISTS edge_cash_check (
+        company_id      UUID NOT NULL,
+        station_id      SMALLINT NOT NULL,
+        checked_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        taken_at        TIMESTAMPTZ,
+        in_cash         INTEGER NOT NULL DEFAULT 0,
+        should_be       INTEGER NOT NULL DEFAULT 0,
+        matched         INTEGER NOT NULL DEFAULT 0,
+        above           INTEGER NOT NULL DEFAULT 0,
+        below           INTEGER NOT NULL DEFAULT 0,
+        raw_material    INTEGER NOT NULL DEFAULT 0,
+        not_in_cash     INTEGER NOT NULL DEFAULT 0,
+        no_card         INTEGER NOT NULL DEFAULT 0,
+        above_items     JSONB NOT NULL DEFAULT '[]'::jsonb,
+        PRIMARY KEY (company_id, station_id)
+    )
+    """,
+    # Артикул, отчеканенный станцией: заявка приезжает наверх уже с номером,
+    # и признание его не меняет — товар уже назван этим номером у полки.
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.item_draft') IS NOT NULL THEN
+            ALTER TABLE edge.item_draft ADD COLUMN IF NOT EXISTS sku VARCHAR(9);
+        END IF;
+    END $$
+    """,
+)
+
+
+# v2.45: правила номенклатурной матрицы.
+#
+# Матрица — единый справочник компании, где всё, что различается между
+# станциями, описано правилами к позиции, а не второй карточкой. Правило
+# отвечает на вопрос «кому × на что × можно или нельзя» и одинаково устроено
+# для двух предметов: право на цену и применение (возит ли станция товар).
+# Разбор — `edge/docs/nomenklaturnaya-matrica.html`.
+#
+# Умолчания, когда правила нет (решение МАГа 30.08.2026):
+#   assortment → доступна всем станциям;
+#   price      → цена сетевая, право выдаётся правилом.
+
+# v2.46: товарные группы «Честного знака» — справочник вместо двух корзин.
+#
+# До этого маркировка жила в двух значениях: «Табачная продукция» и «Требует
+# маркировки (по данным 1С)». Вторая корзина — не группа, а признание незнания:
+# 236 карточек на 208, у каждой свои правила приёмки и свои сроки. «Честный
+# знак» расширяется каждый год, и на тридцати точках «по данным 1С» перестанет
+# отвечать на вопрос «что нам делать с этой пачкой».
+#
+# Группа остаётся ТЕКСТОМ в `edge.item.mark_group`: станция показывает её как
+# есть, и менять формат ради справочника значило бы переучивать экраны обеих
+# сторон. Справочник задаёт список допустимых значений и то, что о группе нужно
+# знать: с какого числа обязательна и каким номером её знает касса.
+MARK_GROUP_MIGRATION_DDL = (
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.item') IS NOT NULL THEN
+            CREATE TABLE IF NOT EXISTS edge.mark_group (
+                code      text PRIMARY KEY,
+                name      text NOT NULL UNIQUE,
+                -- Номер группы в справочнике нефтесервера (третье поле
+                -- Reserve_1). Известен только там, где касса его уже показала:
+                -- у табака 7. Остальные заполняются по мере появления товара —
+                -- выдумывать номера нельзя, касса от чужого номера откажется.
+                cash_code integer,
+                since     date,
+                note      text
+            );
+            ALTER TABLE edge.item_group
+                ADD COLUMN IF NOT EXISTS mark_group_default text;
+        END IF;
+    END $$
+    """,
+    # Перечень групп. Для АЗС значимы табак, никотин, пиво, напитки, вода,
+    # молочное, консервы, корма; остальные заведены, чтобы товаровед выбирал из
+    # справочника, а не писал руками новую строку на каждую пачку.
+    """
+    INSERT INTO edge.mark_group (code, name, cash_code, since, note) VALUES
+        ('tobacco',    'Табачная продукция',              7,    '2019-07-01', NULL),
+        ('nicotine',   'Никотинсодержащая продукция',     NULL, '2021-03-15', 'стики, капсулы, жидкости'),
+        ('beer',       'Пиво и слабоалкогольные напитки', NULL, '2024-04-01', NULL),
+        ('softdrinks', 'Безалкогольные напитки и соки',   NULL, '2024-12-01', NULL),
+        ('water',      'Упакованная вода',                NULL, '2021-12-01', NULL),
+        ('milk',       'Молочная продукция',              NULL, '2021-06-01', 'включая мороженое'),
+        ('canned',     'Консервированные продукты',       NULL, '2025-06-01', NULL),
+        ('petfood',    'Корма для животных',              NULL, '2025-03-01', NULL),
+        ('oils',       'Растительные масла',              NULL, '2025-10-01', NULL),
+        ('antiseptic', 'Антисептики',                     NULL, '2021-10-01', NULL),
+        ('perfume',    'Духи и туалетная вода',           NULL, '2020-10-01', NULL),
+        ('tires',      'Шины и покрышки',                 NULL, '2020-11-01', NULL),
+        ('photo',      'Фотоаппараты и лампы-вспышки',    NULL, '2020-10-01', NULL),
+        ('bad',        'Биологически активные добавки',   NULL, '2024-09-01', NULL),
+        ('medicine',   'Лекарственные препараты',         NULL, '2020-07-01', NULL),
+        ('shoes',      'Обувные товары',                  NULL, '2020-07-01', NULL),
+        ('light',      'Товары лёгкой промышленности',    NULL, '2021-01-01', NULL),
+        ('caviar',     'Икра осетровых',                  NULL, '2024-04-01', NULL)
+    ON CONFLICT (code) DO UPDATE
+       SET name = excluded.name, since = excluded.since, note = excluded.note
+    """,
+    # Умолчание группы по товарной группе: у полки решает не карточка, а полка.
+    # Пустое умолчание — честный ответ «здесь маркируется не всё» (моторные
+    # масла и автохимия не маркируются вовсе, а гигиена — выборочно).
+    """
+    UPDATE edge.item_group g SET mark_group_default = x.mark
+      FROM (VALUES
+        ('Табак / Сигареты',            'Табачная продукция'),
+        ('Табак / Стики и капсулы',     'Никотинсодержащая продукция'),
+        ('Пиво и слабый алкоголь',      'Пиво и слабоалкогольные напитки'),
+        ('Напитки / Вода',              'Упакованная вода'),
+        ('Напитки / Газированные',      'Безалкогольные напитки и соки'),
+        ('Напитки / Соки и морсы',      'Безалкогольные напитки и соки'),
+        ('Напитки / Энергетики',        'Безалкогольные напитки и соки'),
+        ('Напитки / Холодный кофе и чай','Безалкогольные напитки и соки'),
+        ('Еда / Молочное',              'Молочная продукция'),
+        ('Еда / Мороженое',             'Молочная продукция'),
+        ('Еда / Консервы и бакалея',    'Консервированные продукты'),
+        ('Хозтовары и гигиена / Зоотовары', 'Корма для животных')
+      ) AS x(path, mark)
+     WHERE g.path = x.path AND coalesce(g.mark_group_default, '') <> x.mark
+    """,
+    # Разбор корзины «по данным 1С»: карточка получает группу своей полки.
+    # Идемпотентно и работает дальше само — новая карточка из 1С приезжает с
+    # той же корзиной и раскладывается тем же правилом.
+    """
+    UPDATE edge.item i SET mark_group = g.mark_group_default
+      FROM edge.item_group g
+     WHERE i.group_id = g.id
+       AND g.mark_group_default IS NOT NULL
+       AND coalesce(i.mark_group, '') IN ('', 'Требует маркировки (по данным 1С)')
+       AND i.marked
+    """,
+)
+
+
+# v2.47: `company_id` в схеме `edge` — до появления второй компании.
+#
+# Таблицы `edge.item`, `barcode`, `price`, `ns_code`, `stock` писались под одну
+# компанию: пока у каждой своё пространство со своей базой, это не мешало.
+# Две компании в одном пространстве склеились бы МОЛЧА — одинаковый номер
+# станции, одинаковый штрихкод у разных товаров, один код кассы на двоих.
+#
+# Колонка добавляется и заполняется там, где компания определяется однозначно
+# (в пространстве она одна). Уникальность переносится на пару с компанией
+# везде, где она локальна по смыслу: штрихкод одного товара у другой компании —
+# норма, номер станции — тоже.
+#
+# ⚠ Чего эта миграция НЕ делает: `edge.station.id` остаётся первичным ключом,
+# то есть две компании с АЗС №208 в одном пространстве не заведутся. Это
+# осознанно: смена PK тянет за собой все внешние ключи схемы. Важно, что теперь
+# такая попытка упрётся в ошибку, а не сольёт два справочника молча.
+COMPANY_SCOPE_MIGRATION_DDL = (
+    """
+    DO $$
+    DECLARE единственная uuid; сколько int;
+    BEGIN
+        IF to_regclass('edge.item') IS NULL THEN RETURN; END IF;
+
+        ALTER TABLE edge.station  ADD COLUMN IF NOT EXISTS company_id uuid;
+        ALTER TABLE edge.item     ADD COLUMN IF NOT EXISTS company_id uuid;
+        ALTER TABLE edge.barcode  ADD COLUMN IF NOT EXISTS company_id uuid;
+        ALTER TABLE edge.price    ADD COLUMN IF NOT EXISTS company_id uuid;
+        ALTER TABLE edge.ns_code  ADD COLUMN IF NOT EXISTS company_id uuid;
+        ALTER TABLE edge.stock    ADD COLUMN IF NOT EXISTS company_id uuid;
+
+        -- Через две выборки, а не `min(id)`: у uuid в PostgreSQL нет агрегата
+        -- min(), и запрос падает с «function min(uuid) does not exist».
+        SELECT count(*) INTO сколько FROM companies;
+        IF сколько = 1 THEN
+            SELECT id INTO единственная FROM companies LIMIT 1;
+            UPDATE edge.station SET company_id = единственная WHERE company_id IS NULL;
+            UPDATE edge.item    SET company_id = единственная WHERE company_id IS NULL;
+            UPDATE edge.barcode SET company_id = единственная WHERE company_id IS NULL;
+            UPDATE edge.price   SET company_id = единственная WHERE company_id IS NULL;
+            UPDATE edge.ns_code SET company_id = единственная WHERE company_id IS NULL;
+            UPDATE edge.stock   SET company_id = единственная WHERE company_id IS NULL;
+        ELSE
+            -- Компаний несколько: владельца строки выводим через станцию, а для
+            -- карточек и штрихкодов — не выводим вовсе. Догадка здесь опаснее
+            -- пустоты: приписать чужой товар компании значит смешать учёт.
+            UPDATE edge.price p SET company_id = s.company_id
+              FROM edge.station s WHERE s.id = p.station_id AND p.company_id IS NULL
+                                    AND s.company_id IS NOT NULL;
+            UPDATE edge.ns_code n SET company_id = s.company_id
+              FROM edge.station s WHERE s.id = n.station_id AND n.company_id IS NULL
+                                    AND s.company_id IS NOT NULL;
+            UPDATE edge.stock k SET company_id = s.company_id
+              FROM edge.station s WHERE s.id = k.station_id AND k.company_id IS NULL
+                                    AND s.company_id IS NOT NULL;
+        END IF;
+    END $$
+    """,
+    # Уникальность — на пару с компанией. Прежние глобальные индексы снимаем
+    # ровно те, что становятся ложью: активный штрихкод, действующая цена,
+    # активный код кассы. `external_uuid` и `sku` остаются глобальными
+    # осознанно — UUID уникален по природе, а пул артикулов один на
+    # инсталляцию (номер 100000009 обязан значить один товар везде).
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.item') IS NULL THEN RETURN; END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM edge.barcode WHERE company_id IS NULL) THEN
+            CREATE UNIQUE INDEX IF NOT EXISTS barcode_active_company_uniq
+                ON edge.barcode (company_id, code) WHERE status = 'active';
+            DROP INDEX IF EXISTS edge.barcode_active_uniq;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM edge.price WHERE company_id IS NULL) THEN
+            CREATE UNIQUE INDEX IF NOT EXISTS price_current_company_uniq
+                ON edge.price (company_id, item_id, station_id) WHERE valid_to IS NULL;
+            DROP INDEX IF EXISTS edge.price_current_uniq;
+        END IF;
+
+        IF NOT EXISTS (SELECT 1 FROM edge.ns_code WHERE company_id IS NULL) THEN
+            CREATE UNIQUE INDEX IF NOT EXISTS ns_code_active_company_uniq
+                ON edge.ns_code (company_id, station_id, ns_code) WHERE status = 'active';
+            CREATE UNIQUE INDEX IF NOT EXISTS ns_code_barcode_company_uniq
+                ON edge.ns_code (company_id, station_id, barcode_id) WHERE status = 'active';
+            DROP INDEX IF EXISTS edge.ns_code_active_uniq;
+            DROP INDEX IF EXISTS edge.ns_code_barcode_uniq;
+        END IF;
+
+        CREATE INDEX IF NOT EXISTS item_company_idx ON edge.item (company_id);
+        CREATE INDEX IF NOT EXISTS stock_company_idx ON edge.stock (company_id, station_id);
+    END $$
+    """,
+    # Новая строка обязана рождаться с компанией. Умолчание берём от карточки
+    # (штрихкод, цена, код кассы принадлежат тому же владельцу, что и товар) —
+    # так ни один существующий INSERT не приходится переписывать.
+    """
+    CREATE OR REPLACE FUNCTION edge.наследовать_компанию() RETURNS trigger AS $$
+    BEGIN
+        IF NEW.company_id IS NOT NULL THEN
+            RETURN NEW;
+        END IF;
+        -- Штрихкод и цена принадлежат владельцу карточки, код кассы и остаток —
+        -- владельцу штрихкода. Цепочка кончается на карточке: у неё компания
+        -- проставляется тем, кто её создаёт.
+        IF TG_TABLE_NAME IN ('barcode', 'price') THEN
+            SELECT company_id INTO NEW.company_id FROM edge.item WHERE id = NEW.item_id;
+        ELSE
+            SELECT company_id INTO NEW.company_id FROM edge.barcode WHERE id = NEW.barcode_id;
+        END IF;
+        RETURN NEW;
+    END $$ LANGUAGE plpgsql
+    """,
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.barcode') IS NOT NULL THEN
+            DROP TRIGGER IF EXISTS barcode_company_inherit ON edge.barcode;
+            CREATE TRIGGER barcode_company_inherit BEFORE INSERT ON edge.barcode
+                FOR EACH ROW EXECUTE FUNCTION edge.наследовать_компанию();
+            DROP TRIGGER IF EXISTS price_company_inherit ON edge.price;
+            CREATE TRIGGER price_company_inherit BEFORE INSERT ON edge.price
+                FOR EACH ROW EXECUTE FUNCTION edge.наследовать_компанию();
+            DROP TRIGGER IF EXISTS ns_code_company_inherit ON edge.ns_code;
+            CREATE TRIGGER ns_code_company_inherit BEFORE INSERT ON edge.ns_code
+                FOR EACH ROW EXECUTE FUNCTION edge.наследовать_компанию();
+            DROP TRIGGER IF EXISTS stock_company_inherit ON edge.stock;
+            CREATE TRIGGER stock_company_inherit BEFORE INSERT ON edge.stock
+                FOR EACH ROW EXECUTE FUNCTION edge.наследовать_компанию();
+        END IF;
+    END $$
+    """,
+)
+
+
+# v2.48: отдел кассы — свойство товарной группы, а не догадка станции.
+#
+# Касса раскладывает товар по отделам (на 208: 1 автотовары и хозтовары,
+# 2 табак, 3 еда и напитки, 5 общепит). Агент выводил отдел по соседям —
+# смотрел, в каком отделе стоят позиции той же группы, уже заведённые в кассе.
+# Приём работает ровно до первой позиции новой группы: соседей нет, отдел не
+# выведен, товар в кассу не уезжает.
+#
+# На станции, запущенной с чистого листа, соседей нет НИ У КОГО: в её кассе не
+# стоит ни одной нашей позиции. Поэтому отдел переезжает в справочник сети:
+# один раз задан товароведом — и работает на любой новой АЗС с первого дня.
+#
+# Значения взяты с боевой 208 (замер 31.08.2026: 974 строки кассы против
+# 1126 штрихкодов справочника). Смешанные группы разложены по преобладающему
+# отделу: «Прочее» 90/53/13, «Газированные» 74/9 — большинство и есть правило,
+# исключения станция поправит у себя.
+CASH_SECTION_MIGRATION_DDL = (
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.item_group') IS NOT NULL THEN
+            ALTER TABLE edge.item_group
+                ADD COLUMN IF NOT EXISTS cash_section smallint;
+        END IF;
+    END $$
+    """,
+    """
+    UPDATE edge.item_group g SET cash_section = x.section
+      FROM (VALUES
+        ('Табак',                                    2),
+        ('Табак / Сигареты',                         2),
+        ('Табак / Стики и капсулы',                  2),
+        ('Табак / Аксессуары',                       2),
+        ('Напитки',                                  3),
+        ('Напитки / Вода',                           3),
+        ('Напитки / Газированные',                   3),
+        ('Напитки / Соки и морсы',                   3),
+        ('Напитки / Энергетики',                     3),
+        ('Напитки / Холодный кофе и чай',            3),
+        ('Пиво и слабый алкоголь',                   3),
+        ('Еда',                                      3),
+        ('Еда / Снеки',                              3),
+        ('Еда / Шоколад и конфеты',                  3),
+        ('Еда / Жевательная резинка',                3),
+        ('Еда / Молочное',                           3),
+        ('Еда / Мороженое',                          3),
+        ('Еда / Выпечка и хлеб',                     3),
+        ('Еда / Консервы и бакалея',                 3),
+        ('Кухня',                                    5),
+        ('Кухня / Блюда',                            5),
+        ('Кухня / Сырьё',                            5),
+        ('Кухня / Упаковка',                         1),
+        ('Автотовары',                               1),
+        ('Автотовары / Масла и жидкости',            1),
+        ('Автотовары / Автохимия',                   1),
+        ('Автотовары / Стеклоомыватель',             1),
+        ('Автотовары / Лампы и щётки',               1),
+        ('Автотовары / Аксессуары',                  1),
+        ('Хозтовары и гигиена',                      1),
+        ('Хозтовары и гигиена / Батарейки и электро',1),
+        ('Хозтовары и гигиена / Гигиена',            1),
+        ('Хозтовары и гигиена / Зоотовары',          1),
+        ('Прочее',                                   1)
+      ) AS x(path, section)
+     WHERE g.path = x.path AND g.cash_section IS DISTINCT FROM x.section
+    """,
+)
+
+LOCAL_BARCODE_MIGRATION_DDL = (
+    """
+    ALTER TABLE edge.barcode ADD COLUMN IF NOT EXISTS station_id integer
+    """,
+    # Короткий код (меньше восьми знаков — короче самого короткого EAN-8)
+    # приписываем станции, на которой он работает: ту, где по нему выдан
+    # действующий код кассы. Кода кассы нет — берём единственную станцию с
+    # ценой; станций несколько — оставляем сетевым, решит человек.
+    """
+    UPDATE edge.barcode b SET station_id = n.station_id
+      FROM (SELECT barcode_id, min(station_id) AS station_id, count(DISTINCT station_id) AS ст
+              FROM edge.ns_code WHERE status = 'active' GROUP BY barcode_id) n
+     WHERE b.id = n.barcode_id AND n.ст = 1
+       AND b.station_id IS NULL AND length(b.code) < 8
+    """,
+    """
+    UPDATE edge.barcode b SET station_id = p.station_id
+      FROM (SELECT item_id, min(station_id) AS station_id,
+                   count(DISTINCT station_id) AS ст
+              FROM edge.price WHERE valid_to IS NULL GROUP BY item_id) p
+     WHERE b.item_id = p.item_id AND p.ст = 1
+       AND b.station_id IS NULL AND length(b.code) < 8
+    """,
+    # Уникальность по ярусу: сетевой код один на компанию, внутренний — один
+    # на станцию. NULL в UNIQUE сам с собой не сравнивается, поэтому два
+    # частичных индекса.
+    """
+    DROP INDEX IF EXISTS edge.barcode_active_company_uniq
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS barcode_active_company_uniq
+        ON edge.barcode (company_id, code)
+     WHERE status = 'active' AND station_id IS NULL
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS barcode_active_station_uniq
+        ON edge.barcode (company_id, station_id, code)
+     WHERE status = 'active' AND station_id IS NOT NULL
+    """,
+)
+
+
+RECIPE_TIER_MIGRATION_DDL = (
+    """
+    ALTER TABLE store_recipe_versions
+        ADD COLUMN IF NOT EXISTS station_id integer
+    """,
+    # Карты, пришедшие со станции, СТАНОВЯТСЯ станционными: их набивал
+    # администратор АЗС под свою кухню, и объявлять их сетевой нормой значит
+    # навязать её соседям. Сетевая норма появляется, когда товаровед утверждает
+    # карту в центре, — до тех пор ярус сети пуст, и это честно.
+    """
+    UPDATE store_recipe_versions
+       SET station_id = source_station_id
+     WHERE station_id IS NULL AND source = 'station' AND source_station_id IS NOT NULL
+    """,
+    # Прежняя уникальность «одна версия на блюдо в компании» запрещала двум АЗС
+    # иметь свои карты одного блюда — ровно то, ради чего ярус и вводится.
+    """
+    ALTER TABLE store_recipe_versions
+        DROP CONSTRAINT IF EXISTS uq_store_recipe_version
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_store_recipe_version_net
+        ON store_recipe_versions (company_id, dish_uuid, version)
+     WHERE station_id IS NULL
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_store_recipe_version_station
+        ON store_recipe_versions (company_id, dish_uuid, station_id, version)
+     WHERE station_id IS NOT NULL
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_store_recipe_tier
+        ON store_recipe_versions (company_id, dish_uuid, station_id, status)
+    """,
+    # Одна действующая карта на блюдо в ярусе — правилом схемы, а не только
+    # порядком в коде. Две активные карты одного блюда это спор о том, что
+    # списывать, и разрешать его в момент продажи поздно.
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_store_recipe_active_net
+        ON store_recipe_versions (company_id, dish_uuid)
+     WHERE status = 'active' AND valid_to IS NULL AND station_id IS NULL
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_store_recipe_active_station
+        ON store_recipe_versions (company_id, dish_uuid, station_id)
+     WHERE status = 'active' AND valid_to IS NULL AND station_id IS NOT NULL
+    """,
+)
+
+
+MATRIX_MIGRATION_DDL = (
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.item') IS NOT NULL THEN
+            CREATE TABLE IF NOT EXISTS edge.matrix_rule (
+                id          UUID PRIMARY KEY,
+                company_id  UUID NOT NULL,
+                -- 'price' — кто вправе менять цену; 'assortment' — возит ли станция.
+                subject     TEXT NOT NULL,
+                -- Пусто = правило про всю сеть. Заполнено = про одну АЗС.
+                station_id  SMALLINT,
+                -- Группа действует на всю ветку; карточка точнее группы.
+                -- Обе сразу бессмысленны: карточка уже определяет группу.
+                group_id    BIGINT REFERENCES edge.item_group(id) ON DELETE CASCADE,
+                item_id     BIGINT REFERENCES edge.item(id) ON DELETE CASCADE,
+                allow       BOOLEAN NOT NULL,
+                -- Жёсткий запрет бьёт всё, включая станционные разрешения.
+                -- Нужен там, где нарушение стоит штрафа компании: цена табака
+                -- выше МРЦ — это ст. 13 ФЗ-15, и «широкий жест» станции здесь
+                -- не жест, а риск. Ставится только сетевым правилом.
+                hard        BOOLEAN NOT NULL DEFAULT false,
+                valid_from  TIMESTAMPTZ,
+                valid_to    TIMESTAMPTZ,
+                -- Причина обязательна: через полгода «почему так» спросят.
+                reason      TEXT NOT NULL,
+                created_by  UUID,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                -- Правило не редактируется на месте: старое закрывается, новое
+                -- создаётся со ссылкой. История прав — такой же документ, как
+                -- история цен, и переписывать её нельзя.
+                closed_at   TIMESTAMPTZ,
+                closed_by   UUID,
+                replaced_by UUID,
+                CONSTRAINT ck_matrix_rule_subject
+                    CHECK (subject IN ('price','assortment')),
+                CONSTRAINT ck_matrix_rule_target
+                    CHECK (NOT (group_id IS NOT NULL AND item_id IS NOT NULL)),
+                CONSTRAINT ck_matrix_rule_hard_network
+                    CHECK (NOT hard OR station_id IS NULL),
+                CONSTRAINT ck_matrix_rule_period
+                    CHECK (valid_to IS NULL OR valid_from IS NULL OR valid_to >= valid_from)
+            );
+        END IF;
+    END $$
+    """,
+    # Двух действующих правил на одну четвёрку быть не может: иначе исход
+    # зависел бы от того, в каком порядке их завели. NULLS NOT DISTINCT — чтобы
+    # «вся сеть» и «любая группа» участвовали в уникальности наравне со
+    # значениями (иначе Postgres считает два NULL разными и пропускает дубли).
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.matrix_rule') IS NOT NULL THEN
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_matrix_rule_open
+                ON edge.matrix_rule (company_id, subject, station_id, group_id, item_id)
+                NULLS NOT DISTINCT
+                WHERE closed_at IS NULL;
+            CREATE INDEX IF NOT EXISTS ix_matrix_rule_lookup
+                ON edge.matrix_rule (company_id, subject, closed_at);
+        END IF;
+    END $$
+    """,
+)
+
+
 ACCOUNTING_REVISION_MIGRATION_DDL = (
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS document_id UUID",
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS revision INTEGER",
@@ -2764,6 +3365,50 @@ async def create_all() -> None:
         # Legacy/fuel idem_key сохраняет прежнюю семантику отдельным predicate.
         for stmt in ACCOUNTING_REVISION_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
+
+        # Миграции магазина идут только там, где схема `edge` наполнена: её
+        # таблицы заводит провижининг станции, и в пространстве без магазина
+        # (энергетический профиль) их нет вовсе. Отдельные операторы этих
+        # наборов защищены `to_regclass`, но не все — незащищённый INSERT в
+        # `edge.mark_group` уронил старт всего приложения на rushydro
+        # (01.09.2026): падает миграция — не поднимается ни один экран.
+        edge_ready = bool((await conn.execute(_sa.text(
+            "SELECT to_regclass('edge.item') IS NOT NULL"))).scalar())
+
+        if edge_ready:
+            # v2.44: артикул сети — колонка, прежние коды, счётчик и блоки станций.
+            for stmt in SKU_MIGRATION_DDL:
+                await conn.execute(_sa.text(stmt))
+
+            # v2.45: правила номенклатурной матрицы (право на цену и применение).
+            for stmt in MATRIX_MIGRATION_DDL:
+                await conn.execute(_sa.text(stmt))
+
+            # v2.46: справочник товарных групп «Честного знака» и раскладка по нему.
+            for stmt in MARK_GROUP_MIGRATION_DDL:
+                await conn.execute(_sa.text(stmt))
+
+            # v2.47: company_id в схеме edge — до появления второй компании.
+            for stmt in COMPANY_SCOPE_MIGRATION_DDL:
+                await conn.execute(_sa.text(stmt))
+
+            # v2.48: отдел кассы у товарной группы — чтобы новая станция знала его
+            # с первого дня, а не выводила по соседям, которых у неё нет.
+            for stmt in CASH_SECTION_MIGRATION_DDL:
+                await conn.execute(_sa.text(stmt))
+
+        # v2.49: ярус карты рецептуры. Сетевая норма (station_id IS NULL) плюс
+        # переопределение станции: у двух кухонь может быть свой латте, и они
+        # больше не перебивают карты друг друга по одному блюду.
+        for stmt in RECIPE_TIER_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # v2.50: внутренний код станции — не сетевой штрихкод. Номер кухни
+        # уникален в пределах своей АЗС, у соседней он означает своё.
+        # Только при наполненной схеме edge — см. `edge_ready` выше.
+        if edge_ready:
+            for stmt in LOCAL_BARCODE_MIGRATION_DDL:
+                await conn.execute(_sa.text(stmt))
 
         # v2.43: BusinessShift identity, collision-safe backfill и current group.
         for stmt in BUSINESS_SHIFT_MIGRATION_DDL:
