@@ -14,6 +14,7 @@ import { Kpi } from './analytics/Kpi'
 import { PanelViewTabs } from './PanelViewTabs'
 import { useTabParams } from '@/hooks/useTabParams'
 import { useFilters } from '@/contexts/FilterContext'
+import { useNetScope } from '@/hooks/useScopeReset'
 import {
   getPaymentsList, getPaymentsSummary, getReconciliation, getReconciliationBy,
   getReconciliationRows,
@@ -212,19 +213,20 @@ function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
   // Разрез «где копится»: список расхождений отвечает, какие строки битые,
   // а этот — на каких станциях и в каких регионах они собираются.
   const [by, setBy] = useState<'station' | 'region'>('station')
+  const sc = useNetScope()
   const sum = useQuery<ReconSummary>({
-    queryKey: ['charge-recon', companyId, dateFrom, dateTo],
-    queryFn: () => getReconciliation({ companyId, dateFrom, dateTo }),
+    queryKey: ['charge-recon', companyId, dateFrom, dateTo, sc.key],
+    queryFn: () => getReconciliation({ companyId, dateFrom, dateTo, stations: sc.stations, regions: sc.regions }),
     enabled: !!companyId,
   })
   const rows = useQuery<ReconRow[]>({
-    queryKey: ['charge-recon-rows', companyId, dateFrom, dateTo, kind],
-    queryFn: () => getReconciliationRows({ companyId, dateFrom, dateTo, kind: kind! }),
+    queryKey: ['charge-recon-rows', companyId, dateFrom, dateTo, kind, sc.key],
+    queryFn: () => getReconciliationRows({ companyId, dateFrom, dateTo, kind: kind!, stations: sc.stations, regions: sc.regions }),
     enabled: !!companyId && !!kind,
   })
   const where = useQuery<ReconByRow[]>({
-    queryKey: ['charge-recon-by', companyId, dateFrom, dateTo, by],
-    queryFn: () => getReconciliationBy({ companyId, dateFrom, dateTo, by, limit: 40 }),
+    queryKey: ['charge-recon-by', companyId, dateFrom, dateTo, by, sc.key],
+    queryFn: () => getReconciliationBy({ companyId, dateFrom, dateTo, by, limit: 40, stations: sc.stations, regions: sc.regions }),
     enabled: !!companyId,
   })
 
@@ -260,10 +262,15 @@ function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
                     kind === k.key ? 'bg-muted/40' : ''}`}>
                 <td className="p-2">
                   <div className="font-medium">{k.label}</div>
+                  {k.unscopable ? (
+                    <div className="text-xs text-muted-foreground">
+                      Платёж без сессии не привязан к станции — под выбранным контуром не считается.
+                    </div>
+                  ) : null}
                   <div className="text-muted-foreground">{k.hint}</div>
                 </td>
                 <td className={`p-2 text-right tabular-nums ${k.count ? '' : 'text-muted-foreground'}`}>
-                  {nf0.format(k.count)}
+                  {k.unscopable ? '—' : nf0.format(k.count)}
                 </td>
                 <td className="p-2 text-right tabular-nums text-muted-foreground">{money(k.amount)}</td>
                 <td className="p-2 text-right tabular-nums text-muted-foreground">{money(k.paid)}</td>

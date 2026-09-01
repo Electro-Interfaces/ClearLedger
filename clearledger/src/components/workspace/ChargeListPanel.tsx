@@ -260,6 +260,9 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
         <ChargeGroupedView
           companyId={companyId} dateFrom={period.from} dateTo={period.to} groupBy={p.groupBy}
           filters={{
+            // Контур обязателен и здесь: плоский список сужался, а тот же реестр
+            // в разрезе показывал всю сеть — две цифры на одном экране.
+            stations: scopeStations, regions: scopeRegions,
             userType: p.userType === 'fl' ? 'ФЛ' : p.userType === 'ul' ? 'ЮЛ' : null,
             region: p.region === ALL ? null : p.region,
             connector: p.connector === ALL ? null : p.connector,

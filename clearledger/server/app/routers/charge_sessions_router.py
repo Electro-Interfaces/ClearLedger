@@ -371,6 +371,8 @@ async def charge_reconciliation_summary(
     company_id: str,
     date_from: str,
     date_to: str,
+    stations: str | None = Query(None, description="коды ЭЗС через запятую — контур"),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -378,7 +380,8 @@ async def charge_reconciliation_summary(
     cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.services.charge_reconciliation import reconciliation
     df, dt = _day_bounds(date_from, date_to)
-    return await reconciliation(db, cid, df.date(), (dt - timedelta(days=1)).date())
+    return await reconciliation(db, cid, df.date(), (dt - timedelta(days=1)).date(),
+                                _csv(stations), _csv(regions))
 
 
 @router.get("/reconciliation/list")
@@ -388,6 +391,8 @@ async def charge_reconciliation_rows(
     date_to: str,
     kind: str = Query(..., pattern="^(impossible|double|underpaid|overpaid|no_payment|no_receipt|orphan|refund_full|hold_rule|receipt_no_txn|not_card)$"),
     limit: int = Query(200, le=2000),
+    stations: str | None = Query(None, description="коды ЭЗС через запятую — контур"),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
@@ -396,7 +401,7 @@ async def charge_reconciliation_rows(
     from app.services.charge_reconciliation import reconciliation_list
     df, dt = _day_bounds(date_from, date_to)
     return await reconciliation_list(db, cid, df.date(), (dt - timedelta(days=1)).date(),
-                                     kind, limit)
+                                     kind, limit, _csv(stations), _csv(regions))
 
 
 @router.get("/reconciliation/by")
@@ -407,6 +412,8 @@ async def charge_reconciliation_by(
     by: str = Query("station",
                     pattern="^(station|region|month|connector|charge_type|client|card_status)$"),
     limit: int = Query(100, le=500),
+    stations: str | None = Query(None, description="коды ЭЗС через запятую — контур"),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
@@ -414,7 +421,8 @@ async def charge_reconciliation_by(
     cid = await assert_company_product(company_id, current_user, db, "sales")
     from app.services.charge_reconciliation import reconciliation_by
     df, dt = _day_bounds(date_from, date_to)
-    return await reconciliation_by(db, cid, df.date(), (dt - timedelta(days=1)).date(), by, limit)
+    return await reconciliation_by(db, cid, df.date(), (dt - timedelta(days=1)).date(), by, limit,
+                                   _csv(stations), _csv(regions))
 
 
 @router.get("/station-sales")
@@ -734,6 +742,8 @@ async def export_sessions_pivot(
     date_from: str | None = None,
     date_to: str | None = None,
     limit: int = Query(200000, ge=1, le=500000),
+    stations: str | None = Query(None, description="коды ЭЗС через запятую — контур"),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Response:
@@ -743,12 +753,16 @@ async def export_sessions_pivot(
     редакторах (LibreOffice, Google Sheets, веб-Excel) она останется пустой —
     там работает лист «Транзакции» с полными данными."""
     cid = await assert_company_product(company_id, current_user, db, "sales")
-    wb, stats = await build_sessions_pivot(db, cid, date_from, date_to, limit)
+    st, rg = _csv(stations), _csv(regions)
+    wb, stats = await build_sessions_pivot(db, cid, date_from, date_to, limit, st, rg)
 
     span = (f"{date_from[:10]} — {date_to[:10]}" if date_from and date_to
             else "весь период")
+    # Контур пишем в журнал выгрузок: по записи должно быть видно, что именно
+    # ушло в файл, иначе «сводная за август» ничего не говорит о её границах.
+    scope_note = (f", контур: станций {len(st)}" if st else "") + (f", регионов {len(rg)}" if rg else "")
     log_export(db, cid, current_user,
-               f"Сессии ЭЗС со сводной (xlsx): {stats['rows']} строк, период {span}"
+               f"Сессии ЭЗС со сводной (xlsx): {stats['rows']} строк, период {span}{scope_note}"
                + (" ⚠ обрезано по лимиту" if stats["truncated"] else ""))
 
     return xlsx_response(wb, f"Сессии ЭЗС со сводной {span}.xlsx")

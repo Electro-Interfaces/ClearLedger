@@ -94,10 +94,13 @@ export async function exportChargeSessionsXlsx(p: {
  */
 export async function exportChargeSessionsPivotXlsx(p: {
   companyId: string; dateFrom?: string; dateTo?: string
+  stations?: string[]; regions?: string[]
 }): Promise<void> {
   const qs = new URLSearchParams({ company_id: p.companyId })
   if (p.dateFrom) qs.set('date_from', p.dateFrom)
   if (p.dateTo) qs.set('date_to', p.dateTo)
+  if (p.stations?.length) qs.set('stations', p.stations.join(','))
+  if (p.regions?.length) qs.set('regions', p.regions.join(','))
   const token = getToken()
   const res = await fetch(`${API_BASE}/api/charge-sessions/export/pivot?${qs.toString()}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},

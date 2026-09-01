@@ -77,8 +77,15 @@ async def build_sessions_pivot(
     date_from: str | None = None,
     date_to: str | None = None,
     limit: int = 200000,
+    stations: list[str] | None = None,
+    regions: list[str] | None = None,
 ):
-    """Заполнить шаблон сессиями за период. Возвращает (Workbook, статистика)."""
+    """Заполнить шаблон сессиями за период в контуре. Возвращает (Workbook, статистика).
+
+    Контур обязателен по той же причине, что и период: файл, выгруженный при
+    суженной области, но собранный по всей сети, внешне неотличим от правильного
+    — расхождение всплывает уже у получателя."""
+
     import openpyxl
 
     if not SESSIONS_TEMPLATE.exists():
@@ -96,6 +103,14 @@ async def build_sessions_pivot(
         # «YYYY-MM-DD» отбросило бы весь последний день (Postgres приводит к
         # полуночи). См. правило в CLAUDE.md.
         where.append(S.started_at <= datetime.fromisoformat(f"{date_to[:10]}T23:59:59"))
+    if stations:
+        where.append(S.station_code.in_(list(stations)))
+    if regions:
+        from app.models import Region, ServiceLocation
+        where.append(S.location_id.in_(
+            select(ServiceLocation.id).join(Region, Region.id == ServiceLocation.region_id)
+            .where(Region.name.in_(list(regions)))
+        ))
 
     rows = (await db.execute(
         select(S).where(*where).order_by(S.started_at).limit(limit)

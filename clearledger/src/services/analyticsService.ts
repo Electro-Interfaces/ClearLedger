@@ -561,6 +561,8 @@ export interface ChargeGroupFilters {
   paid?: string | null
   search?: string | null
   stations?: string[] | null
+  /** Регионы контура рабочей области (не одиночный `region` панели). */
+  regions?: string[] | null
 }
 
 const groupFilterParams = (f: ChargeGroupFilters) => ({
@@ -571,6 +573,9 @@ const groupFilterParams = (f: ChargeGroupFilters) => ({
   paid: f.paid || undefined,
   search: f.search || undefined,
   stations: f.stations?.length ? f.stations.join(',') : undefined,
+  // Регионы контура — отдельно от одиночного `region` панели: выбор только
+  // региона (без станций) обязан сужать разрез так же, как выбор станций.
+  regions: f.regions?.length ? f.regions.join(',') : undefined,
 })
 
 export async function getChargeGroupCatalog(): Promise<ChargeGroupDef[]> {

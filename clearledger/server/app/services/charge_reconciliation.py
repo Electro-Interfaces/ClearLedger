@@ -122,12 +122,51 @@ def _bounds(df: date, dt: date) -> tuple[datetime, datetime]:
             datetime.combine(dt, datetime.min.time()) + timedelta(days=1))
 
 
-async def reconciliation(db: AsyncSession, company_id, df: date, dt: date) -> dict[str, Any]:
-    """Сводка расхождений за период: сколько строк и на какие деньги."""
+def _scope(stations: list[str] | None, regions: list[str] | None,
+           p: dict[str, Any], alias: str = "s") -> str:
+    """Контур рабочей области в условиях сессии: коды станций и/или регионы.
+
+    Регион берём из справочника объектов (`location_id → region_id → regions`),
+    как и все разрезы: в самих сессиях он денормализован и написан
+    по-разному — 87 написаний на 48 субъектов."""
+    sql = ""
+    if stations:
+        sql += f" and {alias}.station_code = any(:stations)"
+        p["stations"] = list(stations)
+    if regions:
+        sql += (f" and {alias}.location_id in (select sl.id from service_locations sl"
+                " join regions r2 on r2.id = sl.region_id"
+                " where r2.name = any(:regions))")
+        p["regions"] = list(regions)
+    return sql
+
+
+def _pay_scope(stations: list[str] | None, regions: list[str] | None,
+               p: dict[str, Any]) -> str:
+    """Тот же контур для запросов по платежам: платёж относится к станции только
+    через свою сессию, поэтому сужаем через неё."""
+    if not stations and not regions:
+        return ""
+    return (" and exists (select 1 from charge_sessions s2"
+            " where s2.company_id = pp.company_id"
+            " and s2.session_ext_id = pp.session_ext_id"
+            + _scope(stations, regions, p, alias="s2") + ")")
+
+
+async def reconciliation(db: AsyncSession, company_id, df: date, dt: date,
+                         stations: list[str] | None = None,
+                         regions: list[str] | None = None) -> dict[str, Any]:
+    """Сводка расхождений за период: сколько строк и на какие деньги.
+
+    Контур рабочей области сужает сверку так же, как остальные разрезы: цифра
+    расхождений по выбранным станциям и цифра по всей сети — разные ответы, и
+    экран обязан показывать тот, который человек набрал в фильтре."""
     lo, hi = _bounds(df, dt)
     p = {"cid": str(company_id), "lo": lo, "hi": hi,
          "maxkw": MAX_POWER_KW, "eps": MONEY_EPS, **acl_params()}
-    join = _SESSION_JOIN.format(acl=acl_sql("s.location_id"))
+    scope = _scope(stations, regions, p)
+    pay_scope = _pay_scope(stations, regions, p)
+    join = _SESSION_JOIN.format(acl=acl_sql("s.location_id")) + scope
 
     totals = (await db.execute(text(f"""
         select count(*) as sessions,
@@ -154,7 +193,7 @@ async def reconciliation(db: AsyncSession, company_id, df: date, dt: date) -> di
                        coalesce(sum(pp.refund_amount), 0) as refund
                   from charge_payments pp
                  where pp.company_id = :cid and pp.paid_at >= :lo and pp.paid_at < :hi
-                   and ({_PAY_WHERE[k.key]})
+                   and ({_PAY_WHERE[k.key]}){pay_scope}
             """), p)).one()
             amount = float(row.amount or 0)
             # Для полного возврата «деньги» — это возвращённая сумма, а не списание.
@@ -164,6 +203,14 @@ async def reconciliation(db: AsyncSession, company_id, df: date, dt: date) -> di
                           "paid": round(amount, 2), "gap": 0.0})
             continue
         if k.key == "orphan":
+            # Платёж без сессии не относится ни к какой станции — сузить его
+            # контуром нечем. При активном контуре показываем не «ноль», а
+            # отсутствие ответа: ноль читался бы как «сирот нет».
+            if scope:
+                items.append({"key": k.key, "label": k.label, "hint": k.hint,
+                              "count": 0, "amount": 0.0, "paid": 0.0, "gap": 0.0,
+                              "unscopable": True})
+                continue
             row = (await db.execute(text("""
                 select count(*) as n, coalesce(sum(pp.amount), 0) as amount
                   from charge_payments pp
@@ -193,6 +240,9 @@ async def reconciliation(db: AsyncSession, company_id, df: date, dt: date) -> di
 
     return {
         "period": {"from": df.isoformat(), "to": dt.isoformat()},
+        # Экран обязан сказать, что ответ сужен: иначе итог сверки молча
+        # расходится с реестром платежей.
+        "scoped": bool(scope),
         "totals": {
             "sessions": int(totals.sessions or 0),
             "amount": round(float(totals.amount or 0), 2),      # начислено по сессиям
@@ -210,11 +260,15 @@ async def reconciliation(db: AsyncSession, company_id, df: date, dt: date) -> di
 
 
 async def reconciliation_list(db: AsyncSession, company_id, df: date, dt: date,
-                              kind: str, limit: int = 200) -> list[dict[str, Any]]:
+                              kind: str, limit: int = 200,
+                              stations: list[str] | None = None,
+                              regions: list[str] | None = None) -> list[dict[str, Any]]:
     """Строки одного расхождения — то, с чем идут разбираться."""
     lo, hi = _bounds(df, dt)
     p = {"cid": str(company_id), "lo": lo, "hi": hi, "maxkw": MAX_POWER_KW,
          "eps": MONEY_EPS, "lim": max(1, min(limit, 2000)), **acl_params()}
+    scope = _scope(stations, regions, p)
+    pay_scope = _pay_scope(stations, regions, p)
 
     if kind in _PAY_WHERE:
         rows = (await db.execute(text(f"""
@@ -231,10 +285,14 @@ async def reconciliation_list(db: AsyncSession, company_id, df: date, dt: date,
               left join charge_sessions s
                      on s.company_id = pp.company_id and s.session_ext_id = pp.session_ext_id
              where pp.company_id = :cid and pp.paid_at >= :lo and pp.paid_at < :hi
-               and ({_PAY_WHERE[kind]})
+               and ({_PAY_WHERE[kind]}){pay_scope}
              order by coalesce(pp.refund_amount, 0) + pp.amount desc limit :lim
         """), p)).mappings().all()
     elif kind == "orphan":
+        # Сирота не привязан к станции: под контуром список пуст, а не «ничего
+        # не нашлось» — сводка помечает этот вид как несужаемый.
+        if scope:
+            return []
         rows = (await db.execute(text("""
             select pp.payment_ext_id as id, pp.session_ext_id as session, null as station,
                    pp.paid_at as at, 0 as energy, 0 as amount, pp.amount as paid,
@@ -248,7 +306,7 @@ async def reconciliation_list(db: AsyncSession, company_id, df: date, dt: date,
              order by pp.amount desc limit :lim
         """), p)).mappings().all()
     else:
-        join = _SESSION_JOIN.format(acl=acl_sql("s.location_id"))
+        join = _SESSION_JOIN.format(acl=acl_sql("s.location_id")) + scope
         order = ("abs(s.amount - pay.paid) desc" if kind in ("underpaid", "double")
                  else ("s.energy_kwh desc" if kind == "impossible" else "s.amount desc"))
         rows = (await db.execute(text(f"""
@@ -290,7 +348,9 @@ BY_DIMS = {
 
 
 async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
-                            by: str = "station", limit: int = 100) -> list[dict[str, Any]]:
+                            by: str = "station", limit: int = 100,
+                            stations: list[str] | None = None,
+                            regions: list[str] | None = None) -> list[dict[str, Any]]:
     """Где копятся расхождения: разрез сверки по выбранному измерению.
 
     Список расхождений отвечает «какие строки битые», этот разрез — «где именно».
@@ -304,6 +364,7 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
     # По станции группируем ПО КОДУ — он идентичность станции, имя может меняться
     # (волна переименований CPO). Подпись собираем как в разрезах: «Имя (код)»,
     # чтобы строки этого разреза соединялись со списками «Надёжности».
+    scope = _scope(stations, regions, p)
     dim = BY_DIMS.get(by, BY_DIMS["station"])
     join_dim = ("""
         left join service_locations l on l.id = s.location_id
@@ -350,7 +411,7 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
                where pp.company_id = s.company_id and pp.session_ext_id = s.session_ext_id
           ) pay on true
           {join_dim}
-         where s.company_id = :cid and s.started_at >= :lo and s.started_at < :hi{acl}
+         where s.company_id = :cid and s.started_at >= :lo and s.started_at < :hi{acl}{scope}
          group by 1
         having count(*) filter (where s.duration_min > 0 and s.energy_kwh > 0
                                   and s.energy_kwh / (s.duration_min / 60.0) > :maxkw) > 0
@@ -359,7 +420,7 @@ async def reconciliation_by(db: AsyncSession, company_id, df: date, dt: date,
          order by abs(coalesce(sum(s.amount) filter (where s.client_name is null), 0)
                       - coalesce(sum(pay.paid), 0)) desc
          limit :lim
-    """.format(acl=acl_sql("s.location_id"), dim=dim, join_dim=join_dim)),
+    """.format(acl=acl_sql("s.location_id"), dim=dim, join_dim=join_dim, scope=scope)),
         p)).mappings().all()
 
     out: list[dict[str, Any]] = []

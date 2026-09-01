@@ -302,6 +302,7 @@ async def get_charge_sessions_grouped(
     date_to: str,
     group_by: str = "station",
     stations: str | None = None,
+    regions: str | None = None,
     user_type: str | None = None,
     region: str | None = None,
     connector: str | None = None,
@@ -326,7 +327,8 @@ async def get_charge_sessions_grouped(
     try:
         return await ChargeGroupingService(db).grouped(
             f.company_id, f.date_from, f.date_to, group_by,
-            station_codes=_csv(stations), user_type=user_type, region=region,
+            station_codes=_csv(stations), regions=_csv(regions),
+            user_type=user_type, region=region,
             connector=connector, result=result, paid=paid, search=search,
             sort=sort, sort_dir=sort_dir, limit=limit)
     except ValueError as exc:
@@ -339,8 +341,9 @@ async def get_charge_group_detail(
     date_from: str,
     date_to: str,
     group_by: str,
-    key: str = "",
+    key: str,
     stations: str | None = None,
+    regions: str | None = None,
     user_type: str | None = None,
     region: str | None = None,
     connector: str | None = None,
@@ -358,7 +361,8 @@ async def get_charge_group_detail(
     try:
         return await ChargeGroupingService(db).group_detail(
             f.company_id, f.date_from, f.date_to, group_by, key,
-            station_codes=_csv(stations), user_type=user_type, region=region,
+            station_codes=_csv(stations), regions=_csv(regions),
+            user_type=user_type, region=region,
             connector=connector, result=result, paid=paid, search=search, limit=limit)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

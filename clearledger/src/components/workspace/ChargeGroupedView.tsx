@@ -37,7 +37,10 @@ export function ChargeGroupedView({ companyId, dateFrom, dateTo, groupBy, filter
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['charge-grouped', companyId, dateFrom, dateTo, groupBy, sort?.key, sort?.dir,
-      filters.userType, filters.region, filters.connector, filters.result, filters.paid, filters.search],
+      filters.userType, filters.region, filters.connector, filters.result, filters.paid, filters.search,
+      // Контур в ключе: без него смена области не перезапрашивает разрез и
+      // таблица остаётся от прошлой выборки.
+      (filters.stations ?? []).join(','), (filters.regions ?? []).join(',')],
     queryFn: () => getChargeGrouped({
       companyId, dateFrom, dateTo, groupBy,
       sort: sort?.key, sortDir: sort?.dir, ...filters,
@@ -127,7 +130,8 @@ function GroupRow({ g, groupBy, open, onToggle, companyId, dateFrom, dateTo, fil
 }) {
   const detail = useQuery({
     queryKey: ['charge-group-detail', companyId, dateFrom, dateTo, groupBy, g.key,
-      filters.userType, filters.region, filters.connector, filters.result, filters.paid, filters.search],
+      filters.userType, filters.region, filters.connector, filters.result, filters.paid, filters.search,
+      (filters.stations ?? []).join(','), (filters.regions ?? []).join(',')],
     queryFn: () => getChargeGroupDetail({ companyId, dateFrom, dateTo, groupBy, key: g.key, ...filters }),
     enabled: open,
   })

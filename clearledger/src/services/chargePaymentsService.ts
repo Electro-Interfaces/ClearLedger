@@ -183,9 +183,13 @@ export interface ReconKind {
   amount: number   // начислено по сессиям
   paid: number     // списано банком
   gap: number      // деньги, о которых спор
+  /** Вид, который контуром не сужается (платёж без сессии не привязан к станции). */
+  unscopable?: boolean
 }
 export interface ReconSummary {
   period: { from: string; to: string }
+  /** Ответ сужен контуром рабочей области: платежи без сессии в него не входят. */
+  scoped?: boolean
   totals: {
     sessions: number; amount: number; paid: number; energy_kwh: number; gap: number
     /** кВт·ч из сессий, противоречащих физике: ровно на них завышен отпуск. */

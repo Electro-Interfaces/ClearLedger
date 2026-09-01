@@ -278,16 +278,18 @@ def _needs_join(group_by: str) -> bool:
     return bool(GROUPS.get(group_by, {}).get("join"))
 
 
-def _needs_region_join(group_by: str, region: str | None = None) -> bool:
+def _needs_region_join(group_by: str, region: str | None = None,
+                       regions: list[str] | None = None) -> bool:
     """Регион участвует в группировке или фильтре → нужен join к справочнику регионов."""
-    return group_by == "region" or bool(region)
+    return group_by == "region" or bool(region) or bool(regions)
 
 
-def _with_join(stmt: Select, group_by: str, region: str | None = None) -> Select:
+def _with_join(stmt: Select, group_by: str, region: str | None = None,
+               regions: list[str] | None = None) -> Select:
     """Подключить справочник станций (и регионов). LEFT JOIN намеренно: сессия
     станции-сироты не должна исчезать из выборки — иначе итог разреза «по бренду»
     окажется меньше итога реестра, и это прочтётся как потеря данных."""
-    need_reg = _needs_region_join(group_by, region)
+    need_reg = _needs_region_join(group_by, region, regions)
     if _needs_join(group_by) or need_reg:
         stmt = stmt.join(L, S.location_id == L.id, isouter=True)
     if need_reg:
@@ -297,10 +299,15 @@ def _with_join(stmt: Select, group_by: str, region: str | None = None) -> Select
 
 def _apply_filters(stmt: Select, *, user_type: str | None, region: str | None,
                    connector: str | None, result: str | None, paid: str | None,
-                   search: str | None) -> Select:
+                   search: str | None, regions: list[str] | None = None) -> Select:
     """Те же фильтры, что в списке реестра: иначе итоги не сойдутся со списком."""
     if user_type:
         stmt = stmt.where(S.user_type == user_type)
+    if regions:
+        # Контур рабочей области: регионов может быть несколько, и это не то же
+        # самое, что одиночный `region` панели. Без него выбор одного региона в
+        # фильтре (без станций) не сужал разрез — таблица показывала всю сеть.
+        stmt = stmt.where(_REGION.in_(regions))
     if region:
         # Регион — из справочника (совпадает с группировкой). Требует region-join
         # у вызывающего запроса (см. _with_join(..., region=region)).
@@ -331,7 +338,7 @@ class ChargeGroupingService:
     @cached_report("cs:grouped")
     async def grouped(
         self, company_id, date_from: date, date_to: date, group_by: str,
-        *, station_codes: list[str] | None = None,
+        *, station_codes: list[str] | None = None, regions: list[str] | None = None,
         user_type: str | None = None, region: str | None = None,
         connector: str | None = None, result: str | None = None,
         paid: str | None = None, search: str | None = None,
@@ -371,7 +378,7 @@ class ChargeGroupingService:
             func.min(S.started_at).label("first_at"),
             func.max(S.started_at).label("last_at"),
         ]
-        stmt = _with_join(select(*cols), group_by, region=region).where(
+        stmt = _with_join(select(*cols), group_by, region=region, regions=regions).where(
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
@@ -381,7 +388,7 @@ class ChargeGroupingService:
         # сессии без клиента, каждая сама себе визит, склеивать их не с чем.
         if group_by == "visit":
             stmt = stmt.where(S.visit_key.is_not(None))
-        stmt = _apply_filters(stmt, user_type=user_type, region=region,
+        stmt = _apply_filters(stmt, user_type=user_type, region=region, regions=regions,
                               connector=connector, result=result, paid=paid,
                               search=search).group_by(expr)
 
@@ -454,7 +461,7 @@ class ChargeGroupingService:
             func.coalesce(func.sum(revenue_expr), 0).label("revenue"),
             func.coalesce(func.sum(success), 0).label("success"),
             func.count(func.distinct(expr)).label("groups"),
-        ), group_by, region=region).where(
+        ), group_by, region=region, regions=regions).where(
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
@@ -463,7 +470,7 @@ class ChargeGroupingService:
         if group_by == "visit":
             tot_stmt = tot_stmt.where(S.visit_key.is_not(None))
         tot = (await self.db.execute(_apply_filters(
-            tot_stmt, user_type=user_type, region=region, connector=connector,
+            tot_stmt, user_type=user_type, region=region, regions=regions, connector=connector,
             result=result, paid=paid, search=search))).one()
 
         t_sessions = int(tot.sessions or 0)
@@ -490,7 +497,7 @@ class ChargeGroupingService:
 
     async def group_detail(
         self, company_id, date_from: date, date_to: date, group_by: str, key: str,
-        *, station_codes: list[str] | None = None,
+        *, station_codes: list[str] | None = None, regions: list[str] | None = None,
         user_type: str | None = None, region: str | None = None,
         connector: str | None = None, result: str | None = None,
         paid: str | None = None, search: str | None = None, limit: int = 100,
@@ -514,7 +521,7 @@ class ChargeGroupingService:
             func.coalesce(S.client_amount, S.amount).label("revenue"), S.result,
             effective_payment_at.label("paid_at"),
             S.visit_seq, S.visit_size,
-        ), group_by, region=region).where(
+        ), group_by, region=region, regions=regions).where(
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
@@ -523,7 +530,7 @@ class ChargeGroupingService:
         # Пустой ключ = группа «не заполнено»: сравнение с '' её не найдёт.
         expr = g["expr"]
         stmt = stmt.where(expr.is_(None) if key == "" else expr == key)
-        stmt = _apply_filters(stmt, user_type=user_type, region=region,
+        stmt = _apply_filters(stmt, user_type=user_type, region=region, regions=regions,
                               connector=connector, result=result, paid=paid,
                               search=search).order_by(S.started_at, S.session_ext_id)
 

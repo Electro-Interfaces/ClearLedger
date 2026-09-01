@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Download, FileSpreadsheet, Loader2, Table2, ReceiptText, LayoutGrid } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { exportChargeSessionsXlsx, exportChargeSessionsPivotXlsx, exportMonthlyMatrixXlsx } from '@/services/chargeSessionsService'
+import { useNetScope } from '@/hooks/useScopeReset'
 import { exportCorporateBillingUpd } from '@/services/corporateService'
 
 /** Последние 18 месяцев для выбора периода выгрузки (значение = 'YYYY-MM'). */
@@ -62,6 +63,10 @@ export function EnergyExportView() {
   // дефолт — прошлый месяц (закрытый период)
   const [month, setMonth] = useState(months[1]?.v ?? months[0]?.v ?? '')
   const [busy, setBusy] = useState<string | null>(null)
+  // Контур рабочей области доезжает до файла: выгрузка при суженной области, но
+  // собранная по всей сети, внешне неотличима от правильной — расхождение
+  // всплывает уже у получателя.
+  const sc = useNetScope()
 
   const run = async (key: string, fn: () => Promise<void>, okMsg: string) => {
     setBusy(key)
@@ -95,6 +100,13 @@ export function EnergyExportView() {
             </SelectContent>
           </Select>
           <span className="text-xs text-muted-foreground">{range.from} — {range.to}</span>
+          <span className="text-xs text-muted-foreground">
+            {sc.stations?.length
+              ? `Контур: станций ${sc.stations.length}`
+              : sc.regions?.length
+                ? `Контур: регионов ${sc.regions.length}`
+                : 'Контур: вся сеть'}
+          </span>
         </div>
       </div>
 
@@ -106,7 +118,7 @@ export function EnergyExportView() {
           action="Выгрузить сессии (xlsx)"
           busy={busy === 'sessions'}
           onRun={() => run('sessions',
-            () => exportChargeSessionsXlsx({ companyId, dateFrom: range.from, dateTo: range.to }),
+            () => exportChargeSessionsXlsx({ companyId, dateFrom: range.from, dateTo: range.to, stations: sc.stations, regions: sc.regions }),
             'Реестр сессий выгружен')}
         />
         <ExportCard
@@ -126,13 +138,13 @@ export function EnergyExportView() {
           action="Выгрузить со сводной (xlsx)"
           busy={busy === 'pivot'}
           onRun={() => run('pivot',
-            () => exportChargeSessionsPivotXlsx({ companyId, dateFrom: range.from, dateTo: range.to }),
+            () => exportChargeSessionsPivotXlsx({ companyId, dateFrom: range.from, dateTo: range.to, stations: sc.stations, regions: sc.regions }),
             'Сессии со сводной выгружены')}
         />
         <ExportCard
           icon={Table2}
           title="Матрица «станция × месяц»"
-          desc="Формат привычного свода «ОБЩАЯ»: паспорт станции (Б/У, ZOI-1, регион, класс, инвентарный №) + помесячные кВт·ч за весь горизонт 2024+. Прямая замена ручного Excel-свода."
+          desc="Формат привычного свода «ОБЩАЯ»: паспорт станции (Б/У, ZOI-1, регион, класс, инвентарный №) + помесячные кВт·ч за весь горизонт 2024+. Прямая замена ручного Excel-свода. Собирается по всей сети — контур и период на неё не влияют."
           action="Выгрузить матрицу (xlsx)"
           busy={busy === 'matrix'}
           onRun={() => run('matrix',
