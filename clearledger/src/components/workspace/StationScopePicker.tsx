@@ -245,7 +245,7 @@ export function StationScopePicker({
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)]">
         <div className="flex max-h-[240px] flex-col gap-4 overflow-y-auto rounded-lg border bg-muted/20 p-3 lg:max-h-none">
           {FACET_GROUPS.map((group) => (
             <FacetGroup
@@ -309,7 +309,7 @@ export function StationScopePicker({
                   />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{station.name}</span>
-                    {meta ? <span className="block truncate text-muted-foreground">{meta}</span> : null}
+                    {meta ? <span className="block text-muted-foreground">{meta}</span> : null}
                   </span>
                   <span className="flex shrink-0 flex-col items-end">
                     <span className="font-mono tabular-nums text-muted-foreground">{station.code}</span>

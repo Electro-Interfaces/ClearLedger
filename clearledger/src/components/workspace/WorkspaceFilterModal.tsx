@@ -272,7 +272,11 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="flex h-[calc(100vh-1rem)] w-[calc(100vw-1rem)] max-w-4xl flex-col gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(760px,calc(100vh-2rem))] sm:w-[calc(100vw-2rem)]"
+        /* Окно, в котором работают со списком, не делают уже рабочего экрана
+           (DESIGN.md → Layout): 96vw до 1600px и 92dvh, как у «Чата» и «Трека».
+           Прежние 896px держали шестьсот станций в колонке шириной с телефон —
+           адрес обрезался на «63 км тр…», а полэкрана рядом пустовало. */
+        className="flex h-[calc(100vh-1rem)] w-[calc(100vw-1rem)] max-w-[1600px] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:h-[92dvh] sm:w-[96vw]"
       >
         <DialogHeader className="shrink-0 border-b px-4 py-4 text-left sm:px-5">
           <div className="flex items-start justify-between gap-4">
@@ -299,7 +303,7 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
           </div>
         </DialogHeader>
 
-        <div className="grid min-h-0 flex-1 md:grid-cols-[230px_minmax(0,1fr)]">
+        <div className="grid min-h-0 flex-1 md:grid-cols-[260px_minmax(0,1fr)]">
           <aside className="flex max-h-56 flex-col gap-4 overflow-y-auto border-b bg-muted/20 p-3 md:max-h-none md:border-r md:border-b-0 md:p-4">
             {/* Разделы контура с текущими значениями — можно окинуть взглядом
                 всю выборку, не открывая каждый. */}
@@ -348,12 +352,21 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                   <Bookmark className="size-3.5" aria-hidden="true" />
                   Быстрые наборы
                 </h3>
-                {!savingPreset ? (
-                  <Button variant="ghost" size="icon-xs" onClick={() => setSavingPreset(true)} aria-label="Сохранить текущий набор">
-                    <Plus />
-                  </Button>
-                ) : null}
               </div>
+
+              {/* Кнопка со словом, а не «+»: набранную фасетами выборку хотят
+                  сохранить, и значок в углу для этого не находят глазом. */}
+              {!savingPreset ? (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className="h-8 w-full justify-start"
+                  onClick={() => setSavingPreset(true)}
+                >
+                  <Plus data-icon="inline-start" />
+                  Сохранить текущую выборку
+                </Button>
+              ) : null}
 
               {savingPreset ? (
                 <div className="flex items-center gap-1">
@@ -365,7 +378,7 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                       if (event.key === 'Enter') handleSavePreset()
                       if (event.key === 'Escape') { setSavingPreset(false); setPresetName('') }
                     }}
-                    placeholder="Название набора"
+                    placeholder={describeState(draft)}
                     className="h-8 text-xs"
                     aria-label="Название набора"
                   />
@@ -663,6 +676,18 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
               {' · '}
               <span className="font-medium text-foreground">{scopeSummary}</span>
             </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 rounded-lg"
+              onClick={() => setSavingPreset(true)}
+              disabled={savingPreset}
+              title="Сохранить набранную выборку в быстрые наборы"
+            >
+              <Bookmark data-icon="inline-start" />
+              <span className="hidden sm:inline">В быстрые наборы</span>
+              <span className="sm:hidden">В наборы</span>
+            </Button>
             <Button variant="outline" size="sm" className="h-9 rounded-lg" onClick={() => onOpenChange(false)}>
               Отмена
             </Button>
