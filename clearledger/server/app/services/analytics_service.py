@@ -1344,21 +1344,82 @@ class AnalyticsService:
         }
 
     async def charge_dimensions(self, company_id) -> dict[str, Any]:
-        """Справочник для фильтра раздела: станции ЭЗС (код+имя) и регионы компании."""
+        """Справочник для фильтра раздела: станции ЭЗС с паспортом и регионы компании.
+
+        Станция приходит не «кодом с именем», а карточкой: место, объём сессий и
+        паспортные признаки (скорость, размещение, производитель, мощность,
+        разъёмы, рабочее состояние, корп-контур). По ним фильтр строит фасеты —
+        «быстрые на трассе производителя ПСС» набирается щелчками, а не
+        перебором шестисот строк.
+
+        Состав списка — реестр объектов, а не только те коды, по которым уже
+        были сессии: станцию, которая не заряжала ни разу, тоже надо уметь
+        выбрать (её отсутствие в цифрах — это и есть вопрос к ней).
+        """
         S = ChargeSession
         st_counts = (await self.session.execute(
             select(S.station_code, func.count().label("cnt"))
             .where(S.company_id == company_id, S.station_code.is_not(None))
             .group_by(S.station_code).order_by(func.count().desc())
         )).all()
+        counts = {r.station_code: int(r.cnt) for r in st_counts}
         # Имя — свежайшее по последней сессии кода (не max: он алфавитный и после
         # переименования показывал бы старое имя).
         names = await self._station_names(company_id)
         places = await self._station_places(company_id)
-        st_rows = [SimpleNamespace(station_code=r.station_code,
-                                   name=names.get(r.station_code) or r.station_code,
-                                   place=places.get(r.station_code),
-                                   cnt=r.cnt) for r in st_counts]
+
+        # Паспорт из реестра объектов. Ключ — station_number: именно он приезжает
+        # в сессию как station_code. Собственный code объекта совпадает с ним лишь
+        # у 92 станций из 622 — у остальных там серийный номер оборудования, и
+        # связка по code потеряла бы паспорт у большей части сети.
+        loc_rows = (await self.session.execute(
+            select(ServiceLocation, Region.name.label("region_name"))
+            .outerjoin(Region, Region.id == ServiceLocation.region_id)
+            .where(ServiceLocation.company_id == company_id,
+                   ServiceLocation.type == "ev_charging",
+                   ServiceLocation.is_test.is_(False))
+        )).all()
+
+        stations: dict[str, dict[str, Any]] = {}
+        for loc, region_name in loc_rows:
+            key = (loc.station_number or loc.code or "").strip()
+            if not key:
+                continue
+            place = places.get(key) or {}
+            stations[key] = {
+                "code": key,
+                "name": names.get(key) or loc.name or key,
+                "region": region_name or place.get("region"),
+                "city": loc.city or place.get("city"),
+                "address": loc.address or place.get("address"),
+                "sessions": counts.get(key, 0),
+                # Паспорт: пустое значение остаётся пустым — фильтр покажет его
+                # отдельной строкой «не указано», а не спрячет станцию.
+                "speed": loc.speed_class,
+                "placement": loc.location_class,
+                "brand": (loc.brand or "").strip() or None,
+                "power": float(loc.power_kwt) if loc.power_kwt is not None else None,
+                "ports": loc.connectors_count,
+                "connectors": [c.strip() for c in (loc.connector_types or "").split(",") if c.strip()],
+                "opStatus": loc.operational_status,
+                "lifecycle": loc.status,
+                "corp": bool(loc.is_corp),
+            }
+        # Коды, по которым сессии есть, а объекта в реестре нет: показать их
+        # обязательно — иначе часть выручки не выбирается никаким фильтром.
+        for code, cnt in counts.items():
+            if code in stations:
+                continue
+            place = places.get(code) or {}
+            stations[code] = {
+                "code": code, "name": names.get(code) or code,
+                "region": place.get("region"), "city": place.get("city"),
+                "address": place.get("address"), "sessions": cnt,
+                "speed": None, "placement": None, "brand": None, "power": None,
+                "ports": None, "connectors": [], "opStatus": None,
+                "lifecycle": None, "corp": False,
+            }
+
         # Регион — из справочника (единый источник), чтобы список фильтра совпадал
         # с группировкой разреза (иначе фильтр по региону не сойдётся). Выражение —
         # в переменную: _region_label() создаёт новый объект, а SELECT и GROUP BY
@@ -1375,14 +1436,8 @@ class AnalyticsService:
             # чего фильтром нельзя пользоваться: в списке из 600 строк «680 680»
             # станцию не опознать, а регион не может сузить список станций, если
             # он у станции неизвестен (замечания заказчика 21.08.2026).
-            "stations": [{
-                "code": r.station_code,
-                "name": r.name or r.station_code,
-                "region": (r.place or {}).get("region"),
-                "city": (r.place or {}).get("city"),
-                "address": (r.place or {}).get("address"),
-                "sessions": int(r.cnt),
-            } for r in st_rows],
+            "stations": sorted(stations.values(),
+                               key=lambda s: (-s["sessions"], s["name"])),
             "regions": [{"region": r.region, "sessions": int(r.cnt)} for r in rg_rows],
         }
 

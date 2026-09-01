@@ -342,12 +342,27 @@ export interface PeriodParams {
   dimVal?: string       // ...и значение
 }
 
+/** Станция ЭЗС в справочнике фильтра: место, объём и паспорт для фасетов. */
+export interface ChargeDimensionStation {
+  code: string; name: string; sessions: number
+  region: string | null; city: string | null; address: string | null
+  /** fast | slow — класс скорости из паспорта; null, если не размечен. */
+  speed: string | null
+  /** city | highway — размещение (субсидийный разрез «город / трасса»). */
+  placement: string | null
+  brand: string | null
+  power: number | null
+  ports: number | null
+  connectors: string[]
+  /** working | no_link | decommissioned | disabled | not_working | unknown. */
+  opStatus: string | null
+  /** active | closed — жизненный цикл объекта. */
+  lifecycle: string | null
+  corp: boolean
+}
 export interface ChargeDimensions {
   /** Регион, город и адрес — чтобы станцию можно было опознать и сузить регионом. */
-  stations: {
-    code: string; name: string; sessions: number
-    region: string | null; city: string | null; address: string | null
-  }[]
+  stations: ChargeDimensionStation[]
   regions: { region: string; sessions: number }[]
 }
 export async function getChargeDimensions(companyId: string): Promise<ChargeDimensions> {

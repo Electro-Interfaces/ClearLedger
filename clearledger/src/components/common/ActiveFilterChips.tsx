@@ -31,15 +31,36 @@ export function ActiveFilterChips({ className }: { className?: string }) {
   if (f.stationCode !== 'all') {
     chips.push({ key: `sts:${f.stationCode}`, label: `Источник STS: ${f.stationCode}`, onRemove: () => f.setStationCode('all') })
   }
-  for (const id of f.locationIds) {
-    const name = locations.find((l) => l.id === id)?.name ?? id
-    chips.push({ key: `loc:${id}`, label: name, onRemove: () => f.toggleLocation(id) })
+  // Массовый выбор сворачивается в один чип. Фасеты подбора («быстрые на
+  // трассе») отмечают сотни станций разом, и триста чипов «ЭЗС 680» заняли бы
+  // весь экран вместо панели ограничений — а снимать их поштучно всё равно
+  // никто не станет.
+  const FOLD_AT = 4
+  if (f.locationIds.length > FOLD_AT) {
+    chips.push({
+      key: 'loc:many',
+      label: `Точек: ${f.locationIds.length}`,
+      onRemove: () => f.setLocationIds([]),
+    })
+  } else {
+    for (const id of f.locationIds) {
+      const name = locations.find((l) => l.id === id)?.name ?? id
+      chips.push({ key: `loc:${id}`, label: name, onRemove: () => f.toggleLocation(id) })
+    }
   }
   for (const r of f.regionIds) {
     chips.push({ key: `reg:${r}`, label: r, onRemove: () => f.toggleRegion(r) })
   }
-  for (const c of f.stationCodes) {
-    chips.push({ key: `st:${c}`, label: `ЭЗС ${c}`, onRemove: () => f.toggleStationCode(c) })
+  if (f.stationCodes.length > FOLD_AT) {
+    chips.push({
+      key: 'st:many',
+      label: `Станций ЭЗС: ${f.stationCodes.length}`,
+      onRemove: () => f.setStationCodes([]),
+    })
+  } else {
+    for (const c of f.stationCodes) {
+      chips.push({ key: `st:${c}`, label: `ЭЗС ${c}`, onRemove: () => f.toggleStationCode(c) })
+    }
   }
   // Вид нефтепродукта — такое же ограничение, как область: без чипа человек видит
   // урезанные цифры и не понимает, почему выручка вдвое меньше вчерашней.
@@ -55,7 +76,7 @@ export function ActiveFilterChips({ className }: { className?: string }) {
         <Badge
           key={c.key}
           variant="outline"
-          className="gap-1 pl-2 pr-1 py-0.5 font-normal border-zinc-600 text-zinc-300"
+          className="gap-1 pl-2 pr-1 py-0.5 font-normal text-muted-foreground"
         >
           <span className="truncate max-w-[180px]">{c.label}</span>
           <button
@@ -72,7 +93,7 @@ export function ActiveFilterChips({ className }: { className?: string }) {
         <button
           type="button"
           onClick={f.clearAll}
-          className="px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+          className="px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground"
         >
           Сбросить всё
         </button>

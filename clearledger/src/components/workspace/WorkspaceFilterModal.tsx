@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
-  Bookmark, CalendarDays, Check, Database, History,
+  Bookmark, CalendarDays, Check, ChevronLeft, ChevronRight, Database, History,
   MapPinned, Plus, RotateCcw, X, type LucideIcon,
 } from 'lucide-react'
 import {
@@ -27,14 +27,53 @@ import { useQuery } from '@tanstack/react-query'
 import { useLocations } from '@/hooks/useLocations'
 import { getStsStationsFromLocations } from '@/services/locationService'
 import { getChargeDimensions } from '@/services/analyticsService'
+import { StationScopePicker } from './StationScopePicker'
 import { todayISO, daysAgoISO, monthFirstISO, prevMonthBounds } from './analytics/periodPresets'
 
 const PERIOD_PRESETS = [
+  { label: 'Вчера', value: () => ({ from: daysAgoISO(1), to: daysAgoISO(1) }) },
+  { label: '7 дней', value: () => ({ from: daysAgoISO(7), to: todayISO() }) },
   { label: '30 дней', value: () => ({ from: daysAgoISO(30), to: todayISO() }) },
   { label: 'Текущий месяц', value: () => ({ from: monthFirstISO(), to: todayISO() }) },
   { label: 'Прошлый месяц', value: prevMonthBounds },
+  { label: 'Квартал', value: () => ({ from: daysAgoISO(90), to: todayISO() }) },
   { label: 'С начала года', value: () => ({ from: `${new Date().getFullYear()}-01-01`, to: todayISO() }) },
+  {
+    label: 'Прошлый год',
+    value: () => {
+      const year = new Date().getFullYear() - 1
+      return { from: `${year}-01-01`, to: `${year}-12-31` }
+    },
+  },
 ]
+
+/** Длина периода в днях включительно: «62 дня» отвечает на «а сколько взяли». */
+function periodDays(period: { from: string; to: string }): number {
+  const from = Date.parse(period.from)
+  const to = Date.parse(period.to)
+  if (Number.isNaN(from) || Number.isNaN(to) || to < from) return 0
+  return Math.round((to - from) / 86_400_000) + 1
+}
+
+/** Сдвиг периода на его собственную длину — соседний интервал без счёта в уме. */
+function shiftPeriod(period: { from: string; to: string }, direction: -1 | 1) {
+  const days = periodDays(period)
+  if (days === 0) return period
+  const move = (iso: string) => {
+    const date = new Date(`${iso}T00:00:00Z`)
+    date.setUTCDate(date.getUTCDate() + direction * days)
+    return date.toISOString().slice(0, 10)
+  }
+  return { from: move(period.from), to: move(period.to) }
+}
+
+function plural(count: number, one: string, few: string, many: string): string {
+  const mod10 = count % 10
+  const mod100 = count % 100
+  if (mod10 === 1 && mod100 !== 11) return one
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few
+  return many
+}
 
 type ArrayFilterKey = 'locationIds' | 'regionIds' | 'stationCodes'
 
@@ -108,7 +147,6 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
   const stations = getStsStationsFromLocations()
   const [draft, setDraft] = useState<FilterState>(() => cloneState(state))
   const [locationQuery, setLocationQuery] = useState('')
-  const [stationQuery, setStationQuery] = useState('')
   const [savingPreset, setSavingPreset] = useState(false)
   const [presetName, setPresetName] = useState('')
   /**
@@ -130,20 +168,22 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
 
   const locationSet = useMemo(() => new Set(draft.locationIds), [draft.locationIds])
   const regionSet = useMemo(() => new Set(draft.regionIds), [draft.regionIds])
-  const stationCodeSet = useMemo(() => new Set(draft.stationCodes), [draft.stationCodes])
+  const days = periodDays(draft.period)
   const locationRegions = useMemo(
     () => new Map(locations.map((location) => [location.id, locationRegion(location)])),
     [locations],
   )
 
+  // Регионы топливного профиля — из справочника точек. В энергетическом профиле
+  // регион стал фасетом подборщика станций (StationScopePicker): он считается по
+  // тем же станциям, что в списке, и потому всегда с ними согласован.
   const regions = useMemo(() => {
     // Отсекаем записи без букв («12» и подобные) — это не регион, а мусор в
     // справочнике. Тот же фильтр стоит в WorkspaceScopePopover; здесь его не
     // было, и «12» висел первым пунктом списка.
     const clean = (list: string[]) => list.filter((r) => /[а-яёa-z]/i.test(r)).sort((a, b) => a.localeCompare(b, 'ru'))
-    if (isEnergy) return clean([...(dimensions?.regions ?? [])].map((region) => region.region))
     return clean(Array.from(new Set(locations.map(locationRegion).filter(Boolean))))
-  }, [dimensions?.regions, isEnergy, locations])
+  }, [locations])
 
   const filteredLocations = useMemo(() => {
     const query = locationQuery.trim().toLowerCase()
@@ -152,29 +192,6 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
       .filter((location) => !query || location.name.toLowerCase().includes(query))
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
   }, [draft.regionIds.length, locationQuery, locations, regionSet])
-
-  // Регион СУЖАЕТ список станций — ровно то, что обещает подпись раздела и чего
-  // энергетическая ветка не делала: у топливной точки фильтровались по региону, а
-  // станции — нет, и «Московская область» оставляла в списке все 600 (замечание
-  // заказчика 21.08.2026). Поиск идёт и по городу с адресом: станцию ищут по
-  // месту, а не по коду, который никто не помнит.
-  const energyStations = useMemo(() => {
-    const query = stationQuery.trim().toLowerCase()
-    return (dimensions?.stations ?? []).filter((station) => (
-      (draft.regionIds.length === 0 || (station.region ? regionSet.has(station.region) : false))
-      && (!query || `${station.name} ${station.code} ${station.city ?? ''} ${station.address ?? ''}`
-        .toLowerCase().includes(query))
-    ))
-  }, [dimensions?.stations, draft.regionIds.length, regionSet, stationQuery])
-
-  const shownCodes = useMemo(
-    () => new Set(energyStations.map((s) => s.code)), [energyStations])
-  const allShownPicked = shownCodes.size > 0
-    && [...shownCodes].every((c) => stationCodeSet.has(c))
-
-  /** Что показывать строкой станции: место человек читает, код — сверяет. */
-  const stationPlace = (s: { city: string | null; address: string | null; region: string | null }) =>
-    [s.city || s.region, s.address].filter(Boolean).join(' · ')
 
   const count = activeFilterCount(draft)
   const dirty = !sameFilterState(draft, state)
@@ -304,7 +321,7 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                     <Icon className={cn('mt-0.5 size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
                     <span className="min-w-0">
                       <span className="block truncate text-xs font-semibold">{s.label}</span>
-                      <span className={cn('block truncate text-[11px]', active ? 'text-primary/80' : 'text-muted-foreground')}>
+                      <span className={cn('block truncate text-xs', active ? 'text-primary/80' : 'text-muted-foreground')}>
                         {s.value}
                       </span>
                     </span>
@@ -372,7 +389,7 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                       title={describeState(preset.state)}
                     >
                       <span className="block truncate text-xs font-medium">{preset.name}</span>
-                      <span className="block truncate text-[10px] text-muted-foreground">{describeState(preset.state)}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{describeState(preset.state)}</span>
                     </button>
                     <Button
                       variant="ghost"
@@ -413,13 +430,21 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
             ) : null}
           </aside>
 
-          <ScrollArea className="min-h-0">
+          <div className="flex min-h-0 flex-col overflow-hidden">
+          <ScrollArea className={cn('min-h-0 flex-1', section === 'scope' && isEnergy ? 'hidden' : null)}>
             <div className="flex flex-col gap-6 p-4 sm:p-5">
               {section === 'period' && (
               <FilterSection
                 icon={CalendarDays}
                 title="Период"
                 description="Единый интервал для отчётов, сверок и документов."
+                action={(
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {days > 0
+                      ? `${days} ${plural(days, 'день', 'дня', 'дней')}`
+                      : 'Даты заданы наоборот'}
+                  </span>
+                )}
               >
                 <div className="flex flex-wrap items-end gap-2">
                   <label className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -442,24 +467,50 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                       className="h-9 w-[150px] text-xs text-foreground"
                     />
                   </label>
-                  <div className="flex flex-wrap gap-1">
-                    {PERIOD_PRESETS.map((preset) => (
+                  {/* Сдвиг на длину периода: «тот же месяц назад» — самый частый
+                      следующий шаг после выбора интервала, и считать даты руками
+                      для этого не нужно. */}
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline" size="xs" className="h-8"
+                      onClick={() => setDraft((current) => ({ ...current, period: shiftPeriod(current.period, -1) }))}
+                      disabled={days === 0}
+                      aria-label="Сдвинуть период назад на его длину"
+                    >
+                      <ChevronLeft />
+                    </Button>
+                    <Button
+                      variant="outline" size="xs" className="h-8"
+                      onClick={() => setDraft((current) => ({ ...current, period: shiftPeriod(current.period, 1) }))}
+                      disabled={days === 0}
+                      aria-label="Сдвинуть период вперёд на его длину"
+                    >
+                      <ChevronRight />
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {PERIOD_PRESETS.map((preset) => {
+                    const value = preset.value()
+                    const active = value.from === draft.period.from && value.to === draft.period.to
+                    return (
                       <Button
                         key={preset.label}
-                        variant="outline"
+                        variant={active ? 'default' : 'outline'}
                         size="xs"
                         className="h-8"
+                        aria-pressed={active}
                         onClick={() => setDraft((current) => ({ ...current, period: preset.value() }))}
                       >
                         {preset.label}
                       </Button>
-                    ))}
-                  </div>
+                    )
+                  })}
                 </div>
               </FilterSection>
               )}
 
-              {section === 'scope' && (
+              {section === 'scope' && !isEnergy && (
               <FilterSection
                 icon={MapPinned}
                 title="Область учёта"
@@ -488,91 +539,31 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                   </fieldset>
                 ) : null}
 
-                {isEnergy ? (
-                  <fieldset className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <legend className="text-xs font-medium">Станции ЭЗС</legend>
-                      <span className="text-[10px] text-muted-foreground">Выбрано: {draft.stationCodes.length}</span>
-                    </div>
-                    <Input
-                      placeholder="Найти станцию: название, город, улица или код"
-                      value={stationQuery}
-                      onChange={(event) => setStationQuery(event.target.value)}
-                      className="h-9 text-xs"
-                    />
-                    {/* «Выбрать все» — это все ОТФИЛЬТРОВАННЫЕ, а не все 600 в сети:
-                        кнопка стоит под фильтром и обязана слушаться его же. */}
-                    {energyStations.length > 0 && (
-                      <div className="flex items-center justify-between gap-2 px-1">
-                        <label className="flex cursor-pointer items-center gap-2 text-xs">
-                          <Checkbox
-                            checked={allShownPicked}
-                            onCheckedChange={() => setDraft((current) => ({
-                              ...current,
-                              stationCodes: allShownPicked
-                                ? current.stationCodes.filter((c) => !shownCodes.has(c))
-                                : [...new Set([...current.stationCodes, ...shownCodes])],
-                            }))}
-                          />
-                          <span>{allShownPicked ? 'Снять все показанные' : 'Выбрать все показанные'}</span>
-                        </label>
-                        <span className="text-[10px] text-muted-foreground">
-                          показано: {energyStations.length}
-                          {draft.regionIds.length > 0 ? ' (в выбранных регионах)' : ''}
-                        </span>
-                      </div>
-                    )}
-                    <div className="max-h-44 overflow-y-auto rounded-md border p-1.5">
-                      {energyStations.length === 0 ? (
-                        <p className="px-2 py-5 text-center text-xs text-muted-foreground">
-                          {draft.regionIds.length > 0
-                            ? 'В выбранных регионах станций нет'
-                            : 'Станции не найдены'}
-                        </p>
-                      ) : energyStations.map((station) => (
-                        <label key={station.code} className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/70">
-                          <Checkbox className="mt-0.5" checked={stationCodeSet.has(station.code)} onCheckedChange={() => toggleValue('stationCodes', station.code)} />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate">{station.name}</span>
-                            {/* Место под именем: по двум номерам станцию не опознать. */}
-                            {stationPlace(station) && (
-                              <span className="block truncate text-[10px] text-muted-foreground">
-                                {stationPlace(station)}
-                              </span>
-                            )}
-                          </span>
-                          <span className="shrink-0 tabular-nums text-muted-foreground">{station.code}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                ) : (
-                  <fieldset className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <legend className="text-xs font-medium">Точки обслуживания</legend>
-                      <span className="text-[10px] text-muted-foreground">Выбрано: {draft.locationIds.length}</span>
-                    </div>
-                    <Input
-                      placeholder="Найти точку"
-                      value={locationQuery}
-                      onChange={(event) => setLocationQuery(event.target.value)}
-                      className="h-9 text-xs"
-                    />
-                    <div className="max-h-44 overflow-y-auto rounded-md border p-1.5">
-                      {filteredLocations.length === 0 ? (
-                        <p className="px-2 py-5 text-center text-xs text-muted-foreground">Точки не найдены</p>
-                      ) : filteredLocations.map((location) => (
-                        <label key={location.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/70">
-                          <Checkbox checked={locationSet.has(location.id)} onCheckedChange={() => toggleValue('locationIds', location.id)} />
-                          <span className="min-w-0 flex-1 truncate">{location.name}</span>
-                          {locationRegion(location) ? (
-                            <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">{locationRegion(location)}</span>
-                          ) : null}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                )}
+                <fieldset className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <legend className="text-xs font-medium">Точки обслуживания</legend>
+                    <span className="text-xs text-muted-foreground">Выбрано: {draft.locationIds.length}</span>
+                  </div>
+                  <Input
+                    placeholder="Найти точку"
+                    value={locationQuery}
+                    onChange={(event) => setLocationQuery(event.target.value)}
+                    className="h-9 text-xs"
+                  />
+                  <div className="max-h-44 overflow-y-auto rounded-md border p-1.5">
+                    {filteredLocations.length === 0 ? (
+                      <p className="px-2 py-5 text-center text-xs text-muted-foreground">Точки не найдены</p>
+                    ) : filteredLocations.map((location) => (
+                      <label key={location.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/70">
+                        <Checkbox checked={locationSet.has(location.id)} onCheckedChange={() => toggleValue('locationIds', location.id)} />
+                        <span className="min-w-0 flex-1 truncate">{location.name}</span>
+                        {locationRegion(location) ? (
+                          <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">{locationRegion(location)}</span>
+                        ) : null}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
               </FilterSection>
               )}
 
@@ -613,6 +604,44 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
 
             </div>
           </ScrollArea>
+
+          {/* Подбор станций живёт вне общего скролла: список должен занимать всю
+              высоту окна, а не ютиться в полосе на 176 пикселей, под которой
+              пустует полэкрана. */}
+          {section === 'scope' && isEnergy ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-3 p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-2.5">
+                  <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                    <MapPinned className="size-4" aria-hidden="true" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold leading-5">Область учёта</h3>
+                    <p className="text-xs leading-4 text-muted-foreground">
+                      Условия слева сужают сеть; отмеченные станции задают рабочий контур.
+                    </p>
+                  </div>
+                </div>
+                {draft.stationCodes.length + draft.regionIds.length > 0 ? (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setDraft((current) => ({ ...current, locationIds: [], regionIds: [], stationCodes: [] }))}
+                  >
+                    Очистить
+                  </Button>
+                ) : null}
+              </div>
+              <StationScopePicker
+                stations={dimensions?.stations ?? []}
+                selected={draft.stationCodes}
+                onChange={(codes) => setDraft((current) => ({ ...current, stationCodes: codes }))}
+                regionIds={draft.regionIds}
+                onRegionsChange={(regionIds) => setDraft((current) => ({ ...current, regionIds }))}
+              />
+            </div>
+          ) : null}
+          </div>
         </div>
 
         <DialogFooter className="shrink-0 flex-row items-center justify-between border-t px-3 py-3 sm:px-5">
