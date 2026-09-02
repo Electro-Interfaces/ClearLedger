@@ -2203,7 +2203,7 @@ export function ChatPanel({ compact, scopeProduct }: {
   scopeProduct?: string | null
 } = {}) {
   const { user } = useAuth()
-  const { companyId } = useCompany()
+  const { companyId, isCompanyAdmin } = useCompany()
   const isMobile = useIsMobile()
   // Узкий контейнер (правый док) — одна колонка список↔переписка + папки-чипы,
   // даже на десктопе: 3 колонки в ~420px не помещаются.
@@ -2767,7 +2767,11 @@ export function ChatPanel({ compact, scopeProduct }: {
     if (roomDetail && roomDetail.id === selectedRoom) return { ...roomDetail, unreadCount: 0 }
     return undefined
   }, [rooms, selectedRoom, roomDetail])
-  const isAdmin = user?.role === 'admin' || !!user?.is_superadmin
+  // Администратор ПРОСТРАНСТВА, а не глобальное поле `users.role`: последнее осталось
+  // от прежней модели и у перенесённых людей стоит как попало — админ компании
+  // не мог настроить комнату, а рядовой сотрудник мог. Право считается по членству,
+  // тем же расчётом, что на сервере (`_is_company_admin`).
+  const isAdmin = isCompanyAdmin
   // Канал односторонний: писать в него могут владелец и назначенные им админы —
   // роль В КОМНАТЕ, а не должность в компании. «Объявления» пространства ведёт ещё и
   // администратор компании: это канал самой организации, а канал платформы — наш,
