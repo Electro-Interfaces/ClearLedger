@@ -20,6 +20,16 @@ from app.schemas import CompanyRoleCreate, CompanyRoleResponse, CompanyRoleUpdat
 router = APIRouter(prefix="/roles", tags=["Роли доступа"])
 
 
+def _scope_or_none(value: str | None) -> str | None:
+    """Контур переписки роли: код приложения или ничего.
+
+    Пустая строка из формы — это «контура нет», а не приложение с пустым кодом:
+    иначе роль получила бы контур, в котором не видно ни одного чата.
+    """
+    v = (value or "").strip()
+    return v or None
+
+
 async def _to_resp(role: CompanyRole, db: AsyncSession) -> CompanyRoleResponse:
     cnt = (await db.execute(
         select(func.count()).select_from(UserCompany).where(UserCompany.role_id == role.id)
@@ -27,6 +37,7 @@ async def _to_resp(role: CompanyRole, db: AsyncSession) -> CompanyRoleResponse:
     return CompanyRoleResponse(
         id=str(role.id), name=role.name, modules=role.modules,
         is_system=role.is_system, members_count=int(cnt or 0),
+        chat_scope=role.chat_scope,
     )
 
 
@@ -61,6 +72,7 @@ async def create_role(
     role = CompanyRole(
         company_id=cid, name=payload.name.strip(),
         modules=sanitize_modules(payload.modules), is_system=False,
+        chat_scope=_scope_or_none(payload.chat_scope),
     )
     db.add(role)
     await db.flush()
@@ -86,6 +98,11 @@ async def update_role(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Системную роль нельзя изменять")
     role.name = payload.name.strip()
     role.modules = sanitize_modules(payload.modules)
+    # Контур меняем, только если о нём вообще спросили: старая форма роли поля не
+    # знает и не шлёт его — обнулять по умолчанию значило бы молча выпускать
+    # контакт-центр в общую переписку при любой правке названия.
+    if "chat_scope" in payload.model_fields_set:
+        role.chat_scope = _scope_or_none(payload.chat_scope)
     await log_audit(db, actor=current_user, company_id=cid, action="role.update",
                     target=role.name, details={"modules": role.modules})
     await db.commit()

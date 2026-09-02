@@ -21,7 +21,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import App, AppCompanyLink, ServiceLocation, User, UserCompany
+from app.models import App, AppCompanyLink, CompanyRole, ServiceLocation, User, UserCompany
 from app.services import space_registry, sso
 
 # Куда приложение принимает проекцию каждой сущности. Пути фиксированы контрактом;
@@ -267,19 +267,24 @@ async def _users_payload(
     default_role = cfg.get("defaultRole") or role_map.get("user") or "customer"
 
     rows = (await db.execute(
-        select(User, UserCompany)
+        select(User, UserCompany, CompanyRole)
         .join(UserCompany, UserCompany.user_id == User.id)
+        .outerjoin(CompanyRole, CompanyRole.id == UserCompany.role_id)
         .where(UserCompany.company_id == company_id)
         .order_by(User.email)
     )).all()
 
     out: list[dict[str, Any]] = []
-    for user, membership in rows:
+    for user, membership, access_role in rows:
         space_role = "admin" if (user.is_superadmin or membership.role == "admin") else membership.role
         # Названная роль в приложении бьёт карту: карта знает только «админ и
         # остальные», а в службе поддержки разработчик и оператор — разные люди
         # с разными рабочими местами. Не названа — считаем по карте, как раньше.
-        named = (membership.app_roles or {}).get(app_code)
+        #
+        # Порядок: сначала личное исключение в членстве, затем роль доступа (её
+        # носят все операторы смены разом), и только потом карта.
+        named = ((membership.app_roles or {}).get(app_code)
+                 or (getattr(access_role, "app_roles", None) or {}).get(app_code))
         out.append({
             "email": user.email,
             "name": user.name or user.email,

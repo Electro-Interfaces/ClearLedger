@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   Mail, UserPlus, Trash2, Loader2, Send, X,
-  KeyRound, Plus, Pencil, Copy, Share2, Users,
+  KeyRound, Plus, Pencil, Copy, Share2, Users, MessageSquare,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
 import * as invitationService from '@/services/invitationService'
@@ -30,6 +30,7 @@ import type { CompanyRole } from '@/services/roleService'
 import { moduleLabels } from '@/config/accessModules'
 import { AccessMatrix, AccessSummary } from './AccessMatrix'
 import { AccessTreeGrid } from './AccessTreeGrid'
+import { useAccessTree } from '@/hooks/useAccessTree'
 import { DepartmentsPanel } from './DepartmentsPanel'
 import { MembersBoard } from './MembersBoard'
 import { projectSpaceUsers, listSpaceOrganizations } from '@/services/spaceObjectsService'
@@ -633,6 +634,10 @@ function MemberAccessCard({ companyId }: { companyId: string }) {
   )
 }
 
+// Radix Select не принимает пустую строку как значение пункта — «контура нет»
+// приходится называть словом и переводить обратно в пустоту при сохранении.
+const NO_SCOPE = '__none__'
+
 /** Создание (clone-to-create + diff) / правка кастомной роли. */
 function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
   companyId: string; roles: CompanyRole[]; editRole?: CompanyRole; onSaved: () => void
@@ -643,11 +648,15 @@ function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
   const [full, setFull] = useState(editRole ? editRole.modules == null : false)
   const [sel, setSel] = useState<Set<string>>(new Set(editRole?.modules ?? []))
   const [cloneId, setCloneId] = useState<string>('')
+  // Контур переписки роли: пусто — обычный сотрудник, видит общие чаты пространства.
+  const [scope, setScope] = useState<string>(editRole?.chat_scope ?? '')
+  const { tree } = useAccessTree(companyId)
   const changeOpen = (next: boolean) => {
     if (next) {
       setName(editRole?.name ?? '')
       setFull(editRole ? editRole.modules == null : false)
       setSel(new Set(editRole?.modules ?? []))
+      setScope(editRole?.chat_scope ?? '')
       setCloneId('')
     }
     setOpen(next)
@@ -655,12 +664,18 @@ function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
   const applyClone = (id: string) => {
     setCloneId(id)
     const src = roles.find((r) => r.id === id)
-    if (src) { setFull(src.modules == null); setSel(new Set(src.modules ?? [])) }
+    if (src) {
+      setFull(src.modules == null)
+      setSel(new Set(src.modules ?? []))
+      setScope(src.chat_scope ?? '')
+    }
   }
   const save = useMutation({
     mutationFn: () => isEdit
-      ? roleService.updateRole(editRole!.id, companyId, name.trim(), full ? null : Array.from(sel))
-      : roleService.createRole(companyId, name.trim(), full ? null : Array.from(sel)),
+      ? roleService.updateRole(editRole!.id, companyId, name.trim(),
+                               full ? null : Array.from(sel), scope || null)
+      : roleService.createRole(companyId, name.trim(),
+                               full ? null : Array.from(sel), scope || null),
     onSuccess: () => { toast.success(isEdit ? 'Роль сохранена' : 'Роль создана'); onSaved(); setOpen(false) },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
@@ -705,6 +720,21 @@ function RoleEditDialog({ companyId, roles, editRole, onSaved }: {
             <input type="checkbox" checked={full} onChange={(e) => setFull(e.target.checked)} className="h-4 w-4" />
             Полный доступ (все модули)
           </label>
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1"><MessageSquare className="h-3.5 w-3.5" /> Контур переписки</Label>
+            <Select value={scope || NO_SCOPE} onValueChange={(v) => setScope(v === NO_SCOPE ? '' : v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_SCOPE}>Всё пространство</SelectItem>
+                {tree.map((a) => <SelectItem key={a.app} value={a.app}>Только чаты «{a.name}»</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">
+              Роль с контуром — для тех, кто работает в пространстве через одно приложение
+              (например контакт-центр подрядчика): общий чат, объявления и группы компании
+              им не видны, свои группы они заводят внутри контура.
+            </p>
+          </div>
           <AccessTreeGrid companyId={companyId} sel={sel} onToggle={toggle} onCarve={carve} disabled={full} />
           {tmpl && (added.length > 0 || removed.length > 0) && (
             <div className="text-[11px] rounded-md border bg-muted/30 p-2">

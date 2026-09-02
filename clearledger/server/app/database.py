@@ -53,6 +53,15 @@ STORE_RECEIPT_MIGRATION_DDL = (
     "ON store_receipt_stock_movements",
     "DROP TRIGGER IF EXISTS store_receipt_accounting_revision_trg ON store_receipts",
     "ALTER TABLE store_receipts ALTER COLUMN station_id DROP NOT NULL",
+    # edge_cash_check создавалась раньше без части колонок сверки — мигрируем
+    # существующую таблицу (CREATE IF NOT EXISTS её не трогает, и ingest падал 500).
+    # `IF EXISTS` обязателен: набор идёт ДО таблиц магазина и выполняется на всех
+    # стеках, а в пространстве без магазина (энергетический профиль — rushydro)
+    # этой таблицы нет вовсе. Без него падает миграция, а с ней весь старт: ровно
+    # так стенд лёг 02.09.2026, повторив случай `edge.mark_group` от 01.09.
+    "ALTER TABLE IF EXISTS edge_cash_check ADD COLUMN IF NOT EXISTS not_in_cash INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE IF EXISTS edge_cash_check ADD COLUMN IF NOT EXISTS no_card INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE IF EXISTS edge_cash_check ADD COLUMN IF NOT EXISTS above_items JSONB NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS services JSONB NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
@@ -78,6 +87,8 @@ STORE_RECEIPT_MIGRATION_DDL = (
     "ALTER TABLE space_inbound_keys ADD COLUMN IF NOT EXISTS station_id INTEGER",
     "ALTER TABLE eco_partner_spaces ADD COLUMN IF NOT EXISTS support_company_id VARCHAR(120)",
     "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS app_roles JSONB",
+    "ALTER TABLE company_roles ADD COLUMN IF NOT EXISTS chat_scope VARCHAR(40)",
+    "ALTER TABLE company_roles ADD COLUMN IF NOT EXISTS app_roles JSONB",
     "CREATE UNIQUE INDEX IF NOT EXISTS uq_space_inbound_key_station_active "
     "ON space_inbound_keys (company_id, station_id) "
     "WHERE station_id IS NOT NULL AND revoked_at IS NULL",

@@ -227,18 +227,21 @@ class CompanyRoleResponse(BaseModel):
     modules: list[str] | None = None    # null = все модули
     is_system: bool = False
     members_count: int = 0
+    chat_scope: str | None = None       # код приложения — контур переписки роли
 
 
 class CompanyRoleCreate(BaseModel):
     company_id: str
     name: str = Field(min_length=1, max_length=100)
     modules: list[str] | None = None
+    chat_scope: str | None = None
 
 
 class CompanyRoleUpdate(BaseModel):
     company_id: str
     name: str = Field(min_length=1, max_length=100)
     modules: list[str] | None = None    # полная замена набора
+    chat_scope: str | None = None       # пусто — снять контур (обычный сотрудник)
 
 
 class UserAdminResponse(BaseModel):

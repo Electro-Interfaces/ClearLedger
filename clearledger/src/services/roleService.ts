@@ -10,6 +10,8 @@ export interface CompanyRole {
   modules: string[] | null   // null = все модули
   is_system: boolean
   members_count: number
+  /** Контур переписки: код приложения, дальше которого роль не видит чатов. */
+  chat_scope?: string | null
 }
 
 export async function listRoles(companyId: string): Promise<CompanyRole[]> {
@@ -17,15 +19,22 @@ export async function listRoles(companyId: string): Promise<CompanyRole[]> {
 }
 
 export async function createRole(
-  companyId: string, name: string, modules: string[] | null,
+  companyId: string, name: string, modules: string[] | null, chatScope?: string | null,
 ): Promise<CompanyRole> {
-  return post<CompanyRole>('/api/roles', { company_id: companyId, name, modules })
+  return post<CompanyRole>('/api/roles', {
+    company_id: companyId, name, modules, chat_scope: chatScope ?? null,
+  })
 }
 
 export async function updateRole(
   id: string, companyId: string, name: string, modules: string[] | null,
+  chatScope?: string | null,
 ): Promise<CompanyRole> {
-  return patch<CompanyRole>(`/api/roles/${id}`, { company_id: companyId, name, modules })
+  // Контур передаём, только когда форма о нём спрашивала: матрица доступа правит
+  // одни модули, и посылать там `null` значило бы снимать контур мимоходом.
+  const body: Record<string, unknown> = { company_id: companyId, name, modules }
+  if (chatScope !== undefined) body.chat_scope = chatScope
+  return patch<CompanyRole>(`/api/roles/${id}`, body)
 }
 
 export async function deleteRole(id: string, companyId: string): Promise<void> {

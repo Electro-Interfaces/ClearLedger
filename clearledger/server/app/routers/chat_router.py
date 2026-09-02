@@ -28,7 +28,7 @@ from app.deps import capture_company_header, scope_company_id
 from app.services.service_accounts import not_service
 from app.models import (
     ChatFolder, ChatMessage, ChatMessageReaction, ChatParticipant, ChatPushSubscription,
-    ChatPoll, ChatPollVote, ChatRoom, ChatTicketLink, Company, Counterparty,
+    ChatPoll, ChatPollVote, ChatRoom, ChatTicketLink, Company, CompanyRole, Counterparty,
     DocRelation, ServiceLocation, User, UserCompany,
 )
 from app.services import chat_mail, process_templates, web_push
@@ -184,6 +184,13 @@ async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) 
         ChatParticipant.room_id == room_id, ChatParticipant.user_id == user.id))).scalar_one_or_none()
     if p is None and not user.is_superadmin:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
+    # Контур — та же изоляция, что между организациями, только внутри одной: членство
+    # в комнате вне своего приложения ничего не открывает. Проверка здесь, а не в
+    # каждой ручке: через эту функцию идут и чтение ленты, и отправка, и вложения.
+    if room.company_id is not None and room.type != "direct":
+        scope = await _chat_scope(user, room.company_id, db)
+        if scope and room.scope_product != scope:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
     if p is None:
         await _audit_foreign_access(room, user, db)
     return room
@@ -243,6 +250,37 @@ SYSTEM_ROOMS = [
     ("platform", "Обновления платформы", "channel"),
 ]
 
+# Общий чат КОНТУРА — для тех, кому пространство открыто только через одно приложение.
+# Контакт-центр работает в пространстве заказчика посменно и состав его меняется чаще,
+# чем состав компании; без своего чата смена переписывается мимо системы, а «Общий чат»
+# пространства ей закрыт. Имя короткое и по делу: человек и так внутри приложения.
+SCOPE_ROOMS = {"support": "Контакт-центр"}
+
+
+async def _chat_scope(user: User, cid: uuid.UUID, db: AsyncSession) -> str | None:
+    """Контур переписки человека в этом пространстве — код приложения или None.
+
+    Берётся из НАЗНАЧЕННОЙ роли (`company_roles.chat_scope`), а не из набора модулей:
+    набор отвечает, какие приложения открыть, контур — с кем человек в них
+    разговаривает. Владелец контейнера контура не имеет никогда: он и есть надзор.
+    """
+    if user.is_superadmin:
+        return None
+    return (await db.execute(
+        select(CompanyRole.chat_scope)
+        .join(UserCompany, UserCompany.role_id == CompanyRole.id)
+        .where(UserCompany.user_id == user.id, UserCompany.company_id == cid,
+               CompanyRole.chat_scope.isnot(None))
+        .limit(1)
+    )).scalar_one_or_none()
+
+
+def _scoped_member_ids(cid: uuid.UUID):
+    """Подзапрос: люди пространства, запертые в каком-либо контуре."""
+    return (select(UserCompany.user_id)
+            .join(CompanyRole, CompanyRole.id == UserCompany.role_id)
+            .where(UserCompany.company_id == cid, CompanyRole.chat_scope.isnot(None)))
+
 async def ensure_company_rooms(user: User, cid: uuid.UUID, db: AsyncSession) -> None:
     """Базовый набор чатов пространства + членство ВСЕХ его людей.
 
@@ -294,12 +332,17 @@ async def ensure_company_rooms(user: User, cid: uuid.UUID, db: AsyncSession) -> 
                 # напоминания, но говорить не умеет, и в составе комнаты он
                 # выглядит сотрудником, которому можно написать.
                 not_service(),
+                # Люди контура — тоже нет: подрядчику, работающему в пространстве
+                # через одно приложение, общий чат и объявления компании не
+                # предназначены. Свой чат он получает ниже, в комнате контура.
+                User.id.notin_(_scoped_member_ids(cid)),
                 or_(
                     User.company_id == cid,
                     User.id.in_(select(UserCompany.user_id).where(UserCompany.company_id == cid)),
                 ),
             ))).scalars().all())
-            space_ids.add(user.id)
+            if await _chat_scope(user, cid, db) is None:
+                space_ids.add(user.id)
             missing = space_ids - member_ids
             if missing:
                 # ON CONFLICT, а не просто `db.add`: эту дописку одновременно делают все
@@ -315,6 +358,58 @@ async def ensure_company_rooms(user: User, cid: uuid.UUID, db: AsyncSession) -> 
                      "role": "member", "is_muted": False} for uid in missing
                 ]).on_conflict_do_nothing(index_elements=["room_id", "user_id"]))
 
+    await _ensure_scope_rooms(cid, db)
+
+
+async def _ensure_scope_rooms(cid: uuid.UUID, db: AsyncSession) -> None:
+    """Общий чат для каждого контура, в котором есть люди.
+
+    Комната заводится не «на всякий случай», а по факту: пока роль с контуром никому
+    не назначена, чата нет. Это то же правило, по которому пространство не плодит
+    группы под приложения (решение МАГа 31.07.2026) — пустой чат человек закроет и
+    не вернётся.
+    """
+    scoped = (await db.execute(
+        select(CompanyRole.chat_scope, UserCompany.user_id)
+        .join(UserCompany, UserCompany.role_id == CompanyRole.id)
+        .join(User, and_(User.id == UserCompany.user_id, User.mail_only.is_(False), not_service()))
+        .where(UserCompany.company_id == cid, CompanyRole.chat_scope.isnot(None))
+    )).all()
+    if not scoped:
+        return
+    by_scope: dict[str, set[uuid.UUID]] = {}
+    for scope, uid in scoped:
+        by_scope.setdefault(scope, set()).add(uid)
+
+    for scope, uids in by_scope.items():
+        kind = f"scope:{scope}"
+        room = (await db.execute(select(ChatRoom).where(
+            ChatRoom.company_id == cid, ChatRoom.kind == kind, ChatRoom.is_active.is_(True),
+        ))).scalar_one_or_none()
+        if room is None:
+            room = ChatRoom(type="group", kind=kind, name=SCOPE_ROOMS.get(scope, scope),
+                            company_id=cid, scope_product=scope,
+                            created_by=next(iter(uids)))
+            db.add(room)
+            try:
+                await db.flush()
+            except Exception:  # noqa: BLE001 — гонка двух вкладок, ловит unique-индекс
+                await db.rollback()
+                room = (await db.execute(select(ChatRoom).where(
+                    ChatRoom.company_id == cid, ChatRoom.kind == kind,
+                    ChatRoom.is_active.is_(True)))).scalar_one_or_none()
+        if room is None:
+            continue
+        member_ids = set((await db.execute(select(ChatParticipant.user_id).where(
+            ChatParticipant.room_id == room.id))).scalars().all())
+        # Сотрудников компании, которых позвали в этот чат руками, не трогаем: состав
+        # добирается людьми контура, а не сводится к ним.
+        missing = uids - member_ids
+        if missing:
+            await db.execute(pg_insert(ChatParticipant.__table__).values([
+                {"id": uuid.uuid4(), "room_id": room.id, "user_id": uid,
+                 "role": "member", "is_muted": False} for uid in missing
+            ]).on_conflict_do_nothing(index_elements=["room_id", "user_id"]))
 
 
 async def _is_company_admin(db: AsyncSession, company_id: uuid.UUID | None,
@@ -531,6 +626,7 @@ async def list_rooms(
 ):
     cid = await _company_of(current_user, db)
     await ensure_company_rooms(current_user, cid, db)
+    scope = await _chat_scope(current_user, cid, db)
 
     # Только комнаты ВЫБРАННОЙ организации — иначе мультикомпанийный юзер увидел
     # бы чаты двух орг вперемешку. Строгая изоляция пространств.
@@ -548,6 +644,12 @@ async def list_rooms(
                # передаёт и получает всё: один чат, разные предустановки.
                or_(ChatRoom.scope_product.is_(None), ChatRoom.scope_product == product)
                if product else text("true"),
+               # Контур роли — жёсткая граница, а не предустановка: человек
+               # контакт-центра видит чаты своего приложения и личную переписку,
+               # и ничего из остального пространства. Общие чаты компании сюда не
+               # подмешиваются даже тогда, когда его в них когда-то вписали.
+               or_(ChatRoom.type == "direct", ChatRoom.scope_product == scope)
+               if scope else text("true"),
                ChatRoom.scope_object_id == object_id if object_id else text("true"),
                # Чаты заявок и задач скрыты из общего пространства: их видно только
                # из карточки заявки/задачи (решение МАГа) — сюда попадают лишь
@@ -707,7 +809,12 @@ async def create_room(
     if body.type not in ("direct", "group", "channel"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Тип чата: direct, group или channel")
-    if not await _is_insider(current_user, cid) and not current_user.is_superadmin:
+    # Человек контура — исключение из правила «инициирует хозяин пространства»: он
+    # работает в пространстве по договору (контакт-центр), и переписка смены между
+    # собой не касается заказчика. Создать он может только в своём контуре — ниже.
+    creator_scope = await _chat_scope(current_user, cid, db)
+    if (not await _is_insider(current_user, cid) and not current_user.is_superadmin
+            and not creator_scope):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Создавать чаты в этом пространстве могут только его сотрудники")
     if body.type == "channel" and not await _is_space_admin(current_user, cid, db):
@@ -746,10 +853,17 @@ async def create_room(
         await _assert_company_object(body.scopeObjectId, cid, db)
         scope_object = body.scopeObjectId
 
+    # Человек контура заводит группы только в своём контуре: иначе он создал бы
+    # чат, которого сам же не увидит в списке. Выбор приложения в диалоге для него
+    # не решение, а формальность — контур решает за него.
+    room_scope = (body.scopeProduct or None) if body.type != "direct" else None
+    if creator_scope and body.type != "direct":
+        room_scope = creator_scope
+
     room = ChatRoom(type=body.type, kind=None, name=body.name, company_id=cid,
                     created_by=current_user.id,
                     # Личный чат контекста не имеет: он про людей, а не про экран.
-                    scope_product=(body.scopeProduct or None) if body.type != "direct" else None,
+                    scope_product=room_scope,
                     scope_object_id=scope_object)
     db.add(room)
     await db.flush()
@@ -1575,6 +1689,12 @@ async def rename_room(
         if room.kind is not None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "Системный чат — общий для пространства, привязки у него нет")
+        # Из своего контура группу не выносят: сменив привязку, владелец потерял бы
+        # собственный чат из списка, а переписка уехала бы в общее пространство.
+        scope = await _chat_scope(current_user, room.company_id, db)
+        if scope and body.scopeProduct.strip() != scope:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "Ваши чаты живут в своём приложении — привязку сменить нельзя")
         room.scope_product = body.scopeProduct.strip() or None
     if body.scopeObjectId is not None:
         if room.kind is not None:
@@ -2084,6 +2204,9 @@ async def search_all_messages(
 ):
     """Глобальный поиск по всем чатам, где человек участник (в пределах организации)."""
     cid = await _company_of(current_user, db)
+    # Контур держит и поиск: иначе человек контакт-центра нашёл бы через строку
+    # поиска переписку комнаты, которой в его списке нет.
+    scope = await _chat_scope(current_user, cid, db)
     rows = (await db.execute(
         select(ChatMessage, ChatRoom)
         .join(ChatRoom, ChatRoom.id == ChatMessage.room_id)
@@ -2091,6 +2214,8 @@ async def search_all_messages(
                                     ChatParticipant.user_id == current_user.id))
         .where(ChatRoom.company_id == cid, ChatRoom.is_active.is_(True),
                ChatMessage.deleted_at.is_(None),
+               or_(ChatRoom.type == "direct", ChatRoom.scope_product == scope)
+               if scope else text("true"),
                ChatMessage.content.ilike(f"%{q}%"))
         .order_by(ChatMessage.created_at.desc()).limit(limit)
     )).all()

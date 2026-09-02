@@ -339,6 +339,20 @@ class CompanyRole(Base):
     modules: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # Системная роль (сид из пресетов): нельзя удалять/переименовывать.
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    # Контур переписки: код приложения, дальше которого человек в чатах не видит
+    # ничего. NULL — обычный сотрудник пространства (все общие чаты, любые группы).
+    #
+    # Зачем отдельно от `modules`: набор приложений отвечает, ЧТО человеку открыть,
+    # а контур — с КЕМ он при этом разговаривает. Контакт-центр по договору сидит в
+    # пространстве заказчика, но не является его сотрудником: в «Общем чате» и
+    # «Объявлениях» компании ему делать нечего, а видеть их — прямая утечка
+    # внутренней переписки заказчика подрядчику.
+    chat_scope: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Кем носитель роли работает В ПРИЛОЖЕНИИ: {"support": "operator"}. То же поле есть
+    # у членства (`user_companies.app_roles`) — здесь оно на роль, чтобы не назначать
+    # руками каждому: смена контакт-центра меняется чаще, чем настройки, а забытая
+    # роль в приложении означает оператора с правами сотрудника компании.
+    app_roles: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -8908,6 +8922,10 @@ class StoreRecipeVersion(Base):
     lines: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="center")
+    # Ярус карты: NULL — сетевая норма, номер — карта станции. Станционная
+    # перебивает сетевую; сетевая действует там, где своей нет. Без этого поля
+    # две АЗС с разными кухнями перебивали карты друг друга по одному блюду.
+    station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     change_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     source_bundle_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -8922,8 +8940,13 @@ class StoreRecipeVersion(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        UniqueConstraint("company_id", "dish_uuid", "version",
-                         name="uq_store_recipe_version"),
+        # Уникальность внутри яруса: NULL в UNIQUE не сравнивается сам с собой,
+        # поэтому два частичных индекса, а не один составной.
+        Index("uq_store_recipe_version_net", "company_id", "dish_uuid", "version",
+              unique=True, postgresql_where=text("station_id IS NULL")),
+        Index("uq_store_recipe_version_station", "company_id", "dish_uuid",
+              "station_id", "version", unique=True,
+              postgresql_where=text("station_id IS NOT NULL")),
         Index("ix_store_recipe_active", "company_id", "status", "valid_from"),
     )
 
