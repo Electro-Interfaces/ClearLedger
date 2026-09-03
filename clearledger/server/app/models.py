@@ -7359,6 +7359,14 @@ class ChatRoom(Base):
     scope_task_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"),
         nullable=True, index=True)
+    # Предмет, при котором живёт комната: `<вид>:<ключ>` — тот же формат, что у
+    # `Task.subject_ref` и `DocRelation.target_ref` (см. `_REF_TARGETS`). Заведён
+    # ради проекта: `scope_object_id` ведёт на объект сети, а он появляется у
+    # площадки только со вводом в эксплуатацию — переписка же с собственником
+    # участка и сетевой идёт с первого дня. Отдельная колонка на каждую сущность
+    # означала бы третью, четвёртую и пятую; одна строка вида и ключа покрывает
+    # всё, что уже умеет пространство (site, contract, object, task, room).
+    scope_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # Аватар чата: относительный путь файла пространства (/api/files/<id>), грузится
     # владельцем/админом чата. NULL — иконка по типу комнаты.
     avatar_url: Mapped[str | None] = mapped_column(String(300), nullable=True)
@@ -7371,6 +7379,10 @@ class ChatRoom(Base):
     __table_args__ = (
         Index("idx_chat_rooms_company", "company_id"),
         Index("idx_chat_rooms_type", "type"),
+        # Частичный: комнат с предметом заметно меньше, чем комнат вообще, а
+        # ищут по нему из карточки предмета — «покажи чаты этого проекта».
+        Index("ix_chat_rooms_scope_ref", "company_id", "scope_ref",
+              postgresql_where=text("scope_ref IS NOT NULL")),
         # Одна системная комната каждого вида (general/news) на компанию среди активных.
         Index("uq_chat_rooms_company_kind", "company_id", "kind",
               unique=True, postgresql_where=text("kind IS NOT NULL AND is_active = true")),
@@ -12828,6 +12840,63 @@ class PartnerSpace(Base):
     )
 
 
+class PartnerTopic(Base):
+    """Обращение — тема разговора двух пространств (docs/BRIDGE.md §4.1).
+
+    Единица моста — не сообщение, а обращение: у клиента это «мой вопрос» с
+    номером и состоянием, у нас — тред очереди и, когда нужно, заявка. Плоская
+    лента на пространство отвечала «что писали», но не отвечала «сколько у меня
+    открытых вопросов и чей сейчас ход», а без этого поддержка выглядит
+    перепиской без обязательств.
+
+    `code` — ключ темы, ОДИН на обе стороны: идентификатор, который присвоил
+    зачинатель. По нему реплика находит свою ветку у соседа, и повторная доставка
+    не заводит второй разговор.
+
+    Состояние ведёт та сторона, которая делает работу (у обращения к поддержке —
+    мы). У клиента оно только показывается: право двигать чужую работу мостом не
+    передаётся.
+    """
+    __tablename__ = "eco_partner_topics"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    partner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eco_partner_spaces.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    # Предмет — У СЕБЯ: объект, документ, заявка. Соседу уезжает не он, а
+    # `subject_label`: номер и название, по которым человек понимает, о чём речь.
+    # Данные предмета мостом не ходят — за ними инженер входит пропуском.
+    subject_kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    subject_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    subject_label: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # new | in_progress | waiting | resolved | closed — общий словарь на оба конца.
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="new")
+    # Номер обращения у ТОЙ стороны — для клиента это номер нашей заявки, по
+    # которому он нас и спрашивает.
+    external_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    opened_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    last_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("partner_id", "code", name="uq_partner_topic_code"),
+        Index("idx_partner_topics_list", "company_id", "partner_id", "last_message_at"),
+    )
+
+
 class PartnerMessage(Base):
     """Сообщение между пространствами: обращение к поддержке и ответ на него.
 
@@ -12850,6 +12919,11 @@ class PartnerMessage(Base):
     partner_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("eco_partner_spaces.id", ondelete="CASCADE"),
         nullable=False, index=True)
+    # В каком обращении сказано. Пусто — переписка «обо всём» до появления тем:
+    # такие ленты живут дальше и человеку остаются видны.
+    topic_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eco_partner_topics.id", ondelete="CASCADE"),
+        nullable=True, index=True)
     # `out` — написали мы, `in` — написали нам. Направление считается ОТ ЭТОГО
     # пространства: у обеих сторон одна и та же переписка читается зеркально.
     direction: Mapped[str] = mapped_column(String(4), nullable=False)

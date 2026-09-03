@@ -31,6 +31,53 @@ export interface PartnerMessage {
   error: string | null
 }
 
+/** Состояние обращения — общий словарь обеих сторон (docs/BRIDGE.md §4.1). */
+export type TopicState = 'new' | 'in_progress' | 'waiting' | 'resolved' | 'closed'
+
+export interface PartnerTopic {
+  code: string
+  title: string
+  state: TopicState
+  /** Номер у той стороны: для клиента — номер заявки поддержки. */
+  number: string | null
+  subjectLabel: string | null
+  createdAt: string | null
+  lastMessageAt: string | null
+}
+
+export const TOPIC_STATE_NAME: Record<TopicState, string> = {
+  new: 'Принято',
+  in_progress: 'В работе',
+  waiting: 'Ждём вас',
+  resolved: 'Решено',
+  closed: 'Закрыто',
+}
+
+export const listTopics = (code: string, companyId: string) =>
+  get<{ items: PartnerTopic[]; general: number }>(
+    `/api/partner-space/${encodeURIComponent(code)}/topics`, { company_id: companyId })
+
+export const openTopic = (
+  code: string, companyId: string,
+  body: { title: string; body: string; subject_kind?: string; subject_ref?: string; subject_label?: string },
+) =>
+  post<{ code: string; state: TopicState; delivered: boolean; error: string | null }>(
+    `/api/partner-space/${encodeURIComponent(code)}/topics?company_id=${encodeURIComponent(companyId)}`,
+    body)
+
+export const topicFeed = (code: string, topicCode: string, companyId: string) =>
+  get<{
+    topic: { code: string; title: string; state: TopicState; number: string | null; subjectLabel: string | null }
+    messages: PartnerMessage[]
+  }>(
+    `/api/partner-space/${encodeURIComponent(code)}/topics/${encodeURIComponent(topicCode)}/feed`,
+    { company_id: companyId })
+
+export const sendToTopic = (code: string, topicCode: string, companyId: string, body: string) =>
+  post<{ id: string; delivered: boolean; error: string | null }>(
+    `/api/partner-space/${encodeURIComponent(code)}/topics/${encodeURIComponent(topicCode)}/message`
+    + `?company_id=${encodeURIComponent(companyId)}`, { body })
+
 export const listPartnerSpaces = (companyId: string) =>
   get<{ items: PartnerSpaceRef[] }>('/api/partner-space/spaces', { company_id: companyId })
 

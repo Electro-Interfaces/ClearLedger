@@ -86,6 +86,11 @@ STORE_RECEIPT_MIGRATION_DDL = (
     "ALTER TABLE store_receipts ADD COLUMN IF NOT EXISTS content_hash CHAR(64)",
     "ALTER TABLE space_inbound_keys ADD COLUMN IF NOT EXISTS station_id INTEGER",
     "ALTER TABLE eco_partner_spaces ADD COLUMN IF NOT EXISTS support_company_id VARCHAR(120)",
+    # Обращения моста: create_all заводит новую таблицу, но колонку в уже
+    # существующую не добавляет, а переписка «обо всём» накоплена и должна
+    # остаться видимой (docs/BRIDGE.md §5).
+    "ALTER TABLE eco_partner_messages ADD COLUMN IF NOT EXISTS topic_id UUID "
+    "REFERENCES eco_partner_topics(id) ON DELETE CASCADE",
     "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS app_roles JSONB",
     "ALTER TABLE company_roles ADD COLUMN IF NOT EXISTS chat_scope VARCHAR(40)",
     "ALTER TABLE company_roles ADD COLUMN IF NOT EXISTS app_roles JSONB",
@@ -4845,6 +4850,17 @@ async def create_all() -> None:
             "ON raw_batches (channel_id, fetched_at DESC) WHERE channel_id IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS ix_raw_batches_sync_log "
             "ON raw_batches (sync_log_id) WHERE sync_log_id IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # v2.87: предмет комнаты чата. Пусто у существующих — они и были без
+        # предмета. Заполняется тем, кто заводит разговор из карточки проекта;
+        # `scope_object_id` остаётся как был (объект сети), потому что у площадки
+        # объекта до ввода в эксплуатацию нет вовсе.
+        for stmt in (
+            "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS scope_ref VARCHAR(120)",
+            "CREATE INDEX IF NOT EXISTS ix_chat_rooms_scope_ref "
+            "ON chat_rooms (company_id, scope_ref) WHERE scope_ref IS NOT NULL",
         ):
             await conn.execute(_sa.text(stmt))
 

@@ -22,7 +22,7 @@ import uuid
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import PartnerMessage, PartnerSpace
+from app.models import PartnerMessage, PartnerSpace, PartnerTopic
 from app.services import space_projection
 
 TIMEOUT = 10.0
@@ -62,6 +62,15 @@ async def mirror_incoming(
         "partnerCode": partner.code,
         "partnerName": who,
     }
+    # Обращение — одна ветка на обеих сторонах (docs/BRIDGE.md §4.3). Тред у
+    # оператора ключуется его кодом: второй сотрудник клиента, написавший по тому
+    # же вопросу, попадает в тот же разговор, а не заводит соседний.
+    if message.topic_id is not None:
+        topic = await db.get(PartnerTopic, message.topic_id)
+        if topic is not None:
+            payload |= {"topic": topic.code,
+                        "topicTitle": f"{who} · {topic.title}",
+                        "subjectLabel": topic.subject_label}
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.post(url, json=payload,
