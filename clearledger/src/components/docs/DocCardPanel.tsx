@@ -9,9 +9,11 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive, ArrowLeft, Ban, CheckCheck, FileCheck2, FileUp, KeyRound, Link2,
-  ListChecks, LockKeyhole, Printer, Send, ShieldCheck, Stamp, Tag, Workflow,
+  ListChecks, LockKeyhole, MessagesSquare, Printer, Send, ShieldCheck, Stamp, Tag,
+  Workflow,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { AskSupportButton } from '@/components/support/AskSupportButton'
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -37,8 +39,21 @@ import { DocSendTab } from './DocSendTab'
 import { openAuthAttachment } from '@/lib/authFiles'
 import { formatDate } from '@/lib/formatDate'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useSupportContext } from '@/contexts/SupportContext'
 import { DocRegisterDialog, type DocRegisterValues } from './DocRegisterDialog'
 import { DocErrandDialog } from './DocErrandDialog'
+
+/** Вид связи документа — словами. Коды заданы моделью (`DocRelation.kind`). */
+const RELATION_KIND: Record<string, string> = {
+  reply_to: 'ответ на',
+  annex_of: 'приложение к',
+  amends: 'изменяет',
+  cancels: 'отменяет',
+  basis: 'основание',
+  errand: 'поручение',
+  discussion: 'обсуждение',
+  related: 'связан с',
+}
 
 const EVENT_LABEL: Record<string, string> = {
   created: 'заведён',
@@ -343,6 +358,13 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
           <Printer className="h-4 w-4 md:mr-1.5" /><span className="hidden md:inline">Печать</span>
         </Button>
       )}
+      {/* Вопрос поставщику программы — отсюда же: документ уезжает предметом
+          обращения (номер и вид, не содержимое), и переписка идёт в «Поддержке»
+          с состоянием, а не теряется в чате (docs/BRIDGE.md §4.2). */}
+      <AskSupportButton variant="ghost" subject={{
+        kind: 'doc', ref: String(d.id),
+        label: `${d.kind_name || d.kind_code} ${registered ? `${d.reg_number} от ${d.reg_date}` : '(черновик)'}`,
+      }} />
     </>
   )
 
@@ -838,21 +860,8 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
           </Card>
           <Card className="divide-y divide-border/60">
             {d.relations.map((relation) => (
-              relation.target_ref.startsWith('task:') ? (
-                <Link key={relation.id}
-                  to={`/docs/work?view=errands&task=${encodeURIComponent(relation.target_ref.slice(5))}`}
-                  className="flex min-h-11 items-center gap-2 px-3 py-2 text-sm hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-                  <ListChecks className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="font-medium">Открыть поручение</span>
-                  <span className="truncate font-mono text-xs text-muted-foreground">{relation.target_ref.slice(5)}</span>
-                </Link>
-              ) : (
-                <div key={relation.id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                  <Link2 className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-muted-foreground">{relation.kind}</span>
-                  <span className="font-mono text-xs">{relation.target_ref}</span>
-                </div>
-              )
+              <DocRelationRow key={relation.id} companyId={companyId}
+                kind={relation.kind} targetRef={relation.target_ref} />
             ))}
             {d.relations.length === 0 && (
               <div className="px-3 py-8 text-center text-sm text-muted-foreground">
@@ -1203,6 +1212,60 @@ function formatEventTime(value: string | null): string {
 function formatEventValue(value: string): string {
   if (!value) return 'не заполнено'
   return EVENT_VALUE[value] ?? value
+}
+
+/**
+ * Строка связи документа: чем связан и с чем — по-человечески.
+ *
+ * Показывали машинный ключ (`site:9f3c…`, `room:5d2e…`): по нему нельзя ни
+ * понять, о каком проекте речь, ни перейти. Имя и адрес даёт тот же резолвер,
+ * что и предмет поручения, — второго перечня видов не заводим.
+ *
+ * У обсуждения адреса нет намеренно: чат открывается панелью поверх работы, а
+ * не отдельной страницей, поэтому здесь кнопка, а не ссылка.
+ */
+function DocRelationRow({ companyId, kind, targetRef }: {
+  companyId: string; kind: string; targetRef: string
+}) {
+  const { openInteraction } = useSupportContext()
+  const q = useQuery({
+    queryKey: ['ref', companyId, targetRef],
+    queryFn: () => docsService.resolveRefs(companyId, [targetRef]),
+    enabled: !!companyId, staleTime: 5 * 60 * 1000,
+  })
+  const found = q.data?.[targetRef]
+  const label = found?.name || targetRef
+  const isRoom = targetRef.startsWith('room:')
+  const rowClass = 'flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm'
+
+  if (isRoom) {
+    return (
+      <button type="button" className={`${rowClass} hover:bg-accent/40`}
+        onClick={() => openInteraction('chat', targetRef)}>
+        <MessagesSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-muted-foreground">{RELATION_KIND[kind] ?? kind}</span>
+        <span className="truncate font-medium">{label}</span>
+      </button>
+    )
+  }
+  if (found?.url) {
+    return (
+      <Link to={found.url} className={`${rowClass} hover:bg-accent/40`}>
+        {targetRef.startsWith('task:')
+          ? <ListChecks className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          : <Link2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+        <span className="text-muted-foreground">{RELATION_KIND[kind] ?? kind}</span>
+        <span className="truncate font-medium">{label}</span>
+      </Link>
+    )
+  }
+  return (
+    <div className={rowClass}>
+      <Link2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span className="text-muted-foreground">{RELATION_KIND[kind] ?? kind}</span>
+      <span className="truncate">{label}</span>
+    </div>
+  )
 }
 
 export default DocCardPanel

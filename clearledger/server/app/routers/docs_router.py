@@ -54,7 +54,8 @@ from app.models import (
     DocCase, DocCounter, DocEvent, DocKind, DocRelation, DocAcquaint, DocExchangeTarget,
     DocExport, DocInboxItem, DocLabelLink,
     DocShareLink, DocSignatureEvidence, UserSubstitution,
-    DocVersion, EzsSite, Organization, ServiceLocation, SourceFile, Task, TaskEvent,
+    DocVersion, EzsSite, Organization, PartnerTopic, ServiceLocation, SourceFile,
+    Task, TaskEvent,
     TaskLabel, TaskTemplate, TaskType, TaskView, TaskWorkItem, User, UserCompany,
 )
 from app.routers import doc_share_router
@@ -168,6 +169,10 @@ _REF_TARGETS: dict[str, tuple[Any, bool]] = {
     # пространства, как договор; отдельная таблица связей ради одного вида цели
     # завела бы второй механизм рядом с работающим.
     "room": (ChatRoom, False),
+    # Обращение соседнего пространства: работа, рождённая из разговора с
+    # клиентом поддержки (docs/BRIDGE.md §4.4). Задача по нему — наша, но
+    # спрашивать и отвечать она обязана в том обращении, откуда пришла.
+    "partner_topic": (PartnerTopic, False),
 }
 
 
@@ -1132,6 +1137,20 @@ async def resolve_refs(
         elif prefix == "task":
             name = f"поручение №{getattr(row, 'number', '')}".strip()
             url = f"/docs/company?view=errands&task={row.id}"
+        elif prefix == "room":
+            # Разговор, из которого документ вырос. Адреса нет намеренно: чат
+            # открывается панелью поверх работы, а не отдельной страницей —
+            # ссылка увела бы человека с документа на административный экран
+            # чатов, куда обычному сотруднику и входа нет. Имя нужно: без него
+            # связь показывалась строкой `room:<uuid>`.
+            name = getattr(row, "name", None) or "обсуждение"
+            url = None
+        elif prefix == "partner_topic":
+            # Обращение клиента. Адреса нет: разговор открывается панелью
+            # поддержки поверх работы, отдельной страницы у него не бывает.
+            number = getattr(row, "external_number", None)
+            name = f"обращение {number} · {row.title}" if number else f"обращение · {row.title}"
+            url = None
         else:
             name = str(getattr(row, "name", None) or getattr(row, "title", None) or ref)
             url = None

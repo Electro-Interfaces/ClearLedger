@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+import base64
 import os
 import uuid
 from datetime import UTC, datetime
@@ -31,7 +32,10 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import PartnerMessage, PartnerSpace, PartnerTopic
+from app.models import (
+    PartnerAttachment, PartnerMessage, PartnerSpace, PartnerTopic, SourceFile,
+)
+from app.services import file_store
 
 DELIVERY_TIMEOUT = 15.0
 # Путь приёмника у партнёра. Совпадает с нашим: обе стороны — одно Ядро.
@@ -42,6 +46,11 @@ STATE_PATH = "/api/eco/partner/topic-state"
 # намеренно: стадии заявки, SLA и исполнители — наше внутреннее устройство, и
 # клиенту от них нужен только ответ «чей ход и чем кончилось».
 STATES = ("new", "in_progress", "waiting", "resolved", "closed")
+# Потолок вложений реплики. Файл едет в теле запроса, base64 прибавляет треть, и
+# без потолка первый же дамп базы, приложенный «чтобы вы посмотрели», кладёт
+# приёмник соседа. Скриншот и выгрузка в эти рамки укладываются.
+MAX_FILE_BYTES = 10 * 1024 * 1024
+MAX_FILES = 5
 # Где у партнёра лежит его публичный ключ и куда приходит гость. Пути те же, что у
 # нас: оба конца — одно Ядро.
 JWKS_PATH = "/api/sso/jwks.json"
@@ -139,6 +148,9 @@ async def topics(
         .limit(limit)
     )
     return [{
+        # Идентификатор нужен ссылке предмета (`partner_topic:<id>`): код темы
+        # общий с соседом, а ссылка внутри нашего пространства ведёт по id.
+        "id": str(t.id),
         "code": t.code,
         "title": t.title,
         "state": t.state,
@@ -235,10 +247,42 @@ async def record_incoming(
         external_id=external_id,
     )
     db.add(row)
+    await db.flush()
+    await _accept_files(db, company_id, row, payload.get("files") or [])
     partner.last_seen_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(row)
     return row, True
+
+
+async def _accept_files(
+    db: AsyncSession, company_id: uuid.UUID, message: PartnerMessage,
+    files: list[dict[str, Any]],
+) -> None:
+    """Принять вложения реплики: своя копия в своём хранилище.
+
+    Битую строку base64 пропускаем молча, но реплику принимаем: текст важнее
+    картинки, и отказать в приёме сообщения из-за одного испорченного файла
+    значит потерять само обращение.
+    """
+    for item in files[:MAX_FILES]:
+        raw = str(item.get("contentBase64") or "")
+        if not raw:
+            continue
+        try:
+            data = base64.b64decode(raw, validate=True)
+        except (ValueError, TypeError):
+            continue
+        if not data or len(data) > MAX_FILE_BYTES:
+            continue
+        stored = file_store.put(
+            db, company_id, data,
+            file_name=str(item.get("name") or "файл")[:500],
+            mime=str(item.get("mime") or "application/octet-stream")[:100])
+        await db.flush()
+        db.add(PartnerAttachment(
+            company_id=company_id, message_id=message.id, file_id=stored.id,
+            external_id=str(item.get("id") or "")[:120] or None))
 
 
 async def send(
@@ -247,6 +291,7 @@ async def send(
     author_email: str | None = None, author_name: str | None = None,
     subject_kind: str | None = None, subject_ref: str | None = None,
     external_id: str | None = None, topic: PartnerTopic | None = None,
+    files: list[dict[str, Any]] | None = None,
 ) -> PartnerMessage:
     """Отправить сообщение партнёру и записать его у себя.
 
@@ -302,6 +347,8 @@ async def send(
         # сообщением, которое доехало первым, — безымянным ему быть нельзя.
         payload |= {"topic": topic.code, "topicTitle": topic.title,
                     "subjectLabel": topic.subject_label}
+    if files:
+        payload["files"] = files
     try:
         async with httpx.AsyncClient(timeout=DELIVERY_TIMEOUT) as client:
             resp = await client.post(url, json=payload, headers={
@@ -345,8 +392,19 @@ async def feed(
     res = await db.execute(stmt.order_by(PartnerMessage.created_at.desc()).limit(limit))
     rows = list(res.scalars().all())
     rows.reverse()
+    attachments: dict[uuid.UUID, list[dict[str, Any]]] = {}
+    if rows:
+        att = await db.execute(
+            select(PartnerAttachment, SourceFile)
+            .join(SourceFile, SourceFile.id == PartnerAttachment.file_id)
+            .where(PartnerAttachment.message_id.in_([r.id for r in rows])))
+        for link, stored in att.all():
+            attachments.setdefault(link.message_id, []).append({
+                "id": str(link.id), "name": stored.file_name, "size": stored.size,
+            })
     return [{
         "id": str(r.id),
+        "files": attachments.get(r.id, []),
         "direction": r.direction,
         "body": r.body,
         "authorName": r.author_name,

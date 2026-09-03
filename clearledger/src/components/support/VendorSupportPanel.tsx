@@ -18,15 +18,20 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowLeft, Loader2, LifeBuoy, Plus, Send } from 'lucide-react'
+import {
+  AlertTriangle, ArrowLeft, Loader2, LifeBuoy, Paperclip, Plus, Send,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { formatDateTime } from '@/lib/formatDate'
 import {
-  listTopics, openTopic, partnerFeed, sendToTopic, topicFeed,
-  TOPIC_STATE_NAME, type PartnerMessage, type PartnerSpaceRef, type TopicState,
+  attachToTopic, listTopics, openTopic, partnerFeed, partnerFileUrl, sendToTopic,
+  topicFeed, TOPIC_STATE_NAME,
+  type PartnerMessage, type PartnerSpaceRef, type TopicState,
 } from '@/services/partnerSpaceService'
+import { openAuthAttachment } from '@/lib/authFiles'
+import type { AskSubject } from './AskSupportButton'
 
 /** Ответ приходит мостом, а не веб-сокетом: опрос — честная цена за то, что у
  *  поддержки и у клиента разные контейнеры и общей шины между ними нет. */
@@ -68,8 +73,8 @@ function Header({ back, title, hint }: {
   )
 }
 
-function Feed({ messages, vendor, loading }: {
-  messages: PartnerMessage[]; vendor: PartnerSpaceRef; loading: boolean
+function Feed({ messages, vendor, loading, companyId }: {
+  messages: PartnerMessage[]; vendor: PartnerSpaceRef; loading: boolean; companyId: string
 }) {
   const bottom = useRef<HTMLDivElement>(null)
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }) }, [messages.length])
@@ -96,6 +101,16 @@ function Feed({ messages, vendor, loading }: {
               {m.createdAt && <span>{formatDateTime(m.createdAt)}</span>}
             </div>
             <div className="whitespace-pre-wrap break-words text-foreground">{m.body}</div>
+            {/* Файл забирает браузер по адресу с сессией: держать копию в памяти
+                вкладки незачем, а «скачать» должно работать и для большого. */}
+            {(m.files || []).map((f) => (
+              <button key={f.id} type="button"
+                className="mt-1 flex items-center gap-1 text-xs text-primary hover:underline"
+                onClick={() => openAuthAttachment(partnerFileUrl(f.id, companyId))}>
+                <Paperclip className="h-3 w-3" />
+                {f.name} · {Math.max(1, Math.round(f.size / 1024))} КБ
+              </button>
+            ))}
             {/* Не дошедшее видно сразу: реплика осталась у нас, и человек должен
                 знать это, а не думать, что поддержка молчит. */}
             {m.direction === 'out' && !m.delivered && (
@@ -112,10 +127,14 @@ function Feed({ messages, vendor, loading }: {
   )
 }
 
-function Composer({ onSend, pending, error, placeholder }: {
-  onSend: (text: string) => void; pending: boolean; error?: string; placeholder: string
+function Composer({ onSend, onAttach, attaching, pending, error, placeholder }: {
+  onSend: (text: string) => void
+  onAttach?: (file: File, note: string) => void
+  attaching?: boolean
+  pending: boolean; error?: string; placeholder: string
 }) {
   const [text, setText] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
   const submit = () => { const t = text.trim(); if (t) { onSend(t); setText('') } }
   return (
     <div className="border-t border-border/60 p-3">
@@ -131,6 +150,23 @@ function Composer({ onSend, pending, error, placeholder }: {
       />
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-[11px] text-muted-foreground">Ctrl + Enter — отправить</span>
+        {onAttach && (
+          <>
+            <input ref={fileRef} type="file" className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) { onAttach(f, text.trim()); setText('') }
+                e.target.value = ''
+              }} />
+            <Button size="sm" variant="ghost" className="ml-auto gap-1.5"
+              disabled={attaching} onClick={() => fileRef.current?.click()}
+              title="Приложить файл — уйдёт вместе с репликой">
+              {attaching ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Paperclip className="h-4 w-4" />}
+              Файл
+            </Button>
+          </>
+        )}
         <Button size="sm" className="gap-2" disabled={!text.trim() || pending} onClick={submit}>
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Отправить
@@ -151,12 +187,18 @@ function TopicView({ vendor, companyId, topicCode, back }: {
     queryFn: () => topicFeed(vendor.code, topicCode, companyId),
     refetchInterval: POLL_MS,
   })
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['partner-topic', vendor.code, topicCode, companyId] })
+    qc.invalidateQueries({ queryKey: ['partner-topics', vendor.code, companyId] })
+  }
   const send = useMutation({
     mutationFn: (body: string) => sendToTopic(vendor.code, topicCode, companyId, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['partner-topic', vendor.code, topicCode, companyId] })
-      qc.invalidateQueries({ queryKey: ['partner-topics', vendor.code, companyId] })
-    },
+    onSuccess: refresh,
+  })
+  const attach = useMutation({
+    mutationFn: (v: { file: File; note: string }) =>
+      attachToTopic(vendor.code, topicCode, companyId, v.file, v.note),
+    onSuccess: refresh,
   })
   const topic = feed.data?.topic
 
@@ -171,10 +213,15 @@ function TopicView({ vendor, companyId, topicCode, back }: {
           topic?.subjectLabel,
         ].filter(Boolean).join(' · ') || vendor.name}
       />
-      <Feed messages={feed.data?.messages || []} vendor={vendor} loading={feed.isLoading} />
+      <Feed messages={feed.data?.messages || []} vendor={vendor} loading={feed.isLoading}
+        companyId={companyId} />
       <Composer
         onSend={(t) => send.mutate(t)} pending={send.isPending}
-        error={send.isError ? ((send.error as Error).message || 'Не удалось отправить') : undefined}
+        onAttach={(file, note) => attach.mutate({ file, note })}
+        attaching={attach.isPending}
+        error={send.isError || attach.isError
+          ? (((send.error || attach.error) as Error)?.message || 'Не удалось отправить')
+          : undefined}
         placeholder="Дополнить обращение"
       />
     </div>
@@ -195,20 +242,29 @@ function GeneralView({ vendor, companyId, back }: {
     <div className="flex h-full min-h-0 flex-col">
       <Header back={back} title="Прежняя переписка"
         hint="История до появления обращений — только для чтения" />
-      <Feed messages={feed.data?.messages || []} vendor={vendor} loading={feed.isLoading} />
+      <Feed messages={feed.data?.messages || []} vendor={vendor} loading={feed.isLoading}
+        companyId={companyId} />
     </div>
   )
 }
 
-/** Новое обращение: тема отдельно от текста — по ней его различают обе стороны. */
-function NewTopicForm({ vendor, companyId, done }: {
-  vendor: PartnerSpaceRef; companyId: string; done: (code: string) => void
+/** Новое обращение: тема отдельно от текста — по ней его различают обе стороны.
+ *
+ *  Предмет приходит из карточки, откуда нажали «Спросить поддержку»: он и даёт
+ *  теме первое название — переписывать его человек может, но с пустого места
+ *  начинать не должен. */
+function NewTopicForm({ vendor, companyId, subject, done }: {
+  vendor: PartnerSpaceRef; companyId: string; subject?: AskSubject | null
+  done: (code: string) => void
 }) {
   const qc = useQueryClient()
-  const [title, setTitle] = useState('')
+  const [title, setTitle] = useState(subject?.label || '')
   const [body, setBody] = useState('')
   const open = useMutation({
-    mutationFn: () => openTopic(vendor.code, companyId, { title: title.trim(), body: body.trim() }),
+    mutationFn: () => openTopic(vendor.code, companyId, {
+      title: title.trim(), body: body.trim(),
+      subject_kind: subject?.kind, subject_ref: subject?.ref, subject_label: subject?.label,
+    }),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['partner-topics', vendor.code, companyId] })
       done(res.code)
@@ -217,7 +273,7 @@ function NewTopicForm({ vendor, companyId, done }: {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header back={() => done('')} title="Новое обращение"
-        hint={`Уйдёт в ${vendor.name}`} />
+        hint={subject ? `${subject.label} · уйдёт в ${vendor.name}` : `Уйдёт в ${vendor.name}`} />
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">Тема</label>
@@ -245,9 +301,15 @@ function NewTopicForm({ vendor, companyId, done }: {
   )
 }
 
-export function VendorSupportPanel({ vendor, companyId }: { vendor: PartnerSpaceRef; companyId: string }) {
+export function VendorSupportPanel({ vendor, companyId, subject, openTopicCode }: {
+  vendor: PartnerSpaceRef; companyId: string; subject?: AskSubject | null
+  openTopicCode?: string | null
+}) {
   // '' — список, 'general' — прежняя переписка, 'new' — форма, иначе код обращения.
-  const [view, setView] = useState('')
+  // Пришли из карточки с предметом — сразу форма: человек нажал «спросить», а не
+  // «покажи мои обращения», и лишний шаг здесь читается как «кнопка не сработала».
+  // Попросили открыть конкретное обращение — открываем его.
+  const [view, setView] = useState(openTopicCode || (subject ? 'new' : ''))
 
   const topics = useQuery({
     queryKey: ['partner-topics', vendor.code, companyId],
@@ -256,7 +318,8 @@ export function VendorSupportPanel({ vendor, companyId }: { vendor: PartnerSpace
   })
 
   if (view === 'new') {
-    return <NewTopicForm vendor={vendor} companyId={companyId} done={(code) => setView(code)} />
+    return <NewTopicForm vendor={vendor} companyId={companyId} subject={subject}
+      done={(code) => setView(code)} />
   }
   if (view === 'general') {
     return <GeneralView vendor={vendor} companyId={companyId} back={() => setView('')} />

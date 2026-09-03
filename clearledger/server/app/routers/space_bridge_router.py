@@ -17,12 +17,17 @@
 """
 from __future__ import annotations
 
+import base64
 import json
 import secrets
 import uuid
+from urllib.parse import quote
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import (
+    APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile,
+)
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,9 +39,10 @@ from app.auth import (
 )
 from app.database import get_db
 from app.models import (
-    Company, PartnerMessage, PartnerSpace, PartnerTopic, User, UserCompany,
+    Company, PartnerAttachment, PartnerMessage, PartnerSpace, PartnerTopic,
+    SourceFile, Task, TaskEvent, User, UserCompany,
 )
-from app.services import partner_bridge, sso, support_mirror
+from app.services import file_store, partner_bridge, sso, support_mirror
 
 router = APIRouter(tags=["Пространства-партнёры"])
 
@@ -131,7 +137,29 @@ async def accept_partner_message(
     # это обращение, и оно должно встать в очередь оператора рядом со звонками.
     if is_new and partner.role == "client":
         await support_mirror.mirror_incoming(db, company.id, partner, row)
+    if is_new and row.topic_id is not None:
+        await _return_ball(db, company.id, row.topic_id)
     return {"status": "accepted" if is_new else "duplicate", "id": str(row.id)}
+
+
+async def _return_ball(db: AsyncSession, company_id: uuid.UUID, topic_id: uuid.UUID) -> None:
+    """Ответила та сторона — мяч возвращается нам.
+
+    Задача, поставленная по обращению, ждала внешних (`waiting_for`), и пока мяч
+    там, она не попадает в «На мне». Ответ пришёл — значит ждать больше нечего, и
+    исполнитель должен увидеть работу у себя, а не искать её в «Ждём внешних».
+    Событие в ленте задачи обязательно: иначе непонятно, отчего она вернулась.
+    """
+    rows = (await db.execute(select(Task).where(
+        Task.company_id == company_id,
+        Task.subject_ref == f"partner_topic:{topic_id}",
+        Task.waiting_for == "external"))).scalars().all()
+    for task in rows:
+        task.waiting_for = None
+        db.add(TaskEvent(task_id=task.id, kind="external_stage", user_id=None,
+                         actor_name="Обращение", to_value="ответ получен"))
+    if rows:
+        await db.commit()
 
 
 @router.post("/eco/partner/topic-state")
@@ -218,6 +246,13 @@ async def support_reply(
     return {"status": "state", "state": topic.state}
 
 
+def _uuid_or_400(value: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Неверный идентификатор")
+
+
 async def _partner_for_user(
     db: AsyncSession, company_id: str, code: str, user: User,
 ) -> tuple[uuid.UUID, PartnerSpace]:
@@ -266,6 +301,37 @@ async def partner_feed(
         "partner": _partner_view(partner),
         "messages": await partner_bridge.feed(db, cid, partner),
     }
+
+
+@router.get("/partner-space/subject-topics")
+async def subject_topics(
+    kind: str = Query(...),
+    ref: str = Query(...),
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Что уже спрашивали по этому предмету — во всех соседних пространствах.
+
+    Карточка должна показывать это рядом с кнопкой «Спросить поддержку»: иначе
+    один и тот же документ уезжает третьим обращением, а первые два висят
+    открытыми у оператора.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    res = await db.execute(
+        select(PartnerTopic, PartnerSpace.code, PartnerSpace.name)
+        .join(PartnerSpace, PartnerSpace.id == PartnerTopic.partner_id)
+        .where(PartnerTopic.company_id == cid,
+               PartnerTopic.subject_kind == kind, PartnerTopic.subject_ref == ref)
+        .order_by(PartnerTopic.last_message_at.desc().nullslast())
+        .limit(20))
+    return {"items": [{
+        "code": topic.code, "title": topic.title, "state": topic.state,
+        "number": topic.external_number,
+        "partnerCode": partner_code, "partnerName": partner_name or partner_code,
+        "lastMessageAt": (topic.last_message_at.isoformat()
+                          if topic.last_message_at else None),
+    } for topic, partner_code, partner_name in res.all()]}
 
 
 @router.get("/partner-space/{code}/topics")
@@ -408,6 +474,73 @@ async def partner_send(
         # осталось у нас, а не думать, что оно ушло.
         "error": row.delivery_error,
     }
+
+
+@router.post("/partner-space/{code}/topics/{topic_code}/attach")
+async def partner_topic_attach(
+    code: str,
+    topic_code: str,
+    company_id: str = Query(...),
+    note: str = Query(""),
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Приложить файл к обращению: скриншот, выгрузка, акт.
+
+    Файл уезжает целиком, а не ссылкой: ссылка в чужое пространство не откроется,
+    и «доступ по ссылке» был бы дыркой в изоляции. Реплика создаётся всегда —
+    вложение без строки в ленте выглядит как пропавшее сообщение.
+    """
+    cid, partner, topic = await _topic_for_user(db, company_id, code, topic_code, user)
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Пустой файл")
+    if len(content) > partner_bridge.MAX_FILE_BYTES:
+        raise HTTPException(413, "Файл больше 10 МБ — так мост не возит")
+
+    stored = file_store.put(db, cid, content,
+                            file_name=file.filename or "файл",
+                            mime=file.content_type or "application/octet-stream")
+    await db.flush()
+    self_code = (await db.execute(select(Company.slug).where(Company.id == cid))).scalar_one()
+    row = await partner_bridge.send(
+        db, cid, partner, self_code=self_code,
+        body=(note.strip() or f"Файл: {stored.file_name}"),
+        author_email=user.email, author_name=user.name or user.email, topic=topic,
+        files=[{
+            "id": str(stored.id), "name": stored.file_name, "mime": stored.mime_type,
+            "contentBase64": base64.b64encode(content).decode(),
+        }])
+    db.add(PartnerAttachment(company_id=cid, message_id=row.id, file_id=stored.id,
+                             external_id=str(stored.id)))
+    await db.commit()
+    return {"id": str(row.id), "name": stored.file_name, "size": stored.size,
+            "delivered": row.delivered_at is not None, "error": row.delivery_error}
+
+
+@router.get("/partner-space/attachments/{attachment_id}")
+async def partner_attachment(
+    attachment_id: str,
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отдать вложение реплики. Только своей компании: файл пришёл в её разговор."""
+    cid = await assert_company_member(company_id, user, db)
+    link = await db.get(PartnerAttachment, _uuid_or_400(attachment_id))
+    if link is None or link.company_id != cid:
+        raise HTTPException(404, "Вложение не найдено")
+    stored = await db.get(SourceFile, link.file_id)
+    if stored is None:
+        raise HTTPException(404, "Файл не найден")
+    try:
+        data = file_store.read(stored)
+    except OSError:
+        raise HTTPException(410, "Файл больше не хранится")
+    return Response(content=data, media_type=stored.mime_type or "application/octet-stream",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="{quote(stored.file_name)}"'})
 
 
 @router.post("/partner-space/{code}/visit")

@@ -30,6 +30,7 @@ import { openAuthAttachment } from '@/lib/authFiles'
 import { cn } from '@/lib/utils'
 import * as tasksService from '@/services/tasksService'
 import { WorkIdentity } from '@/components/work/WorkIdentity'
+import { AskSupportButton } from '@/components/support/AskSupportButton'
 import * as docsService from '@/services/docsService'
 import { WorkTrace } from '@/components/work/WorkTrace'
 import { SubjectMeetings } from '@/components/calendar/SubjectMeetings'
@@ -303,6 +304,13 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
         <Description task={t} disabled={!live || act.isPending}
           onSave={(description) => act.mutate({ companyId, description })} />
 
+        {/* Работа выросла из обращения клиента — вопрос ему уходит туда же, где
+            идёт разговор, а не отдельным письмом (docs/BRIDGE.md §4.4). */}
+        {t.subject_ref?.startsWith('partner_topic:') && (
+          <AskClient taskId={t.id} companyId={companyId} live={live}
+            waiting={t.waiting_for === 'external'} onChanged={reload} />
+        )}
+
         <Checklist task={t} companyId={companyId} live={live} onChanged={reload} />
           </TabsContent>
           <TabsContent value="attrs" className="space-y-5 pt-4 xl:hidden">
@@ -529,6 +537,14 @@ function Header({ task, companyId, onRename, onBack }: {
             {l.name}
           </span>
         ))}
+        {/* Работа встала из-за программы — вопрос уходит поставщику отсюда, с
+            номером задачи предметом обращения (docs/BRIDGE.md §4.2). */}
+        <span className="ml-auto">
+          <AskSupportButton variant="ghost" subject={{
+            kind: 'task', ref: String(task.id),
+            label: `${tasksService.taskKey(task)} · ${task.title}`,
+          }} />
+        </span>
       </div>
       {editing ? (
         <div className="mt-1 flex gap-2">
@@ -1601,6 +1617,45 @@ export default TaskCard
  * договора и не поймёт, о какой площадке речь. Пока имя не пришло, не рисуем
  * ничего: мигающий машинный ключ хуже пустоты.
  */
+/** Вопрос клиенту по обращению: реплика в его пространство и мяч наружу.
+ *
+ *  Ответ вернёт мяч сам — приёмник моста снимает ожидание и пишет событие, —
+ *  поэтому кнопки «мяч обратно» здесь нет: она позволяла бы соврать про ответ,
+ *  которого не было. */
+function AskClient({ taskId, companyId, live, waiting, onChanged }: {
+  taskId: string; companyId: string; live: boolean; waiting: boolean; onChanged: () => void
+}) {
+  const [text, setText] = useState('')
+  const ask = useMutation({
+    mutationFn: () => tasksService.askPartner(taskId, companyId, text.trim()),
+    onSuccess: (res) => {
+      setText('')
+      if (res.error) toast.warning(`Вопрос записан, но не доставлен: ${res.error}`)
+      else toast.success('Вопрос ушёл клиенту, ждём ответа')
+      onChanged()
+    },
+    onError: (e: Error) => toast.error(e.message || 'Не удалось отправить'),
+  })
+  return (
+    <Section title="Вопрос клиенту">
+      {waiting && (
+        <div className="mb-2 text-xs text-amber-600 dark:text-amber-400">
+          Ждём ответа клиента — задача вернётся в «На мне», когда он ответит.
+        </div>
+      )}
+      <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={3}
+        disabled={!live || ask.isPending} className="resize-none text-sm"
+        placeholder="Что уточнить у клиента? Уйдёт в его обращение." />
+      <div className="mt-2 flex justify-end">
+        <Button size="sm" disabled={!live || !text.trim() || ask.isPending}
+          onClick={() => ask.mutate()}>
+          {ask.isPending ? 'Отправляю…' : 'Спросить клиента'}
+        </Button>
+      </div>
+    </Section>
+  )
+}
+
 function SubjectLink({ companyId, refKey }: { companyId: string; refKey: string }) {
   const q = useQuery({
     queryKey: ['ref', companyId, refKey],

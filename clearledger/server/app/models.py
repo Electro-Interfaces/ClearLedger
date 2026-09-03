@@ -12840,6 +12840,35 @@ class PartnerSpace(Base):
     )
 
 
+class PartnerAttachment(Base):
+    """Файл при реплике моста: скриншот, выгрузка, акт (docs/BRIDGE.md, волна В4).
+
+    Файл едет ЦЕЛИКОМ, а не ссылкой: ссылка в чужое пространство не откроется —
+    там другая учётная запись и другой домен, а «доступ по ссылке» означал бы
+    дырку в изоляции. Поэтому у каждой стороны своя копия в своём хранилище
+    (`source_files` + `UPLOAD_DIR`), как у вложений задач.
+
+    `external_id` — идентификатор файла у отправителя: повторная доставка реплики
+    не должна класть тот же скриншот вторым файлом.
+    """
+    __tablename__ = "eco_partner_attachments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eco_partner_messages.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="CASCADE"),
+        nullable=False)
+    external_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
 class PartnerTopic(Base):
     """Обращение — тема разговора двух пространств (docs/BRIDGE.md §4.1).
 

@@ -35,15 +35,16 @@ from app.auth import assert_company_product, get_company_by_api_key, get_current
 from app.database import get_db
 from app.services.service_accounts import not_service
 from app.models import (
-    Company, ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
+    Company, PartnerSpace, PartnerTopic,
+    ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
     TaskEvent, TaskExternalRef, TaskLabel, TaskLabelLink, TaskLink, TaskParticipant,
     TaskCodeRef, TaskProject, TaskRecurrence, TaskSprint, TaskTemplate, TaskType,
     TaskVersion, TaskView, TaskWatcher, TaskWorkItem,
     User, UserCompany,
 )
 from app.services import (
-    placement, process_templates, space_connectors, task_mail, task_scheduler,
-    work_query, work_state,
+    partner_bridge, placement, process_templates, space_connectors, task_mail,
+    task_scheduler, work_query, work_state,
 )
 
 router = APIRouter(prefix="/tasks", tags=["Задачи"])
@@ -3627,6 +3628,62 @@ async def delegate_task(
         due=t.due_at.strftime("%d.%m.%Y") if t.due_at else None)
     return {"ok": True, "user_id": str(person.id), "email": email,
             "reply_address": task_mail.reply_address(t.number)}
+
+
+class AskPartnerIn(BaseModel):
+    company_id: str
+    body: str = Field(..., min_length=1, max_length=4000)
+
+
+@router.post("/{task_id}/ask-partner")
+async def ask_partner(
+    task_id: str,
+    payload: AskPartnerIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Спросить клиента по обращению, из которого выросла эта задача.
+
+    Задача наша, исполнитель наш, и заводить клиенту доступ в наш реестр нельзя —
+    там работа по другим клиентам. Но когда исполнителю нужен ответ, спрашивать
+    его новым письмом «в никуда» тоже нельзя: разговор уже идёт в обращении, и
+    вопрос обязан прийти туда же (docs/BRIDGE.md §4.4).
+
+    Мяч переходит внешней стороне: задача не висит «на мне», пока ждём ответа.
+    Ответ клиента вернёт мяч сам — приёмник моста снимает `waiting_for` и пишет
+    событие в ленту задачи.
+    """
+    cid = await _assert_work(payload.company_id, current_user, db)
+    t = await _task_or_404(db, cid, task_id)
+    await _assert_actor(db, cid, current_user, t)
+
+    ref = t.subject_ref or ""
+    if not ref.startswith("partner_topic:"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Задача не связана с обращением: спрашивать некого")
+    topic = await db.get(PartnerTopic, _uuid_or_400(ref.split(":", 1)[1], "обращение"))
+    if topic is None or topic.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Обращение не найдено")
+    partner = await db.get(PartnerSpace, topic.partner_id)
+    if partner is None or not partner.is_active:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Связь с пространством выключена")
+
+    self_code = (await db.execute(
+        select(Company.slug).where(Company.id == cid))).scalar_one()
+    row = await partner_bridge.send(
+        db, cid, partner, self_code=self_code, body=payload.body.strip(),
+        author_email=current_user.email, author_name=current_user.name or "Поддержка",
+        topic=topic)
+    # Ждём клиента — это состояние обращения, и оно должно быть видно ему, а не
+    # только нам: иначе человек считает, что мяч у поддержки.
+    topic.state = "waiting"
+    t.waiting_for = "external"
+    db.add(TaskEvent(task_id=t.id, kind="external_stage", user_id=current_user.id,
+                     to_value="вопрос клиенту", note=payload.body.strip()[:2000]))
+    await db.commit()
+    await partner_bridge.send_state(partner, self_code, topic)
+    return {"ok": True, "delivered": row.delivered_at is not None,
+            "error": row.delivery_error}
 
 
 @router.delete("/{task_id}/participants/{user_id}")

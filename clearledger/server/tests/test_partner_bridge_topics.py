@@ -15,13 +15,14 @@
 
 Запуск: cd server && py -3 -m pytest tests/test_partner_bridge_topics.py -v
 """
+import base64
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Company, PartnerSpace
+from app.models import Company, PartnerAttachment, PartnerSpace
 from app.services import partner_bridge
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -105,3 +106,29 @@ async def test_лента_обращения_не_показывает_чужи�
     assert [m["body"] for m in лента] == ["Касса не печатает чек", "Ещё раз про кассу"]
     # Без темы — вся переписка с пространством: так читают историю.
     assert len(await partner_bridge.feed(db, cid, partner)) == 3
+
+
+async def test_негодное_вложение_не_роняет_приём_сообщения(db: AsyncSession):
+    """Текст важнее картинки.
+
+    Отказать в приёме обращения из-за испорченного вложения значит потерять само
+    обращение: отправитель получит ошибку и будет считать, что мы не ответили, —
+    хотя ответить нам просто не на что.
+    """
+    cid, partner = await _партнёр(db)
+    код = uuid.uuid4().hex
+    row, новое = await partner_bridge.record_incoming(db, cid, partner, {
+        "id": uuid.uuid4().hex, "body": "Скриншот ошибки", "topic": код,
+        "topicTitle": "Касса",
+        "files": [
+            {"id": "1", "name": "screen.png", "contentBase64": "не base64 вовсе"},
+            # Больше потолка: base64 честный, но такой файл мост не возит.
+            {"id": "2", "name": "dump.sql",
+             "contentBase64": base64.b64encode(b"x" * (partner_bridge.MAX_FILE_BYTES + 1)).decode()},
+        ],
+    })
+    assert новое is True
+    assert row.body == "Скриншот ошибки"
+    сколько = await db.scalar(select(func.count()).select_from(PartnerAttachment).where(
+        PartnerAttachment.message_id == row.id))
+    assert сколько == 0

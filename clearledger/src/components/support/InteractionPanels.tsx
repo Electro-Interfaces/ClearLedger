@@ -12,6 +12,7 @@ import { ECOSYSTEM_TITLE } from '@/config/brand'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { listPartnerSpaces } from '@/services/partnerSpaceService'
+import { parseAskContext, parseTopicContext } from './AskSupportButton'
 import { VendorSupportPanel } from './VendorSupportPanel'
 
 export function ContactList() {
@@ -49,7 +50,7 @@ export function ContactList() {
  * запасным выходом: он работает и тогда, когда сломалось само пространство.
  */
 export function TicketsPanel() {
-  const { openInteraction } = useSupportContext()
+  const { openInteraction, interactionContext } = useSupportContext()
   const { companyId } = useCompany()
   // Кто нас обслуживает: запись роли `vendor` в реестре партнёров. Её нет —
   // пространство ещё ни с кем не связано, и разговаривать мосту не с кем.
@@ -60,7 +61,16 @@ export function TicketsPanel() {
     staleTime: 5 * 60_000,
   })
   const vendor = spaces.data?.items.find((p) => p.role === 'vendor' && p.isActive && p.linked)
-  if (vendor) return <VendorSupportPanel vendor={vendor} companyId={companyId} />
+  // Панель могли открыть из карточки кнопкой «Спросить поддержку» — тогда в
+  // контексте вызова лежит предмет, и обращение начинается с него.
+  if (vendor) {
+    // Из карточки могли попросить не новое обращение, а открыть уже заведённое —
+    // тогда в контексте лежит его код.
+    const opened = parseTopicContext(interactionContext)
+    return <VendorSupportPanel vendor={vendor} companyId={companyId}
+      subject={parseAskContext(interactionContext)}
+      openTopicCode={opened?.partner === vendor.code ? opened.topic : null} />
+  }
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">

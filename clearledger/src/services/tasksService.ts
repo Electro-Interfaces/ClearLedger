@@ -824,6 +824,16 @@ export async function delegateByMail(taskId: string, data: {
     })
 }
 
+/** Спросить клиента по обращению, из которого выросла задача (docs/BRIDGE.md §4.4).
+ *
+ *  Вопрос уходит в то же обращение, где идёт разговор, а не отдельным письмом:
+ *  человек по ту сторону не должен искать, куда отвечать. Мяч переходит наружу,
+ *  ответ вернёт его сам. */
+export async function askPartner(taskId: string, companyId: string, body: string) {
+  return post<{ ok: boolean; delivered: boolean; error: string | null }>(
+    `/api/tasks/${taskId}/ask-partner`, { company_id: companyId, body })
+}
+
 export async function removeParticipant(taskId: string, userId: string, companyId: string) {
   return del<{ deleted: string; participants_left: number }>(
     `/api/tasks/${taskId}/participants/${userId}?company_id=${encodeURIComponent(companyId)}`)

@@ -7,6 +7,7 @@
  * 4 группах (Объект · Подключение · Сервис · Коммерция), контент адаптивен по типу.
  */
 import { useEffect, useState, type ReactNode } from 'react'
+import { AskSupportButton } from '@/components/support/AskSupportButton'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import { Tabs as TabsPrimitive } from 'radix-ui'
@@ -121,9 +122,18 @@ export function LocationCockpitModal({
                 {OP_META[curOp]?.label ?? curOp}
               </Badge>
             </DialogPrimitive.Title>
+            {/* Вопрос по объекту — поставщику программы, отсюда же: предметом
+                уезжает номер и название, данные объекта остаются здесь
+                (docs/BRIDGE.md §4.2). */}
+            <span className="ml-auto shrink-0">
+              <AskSupportButton variant="ghost" subject={{
+                kind: 'object', ref: String(location.id),
+                label: `${location.name} · ${String(meta.number ?? location.code)}`,
+              }} />
+            </span>
             <DialogPrimitive.Close
               aria-label="Закрыть окно станции"
-              className="ml-auto shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <X className="h-4 w-4" />
             </DialogPrimitive.Close>

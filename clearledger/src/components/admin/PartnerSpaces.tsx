@@ -11,15 +11,22 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ExternalLink, Loader2, MessagesSquare, Network, ShieldCheck } from 'lucide-react'
+import {
+  ExternalLink, ListChecks, Loader2, MessagesSquare, Network, ShieldCheck,
+} from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useCompany } from '@/contexts/CompanyContext'
 import { formatDateTime } from '@/lib/formatDate'
-import { listPartnerSpaces, partnerFeed, visitPartnerSpace } from '@/services/partnerSpaceService'
+import {
+  listPartnerSpaces, listTopics, partnerFeed, TOPIC_STATE_NAME, visitPartnerSpace,
+} from '@/services/partnerSpaceService'
+import * as tasksService from '@/services/tasksService'
 
 export function PartnerSpaces() {
   const { companyId } = useCompany()
   const [openFeed, setOpenFeed] = useState<string | null>(null)
+  const [openTopics, setOpenTopics] = useState<string | null>(null)
 
   const spaces = useQuery({
     queryKey: ['partner-spaces', companyId],
@@ -30,6 +37,21 @@ export function PartnerSpaces() {
     queryKey: ['partner-feed', openFeed, companyId],
     queryFn: () => partnerFeed(openFeed!, companyId),
     enabled: !!openFeed && !!companyId,
+  })
+  const topics = useQuery({
+    queryKey: ['partner-topics', openTopics, companyId],
+    queryFn: () => listTopics(openTopics!, companyId),
+    enabled: !!openTopics && !!companyId,
+  })
+  // Задача по обращению — наша работа, но со ссылкой на разговор: из неё
+  // исполнитель спрашивает клиента, не выходя из задачи (docs/BRIDGE.md §4.4).
+  const makeTask = useMutation({
+    mutationFn: (t: { id: string; title: string }) => tasksService.createTask({
+      companyId, title: t.title.slice(0, 300),
+      subjectRef: `partner_topic:${t.id}`,
+    }),
+    onSuccess: (task) => toast.success(`Задача №${task.number} поставлена`),
+    onError: (e: Error) => toast.error(e.message || 'Задача не поставлена'),
   })
   const visit = useMutation({
     mutationFn: (code: string) => visitPartnerSpace(code, companyId),
@@ -80,6 +102,10 @@ export function PartnerSpaces() {
             )}
             <div className="ml-auto flex gap-2">
               <Button size="sm" variant="outline" className="gap-1.5"
+                onClick={() => setOpenTopics(openTopics === p.code ? null : p.code)}>
+                <ListChecks className="h-4 w-4" />Обращения
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1.5"
                 onClick={() => setOpenFeed(openFeed === p.code ? null : p.code)}>
                 <MessagesSquare className="h-4 w-4" />Переписка
               </Button>
@@ -95,6 +121,35 @@ export function PartnerSpaces() {
               )}
             </div>
           </div>
+
+          {openTopics === p.code && (
+            <div className="mt-3 space-y-1.5 border-t border-border/60 pt-3">
+              {topics.isLoading ? (
+                <div className="text-xs text-muted-foreground">Читаю обращения…</div>
+              ) : topics.data?.items.length ? topics.data.items.map((t) => (
+                <div key={t.code} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                  <span className="text-foreground">{t.title}</span>
+                  <span className="rounded bg-secondary px-1.5 py-0.5 text-xs text-muted-foreground">
+                    {TOPIC_STATE_NAME[t.state]}
+                  </span>
+                  {t.number && <span className="text-xs text-muted-foreground">№ {t.number}</span>}
+                  {t.subjectLabel && (
+                    <span className="text-xs text-muted-foreground">· {t.subjectLabel}</span>
+                  )}
+                  {t.lastMessageAt && (
+                    <span className="text-xs text-muted-foreground">
+                      · {formatDateTime(t.lastMessageAt)}
+                    </span>
+                  )}
+                  <Button size="sm" variant="ghost" className="ml-auto h-7 px-2 text-xs"
+                    disabled={makeTask.isPending}
+                    onClick={() => makeTask.mutate({ id: t.id, title: t.title })}>
+                    Поставить задачу
+                  </Button>
+                </div>
+              )) : <div className="text-xs text-muted-foreground">Обращений ещё не было.</div>}
+            </div>
+          )}
 
           {openFeed === p.code && (
             <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
