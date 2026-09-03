@@ -187,7 +187,12 @@ async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) 
     # Контур — та же изоляция, что между организациями, только внутри одной: членство
     # в комнате вне своего приложения ничего не открывает. Проверка здесь, а не в
     # каждой ручке: через эту функцию идут и чтение ленты, и отправка, и вложения.
-    if room.company_id is not None and room.type != "direct":
+    # Комнаты предмета (заявка, задача) контуром не режутся: в список пространства
+    # они не попадают вовсе (см. `list_rooms`), открываются только из карточки, и
+    # границу им держит участие плюс проверка причастности при заведении. Иначе
+    # оператор контакт-центра получал 404 на обсуждение СВОЕЙ заявки — комнату
+    # заводят без продукта, и контур не совпадал никогда.
+    if room.company_id is not None and room.type != "direct"             and room.scope_ticket_id is None and room.scope_task_id is None:
         scope = await _chat_scope(user, room.company_id, db)
         if scope and room.scope_product != scope:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
@@ -2966,12 +2971,13 @@ async def _ws_can_subscribe(user: User, channel: str, db: AsyncSession) -> bool:
         return cid in {str(c) for c in await _member_ids(user.id, db)} or str(user.company_id) == cid
     if channel.startswith("chat:"):
         rid = channel.split(":", 1)[1]
+        # Та же проверка, что у ручек чтения, а не «просто участник»: подписка отдаёт
+        # живой поток сообщений, и человеку вне своего контура он открывал комнату,
+        # которую ручка уже не показывает. Изоляция организаций тоже приезжает отсюда.
         try:
-            p = (await db.execute(select(ChatParticipant.id).where(
-                ChatParticipant.room_id == uuid.UUID(rid),
-                ChatParticipant.user_id == user.id))).scalar_one_or_none()
-            return p is not None
-        except (ValueError, TypeError):
+            await _assert_participant(uuid.UUID(rid), user, db)
+            return True
+        except (ValueError, TypeError, HTTPException):
             return False
     return False
 

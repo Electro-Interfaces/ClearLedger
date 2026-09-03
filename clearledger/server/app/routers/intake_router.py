@@ -17,7 +17,7 @@ from app.auth import assert_company_member, get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.deps import get_owned
-from app.models import ChatMessage, ChatParticipant, SourceFile, User
+from app.models import ChatMessage, SourceFile, User
 
 router = APIRouter(tags=["Intake / Файлы"])
 
@@ -131,12 +131,21 @@ async def download_file(
     if rows:
         # Пересланное сообщение копирует адрес файла в другую комнату — достаточно
         # одного живого сообщения в комнате, где человек состоит.
+        # Проверка комнаты — общая с ручками чата (`_assert_participant`): она же
+        # держит границу организации и контур роли. Своей копией условия файл
+        # отдавался человеку, которому саму переписку уже не показывают.
+        from app.routers.chat_router import _assert_participant
+
         live_rooms = {r for r, deleted in rows if deleted is None}
-        allowed = current_user.is_superadmin or bool(live_rooms and (await db.execute(
-            select(ChatParticipant.id).where(
-                ChatParticipant.user_id == current_user.id,
-                ChatParticipant.room_id.in_(live_rooms),
-            ).limit(1))).scalar_one_or_none())
+        allowed = current_user.is_superadmin
+        for rid in live_rooms:
+            if allowed:
+                break
+            try:
+                await _assert_participant(rid, current_user, db)
+                allowed = True
+            except HTTPException:
+                pass
         if not allowed:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
 
