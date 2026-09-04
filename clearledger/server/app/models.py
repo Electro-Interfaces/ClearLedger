@@ -12915,6 +12915,12 @@ class PartnerTopic(Base):
         DateTime(timezone=True), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # До какого момента про это обращение человеку уже сказал «Секретарь» и в
+    # каком состоянии оно тогда было. Без отметок сводка повторяла бы один и тот
+    # же повод каждое окно — а повторённое напоминание перестают читать.
+    notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    notified_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -91,6 +91,9 @@ STORE_RECEIPT_MIGRATION_DDL = (
     # остаться видимой (docs/BRIDGE.md §5).
     "ALTER TABLE eco_partner_messages ADD COLUMN IF NOT EXISTS topic_id UUID "
     "REFERENCES eco_partner_topics(id) ON DELETE CASCADE",
+    # Отметки «Секретаря» по обращению: create_all заводит только новые таблицы.
+    "ALTER TABLE eco_partner_topics ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ",
+    "ALTER TABLE eco_partner_topics ADD COLUMN IF NOT EXISTS notified_state VARCHAR(20)",
     "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS app_roles JSONB",
     "ALTER TABLE company_roles ADD COLUMN IF NOT EXISTS chat_scope VARCHAR(40)",
     "ALTER TABLE company_roles ADD COLUMN IF NOT EXISTS app_roles JSONB",

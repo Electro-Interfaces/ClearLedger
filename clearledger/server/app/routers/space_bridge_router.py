@@ -327,6 +327,40 @@ async def partner_feed(
     }
 
 
+@router.get("/partner-space/topics")
+async def all_topics(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Все обращения компании — с кем бы ни шёл разговор.
+
+    Ручка по коду партнёра требует знать код, а спрашивающий («что с моим
+    обращением?») его не знает и знать не должен: у клиента поставщик один, у
+    поддержки клиентов много, и в обоих случаях человеку нужен список, а не
+    навигация по реестру. Отсюда общий список — им же пользуется агент
+    пространства.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    res = await db.execute(
+        select(PartnerTopic, PartnerSpace.code, PartnerSpace.name, PartnerSpace.role)
+        .join(PartnerSpace, PartnerSpace.id == PartnerTopic.partner_id)
+        .where(PartnerTopic.company_id == cid)
+        .order_by(PartnerTopic.last_message_at.desc().nullslast())
+        .limit(200))
+    return {"items": [{
+        "code": topic.code, "title": topic.title, "state": topic.state,
+        "number": topic.external_number, "subjectLabel": topic.subject_label,
+        "partnerCode": partner_code, "partnerName": partner_name or partner_code,
+        # `vendor` — разговор с нашим поставщиком программы, `client` — с тем,
+        # кого обслуживаем мы. Слова в ответе человеку от этого разные.
+        "partnerRole": role,
+        "createdAt": topic.created_at.isoformat() if topic.created_at else None,
+        "lastMessageAt": (topic.last_message_at.isoformat()
+                          if topic.last_message_at else None),
+    } for topic, partner_code, partner_name, role in res.all()]}
+
+
 @router.get("/partner-space/subject-topics")
 async def subject_topics(
     kind: str = Query(...),

@@ -17,12 +17,13 @@
 """
 import base64
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Company, PartnerAttachment, PartnerSpace, Task
+from app.models import Company, PartnerAttachment, PartnerSpace, Task, User
 from app.services import partner_bridge
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -161,3 +162,67 @@ async def test_ответ_возвращает_мяч_заданию_клиен�
 
     await db.refresh(task)
     assert task.waiting_for is None
+
+
+async def test_секретарь_говорит_про_обращение_один_раз(db: AsyncSession):
+    """Повод «поддержка ждёт вас» человек должен получить и не получать снова.
+
+    Сводка окна лечит поток числом сообщений: повторить один и тот же повод в
+    каждом окне — тот же поток, только медленнее. И наоборот, промолчать про
+    состояние «ждём вас» значит оставить мяч у человека, который об этом не
+    знает: разговор идёт в панели, а панель открывают, когда вспомнят.
+    """
+    from app.services import digest
+    from app.services.task_scheduler import run_partner_topics
+
+    company = (await db.execute(select(Company).limit(1))).scalars().first()
+    кто = (await db.execute(select(User).where(
+        User.company_id == company.id).limit(1))).scalars().first()
+    вендор = PartnerSpace(company_id=company.id, role="vendor",
+                          code=f"desk-{uuid.uuid4().hex[:8]}", name="Техподдержка")
+    db.add(вендор)
+    await db.flush()
+    тема = await partner_bridge.ensure_topic(
+        db, company.id, вендор, uuid.uuid4().hex, title="Касса",
+        opened_by_id=кто.id if кто else None)
+    тема.state = "waiting"
+    await db.commit()
+
+    now = datetime.now(UTC)
+    bucket = digest.Bucket()
+    assert await run_partner_topics(db, now, bucket) >= 1
+    поводы = [line for lines in bucket.lines.values() for line in lines
+              if line.key == f"partner-topic:{тема.id}"]
+    assert len(поводы) == 1
+    assert "ждёт вашего ответа" in поводы[0].text
+
+    # Доставка помечает сказанное — второе окно про то же молчит.
+    поводы[0].mark()
+    await db.commit()
+    bucket2 = digest.Bucket()
+    await run_partner_topics(db, now, bucket2)
+    assert not [line for lines in bucket2.lines.values() for line in lines
+                if line.key == f"partner-topic:{тема.id}"]
+
+
+async def test_у_поддержки_свои_обращения_в_сводку_не_идут(db: AsyncSession):
+    """У нас обращения живут в очереди Координатора со своими сроками.
+
+    Позвать сводкой на ту же работу значит позвать дважды: оператор смотрит
+    очередь, а не личную комнату.
+    """
+    from app.services import digest
+    from app.services.task_scheduler import run_partner_topics
+
+    cid, partner = await _партнёр(db)          # роль `client` — это наш клиент
+    кто = (await db.execute(select(User).where(User.company_id == cid).limit(1))).scalars().first()
+    тема = await partner_bridge.ensure_topic(
+        db, cid, partner, uuid.uuid4().hex, title="Обращение клиента",
+        opened_by_id=кто.id if кто else None)
+    тема.state = "waiting"
+    await db.commit()
+
+    bucket = digest.Bucket()
+    await run_partner_topics(db, datetime.now(UTC), bucket)
+    assert not [line for lines in bucket.lines.values() for line in lines
+                if line.key == f"partner-topic:{тема.id}"]

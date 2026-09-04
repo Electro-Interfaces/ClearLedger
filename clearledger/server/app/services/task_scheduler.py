@@ -36,6 +36,7 @@ from app.auth import resolve_member_modules
 from app.database import async_session_factory
 from app.models import (
     DocAcquaint, DocApproval, DocBreakGlassAccess, DocCard, DocExchangeTarget,
+    PartnerMessage, PartnerSpace, PartnerTopic,
     Task, TaskChecklistItem, TaskEvent, TaskRecurrence, TaskTemplate, TaskType,
     User, UserCompany,
 )
@@ -78,7 +79,7 @@ SERIES_MAX_PER_TICK = 40
 
 # Проходы, которые не шлют сами, а кладут повод в сводку окна.
 _WITH_BUCKET = frozenset({"reminders", "escalations", "acquaints",
-                          "approvals", "meetings", "digests"})
+                          "approvals", "meetings", "partner_topics", "digests"})
 
 
 def _tz(rule: dict) -> ZoneInfo:
@@ -819,6 +820,59 @@ async def _reminder_text(db, row) -> str:
     return "Напоминание"
 
 
+async def run_partner_topics(db, now: datetime, bucket: digest.Bucket) -> int:
+    """Сказать человеку, что поддержка ответила или ждёт его (docs/BRIDGE.md).
+
+    Разговор с поставщиком программы идёт в панели «Техподдержка», а панель
+    открывают, когда о ней вспомнят. Пока «Секретарь» о ней не знал, ответ мог
+    пролежать сутки, а обращение в состоянии «ждём вас» — до звонка куратора:
+    мяч у клиента, и он об этом не догадывается.
+
+    Поводов три, и на обращение за окно берётся ОДИН — самый весомый: «ждут вас»
+    важнее «решено», «решено» важнее просто ответа. Три строки об одном разговоре
+    в одной сводке — это тот же поток, только внутри окна.
+
+    Говорим только у клиента (`role='vendor'`): у поддержки обращения живут в
+    очереди Координатора, где своя механика сроков, и дублировать её сводкой
+    значит звать дважды на одну работу.
+    """
+    rows = (await db.execute(
+        select(PartnerTopic, PartnerSpace)
+        .join(PartnerSpace, PartnerSpace.id == PartnerTopic.partner_id)
+        .where(PartnerSpace.role == "vendor",
+               PartnerTopic.state != "closed",
+               PartnerTopic.opened_by_id.is_not(None)))).all()
+    sent = 0
+    for topic, partner in rows:
+        # Ответ считаем по последней ВХОДЯЩЕЙ реплике: свои сообщения человеку
+        # пересказывать незачем, а `last_message_at` двигают оба направления.
+        answered_at = await db.scalar(
+            select(func.max(PartnerMessage.created_at)).where(
+                PartnerMessage.topic_id == topic.id, PartnerMessage.direction == "in"))
+        state_new = topic.state != (topic.notified_state or "")
+        answer_new = bool(answered_at and (topic.notified_at is None
+                                           or answered_at > topic.notified_at))
+        номер = f"№{topic.external_number} " if topic.external_number else ""
+        if state_new and topic.state == "waiting":
+            текст = f"{partner.name or partner.code} ждёт вашего ответа: {номер}«{topic.title}»"
+        elif state_new and topic.state == "resolved":
+            текст = (f"{partner.name or partner.code} считает решённым: {номер}"
+                     f"«{topic.title}» — проверьте и закройте")
+        elif answer_new:
+            текст = f"Ответ поддержки: {номер}«{topic.title}»"
+        else:
+            continue
+
+        def mark(topic=topic, answered_at=answered_at):
+            topic.notified_at = answered_at or now
+            topic.notified_state = topic.state
+
+        bucket.add(topic.company_id, topic.opened_by_id,
+                   f"partner-topic:{topic.id}", текст, mark=mark)
+        sent += 1
+    return sent
+
+
 async def run_digests(db, now: datetime, bucket: digest.Bucket) -> int:
     """Разнести накопленное окнами доставки. Идёт последним в тике.
 
@@ -839,7 +893,7 @@ async def tick() -> dict[str, int]:
     out = {"recurrences": 0, "reminders": 0, "escalations": 0,
            "acquaints": 0, "approvals": 0, "events": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0,
            "inbound_events": 0, "approval_delivery": 0, "personal": 0,
-           "series": 0, "meetings": 0, "digests": 0}
+           "series": 0, "meetings": 0, "partner_topics": 0, "digests": 0}
     # Поводы копятся весь проход и доставляются одним сообщением в конце: сводка
     # окна — это про число сообщений человеку, а не про удобство планировщика.
     bucket = digest.Bucket()
@@ -858,6 +912,7 @@ async def tick() -> dict[str, int]:
                         ("personal", run_personal_reminders),
                         ("series", run_meeting_series),
                         ("meetings", run_meetings),
+                        ("partner_topics", run_partner_topics),
                         ("digests", run_digests)):
             try:
                 out[key] = await (fn(db, now, bucket) if key in _WITH_BUCKET
