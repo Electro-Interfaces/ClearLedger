@@ -22,7 +22,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Company, PartnerAttachment, PartnerSpace
+from app.models import Company, PartnerAttachment, PartnerSpace, Task
 from app.services import partner_bridge
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -132,3 +132,32 @@ async def test_негодное_вложение_не_роняет_приём_с
     сколько = await db.scalar(select(func.count()).select_from(PartnerAttachment).where(
         PartnerAttachment.message_id == row.id))
     assert сколько == 0
+
+
+async def test_ответ_возвращает_мяч_заданию_клиента(db: AsyncSession):
+    """Задание, переданное поддержке, не должно висеть в «ждём внешних» вечно.
+
+    Связь здесь обратная той, что у поддержки: задание завёл клиент, а обращение
+    выросло из его карточки — значит предмет хранит обращение, а не задание.
+    Ищи мост только по `Task.subject_ref`, и мяч у клиента не вернётся никогда:
+    человек будет ждать ответа, который уже пришёл.
+    """
+    from app.routers.space_bridge_router import _return_ball
+
+    cid, partner = await _партнёр(db)
+    task = Task(company_id=cid, title="Разобраться с кассой", waiting_for="external")
+    db.add(task)
+    await db.flush()
+
+    тема = await partner_bridge.ensure_topic(
+        db, cid, partner, uuid.uuid4().hex, title="Касса",
+        subject_kind="task", subject_ref=str(task.id))
+    await db.commit()
+
+    await partner_bridge.record_incoming(db, cid, partner, {
+        "id": uuid.uuid4().hex, "body": "Посмотрели, дело в драйвере",
+        "topic": тема.code, "topicTitle": "Касса"})
+    await _return_ball(db, cid, тема.id)
+
+    await db.refresh(task)
+    assert task.waiting_for is None

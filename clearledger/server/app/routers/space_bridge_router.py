@@ -29,7 +29,7 @@ from fastapi import (
 )
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
@@ -142,23 +142,47 @@ async def accept_partner_message(
     return {"status": "accepted" if is_new else "duplicate", "id": str(row.id)}
 
 
+async def _topic_tasks(db: AsyncSession, company_id: uuid.UUID, topic: PartnerTopic):
+    """Задания, связанные с обращением, — с обеих сторон разговора.
+
+    Связь бывает двух видов, и обе законные. У поддержки задача заводится ПО
+    обращению и держит его предметом (`partner_topic:<id>`). У клиента наоборот:
+    задание уже есть, и обращение заводится ИЗ его карточки — тогда предмет
+    хранит обращение (`subject_kind='task'`). Искать надо оба, иначе мяч
+    возвращается только одной стороне.
+    """
+    refs = [f"partner_topic:{topic.id}"]
+    stmt = select(Task).where(Task.company_id == company_id)
+    if topic.subject_kind == "task" and topic.subject_ref:
+        try:
+            return (await db.execute(stmt.where(or_(
+                Task.subject_ref.in_(refs),
+                Task.id == uuid.UUID(topic.subject_ref))))).scalars().all()
+        except (ValueError, TypeError):
+            pass
+    return (await db.execute(stmt.where(Task.subject_ref.in_(refs)))).scalars().all()
+
+
 async def _return_ball(db: AsyncSession, company_id: uuid.UUID, topic_id: uuid.UUID) -> None:
     """Ответила та сторона — мяч возвращается нам.
 
-    Задача, поставленная по обращению, ждала внешних (`waiting_for`), и пока мяч
-    там, она не попадает в «На мне». Ответ пришёл — значит ждать больше нечего, и
+    Задание, отданное в обращение, ждало внешних (`waiting_for`), и пока мяч там,
+    оно не попадает в «На мне». Ответ пришёл — значит ждать больше нечего, и
     исполнитель должен увидеть работу у себя, а не искать её в «Ждём внешних».
-    Событие в ленте задачи обязательно: иначе непонятно, отчего она вернулась.
+    Событие в ленте задания обязательно: иначе непонятно, отчего оно вернулось.
     """
-    rows = (await db.execute(select(Task).where(
-        Task.company_id == company_id,
-        Task.subject_ref == f"partner_topic:{topic_id}",
-        Task.waiting_for == "external"))).scalars().all()
-    for task in rows:
+    topic = await db.get(PartnerTopic, topic_id)
+    if topic is None:
+        return
+    changed = False
+    for task in await _topic_tasks(db, company_id, topic):
+        if task.waiting_for != "external":
+            continue
         task.waiting_for = None
         db.add(TaskEvent(task_id=task.id, kind="external_stage", user_id=None,
                          actor_name="Обращение", to_value="ответ получен"))
-    if rows:
+        changed = True
+    if changed:
         await db.commit()
 
 
@@ -383,6 +407,21 @@ async def partner_topic_open(
         # мостом не ходят (docs/BRIDGE.md §4.2).
         subject_label=(payload.subject_label or "").strip()[:300] or None,
         opened_by_id=user.id)
+    # Обращение из карточки задания — это и есть «передать его поддержке»: мяч
+    # уходит наружу, и задание перестаёт числиться на своём исполнителе, пока
+    # ответа нет. Возврат мяча сделает приёмник моста, когда придёт ответ.
+    if payload.subject_kind == "task" and payload.subject_ref:
+        try:
+            task = await db.get(Task, uuid.UUID(payload.subject_ref))
+        except (ValueError, TypeError):
+            task = None
+        if task is not None and task.company_id == cid:
+            task.waiting_for = "external"
+            db.add(TaskEvent(task_id=task.id, kind="external_stage", user_id=user.id,
+                             actor_name=user.name or user.email,
+                             to_value=f"передано в {partner.name or partner.code}",
+                             note=title[:2000]))
+
     self_code = (await db.execute(select(Company.slug).where(Company.id == cid))).scalar_one()
     row = await partner_bridge.send(
         db, cid, partner, self_code=self_code, body=body,
