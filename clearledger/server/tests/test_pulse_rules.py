@@ -355,3 +355,23 @@ def test_catalog_matches_role_builder():
 
     assert {k for k, _, _ in PULSE_ITEMS} - {"showcase", "views"} \
         == {k for k, _ in _PULSE_MODULES}
+
+
+def test_support_users_are_addressed_by_schema():
+    """К людям Поддержки — только через `public.users`.
+
+    Ядро работает с `search_path = core`, поэтому голое `users` в запросе
+    означает `core.users`: там нет ни `is_active`, ни тех id, которыми Поддержка
+    помечает обращения. Экран при этом не падает — он молча показывает нули,
+    а это худший вид поломки витрины.
+    """
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "app" / "routers" / "pulse_router.py"
+    text = src.read_text(encoding="utf-8")
+    # Только разрезы контакт-центра: в остальном роутере `users` — это люди
+    # Ядра, и там голое имя как раз правильное.
+    block = text[text.index("async def _cc_tables"):text.index('@router.get("/team")')]
+    bare = re.findall(r"(?:from|join)\s+users\b", block)
+    assert not bare, f"таблица людей Поддержки без схемы: {bare}"

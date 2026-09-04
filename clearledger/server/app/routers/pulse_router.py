@@ -2834,7 +2834,7 @@ async def _cc_me(db: AsyncSession, email: str) -> Any:
     Нет записи — человек в контакт-центре не заведён, и показывать нечего.
     """
     return (await db.execute(text(
-        "select id, name from users where lower(email) = lower(:email) limit 1"
+        "select id, name from public.users where lower(email) = lower(:email) limit 1"
     ), {"email": email})).one_or_none()
 
 
@@ -2897,7 +2897,7 @@ async def pulse_my_line(
     shift = (await db.execute(text("""
         select s.state, sh.started_at as shift_started_at,
                coalesce(st.max_concurrent, p.max_concurrent, 3) as max_concurrent
-        from users u
+        from public.users u
         left join cc_agent_states s on s.user_id = u.id and s.ended_at is null
         left join cc_operator_shifts sh on sh.user_id = u.id and sh.status = 'active'
         left join cc_agent_profiles p on p.user_id = u.id
@@ -2969,8 +2969,15 @@ async def pulse_shift(
     у кого очередь упёрлась в предел, сколько людей ждёт и давно ли. Состав
     берётся тот же, что ведётся в самой Поддержке (`cc_staff`): второго реестра
     людей контакт-центра здесь не заводим.
+
+    Пункт проверяется отдельно от продукта: здесь поимённая нагрузка коллег, и
+    оператору, которому «Смена» не открыта, её не должно отдавать и по адресу.
     """
-    await assert_company_product(company_id, current_user, db, "pulse")
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    visible = await _visible_items(db, str(cid), current_user)
+    if visible is not None and "business.shift" not in visible:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Смена контакт-центра закрыта для этой роли")
     if not await _cc_tables(db):
         return {"available": False, "reason": "no_support"}
 
@@ -2992,7 +2999,7 @@ async def pulse_shift(
                  where t.handled_by = u.id
                    and t.closed_at > now() - interval '24 hours') as closed_today
         from cc_staff st
-        join users u on u.id = st.user_id
+        join public.users u on u.id = st.user_id
         left join cc_agent_states s on s.user_id = u.id and s.ended_at is null
         left join cc_operator_shifts sh on sh.user_id = u.id and sh.status = 'active'
         left join cc_agent_profiles p on p.user_id = u.id
