@@ -25,6 +25,9 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import * as tasksService from '@/services/tasksService'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 
 export function PartnerSpaces() {
   const { companyId } = useCompany()
@@ -37,6 +40,10 @@ export function PartnerSpaces() {
   const [draft, setDraft] = useState({ title: '', body: '' })
   const [replyTo, setReplyTo] = useState<{ partner: string; topic: string } | null>(null)
   const [reply, setReply] = useState('')
+  // Куда положить работу по обращению. Пространство поддержки — не только про
+  // клиентов: тут же идут наши собственные проекты, и задача без проекта
+  // сваливается в общий список, где её потом не отделить от своей работы.
+  const [project, setProject] = useState('')
 
   const spaces = useQuery({
     queryKey: ['partner-spaces', companyId],
@@ -47,6 +54,12 @@ export function PartnerSpaces() {
     queryKey: ['partner-feed', openFeed, companyId],
     queryFn: () => partnerFeed(openFeed!, companyId),
     enabled: !!openFeed && !!companyId,
+  })
+  const projects = useQuery({
+    queryKey: ['task-projects', companyId],
+    queryFn: () => tasksService.listTaskProjects(companyId),
+    enabled: !!companyId,
+    staleTime: 5 * 60_000,
   })
   const topics = useQuery({
     queryKey: ['partner-topics', openTopics, companyId],
@@ -59,6 +72,7 @@ export function PartnerSpaces() {
     mutationFn: (t: { id: string; title: string }) => tasksService.createTask({
       companyId, title: t.title.slice(0, 300),
       subjectRef: `partner_topic:${t.id}`,
+      projectId: project || undefined,
     }),
     onSuccess: (task) => toast.success(`Задача №${task.number} поставлена`),
     onError: (e: Error) => toast.error(e.message || 'Задача не поставлена'),
@@ -221,6 +235,26 @@ export function PartnerSpaces() {
                   )}
                 </div>
               )) : <div className="text-xs text-muted-foreground">Обращений ещё не было.</div>}
+              {/* Проект выбирается один раз на разбор очереди, а не в каждой
+                  строке: оператор разбирает обращения одного клиента подряд, и
+                  они чаще всего идут в одну работу. */}
+              {(projects.data?.projects.length ?? 0) > 0 && (
+                <div className="flex items-center gap-2 pt-1 text-xs text-muted-foreground">
+                  <span>Задачи класть в проект:</span>
+                  <Select value={project || 'none'}
+                    onValueChange={(v) => setProject(v === 'none' ? '' : v)}>
+                    <SelectTrigger className="h-7 w-56 text-xs">
+                      <SelectValue placeholder="без проекта" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">без проекта</SelectItem>
+                      {projects.data?.projects.map((pr) => (
+                        <SelectItem key={pr.id} value={pr.id}>{pr.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
           )}
 
