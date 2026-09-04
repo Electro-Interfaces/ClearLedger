@@ -3046,14 +3046,25 @@ async def pulse_shift(
     if not await _cc_tables(db):
         return {"available": False, "reason": "no_support"}
 
+    # Человек в смене — это человек пространства: чтобы руководитель мог с ним
+    # связаться прямо отсюда, нужны его учётка Ядра (для личного чата) и
+    # телефон. Связывает половины адрес почты — общий ключ входа.
     agents = [{"id": str(r.id), "name": r.name, "duty": r.duty,
+               "email": r.email,
+               "core_user_id": str(r.core_user_id) if r.core_user_id else None,
+               "phone": r.phone,
                "state": r.state or "offline",
                "on_shift": r.shift_started_at is not None,
                "since": r.shift_started_at.isoformat() if r.shift_started_at else None,
                "in_work": int(r.in_work), "max": int(r.max_concurrent),
-               "overdue": int(r.overdue), "closed_today": int(r.closed_today)}
+               "overdue": int(r.overdue), "closed_today": int(r.closed_today),
+               "planned": ({"starts_at": r.plan_starts.isoformat(),
+                            "ends_at": r.plan_ends.isoformat(),
+                            "now": bool(r.plan_now)} if r.plan_starts else None)}
               for r in (await db.execute(text("""
-        select u.id, u.name, st.duty, s.state, sh.started_at as shift_started_at,
+        select u.id, u.name, u.email, st.duty, s.state, sh.started_at as shift_started_at,
+               cu.id as core_user_id,
+               coalesce(cu.phone_mobile, cu.phone_office) as phone,
                coalesce(st.max_concurrent, p.max_concurrent, 3) as max_concurrent,
                (select count(*) from inbox_threads t
                  where t.assigned_to = u.id and t.status <> 'closed') as in_work,
@@ -3062,15 +3073,58 @@ async def pulse_shift(
                    and t.response_due_at < now() and t.first_response_at is null) as overdue,
                (select count(*) from inbox_threads t
                  where t.handled_by = u.id
-                   and t.closed_at > now() - interval '24 hours') as closed_today
+                   and t.closed_at > now() - interval '24 hours') as closed_today,
+               pl.starts_at as plan_starts, pl.ends_at as plan_ends,
+               (pl.starts_at <= now() and pl.ends_at > now()) as plan_now
         from cc_staff st
         join public.users u on u.id = st.user_id
+        left join core.users cu on lower(cu.email) = lower(u.email)
         left join cc_agent_states s on s.user_id = u.id and s.ended_at is null
         left join cc_operator_shifts sh on sh.user_id = u.id and sh.status = 'active'
         left join cc_agent_profiles p on p.user_id = u.id
+        -- Смена по графику: идущая сейчас, иначе ближайшая впереди. Так строка
+        -- отвечает и «кто на линии», и «кто следующий», одним запросом.
+        left join lateral (
+            select starts_at, ends_at from cc_shift_plan
+             where user_id = u.id and status = 'planned' and ends_at > now()
+             order by starts_at limit 1
+        ) pl on true
         where st.active and coalesce(u.is_active, true)
         order by (sh.started_at is null), u.name
     """))).all()]
+
+    # График на неделю вперёд: «кто когда выходит» — вопрос, на который иначе
+    # отвечают перепиской. Отменённые смены не показываем: «не поставили» и
+    # «сняли» руководитель различает в самом приложении.
+    plan = [{"user": r.name, "duty": r.duty,
+             "starts_at": r.starts_at.isoformat(), "ends_at": r.ends_at.isoformat(),
+             "now": bool(r.now)}
+            for r in (await db.execute(text("""
+        select u.name, pl.duty, pl.starts_at, pl.ends_at,
+               (pl.starts_at <= now() and pl.ends_at > now()) as now
+        from cc_shift_plan pl
+        join public.users u on u.id = pl.user_id
+        where pl.status = 'planned'
+          and pl.ends_at > now() and pl.starts_at < now() + interval '7 days'
+        order by pl.starts_at
+        limit 60
+    """))).all()]
+
+    # Лента звонков: убедиться, что линия дышит. Пятнадцать последних — это
+    # «что сейчас происходит», а не отчёт: за отчётом идут в «Обращения».
+    calls = []
+    if (await db.execute(text("select to_regclass('public.call_records')"))).scalar():
+        calls = [{"at": r.started_at.isoformat() if r.started_at else None,
+                  "phone": r.client_phone, "missed": bool(r.missed),
+                  "operator": r.operator, "wait": int(r.wait_sec or 0),
+                  "duration": int(r.duration_sec or 0)}
+                 for r in (await db.execute(text("""
+            select started_at, client_phone, missed, operator, wait_sec, duration_sec
+            from call_records
+            where direction = 'inbound' or direction = 'in'
+            order by started_at desc nulls last
+            limit 15
+        """))).all()]
 
     queue = (await db.execute(text("""
         select count(*) as waiting, min(created_at) as oldest,
@@ -3104,6 +3158,7 @@ async def pulse_shift(
     ]
 
     return {"available": True, "kpi": kpi, "agents": agents,
+            "plan": plan, "calls": calls,
             "queue_oldest": queue.oldest.isoformat() if queue.oldest else None}
 
 

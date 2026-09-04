@@ -11,13 +11,19 @@
  * ссылка туда стоит внизу. Второго набора метрик контакт-центра здесь нет —
  * цифры считаются по тем же таблицам, что и «Обращения» (PULSE.md §6).
  */
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpRight, Clock, Coffee, Headphones, Inbox, LogIn, LogOut, Play } from 'lucide-react'
+import {
+  ArrowUpRight, CalendarClock, Clock, Coffee, Headphones, Inbox, LogIn, LogOut,
+  MessageCircle, Phone, PhoneMissed, Play,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useSupportContext } from '@/contexts/SupportContext'
+import { createRoom } from '@/services/chatService'
 import { getPulseMyLine, getPulseShift, pulseLineAction } from './pulseService'
 import type { LineAction, PulseShiftAgent } from './pulseService'
 import { KpiTile, PulseError, PulseLoading, fmtNum, plural } from './parts'
@@ -226,9 +232,36 @@ export function MyLineView() {
   )
 }
 
+/** «Сегодня 09:00–18:00», «завтра 14:00» — график читают глазами. */
+function when(iso: string): string {
+  const d = new Date(iso)
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const day = new Date(d); day.setHours(0, 0, 0, 0)
+  const diff = Math.round((day.getTime() - today.getTime()) / 86_400_000)
+  const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  if (diff === 0) return `сегодня ${time}`
+  if (diff === 1) return `завтра ${time}`
+  return `${d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })} ${time}`
+}
+
+const hhmm = (iso: string) =>
+  new Date(iso).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+
+/** «2 мин 30 с» — длительность разговора. */
+const dur = (sec: number) => (sec < 60 ? `${sec} с` : `${Math.floor(sec / 60)} мин`)
+
 function AgentRow({ a }: { a: PulseShiftAgent }) {
   const st = state(a.state)
   const loaded = a.max > 0 && a.in_work >= a.max
+  const { openInteraction } = useSupportContext()
+
+  /** Написать человеку: личный чат пространства, а не второй мессенджер. */
+  const write = useMutation({
+    mutationFn: () => createRoom('direct', [a.core_user_id as string]),
+    onSuccess: (room) => openInteraction('chat', `room:${room.id}`),
+    onError: (e: Error) => toast.error(e.message || 'Не получилось открыть разговор'),
+  })
+
   return (
     <div className="flex items-center gap-3 px-3 py-2">
       <Headphones className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -243,7 +276,25 @@ function AgentRow({ a }: { a: PulseShiftAgent }) {
           <span className={cn('h-1.5 w-1.5 rounded-full', st.dot)} />
           {st.label}
           {a.on_shift ? ` · на линии ${ago(a.since)}` : ' · смена не открыта'}
+          {!a.on_shift && a.planned && ` · по графику ${when(a.planned.starts_at)}`}
         </span>
+      </span>
+      {/* Связаться — половина работы руководителя смены: увидел затор, написал
+          или позвонил. Разговор идёт в чате пространства, звонок — с трубки. */}
+      <span className="flex shrink-0 items-center gap-1">
+        {a.core_user_id && (
+          <button type="button" title="Написать в чат" disabled={write.isPending}
+            onClick={() => write.mutate()}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+            <MessageCircle className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {a.phone && (
+          <a href={`tel:${a.phone.replace(/[^+\d]/g, '')}`} title={`Позвонить: ${a.phone}`}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground">
+            <Phone className="h-3.5 w-3.5" />
+          </a>
+        )}
       </span>
       {/* Нагрузка и просрочки — то, ради чего руководитель сюда смотрит:
           «у кого упёрлось» и «у кого горит», остальное можно не читать. */}
@@ -263,8 +314,21 @@ function AgentRow({ a }: { a: PulseShiftAgent }) {
   )
 }
 
+type ShiftTab = 'now' | 'plan' | 'calls'
+
+const TABS: { key: ShiftTab; label: string }[] = [
+  { key: 'now', label: 'Сейчас' },
+  { key: 'plan', label: 'График' },
+  { key: 'calls', label: 'Звонки' },
+]
+
 export function ShiftView() {
   const { company } = useCompany()
+  const { openInteraction } = useSupportContext()
+  // Три вопроса руководителя смены идут по очереди: что происходит сейчас, кто
+  // выходит дальше, дышит ли линия. Это виды одного предмета, поэтому вкладки, а
+  // не три пункта меню.
+  const [tab, setTab] = useState<ShiftTab>('now')
   const q = useQuery({
     queryKey: ['pulse-shift', company.id],
     queryFn: () => getPulseShift(company.id),
@@ -280,13 +344,96 @@ export function ShiftView() {
   const agents = d.agents ?? []
   const online = agents.filter((a) => a.on_shift)
   const offline = agents.filter((a) => !a.on_shift)
+  const plan = d.plan ?? []
+  const calls = d.calls ?? []
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-5">
         {(d.kpi ?? []).map((k) => <KpiTile key={k.key} k={k} />)}
       </div>
 
-      {d.queue_oldest && (
+      <div className="flex flex-wrap gap-1">
+        {TABS.map((t) => (
+          <button key={t.key} type="button" onClick={() => setTab(t.key)}
+            className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+              tab === t.key ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
+            {t.label}
+            {t.key === 'plan' && plan.length > 0 && (
+              <span className="ml-1.5 opacity-70">{plan.length}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'plan' && (
+        <section className="space-y-2">
+          <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+            Кто когда выходит · неделя вперёд
+          </h2>
+          {plan.length ? (
+            <Card className="py-0"><CardContent className="divide-y p-0">
+              {plan.map((p, i) => (
+                <div key={`${p.user}-${p.starts_at}-${i}`} className="flex items-center gap-3 px-3 py-2">
+                  <CalendarClock className={cn('h-3.5 w-3.5 shrink-0',
+                    p.now ? 'text-emerald-500' : 'text-muted-foreground')} />
+                  <span className="min-w-0 flex-1 truncate text-[13px]">{p.user}</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">
+                    {p.duty === 'head' ? 'старший' : 'оператор'}
+                  </span>
+                  <span className={cn('shrink-0 text-[11px] tabular-nums',
+                    p.now ? 'font-semibold text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground')}>
+                    {when(p.starts_at)}–{hhmm(p.ends_at)}
+                  </span>
+                </div>
+              ))}
+            </CardContent></Card>
+          ) : (
+            <Card className="border-dashed py-0">
+              <CardContent className="p-4 text-xs text-muted-foreground">
+                График на неделю не поставлен — смены ведутся в «Поддержке», раздел «Смены операторов».
+              </CardContent>
+            </Card>
+          )}
+        </section>
+      )}
+
+      {tab === 'calls' && (
+        <section className="space-y-2">
+          <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+            Последние звонки
+          </h2>
+          {calls.length ? (
+            <Card className="py-0"><CardContent className="divide-y p-0">
+              {calls.map((c, i) => (
+                <div key={`${c.at}-${i}`} className="flex items-center gap-3 px-3 py-2">
+                  {c.missed
+                    ? <PhoneMissed className="h-3.5 w-3.5 shrink-0 text-red-500" />
+                    : <Phone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] tabular-nums">{c.phone || 'номер скрыт'}</span>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {c.missed ? `не ответили · ждал ${dur(c.wait)}`
+                        : `${c.operator || 'оператор'} · разговор ${dur(c.duration)}`}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                    {c.at ? when(c.at) : '—'}
+                  </span>
+                </div>
+              ))}
+            </CardContent></Card>
+          ) : (
+            <Card className="border-dashed py-0">
+              <CardContent className="p-4 text-xs text-muted-foreground">
+                Звонков не приходило — либо телефония ещё не подключена.
+              </CardContent>
+            </Card>
+          )}
+        </section>
+      )}
+
+      {tab === 'now' && d.queue_oldest && (
         <Card className="py-0">
           <CardContent className="p-3 text-xs text-muted-foreground">
             Самое давнее обращение в очереди ждёт с {at(d.queue_oldest)} — это {ago(d.queue_oldest)} без ответа.
@@ -294,6 +441,7 @@ export function ShiftView() {
         </Card>
       )}
 
+      {tab === 'now' && (
       <section className="space-y-2">
         <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
           На линии · {online.length} {plural(online.length, 'человек', 'человека', 'человек')}
@@ -310,8 +458,9 @@ export function ShiftView() {
           </Card>
         )}
       </section>
+      )}
 
-      {offline.length > 0 && (
+      {tab === 'now' && offline.length > 0 && (
         <section className="space-y-2">
           <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
             Сегодня не на линии
@@ -322,9 +471,21 @@ export function ShiftView() {
         </section>
       )}
 
-      <a href="/support/" className="inline-flex min-h-9 items-center gap-1 text-xs text-primary hover:underline sm:min-h-0">
-        Открыть смену в «Поддержке»<ArrowUpRight className="h-3.5 w-3.5" />
-      </a>
+      {/* Общение — половина работы руководителя смены, и держать его в другом
+          месте бессмысленно: чат пространства открывается панелью прямо здесь,
+          «Трек» и рабочее место — соседними приложениями. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        <button type="button" onClick={() => openInteraction('chat')}
+          className="inline-flex min-h-9 items-center gap-1 text-primary hover:underline sm:min-h-0">
+          <MessageCircle className="h-3.5 w-3.5" />Чаты смены
+        </button>
+        <a href="/docs/work" className="inline-flex min-h-9 items-center gap-1 text-primary hover:underline sm:min-h-0">
+          Мои поручения в «Треке»<ArrowUpRight className="h-3.5 w-3.5" />
+        </a>
+        <a href="/support/" className="inline-flex min-h-9 items-center gap-1 text-primary hover:underline sm:min-h-0">
+          Открыть смену в «Поддержке»<ArrowUpRight className="h-3.5 w-3.5" />
+        </a>
+      </div>
     </div>
   )
 }

@@ -305,6 +305,10 @@ export interface PulseShiftAgent {
   id: string
   name: string
   duty: string | null
+  /** Учётка Ядра и телефон — чтобы связаться с человеком прямо из пульта. */
+  email: string | null
+  core_user_id: string | null
+  phone: string | null
   state: string
   on_shift: boolean
   since: string | null
@@ -312,6 +316,27 @@ export interface PulseShiftAgent {
   max: number
   overdue: number
   closed_today: number
+  /** Смена по графику: идущая сейчас или ближайшая впереди. */
+  planned: { starts_at: string; ends_at: string; now: boolean } | null
+}
+
+/** Кто когда выходит: неделя вперёд, отменённые смены не показываются. */
+export interface PulseShiftPlanRow {
+  user: string
+  duty: string | null
+  starts_at: string
+  ends_at: string
+  now: boolean
+}
+
+/** Лента звонков — «линия дышит», а не отчёт: за отчётом идут в «Обращения». */
+export interface PulseCallRow {
+  at: string | null
+  phone: string | null
+  missed: boolean
+  operator: string | null
+  wait: number
+  duration: number
 }
 
 export interface PulseShift {
@@ -319,6 +344,8 @@ export interface PulseShift {
   reason?: 'no_support'
   kpi?: PulseKpi[]
   agents?: PulseShiftAgent[]
+  plan?: PulseShiftPlanRow[]
+  calls?: PulseCallRow[]
   queue_oldest?: string | null
 }
 
