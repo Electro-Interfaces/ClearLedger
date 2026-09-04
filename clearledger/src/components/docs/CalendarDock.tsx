@@ -24,8 +24,9 @@ import {
   isWeekend, startOfDay, startOfWeek,
 } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import { CalendarDays, Loader2, MapPin, UserPlus, Video } from 'lucide-react'
+import { CalendarDays, Loader2, MapPin, UserCheck, UserPlus, Video } from 'lucide-react'
 import { toast } from 'sonner'
+import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { PlacedList } from '@/components/docs/PlacedList'
 import * as workService from '@/services/workService'
@@ -46,6 +47,8 @@ function предмет(e: React.DragEvent): { kind: string; id: string } | null
 
 export function CalendarDock() {
   const { company } = useCompany()
+  const { user } = useAuth()
+  const я = user?.id ?? ''
   const qc = useQueryClient()
   const companyId = company?.id ?? ''
   const [день, setДень] = useState(() => startOfDay(new Date()))
@@ -82,10 +85,13 @@ export function CalendarDock() {
    *  подсказка — отдельного блока «избранные» не заводим. */
   const адресаты = useMemo(() => {
     const вес = new Map((частые.data?.people ?? []).map((p) => [p.id, p.count]))
-    return [...(люди.data?.people ?? [])]
+    // Себя в общем списке нет: он стоит отдельной строкой над всеми. Иначе
+    // «забрать себе» приходилось искать среди двух десятков фамилий, хотя это
+    // самое частое, что делают с чужой работой.
+    return [...(люди.data?.people ?? [])].filter((p) => p.id !== я)
       .sort((a, b) => (вес.get(b.id) ?? 0) - (вес.get(a.id) ?? 0)
         || a.name.localeCompare(b.name, 'ru'))
-  }, [люди.data, частые.data])
+  }, [люди.data, частые.data, я])
 
   const обновить = () => {
     void qc.invalidateQueries({ queryKey: ['work-mine'] })
@@ -93,6 +99,30 @@ export function CalendarDock() {
     void qc.invalidateQueries({ queryKey: ['tasks'] })
     void qc.invalidateQueries({ queryKey: ['placed'] })
   }
+
+  /** Записать себе на выбранный день. Пульт раскидывания умел двигать чужое, а
+   *  «поставить себе напоминание» отправлял человека искать другое окно —
+   *  притом что день уже выбран мышью в этой же сетке. */
+  const [черновик, setЧерновик] = useState('')
+  const записать = useMutation({
+    mutationFn: () => {
+      const d = new Date(день)
+      d.setHours(18, 0, 0, 0)
+      return tasksService.createTask({
+        companyId, title: черновик.trim(),
+        // Исполнитель ЯВНЫЙ: задача без исполнителя ничья и в «Моей очереди»
+        // (отбор идёт по исполнителю) не появляется вовсе.
+        assigneeId: я || undefined,
+        dueAt: d.toISOString(),
+      })
+    },
+    onSuccess: (t) => {
+      setЧерновик('')
+      обновить()
+      toast.success(`${tasksService.taskKey(t)} — себе на ${format(день, 'd MMMM', { locale: ru })}`)
+    },
+    onError: (e: Error) => toast.error(e.message || 'Не записалось'),
+  })
 
   const срок = useMutation({
     mutationFn: ({ id, on }: { id: string; on: Date }) => {
@@ -149,8 +179,9 @@ export function CalendarDock() {
       </header>
 
       <p className="shrink-0 px-3 pt-2 text-xs text-muted-foreground">
-        Перетащите задачу на день — у неё станет этот срок. На человека внизу —
-        поручите ему.
+        Тащите строку работы из «Трека» — из «Моей очереди», «Поручений» или с
+        доски (слева от названия есть ручка). На день — у неё станет этот срок,
+        на «Мне» внизу — заберёте себе, на человека — поручите ему.
       </p>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
@@ -203,13 +234,45 @@ export function CalendarDock() {
         )}
       </div>
 
+      {/* Записать себе: день уже выбран в сетке выше, поэтому строка ставит
+          работу сразу со сроком. Тип, проект и подробности — потом в карточке. */}
+      <div className="shrink-0 border-t border-border/50 px-3 py-2">
+        <input value={черновик} onChange={(e) => setЧерновик(e.target.value)}
+          maxLength={300}
+          placeholder={`Записать себе на ${format(день, 'd MMMM', { locale: ru })} — Enter`}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && черновик.trim().length >= 3 && !записать.isPending) {
+              записать.mutate()
+            }
+          }}
+          className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+      </div>
+
       {/* Кому поручить: весь список пространства, две колонки. Бросок на строку
           переназначает исполнителя. */}
-      {адресаты.length > 0 && (
+      {(адресаты.length > 0 || !!я) && (
         <div className="shrink-0 border-t border-border/50 px-3 py-2">
           <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             <UserPlus className="h-3.5 w-3.5" />Поручить
           </h3>
+          {/* «Мне» — отдельной строкой во всю ширину и с акцентом: забрать
+              работу себе просят чаще, чем поручить конкретному человеку, а
+              среди двух десятков фамилий своя ничем не выделялась. */}
+          {!!я && (
+            <button type="button"
+              onDragOver={(e) => { e.preventDefault(); setНаведён(я) }}
+              onDragLeave={() => setНаведён((k) => (k === я ? null : k))}
+              onDrop={(e) => бросок(e, (id) => исполнитель.mutate({ id, userId: я }))}
+              onClick={() => toast.info('Перетащите сюда задачу — заберёте её себе')}
+              title="Перетащите сюда задачу — она станет вашей"
+              className={cn('mb-1 flex w-full items-center gap-1.5 rounded-md border border-dashed px-2 py-1.5 text-left text-xs font-medium transition-colors',
+                наведён === я
+                  ? 'border-primary bg-primary/15 text-primary'
+                  : 'border-primary/40 bg-primary/5 text-primary hover:bg-primary/10')}>
+              <UserCheck className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">Мне{user?.name ? ` · ${user.name}` : ''}</span>
+            </button>
+          )}
           <div className="grid max-h-32 grid-cols-2 gap-1 overflow-y-auto">
             {адресаты.map((p) => (
               <button key={p.id} type="button"
