@@ -83,19 +83,41 @@ async def tree(db: AsyncSession, company_id, *, app_code: str | None = None) -> 
     by_cat: dict[str, list[dict[str, Any]]] = {}
     for a in arts:
         by_cat.setdefault(str(a.category_id) if a.category_id else "", []).append(_article_out(a))
+    # Разделы вкладываются в разделы: верхний уровень - приложение («Трек»,
+    # «Проекты», «Поддержка»), внутри - его разделы. Плоский список сваливал в
+    # одну кучу девять разделов «Трека», шесть «Проектов» и общие правила
+    # пространства, и найти нужное можно было только перебором.
+    children: dict[str, list[Any]] = {}
+    for c in cats:
+        children.setdefault(str(c.parent_id) if c.parent_id else "", []).append(c)
+
+    def узел(c: Any, kind: str) -> dict[str, Any] | None:
+        """Раздел с его статьями и вложенными разделами - или None, если пусто.
+
+        Пустой раздел не рисуем: в пласте «Нормы» у приложения может не быть ни
+        одной статьи, и заголовок без содержания читается как поломка.
+        """
+        свои = [x for x in by_cat.get(str(c.id), []) if x["kind"] == kind]
+        вложенные = [у for у in (узел(ch, kind) for ch in children.get(str(c.id), []))
+                     if у is not None]
+        if not свои and not вложенные:
+            return None
+        return {"id": str(c.id), "title": c.title, "articles": свои,
+                # `count` считает всё поддерево: у приложения в шапке стоит число
+                # его статей, а не число статей, лежащих прямо в нём.
+                "count": len(свои) + sum(у["count"] for у in вложенные),
+                "children": вложенные}
+
     groups = []
     for k in KINDS:
         items = [a for a in arts if a.kind == k["key"]]
         if not items:
             continue
-        cat_ids = {str(a.category_id) for a in items if a.category_id}
         groups.append({
             **k,
             "count": len(items),
-            "categories": [{"id": str(c.id), "title": c.title,
-                            "articles": [x for x in by_cat.get(str(c.id), [])
-                                         if x["kind"] == k["key"]]}
-                           for c in cats if str(c.id) in cat_ids],
+            "categories": [у for у in (узел(c, k["key"]) for c in children.get("", []))
+                           if у is not None],
             # Статьи без раздела показываем в конце группы, а не прячем.
             "loose": [x for x in by_cat.get("", []) if x["kind"] == k["key"]],
         })

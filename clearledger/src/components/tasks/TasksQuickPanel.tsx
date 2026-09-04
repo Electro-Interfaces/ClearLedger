@@ -24,8 +24,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowUpRight, Bell, CalendarDays, Check, Clock3, Eye, FileText, Flame,
-  ListChecks, Loader2, NotebookPen, Plus, Star, Stamp, Users,
+  ArrowUpRight, Bell, BookOpen, CalendarDays, Check, Clock3, Eye, FileText, Flame,
+  ListChecks, Loader2, Plus, Star, Stamp, Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -37,9 +37,11 @@ import { useSupportContext } from '@/contexts/SupportContext'
 import * as tasksService from '@/services/tasksService'
 import * as workService from '@/services/workService'
 import type { SpaceTask } from '@/services/tasksService'
+import { DOCS_VIEWS } from '@/pages/docs/DocsLayout'
 import { MyWorkPage } from '@/pages/docs/MyWorkPage'
 import { PlacedList } from '@/components/docs/PlacedList'
 import { cn } from '@/lib/utils'
+import { workCounts } from '@/lib/workCounts'
 
 /** Срок словами: «сегодня» / «завтра» / «просрочена на 3 дн» — точная дата тут лишняя. */
 function dueText(due: string | null, overdue: boolean): string | null {
@@ -59,45 +61,62 @@ const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('ru-RU', {
   hour: '2-digit', minute: '2-digit',
 })
 
-type ViewKey =
-  | 'hot' | 'queue' | 'approvals' | 'acquaints' | 'errands' | 'own'
-  | 'assigned' | 'watching' | 'starred' | 'deferred' | 'notes'
+type ViewKey = string
 
-/** Разрезы рельсы. Группы и слова те же, что в разделе «Моё» приложения
- *  (`DocsLayout`): человек не должен переучиваться, переходя из пульта на экран.
- *  `href` ведёт в тот же разрез «Трека» — кнопка «Открыть» продолжает работу, а
- *  не возвращает в начало. */
+/** Иконка разреза. Слова, порядок и группы берём из меню «Трека»
+ *  (`DOCS_VIEWS`), здесь остаётся только картинка: в меню приложения иконок
+ *  нет, а в пульте они помогают попасть в нужную строку с одного взгляда. */
+const VIEW_ICONS: Record<string, typeof Flame> = {
+  today: Flame,
+  starred: Star,
+  deferred: Clock3,
+  'mine-all': ListChecks,
+  approvals: Stamp,
+  acquaints: BookOpen,
+  errands: Check,
+  mine: FileText,
+  assigned: Users,
+  watching: Eye,
+}
+
+/** «Сегодня» в приложении — экран дня целиком. В окне день стоит отдельной
+ *  полосой справа, поэтому в центре показывается то, что на сегодня давит:
+ *  подсказку меню здесь пришлось бы читать как обещание, которого окно не даёт. */
+const VIEW_HINTS: Record<string, string> = {
+  today: 'просрочено и срок сегодня; день целиком — полосой справа',
+}
+
+/** Разрезы рельсы — ровно пункты раздела «Моё» приложения, в том же порядке и
+ *  с теми же группами. Свой перечень здесь уже расходился с меню: «Поручения»
+ *  стояли в «Ждут от меня», а «Я поставил» — в «Веду сам», хотя в приложении
+ *  они давно в «Веду сам» и «Слежу». Человек, переходя из окна на экран, искал
+ *  знакомый разрез не там, где он есть.
+ *
+ *  Скрытые пункты (календарь, записи, подборки) не берём: календарь и записи
+ *  живут в правой рельсе, подборки — работа на весь экран. */
 const VIEWS: {
   key: ViewKey; label: string; hint: string; group: string
   icon: typeof Flame; href: string
-}[] = [
-  { key: 'hot', label: 'Горит', hint: 'просрочено и срок сегодня', group: 'Ждут от меня',
-    icon: Flame, href: '/docs/work?view=today' },
-  { key: 'queue', label: 'Моя очередь', hint: 'всё, что ждёт меня, по срочности', group: 'Ждут от меня',
-    icon: ListChecks, href: '/docs/work?view=mine-all' },
-  { key: 'approvals', label: 'Визы', hint: 'документы, ждущие моего согласования', group: 'Ждут от меня',
-    icon: Stamp, href: '/docs/work?view=approvals' },
-  { key: 'acquaints', label: 'Ознакомиться', hint: 'приказы, доведённые до меня', group: 'Ждут от меня',
-    icon: Eye, href: '/docs/work?view=acquaints' },
-  { key: 'errands', label: 'Поручения', hint: 'работа, которую делаю я', group: 'Ждут от меня',
-    icon: Check, href: '/docs/work?view=errands' },
-  { key: 'own', label: 'Мои документы', hint: 'где я автор или ответственный', group: 'Ждут от меня',
-    icon: FileText, href: '/docs/work?view=mine' },
-  { key: 'assigned', label: 'Я поставил', hint: 'что поручил другим', group: 'Веду сам',
-    icon: Users, href: '/docs/work?view=assigned' },
-  { key: 'watching', label: 'Наблюдаю', hint: 'слежу со стороны', group: 'Веду сам',
-    icon: Eye, href: '/docs/work?view=watching' },
-  { key: 'starred', label: 'Важное', hint: 'помеченное лично', group: 'Веду сам',
-    icon: Star, href: '/docs/work?view=starred' },
-  { key: 'deferred', label: 'Отложено', hint: 'спрятанное у себя до даты', group: 'Веду сам',
-    icon: Clock3, href: '/docs/work?view=deferred' },
-  { key: 'notes', label: 'Записная книжка', hint: 'что записал себе', group: 'Веду сам',
-    icon: NotebookPen, href: '/docs/work?view=notes' },
-]
+}[] = (DOCS_VIEWS['/docs/work'] ?? [])
+  .filter((v) => !v.hidden)
+  .map((v) => ({
+    key: v.key,
+    label: v.label,
+    hint: VIEW_HINTS[v.key] ?? v.hint,
+    // Первые три пункта — личная раскладка, и заголовка над ними в приложении
+    // нет намеренно. Пустая строка группы сохраняет это и здесь.
+    group: v.group ?? '',
+    icon: VIEW_ICONS[v.key] ?? ListChecks,
+    href: `/docs/work?view=${v.key}`,
+  }))
 
-// Слова групп те же, что в разделе «Моё» приложения: человек, перешедший из
-// пульта на экран, не должен искать знакомый разрез под другим именем.
-const GROUPS = ['Ждут от меня', 'Веду сам']
+/** Ключ числа у разреза — тот же `badge`, что в меню приложения. */
+const BADGE_OF: Record<string, string> = Object.fromEntries(
+  (DOCS_VIEWS['/docs/work'] ?? []).filter((v) => v.badge).map((v) => [v.key, v.badge!]))
+
+/** Порядок групп — тот же, что в меню: он и есть смысл раскладки. */
+const GROUPS = VIEWS.reduce<string[]>((acc, v) => (
+  acc.includes(v.group) ? acc : [...acc, v.group]), [])
 
 /** Ширина полосы, которую человек тянет мышью, с памятью между сессиями.
  *
@@ -186,7 +205,7 @@ export function TasksQuickPanel({ compact = false }: {
   const { user } = useAuth()
   const me = user?.id ?? ''
   const { closeInteraction } = useSupportContext()
-  const [view, setView] = useState<ViewKey>('hot')
+  const [view, setView] = useState<ViewKey>(VIEWS[0]?.key ?? 'today')
   // Ширины полос человек ставит сам: у кого-то рельса с длинными словами, у
   // кого-то день с длинными названиями встреч. Значения переживают перезагрузку.
   const shellRef = useRef<HTMLDivElement>(null)
@@ -230,32 +249,19 @@ export function TasksQuickPanel({ compact = false }: {
     enabled: !!companyId,
   })
 
-  const counts = useMemo(() => {
-    const mine = (mineQ.data?.mine ?? []).filter((r) => !r.hidden)
-    const by = (reason: string) => mine.filter((r) => r.reason === reason).length
-    const open = (rows: SpaceTask[] | undefined) =>
-      (rows ?? []).filter((t) => t.status === 'open').length
-    return {
-      hot: mine.filter((r) => r.bucket === 'overdue' || r.bucket === 'today').length,
-      queue: mine.length,
-      approvals: by('approve'),
-      acquaints: by('acquaint'),
-      errands: by('do'),
-      own: by('own'),
-      assigned: open(assignedQ.data?.tasks),
-      // Живая работа, как и у остальных чисел: закрытое «наблюдаемое» ни о чём
-      // не говорит, а разные числа под одним словом в пульте и в меню — говорят,
-      // что одному из них верить нельзя.
-      watching: open(watchingQ.data?.tasks),
-      starred: listsQ.data?.counts.starred ?? 0,
-      deferred: listsQ.data?.counts.deferred ?? 0,
-      notes: 0,
-    } as Record<ViewKey, number>
-  }, [mineQ.data, assignedQ.data, watchingQ.data, listsQ.data])
+  // Тот же расчёт, что у меню «Трека» (`lib/workCounts`), и те же ключи
+  // запросов: числа под одним словом в окне и в меню обязаны совпадать, иначе
+  // одному из двух мест человек перестаёт верить. Раньше окно считало «Я
+  // поставил» по странице (сто строк), а меню — по `total` сервера.
+  const счёт = useMemo(() => workCounts({
+    mine: mineQ.data, lists: listsQ.data,
+    assigned: assignedQ.data, watching: watchingQ.data,
+  }), [mineQ.data, assignedQ.data, watchingQ.data, listsQ.data])
 
-  const overdue = useMemo(
-    () => (mineQ.data?.mine ?? []).filter((r) => r.overdue && !r.hidden).length,
-    [mineQ.data])
+  /** Число разреза: ключ бейджа тот же, что в меню приложения. */
+  const счётчик = (key: ViewKey) => счёт[BADGE_OF[key] ?? ''] ?? 0
+
+  const overdue = счёт.overdue
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['tasks'] })
@@ -289,7 +295,11 @@ export function TasksQuickPanel({ compact = false }: {
   })
 
   const go = (href: string) => { closeInteraction(); navigate(href) }
-  const openTask = (id: string) => go(`/docs/work?view=errands&task=${id}`)
+  // Карточку поручения открывает реестр «Компании» — только он читает `?task=`.
+  // Раздел «Моё» показывает работу НА МНЕ строками, и поручение, отданное
+  // другому, там не появится вовсе: переход из окна вёл на список, в котором
+  // искомого нет, и выглядел как «кнопка ничего не сделала».
+  const openTask = (id: string) => go(`/docs/company?view=errands&task=${id}`)
   const current = VIEWS.find((v) => v.key === view) ?? VIEWS[0]
 
   const railNav = (
@@ -300,14 +310,17 @@ export function TasksQuickPanel({ compact = false }: {
         : 'shrink-0 space-y-3 overflow-y-auto p-3')}>
       {GROUPS.map((group) => (
         <div key={group} className={compact ? 'contents' : 'space-y-0.5'}>
-          {!compact && (
+          {/* У личной раскладки (Сегодня · Важное · Отложено) заголовка нет —
+              как и в меню приложения: всякое название здесь оказывалось
+              жаргоном, а начинают работу именно с неё. */}
+          {!compact && group && (
             <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {group}
             </p>
           )}
           {VIEWS.filter((v) => v.group === group).map((v) => {
             const Icon = v.icon
-            const n = counts[v.key]
+            const n = счётчик(v.key)
             const active = v.key === view
             return (
               <button key={v.key} type="button" title={v.hint}
@@ -429,10 +442,13 @@ function ViewBody({ view, companyId, tasks, loading, onOpen, onChanged }: {
   onOpen: (id: string) => void; onChanged: () => void
 }) {
   switch (view) {
-    case 'hot':
+    // Ключи — те же, что в меню приложения: `today`, `mine-all`, `mine`.
+    // Свои имена («горит», «очередь», «моё») окно уже носило, и разрез в нём
+    // назывался не так, как тот же разрез на экране.
+    case 'today':
       return <MyWorkPage buckets={['overdue', 'today']} heading={false} hideDeferred
-        empty="Ничего не горит: сроки не поджимают." />
-    case 'queue':
+        empty="На сегодня ничего не горит: сроки не поджимают." />
+    case 'mine-all':
       return <MyWorkPage heading={false} />
     case 'approvals':
       return <MyWorkPage reasons={['approve']} heading={false}
@@ -443,7 +459,7 @@ function ViewBody({ view, companyId, tasks, loading, onOpen, onChanged }: {
     case 'errands':
       return <MyWorkPage reasons={['do']} heading={false}
         empty="Поручений на вас нет." />
-    case 'own':
+    case 'mine':
       return <MyWorkPage reasons={['own']} heading={false}
         empty="Документов, где вы автор или ответственный, сейчас нет." />
     case 'starred':
@@ -452,8 +468,6 @@ function ViewBody({ view, companyId, tasks, loading, onOpen, onChanged }: {
     case 'deferred':
       return <PlacedList companyId={companyId} scope="deferred" onChanged={onChanged}
         empty="Отложенного нет. Отложить можно в строке очереди — срок компании при этом не меняется." />
-    case 'notes':
-      return <NotesList companyId={companyId} onOpen={onOpen} />
     default:
       return <TaskLines rows={tasks} loading={loading} view={view} onOpen={onOpen}
         onChanged={onChanged} companyId={companyId} />
@@ -539,50 +553,6 @@ function TaskLines({ rows, loading, view, companyId, onOpen, onChanged }: {
 
 /** Записная книжка: свои записи без сроков и чужих глаз. В пульте — последние,
  *  чтобы записанное утром было видно там же, где записывалось. */
-function NotesList({ companyId, onOpen }: {
-  companyId: string; onOpen: (id: string) => void
-}) {
-  const q = useQuery({
-    queryKey: ['notes', companyId],
-    queryFn: () => tasksService.listTasks(companyId, 'all', {
-      visibility: 'personal', sort: '-created', limit: 30,
-    }),
-    enabled: !!companyId,
-  })
-  const rows = q.data?.tasks ?? []
-
-  if (q.isLoading) {
-    return (
-      <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />Открываем книжку…
-      </div>
-    )
-  }
-  if (rows.length === 0) {
-    return (
-      <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
-        Записей пока нет. Строка сверху кладёт сюда всё, что записано себе.
-      </div>
-    )
-  }
-  return (
-    <div className="overflow-hidden rounded-lg border">
-      {rows.map((t) => (
-        <button key={t.id} type="button" onClick={() => onOpen(t.id)}
-          className="flex w-full items-start gap-3 border-b border-border/60 px-3 py-2 text-left transition-colors last:border-0 hover:bg-accent">
-          <NotebookPen className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm text-foreground">{t.title}</span>
-            {t.due_at && (
-              <span className="text-xs text-muted-foreground">{dueText(t.due_at, t.overdue)}</span>
-            )}
-          </span>
-        </button>
-      ))}
-    </div>
-  )
-}
-
 /** Правая полоса: день человека. Отвечает на «что у меня сегодня» — взятое в
  *  день, чем просил напомнить и когда встречи. Списки те же, что на экране
  *  «Сегодня». */

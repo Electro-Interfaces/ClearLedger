@@ -45,6 +45,22 @@ GENERAL_ROOM_NAME = "Общий чат"
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+async def _assert_scope_ref(ref: str, cid: uuid.UUID, db: AsyncSession) -> str:
+    """Предмет комнаты — существующий и своей компании.
+
+    Проверку не пишем заново: `<вид>:<ключ>` уже разбирает «Трек», и второй
+    перечень видов разошёлся бы с первым на ближайшей новой сущности.
+    """
+    from app.routers.docs_router import _assert_ref
+
+    value = ref.strip()
+    if ":" not in value:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Предмет задаётся видом и ключом: site:<id>")
+    await _assert_ref(db, cid, value, "scopeRef")
+    return value
+
+
 async def _assert_company_object(object_id: str, cid: uuid.UUID, db: AsyncSession) -> None:
     """Объект должен принадлежать компании чата — чужой привязать нельзя."""
     loc_cid = (await db.execute(select(ServiceLocation.company_id).where(
@@ -502,6 +518,10 @@ class RoomOut(BaseModel):
     scopeObjectName: str | None = None
     # Чат заявки: скрыт из общего списка, открывается из её карточки.
     scopeTicketId: str | None = None
+    # Предмет, при котором живёт разговор: `site:<uuid>`, `contract:<uuid>`…
+    # По нему карточка предмета показывает свои чаты, а работа, заведённая из
+    # сообщения, наследует привязку и возвращается в ленту этого предмета.
+    scopeRef: str | None = None
 
 
 class ParticipantOut(BaseModel):
@@ -577,6 +597,8 @@ class CreateRoomBody(BaseModel):
     scopeObjectId: str | None = None
     # Приложение, из которого чат создан: чат остаётся в его контексте.
     scopeProduct: str | None = None
+    # Предмет разговора (`site:<uuid>` и прочие виды пространства).
+    scopeRef: str | None = None
 
 
 class SendMessageBody(BaseModel):
@@ -626,6 +648,9 @@ async def list_rooms(
         None, description="Код приложения: вернуть его чаты и общие чаты пространства"),
     object_id: str | None = Query(
         None, description="Только чаты этого объекта — для карточки объекта"),
+    ref: str | None = Query(
+        None, max_length=120,
+        description="Только чаты этого предмета (`site:<uuid>`) — для его карточки"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -656,6 +681,7 @@ async def list_rooms(
                or_(ChatRoom.type == "direct", ChatRoom.scope_product == scope)
                if scope else text("true"),
                ChatRoom.scope_object_id == object_id if object_id else text("true"),
+               ChatRoom.scope_ref == ref if ref else text("true"),
                # Чаты заявок и задач скрыты из общего пространства: их видно только
                # из карточки заявки/задачи (решение МАГа) — сюда попадают лишь
                # обычные комнаты. Про задачу это было записано в `ensure_task_room`
@@ -764,6 +790,7 @@ async def list_rooms(
             canWrite=_can_write(room, current_user, my_role, company_admin),
             scopeObjectId=room.scope_object_id,
             scopeObjectName=obj_names.get(room.scope_object_id or ""),
+            scopeRef=room.scope_ref,
         ))
     # системные комнаты вверх (Общий чат, Объявления), затем по времени последнего сообщения
     # В контексте приложения его собственный чат идёт ПЕРВЫМ: человек открыл рельсу в
@@ -858,6 +885,12 @@ async def create_room(
         await _assert_company_object(body.scopeObjectId, cid, db)
         scope_object = body.scopeObjectId
 
+    # Предмет разговора. У личного чата его нет по той же причине, что и
+    # приложения: личная переписка — про людей, а не про предмет.
+    scope_ref = None
+    if body.type != "direct" and body.scopeRef:
+        scope_ref = await _assert_scope_ref(body.scopeRef, cid, db)
+
     # Человек контура заводит группы только в своём контуре: иначе он создал бы
     # чат, которого сам же не увидит в списке. Выбор приложения в диалоге для него
     # не решение, а формальность — контур решает за него.
@@ -869,7 +902,8 @@ async def create_room(
                     created_by=current_user.id,
                     # Личный чат контекста не имеет: он про людей, а не про экран.
                     scope_product=room_scope,
-                    scope_object_id=scope_object)
+                    scope_object_id=scope_object,
+                    scope_ref=scope_ref)
     db.add(room)
     await db.flush()
     # Создатель — ВЛАДЕЛЕЦ: в канале только он и назначенные им админы пишут, и его
@@ -940,6 +974,7 @@ async def get_room(
         avatarUrl=room.avatar_url,
         scopeProduct=room.scope_product,
         scopeObjectId=room.scope_object_id, scopeObjectName=obj_name,
+        scopeRef=room.scope_ref,
         scopeTicketId=str(room.scope_ticket_id) if room.scope_ticket_id else None,
         myRole=my_role,
     )
@@ -1643,6 +1678,8 @@ class RoomRenameBody(BaseModel):
     scopeProduct: str | None = None
     # Привязка к объекту пространства: "" — отвязать.
     scopeObjectId: str | None = None
+    # Привязка к предмету пространства (`site:<uuid>`): "" — отвязать.
+    scopeRef: str | None = None
 
 
 class ParticipantRoleBody(BaseModel):
@@ -1709,9 +1746,17 @@ async def rename_room(
         if oid:
             await _assert_company_object(oid, room.company_id, db)
         room.scope_object_id = oid or None
+    if body.scopeRef is not None:
+        if room.kind is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Системный чат — общий для пространства, привязки у него нет")
+        value = body.scopeRef.strip()
+        room.scope_ref = (await _assert_scope_ref(value, room.company_id, db)
+                          if value else None)
     await db.commit()
     return {"ok": True, "name": room.name, "avatarUrl": room.avatar_url,
-            "scopeProduct": room.scope_product, "scopeObjectId": room.scope_object_id}
+            "scopeProduct": room.scope_product, "scopeObjectId": room.scope_object_id,
+            "scopeRef": room.scope_ref}
 
 
 @router.delete("/rooms/{room_id}/participants/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -2399,7 +2444,11 @@ async def task_from_message(
         status="open", stage_code=route[0]["code"],
         stage_column=work_state.stage_column_of(route, route[0]["code"]),
         assignee_id=assignee_id, author_id=current_user.id,
-        object_id=room.scope_object_id, due_at=body.dueAt)
+        object_id=room.scope_object_id,
+        # Предмет комнаты наследуется работой: разговор шёл по проекту, значит и
+        # поручение из него — по проекту. Без этого работа, рождённая в чате,
+        # в ленту предмета не попадала, и связь с проектом жила только в тексте.
+        subject_ref=room.scope_ref, due_at=body.dueAt)
     db.add(task)
     await db.flush()
     # Ключ источника хранится в следе создания: по нему ловится повтор, и по нему
@@ -2502,6 +2551,9 @@ async def process_from_message(
                 source_note=f"из обсуждения «{room.name or 'чат'}»",
                 summary_suffix=context,
                 object_id=room.scope_object_id,
+                # По предмету документов десяток (договор аренды, ТУ, акт), а
+                # предмет карточки уникален на компанию — поэтому связью.
+                relate_to=room.scope_ref,
             )
             # Обратная ссылка на обсуждение. В чат мы пишем сообщение со ссылкой
             # на документ, а в карточке оставался только `source_ref` — строка,
@@ -2519,6 +2571,7 @@ async def process_from_message(
                 source_note=f"из обсуждения «{room.name or 'чат'}»",
                 summary_suffix=context,
                 object_id=room.scope_object_id,
+                subject_ref=room.scope_ref,
             )
             if msg.file_url:
                 try:

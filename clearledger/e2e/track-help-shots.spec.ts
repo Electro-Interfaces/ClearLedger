@@ -27,6 +27,8 @@ import path from 'node:path'
 const БАЗА = process.env.TRACK_BASE ?? 'https://desk.dataworker.ru'
 const ТОКЕН = process.env.TRACK_TOKEN ?? ''
 const ПАПКА = process.env.HELP_SHOTS ?? 'public/help/track'
+// Компания демонстрации «Меридиан» на стенде desk: ключ фильтра именной.
+const КОМПАНИЯ = process.env.TRACK_COMPANY ?? 'aa9262e4-1c55-4e7b-8adf-054ae10e8f02'
 
 const снято: string[] = []
 const пропущено: string[] = []
@@ -46,14 +48,23 @@ test.afterAll(() => {
 
 /** Вход по токену: тот же способ, каким живут остальные прогоны «Трека». */
 async function войти(page: Page) {
-  await page.addInitScript((v: string) => {
-    localStorage.setItem('clearledger-token', v)
+  await page.addInitScript((v: { token: string; company: string }) => {
+    localStorage.setItem('clearledger-token', v.token)
     // Пункты раздела развёрнуты: в справке человек должен видеть имена экранов,
     // а не колонку значков.
     localStorage.setItem('cl-docs-views-collapsed', '0')
     // Плашка «поставьте приложением» садится поверх нижней трети кадра.
     localStorage.setItem('cl-install-dismissed-at:v3', String(Date.now()))
-  }, ТОКЕН)
+    // Рабочий контур — год целиком. По умолчанию период это текущий месяц, а
+    // документы демонстрации датированы прошлым: реестры уходили в кадр пустыми
+    // («В рабочем контуре документов пока нет»), и карточку было не открыть -
+    // три снимка карточки пропадали каждый прогон.
+    const год = new Date().getFullYear()
+    localStorage.setItem(`gig-filters-${v.company}`, JSON.stringify({
+      period: { from: `${год}-01-01`, to: `${год}-12-31` },
+      stationCode: 'all', locationIds: [], regionIds: [], stationCodes: [], fuelCodes: [],
+    }))
+  }, { token: ТОКЕН, company: КОМПАНИЯ })
   // Рельса приложения развёрнута: свёрнутая до значков, она в справке не
   // объясняет, куда нажимать.
   await page.context().addCookies([{ name: 'sidebar_state', value: 'true', url: БАЗА }])
@@ -115,8 +126,11 @@ test('снимки справки «Трека»', async ({ page }) => {
 
   // Карточка: щелчок по заголовку, а не по первой кнопке строки — первой идёт
   // галочка выбора, и клик по ней открывает панель массовых действий.
+  // Ищем по классу самой кнопки заголовка, а не по номеру колонки: состав
+  // колонок реестра меняется (их и человек настраивает), и `nth-child(6)`
+  // однажды промахнулся мимо заголовка — три кадра карточки просто исчезли.
   await шаг('tr-card', async () => {
-    await page.locator('table tbody tr td:nth-child(6) button').first()
+    await page.locator('table tbody tr button.font-medium').first()
       .click({ timeout: 15_000 })
     await page.waitForTimeout(2600)
     await снимок(page, 'tr-card')
@@ -192,5 +206,18 @@ test('снимки справки «Трека»', async ({ page }) => {
     await page.locator('button:has-text("Изменить")').first().click({ timeout: 10_000 })
     await page.waitForTimeout(1900)
     await снимок(page, 'tr-setup-kind-editor')
+  })
+
+  // ── Окно «Трека» из шапки ───────────────────────────────────────────────
+  // Снимается поверх постороннего экрана намеренно: окно и существует затем,
+  // чтобы заглянуть в работу, не уходя с того, чем занят. Правую рельсу здесь
+  // не гасим — окно само ложится поверх неё.
+  await шаг('tr-header-window', async () => {
+    await экран(page, '/docs/overview?view=docs')
+    await page.locator('button:has-text("Трек")').filter({ visible: true }).first()
+      .click({ timeout: 10_000 })
+    await page.waitForTimeout(2200)
+    await снимок(page, 'tr-header-window')
+    await page.keyboard.press('Escape')
   })
 })

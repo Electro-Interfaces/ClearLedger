@@ -17,10 +17,10 @@ from typing import Any
 PROFILE = "fuel"
 
 CATEGORIES = [
-    {"title": "Работа в «Топливе»", "sort": 10},
-    {"title": "Товародвижение и резервуары", "sort": 20},
-    {"title": "Цены и клиенты", "sort": 30},
-    {"title": "Учёт нефтепродуктов", "sort": 40},
+    {"title": "Работа в «Топливе»", "sort": 10, "parent": "Топливо"},
+    {"title": "Товародвижение и резервуары", "sort": 20, "parent": "Топливо"},
+    {"title": "Цены и клиенты", "sort": 30, "parent": "Топливо"},
+    {"title": "Учёт нефтепродуктов", "sort": 40, "parent": "Топливо"},
 ]
 
 ARTICLES: list[dict[str, Any]] = [

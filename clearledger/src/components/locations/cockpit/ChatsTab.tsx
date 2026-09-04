@@ -1,9 +1,14 @@
 /**
- * «Чаты» станции — обсуждения, привязанные к этому объекту (`chat_rooms.scope_object_id`).
+ * «Чаты» предмета — обсуждения, привязанные к объекту (`scope_object_id`) или к
+ * любому другому предмету пространства (`scope_ref`: `site:<uuid>` и прочие).
  *
- * Смысл двусторонний: в чате видно, при каком объекте идёт разговор, а из карточки
- * объекта — какие обсуждения по нему живут и что в них решали. Открытие — той же
- * панелью чата (док/окно): `openInteraction('chat', 'room:<id>')` доносит комнату.
+ * Смысл двусторонний: в чате видно, при чём идёт разговор, а из карточки — какие
+ * обсуждения по нему живут и что в них решали. Открытие — той же панелью чата
+ * (док/окно): `openInteraction('chat', 'room:<id>')` доносит комнату.
+ *
+ * Один компонент на оба случая намеренно. Второй список чатов, отличающийся
+ * только полем привязки, разошёлся бы с первым на ближайшей правке — а вопрос
+ * «что по нему обсуждали» у станции и у проекта один и тот же.
  */
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -18,32 +23,44 @@ const fmt = (iso?: string | null) => iso
   ? new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
   : null
 
-export function ChatsTab({ location }: { location: ServiceLocation }) {
+export function ChatsTab({ location, subject, plain }: {
+  /** Карточка объекта сети: привязка идёт по `scope_object_id`. */
+  location?: ServiceLocation
+  /** Любой другой предмет пространства: проект, договор. `product` — приложение,
+   *  в контексте которого живёт разговор (чтобы он был в его правой рельсе). */
+  subject?: { ref: string; title: string; product?: string | null }
+  plain?: boolean
+}) {
   const { openInteraction } = useSupportContext()
+  const scopeRef = subject?.ref ?? null
+  const objectId = subject ? null : location?.id ?? null
   const q = useQuery({
-    queryKey: ['chat-rooms-object', location.id],
-    queryFn: () => chat.getRooms(false, null, location.id),
+    queryKey: ['chat-rooms-scope', scopeRef ?? objectId],
+    queryFn: () => chat.getRooms(false, null, objectId, scopeRef),
+    enabled: !!(scopeRef || objectId),
   })
   const rooms = q.data ?? []
+  const what = subject ? 'этому проекту' : 'этому объекту'
 
   const createGroup = () => {
-    chat.createRoom('group', [], location.name, null, location.id)
+    const title = subject?.title || location?.name || 'Группа'
+    chat.createRoom('group', [], title, subject?.product ?? null, objectId, scopeRef)
       .then((room) => {
         q.refetch()
         openInteraction('chat', `room:${room.id}`)
-        toast.success('Группа объекта создана — добавьте участников в её составе')
+        toast.success('Группа создана — добавьте участников в её составе')
       })
       .catch((e: Error) => toast.error(e.message || 'Не удалось создать группу'))
   }
 
   return (
-    <ScrollTab>
+    <ScrollTab plain={plain}>
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          Обсуждения, привязанные к этому объекту: решения по нему остаются при нём.
+          Обсуждения, привязанные к {what}: решения по нему остаются при нём.
         </p>
         <Button size="sm" variant="outline" className="h-8 shrink-0 gap-1.5" onClick={createGroup}>
-          <Plus className="size-4" /> Группа объекта
+          <Plus className="size-4" /> {subject ? 'Группа проекта' : 'Группа объекта'}
         </Button>
       </div>
 
@@ -55,7 +72,9 @@ export function ChatsTab({ location }: { location: ServiceLocation }) {
       {!q.isLoading && rooms.length === 0 && (
         <Placeholder icon={MessageCircle}
           title="Обсуждений пока нет"
-          text="Создайте группу объекта — или привяжите существующую в её свойствах (строка «Объект»)." />
+          text={subject
+            ? 'Создайте группу проекта — переписка с собственником и сетевой останется при нём.'
+            : 'Создайте группу объекта — или привяжите существующую в её свойствах (строка «Объект»).'} />
       )}
 
       <div className="space-y-1.5">

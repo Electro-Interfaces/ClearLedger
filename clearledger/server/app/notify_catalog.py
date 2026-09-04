@@ -76,6 +76,14 @@ CATEGORIES: list[NotifyCategory] = [
         default_on=False,
     ),
     NotifyCategory(
+        code="projects",
+        label="Проекты сети",
+        description="Проект перешёл на другую стадию, встал на паузу или ушёл в "
+                    "архив, закрыт или ослаблен пункт чек-листа. Заметки и правки "
+                    "паспорта сюда не идут — их сотни.",
+        prefixes=("project.",),
+    ),
+    NotifyCategory(
         code="docs",
         label="Документы",
         description="Документ зарегистрирован, изменено его состояние, "
@@ -92,6 +100,18 @@ CATEGORIES: list[NotifyCategory] = [
 ]
 
 _BY_CODE = {c.code: c for c in CATEGORIES}
+
+# Действие словами. Неизвестное действие остаётся кодом — карта всех событий
+# журнала здесь была бы вторым перечнем, который разойдётся с первым; называем
+# то, что человек читает в оповещении чаще всего.
+ACTION_LABELS: dict[str, str] = {
+    "project.stage": "проект сменил стадию",
+    "project.gate": "движение по чек-листу проекта",
+}
+
+
+def action_label(action: str) -> str:
+    return ACTION_LABELS.get(action, action)
 
 
 def list_categories() -> list[dict]:

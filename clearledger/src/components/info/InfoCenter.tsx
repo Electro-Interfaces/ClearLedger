@@ -29,7 +29,7 @@ import {
 import { cn } from '@/lib/utils'
 import {
   getInfoTree, getInfoArticle, searchInfo,
-  type InfoKind, type InfoArticleRow, type InfoTree,
+  type InfoKind, type InfoArticleRow, type InfoNode, type InfoTree,
 } from '@/services/infoService'
 import { Markdown } from './Markdown'
 import { InfoArticleEditor } from './InfoArticleEditor'
@@ -39,6 +39,11 @@ const KIND_ICON: Record<InfoKind, typeof BookOpen> = {
 }
 const FONT_STEPS = [15, 16, 18, 20]
 const FONT_KEY = 'info:fontStep'
+
+/** Дерево разделов плоским списком: для формы документа и стартового экрана. */
+function плоско(nodes: InfoNode[]): InfoNode[] {
+  return nodes.flatMap((n) => [n, ...плоско(n.children ?? [])])
+}
 
 function Snippet({ text }: { text: string }) {
   // Бэкенд отдаёт фрагмент с маркерами <<…>>: рисуем React-узлами, без HTML.
@@ -91,9 +96,11 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
     () => (kind ? groups.length === 0 : (tree.data?.total ?? 0) === 0),
     [kind, groups, tree.data])
   const modal = variant === 'modal'
-  // Разделы для формы документа — все видимые: свои и платформенные.
+  // Разделы для формы документа — все видимые: свои и платформенные. Дерево
+  // теперь вложенное (приложение → разделы), поэтому разворачиваем его плоско:
+  // иначе в форме остались бы одни приложения без разделов внутри.
   const categories = useMemo(
-    () => (tree.data?.groups ?? []).flatMap((g) => g.categories)
+    () => (tree.data?.groups ?? []).flatMap((g) => плоско(g.categories))
       .filter((c, i, arr) => arr.findIndex((x) => x.id === c.id) === i),
     [tree.data])
   // Править можно только документ пространства: платформенные ведёт поставщик.
@@ -162,25 +169,11 @@ export function InfoCenter({ companyId, initialId, variant = 'page' }: {
                   </button>
                   {open && (
                     <div className="ml-3 space-y-0.5">
-                      {g.categories.map((c) => {
-                        const key = `${g.key}:${c.id}`
-                        const co = openCats.has(key)
-                        return (
-                          <div key={c.id}>
-                            <button type="button" onClick={() => toggle(openCats, key, setOpenCats)}
-                              className="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-muted/60">
-                              <ChevronRight className={`h-3 w-3 shrink-0 transition-transform ${co ? 'rotate-90' : ''}`} />
-                              <span className="flex-1 truncate text-left">{c.title}</span>
-                              <span className="font-mono text-[10px] text-muted-foreground">{c.articles.length}</span>
-                            </button>
-                            {co && (
-                              <div className="ml-[15px] space-y-0.5 border-l border-border/40 pl-2">
-                                {c.articles.map((a) => <Item key={a.id} a={a} on={setSelected} active={selected === a.id} />)}
-                              </div>
-                            )}
-                          </div>
-                        )
-                      })}
+                      {g.categories.map((c) => (
+                        <Node key={c.id} node={c} groupKey={g.key} openCats={openCats}
+                          onToggle={(k) => toggle(openCats, k, setOpenCats)}
+                          selected={selected} onPick={setSelected} />
+                      ))}
                       {g.loose.map((a) => <Item key={a.id} a={a} on={setSelected} active={selected === a.id} />)}
                     </div>
                   )}
@@ -275,7 +268,10 @@ function Start({ groups, onPick, onAdd }: {
   groups: InfoTree['groups']; onPick: (id: string) => void; onAdd?: () => void
 }) {
   const first = groups.find((g) => g.key === 'guide') ?? groups[0]
-  const starters = (first?.categories[0]?.articles ?? first?.loose ?? []).slice(0, 5)
+  // Статьи лежат в глубине дерева (приложение → раздел → статьи), поэтому берём
+  // первые из обхода, а не из верхнего узла: у него своих статей нет вовсе.
+  const starters = (плоско(first?.categories ?? []).flatMap((c) => c.articles)
+    .concat(first?.loose ?? [])).slice(0, 5)
   return (
     <div className="mx-auto max-w-3xl space-y-5 py-2">
       <div>
@@ -332,6 +328,50 @@ function Start({ groups, onPick, onAdd }: {
           <Button size="sm" variant="outline" className="mt-2 h-7 text-xs" onClick={onAdd}>
             <Plus className="mr-1 h-3.5 w-3.5" /> Добавить документ
           </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Узел дерева: раздел, его статьи и вложенные разделы.
+ *
+ * Верхний уровень - приложение («Трек», «Проекты», «Поддержка»), под ним его
+ * разделы. Плоский список сваливал в одну кучу девять разделов «Трека», шесть
+ * «Проектов» и общие правила пространства, и нужное искали перебором.
+ *
+ * Рекурсия, а не два жёстких уровня: глубина - дело данных, а не разметки.
+ * Отступ упирается в четвёртый уровень, дальше не растёт - иначе заголовок
+ * уезжает за край узкой панели.
+ */
+function Node({ node, groupKey, openCats, onToggle, selected, onPick, depth = 0 }: {
+  node: InfoNode; groupKey: string; openCats: Set<string>
+  onToggle: (key: string) => void
+  selected: string | null; onPick: (id: string) => void
+  depth?: number
+}) {
+  const key = `${groupKey}:${node.id}`
+  const open = openCats.has(key)
+  return (
+    <div>
+      <button type="button" onClick={() => onToggle(key)}
+        className={cn('flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-xs hover:bg-muted/60',
+          depth === 0 && 'font-medium')}>
+        <ChevronRight className={`h-3 w-3 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`} />
+        <span className="flex-1 truncate text-left">{node.title}</span>
+        <span className="font-mono text-[10px] text-muted-foreground">{node.count}</span>
+      </button>
+      {open && (
+        <div className={cn('space-y-0.5 border-l border-border/40 pl-2',
+          depth >= 3 ? 'ml-[6px]' : 'ml-[15px]')}>
+          {node.children.map((ch) => (
+            <Node key={ch.id} node={ch} groupKey={groupKey} openCats={openCats}
+              onToggle={onToggle} selected={selected} onPick={onPick} depth={depth + 1} />
+          ))}
+          {node.articles.map((a) => (
+            <Item key={a.id} a={a} on={onPick} active={selected === a.id} />
+          ))}
         </div>
       )}
     </div>

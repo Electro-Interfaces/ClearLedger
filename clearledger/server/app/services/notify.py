@@ -25,7 +25,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.notify_catalog import CATEGORIES, category_for, label_of
+from app.notify_catalog import CATEGORIES, action_label, category_for, label_of
 from app.models import (
     Company, MatrixGroupRoom, NotificationRule, User, UserCompany,
 )
@@ -234,7 +234,7 @@ async def ensure_alerts_room(
 def _text(company_name: str, category: str, action: str, who: str | None,
           details: str | None) -> str:
     head = f"{label_of(category)} · {company_name}"
-    body = f"{action}"
+    body = f"{action_label(action)}"
     if who:
         body += f" — {who}"
     if details:

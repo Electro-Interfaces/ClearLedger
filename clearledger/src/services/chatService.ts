@@ -47,6 +47,9 @@ export interface ChatRoom {
   scopeObjectName?: string | null
   /** Чат заявки: скрыт из общего списка, открывается из её карточки. */
   scopeTicketId?: string | null
+  /** Предмет разговора: `site:<uuid>` и прочие виды пространства. Карточка
+   *  предмета показывает свои чаты, работа из сообщения наследует привязку. */
+  scopeRef?: string | null
 }
 
 /** Чат сейчас «без звука»? (9999 год = навсегда) */
@@ -167,11 +170,13 @@ export interface SendPayload {
  * приложения (к ним всегда добавляются общие чаты пространства), верхняя кнопка
  * параметр не передаёт и получает всё. Один и тот же чат, разные предустановки.
  */
-export const getRooms = (archived = false, product?: string | null, objectId?: string | null) =>
+export const getRooms = (archived = false, product?: string | null,
+                        objectId?: string | null, ref?: string | null) =>
   get<ChatRoom[]>('/api/chat/rooms', {
     archived: String(archived),
     ...(product ? { product } : {}),
     ...(objectId ? { object_id: objectId } : {}),
+    ...(ref ? { ref } : {}),
   })
 
 export const getRoom = (roomId: string) =>
@@ -183,8 +188,10 @@ export const createRoom = (
   name?: string,
   scopeProduct?: string | null,
   scopeObjectId?: string | null,
+  scopeRef?: string | null,
 ) =>
-  post<ChatRoomDetail>('/api/chat/rooms', { type, participantIds, name, scopeProduct, scopeObjectId })
+  post<ChatRoomDetail>('/api/chat/rooms',
+    { type, participantIds, name, scopeProduct, scopeObjectId, scopeRef })
 
 export const archiveRoom = (roomId: string) =>
   post<{ ok: boolean; isArchived: boolean }>(`/api/chat/rooms/${roomId}/archive`, {})
@@ -204,8 +211,10 @@ export const addMailParticipant = (roomId: string, email: string, name?: string)
 /** Переименовать чат, сменить аватар, привязку к приложению или объекту — владелец
  * или админ чата (у системных — только пространство; '' очищает значение). */
 export const patchRoom = (roomId: string,
-  body: { name?: string; avatarUrl?: string; scopeProduct?: string; scopeObjectId?: string }) =>
-  patch<{ ok: boolean; name: string | null; avatarUrl: string | null; scopeProduct: string | null; scopeObjectId: string | null }>(
+  body: { name?: string; avatarUrl?: string; scopeProduct?: string; scopeObjectId?: string;
+          scopeRef?: string }) =>
+  patch<{ ok: boolean; name: string | null; avatarUrl: string | null; scopeProduct: string | null;
+          scopeObjectId: string | null; scopeRef?: string | null }>(
     `/api/chat/rooms/${roomId}`, body)
 
 /** Убрать участника: владелец — любого, админ чата — обычных участников. */

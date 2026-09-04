@@ -34,10 +34,22 @@ export interface InfoArticleFull extends InfoArticleRow {
   bindings: { appCode: string; sectionKey: string | null; weight: number }[]
 }
 
+/** Узел дерева: раздел со статьями и вложенными разделами.
+ *  Верхний уровень - приложение («Трек», «Проекты»), внутри его разделы. */
+export interface InfoNode {
+  id: string
+  title: string
+  /** Статьи, лежащие прямо в этом разделе. */
+  articles: InfoArticleRow[]
+  /** Число статей во всём поддереве: у приложения в шапке стоит оно. */
+  count: number
+  children: InfoNode[]
+}
+
 export interface InfoTree {
   groups: {
     key: InfoKind; label: string; hint: string; count: number
-    categories: { id: string; title: string; articles: InfoArticleRow[] }[]
+    categories: InfoNode[]
     loose: InfoArticleRow[]
   }[]
   profile: string | null

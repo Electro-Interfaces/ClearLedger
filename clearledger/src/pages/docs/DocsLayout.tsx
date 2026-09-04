@@ -18,6 +18,7 @@ import { toast } from 'sonner'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
+import { workCounts } from '@/lib/workCounts'
 import { DocsScopeBar } from '@/components/docs/DocsScopeBar'
 import * as tasksService from '@/services/tasksService'
 import * as workService from '@/services/workService'
@@ -261,34 +262,13 @@ export function DocsLayout() {
     reorder.mutate(ids)
   }
 
-  const счёт = useMemo(() => {
-    // Спрятанное человеком в числа не идёт: он его убрал с глаз, и счётчик,
-    // считающий скрытое, спорит с самим смыслом отложения.
-    const mine = (mineQ.data?.mine ?? []).filter((r) => !r.hidden)
-    const по = (reason: string) => mine.filter((r) => r.reason === reason).length
-    const c = listsQ.data?.counts
-    return {
-      hot: mine.filter((r) => r.bucket === 'overdue' || r.bucket === 'today').length,
-      queue: mine.length,
-      approvals: по('approve'),
-      acquaints: по('acquaint'),
-      // Экран «Поручений» показывает работу НА МНЕ (scope=mine). Прибавлять сюда
-      // своё без исполнителя значит обещать в меню число, которого на экране нет.
-      errands: по('do'),
-      own: по('own'),
-      // `total` сервера, а не длина страницы: страница — это сто строк, и на
-      // малых данных совпадение выглядело правильным ответом. Оба разреза
-      // отсекают закрытое на сервере, поэтому доклеивать фильтр незачем.
-      assigned: assignedQ.data?.total ?? (assignedQ.data?.tasks ?? []).length,
-      watching: watchingQ.data?.total ?? (watchingQ.data?.tasks ?? []).length,
-      starred: c?.starred ?? 0,
-      deferred: c?.deferred ?? 0,
-      // Просроченное — отдельное число: «12, из них 3 горят» это два разных
-      // ответа, и одним числом они не заменяются.
-      overdue: mine.filter((r) => r.overdue).length,
-      triage: триажQ.data?.total ?? (триажQ.data?.tasks ?? []).length,
-    } as Record<string, number>
-  }, [mineQ.data, assignedQ.data, watchingQ.data, listsQ.data, триажQ.data])
+  // Считает общий расчёт (`lib/workCounts`): те же числа показывает окно
+  // «Трека» из шапки, и второго мнения о том, сколько на человеке виз, быть
+  // не должно.
+  const счёт = useMemo(() => workCounts({
+    mine: mineQ.data, lists: listsQ.data, assigned: assignedQ.data,
+    watching: watchingQ.data, triage: триажQ.data,
+  }), [mineQ.data, assignedQ.data, watchingQ.data, listsQ.data, триажQ.data])
 
   /** Просрочка показывается только у пунктов-очередей: у «Архива» красное
    *  число значило бы, что просрочен архив. */

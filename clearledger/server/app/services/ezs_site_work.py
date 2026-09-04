@@ -240,6 +240,26 @@ async def log_event(db: AsyncSession, site: EzsSite, kind: str, *, text: str | N
         author_user_id=user.id if user is not None else None,
     )
     db.add(ev)
+
+    # Смена стадии и движение чек-листа уходят ещё и в журнал организации — по
+    # нему работает подписка «Проекты» (`notify_catalog`). Раньше история
+    # площадки жила только в своей таблице: узнать, что проект встал на паузу
+    # или что закрыт последний пункт гейта, можно было, лишь открыв карточку.
+    #
+    # Остальные роды сюда не идут намеренно. Заметок, касаний и правок паспорта
+    # сотни; подписка, в которой тонет важное, выключается на второй день.
+    # Загрузка реестра тоже молчит: она пишет события напрямую, минуя эту
+    # функцию, а условие оставлено на случай, если однажды пойдёт через неё —
+    # тысяча площадок из файла превратилась бы в тысячу оповещений.
+    if kind in ("stage", "gate") and source != "import":
+        from app.audit import log_audit
+
+        name = site.project_no or site.title or site.address or "проект"
+        details = ({"из": STAGE_LABELS.get(from_stage or "", from_stage or "—"),
+                    "в": STAGE_LABELS.get(to_stage or "", to_stage or "—")}
+                   if kind == "stage" else {"пункт": text or ""})
+        await log_audit(db, actor=user, company_id=site.company_id,
+                        action=f"project.{kind}", target=name, details=details)
     return ev
 
 

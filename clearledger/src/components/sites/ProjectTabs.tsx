@@ -30,6 +30,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import * as chatApi from '@/services/chatService'
+import { ChatsTab } from '@/components/locations/cockpit/ChatsTab'
 import { useSupportContext } from '@/contexts/SupportContext'
 import {
   getSiteEvents, getSiteMembers, getSiteEconomics, getProjectContext, getSiteDocs,
@@ -67,6 +68,9 @@ export const PROJECT_TABS = [
   // «Трек» отдельной вкладкой, а не внутри «Документов»: там файлы, приложенные
   // к площадке (ЕГРН, ТУ, договор), здесь — работа, которая по ней идёт.
   { k: 'track', label: 'Трек' },
+  // Разговор стоит рядом с работой: по проекту сначала договариваются с
+  // собственником и сетевой, и только потом это становится документом.
+  { k: 'chats', label: 'Чаты' },
   { k: 'economics', label: 'Экономика' },
   { k: 'accounting', label: 'Учёт' },
   { k: 'history', label: 'История' },
@@ -84,6 +88,13 @@ export function ProjectTabContent({ tab, site, companyId, onDone }: {
   if (tab === 'equipment') return <EquipmentTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'docs') return <DocsTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'track') return <ProjectTrackTab site={site} companyId={companyId} />
+  if (tab === 'chats') return (
+    <ChatsTab plain subject={{
+      ref: `site:${site.id}`,
+      title: `Проект ${site.projectNo ?? site.title ?? ''}`.trim(),
+      product: 'projects',
+    }} />
+  )
   if (tab === 'economics') return <EconomicsTab site={site} companyId={companyId} />
   if (tab === 'accounting') return <AccountingTab site={site} companyId={companyId} onDone={onDone} />
   return <HistoryTab site={site} companyId={companyId} />
@@ -1213,13 +1224,20 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
 
   // Написать собственнику: комната проекта заводится один раз, дальше переписка
   // живёт в ней. Внешний участник отвечает письмом — ответ приходит сюда же.
+  //
+  // Комната ищется по ПРЕДМЕТУ (`site:<id>`), а не по совпадению имени: имя
+  // проекта правится в паспорте, и после первой же правки заводилась вторая
+  // комната, а переписка оставалась в первой. Объект сети для поиска не годится
+  // вовсе — у площадки его нет до ввода в эксплуатацию.
   const { openInteraction } = useSupportContext()
   const mMail = useMutation({
     mutationFn: async (email: string) => {
-      const rooms = await chatApi.getRooms(false, null, site.locationId ?? undefined)
+      const ref = `site:${site.id}`
+      const rooms = await chatApi.getRooms(false, null, null, ref)
       const title = `Проект ${site.projectNo ?? site.title ?? ''}`.trim()
-      const room = rooms.find((r) => r.name === title)
-        ?? await chatApi.createRoom('group', [], title, 'projects', site.locationId ?? null)
+      const room = rooms[0]
+        ?? await chatApi.createRoom('group', [], title, 'projects',
+          site.locationId ?? null, ref)
       await chatApi.addMailParticipant(room.id, email)
       return room.id
     },
