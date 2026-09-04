@@ -171,7 +171,12 @@ async def list_apps(
             # ИМЕНОВАННОЙ роли в членстве стоит `role_id`, а `modules` остаётся NULL.
             # Читая поле напрямую, стол считал такого человека полнодоступным и
             # показывал все плитки — назначенная роль не действовала вообще.
-            if uc is not None and uc.role != "admin":
+            if uc is None:
+                # Не член компании — и не админ платформы: показывать нечего. Раньше
+                # здесь оставалось `allowed = None`, то есть «без ограничений», и
+                # посторонний получал полный каталог пространства.
+                allowed, apps = [], []
+            elif uc.role != "admin":
                 from app.auth import resolve_member_modules
                 allowed = sorted(await app_registry.effective_apps(
                     db, cid, await resolve_member_modules(uc, db)))

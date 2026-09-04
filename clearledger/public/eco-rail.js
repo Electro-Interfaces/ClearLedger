@@ -79,6 +79,35 @@
     try { return localStorage.getItem(TOKEN_KEY) } catch { return null }
   }
 
+  /** Email из JWT Ядра (клейм `email`). Не разобрали — пусто, сверять нечем. */
+  const jwtEmail = (t) => {
+    try {
+      const p = t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
+      const j = JSON.parse(atob(p.padEnd(Math.ceil(p.length / 4) * 4, '=')))
+      return String(j.email || '').trim().toLowerCase()
+    } catch { return '' }
+  }
+
+  /**
+   * ЧУЖОЙ СЕАНС ЯДРА. Приложения контейнера живут на одном origin, поэтому токен Ядра
+   * общий — но сеанс приложения свой. Человек, вошедший прямой формой приложения после
+   * того, как в этом браузере работал кто-то другой, получал рельсу ПРЕДЫДУЩЕГО: панель
+   * показывала его каталог приложений, а переход по плитке шёл его handoff-токеном и
+   * сажал в его учётную запись (04.09.2026, оператор контакт-центра видел всё
+   * пространство и попадал в чужую Поддержку).
+   *
+   * Хозяин страницы сообщает свою личность атрибутом `user`; не сообщил — поведение
+   * прежнее. Чужой токен не трогаем: это сеанс Ядра, гасить его нам не по чину, —
+   * просто не показываем ничего от его имени.
+   */
+  const alienSession = (el) => {
+    const host = (el.getAttribute('user') || '').trim().toLowerCase()
+    const t = token()
+    if (!host || !t) return false
+    const mine = jwtEmail(t)
+    return !!mine && mine !== host
+  }
+
   /** Запрос к Ядру от имени уже вошедшего человека. Ошибку отдаём наверх — рельс её глотает. */
   async function core(path) {
     const t = token()
@@ -330,7 +359,7 @@
     #open = false
     #busy = null
 
-    static observedAttributes = ['collapsed', 'label', 'part']
+    static observedAttributes = ['collapsed', 'label', 'part', 'user']
 
     connectedCallback() {
       this.render()
@@ -395,8 +424,9 @@
       // Без токена Ядра человек вошёл прямой формой приложения: ни страниц Ядра, ни
       // перехода в соседний продукт ему показывать не на чем. Блок исчезает целиком,
       // не оставляя ни отступа, ни разделителя.
-      this.style.display = token() ? '' : 'none'
-      if (!token()) { root.innerHTML = ''; return }
+      const off = !token() || alienSession(this)
+      this.style.display = off ? 'none' : ''
+      if (off) { root.innerHTML = ''; return }
 
       root.innerHTML = `
         <style>
@@ -585,7 +615,7 @@
     #article = null
     #loading = false
 
-    static observedAttributes = ['app', 'section', 'label']
+    static observedAttributes = ['app', 'section', 'label', 'user']
 
     connectedCallback() { this.render() }
 
@@ -628,7 +658,9 @@
     render() {
       const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' })
       // Без токена Ядра знание недоступно: человек вошёл прямой формой приложения.
-      if (!token() || !this.getAttribute('app')) { this.style.display = 'none'; root.innerHTML = ''; return }
+      if (!token() || !this.getAttribute('app') || alienSession(this)) {
+        this.style.display = 'none'; root.innerHTML = ''; return
+      }
       this.style.display = ''
       const label = this.getAttribute('label') || 'Инфо'
       const items = this.#items || []
