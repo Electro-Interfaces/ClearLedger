@@ -19,14 +19,24 @@ import { Button } from '@/components/ui/button'
 import { useCompany } from '@/contexts/CompanyContext'
 import { formatDateTime } from '@/lib/formatDate'
 import {
-  listPartnerSpaces, listTopics, partnerFeed, TOPIC_STATE_NAME, visitPartnerSpace,
+  listPartnerSpaces, listTopics, openTopic, partnerFeed, sendToTopic,
+  TOPIC_STATE_NAME, visitPartnerSpace,
 } from '@/services/partnerSpaceService'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import * as tasksService from '@/services/tasksService'
 
 export function PartnerSpaces() {
   const { companyId } = useCompany()
   const [openFeed, setOpenFeed] = useState<string | null>(null)
   const [openTopics, setOpenTopics] = useState<string | null>(null)
+  // Разговор может начать и поддержка: предупредить о работах, вернуться к
+  // старому случаю, попросить сведения. До этого первое слово было только за
+  // клиентом, и написать ему из своего пространства было нечем.
+  const [writeTo, setWriteTo] = useState<string | null>(null)
+  const [draft, setDraft] = useState({ title: '', body: '' })
+  const [replyTo, setReplyTo] = useState<{ partner: string; topic: string } | null>(null)
+  const [reply, setReply] = useState('')
 
   const spaces = useQuery({
     queryKey: ['partner-spaces', companyId],
@@ -52,6 +62,30 @@ export function PartnerSpaces() {
     }),
     onSuccess: (task) => toast.success(`Задача №${task.number} поставлена`),
     onError: (e: Error) => toast.error(e.message || 'Задача не поставлена'),
+  })
+  const write = useMutation({
+    mutationFn: (code: string) => openTopic(code, companyId,
+      { title: draft.title.trim(), body: draft.body.trim() }),
+    onSuccess: (res) => {
+      setDraft({ title: '', body: '' })
+      setWriteTo(null)
+      if (res.error) toast.warning(`Записано, но не доставлено: ${res.error}`)
+      else toast.success('Обращение отправлено в пространство клиента')
+      topics.refetch()
+    },
+    onError: (e: Error) => toast.error(e.message || 'Не отправлено'),
+  })
+  const answer = useMutation({
+    mutationFn: (v: { partner: string; topic: string; body: string }) =>
+      sendToTopic(v.partner, v.topic, companyId, v.body),
+    onSuccess: (res) => {
+      setReply('')
+      setReplyTo(null)
+      if (res.error) toast.warning(`Записано, но не доставлено: ${res.error}`)
+      else toast.success('Ответ ушёл клиенту')
+      topics.refetch()
+    },
+    onError: (e: Error) => toast.error(e.message || 'Не отправлено'),
   })
   const visit = useMutation({
     mutationFn: (code: string) => visitPartnerSpace(code, companyId),
@@ -105,6 +139,10 @@ export function PartnerSpaces() {
                 onClick={() => setOpenTopics(openTopics === p.code ? null : p.code)}>
                 <ListChecks className="h-4 w-4" />Обращения
               </Button>
+              <Button size="sm" variant="outline" className="gap-1.5" disabled={!p.linked}
+                onClick={() => { setWriteTo(writeTo === p.code ? null : p.code); setOpenTopics(null) }}>
+                <MessagesSquare className="h-4 w-4" />Написать
+              </Button>
               <Button size="sm" variant="outline" className="gap-1.5"
                 onClick={() => setOpenFeed(openFeed === p.code ? null : p.code)}>
                 <MessagesSquare className="h-4 w-4" />Переписка
@@ -121,6 +159,23 @@ export function PartnerSpaces() {
               )}
             </div>
           </div>
+
+          {writeTo === p.code && (
+            <div className="mt-3 space-y-2 border-t border-border/60 pt-3">
+              <Input value={draft.title} maxLength={300}
+                onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                placeholder="Тема: коротко, её увидит клиент" className="text-sm" />
+              <Textarea value={draft.body} rows={4} className="resize-none text-sm"
+                onChange={(e) => setDraft({ ...draft, body: e.target.value })}
+                placeholder="Что сообщить клиенту" />
+              <div className="flex justify-end">
+                <Button size="sm" disabled={!draft.title.trim() || !draft.body.trim() || write.isPending}
+                  onClick={() => write.mutate(p.code)}>
+                  {write.isPending ? 'Отправляю…' : 'Отправить'}
+                </Button>
+              </div>
+            </div>
+          )}
 
           {openTopics === p.code && (
             <div className="mt-3 space-y-1.5 border-t border-border/60 pt-3">
@@ -142,10 +197,28 @@ export function PartnerSpaces() {
                     </span>
                   )}
                   <Button size="sm" variant="ghost" className="ml-auto h-7 px-2 text-xs"
+                    onClick={() => setReplyTo(replyTo?.topic === t.code ? null
+                      : { partner: p.code, topic: t.code })}>
+                    Ответить
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
                     disabled={makeTask.isPending}
                     onClick={() => makeTask.mutate({ id: t.id, title: t.title })}>
                     Поставить задачу
                   </Button>
+                  {replyTo?.topic === t.code && (
+                    <div className="w-full space-y-2 pt-1">
+                      <Textarea value={reply} rows={3} className="resize-none text-sm"
+                        onChange={(e) => setReply(e.target.value)}
+                        placeholder="Ответ клиенту — уйдёт в это обращение" />
+                      <div className="flex justify-end">
+                        <Button size="sm" disabled={!reply.trim() || answer.isPending}
+                          onClick={() => answer.mutate({ partner: p.code, topic: t.code, body: reply.trim() })}>
+                          {answer.isPending ? 'Отправляю…' : 'Ответить'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )) : <div className="text-xs text-muted-foreground">Обращений ещё не было.</div>}
             </div>

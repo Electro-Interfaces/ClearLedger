@@ -31,6 +31,8 @@ import {
   type PartnerMessage, type PartnerSpaceRef, type TopicState,
 } from '@/services/partnerSpaceService'
 import { openAuthAttachment } from '@/lib/authFiles'
+import { useCompany } from '@/contexts/CompanyContext'
+import { templatesForProfile } from '@/config/supportTemplates'
 import type { AskSubject } from './AskSupportButton'
 
 /** Ответ приходит мостом, а не веб-сокетом: опрос — честная цена за то, что у
@@ -258,8 +260,13 @@ function NewTopicForm({ vendor, companyId, subject, done }: {
   done: (code: string) => void
 }) {
   const qc = useQueryClient()
+  const { company } = useCompany()
   const [title, setTitle] = useState(subject?.label || '')
   const [body, setBody] = useState('')
+  // Шаблон спрашивает сведения, за которыми иначе идёт вторая переписка: объект,
+  // время, что делали. Предмет из карточки уже назван — тогда тему не трогаем,
+  // а болванку подставляем: она про содержание, а не про заголовок.
+  const templates = templatesForProfile(company.profileId)
   const open = useMutation({
     mutationFn: () => openTopic(vendor.code, companyId, {
       title: title.trim(), body: body.trim(),
@@ -275,6 +282,21 @@ function NewTopicForm({ vendor, companyId, subject, done }: {
       <Header back={() => done('')} title="Новое обращение"
         hint={subject ? `${subject.label} · уйдёт в ${vendor.name}` : `Уйдёт в ${vendor.name}`} />
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">С чем обращение</label>
+          <div className="flex flex-wrap gap-1.5">
+            {templates.map((t) => (
+              <button key={t.code} type="button"
+                className="rounded-lg border border-border/60 bg-secondary/40 px-2 py-1 text-xs text-foreground transition-colors hover:border-primary/40 hover:bg-accent"
+                onClick={() => {
+                  if (!subject) setTitle(t.title)
+                  setBody(t.body)
+                }}>
+                {t.title}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">Тема</label>
           <Input value={title} onChange={(e) => setTitle(e.target.value)}
