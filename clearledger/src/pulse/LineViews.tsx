@@ -11,13 +11,15 @@
  * ссылка туда стоит внизу. Второго набора метрик контакт-центра здесь нет —
  * цифры считаются по тем же таблицам, что и «Обращения» (PULSE.md §6).
  */
-import { useQuery } from '@tanstack/react-query'
-import { ArrowUpRight, Clock, Headphones, Inbox } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowUpRight, Clock, Coffee, Headphones, Inbox, LogIn, LogOut, Play } from 'lucide-react'
+import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { useCompany } from '@/contexts/CompanyContext'
-import { getPulseMyLine, getPulseShift } from './pulseService'
-import type { PulseShiftAgent } from './pulseService'
+import { getPulseMyLine, getPulseShift, pulseLineAction } from './pulseService'
+import type { LineAction, PulseShiftAgent } from './pulseService'
 import { KpiTile, PulseError, PulseLoading, fmtNum, plural } from './parts'
 
 /** Состояния оператора называются так же, как в самой Поддержке. */
@@ -29,7 +31,7 @@ const STATE: Record<string, { label: string; dot: string }> = {
   offline: { label: 'Не в сети', dot: 'bg-muted-foreground/40' },
 }
 
-const state = (key: string) => STATE[key] ?? STATE.offline
+const state = (key: string) => ({ key, ...(STATE[key] ?? STATE.offline) })
 
 /** «14:35» — время ответа читают глазами, а не считают в уме. */
 const at = (s: string | null | undefined) =>
@@ -60,6 +62,7 @@ function NotAvailable({ reason }: { reason?: string }) {
 
 export function MyLineView() {
   const { company } = useCompany()
+  const qc = useQueryClient()
   const q = useQuery({
     queryKey: ['pulse-my-line', company.id],
     queryFn: () => getPulseMyLine(company.id),
@@ -68,6 +71,43 @@ export function MyLineView() {
     refetchInterval: 60_000,
   })
   const d = q.data
+
+  /**
+   * Действие линии. Правила живут в Поддержке, поэтому здесь только отправка и
+   * человеческий разбор отказа: «передайте активные обращения» — не ошибка, а
+   * условие, и второй нажатой кнопкой человек соглашается передать их очереди.
+   */
+  const act = useMutation({
+    mutationFn: (body: { action: LineAction; state?: string; handover?: boolean; note?: string }) =>
+      pulseLineAction(company.id, body),
+    onSuccess: (res, body) => {
+      if (body.action === 'next') {
+        toast.success(res.taken
+          ? `Взято: ${res.taken.subject || 'обращение'}`
+          : 'В очереди сейчас пусто')
+      } else if (body.action === 'shift_end' && res.handed) {
+        toast.success(`Смена закрыта, ${res.handed} обращений передано очереди`)
+      }
+      qc.invalidateQueries({ queryKey: ['pulse-my-line', company.id] })
+    },
+    onError: (e: Error, body) => {
+      const text = e.message || 'Не получилось'
+      if (body.action === 'shift_end' && text.includes('передайте активные')) {
+        toast.error('На вас есть незакрытые обращения', {
+          description: 'Их можно вернуть в очередь — тогда их возьмёт другой оператор.',
+          action: {
+            label: 'Передать очереди',
+            onClick: () => act.mutate({
+              action: 'shift_end', handover: true, note: 'Смена закрыта из «Пульса»',
+            }),
+          },
+        })
+        return
+      }
+      toast.error(text)
+    },
+  })
+  const busy = act.isPending
 
   if (q.isLoading) return <PulseLoading what="вашей линии" />
   if (q.isError) return <PulseError what="вашу линию" onRetry={() => q.refetch()} />
@@ -92,6 +132,40 @@ export function MyLineView() {
               принято за неделю: <span className="font-semibold tabular-nums text-foreground">{fmtNum(d.accepted_week)}</span>
             </span>
           )}
+          {/* Пульт: то, ради чего экран открывают с телефона. Разговор ведётся в
+              рабочем месте, а вот выйти на линию, отойти и взять следующее нужно
+              уметь отсюда — иначе человек, отошедший от компьютера, просто
+              пропадает для очереди. */}
+          <span className="ml-auto flex flex-wrap items-center gap-1.5">
+            {d.shift?.on_shift ? (
+              <>
+                <Button size="sm" variant="secondary" disabled={busy}
+                  onClick={() => act.mutate({ action: 'next' })}>
+                  <Play className="h-3.5 w-3.5" />Взять следующее
+                </Button>
+                {st.key === 'not_ready' ? (
+                  <Button size="sm" variant="outline" disabled={busy}
+                    onClick={() => act.mutate({ action: 'state', state: 'available' })}>
+                    <Play className="h-3.5 w-3.5" />Готов
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="outline" disabled={busy}
+                    onClick={() => act.mutate({ action: 'state', state: 'not_ready' })}>
+                    <Coffee className="h-3.5 w-3.5" />Перерыв
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" disabled={busy}
+                  onClick={() => act.mutate({ action: 'shift_end' })}>
+                  <LogOut className="h-3.5 w-3.5" />Закончить смену
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" disabled={busy}
+                onClick={() => act.mutate({ action: 'shift_start' })}>
+                <LogIn className="h-3.5 w-3.5" />Начать смену
+              </Button>
+            )}
+          </span>
         </CardContent>
       </Card>
 

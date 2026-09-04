@@ -328,6 +328,29 @@ export const getPulseMyLine = (companyId: string) =>
 export const getPulseShift = (companyId: string) =>
   get<PulseShift>('/api/pulse/shift', { company_id: companyId })
 
+/** Что человек делает со своей линией с телефона. */
+export type LineAction = 'shift_start' | 'shift_end' | 'state' | 'next'
+
+export interface LineActionResult {
+  ok: boolean
+  shift_started_at?: string | null
+  state?: string
+  handed?: number
+  taken?: { id: string; subject: string | null; channel: string | null } | null
+  capacity?: { active: number; max: number }
+}
+
+/**
+ * Действие уходит в Поддержку через Ядро: правила линии (лимит одновременных,
+ * навыки, передача обращений при закрытии смены) живут там, и второй их копии
+ * в «Пульсе» нет.
+ */
+export const pulseLineAction = (
+  companyId: string,
+  body: { action: LineAction; state?: string; handover?: boolean; note?: string },
+) => post<LineActionResult>(
+  `/api/pulse/my-line/action?company_id=${encodeURIComponent(companyId)}`, body)
+
 /* ── «Команда»: у кого затор ─────────────────────────────────────────── */
 
 export interface PulsePerson {

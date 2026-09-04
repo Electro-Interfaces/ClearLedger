@@ -31,7 +31,10 @@ from app.auth import (
     assert_company_member, assert_company_product, get_current_user,
     resolve_member_modules,
 )
+import httpx
+
 from app.services.support_scope import support_company_id
+from app.services import space_projection, sso
 from app.database import get_db
 from app.services.tax_mode import tax_mode as space_tax_mode
 from app.models import (
@@ -2954,6 +2957,68 @@ async def pulse_my_line(
         "accepted_week": int(week.accepted),
         "queue_oldest": queue.oldest.isoformat() if queue.oldest else None,
     }
+
+
+class LineAction(BaseModel):
+    """Что человек делает со своей линией с телефона."""
+
+    action: str
+    state: str | None = None
+    handover: bool = False
+    note: str | None = None
+
+
+@router.post("/my-line/action")
+async def pulse_my_line_action(
+    payload: LineAction,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Короткое действие линии: открыть смену, отойти, вернуться, взять следующее.
+
+    «Пульс» — упрощённое представление рабочего места, а не второе рабочее место:
+    с телефона нужны ровно эти движения, а разговор человек ведёт там, где для
+    него всё есть. Поэтому Ядро ничего не решает само — оно пересказывает
+    действие Поддержке, и правила (лимит одновременных, навыки, передача
+    активных обращений при закрытии смены) остаются в одном месте.
+
+    Действуем от имени того, кто нажал: адрес почты — единственный общий ключ
+    человека в двух половинах пространства.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    visible = await _visible_items(db, str(cid), current_user)
+    if visible is not None and "business.myline" not in visible:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Линия закрыта для этой роли")
+
+    try:
+        app_row, _link, _tok = await space_projection._target(db, cid, "support")
+    except space_projection.ProjectionError as e:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e))
+    # Свой скоуп: право проецировать справочники не должно означать право
+    # открывать человеку смену и назначать на него обращения.
+    token = sso.sign_service_token(aud="support", scope="desk")
+    if not token:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Единый вход не настроен — действовать за сотрудника нельзя")
+
+    url = f"{space_projection._internal_base_url(app_row, 'support')}/api/v1/eco/cc/action"
+    body = {"email": current_user.email, "action": payload.action,
+            "state": payload.state, "handover": payload.handover, "note": payload.note}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=body,
+                                     headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError as e:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            f"Поддержка не отвечает: {e}")
+    if resp.status_code >= 400:
+        # Отказ приложения показываем как есть: «передайте активные обращения» и
+        # «достигнут лимит» — это ответ человеку, а не наша внутренняя ошибка.
+        detail = (resp.json().get("error") if resp.headers.get("content-type", "").startswith("application/json")
+                  else resp.text)
+        raise HTTPException(resp.status_code, detail or "Действие не выполнено")
+    return resp.json()
 
 
 @router.get("/shift")
