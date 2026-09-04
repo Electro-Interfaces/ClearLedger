@@ -340,3 +340,18 @@ def test_selection_happens_before_the_cap():
 def test_topicless_cards_stay_visible():
     """Сообщения без темы (свежесть данных) видны всем — им верят все цифры."""
     assert "data_stale" in keys(stale_days=STALE_DAYS + 1, visible={"team.people"})
+
+
+def test_catalog_matches_role_builder():
+    """Пункт «Пульса» без записи в реестре прав выдать роли невозможно.
+
+    Каталог видимости (`PULSE_ITEMS`) отвечает на вопрос «что кому показывать»,
+    реестр приложений — «что можно отметить в конструкторе роли». Разойдись они
+    на один ключ, и новый экран либо не отдаётся никому, либо открыт всем: право
+    на него просто негде поставить.
+    """
+    from app.routers.pulse_router import PULSE_ITEMS
+    from app.services.app_registry import _PULSE_MODULES
+
+    assert {k for k, _, _ in PULSE_ITEMS} - {"showcase", "views"} \
+        == {k for k, _ in _PULSE_MODULES}

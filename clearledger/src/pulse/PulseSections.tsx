@@ -12,7 +12,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowDownRight, ArrowUpRight, Building2, CalendarDays, ChevronRight, ClipboardList,
-  Gauge, HardHat, LifeBuoy, ListChecks, MapPin, MessageCircle, PhoneCall, TrendingUp,
+  Gauge, HardHat, LifeBuoy, ListChecks, MapPin, Headphones, MessageCircle, PhoneCall, TrendingUp,
   Users,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -32,6 +32,7 @@ import {
 } from './pulseService'
 import { BlockGrid } from './ShowcaseView'
 import { ContactCenterView } from './ContactCenter'
+import { MyLineView, ShiftView } from './LineViews'
 import { SalesView } from './SalesView'
 import { ProjectsView } from './ProjectsView'
 import { TasksView } from './TasksView'
@@ -148,6 +149,8 @@ export function PulseBusinessPage() {
     support: { title: 'Поддержка', hint: 'Сервисный контур: сколько и где стоит работа' },
     tasks: { title: 'Задачи', hint: 'Работа компании: успеваем ли, у кого затор, что уже горит' },
     contacts: { title: 'Обращения', hint: 'Разговор с потребителем: дозвонились ли, быстро ли ответили, нет ли хвостов' },
+    myline: { title: 'Моя линия', hint: 'Что на мне сейчас, что просрочено и успеваю ли я по норме' },
+    shift: { title: 'Смена', hint: 'Кто на линии прямо сейчас, у кого затор и сколько людей ждёт' },
     objects: { title: 'Где болит', hint: 'Точки сети, где сошлось несколько проблем сразу — выручка, расходы, документы' },
     summary: { title: 'Коротко', hint: 'Выжимка для куратора: цифры сети, воронка и вехи' },
   }[view] ?? { title: 'Бизнес', hint: 'В каком состоянии дело' }
@@ -234,6 +237,28 @@ export function PulseBusinessPage() {
         <Title icon={PhoneCall} title={meta.title} hint={meta.hint}
           aside="неделя против предыдущей" />
         <ContactCenterView />
+      </div>
+    )
+  }
+  if (view === 'myline') {
+    return (
+      <div className="space-y-4">
+        {/* Единственный экран «Пульса» про самого смотрящего: оператор отвечает
+            за свои разговоры, а не за счёт всей смены. */}
+        <Title icon={Headphones} title={meta.title} hint={meta.hint}
+          aside="прямо сейчас · неделя против нормы" />
+        <MyLineView />
+      </div>
+    )
+  }
+  if (view === 'shift') {
+    return (
+      <div className="space-y-4">
+        {/* «Обращения» отвечают, как мы работаем; здесь — что происходит в эту
+            минуту: кто вышел, у кого упёрлось, сколько ждут. */}
+        <Title icon={Headphones} title={meta.title} hint={meta.hint}
+          aside="состояние на сейчас" />
+        <ShiftView />
       </div>
     )
   }

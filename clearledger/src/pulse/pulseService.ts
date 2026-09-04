@@ -276,6 +276,58 @@ export interface PulseContactCenter {
 export const getPulseContactCenter = (companyId: string) =>
   get<PulseContactCenter>('/api/pulse/contact-center', { company_id: companyId })
 
+/* ── «Моя линия» и «Смена»: контакт-центр вблизи ─────────────────────── */
+
+/** Обращение на столе человека: срок ответа важнее темы, поэтому он в структуре. */
+export interface PulseLineThread {
+  id: string
+  subject: string | null
+  channel: string | null
+  contact: string | null
+  due_at: string | null
+  answered: boolean
+  last_at: string | null
+}
+
+export interface PulseMyLine {
+  /** false — контура Поддержки нет или человек в контакт-центре не заведён. */
+  available: boolean
+  reason?: 'no_support' | 'not_in_support'
+  me?: { name: string }
+  shift?: { state: string; on_shift: boolean; since: string | null }
+  kpi?: PulseKpi[]
+  threads?: PulseLineThread[]
+  accepted_week?: number
+  queue_oldest?: string | null
+}
+
+export interface PulseShiftAgent {
+  id: string
+  name: string
+  duty: string | null
+  state: string
+  on_shift: boolean
+  since: string | null
+  in_work: number
+  max: number
+  overdue: number
+  closed_today: number
+}
+
+export interface PulseShift {
+  available: boolean
+  reason?: 'no_support'
+  kpi?: PulseKpi[]
+  agents?: PulseShiftAgent[]
+  queue_oldest?: string | null
+}
+
+export const getPulseMyLine = (companyId: string) =>
+  get<PulseMyLine>('/api/pulse/my-line', { company_id: companyId })
+
+export const getPulseShift = (companyId: string) =>
+  get<PulseShift>('/api/pulse/shift', { company_id: companyId })
+
 /* ── «Команда»: у кого затор ─────────────────────────────────────────── */
 
 export interface PulsePerson {

@@ -216,6 +216,10 @@ PULSE_ITEMS: list[tuple[str, str, str]] = [
     ("business.projects", "Проекты", "Бизнес"),
     ("business.ops", "Эксплуатация", "Бизнес"),
     ("business.contacts", "Обращения", "Бизнес"),
+    # Контакт-центр вблизи. Право отдельное от «Обращений»: там неделя
+    # компании, здесь текущая минута одного человека и одной смены.
+    ("business.myline", "Моя линия", "Бизнес"),
+    ("business.shift", "Смена", "Бизнес"),
     ("business.objects", "Где болит", "Бизнес"),
     ("business.support", "Поддержка", "Бизнес"),
     ("business.summary", "Коротко", "Бизнес"),
@@ -2799,6 +2803,236 @@ async def pulse_contact_center(
         "targets": {"missed_share": cc["target_missed"], "first_response_sec": cc["target_frt"],
                     "in_sla_share": cc["target_in_sla"]},
     }
+
+
+# ── Контакт-центр вблизи: своя линия и своя смена ────────────────────────────
+#
+# «Обращения» отвечают руководителю компании и меряют неделю. Людям НА ЛИНИИ
+# нужен другой горизонт — прямо сейчас: оператору «что на мне и успеваю ли я»,
+# руководителю смены «кто сегодня работает и где затор». Считается всё по тем же
+# таблицам Поддержки, что и «Обращения»: второго набора метрик контакт-центра не
+# заводим (PULSE.md §6) — меняются горизонт и разрез, а не определения.
+
+
+async def _cc_tables(db: AsyncSession) -> bool:
+    """Есть ли контур контакт-центра в этой базе.
+
+    У стека без Поддержки таблиц нет вовсе, а на новых может не оказаться гранта.
+    И то, и другое гасит раздел, а не роняет «Пульс».
+    """
+    return bool((await db.execute(text(
+        "select to_regclass('public.inbox_threads') is not null"
+        "   and to_regclass('public.cc_staff') is not null"
+    ))).scalar())
+
+
+async def _cc_me(db: AsyncSession, email: str) -> Any:
+    """Кто этот человек в Поддержке.
+
+    Учётки Ядра и Поддержки — разные записи, и даже у одного человека id не
+    совпадают; связывает их адрес почты — единый ключ входа в пространство.
+    Нет записи — человек в контакт-центре не заведён, и показывать нечего.
+    """
+    return (await db.execute(text(
+        "select id, name from users where lower(email) = lower(:email) limit 1"
+    ), {"email": email})).one_or_none()
+
+
+@router.get("/my-line")
+async def pulse_my_line(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Моя линия» — рабочий день человека на линии его же глазами.
+
+    Единственный экран «Пульса», который считает не по компании, а по тому, кто
+    смотрит. Оператору цифры всей смены не помогают: он не отвечает за то,
+    сколько звонков потеряла линия, он отвечает за свои разговоры. Отсюда набор:
+    что на мне сейчас, что уже просрочено, как отработана неделя против нормы —
+    и сколько людей ждёт в общей очереди, потому что это единственная общая
+    цифра, на которую оператор влияет своими руками.
+
+    Нормы берутся из целей самого контакт-центра (`cc_kpi_targets`), а не
+    назначаются «Пульсом»: иначе экран ругался бы на то, что нормой не считают.
+    """
+    await assert_company_product(company_id, current_user, db, "pulse")
+    if not await _cc_tables(db):
+        return {"available": False, "reason": "no_support"}
+    me = await _cc_me(db, current_user.email)
+    if me is None:
+        return {"available": False, "reason": "not_in_support"}
+
+    targets = await _cc_targets(db)
+    frt_target = targets["first_response_sec"]
+
+    now = (await db.execute(text("""
+        select count(*) as in_work,
+               count(*) filter (where response_due_at < now()
+                                  and first_response_at is null) as overdue
+        from inbox_threads
+        where assigned_to = :me and status <> 'closed'
+    """), {"me": me.id})).one()
+
+    # Очередь общая: обращения, которые ещё никто не взял. Она стоит рядом с
+    # личными цифрами, потому что оператор влияет на неё прямо сейчас.
+    queue = (await db.execute(text("""
+        select count(*) as waiting, min(created_at) as oldest
+        from inbox_threads
+        where status <> 'closed' and assigned_to is null
+    """))).one()
+
+    week = (await db.execute(text("""
+        select count(*) filter (where accepted_at >= now() - interval '7 days') as accepted,
+               count(*) filter (where closed_at >= now() - interval '7 days') as closed,
+               avg(extract(epoch from (first_response_at - created_at)))
+                 filter (where first_response_at >= now() - interval '7 days') as frt,
+               count(*) filter (where first_response_at >= now() - interval '7 days') as answered,
+               count(*) filter (where first_response_at >= now() - interval '7 days'
+                 and extract(epoch from (first_response_at - created_at)) <= :t) as in_sla
+        from inbox_threads
+        where assigned_to = :me or handled_by = :me
+    """), {"me": me.id, "t": frt_target})).one()
+
+    shift = (await db.execute(text("""
+        select s.state, sh.started_at as shift_started_at,
+               coalesce(st.max_concurrent, p.max_concurrent, 3) as max_concurrent
+        from users u
+        left join cc_agent_states s on s.user_id = u.id and s.ended_at is null
+        left join cc_operator_shifts sh on sh.user_id = u.id and sh.status = 'active'
+        left join cc_agent_profiles p on p.user_id = u.id
+        left join cc_staff st on st.user_id = u.id
+        where u.id = :me
+    """), {"me": me.id})).one_or_none()
+
+    mine = [{"id": str(r.id), "subject": r.subject, "channel": r.channel,
+             "contact": r.contact_name or r.contact,
+             "due_at": r.response_due_at.isoformat() if r.response_due_at else None,
+             "answered": r.first_response_at is not None,
+             "last_at": r.last_message_at.isoformat() if r.last_message_at else None}
+            for r in (await db.execute(text("""
+        select id, subject, channel, contact, contact_name, response_due_at,
+               first_response_at, last_message_at
+        from inbox_threads
+        where assigned_to = :me and status <> 'closed'
+        order by response_due_at nulls last, last_message_at desc
+        limit 10
+    """), {"me": me.id})).all()]
+
+    in_sla_share = (round(100.0 * week.in_sla / week.answered, 1)
+                    if week.answered else None)
+    max_concurrent = int(shift.max_concurrent) if shift else 3
+    kpi = [
+        _kpi("in_work", "На мне сейчас", int(now.in_work),
+             note=f"предел {max_concurrent} одновременно", higher_is_better=False,
+             state="warn" if now.in_work >= max_concurrent else None),
+        _kpi("overdue", "Просрочен ответ", int(now.overdue), note="из тех, что на мне",
+             higher_is_better=False, state="alert" if now.overdue else None),
+        _kpi("closed", "Закрыто за неделю", int(week.closed), note="моих разговоров"),
+        _kpi("frt", "Мой первый ответ, с",
+             round(float(week.frt), 1) if week.frt is not None else None,
+             note=f"норма ≤ {frt_target:.0f} с", higher_is_better=False,
+             state=("warn" if week.frt is not None and week.frt > frt_target else None)),
+        _kpi("in_sla", "В норме, %", in_sla_share,
+             note=(f"из {int(week.answered)} отвеченных" if week.answered
+                   else "отвечать было нечего")),
+        _kpi("queue", "Ждут в очереди", int(queue.waiting), note="ничьи обращения",
+             higher_is_better=False, state="warn" if queue.waiting else None),
+    ]
+
+    return {
+        "available": True,
+        "me": {"name": me.name},
+        "shift": {
+            "state": (shift.state if shift else None) or "offline",
+            "on_shift": bool(shift and shift.shift_started_at),
+            "since": (shift.shift_started_at.isoformat()
+                      if shift and shift.shift_started_at else None),
+        },
+        "kpi": kpi,
+        "threads": mine,
+        "accepted_week": int(week.accepted),
+        "queue_oldest": queue.oldest.isoformat() if queue.oldest else None,
+    }
+
+
+@router.get("/shift")
+async def pulse_shift(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Смена» — линия прямо сейчас глазами того, кто её ведёт.
+
+    «Обращения» показывают неделю и отвечают на вопрос «как мы работаем».
+    Руководителю смены нужен другой — «что происходит в эту минуту»: кто вышел,
+    у кого очередь упёрлась в предел, сколько людей ждёт и давно ли. Состав
+    берётся тот же, что ведётся в самой Поддержке (`cc_staff`): второго реестра
+    людей контакт-центра здесь не заводим.
+    """
+    await assert_company_product(company_id, current_user, db, "pulse")
+    if not await _cc_tables(db):
+        return {"available": False, "reason": "no_support"}
+
+    agents = [{"id": str(r.id), "name": r.name, "duty": r.duty,
+               "state": r.state or "offline",
+               "on_shift": r.shift_started_at is not None,
+               "since": r.shift_started_at.isoformat() if r.shift_started_at else None,
+               "in_work": int(r.in_work), "max": int(r.max_concurrent),
+               "overdue": int(r.overdue), "closed_today": int(r.closed_today)}
+              for r in (await db.execute(text("""
+        select u.id, u.name, st.duty, s.state, sh.started_at as shift_started_at,
+               coalesce(st.max_concurrent, p.max_concurrent, 3) as max_concurrent,
+               (select count(*) from inbox_threads t
+                 where t.assigned_to = u.id and t.status <> 'closed') as in_work,
+               (select count(*) from inbox_threads t
+                 where t.assigned_to = u.id and t.status <> 'closed'
+                   and t.response_due_at < now() and t.first_response_at is null) as overdue,
+               (select count(*) from inbox_threads t
+                 where t.handled_by = u.id
+                   and t.closed_at > now() - interval '24 hours') as closed_today
+        from cc_staff st
+        join users u on u.id = st.user_id
+        left join cc_agent_states s on s.user_id = u.id and s.ended_at is null
+        left join cc_operator_shifts sh on sh.user_id = u.id and sh.status = 'active'
+        left join cc_agent_profiles p on p.user_id = u.id
+        where st.active and coalesce(u.is_active, true)
+        order by (sh.started_at is null), u.name
+    """))).all()]
+
+    queue = (await db.execute(text("""
+        select count(*) as waiting, min(created_at) as oldest,
+               count(*) filter (where response_due_at < now()
+                                  and first_response_at is null) as overdue
+        from inbox_threads
+        where status <> 'closed' and assigned_to is null
+    """))).one()
+
+    esc = 0
+    if (await db.execute(text("select to_regclass('public.cc_escalations')"))).scalar():
+        esc = (await db.execute(text(
+            "select count(*) from cc_escalations where resolved_at is null"
+        ))).scalar_one()
+
+    on_line = sum(1 for a in agents if a["on_shift"])
+    loaded = [a for a in agents if a["max"] and a["in_work"] >= a["max"]]
+    kpi = [
+        _kpi("on_line", "На линии", on_line, note=f"из {len(agents)} в составе",
+             state="alert" if agents and not on_line else None),
+        _kpi("queue", "Ждут в очереди", int(queue.waiting), note="никем не взяты",
+             higher_is_better=False, state="warn" if queue.waiting else None),
+        _kpi("queue_overdue", "Просрочен первый ответ", int(queue.overdue),
+             note="в очереди", higher_is_better=False,
+             state="alert" if queue.overdue else None),
+        _kpi("loaded", "Перегружены", len(loaded), note="очередь упёрлась в предел",
+             higher_is_better=False, state="warn" if loaded else None),
+        _kpi("escalations", "Эскалации", int(esc),
+             note="передано выше и не разобрано", higher_is_better=False,
+             state="alert" if esc else None),
+    ]
+
+    return {"available": True, "kpi": kpi, "agents": agents,
+            "queue_oldest": queue.oldest.isoformat() if queue.oldest else None}
 
 
 @router.get("/team")
