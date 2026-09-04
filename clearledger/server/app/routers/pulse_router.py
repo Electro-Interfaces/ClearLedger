@@ -2922,6 +2922,61 @@ async def pulse_my_line(
         limit 10
     """), {"me": me.id})).all()]
 
+    # Мои смены: ближайшие по графику и последние отработанные. «Когда я
+    # выхожу» и «как прошло вчера» — вопросы, за которыми оператор иначе идёт к
+    # руководителю.
+    plan = [{"starts_at": r.starts_at.isoformat(), "ends_at": r.ends_at.isoformat(),
+             "duty": r.duty, "now": bool(r.now)}
+            for r in (await db.execute(text("""
+        select starts_at, ends_at, duty,
+               (starts_at <= now() and ends_at > now()) as now
+        from cc_shift_plan
+        where user_id = :me and status = 'planned' and ends_at > now()
+        order by starts_at limit 10
+    """), {"me": me.id})).all()]
+
+    shifts = [{"started_at": r.started_at.isoformat(),
+               "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+               "minutes": int(r.minutes or 0), "closed": int(r.closed)}
+              for r in (await db.execute(text("""
+        select sh.started_at, sh.ended_at,
+               extract(epoch from (coalesce(sh.ended_at, now()) - sh.started_at)) / 60 as minutes,
+               (select count(*) from inbox_threads t
+                 where t.handled_by = :me and t.closed_at >= sh.started_at
+                   and t.closed_at <= coalesce(sh.ended_at, now())) as closed
+        from cc_operator_shifts sh
+        where sh.user_id = :me
+        order by sh.started_at desc limit 5
+    """), {"me": me.id})).all()]
+
+    # Мои звонки: телефония уже связала разговор с человеком (`operator_user_id`),
+    # поэтому лента личная, а не «все звонки компании с моим именем в тексте».
+    calls = []
+    if (await db.execute(text("select to_regclass('public.call_records')"))).scalar():
+        calls = [{"at": r.started_at.isoformat() if r.started_at else None,
+                  "phone": r.client_phone, "missed": bool(r.missed),
+                  "wait": int(r.wait_sec or 0), "duration": int(r.duration_sec or 0)}
+                 for r in (await db.execute(text("""
+            select started_at, client_phone, missed, wait_sec, duration_sec
+            from call_records
+            where operator_user_id = :me
+            order by started_at desc nulls last limit 15
+        """), {"me": me.id})).all()]
+
+    # Итог месяца рядом с недельным: одна неделя ничего не говорит о том, стало
+    # лучше или хуже — а именно это человек и хочет увидеть в своей отчётности.
+    month = (await db.execute(text("""
+        select count(*) filter (where accepted_at >= now() - interval '30 days') as accepted,
+               count(*) filter (where closed_at >= now() - interval '30 days') as closed,
+               avg(extract(epoch from (first_response_at - created_at)))
+                 filter (where first_response_at >= now() - interval '30 days') as frt,
+               count(*) filter (where first_response_at >= now() - interval '30 days') as answered,
+               count(*) filter (where first_response_at >= now() - interval '30 days'
+                 and extract(epoch from (first_response_at - created_at)) <= :t) as in_sla
+        from inbox_threads
+        where assigned_to = :me or handled_by = :me
+    """), {"me": me.id, "t": frt_target})).one()
+
     in_sla_share = (round(100.0 * week.in_sla / week.answered, 1)
                     if week.answered else None)
     max_concurrent = int(shift.max_concurrent) if shift else 3
@@ -2954,8 +3009,19 @@ async def pulse_my_line(
         },
         "kpi": kpi,
         "threads": mine,
+        "plan": plan,
+        "shifts": shifts,
+        "calls": calls,
         "accepted_week": int(week.accepted),
+        "month": {
+            "accepted": int(month.accepted), "closed": int(month.closed),
+            "frt": round(float(month.frt), 1) if month.frt is not None else None,
+            "in_sla_share": (round(100.0 * month.in_sla / month.answered, 1)
+                             if month.answered else None),
+            "answered": int(month.answered),
+        },
         "queue_oldest": queue.oldest.isoformat() if queue.oldest else None,
+        "targets": {"first_response_sec": frt_target},
     }
 
 

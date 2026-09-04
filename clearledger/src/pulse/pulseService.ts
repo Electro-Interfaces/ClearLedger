@@ -289,6 +289,31 @@ export interface PulseLineThread {
   last_at: string | null
 }
 
+/** Моя смена по графику: когда я выхожу. */
+export interface PulseMyPlanRow {
+  starts_at: string
+  ends_at: string
+  duty: string | null
+  now: boolean
+}
+
+/** Отработанная смена: сколько длилась и сколько я на ней закрыл. */
+export interface PulseMyShiftRow {
+  started_at: string
+  ended_at: string | null
+  minutes: number
+  closed: number
+}
+
+/** Мой звонок: телефония связала разговор со мной, а не с именем в тексте. */
+export interface PulseMyCallRow {
+  at: string | null
+  phone: string | null
+  missed: boolean
+  wait: number
+  duration: number
+}
+
 export interface PulseMyLine {
   /** false — контура Поддержки нет или человек в контакт-центре не заведён. */
   available: boolean
@@ -297,8 +322,20 @@ export interface PulseMyLine {
   shift?: { state: string; on_shift: boolean; since: string | null }
   kpi?: PulseKpi[]
   threads?: PulseLineThread[]
+  plan?: PulseMyPlanRow[]
+  shifts?: PulseMyShiftRow[]
+  calls?: PulseMyCallRow[]
   accepted_week?: number
+  /** Месяц рядом с неделей: одна неделя не отвечает «стало лучше или хуже». */
+  month?: {
+    accepted: number
+    closed: number
+    frt: number | null
+    in_sla_share: number | null
+    answered: number
+  }
   queue_oldest?: string | null
+  targets?: Record<string, number>
 }
 
 export interface PulseShiftAgent {

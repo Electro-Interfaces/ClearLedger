@@ -66,9 +66,21 @@ function NotAvailable({ reason }: { reason?: string }) {
   )
 }
 
+type LineTab = 'now' | 'shifts' | 'calls'
+
+const LINE_TABS: { key: LineTab; label: string }[] = [
+  { key: 'now', label: 'Сейчас' },
+  { key: 'shifts', label: 'Мои смены' },
+  { key: 'calls', label: 'Мои звонки' },
+]
+
 export function MyLineView() {
   const { company } = useCompany()
   const qc = useQueryClient()
+  const { openInteraction } = useSupportContext()
+  // Три вопроса о своей работе: что на мне сейчас, когда я работаю и что я уже
+  // сделал. Виды одного предмета — поэтому вкладки, а не пункты меню.
+  const [tab, setTab] = useState<LineTab>('now')
   const q = useQuery({
     queryKey: ['pulse-my-line', company.id],
     queryFn: () => getPulseMyLine(company.id),
@@ -179,6 +191,138 @@ export function MyLineView() {
         {(d.kpi ?? []).map((k) => <KpiTile key={k.key} k={k} />)}
       </div>
 
+      <div className="flex flex-wrap gap-1">
+        {LINE_TABS.map((t) => (
+          <button key={t.key} type="button" onClick={() => setTab(t.key)}
+            className={cn('rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+              tab === t.key ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'shifts' && (
+        <div className="space-y-5">
+          <section className="space-y-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+              Когда я работаю
+            </h2>
+            {d.plan?.length ? (
+              <Card className="py-0"><CardContent className="divide-y p-0">
+                {d.plan.map((p, i) => (
+                  <div key={`${p.starts_at}-${i}`} className="flex items-center gap-3 px-3 py-2">
+                    <CalendarClock className={cn('h-3.5 w-3.5 shrink-0',
+                      p.now ? 'text-emerald-500' : 'text-muted-foreground')} />
+                    <span className="min-w-0 flex-1 text-[13px]">
+                      {when(p.starts_at)}–{hhmm(p.ends_at)}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                      {p.now ? 'идёт сейчас' : p.duty === 'head' ? 'старший' : 'смена'}
+                    </span>
+                  </div>
+                ))}
+              </CardContent></Card>
+            ) : (
+              <Card className="border-dashed py-0">
+                <CardContent className="p-4 text-xs text-muted-foreground">
+                  Смены на вас не поставлены. График ведёт руководитель — спросите его в чате.
+                </CardContent>
+              </Card>
+            )}
+          </section>
+
+          <section className="space-y-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+              Как прошли последние смены
+            </h2>
+            {d.shifts?.length ? (
+              <Card className="py-0"><CardContent className="divide-y p-0">
+                {d.shifts.map((sh, i) => (
+                  <div key={`${sh.started_at}-${i}`} className="flex items-center gap-3 px-3 py-2">
+                    <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 text-[13px]">
+                      {when(sh.started_at)}
+                      {sh.ended_at ? `–${hhmm(sh.ended_at)}` : ' · идёт'}
+                    </span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                      {Math.floor(sh.minutes / 60)} ч {Math.round(sh.minutes % 60)} мин
+                    </span>
+                    <span className="w-24 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+                      закрыто {sh.closed}
+                    </span>
+                  </div>
+                ))}
+              </CardContent></Card>
+            ) : (
+              <Card className="border-dashed py-0">
+                <CardContent className="p-4 text-xs text-muted-foreground">
+                  Отработанных смен пока нет.
+                </CardContent>
+              </Card>
+            )}
+          </section>
+        </div>
+      )}
+
+      {tab === 'calls' && (
+        <div className="space-y-5">
+          {/* Итог месяца рядом с лентой: «сколько я сделал» — это не только
+              сегодня, а неделя без месяца не отвечает «стало лучше или хуже». */}
+          {d.month && (
+            <Card className="py-0">
+              <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3 text-xs">
+                <span className="text-muted-foreground">за 30 дней:</span>
+                <span>принято <span className="font-semibold tabular-nums text-foreground">{fmtNum(d.month.accepted)}</span></span>
+                <span>закрыто <span className="font-semibold tabular-nums text-foreground">{fmtNum(d.month.closed)}</span></span>
+                <span>первый ответ{' '}
+                  <span className="font-semibold tabular-nums text-foreground">
+                    {d.month.frt == null ? '—' : `${Math.round(d.month.frt)} с`}
+                  </span>
+                </span>
+                <span>в норме{' '}
+                  <span className="font-semibold tabular-nums text-foreground">
+                    {d.month.in_sla_share == null ? '—' : `${d.month.in_sla_share} %`}
+                  </span>
+                </span>
+              </CardContent>
+            </Card>
+          )}
+          <section className="space-y-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+              Мои последние звонки
+            </h2>
+            {d.calls?.length ? (
+              <Card className="py-0"><CardContent className="divide-y p-0">
+                {d.calls.map((c, i) => (
+                  <div key={`${c.at}-${i}`} className="flex items-center gap-3 px-3 py-2">
+                    {c.missed
+                      ? <PhoneMissed className="h-3.5 w-3.5 shrink-0 text-red-500" />
+                      : <Phone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] tabular-nums">{c.phone || 'номер скрыт'}</span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {c.missed ? `не ответили · ждал ${dur(c.wait)}` : `разговор ${dur(c.duration)}`}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                      {c.at ? when(c.at) : '—'}
+                    </span>
+                  </div>
+                ))}
+              </CardContent></Card>
+            ) : (
+              <Card className="border-dashed py-0">
+                <CardContent className="p-4 text-xs text-muted-foreground">
+                  Звонков на вас не записано — либо телефония ещё не связала разговоры с учётной записью.
+                </CardContent>
+              </Card>
+            )}
+          </section>
+        </div>
+      )}
+
+      {tab === 'now' && (
       <section className="space-y-2">
         <div className="flex items-baseline justify-between gap-2">
           <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
@@ -224,10 +368,22 @@ export function MyLineView() {
           </Card>
         )}
       </section>
+      )}
 
-      <a href="/support/" className="inline-flex min-h-9 items-center gap-1 text-xs text-primary hover:underline sm:min-h-0">
-        Открыть рабочее место<ArrowUpRight className="h-3.5 w-3.5" />
-      </a>
+      {/* Общение и работа — на один тап: чат пространства открывается панелью
+          здесь же, «Трек» и рабочее место — соседними приложениями. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        <button type="button" onClick={() => openInteraction('chat')}
+          className="inline-flex min-h-9 items-center gap-1 text-primary hover:underline sm:min-h-0">
+          <MessageCircle className="h-3.5 w-3.5" />Чаты
+        </button>
+        <a href="/docs/work" className="inline-flex min-h-9 items-center gap-1 text-primary hover:underline sm:min-h-0">
+          Мои поручения в «Треке»<ArrowUpRight className="h-3.5 w-3.5" />
+        </a>
+        <a href="/support/" className="inline-flex min-h-9 items-center gap-1 text-primary hover:underline sm:min-h-0">
+          Открыть рабочее место<ArrowUpRight className="h-3.5 w-3.5" />
+        </a>
+      </div>
     </div>
   )
 }
