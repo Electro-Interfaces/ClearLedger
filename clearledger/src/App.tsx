@@ -247,7 +247,7 @@ const router = createBrowserRouter([
     element: <Providers />,
     children: [
       { path: '/login', element: <LazyPage><LoginPage /></LazyPage> },
-      { path: '/pwa', element: <ProtectedRoute><LazyPage><PulsePwaEntry /></LazyPage></ProtectedRoute> },
+      { path: '/pwa-start', element: <ProtectedRoute><LazyPage><PulsePwaEntry /></LazyPage></ProtectedRoute> },
       { path: '/invite/:token', element: <LazyPage><AcceptInvitePage /></LazyPage> },
       { path: '/reset-password/:token', element: <LazyPage><ResetPasswordPage /></LazyPage> },
       // Пятый вход без учётки: инженер платформы приходит из своего пространства
