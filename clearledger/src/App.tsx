@@ -60,6 +60,7 @@ const DocsWorkPage = lazy(() => import('@/pages/docs/DocsWorkPage').then((m) => 
 // «Сайт» — публичная витрина и кабинет клиента: данные ведёт сам сайт, экран их читает.
 const SitePage = lazy(() => import('@/pages/site/SitePage').then((m) => ({ default: m.SitePage })))
 const PulseAppPage = lazy(() => import('@/pulse/PulseAppPage').then((m) => ({ default: m.PulseAppPage })))
+const PulsePwaEntry = lazy(() => import('@/pulse/PulsePwaEntry').then((m) => ({ default: m.PulsePwaEntry })))
 const PulseBusinessPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseBusinessPage })))
 const PulseTeamPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseTeamPage })))
 const PulseWeekPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseWeekPage })))
@@ -246,6 +247,7 @@ const router = createBrowserRouter([
     element: <Providers />,
     children: [
       { path: '/login', element: <LazyPage><LoginPage /></LazyPage> },
+      { path: '/pwa', element: <ProtectedRoute><LazyPage><PulsePwaEntry /></LazyPage></ProtectedRoute> },
       { path: '/invite/:token', element: <LazyPage><AcceptInvitePage /></LazyPage> },
       { path: '/reset-password/:token', element: <LazyPage><ResetPasswordPage /></LazyPage> },
       // Пятый вход без учётки: инженер платформы приходит из своего пространства

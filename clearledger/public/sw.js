@@ -31,7 +31,10 @@ self.addEventListener('fetch', (event) => {
         + '<div style="text-align:center;padding:24px">'
         + '<div style="font-size:18px;font-weight:600">Нет связи</div>'
         + '<div style="margin-top:8px;opacity:.7">Пространство откроется, когда вернётся сеть.<br>'
-        + 'Цифры здесь живые — из кэша их не показываем.</div></div>',
+        + 'Обновите страницу, чтобы получить актуальные данные.</div>'
+        + '<button onclick="location.reload()" style="margin-top:24px;min-height:48px;'
+        + 'padding:12px 24px;border:1px solid #8c9bb5;border-radius:8px;'
+        + 'background:transparent;color:inherit;font:inherit">Повторить подключение</button></div>',
         { headers: { 'Content-Type': 'text/html; charset=utf-8' }, status: 503 })
     }
   })())

@@ -17,6 +17,9 @@ import { routeAllowed } from '@/config/accessModules'
 import { pathAllowed, homePath, SPACE_PRODUCTS } from '@/config/spaceProducts'
 import { productModuleAllowed } from '@/config/productAccess'
 import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
+import { PulseMobileNav } from '@/pulse/PulseMobileNav'
+import { isPwaInstalled } from '@/lib/pwaInstall'
+import { useAppEnabled } from '@/hooks/useCompanyRegistry'
 
 interface BottomNavItem {
   label: string
@@ -44,11 +47,14 @@ const PULSE_ITEMS: BottomNavItem[] = [
  * возвращается к общим страницам: иначе она осталась бы пустой.
  */
 export function MobileBottomNav() {
-  const { company, companyModules, canApp, canModule, oversees } = useCompany()
+  const { company, companyId, companyModules, canApp, canModule, oversees } = useCompany()
+  const pulseOn = useAppEnabled(companyId, 'pulse')
   const { pathname, search } = useLocation()
   // Разделы рабочей области: без фильтра lockedModes (он живёт в контексте самой
   // области), поэтому продукт отбирает свои режимы сам — по списку из реестра.
   const sections = useWorkspaceSections()
+
+  if (canApp('pulse') && pulseOn !== false && (pathname.startsWith('/pulse') || isPwaInstalled())) return <PulseMobileNav />
 
   // Продукт определяем СТРОГО по его корню. `productForPath` для общих страниц Ядра
   // («Объекты», «Документы») отдаёт первый продукт по фолбэку — и полоса показывала

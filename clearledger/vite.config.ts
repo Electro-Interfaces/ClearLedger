@@ -49,7 +49,7 @@ function pwaFiles() {
     short_name: PWA_BRAND,
     description: 'Рабочее пространство компании: приложения, данные, задачи и коммуникации',
     id: baseUrl(),
-    start_url: baseUrl(),
+    start_url: baseUrl('pwa'),
     scope: baseUrl(),
     display: 'standalone',
     display_override: ['standalone'],
@@ -65,8 +65,8 @@ function pwaFiles() {
     ],
     shortcuts: [
       { name: 'Рабочий стол', url: baseUrl() },
-      { name: 'Пульс', url: baseUrl('pulse') },
-      { name: 'Чаты', url: baseUrl('messages') },
+      { name: 'Пульс', url: baseUrl('pwa') },
+      { name: 'Моя работа', url: baseUrl('docs/work?view=today') },
     ],
   }
 

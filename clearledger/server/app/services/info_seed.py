@@ -32,6 +32,7 @@ from app.services.info_seed_track import ARTICLES as TRACK_ARTICLES
 from app.services.info_seed_track import CATEGORIES as TRACK_CATEGORIES
 from app.services.info_seed_help import ARTICLES as HELP_ARTICLES
 from app.services.info_seed_help import CATEGORIES as HELP_CATEGORIES
+from app.services.info_seed_pulse import ARTICLES as PULSE_ARTICLES, CATEGORIES as PULSE_CATEGORIES
 from app.services.info_seed_support import ARTICLES as SUPPORT_ARTICLES
 from app.services.info_seed_support import CATEGORIES as SUPPORT_CATEGORIES
 from app.services.info_seed_office import ARTICLES as OFFICE_ARTICLES
@@ -886,8 +887,8 @@ async def seed_info(db: AsyncSession) -> dict[str, int]:
         # «Управление», поэтому его знание лежит в общем слое, а не в отраслевом.
         # «Инфо» и «Трек» — приложения Ядра: их знание общее для всех профилей.
         (None, COMMON_CATEGORIES + TRACK_CATEGORIES + HELP_CATEGORIES
-         + SUPPORT_CATEGORIES,
-         COMMON_ARTICLES + TRACK_ARTICLES + HELP_ARTICLES + SUPPORT_ARTICLES),
+         + SUPPORT_CATEGORIES + PULSE_CATEGORIES,
+         COMMON_ARTICLES + TRACK_ARTICLES + HELP_ARTICLES + SUPPORT_ARTICLES + PULSE_ARTICLES),
         (PROFILE, CATEGORIES, ARTICLES),
         # Топливный профиль ведёт «Топливо», «Магазин» и рабочее место АЗС. Пакеты
         # раздельные (их правят разные люди и в разное время), профиль один.

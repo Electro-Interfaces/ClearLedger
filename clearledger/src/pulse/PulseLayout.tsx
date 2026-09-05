@@ -28,6 +28,8 @@ export interface PulseView { key: string; label: string; hint: string }
 /** Пункты по разделам: каждый — самостоятельный вопрос, с которым приходят отдельно. */
 export const PULSE_VIEWS: Record<string, PulseView[]> = {
   '/pulse': [
+    { key: 'home', label: 'Мой пульт', hint: 'моя работа, чаты, встречи и показатели пространства' },
+    { key: 'apps', label: 'Приложения', hint: 'рабочие места, доступные в пространстве' },
     { key: 'today', label: 'Экран дня', hint: 'что требует вмешательства и как идут дела' },
     { key: 'accepted', label: 'Принятое сегодня', hint: 'какие карточки уже сняты и кем' },
     // Пороги живут рядом с тем, что регулируют: увидел карточку — поправил
@@ -106,10 +108,18 @@ export function pulseViews(route: string, profileId?: string): PulseView[] {
 /** Активный пункт раздела: из `?view=`, иначе первый. */
 export function usePulseView(route: string): string {
   const [params] = useSearchParams()
-  const { company } = useCompany()
-  const views = pulseViews(route, company.profileId)
+  const { company, canModule } = useCompany()
+  const views = availablePulseViews(route, company.profileId, canModule)
   const v = params.get('view')
   return v && views.some((x) => x.key === v) ? v : (views[0]?.key ?? '')
+}
+
+export function availablePulseViews(route: string, profile: string | undefined,
+  canModule: (app: string, key: string) => boolean): PulseView[] {
+  const section = route.replace('/pulse', '').replace('/', '')
+  return pulseViews(route, profile).filter((view) =>
+    (!section && ['home', 'apps'].includes(view.key)) ||
+    canModule('pulse', section ? `${section}.${view.key}` : view.key))
 }
 
 export function PulseLayout() {
@@ -127,12 +137,12 @@ export function PulseLayout() {
     (r) => pathname === r || pathname === `${r}/`) ?? '/pulse'
   // Ключ права пункта = раздел + пункт («business.sales»), как в реестре
   // приложения. `canModule` уже умеет читать `pulse:...` из роли.
-  const section = route.replace('/pulse', '').replace('/', '')
-  const views = pulseViews(route, company.profileId).filter(
-    (v) => canModule('pulse', section ? `${section}.${v.key}` : v.key))
+  const views = availablePulseViews(route, company.profileId, canModule)
   // Тем же правилом, что и сами экраны (`usePulseView`): иначе подсветка в меню
   // и открытый пункт разъезжались бы, стоило одному из двух мест измениться.
   const active = usePulseView(route)
+
+  if (!views.length) return <p className="p-4 text-sm text-muted-foreground">В этом разделе нет доступных вам пунктов.</p>
 
   const toggle = () => setCollapsed((c) => {
     localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
