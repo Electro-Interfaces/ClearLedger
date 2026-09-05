@@ -23,7 +23,7 @@ from app.database import get_db
 from app.models import App, AppCompanyLink, Company, User, UserCompany
 from app.services import space_map as space_map_service
 from app.services import (
-    space_connection_registry, space_connectors, space_data_model, space_desk,
+    managed_connectors, space_connection_registry, space_connectors, space_data_model, space_desk,
     space_links, space_projection, space_registry,
 )
 from app.services.data_quality import data_quality
@@ -354,12 +354,48 @@ async def list_space_connectors(
     """Подключения пространства: откуда компания получает данные.
 
     Файловые каналы Учёта + платформенные сервисы + живые интеграции приложений
-    (Координатор спрашивается служебным каналом). Витрина: настройка остаётся
-    в приложении-владельце, здесь только видно, что где подключено.
+    (Координатор спрашивается служебным каналом). Поддерживаемые провайдеры
+    настраиваются здесь через API владельца; он хранит настройки и выполняет обмен.
     """
     cid = await _member(company_id, user, db)
     data = await space_connectors.list_connectors(db, cid)
     return {"companyId": str(cid), **data, "total": len(data["connectors"])}
+
+
+@router.get("/connectors/catalog")
+async def connector_catalog(company_id: str = Query(...), user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    cid = await _admin(company_id, user, db)
+    return await managed_connectors.catalog(db, cid, user.id)
+
+
+@router.get("/connectors/managed/{app_code}/{connector_id}")
+async def managed_connector_get(app_code: str, connector_id: uuid.UUID, company_id: str = Query(...),
+                                user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    cid = await _admin(company_id, user, db)
+    return await managed_connectors.owner_request(db, cid, user.id, app_code, "GET", f"/{connector_id}")
+
+
+@router.post("/connectors/managed/{app_code}")
+async def managed_connector_create(app_code: str, body: dict = Body(...), company_id: str = Query(...),
+                                   user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    cid = await _admin(company_id, user, db)
+    return await managed_connectors.owner_request(db, cid, user.id, app_code, "POST", "", body)
+
+
+@router.patch("/connectors/managed/{app_code}/{connector_id}")
+async def managed_connector_update(app_code: str, connector_id: uuid.UUID, body: dict = Body(...), company_id: str = Query(...),
+                                   user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    cid = await _admin(company_id, user, db)
+    return await managed_connectors.owner_request(db, cid, user.id, app_code, "PATCH", f"/{connector_id}", body)
+
+
+@router.post("/connectors/managed/{app_code}/{connector_id}/actions/{action}")
+async def managed_connector_action(app_code: str, connector_id: uuid.UUID, action: str, company_id: str = Query(...),
+                                   user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    cid = await _admin(company_id, user, db)
+    if action not in {"test", "sync"}:
+        raise HTTPException(404, "Действие не поддерживается")
+    return await managed_connectors.owner_request(db, cid, user.id, app_code, "POST", f"/{connector_id}/actions/{action}", {})
 
 
 @router.get("/connections")

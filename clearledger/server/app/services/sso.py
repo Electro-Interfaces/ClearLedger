@@ -134,7 +134,8 @@ def sign_visit_token(*, user, space_code: str, self_code: str,
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})
 
 
-def sign_service_token(*, aud: str, scope: str, ttl_seconds: int = 120) -> str | None:
+def sign_service_token(*, aud: str, scope: str, ttl_seconds: int = 120,
+                       company_id: str | None = None, actor_id: str | None = None) -> str | None:
     """Служебный (машинный) токен Ядра для приложения `aud`.
 
     Отличается от handoff-токена клеймом `svc`: он не про человека, а про право
@@ -154,6 +155,10 @@ def sign_service_token(*, aud: str, scope: str, ttl_seconds: int = 120) -> str |
         "nbf": now - 10,
         "exp": now + ttl_seconds,
     }
+    if company_id is not None:
+        payload["cid"] = company_id
+    if actor_id is not None:
+        payload["actor"] = actor_id
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})
 
 
