@@ -381,9 +381,9 @@ export interface PersonalReminder {
   snooze_count: number
 }
 
-export async function listReminders(companyId: string, opts?: { pending?: boolean }) {
+export async function listReminders(companyId: string, opts?: { pending?: boolean; targetRef?: string }) {
   return get<{ items: PersonalReminder[]; total: number }>('/api/work/reminders', {
-    company_id: companyId, pending: opts?.pending ? 'true' : undefined,
+    company_id: companyId, pending: opts?.pending ? 'true' : undefined, target_ref: opts?.targetRef,
   })
 }
 
@@ -465,31 +465,37 @@ export interface CalendarEvent {
 /** Встречи периода: пересекающиеся с окном, а не начинающиеся в нём. */
 export async function listEvents(companyId: string, from: string, to: string,
   opts?: {
+    q?: string
     /** `mine` — мой календарь; `company` — общий календарь компании, и в нём
      *  только встречи с кругом «вся компания». */
     scope?: 'mine' | 'company'
     /** Обсуждения по предмету: `doc:<uuid>`, `task:<uuid>`. */
     subjectRef?: string
   }) {
-  return get<{ events: CalendarEvent[]; total: number }>('/api/work/calendar', {
+  return get<{ events: CalendarEvent[]; total: number; truncated?: boolean }>('/api/work/calendar', {
     company_id: companyId, from, to,
-    scope: opts?.scope, subject_ref: opts?.subjectRef,
+    scope: opts?.scope, subject_ref: opts?.subjectRef, q: opts?.q,
   })
+}
+
+export async function getEvent(companyId: string, id: string) {
+  return get<CalendarEvent>(`/api/work/calendar/${id}`, { company_id: companyId })
 }
 
 /** Кто когда занят в окне — интервалы и рабочее окно, без названий и участников.
  *  Чтобы предложить время, знать предмет чужой встречи не нужно. */
 export async function calendarBusy(companyId: string, from: string, to: string,
-  userIds: string[]) {
+  userIds: string[], excludeEventId?: string) {
   return get<{
     from: string; to: string
+    truncated?: boolean
     people: {
       user_id: string; name: string
       tz: string | null; work_start: string | null; work_end: string | null
       busy: { starts_at: string; ends_at: string; all_day: boolean }[]
     }[]
   }>('/api/work/calendar/busy', {
-    company_id: companyId, from, to, user_ids: userIds.join(','),
+    company_id: companyId, from, to, user_ids: userIds.join(','), exclude_event_id: excludeEventId,
   })
 }
 
@@ -679,6 +685,7 @@ export async function eventAction(companyId: string, id: string, data: {
   title?: string; startsAt?: string; endsAt?: string
   description?: string; location?: string; conferenceUrl?: string
   attendeeIds?: string[]
+  optionalIds?: string[]; visibility?: EventVisibility; allDay?: boolean; tz?: string
   cancel?: boolean; cancelReason?: string
   response?: Exclude<EventResponse, 'pending'>; comment?: string
   /** Встречное предложение участника. Время оно не двигает: перенос —
@@ -695,11 +702,12 @@ export async function eventAction(companyId: string, id: string, data: {
     description: data.description, location: data.location,
     conference_url: data.conferenceUrl,
     attendee_ids: data.attendeeIds,
+    optional_ids: data.optionalIds, visibility: data.visibility, all_day: data.allDay, tz: data.tz,
     cancel: data.cancel, cancel_reason: data.cancelReason,
     propose_starts_at: data.proposeStartsAt,
     propose_ends_at: data.proposeEndsAt,
     recurrence: data.recurrence ?? undefined,
-    recurrence_until: data.recurrenceUntil || undefined,
+    recurrence_until: data.recurrenceUntil,
     response: data.response, comment: data.comment,
   })
 }

@@ -31,7 +31,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     Integer, String, Uuid, and_, cast, delete, func, literal, or_, select)
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -849,6 +849,7 @@ def _reminder_out(row) -> dict[str, Any]:
 async def reminders_list(
     company_id: str = Query(...),
     pending: bool = Query(False, description="только сработавшие и не погашенные"),
+    target_ref: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -863,6 +864,8 @@ async def reminders_list(
         PersonalReminder.done_at.is_(None))
     if pending:
         sel = sel.where(PersonalReminder.fired_at.is_not(None))
+    if target_ref:
+        sel = sel.where(PersonalReminder.target_ref == target_ref)
     rows = list((await db.execute(
         sel.order_by(PersonalReminder.remind_at).limit(_LIST_LIMIT))).scalars())
     return {"items": [_reminder_out(r) for r in rows], "total": len(rows)}
@@ -953,6 +956,11 @@ class EventIn(BaseModel):
     recurrence: dict | None = None
     recurrence_until: date | None = None
 
+    @field_validator('title', mode='before')
+    @classmethod
+    def trim_title(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
 
 class EventAction(BaseModel):
     """Одно действие над встречей: правка, отмена или свой ответ.
@@ -962,13 +970,17 @@ class EventAction(BaseModel):
     одинаково пересчитывать согласия и разошлись бы на первой правке.
     """
     company_id: str
-    title: str | None = None
+    title: str | None = Field(None, min_length=1, max_length=300)
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     description: str | None = None
     location: str | None = None
     conference_url: str | None = None
     attendee_ids: list[str] | None = None
+    optional_ids: list[str] | None = None
+    visibility: str | None = Field(None, pattern="^(company|private|personal)$")
+    all_day: bool | None = None
+    tz: str | None = None
     cancel: bool | None = None
     cancel_reason: str | None = None
     # Правка серии: пустой словарь снимает повторение (созданные встречи
@@ -982,6 +994,39 @@ class EventAction(BaseModel):
     # человеку удобно, и переписка уходит в чат, где её потом не найти.
     propose_starts_at: datetime | None = None
     propose_ends_at: datetime | None = None
+
+    @field_validator('title', mode='before')
+    @classmethod
+    def trim_title(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
+def _check_event_details(starts, ends, tz, recurrence, until, conference):
+    from urllib.parse import urlsplit
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    if starts.tzinfo is None or ends.tzinfo is None:
+        raise HTTPException(400, "Укажите часовой пояс начала и конца встречи")
+    if ends <= starts:
+        raise HTTPException(400, "Конец встречи должен быть позже начала")
+    try:
+        zone = ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        raise HTTPException(400, "Неизвестный часовой пояс встречи")
+    if recurrence:
+        interval = recurrence.get('interval', 1)
+        if recurrence.get('mode') not in {'daily', 'weekly', 'monthly'} or type(interval) is not int or not 1 <= interval <= 52:
+            raise HTTPException(400, "Выберите ежедневное, еженедельное или ежемесячное повторение с шагом от 1 до 52")
+        if until and until < starts.astimezone(zone).date():
+            raise HTTPException(400, "Повторение не может закончиться раньше первой встречи")
+    if conference:
+        try:
+            link = urlsplit(conference.strip())
+            valid = link.scheme in {'https', 'http'} and bool(link.hostname)
+        except ValueError:
+            valid = False
+        if not valid:
+            raise HTTPException(400, "Ссылка на видеовстречу должна начинаться с https:// или http://")
 
 
 def _event_out(ev, attendees: list, me: uuid.UUID) -> dict[str, Any]:
@@ -1225,6 +1270,7 @@ async def calendar_busy(
     date_to: datetime = Query(..., alias="to"),
     # Кого проверяем: список id через запятую. Пусто — только себя.
     user_ids: str | None = Query(None, max_length=2000),
+    exclude_event_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1240,6 +1286,12 @@ async def calendar_busy(
     from app.models import CalendarAttendee, CalendarEvent
 
     cid = await _assert_work(company_id, current_user, db)
+    excluded = None
+    if exclude_event_id:
+        excluded = _uuid_or_400(exclude_event_id, 'exclude_event_id')
+        event = await db.get(CalendarEvent, excluded)
+        if event is None or event.company_id != cid or not await can_manage_calendar(db, cid, event.organizer_id, current_user):
+            raise HTTPException(403, "Исключить из подбора можно только встречу, которой вы управляете")
     ids = {current_user.id}
     for chunk in (user_ids or "").split(","):
         if chunk.strip():
@@ -1256,6 +1308,7 @@ async def calendar_busy(
                # шесть предложенных вариантов заняли бы всем участникам
                # полнедели — то есть подбор перестал бы находить что-либо.
                CalendarEvent.status == "planned",
+               CalendarEvent.id != excluded if excluded else _sa_true(),
                CalendarAttendee.user_id.in_(свои),
                CalendarAttendee.response != "declined",
                CalendarEvent.starts_at < date_to,
@@ -1431,9 +1484,9 @@ async def calendar_card(
     if ev is None or ev.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
     parts = (await _attendees(db, [ev.id])).get(ev.id, [])
-    # Видеть встречу вправе организатор и приглашённые. Правило то же, что у выборки
-    # (`_my_events_clause`): прямая ссылка не должна обходить то, что закрывает список.
-    if ev.organizer_id != current_user.id and not any(
+    # Общая встреча доступна тому же кругу, что в календаре компании.
+    # Закрытая по прямой ссылке остаётся доступна только организатору и участникам.
+    if ev.visibility != 'company' and ev.organizer_id != current_user.id and not any(
             a.user_id == current_user.id for a in parts):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша встреча")
     return _event_out(ev, parts, current_user.id)
@@ -1450,9 +1503,8 @@ async def calendar_create(
     from app.models import CalendarAttendee, CalendarEvent
 
     cid = await _assert_work(payload.company_id, current_user, db)
-    if payload.ends_at <= payload.starts_at:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Встреча не может кончаться раньше, чем начинается")
+    _check_event_details(payload.starts_at, payload.ends_at, payload.tz,
+                         payload.recurrence, payload.recurrence_until, payload.conference_url)
     # Помощник собирает встречу ОТ ИМЕНИ владельца календаря: организатором
     # становится владелец, иначе выданное полномочие бесполезно — секретарь
     # заводил бы встречи на себя. Кто именно нажал, видно в журнале.
@@ -1481,6 +1533,8 @@ async def calendar_create(
     ids = ({организатор, current_user.id}
            | {_uuid_or_400(i, "attendee_ids") for i in payload.attendee_ids}
            | необязательные)
+    if payload.visibility == 'personal':
+        ids = {организатор}
     # Зовём только людей этой компании: приглашение постороннему открыло бы ему
     # карточку встречи вместе с предметом и составом участников.
     свои = set((await db.execute(select(UserCompany.user_id).where(
@@ -1491,7 +1545,7 @@ async def calendar_create(
             # Необязательный участник не блокирует подбор времени: иначе
             # приглашённый «для сведения» руководитель закрывает все слоты, хотя
             # встреча может пройти без него.
-            role="optional" if uid in необязательные else "required",
+            role="optional" if uid in необязательные and uid != организатор else "required",
             response="accepted" if uid == организатор else "pending"))
     await db.flush()
     parts = await _attendees(db, [ev.id])
@@ -1519,10 +1573,15 @@ async def calendar_action(
     if ev.organizer_id != current_user.id and not приглашён:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша встреча")
 
+    if ev.status == 'cancelled' and not payload.cancel:
+        raise HTTPException(409, "Встреча отменена. Ответить или изменить её уже нельзя")
+
     # Встречное предложение — второе (и последнее), что участник может сделать
     # со встречей помимо ответа. Время оно не двигает: перенос остаётся решением
     # организатора, иначе любой приглашённый переставлял бы чужие календари.
     if payload.propose_starts_at is not None and payload.propose_ends_at is not None:
+        _check_event_details(payload.propose_starts_at, payload.propose_ends_at,
+                             ev.tz, None, None, None)
         mine = next((a for a in parts if a.user_id == current_user.id), None)
         if mine is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
@@ -1549,6 +1608,8 @@ async def calendar_action(
         mine.response = payload.response
         mine.responded_at = datetime.now(timezone.utc)
         mine.comment = payload.comment or None
+        mine.proposed_starts_at = None
+        mine.proposed_ends_at = None
         await db.commit()
         return _event_out(ev, parts, current_user.id)
 
@@ -1581,7 +1642,7 @@ async def calendar_action(
         await db.commit()
         return _event_out(ev, parts, current_user.id)
 
-    if payload.recurrence is not None and ev.series_id is not None:
+    if (payload.recurrence is not None or 'recurrence_until' in payload.model_fields_set) and ev.series_id is not None:
         # Повторение живёт только у ГОЛОВЫ. Иначе порождённая встреча начинает
         # порождать своё продолжение, и серия ветвится. Интерфейс это знает и
         # поля не показывает, но правило обязано стоять на сервере: клиент у
@@ -1589,13 +1650,25 @@ async def calendar_action(
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Это встреча из серии. Повторение задаётся у первой встречи серии")
+    starts = payload.starts_at or ev.starts_at
+    ends = payload.ends_at or ev.ends_at
+    rule = (payload.recurrence or None) if payload.recurrence is not None else ev.recurrence
+    until = payload.recurrence_until if 'recurrence_until' in payload.model_fields_set else ev.recurrence_until
+    conference = payload.conference_url if payload.conference_url is not None else ev.conference_url
+    _check_event_details(starts, ends, payload.tz or ev.tz, rule, until, conference)
     if payload.recurrence is not None:
         # Пустой словарь снимает повторение. Уже созданные встречи остаются: они
         # стоят в чужих календарях, и «выключил серию — исчезли три планёрки»
         # означает, что люди придут в пустую переговорную.
         ev.recurrence = payload.recurrence or None
-    if payload.recurrence_until is not None:
+    if 'recurrence_until' in payload.model_fields_set:
         ev.recurrence_until = payload.recurrence_until
+    if payload.visibility is not None:
+        ev.visibility = payload.visibility
+    if payload.all_day is not None:
+        ev.all_day = payload.all_day
+    if payload.tz is not None:
+        ev.tz = payload.tz
 
     время_сдвинулось = False
     if payload.starts_at is not None or payload.ends_at is not None:
@@ -1613,23 +1686,35 @@ async def calendar_action(
         if значение is not None:
             setattr(ev, поле, значение.strip() or None)
 
-    if payload.attendee_ids is not None:
-        хотим = {current_user.id} | {_uuid_or_400(i, "attendee_ids") for i in payload.attendee_ids}
+    if payload.attendee_ids is not None or payload.optional_ids is not None or ev.visibility == 'personal':
+        хотим = {ev.organizer_id} | ({_uuid_or_400(i, "attendee_ids") for i in payload.attendee_ids}
+                                    if payload.attendee_ids is not None else {a.user_id for a in parts})
+        необязательные = ({_uuid_or_400(i, "optional_ids") for i in payload.optional_ids}
+                         if payload.optional_ids is not None else {a.user_id for a in parts if a.role == 'optional'})
+        if ev.visibility == 'personal':
+            хотим = {ev.organizer_id}
         свои = set((await db.execute(select(UserCompany.user_id).where(
             UserCompany.company_id == cid, UserCompany.user_id.in_(хотим)))).scalars())
         хотим &= свои
         есть = {a.user_id: a for a in parts}
         for uid in хотим - set(есть):
-            db.add(CalendarAttendee(event_id=ev.id, user_id=uid, response="pending"))
+            db.add(CalendarAttendee(event_id=ev.id, user_id=uid,
+                                    role='optional' if uid in необязательные and uid != ev.organizer_id else 'required',
+                                    response='accepted' if uid == ev.organizer_id else 'pending'))
         for uid, att in есть.items():
             if uid not in хотим:
                 await db.delete(att)
+                await reminders.drop_for(db, f'event:{ev.id}', uid)
+            else:
+                att.role = 'optional' if uid in необязательные and uid != ev.organizer_id else 'required'
 
     if время_сдвинулось:
         # «Буду в 10» не равно «буду в 18»: перенос обнуляет согласия, иначе
         # организатор считает, что кворум есть, а половина не придёт.
         for att in parts:
-            if att.user_id != current_user.id:
+            att.proposed_starts_at = None
+            att.proposed_ends_at = None
+            if att.user_id != ev.organizer_id:
                 att.response = "pending"
                 att.responded_at = None
     await db.flush()
