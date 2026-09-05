@@ -13,6 +13,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAppsPanel } from './AppsPanel'
+import { AppsQuickMenu } from './AppsQuickMenu'
 import {
   PanelLeftClose, PanelLeftOpen, ChevronDown, Database, Layers,
   Archive, Megaphone, MessagesSquare, UserRound, Users2,
@@ -131,6 +132,10 @@ export function AppsNavItem({ collapsed, onNavigate }: {
         </TooltipTrigger>
         {collapsed && <TooltipContent side="right">Приложения</TooltipContent>}
       </Tooltip>
+      {/* Знающему, куда он идёт, панель плашек не нужна: стрелка разворачивает
+          список приложений прямо здесь и уводит в выбранное одним нажатием.
+          В свёрнутом рельсе её нет — там нет и места (ui-kit прячет сам). */}
+      <AppsQuickMenu onNavigate={onNavigate} />
     </SidebarMenuItem>
   )
 }

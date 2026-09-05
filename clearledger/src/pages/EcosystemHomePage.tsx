@@ -15,13 +15,7 @@ import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import {
-  Menu, LayoutGrid, ExternalLink, Loader2,
-  LifeBuoy, ClipboardList, ListChecks, Video, FileText, MessagesSquare,
-  ShieldCheck, BookOpen, HardHat, Gauge, BarChart3, Wallet, Database, MessageCircle,
-  Building2, ShoppingCart, Megaphone, Network, Calculator, Stethoscope, Activity,
-  Briefcase, Bot,
-} from 'lucide-react'
+import { Menu, LayoutGrid, Rows3, ExternalLink, Loader2, Network, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
 import { MobileContextBar } from '@/components/layout/MobileContextBar'
@@ -36,44 +30,60 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from 
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
-import { listSsoApps, type SsoApp } from '@/services/ssoService'
+import { type SsoApp } from '@/services/ssoService'
 import { listPartnerSpaces, visitPartnerSpace } from '@/services/partnerSpaceService'
 import { useOpenApp } from '@/hooks/useOpenApp'
+import { useSpaceApps } from '@/hooks/useSpaceApps'
+import { appIcon } from '@/config/spaceLauncher'
 import {
   READINESS_LABEL, SPACE_PRODUCTS, productReadiness, type Readiness,
 } from '@/config/spaceProducts'
 
 
-/** Иконка по имени из реестра Ядра (`eco_apps.icon`, манифест `apps/<code>.yml`).
- *  Неизвестное имя — LayoutGrid: плитка появляется, просто без своего значка. */
-const ICONS: Record<string, typeof FileText> = {
-  'life-buoy': LifeBuoy,
-  'clipboard-list': ClipboardList,
-  'list-checks': ListChecks,
-  'video': Video,
-  'file-text': FileText,
-  'messages-square': MessagesSquare,
-  'message-circle': MessageCircle,
-  'shield-check': ShieldCheck,
-  'book-open': BookOpen,
-  'activity': Activity,
-  // Продукты разреза Учёта (config/spaceProducts.ts).
-  'hard-hat': HardHat,
-  'gauge': Gauge,
-  'bar-chart-3': BarChart3,
-  'wallet': Wallet,
-  'database': Database,
-  'building-2': Building2,
-  'shopping-cart': ShoppingCart,
-  'megaphone': Megaphone,
-  'network': Network,
-  'calculator': Calculator,
-  'stethoscope': Stethoscope,
-  // Рабочие места компании без объектов: «Услуги». «Бухгалтерия» и «Продажи» берут
-  // book-open и bar-chart-3 — они выше. Незнакомое имя молча даёт LayoutGrid.
-  'briefcase': Briefcase,
-  // Аудитор — сквозной агент пространства.
-  'bot': Bot,
+/**
+ * Вид стола: плитки или строки (просьба МАГа 05.09.2026). Состав, порядок и разбивка
+ * по строкам одни и те же — меняется только подача: плитка показывает продукт с
+ * пояснением, строка вмещает вдвое больше продуктов на экран и читается списком.
+ *
+ * Выбор помнится между заходами: это привычка человека, а не настройка пространства,
+ * поэтому живёт в браузере, а не в профиле.
+ */
+export type LauncherView = 'tiles' | 'list'
+const VIEW_KEY = 'space.launcher.view'
+
+function readView(): LauncherView {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'tiles'
+  } catch {
+    return 'tiles'   // приватное окно или запрет на хранилище — вид по умолчанию
+  }
+}
+
+function ViewSwitch({ value, onChange }: {
+  value: LauncherView; onChange: (v: LauncherView) => void
+}) {
+  const item = (v: LauncherView, Icon: typeof FileText, label: string) => (
+    <button
+      type="button"
+      onClick={() => onChange(v)}
+      aria-pressed={value === v}
+      title={label}
+      className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors
+                 ${value === v
+                   ? 'bg-primary text-primary-foreground'
+                   : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+    >
+      <Icon className="size-4" />
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  )
+  return (
+    <div role="group" aria-label="Вид списка приложений"
+      className="flex shrink-0 items-center gap-1 rounded-xl border border-border/70 bg-card/50 p-1">
+      {item('tiles', LayoutGrid, 'Карточки')}
+      {item('list', Rows3, 'Список')}
+    </div>
+  )
 }
 
 interface TileProps {
@@ -95,24 +105,6 @@ const DOT_CLASS: Record<Readiness, string> = {
   draft: 'bg-red-500',
 }
 
-/**
- * Приложения клиентской стороны: продать, обслужить, поддержать. Остальные продукты —
- * внутренний контур (стройка сети, эксплуатация, связь, деньги). Деление по контуру,
- * а не по слою: слой говорит, ЧТО это (ядро/сервис/приложение), контур — про чей день.
- */
-// Рабочая строка стола. Порядок — как к продуктам обращаются за день: заявки,
-// продажи, расчёты, товары, продвижение и состояние систем (решение МАГа
-// 01.08.2026; отменяет вынос «Поддержки» в сервисы от 31.07.2026 — заявки
-// оказались началом дня, а не общей утилитой вроде чата).
-const COMMERCE_APPS = [
-  'support', 'revenue', 'corp', 'retail_store', 'monitor',
-]
-// «Пульс» — рабочее место руководителя над ВСЕМ пространством, поэтому своя строка
-// вверху стола, а не «чем владеем и как считаем» (ecosystem-deploy/docs/PULSE.md).
-// Круг узкий: у кого права нет, тот этой строки не увидит вовсе.
-const LEAD_APPS = ['pulse']
-const OPERATIONS_APPS = ['projects', 'ops', 'netlink', 'diag']
-const SERVICE_APPS = ['chat', 'docs', 'conf', 'shop', 'marketing']
 /**
  * Карточка продукта: имя, точка готовности и короткое пояснение.
  *
@@ -186,14 +178,71 @@ function Tile({
 }
 
 /**
+ * Тот же продукт одной строкой — второй вид стола.
+ *
+ * Строка держит колонки в одном месте по всему столу: значок, имя, готовность,
+ * пояснение и способ входа. Поэтому имя — колонка фиксированной ширины, а не
+ * «сколько займёт»: иначе пояснения скачут по горизонтали от строки к строке и
+ * список перестаёт читаться сверху вниз. На узком экране пояснение уходит —
+ * остаётся имя и как продукт открывается.
+ */
+function Row({
+  title, subtitle, icon: Icon, badge, availability, busy, inactive, readiness, onClick,
+}: TileProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy || inactive}
+      title={[title, availability, subtitle, badge, readiness && READINESS_LABEL[readiness]]
+        .filter(Boolean).join(' · ')}
+      className={`group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left
+                  transition-colors duration-200
+                  ${inactive
+                    ? 'cursor-inherit border-dashed border-border bg-card'
+                    : 'border-border/70 bg-card/40 hover:border-primary/50 hover:bg-primary/[0.10]'}
+                  ${busy ? 'opacity-60' : ''}`}
+    >
+      <span className={`shrink-0 rounded-md p-1.5 transition-colors
+                       ${inactive
+                         ? 'bg-muted text-muted-foreground'
+                         : 'bg-primary/15 text-primary group-hover:bg-primary group-hover:text-primary-foreground'}`}>
+        {busy ? <Loader2 className="size-4 animate-spin" /> : <Icon className="size-4" />}
+      </span>
+      <span className="flex min-w-0 shrink-0 items-center gap-2 sm:w-56">
+        <span className="min-w-0 truncate text-sm font-medium leading-snug">{title}</span>
+        {readiness && (
+          <span aria-hidden="true"
+            className={`size-2 shrink-0 rounded-full ${DOT_CLASS[readiness]}`} />
+        )}
+      </span>
+      <span className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground/90 sm:inline">
+        {subtitle}
+      </span>
+      {badge && <ExternalLink className="ml-auto size-3.5 shrink-0 text-muted-foreground sm:ml-0" />}
+      {availability && (
+        <span className={`ml-auto shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium
+                         ${inactive
+                           ? 'border border-dashed border-border bg-card text-muted-foreground'
+                           : 'bg-primary text-primary-foreground'}`}>
+          {availability}
+        </span>
+      )}
+    </button>
+  )
+}
+
+/**
  * Слой стола: подпись слева, плитки справа. Заголовок отдельной строкой стоил трёх
  * строк высоты на каждый слой — при трёх слоях это уже экран. Карточки держатся одной
  * строкой на любой ширине; если строка не помещается, прокручивается только этот слой.
  */
-function Section({ title, hint, children, divider }: {
+function Section({ title, hint, children, divider, view = 'tiles' }: {
   title: string; hint?: string; children: React.ReactNode
   /** Линия сверху — граница уровня стола (Ядро · Сервисы · Приложения). */
   divider?: boolean
+  /** Плитки строкой с прокруткой или список сверху вниз. */
+  view?: LauncherView
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef({
@@ -261,9 +310,11 @@ function Section({ title, hint, children, divider }: {
         onPointerCancel={finishDrag}
         onClickCapture={suppressClickAfterDrag}
         onDragStart={(event) => event.preventDefault()}
-        className="grid min-w-0 snap-x snap-proximity grid-flow-col auto-cols-[minmax(300px,330px)]
-                   cursor-grab select-none gap-2 overflow-x-auto overscroll-x-contain pb-2 pr-1 active:cursor-grabbing
-                   sm:auto-cols-[minmax(208px,244px)]"
+        className={view === 'list'
+          ? 'flex min-w-0 flex-col gap-1 pb-1 pr-1'
+          : `grid min-w-0 snap-x snap-proximity grid-flow-col auto-cols-[minmax(300px,330px)]
+             cursor-grab select-none gap-2 overflow-x-auto overscroll-x-contain pb-2 pr-1 active:cursor-grabbing
+             sm:auto-cols-[minmax(208px,244px)]`}
       >
         {children}
       </div>
@@ -312,57 +363,25 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
     if (target) navigate(`${target.route}${location.search}`, { replace: true })
   }, [location, navigate])
   const [menuOpen, setMenuOpen] = useState(false)
+  // Вид стола помним между заходами — привычка человека, а не настройка пространства.
+  const [view, setView] = useState<LauncherView>(readView)
+  function changeView(v: LauncherView) {
+    setView(v)
+    try { localStorage.setItem(VIEW_KEY, v) } catch { /* хранилище недоступно */ }
+  }
   const { user } = useAuth()
-  const { company, companyId } = useCompany()
+  const { company } = useCompany()
   // Открытие продуктов — общей логикой с лаунчером: там же живёт особый случай
   // «Конференций», где вместо перехода на чужую главную создаётся комната.
   const { open: openViaHook, busy } = useOpenApp()
 
-  const q = useQuery({
-    queryKey: ['sso-apps', companyId],
-    queryFn: () => listSsoApps(companyId),
-    enabled: isApiEnabled(),
-    staleTime: 5 * 60_000,
-  })
-  // RBAC-гейт стола: allowed_apps — коды, доступных ролью в компании (null = не ограничено,
-  // напр. админ). Бэкенд уже отфильтровал apps; здесь гейтим внутренние плитки Ledger и Чат.
-  const allowed = q.data?.allowed_apps ?? null
-  const canOpen = (code: string) => allowed === null || allowed.includes(code)
-  const all: SsoApp[] = (q.data?.apps ?? []).filter((a) => canOpen(a.code))
-  // Слой каталога говорит, ЧТО это (ядро/сервис/приложение), но место на столе
-  // задаёт рабочий контур: «Поддержка» числится сервисом, «Диагностика» — ядром,
-  // а работают с ними в общей строке дня (решение МАГа 01.08.2026).
-  const management = all.filter((a) => a.layer === 'admin' && !COMMERCE_APPS.includes(a.code))
-  const services = [
-    ...SERVICE_APPS.map((code) => all.find((a) => a.code === code))
-      .filter((a): a is SsoApp => !!a),
-    ...all.filter((a) => a.layer === 'service' && !COMMERCE_APPS.includes(a.code)
-      && !SERVICE_APPS.includes(a.code)),
-  ]
-  const apps = all.filter((a) => !SERVICE_APPS.includes(a.code) && (COMMERCE_APPS.includes(a.code)
-    || (a.layer !== 'admin' && a.layer !== 'service')))
-  // Два контура приложений: обращённый к клиенту (продать, обслужить) и внутренний
-  // (построить, содержать, посчитать).
-  const lead = apps.filter((a) => LEAD_APPS.includes(a.code))
-  // Порядок рабочей строки задан явно, а не порядком реестра: он отражает,
-  // в каком порядке к продуктам обращаются в течение дня.
-  const commerce = COMMERCE_APPS
-    .map((code) => apps.find((a) => a.code === code))
-    .filter((a): a is SsoApp => !!a)
-  const operations = OPERATIONS_APPS
-    .map((code) => apps.find((a) => a.code === code))
-    .filter((a): a is SsoApp => !!a)
-  // Учётная строка: содержание сети и деньги за неё — в том порядке, в каком
-  // цифра идёт от объекта к отчётности.
-  const INTERNAL_ORDER = ['econ', 'perimeter', 'books']
-  const internal = apps
-    .filter((a) => !COMMERCE_APPS.includes(a.code) && !LEAD_APPS.includes(a.code)
-      && !OPERATIONS_APPS.includes(a.code))
-    .sort((a, b) => {
-      const ia = INTERNAL_ORDER.indexOf(a.code), ib = INTERNAL_ORDER.indexOf(b.code)
-      // Незаданные продукты идут следом за перечисленными, порядком реестра.
-      return (ia < 0 ? INTERNAL_ORDER.length : ia) - (ib < 0 ? INTERNAL_ORDER.length : ib)
-    })
+  // Каталог продуктов и раскладка строк — общие с меню приложений в левом рельсе
+  // (`hooks/useSpaceApps`): второго списка приложений в пространстве нет.
+  const { apps: all, sections, isLoading } = useSpaceApps()
+  // Продукты (без сервисов и Ядра) — по ним считается «приложения не подключены».
+  const productCount = sections
+    .filter((x) => x.key !== 'services' && x.key !== 'management')
+    .reduce((n, x) => n + x.apps.length, 0)
 
   /**
    * Открыть продукт. Продукт пространства — это СТРАНИЦА, и открывается он обычным
@@ -433,12 +452,13 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
       || (a.mode === 'internal' ? 'Продукт пространства'
         : a.mode === 'link' ? 'Открывается по ссылке' : 'Единый вход')
     const subtitle = isOptional ? `Можно подключить · ${description}` : description
+    const Item = view === 'list' ? Row : Tile
     return (
-      <Tile
+      <Item
         key={a.code}
         title={a.name}
         subtitle={subtitle}
-        icon={ICONS[a.icon] ?? LayoutGrid}
+        icon={appIcon(a.icon)}
         badge={a.mode === 'link' ? 'вход отдельный' : undefined}
         availability={isOptional ? 'Отдельное демо' : 'Открыть здесь'}
         busy={busy === a.code}
@@ -486,12 +506,12 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
             </Button>
           )}
         </div>
-        <Section title="Уже внутри"
+        <Section title="Уже внутри" view={view}
                  hint="идёт вместе с пространством — подключать ничего не нужно">
           {included.map(renderProductTile)}
         </Section>
         {later.length > 0 && (
-          <Section title="Можно добавить позже"
+          <Section title="Можно добавить позже" view={view}
                    hint="продукты экосистемы: по одному, когда понадобятся" divider>
             {later.map(renderProductTile)}
           </Section>
@@ -505,59 +525,42 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
     // Стенд узнаётся по базовому пути сборки: пространство отдаётся кабинетом
     // сайта под /demo-run/<стенд>/app/, и другого признака показа не нужно.
     if (import.meta.env.BASE_URL.startsWith('/demo-run/')) return renderStandLayers()
+    // «Учёт» показывается всегда: в этой строке живут сообщения «загрузка» и
+    // «приложения не подключены», и без неё стол пустого пространства молчит.
+    const visible = sections.filter((x) => x.apps.length > 0 || x.key === 'internal')
     return (
       <>
-        {lead.length > 0 && (
-          <Section title="Руководство" hint="как идут дела и куда вмешаться">
-            {lead.map(renderProductTile)}
+        {visible.map((x, idx) => (
+          <Section key={x.key} title={x.title} hint={x.hint} view={view} divider={idx > 0}>
+            {x.apps.map(renderProductTile)}
+            {x.key === 'internal' && isLoading && (
+              <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Загрузка каталога…
+              </div>
+            )}
+            {x.key === 'internal' && !isLoading && productCount === 0 && (
+              <div className="px-3 py-2.5 text-sm text-muted-foreground">
+                Приложения не подключены. Состав задаётся в «Управлении» → «Приложения».
+              </div>
+            )}
           </Section>
-        )}
-        {commerce.length > 0 && (
-          <Section title="Клиенты и продажи" hint="кому продаём и как обслуживаем" divider={lead.length > 0}>
-            {commerce.map(renderProductTile)}
-          </Section>
-        )}
-        <Section title="Учёт" hint="экономика, периметр и бухгалтерия" divider>
-          {internal.map(renderProductTile)}
-          {q.isLoading && (
-            <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> Загрузка каталога…
-            </div>
-          )}
-          {!q.isLoading && apps.length === 0 && (
-            <div className="px-3 py-2.5 text-sm text-muted-foreground">
-              Приложения не подключены. Состав задаётся в «Управлении» → «Приложения».
-            </div>
-          )}
-        </Section>
-        {operations.length > 0 && (
-          <Section title="Сеть" hint="связь, оборудование и состояние систем" divider>
-            {operations.map(renderProductTile)}
-          </Section>
-        )}
-        {services.length > 0 && (
-          <Section title="Сервисы экосистемы" hint="общие для всех приложений" divider>
-            {services.map(renderProductTile)}
-          </Section>
-        )}
+        ))}
         {clientSpaces.length > 0 && (
-          <Section title="Пространства клиентов" hint="войти своей учётной записью" divider>
-            {clientSpaces.map((p) => (
-              <Tile
-                key={p.code}
-                title={p.name}
-                subtitle="Рабочее пространство клиента"
-                icon={Network}
-                availability="Войти по пропуску"
-                busy={visiting === p.code}
-                onClick={() => openSpace(p.code)}
-              />
-            ))}
-          </Section>
-        )}
-        {management.length > 0 && (
-          <Section title="Ядро системы" divider>
-            {management.map(renderProductTile)}
+          <Section title="Пространства клиентов" hint="войти своей учётной записью" view={view} divider>
+            {clientSpaces.map((c) => {
+              const Item = view === 'list' ? Row : Tile
+              return (
+                <Item
+                  key={c.code}
+                  title={c.name}
+                  subtitle="Рабочее пространство клиента"
+                  icon={Network}
+                  availability="Войти по пропуску"
+                  busy={visiting === c.code}
+                  onClick={() => openSpace(c.code)}
+                />
+              )
+            })}
           </Section>
         )}
       </>
@@ -569,7 +572,12 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
   if (embedded) {
     return (
       <div className="flex w-full flex-col gap-5 px-4 py-4 sm:px-6">
-        <DemoAccessLegend />
+        {/* Легенда доступности и вид стола — одной полосой: и то и другое про то,
+            КАК читать список приложений, а не про сами приложения. */}
+        <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
+          <DemoAccessLegend />
+          <ViewSwitch value={view} onChange={changeView} />
+        </div>
         {renderLayers()}
       </div>
     )
@@ -651,7 +659,12 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
           {user?.name ? `Здравствуйте, ${user.name}` : 'Рабочий стол'}
         </h1>
 
-        <DemoAccessLegend />
+        {/* Легенда доступности и вид стола — одной полосой: и то и другое про то,
+            КАК читать список приложений, а не про сами приложения. */}
+        <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
+          <DemoAccessLegend />
+          <ViewSwitch value={view} onChange={changeView} />
+        </div>
 
         {/* Все слои — из ОДНОГО каталога продуктов пространства (`Layers`), тем же
             составом, что и панель «Приложения» в рабочей области приложений. */}

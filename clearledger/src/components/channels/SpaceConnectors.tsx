@@ -3,12 +3,13 @@
  * каналов Учёта, живых интеграций Координатора и платформенных сервисов.
  *
  * Пространство одно, поэтому и список один: колонка «Приложение» показывает, кто владеет
- * подключением, а не разводит их по разным экранам. Настройка остаётся у владельца —
- * отсюда только переход (ключи провайдеров живут в приложении, дублировать их нельзя).
+ * подключением, а не разводит их по разным экранам. Поддерживаемые провайдеры настраиваются
+ * здесь через API владельца; ключи сохраняются только в его приложении.
  */
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { AlertTriangle, ArrowDownToLine, CheckCircle2, CircleOff, HelpCircle, Loader2, PauseCircle, Settings2 } from 'lucide-react'
+import { AlertTriangle, ArrowDownToLine, CheckCircle2, CircleOff, HelpCircle, Loader2, PauseCircle, Plus, Settings2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +18,10 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { useOpenApp } from '@/hooks/useOpenApp'
 import { listSpaceConnectors, type SpaceConnector } from '@/services/spaceConnectorsService'
 import { listSsoApps } from '@/services/ssoService'
+import { managedConnectorService, type ManagedConnectorProvider } from '@/services/spaceConnectorsService'
+import { ManagedConnectorDialog } from './ManagedConnectorDialog'
+import { useCanManage } from '@/hooks/useCanManage'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 /**
  * Состояние подключения одним словом.
@@ -65,8 +70,24 @@ function sinceLabel(iso: string | null): string {
 
 export function SpaceConnectors() {
   const { companyId } = useCompany()
+  return <CompanySpaceConnectors key={companyId} />
+}
+
+function CompanySpaceConnectors() {
+  const { companyId, company } = useCompany()
+  const { canManage } = useCanManage()
+  const queryClient = useQueryClient()
+  const [addingFor, setAddingFor] = useState<string | null>(null)
+  const [editor, setEditor] = useState<{ companyId: string; provider: ManagedConnectorProvider; id?: string } | null>(null)
   const navigate = useNavigate()
   const { openApp } = useOpenApp()
+  const catalog = useQuery({
+    queryKey: ['managed-connector-catalog', companyId],
+    queryFn: () => managedConnectorService.catalog(companyId),
+    enabled: !!companyId && canManage,
+    staleTime: 30_000,
+    retry: false,
+  })
 
   const q = useQuery({
     queryKey: ['space-connectors', companyId],
@@ -118,6 +139,11 @@ export function SpaceConnectors() {
   const inbound = items.filter((c) => c.initiator === 'them')
 
   function openSettings(c: SpaceConnector) {
+    if (c.management) {
+      const provider = catalog.data?.providers.find((item) => item.app === c.app && item.provider === c.provider)
+      if (canManage && provider) setEditor({ companyId, provider, id: c.management.id })
+      return
+    }
     if (c.settings_route) { navigate(c.settings_route); return }
     const app = (appsQ.data?.apps ?? []).find((a) => a.code === c.settings_app)
     if (app) openApp(app)
@@ -162,8 +188,9 @@ export function SpaceConnectors() {
             )}
           </TableCell>
           <TableCell>
-            {(c.settings_route || c.settings_app) && (
-              <Button variant="ghost" size="icon" title="Настроить у владельца"
+            {(c.settings_route || c.settings_app) && canManage && (
+              <Button variant="ghost" size="icon" title={c.management ? 'Настроить подключение' : 'Настроить у владельца'} aria-label={`Настроить ${c.label}`}
+                disabled={!!c.management && !catalog.data?.providers.some((item) => item.app === c.app && item.provider === c.provider)}
                 onClick={() => openSettings(c)}>
                 <Settings2 className="h-4 w-4" />
               </Button>
@@ -181,14 +208,13 @@ export function SpaceConnectors() {
           <div>
             <h2 className="text-base font-semibold">Подключения пространства</h2>
             <p className="text-sm text-muted-foreground">
-              Откуда организация получает данные — во всех приложениях сразу. Настройка живёт
-              там, где подключение заведено.
+              Источники и обмены выбранной организации. Создавайте подключения, настраивайте доступ и проверяйте связь.
             </p>
           </div>
-          <span className="text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-3"><span className="text-xs text-muted-foreground">
             Работают: {live} из {items.length}
             {failing > 0 && <span className="text-destructive"> · с ошибкой: {failing}</span>}
-          </span>
+          </span>{canManage && <Button size="sm" onClick={() => setAddingFor(companyId)}><Plus className="size-4" />Добавить подключение</Button>}</div>
         </div>
 
         {problems.length > 0 && (
@@ -200,6 +226,9 @@ export function SpaceConnectors() {
             ))}
           </div>
         )}
+        {canManage && (catalog.isError || !!catalog.data?.problems.length) && <p className="text-sm text-muted-foreground">
+          Настройка некоторых подключений недоступна. <button className="underline underline-offset-4" onClick={() => { setAddingFor(companyId); void catalog.refetch() }}>Показать причину</button>
+        </p>}
 
         <div className="overflow-x-auto rounded-lg border border-border">
           <Table>
@@ -239,6 +268,29 @@ export function SpaceConnectors() {
             </TableBody>
           </Table>
         </div>
+        {addingFor === companyId && canManage && <Dialog open onOpenChange={(open) => { if (!open) setAddingFor(null) }}>
+          <DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Добавить подключение</DialogTitle>
+            <DialogDescription>{company.name} · выберите внешнюю систему</DialogDescription></DialogHeader>
+            {catalog.isPending ? <p role="status" className="flex items-center gap-2"><Loader2 className="size-4 animate-spin" />Получаем доступные подключения…</p>
+              : <div className="space-y-3">
+                {catalog.data?.providers.map((provider) => <button key={`${provider.app}:${provider.provider}`}
+                  className="w-full rounded-md border p-4 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => { setAddingFor(null); setEditor({ companyId, provider }) }}>
+                  <span className="block font-medium">{provider.title}</span><span className="mt-1 block text-sm text-muted-foreground">{provider.intro}</span>
+                </button>)}
+                {catalog.data?.problems.map((problem) => <p key={problem.app} role="alert" className="text-sm text-muted-foreground">{problem.message}</p>)}
+                {catalog.isError && <p role="alert" className="text-sm text-destructive">Каталог подключений не загрузился. Повторите запрос.</p>}
+                {!catalog.isError && !catalog.data?.providers.length && !catalog.data?.problems.length && <p className="text-sm text-muted-foreground">Для этой организации пока нет доступных подключений. Проверьте состав приложений организации.</p>}
+                {(catalog.isError || !!catalog.data?.problems.length) && <Button variant="outline" onClick={() => catalog.refetch()}>Повторить</Button>}
+              </div>}
+          </DialogContent>
+        </Dialog>}
+        {editor && editor.companyId === companyId && canManage && <ManagedConnectorDialog key={`${companyId}:${editor.id || 'new'}`}
+          companyId={companyId} companyName={company.name} provider={editor.provider} connectorId={editor.id}
+          onClose={() => setEditor(null)} onSaved={() => {
+            void queryClient.invalidateQueries({ queryKey: ['space-connectors', companyId] })
+            void queryClient.invalidateQueries({ queryKey: ['managed-connector', companyId] })
+          }} />}
       </CardContent>
     </Card>
   )
