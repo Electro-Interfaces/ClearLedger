@@ -22,6 +22,11 @@ export function ProjectOverviewTab({ site, companyId }: { site: SiteDetail; comp
   const data = q.data
   const step = data.scenario?.steps.find((s) => s.code === data.scenario?.stage)
   return <div className="space-y-7">
+    {data.demo && <details className="space-y-3 border-b pb-4"><summary className="cursor-pointer font-medium">Учебная закупка: как пройти пример</summary>
+      <p className="text-sm text-muted-foreground">Участники и документы вымышлены. Вы — руководитель проекта: проверяете потребность, организуете согласование, контролируете поставку и принимаете результат. Работы подготовлены и ожидают выполнения.</p>
+      <ol className="space-y-2">{data.demo.guide.map((item, index) => <li key={item.stage} className="text-sm">{index + 1}. <Link className="text-primary underline" to={work.projectWorkHref(item)}>{item.title}</Link> — {item.requirement === 'done' ? 'выполните поручение' : item.requirement === 'approved' ? 'проведите согласование документа в Треке' : 'оформите подписание актуального документа'}. Вернитесь в проект и примите результат этапа.</li>)}</ol>
+      <p className="text-sm">На этапе поставки попробуйте указать внешнее ожидание, ответственного и дату контакта. После ответа поставщика зафиксируйте решение и снимите ожидание. Факт оплаты и складские остатки этот пример не создаёт.</p>
+    </details>}
     <div className="space-y-3"><h2 className="text-lg font-semibold">Работа на сегодня</h2>
       <ProjectWorkActions site={site} companyId={companyId} initialTitle={step?.result} />
       <Link className="inline-block text-sm text-primary underline underline-offset-4" to={`?mode=projects&sub=pr_project&project=${site.id}&ptab=docs`}>Добавить документ</Link>
@@ -76,6 +81,7 @@ function ScenarioEditor({ scenario, site, companyId }: { scenario: work.ProjectS
   }, onSuccess: () => { for (const key of ['project-workspace', 'work-context', 'site-detail', 'pr-projects', 'pr-portfolio', 'pr-overview']) void qc.invalidateQueries({ queryKey: [key] }); toast.success('Сценарий обновлён') }, onError: (e) => toast.error(e.message) })
   const current = scenario.steps.find((s) => s.code === scenario.stage)
   return <section className="space-y-4"><h3 className="font-medium">{scenario.name} · {current?.name || 'Завершено'}</h3>
+    <p className="text-sm text-muted-foreground">Сценарий · версия {scenario.version}. <Link className="text-primary underline" to={`?mode=projects&sub=pr_project&project=${site.id}&scenarioSettings=1`}>Настройки для новых проектов</Link></p>
     <ol className="flex flex-wrap gap-x-4 gap-y-2 text-sm">{scenario.steps.map((s) => <li key={s.code} aria-current={s.code === scenario.stage ? 'step' : undefined} className={s.code === scenario.stage ? 'font-semibold text-primary' : 'text-muted-foreground'}>{s.name}{scenario.evidence[s.code] ? ' — принято' : ''}</li>)}</ol>
     {site.kind === 'warehouse' && <p className="text-sm text-muted-foreground">Резервы, остатки и первичные документы ведутся в складском учёте. Здесь фиксируются потребность, ответственная работа и её результат.</p>}
     <details className="space-y-3"><summary className="cursor-pointer text-sm text-primary">Поля и настройки сценария</summary>

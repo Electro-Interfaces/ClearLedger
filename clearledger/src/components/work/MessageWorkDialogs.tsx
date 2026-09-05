@@ -11,7 +11,7 @@ import * as chat from '@/services/chatService'
 import type { ChatMessage } from '@/services/chatService'
 import * as docsService from '@/services/docsService'
 import { listTaskPeople } from '@/services/tasksService'
-import { resolveWorkContext } from '@/services/workContextService'
+import { contextDueDate, resolveWorkContext } from '@/services/workContextService'
 import { WorkContextPicker } from './WorkContextPicker'
 
 export function TaskFromMessageDialog({ message, companyId, subjectRef, onClose, onDone }: {
@@ -55,7 +55,7 @@ export function TaskFromMessageDialog({ message, companyId, subjectRef, onClose,
         </DialogHeader>
         <div className="space-y-3 px-4 py-3">
           <WorkContextPicker companyId={companyId} value={contextRef} onChange={setContextRef} />
-          {contextQ.data && <Button type="button" size="sm" variant="outline" onClick={() => { setAssigneeId(contextQ.data!.defaults.responsible_id || ''); setTitle(contextQ.data!.defaults.title || title) }}>Применить настройки приложения</Button>}
+          {contextQ.data && <Button type="button" size="sm" variant="outline" onClick={() => { setAssigneeId(contextQ.data!.defaults.responsible_id || ''); setTitle(contextQ.data!.defaults.title || title); setDueAt(contextDueDate(contextQ.data!)) }}>Применить настройки приложения</Button>}
           {message.fileName && <p className="text-xs text-muted-foreground">Вложение: {message.fileName}</p>}
           <div className="space-y-1">
             <Label className="text-xs">Что сделать</Label>
@@ -152,7 +152,7 @@ export function ProcessFromMessageDialog({ message, companyId, subjectRef, onClo
         </DialogHeader>
         <div className="space-y-3 p-4">
           <WorkContextPicker companyId={companyId} value={contextRef} onChange={setContextRef} />
-          {contextQ.data && <Button type="button" size="sm" variant="outline" onClick={() => { setResponsibleId(contextQ.data!.defaults.responsible_id || ''); setTemplateId(contextQ.data!.defaults.template_ids?.[0] || templateId) }}>Применить настройки приложения</Button>}
+          {contextQ.data && <Button type="button" size="sm" variant="outline" onClick={() => { setResponsibleId(contextQ.data!.defaults.responsible_id || ''); setTemplateId(contextQ.data!.defaults.template_ids?.[0] || templateId); setDueAt(contextDueDate(contextQ.data!)) }}>Применить настройки приложения</Button>}
           {message.fileName && <p className="text-xs text-muted-foreground">Вложение: {message.fileName}</p>}
           <label className="block space-y-1 text-sm">Срок<Input aria-label="Срок" type="date" value={dueAt} onChange={(e) => setDueAt(e.target.value)} /></label>
           <p className="max-h-20 overflow-hidden rounded-md bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">

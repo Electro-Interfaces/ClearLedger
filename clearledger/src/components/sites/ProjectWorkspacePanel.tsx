@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 import { PROJECT_TABS, ProjectTabContent, type ProjectTabKey } from './ProjectTabs'
 import { ProjectPhaseStrip } from './ProjectPhaseStrip'
 import { ProjectsListPanel } from './ProjectsListPanel'
+import { ProjectScenarioSettings } from './ProjectScenarioSettings'
 import { plural } from '@/lib/textUtils'
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -53,6 +54,11 @@ export function ProjectWorkspacePanel({ companyId }: { companyId: string }) {
     }, { replace: true })
   }
 
+  if (params.get('scenarioSettings') === '1') return <ProjectScenarioSettings companyId={companyId} onProject={(id) => setParams((prev) => {
+    const next = new URLSearchParams(prev); next.delete('scenarioSettings'); next.set('project', id); next.set('ptab', 'overview'); return next
+  }, { replace: true })} onBack={() => setParams((prev) => {
+    const next = new URLSearchParams(prev); next.delete('scenarioSettings'); return next
+  }, { replace: true })} />
   if (!projectId) return <ProjectsListPanel companyId={companyId} />
   return <ProjectWorkspace companyId={companyId} id={projectId} tab={tab} onTab={setTab}
     onBack={() => setProject(null)} />

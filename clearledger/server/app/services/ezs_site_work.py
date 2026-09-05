@@ -432,6 +432,8 @@ async def create_site(db: AsyncSession, company_id, payload: dict[str, Any],
         _addr_key(site.full_address or site.address, site.city),
         f"{site.region or ''} {site.city or ''} {site.address or ''} {site.owner or ''}".strip(),
     )
+    from app.services.project_scenario_settings import initialize
+    await initialize(db, site)
     db.add(site)
     await db.flush()
     # У места сразу появляется первый проект: без него площадка не попадёт ни в

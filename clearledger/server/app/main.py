@@ -453,6 +453,8 @@ app.include_router(equipment_router.router, prefix=API_PREFIX)  # складск
 app.include_router(sites_router.router, prefix=API_PREFIX)  # банк ЗУ: площадки под установку ЭЗС
 from app.routers import project_workspace_router
 app.include_router(project_workspace_router.router, prefix=API_PREFIX)
+from app.routers import project_scenarios_router
+app.include_router(project_scenarios_router.router, prefix=API_PREFIX)
 from app.routers import work_contexts_router
 from app.services import work_contexts
 from app.services.project_work_context import ProjectsContext

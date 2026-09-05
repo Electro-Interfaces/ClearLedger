@@ -425,6 +425,9 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         <Button size="sm" variant="outline" className="h-8 text-sm" onClick={() => setCreating(true)}>
           <Plus className="h-3.5 w-3.5 mr-1" />Новый проект
         </Button>
+        <Button size="sm" variant="outline" onClick={() => setParams((prev) => {
+          const next = new URLSearchParams(prev); next.set('scenarioSettings', '1'); return next
+        }, { replace: true })}>Сценарии</Button>
         {/* Реестр тоже уходит на совещание — своей выгрузкой, а не пересказом. */}
         <ExportButton companyId={companyId} report="portfolio" fileName="projects_portfolio.xlsx" />
         {risk && (

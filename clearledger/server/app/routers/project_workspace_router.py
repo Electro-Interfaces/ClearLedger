@@ -87,7 +87,7 @@ async def overview(sid: uuid.UUID, company_id: str, user=Depends(get_current_use
         or_(ChatParticipant.history_from.is_(None), ChatMessage.created_at >= ChatParticipant.history_from),
         or_(ChatParticipant.last_read_at.is_(None), ChatMessage.created_at > ChatParticipant.last_read_at)))
     return {"work": track, "pending_results": pending, "next_work": next_work, "external_wait": data.get("external_wait"),
-        "scenario": project_scenarios.scenario(site), "unread": unread,
+        "scenario": project_scenarios.scenario(site), "demo": data.get("demo"), "unread": unread,
         "target_date": data.get("target_date"), "budget": data.get("budget"),
         "team": [{"id": str(uid), "name": name, "role": role} for uid, name, role in team],
         "events": [{"id": str(e.id), "kind": e.kind, "text": e.text, "author": name,
@@ -343,7 +343,7 @@ async def update_scenario(sid: uuid.UUID, body: ScenarioBody, company_id: str,
     from app.models import TaskTemplate
     for code, tid in body.templates.items():
         if tid is None:
-            templates.pop(code, None)
+            templates[code] = None
         else:
             template = await db.get(TaskTemplate, tid)
             if template is None or template.company_id != cid:
@@ -381,6 +381,9 @@ async def update_scenario(sid: uuid.UUID, body: ScenarioBody, company_id: str,
         stage = spec["steps"][index + 1]["code"] if index + 1 < len(spec["steps"]) else "done"
         await ezs_site_work.log_event(db, site, "scenario", text=step["result"], user=user,
             changes=[{"work_ref": ref, "from": spec["stage"], "to": stage}])
-    site.workspace_data = {**(site.workspace_data or {}), "scenario": {"stage": stage, "fields": values, "templates": templates, "evidence": evidence}}
+    definition = {key: spec[key] for key in ("name", "fields", "steps", "message_actions") if key in spec}
+    site.workspace_data = {**(site.workspace_data or {}), "scenario": {
+        "definition": definition, "version": spec["version"],
+        "stage": stage, "fields": values, "templates": templates, "evidence": evidence}}
     await db.commit()
     return {"ok": True, "scenario": project_scenarios.scenario(site)}

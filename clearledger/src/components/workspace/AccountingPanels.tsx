@@ -6,6 +6,7 @@
  * над проводками AccountingDoc и сменами FuelShift.
  */
 
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceSubView, useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { workspaceModeForKey } from '@/config/workspaceMenus'
@@ -66,7 +67,6 @@ import { TaxVitrine } from '@/components/balance/EnergyTaxVitrine'
 // Бухгалтерский модуль ГИГ — смены/ТТН (корректировка перед 1С) + аналитика.
 // Нормализация и сверка НЕ дублируются здесь — они живут в разделах
 // «Нормализация» (/normalization) и «Разрезы учёта» (/reconciliation).
-import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { ShiftDetailsDialog } from '@/components/fuel/ShiftDetailsDialog'
 import { ShiftDashboardPanel } from '@/components/fuel/ShiftDashboardPanel'
 import { AccountingCashPanel } from './AccountingCashPanel'

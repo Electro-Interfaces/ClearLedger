@@ -10,7 +10,7 @@ import { createTask } from '@/services/tasksService'
 import { getSiteMembers, type SiteDetail } from '@/services/sitesService'
 import { ProjectEvidencePicker } from './ProjectEvidencePicker'
 import * as work from '@/services/projectWorkspaceService'
-import { resolveWorkContext } from '@/services/workContextService'
+import { contextDueDate, resolveWorkContext } from '@/services/workContextService'
 
 export function ProjectWorkActions({ site, companyId, initialTitle = '' }: {
   site: SiteDetail; companyId: string; initialTitle?: string
@@ -67,6 +67,12 @@ export function ProjectWorkActions({ site, companyId, initialTitle = '' }: {
           <DialogDescription>{site.projectNo} · {site.title || site.address}</DialogDescription></DialogHeader>
         {mode !== 'link' && <label className="space-y-2 text-sm">{mode === 'task' ? 'Что сделать' : mode === 'wait' ? 'Кого и чего ждём' : 'Принятое решение'}
           <Textarea aria-label={mode === 'task' ? 'Что сделать' : mode === 'wait' ? 'Кого и чего ждём' : 'Принятое решение'} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={mode === 'decision' ? 4000 : 300} /></label>}
+        {mode === 'task' && context.data && <Button variant="outline" onClick={() => {
+          const defaults = context.data!
+          setPerson(defaults.defaults.responsible_id || '')
+          setTitle(defaults.defaults.title || title)
+          setDue(contextDueDate(defaults))
+        }}>Применить настройки сценария</Button>}
         {(mode === 'task' || mode === 'wait') && <label className="space-y-2 text-sm">Ответственный
           <select aria-label="Ответственный" className="flex h-10 w-full rounded-md border bg-background px-3" value={person} onChange={(e) => setPerson(e.target.value)}>
             <option value="">Выберите сотрудника</option>{people.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}

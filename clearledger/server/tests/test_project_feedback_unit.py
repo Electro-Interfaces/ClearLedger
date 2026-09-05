@@ -73,6 +73,8 @@ async def test_адресный_сервис_и_резервные_подска�
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["warehouse", "procurement", "corporate_client"])
 async def test_новые_виды_работ_и_тип_объекта_сохраняются(monkeypatch, kind):
+    from app.services import project_scenario_settings
+    monkeypatch.setattr(project_scenario_settings, "initialize", AsyncMock())
     db = MagicMock()
     db.execute = AsyncMock(return_value=SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [])))
     db.flush = AsyncMock()

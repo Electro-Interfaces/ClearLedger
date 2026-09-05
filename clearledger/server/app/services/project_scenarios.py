@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from fastapi import HTTPException
 
 
@@ -34,12 +36,16 @@ SCENARIOS = {
 
 
 def scenario(site):
-    spec = SCENARIOS.get(site.kind)
+    data = (site.workspace_data or {}).get("scenario", {})
+    spec = data.get("definition") or SCENARIOS.get(site.kind)
     if spec is None:
         return None
-    data = (site.workspace_data or {}).get("scenario", {})
-    return {**spec, "stage": data.get("stage", spec["steps"][0]["code"]),
-            "values": data.get("fields", {}), "templates": data.get("templates", {}), "evidence": data.get("evidence", {})}
+    templates = {s["code"]: s["template_id"] for s in spec["steps"] if s.get("template_id")}
+    templates.update(data.get("templates", {}))
+    templates = {key: value for key, value in templates.items() if value}
+    return {**deepcopy(spec), "version": data.get("version", 1),
+            "stage": data.get("stage", spec["steps"][0]["code"]),
+            "values": data.get("fields", {}), "templates": templates, "evidence": data.get("evidence", {})}
 
 
 def validate_fields(spec, values):

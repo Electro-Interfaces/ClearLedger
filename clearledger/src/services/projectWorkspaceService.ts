@@ -8,12 +8,14 @@ export type ProjectEvent = {
   changes: { room_id?: string; message_id?: string; work_ref?: string; deadline?: { from: string; to: string }; budget?: { from: number; to: number } }[] | null
 }
 export interface ProjectScenario {
+  version: number
   name: string; stage: string; fields: Record<string, string>; values: Record<string, string>
   steps: { code: string; name: string; result: string; requirement: string; fields?: string[] }[]
   templates: Record<string, string>
   evidence: Record<string, { ref: string; by: string; at: string; revision: number | null }>
 }
 export interface ProjectOverview {
+  demo?: { key: string; room_id: string; guide: { stage: string; title: string; kind: 'task' | 'doc'; id: string; requirement: string }[] } | null
   work: { items: SiteTrackItem[]; total: number; waiting: number }
   pending_results?: { items: SiteTrackItem[]; total: number }
   next_work: { id?: string; kind?: 'doc' | 'task'; title?: string; due_at?: string; status?: string; unavailable?: boolean } | null

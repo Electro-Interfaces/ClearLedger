@@ -39,18 +39,28 @@ class ProjectsContext:
         for person in people:
             if not person.mail_only and await _is_insider(person, cid):
                 suggestions.append({"id": str(person.id), "name": person.name})
+        responsible_id = step.get("responsible_id") if step else None
+        if responsible_id and not await db.get(UserCompany, (uuid.UUID(responsible_id), cid)):
+            responsible_id = None
+        actions = [{"code": "discussion", "label": "Добавить обсуждение в проект"},
+                   {"code": "decision", "label": "Зафиксировать решение", "text_required": True},
+                   {"code": "file", "label": "Добавить файл в документы проекта", "requires_file": True}]
+        if scenario and "message_actions" in scenario:
+            actions = [action for action in actions if action["code"] in scenario["message_actions"]]
         return {"ref": f"site:{sid}", "application": self.application,
             "title": f"{site.project_no or ''} · {site.title or site.city or 'Проект'}",
             "url": f"/projects?mode=projects&sub=pr_project&project={sid}&ptab=overview", "object_id": site.location_id,
             "suggested_people": suggestions,
-            "defaults": {"responsible_id": str(site.owner_user_id) if site.owner_user_id else None,
+            "defaults": {"responsible_id": responsible_id or (str(site.owner_user_id) if site.owner_user_id else None),
+                         "due_days": step.get("due_days") if step else None,
                          "title": step["result"] if step else None,
                          "template_ids": [scenario["templates"][step["code"]]] if step and scenario["templates"].get(step["code"]) else []},
-            "actions": [{"code": "discussion", "label": "Добавить обсуждение в проект"},
-                        {"code": "decision", "label": "Зафиксировать решение", "text_required": True},
-                        {"code": "file", "label": "Добавить файл в документы проекта", "requires_file": True}]}
+            "actions": actions}
 
     async def execute(self, db, cid, user, key, body):
+        context = await self.resolve(db, cid, user, key)
+        if body.action not in {action["code"] for action in context["actions"]}:
+            raise HTTPException(403, "Действие отключено в сценарии приложения")
         from app.routers import project_workspace_router as projects
         sid = uuid.UUID(key)
         if body.action == "file":
