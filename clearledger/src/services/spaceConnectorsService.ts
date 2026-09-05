@@ -61,6 +61,15 @@ export interface ConnectorField {
   fallback?: string
   placeholder?: string
   hint?: string
+  choices?: {value:string;label:string}[]
+  choicesFrom?: 'line'|'group'
+}
+
+export interface MangoDirectory {
+  entries:{kind:'user'|'group'|'line';external_id:string;extension:string;name:string;email:string}[]
+  staff:{id:string;name:string;email:string}[]
+  bindings:{extension:string;user_id:string;can_call:boolean}[]
+  synced_at:string|null
 }
 
 export interface ManagedConnectorProvider {
@@ -75,6 +84,7 @@ export interface ManagedConnectorProvider {
 }
 
 export interface ManagedConnectorState {
+  directory?:MangoDirectory
   id: string
   provider: string
   label: string
@@ -108,6 +118,6 @@ export const managedConnectorService = {
   read: (companyId: string, app: string, id: string) => get<ManagedConnectorState>(managementPath(companyId, app, `/${encodeURIComponent(id)}`)),
   create: (companyId: string, app: string, body: ManagedConnectorInput) => post<ManagedConnectorState>(managementPath(companyId, app), body),
   update: (companyId: string, app: string, id: string, body: ManagedConnectorInput) => patch<ManagedConnectorState>(managementPath(companyId, app, `/${encodeURIComponent(id)}`), body),
-  action: (companyId: string, app: string, id: string, action: string) => post<{ ok: boolean; at?: string; message: string }>(
-    managementPath(companyId, app, `/${encodeURIComponent(id)}/actions/${encodeURIComponent(action)}`), {}),
+  action: (companyId: string, app: string, id: string, action: string,body:Record<string,unknown>={}) => post<{ ok: boolean; at?: string; message: string }>(
+    managementPath(companyId, app, `/${encodeURIComponent(id)}/actions/${encodeURIComponent(action)}`), body),
 }

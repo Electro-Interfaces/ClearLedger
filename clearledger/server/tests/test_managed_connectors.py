@@ -135,3 +135,18 @@ def test_service_token_remains_compatible_with_existing_scopes(signing):
     claims = jwt.decode(token, signing, algorithms=['RS256'], audience='support', issuer=sso.settings.sso_issuer)
     assert claims['svc'] == 'projection'
     assert 'cid' not in claims and 'actor' not in claims
+
+
+@pytest.mark.asyncio
+async def test_directory_binding_uses_owner_company_and_checks_admin(api):
+    app,state=api
+    body={'extension':'101','user_id':str(ACTOR),'can_call':True}
+    path=f'/api/registry/connectors/managed/support/{CONNECTOR}/actions/bind-operator?company_id={COMPANY}'
+    async with RealClient(transport=httpx.ASGITransport(app),base_url='http://test') as client:
+        response=await client.post(path,json=body)
+        assert response.status_code==200
+        assert state['calls'][0]['body']==body
+        assert state['calls'][0]['claims']['cid']==REMOTE
+        state['role']='member'
+        assert (await client.post(path,json=body)).status_code==403
+    assert len(state['calls'])==1

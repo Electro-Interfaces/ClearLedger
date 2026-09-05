@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { managedConnectorService, type ManagedConnectorProvider, type ManagedConnectorState } from '@/services/spaceConnectorsService'
+import {MangoDirectoryEditor} from './MangoDirectoryEditor'
 
 type EditorProps = {
   companyId: string
@@ -117,9 +118,12 @@ function ManagedConnectorForm({ companyId, companyName, provider, connectorId, o
                 {provider.fields.filter((field) => !field.readOnly).map((field) => {
                   const id = `${prefix}-${field.key}`
                   const isRemoved = removed.includes(field.key)
+                  const choices=field.choices || (field.choicesFrom ? (saved?.directory?.entries || []).filter(row=>row.kind===field.choicesFrom).map(row=>({value:field.choicesFrom==='line'?row.external_id:row.extension,label:`${row.name} · ${row.extension}`})):null)
                   return <div key={field.key} className="space-y-2">
                     <Label htmlFor={id}>{field.label}</Label>
-                    {field.list ? <Textarea id={id} value={values[field.key] || ''} rows={3} placeholder={field.placeholder}
+                    {choices ? <select id={id} className="h-11 w-full rounded-md border bg-background px-2 text-sm" value={values[field.key] || ''} onChange={event=>{setValues(current=>({...current,[field.key]:event.target.value}));change()}}>
+                      {!field.choices && <option value="">Не выбрана</option>}{choices.map(choice=><option key={choice.value} value={choice.value}>{choice.label}</option>)}</select>
+                      : field.list ? <Textarea id={id} value={values[field.key] || ''} rows={3} placeholder={field.placeholder}
                       onChange={(event) => { setValues((current) => ({ ...current, [field.key]: event.target.value })); change() }} />
                       : <Input id={id} type={field.secret ? 'password' : 'text'} autoComplete={field.secret ? 'new-password' : 'off'} disabled={isRemoved}
                         value={field.secret ? credentials[field.key] || '' : values[field.key] || ''}
@@ -163,6 +167,9 @@ function ManagedConnectorForm({ companyId, companyName, provider, connectorId, o
                 {saved?.last_sync_at && <p className="text-xs text-muted-foreground">Последняя загрузка: {new Date(saved.last_sync_at).toLocaleString('ru-RU')}</p>}
                 {saved?.last_error && <p role="alert" className="text-sm text-destructive">{saved.last_error}</p>}
               </div>
+              {saved?.directory && <MangoDirectoryEditor directory={saved.directory} companyId={companyId} connectorId={saved.id} disabled={busy || dirty}
+                onUpdated={async()=>{accept(await managedConnectorService.read(companyId,provider.app,saved.id));setActionResult({ok:true,message:'Сопоставление сотрудника сохранено'});onSaved()}}
+                onAddLine={number=>{setValues(current=>({...current,lines:[...new Set((current.lines || '').split('\n').filter(Boolean).concat(number))].join('\n')}));change()}}/>}
             </form>
         {error && <p role="alert" className="text-sm text-destructive">{error.message || 'Не удалось сохранить подключение. Повторите запрос.'}</p>}
         {save.isSuccess && !dirty && <p role="status" className="text-sm text-muted-foreground">Изменения сохранены</p>}

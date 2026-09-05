@@ -391,11 +391,12 @@ async def managed_connector_update(app_code: str, connector_id: uuid.UUID, body:
 
 @router.post("/connectors/managed/{app_code}/{connector_id}/actions/{action}")
 async def managed_connector_action(app_code: str, connector_id: uuid.UUID, action: str, company_id: str = Query(...),
+                                   body: dict = Body(default={}),
                                    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
     cid = await _admin(company_id, user, db)
-    if action not in {"test", "sync"}:
+    if action not in {"test", "sync", "directory", "bind-operator"}:
         raise HTTPException(404, "Действие не поддерживается")
-    return await managed_connectors.owner_request(db, cid, user.id, app_code, "POST", f"/{connector_id}/actions/{action}", {})
+    return await managed_connectors.owner_request(db, cid, user.id, app_code, "POST", f"/{connector_id}/actions/{action}", body)
 
 
 @router.get("/connections")
