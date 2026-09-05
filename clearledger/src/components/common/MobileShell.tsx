@@ -5,7 +5,7 @@
  * молча, а выкаченные правки не доезжают до человека вовсе — он видит ту сборку,
  * что открыл когда-то, и справедливо считает, что ничего не изменилось.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2, ArrowDown, RefreshCw, Smartphone } from 'lucide-react'
 import { usePullToRefresh } from '@/hooks/usePullToRefresh'
@@ -136,6 +136,7 @@ function wasRecentlyDismissed(): boolean {
 }
 
 export function InstallApp() {
+  const bannerRef = useRef<HTMLDivElement>(null)
   const [promptAvailable, setPromptAvailable] = useState(hasPwaInstallPrompt)
   const [hidden, setHidden] = useState(wasRecentlyDismissed)
   const [installed, setInstalled] = useState(isPwaInstalled)
@@ -150,6 +151,14 @@ export function InstallApp() {
   }, [])
 
   const visible = !installed && !hidden
+  useEffect(() => {
+    if (!visible || !bannerRef.current) return
+    const update = () => document.documentElement.style.setProperty('--pwa-install-height', `${bannerRef.current?.offsetHeight ?? 0}px`)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(bannerRef.current)
+    return () => { observer.disconnect(); document.documentElement.style.removeProperty('--pwa-install-height') }
+  }, [visible])
   useEffect(() => {
     if (visible) document.documentElement.dataset.pwaInstall = howto ? 'expanded' : 'compact'
     else delete document.documentElement.dataset.pwaInstall
@@ -173,7 +182,7 @@ export function InstallApp() {
   }
 
   return (
-    <div data-pwa-install className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] z-[60]
+    <div ref={bannerRef} data-pwa-install className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.5rem)] z-40
                     rounded-lg border border-border bg-card/95 px-3 py-2 text-[13px]
                     shadow-lg backdrop-blur
                     md:inset-x-auto md:right-4 md:bottom-4 md:max-w-md">

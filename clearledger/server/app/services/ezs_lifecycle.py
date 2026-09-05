@@ -45,6 +45,12 @@ PROJECT_KINDS = [
      "hint": "станция переезжает на другое место", "startStage": "decision"},
     {"key": "decommission", "label": "Демонтаж",
      "hint": "вывод объекта из эксплуатации", "startStage": "decision"},
+    {"key": "warehouse", "label": "Склад",
+     "hint": "работы по складскому обеспечению", "startStage": "decision"},
+    {"key": "procurement", "label": "Закупка",
+     "hint": "закупка оборудования и материалов", "startStage": "decision"},
+    {"key": "corporate_client", "label": "Корпоративный клиент",
+     "hint": "работы для корпоративного клиента", "startStage": "decision"},
 ]
 KIND_LABELS = {k["key"]: k["label"] for k in PROJECT_KINDS}
 KIND_START_STAGE = {k["key"]: k["startStage"] for k in PROJECT_KINDS}

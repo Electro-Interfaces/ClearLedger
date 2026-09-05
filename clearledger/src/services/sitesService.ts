@@ -116,6 +116,7 @@ export interface GateItem {
   waiveReason?: string | null
   /** Можно ли снимать обязательность с этого пункта вообще. */
   waivable?: boolean
+  documentState?: 'file' | 'approved' | 'signed'
 }
 export interface GateState {
   stage: SiteStage; stageLabel: string; items: GateItem[]; done: number; total: number
@@ -255,6 +256,7 @@ export async function getSitesOverview(companyId: string): Promise<SitesOverview
 
 export async function getSites(p: {
   companyId: string; stage?: string; region?: string; search?: string
+  kind?: string; placeKind?: string
   ownerId?: string; overdue?: boolean; risk?: string; node?: string
   page?: number; pageSize?: number
 }): Promise<SitesList> {
@@ -263,8 +265,23 @@ export async function getSites(p: {
     search: p.search || undefined, owner_id: p.ownerId || undefined,
     overdue: p.overdue ? 1 : undefined, risk: p.risk || undefined,
     node: p.node || undefined,
+    kind: p.kind || undefined, place_kind: p.placeKind || undefined,
     page: p.page ?? 1, page_size: p.pageSize ?? 300,
   })
+}
+
+export const PROJECT_OBJECT_TYPES = ['АЗС/АГНС', 'Гостиница', 'Трасса', 'Город', 'БЦ/ТЦ', 'Автосалон', 'Общепит', 'Девелопмент']
+export const projectObjectLabel = (value?: string | null) =>
+  PROJECT_OBJECT_TYPES.find((label) => label.toLocaleLowerCase('ru') === value?.toLocaleLowerCase('ru')) ?? value ?? '—'
+
+export type ProjectSuggestionField = 'title' | 'region' | 'city' | 'address' | 'install_place'
+export interface ProjectSuggestion {
+  value: string; label?: string; source: 'projects' | 'registry'
+  fields?: Partial<Record<'region' | 'city' | 'address', string>>
+}
+export function getProjectSuggestions(companyId: string, field: ProjectSuggestionField, q: string, region = '', city = '') {
+  return get<{ items: ProjectSuggestion[]; registry: 'local' | 'available' | 'unavailable' }>(
+    '/api/sites/meta/suggestions', { company_id: companyId, field, q, region, city })
 }
 
 /** Узлы маршрута с числом стоящих на них проектов.
@@ -934,30 +951,20 @@ export async function getProjectContext(companyId: string, id: string): Promise<
 
 /** Строка ленты «Трека» в карточке проекта: документ или поручение. */
 export interface SiteTrackItem {
-  id: string
-  kind: 'doc' | 'task'
-  /** Как называют вслух: «Вх-88», «№17», «черновик». */
-  key: string
-  title: string
-  type: string | null
-  state: string
-  state_name: string
-  at: string | null
+  id: string; kind: 'doc' | 'task'; key: string; title: string; type?: string | null
+  state: string; state_name: string; at: string | null; status?: string
+  responsible_id?: string | null; responsible_name?: string | null; due_at?: string | null
+  overdue?: boolean; required?: boolean; revision?: number; approval_status?: string; document_state?: string; waiting_for_names?: string[]
+  deliveries?: { id: string; outcome: string | null; pending: boolean; error: boolean; attempts: number; decided_at: string | null; delivered_at: string | null }[]
 }
 
-/**
- * Что «Трек» ведёт по проекту: документы и поручения одной лентой.
- *
- * Предметов у работы два, и оба законны: пока объекта сети нет — а он
- * появляется со вводом в эксплуатацию, — работа цепляется к проекту; когда
- * объект появился, к нему. Ручка ищет по обоим, чтобы человеку не приходилось
- * знать внутреннее устройство.
- */
-export async function getSiteTrack(companyId: string, id: string): Promise<{
+export async function getSiteTrack(companyId: string, id: string, options: {
+  scope?: string; offset?: number; limit?: number; common?: boolean; kind?: 'doc' | 'task'; q?: string
+} = {}): Promise<{
   site_id: string; object_id: string | null; subject_ref: string
-  items: SiteTrackItem[]; waiting: number
+  items: SiteTrackItem[]; waiting: number; total: number
 }> {
-  return get(`/api/sites/${id}/track`, { company_id: companyId })
+  return get(`/api/sites/${id}/track`, { company_id: companyId, ...options, common: options.common ? 1 : undefined })
 }
 
 export async function getSiteDocs(companyId: string, id: string): Promise<SiteDoc[]> {

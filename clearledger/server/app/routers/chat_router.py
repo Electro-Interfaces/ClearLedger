@@ -521,6 +521,8 @@ class RoomOut(BaseModel):
     # Предмет, при котором живёт разговор: `site:<uuid>`, `contract:<uuid>`…
     # По нему карточка предмета показывает свои чаты, а работа, заведённая из
     # сообщения, наследует привязку и возвращается в ленту этого предмета.
+    scopePurpose: str | None = None
+    audience: str = "mixed"
     scopeRef: str | None = None
 
 
@@ -790,7 +792,7 @@ async def list_rooms(
             canWrite=_can_write(room, current_user, my_role, company_admin),
             scopeObjectId=room.scope_object_id,
             scopeObjectName=obj_names.get(room.scope_object_id or ""),
-            scopeRef=room.scope_ref,
+            scopeRef=room.scope_ref, scopePurpose=room.scope_purpose, audience=room.audience,
         ))
     # системные комнаты вверх (Общий чат, Объявления), затем по времени последнего сообщения
     # В контексте приложения его собственный чат идёт ПЕРВЫМ: человек открыл рельсу в
@@ -974,7 +976,7 @@ async def get_room(
         avatarUrl=room.avatar_url,
         scopeProduct=room.scope_product,
         scopeObjectId=room.scope_object_id, scopeObjectName=obj_name,
-        scopeRef=room.scope_ref,
+        scopeRef=room.scope_ref, scopePurpose=room.scope_purpose, audience=room.audience,
         scopeTicketId=str(room.scope_ticket_id) if room.scope_ticket_id else None,
         myRole=my_role,
     )
@@ -1042,6 +1044,7 @@ async def list_messages(
     limit: int = Query(100, ge=1, le=200),
     before: str | None = Query(None),
     search: str | None = Query(None),
+    around: uuid.UUID | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1054,6 +1057,11 @@ async def list_messages(
     граница = await _history_from(rid, current_user, db)
     if граница is not None:
         stmt = stmt.where(ChatMessage.created_at >= граница)
+    if around:
+        target = await db.scalar(stmt.where(ChatMessage.id == around, ChatMessage.deleted_at.is_(None)))
+        if target is None:
+            raise HTTPException(404, "Исходное сообщение недоступно или удалено")
+        stmt = stmt.where(ChatMessage.created_at <= target.created_at)
     if before:
         try:
             stmt = stmt.where(ChatMessage.created_at < datetime.fromisoformat(before))
@@ -1488,6 +1496,11 @@ async def add_participant(
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     room = await _assert_participant(rid, current_user, db)
+    if room.audience == "internal":
+        person = await db.get(User, target)
+        if person is None or person.mail_only or not await _is_insider(person, room.company_id):
+            raise HTTPException(403, "Внешних участников добавляют в отдельное обсуждение")
+
     # право добавлять: создатель, admin комнаты или суперадмин
     my = (await db.execute(select(ChatParticipant.role).where(
         ChatParticipant.room_id == rid, ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
@@ -1551,6 +1564,9 @@ async def add_mail_participant(
                             "В пространстве не настроен ящик приёма — писать по почте некуда")
 
     room = await _assert_participant(rid, current_user, db)
+    if room.audience == "internal":
+        raise HTTPException(403, "Для переписки по почте создайте отдельное обсуждение")
+
     my = await _my_room_role(rid, current_user, db)
     if not (current_user.is_superadmin or room.created_by == current_user.id or my in ("owner", "admin")):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет прав добавлять участников")
@@ -1726,6 +1742,10 @@ async def rename_room(
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "Аватар — файл пространства (/api/files/…)")
         room.avatar_url = url or None
+    if room.scope_purpose:
+        for field, current in (("scopeRef", room.scope_ref), ("scopeProduct", room.scope_product), ("scopeObjectId", room.scope_object_id)):
+            if field in body.model_fields_set and (getattr(body, field) or None) != current:
+                raise HTTPException(409, "Контекст основной группы задаёт приложение. Для другого предмета создайте отдельное обсуждение")
     if body.scopeProduct is not None:
         # Привязка группы к приложению: системным не meняем — они общие по устройству.
         if room.kind is not None:
@@ -1746,11 +1766,11 @@ async def rename_room(
         if oid:
             await _assert_company_object(oid, room.company_id, db)
         room.scope_object_id = oid or None
-    if body.scopeRef is not None:
+    if "scopeRef" in body.model_fields_set:
         if room.kind is not None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "Системный чат — общий для пространства, привязки у него нет")
-        value = body.scopeRef.strip()
+        value = (body.scopeRef or "").strip()
         room.scope_ref = (await _assert_scope_ref(value, room.company_id, db)
                           if value else None)
     await db.commit()
@@ -2361,6 +2381,7 @@ class TaskFromMessageBody(BaseModel):
     title: str | None = Field(None, min_length=3, max_length=300)
     assigneeId: str | None = None
     dueAt: datetime | None = None
+    subjectRef: str | None = Field(None, max_length=120)
 
 
 @router.post("/messages/{message_id}/task", status_code=status.HTTP_201_CREATED)
@@ -2394,7 +2415,24 @@ async def task_from_message(
     if msg is None or msg.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
     room = await _assert_participant(msg.room_id, current_user, db)
+    since = await _history_from(msg.room_id, current_user, db)
+    if since and msg.created_at < since:
+        raise HTTPException(404, "Сообщение не найдено")
     await assert_company_product(str(room.company_id), current_user, db, "docs")
+    subject_ref = room.scope_ref
+    if "subjectRef" in body.model_fields_set:
+        subject_ref = await _assert_scope_ref(body.subjectRef, room.company_id, db) if body.subjectRef else None
+    work_object_id = room.scope_object_id
+    if "subjectRef" in body.model_fields_set:
+        work_object_id = None
+        if subject_ref:
+            from app.services import work_contexts
+            if subject_ref.split(":", 1)[0] in {p.prefix for p in work_contexts.providers()}:
+                context = await work_contexts.resolve(db, room.company_id, current_user, subject_ref)
+                work_object_id = context.get("object_id")
+    from app.services.track_files import message_file
+    source_file = await message_file(db, room.company_id, msg)
+    await db.execute(select(ChatMessage.id).where(ChatMessage.id == mid).with_for_update())
 
     source_ref = f"chat:{mid}:task"
     duplicate = await db.scalar(select(TaskEvent.id).join(
@@ -2444,11 +2482,11 @@ async def task_from_message(
         status="open", stage_code=route[0]["code"],
         stage_column=work_state.stage_column_of(route, route[0]["code"]),
         assignee_id=assignee_id, author_id=current_user.id,
-        object_id=room.scope_object_id,
+        object_id=work_object_id,
         # Предмет комнаты наследуется работой: разговор шёл по проекту, значит и
         # поручение из него — по проекту. Без этого работа, рождённая в чате,
         # в ленту предмета не попадала, и связь с проектом жила только в тексте.
-        subject_ref=room.scope_ref, due_at=body.dueAt)
+        subject_ref=subject_ref, due_at=body.dueAt)
     db.add(task)
     await db.flush()
     # Ключ источника хранится в следе создания: по нему ловится повтор, и по нему
@@ -2456,15 +2494,9 @@ async def task_from_message(
     db.add(TaskEvent(task_id=task.id, kind="created", user_id=current_user.id,
                      to_value=route[0]["name"], note=source_ref))
 
-    if msg.file_url:
-        try:
-            file_id = uuid.UUID(msg.file_url.rstrip("/").rsplit("/", 1)[-1])
-        except (ValueError, TypeError):
-            file_id = None
-        source_file = await db.get(SourceFile, file_id) if file_id else None
-        if source_file is not None and source_file.company_id == room.company_id:
-            db.add(TaskAttachment(task_id=task.id, file_id=source_file.id,
-                                  uploaded_by=current_user.id))
+    if source_file is not None:
+        db.add(TaskAttachment(task_id=task.id, file_id=source_file.id,
+                              uploaded_by=current_user.id))
 
     target_url = (f"{get_settings().app_public_url.rstrip('/')}"
                   f"/docs/company?view=errands&task={task.id}")
@@ -2487,6 +2519,8 @@ async def task_from_message(
 
 class ProcessFromMessageBody(BaseModel):
     templateId: str
+    subjectRef: str | None = Field(None, max_length=120)
+    dueAt: datetime | None = None
     responsibleId: str | None = None
     title: str | None = Field(None, min_length=3, max_length=300)
 
@@ -2510,7 +2544,24 @@ async def process_from_message(
     if msg is None or msg.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
     room = await _assert_participant(msg.room_id, current_user, db)
+    since = await _history_from(msg.room_id, current_user, db)
+    if since and msg.created_at < since:
+        raise HTTPException(404, "Сообщение не найдено")
     await assert_company_product(str(room.company_id), current_user, db, "docs")
+    subject_ref = room.scope_ref
+    if "subjectRef" in body.model_fields_set:
+        subject_ref = await _assert_scope_ref(body.subjectRef, room.company_id, db) if body.subjectRef else None
+    work_object_id = room.scope_object_id
+    if "subjectRef" in body.model_fields_set:
+        work_object_id = None
+        if subject_ref:
+            from app.services import work_contexts
+            if subject_ref.split(":", 1)[0] in {p.prefix for p in work_contexts.providers()}:
+                context = await work_contexts.resolve(db, room.company_id, current_user, subject_ref)
+                work_object_id = context.get("object_id")
+    from app.services.track_files import message_file
+    source_file = await message_file(db, room.company_id, msg)
+    await db.execute(select(ChatMessage.id).where(ChatMessage.id == mid).with_for_update())
 
     try:
         template_id = uuid.UUID(body.templateId)
@@ -2550,10 +2601,11 @@ async def process_from_message(
                 source_ref=source_ref,
                 source_note=f"из обсуждения «{room.name or 'чат'}»",
                 summary_suffix=context,
-                object_id=room.scope_object_id,
+                object_id=work_object_id,
                 # По предмету документов десяток (договор аренды, ТУ, акт), а
                 # предмет карточки уникален на компанию — поэтому связью.
-                relate_to=room.scope_ref,
+                relate_to=subject_ref,
+                source_file=source_file, due_at=body.dueAt, title=body.title,
             )
             # Обратная ссылка на обсуждение. В чат мы пишем сообщение со ссылкой
             # на документ, а в карточке оставался только `source_ref` — строка,
@@ -2561,7 +2613,7 @@ async def process_from_message(
             # документ вырос, спрашивают чаще, чем кажется: там причина.
             db.add(DocRelation(
                 company_id=room.company_id, doc_id=entity.id, kind="discussion",
-                target_ref=f"room:{room.id}", created_by=current_user.id))
+                target_ref=f"room:{room.id}", meta={"message_id": str(mid)}, created_by=current_user.id))
         else:
             entity, result = await process_templates.launch_task(
                 db, room.company_id, tpl, current_user,
@@ -2570,8 +2622,8 @@ async def process_from_message(
                 source_ref=source_ref,
                 source_note=f"из обсуждения «{room.name or 'чат'}»",
                 summary_suffix=context,
-                object_id=room.scope_object_id,
-                subject_ref=room.scope_ref,
+                object_id=work_object_id,
+                subject_ref=subject_ref,
             )
             if msg.file_url:
                 try:
@@ -2590,6 +2642,8 @@ async def process_from_message(
                 else status.HTTP_400_BAD_REQUEST)
         raise HTTPException(code, str(exc)) from exc
 
+    if body.dueAt is not None:
+        entity.due_at = body.dueAt
     if tpl.doc_kind_id:
         target_url = (f"{get_settings().app_public_url.rstrip('/')}"
                       f"/docs?view=all&doc={entity.id}")

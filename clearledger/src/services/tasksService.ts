@@ -535,6 +535,7 @@ export async function listTaskTypes(companyId: string) {
 
 export async function createTask(data: {
   companyId: string; title: string; description?: string
+  watcherIds?: string[]
   projectId?: string
   typeId?: string; assigneeId?: string; objectId?: string
   foundVersionId?: string; fixVersionId?: string
@@ -556,6 +557,7 @@ export async function createTask(data: {
     type_id: data.typeId || undefined, assignee_id: data.assigneeId || undefined,
     object_id: data.objectId || undefined, priority: data.priority || undefined,
     subject_ref: data.subjectRef || undefined,
+    watcher_ids: data.watcherIds,
     due_at: data.dueAt || undefined,
     visibility: data.visibility || undefined,
     remind_at: data.remindAt || undefined,

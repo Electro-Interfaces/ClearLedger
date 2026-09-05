@@ -112,6 +112,7 @@ from app.routers import (
     users_router,
     sources_router,
     stats_router,
+    tl_channel_router,
 )
 from app.seed import seed_data
 
@@ -450,6 +451,15 @@ app.include_router(online_reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(ops_router.router, prefix=API_PREFIX)  # управленческий кокпит ЭЗС
 app.include_router(equipment_router.router, prefix=API_PREFIX)  # складской учёт оборудования ЭЗС
 app.include_router(sites_router.router, prefix=API_PREFIX)  # банк ЗУ: площадки под установку ЭЗС
+from app.routers import project_workspace_router
+app.include_router(project_workspace_router.router, prefix=API_PREFIX)
+from app.routers import work_contexts_router
+from app.services import work_contexts
+from app.services.project_work_context import ProjectsContext
+from app.services.object_work_context import ObjectsContext
+work_contexts.register(ProjectsContext())
+work_contexts.register(ObjectsContext())
+app.include_router(work_contexts_router.router, prefix=API_PREFIX)
 app.include_router(info_router.router, prefix=API_PREFIX)   # «Инфо»: знание пространства
 app.include_router(sso_router.router, prefix=API_PREFIX)  # SSO ElsyPlus (Фаза 0): лаунчер + handoff + JWKS
 app.include_router(app_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр приложений/модулей
@@ -498,6 +508,9 @@ app.include_router(market_router.router, prefix=API_PREFIX)
 app.include_router(books_router.router, prefix=API_PREFIX)
 app.include_router(intake_docs_router.router, prefix=API_PREFIX)
 app.include_router(mail_router.router, prefix=API_PREFIX)
+# Канал ОРП в бухгалтерию: расширение TradeLedger забирает пакеты по HTTP,
+# без каталога обмена на сервере 1С.
+app.include_router(tl_channel_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")

@@ -101,7 +101,8 @@ def gate_state(site: EzsSite, stage: str | None = None,
         if it.get("manual"):
             done = bool(marks.get(it["key"], {}).get("done"))
         elif it.get("doc"):
-            done = it["doc"] in docs
+            requirement = it.get("document_state", "file")
+            done = (it["doc"] if requirement == "file" else f"{requirement}:{it['doc']}") in docs
         elif it.get("equipment"):
             # Закрывается не галочкой, а фактом: все нужные позиции поставлены.
             done = bool(equipment_supplied)
@@ -112,7 +113,7 @@ def gate_state(site: EzsSite, stage: str | None = None,
         else:
             done = _field_filled(site, it["field"])
         out.append({"key": it["key"], "label": it["label"], "manual": bool(it.get("manual")),
-                    "doc": it.get("doc"), "equipment": bool(it.get("equipment")),
+                    "doc": it.get("doc"), "documentState": it.get("document_state", "file"), "equipment": bool(it.get("equipment")),
                     # `required` остаётся истиной и после послабления: по регламенту
                     # пункт обязателен, снята обязательность только в этом проекте
                     # и только под подписью. Разница видна и в карточке, и в отчёте.
@@ -191,16 +192,19 @@ async def site_doc_kinds(db: AsyncSession, site_id) -> set[str]:
         DocRelation.doc_id == DocCard.id,
         DocRelation.target_ref.in_(refs)).exists()
     settled = (await db.execute(
-        select(DocKind.gate_key)
-        .join(DocCard, DocCard.kind_id == DocKind.id)
-        .where(
-            DocCard.company_id == site.company_id,
-            DocKind.gate_key.is_not(None),
+        select(DocCard, DocKind.gate_key).join(DocKind, DocCard.kind_id == DocKind.id)
+        .where(DocCard.company_id == site.company_id, DocKind.gate_key.is_not(None),
             or_(DocCard.subject_ref.in_(refs), related,
                 DocCard.object_id == site.location_id if site.location_id else false()),
-            or_(DocCard.approval_status == "approved",
-                DocCard.status.in_(("in_force", "executed")))))).scalars().all()
-    kinds.update(k for k in settled if k)
+            DocCard.status.not_in(("cancelled", "archived"))))).all()
+    from app.services.track_files import signed_current
+    for doc, key in settled:
+        if doc.has_files:
+            kinds.add(key)
+        if doc.approval_status == "approved":
+            kinds.add(f"approved:{key}")
+        if await signed_current(db, doc):
+            kinds.add(f"signed:{key}")
     return kinds
 
 
@@ -251,13 +255,13 @@ async def log_event(db: AsyncSession, site: EzsSite, kind: str, *, text: str | N
     # Загрузка реестра тоже молчит: она пишет события напрямую, минуя эту
     # функцию, а условие оставлено на случай, если однажды пойдёт через неё —
     # тысяча площадок из файла превратилась бы в тысячу оповещений.
-    if kind in ("stage", "gate") and source != "import":
+    if kind in ("stage", "gate", "decision", "scenario", "result") and source != "import":
         from app.audit import log_audit
 
         name = site.project_no or site.title or site.address or "проект"
         details = ({"из": STAGE_LABELS.get(from_stage or "", from_stage or "—"),
                     "в": STAGE_LABELS.get(to_stage or "", to_stage or "—")}
-                   if kind == "stage" else {"пункт": text or ""})
+                   if kind == "stage" else {"пункт" if kind == "gate" else "событие": text or ""})
         await log_audit(db, actor=user, company_id=site.company_id,
                         action=f"project.{kind}", target=name, details=details)
     return ev
@@ -290,6 +294,8 @@ def _coerce(field: str, value: Any) -> Any:
 async def update_site(db: AsyncSession, site: EzsSite, patch: dict[str, Any],
                       user: User | None) -> dict[str, Any]:
     """Правка карточки. Изменённые поля запоминаются как ручные — импорт их не тронет."""
+    if (site.workspace_data or {}).get("next_ref") and any(patch.get(k) for k in ("next_action", "next_action_due")):
+        return {"ok": False, "message": "Следующий результат связан с работой Трека. Измените срок в её карточке или снимите связь в обзоре"}
     changed: list[str] = []
     changes: list[dict[str, Any]] = []
     owner_values: tuple[Any, Any] | None = None

@@ -13,6 +13,7 @@ import {
 } from '@/lib/authFiles'
 import { cn } from '@/lib/utils'
 import type { DocVersion } from '@/services/docsService'
+import { DocOfficePreview, DocVersionCompare } from './DocOfficePreview'
 
 const ROLE_LABEL: Record<string, string> = {
   body: 'Документ',
@@ -21,9 +22,10 @@ const ROLE_LABEL: Record<string, string> = {
   attachment: 'Вложение',
 }
 
-function previewKind(version: DocVersion): 'image' | 'pdf' | 'text' | 'unsupported' {
+function previewKind(version: DocVersion): 'image' | 'pdf' | 'text' | 'office' | 'unsupported' {
   const mime = (version.mime ?? '').toLowerCase().split(';', 1)[0].trim()
   const name = version.file_name.toLowerCase()
+  if (/\.(docx|xlsx|xls)$/.test(name)) return 'office'
   if (mime) {
     if (['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp'].includes(mime)) {
       return 'image'
@@ -37,13 +39,15 @@ function previewKind(version: DocVersion): 'image' | 'pdf' | 'text' | 'unsupport
   return 'unsupported'
 }
 
-export function DocFileWorkspace({ versions, canDownload, sensitive, canRemove, removing, onRemove }: {
+export function DocFileWorkspace({ versions, canDownload, sensitive, canRemove, removing, onRemove, compact = false, comparisonVersions }: {
   versions: DocVersion[]
   canDownload: boolean
   sensitive: boolean
   canRemove: boolean
   removing: boolean
   onRemove: (versionId: string, reason: string) => void
+  compact?: boolean
+  comparisonVersions?: DocVersion[]
 }) {
   const initial = useMemo(
     () => versions.find((version) => version.role === 'body' && version.is_current)
@@ -53,13 +57,16 @@ export function DocFileWorkspace({ versions, canDownload, sensitive, canRemove, 
   const [selectedId, setSelectedId] = useState<string | null>(initial?.id ?? null)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [reason, setReason] = useState('')
+  const [compareId, setCompareId] = useState('')
   const reasonId = useId()
 
   const selected = versions.find((version) => version.id === selectedId) ?? initial
+  const previous = (comparisonVersions ?? versions).filter((version) => selected
+    && version.role === selected.role && version.revision < selected.revision)
   const path = selected && canDownload ? `/api/files/${selected.file_id}` : null
   const kind = selected ? previewKind(selected) : 'unsupported'
   const previewPath = sensitive ? null : path
-  const blob = useAuthBlob(kind === 'text' ? null : previewPath)
+  const blob = useAuthBlob(kind === 'image' || kind === 'pdf' ? previewPath : null)
   const textPreview = useAuthText(previewPath, kind === 'text')
 
   const download = async () => {
@@ -93,8 +100,8 @@ export function DocFileWorkspace({ versions, canDownload, sensitive, canRemove, 
   }
 
   return (
-    <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(260px,0.75fr)_minmax(420px,1.25fr)]">
-      <Card className="order-2 min-h-0 overflow-hidden lg:order-1">
+    <div className={cn('grid min-h-0 min-w-0 gap-3', !compact && 'xl:grid-cols-[minmax(180px,0.6fr)_minmax(0,1.4fr)]')}>
+      <Card className={cn('order-2 min-h-0 overflow-hidden', !compact && 'xl:order-1')}>
         <div className="border-b border-border px-3 py-2">
           <div className="text-sm font-medium">Редакции и приложения</div>
           <div className="text-xs text-muted-foreground">Выберите файл для просмотра</div>
@@ -105,7 +112,7 @@ export function DocFileWorkspace({ versions, canDownload, sensitive, canRemove, 
             return (
               <div key={version.id} className={cn('px-2 py-2', active && 'bg-primary/5')}>
                 <div className="flex items-start gap-1">
-                  <button type="button" onClick={() => setSelectedId(version.id)}
+                  <button type="button" onClick={() => { setSelectedId(version.id); setCompareId('') }}
                     aria-current={active ? 'true' : undefined}
                     className="min-w-0 flex-1 rounded-md px-1 py-0.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <div className="flex items-center gap-1.5 text-sm font-medium">
@@ -151,7 +158,7 @@ export function DocFileWorkspace({ versions, canDownload, sensitive, canRemove, 
         </div>
       </Card>
 
-      <Card className="order-1 min-h-[18rem] overflow-hidden lg:order-2 lg:min-h-[24rem]">
+      <Card className={cn('order-1 min-h-[18rem] min-w-0 overflow-hidden', !compact && 'xl:order-2')}>
         {selected && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
@@ -172,7 +179,9 @@ export function DocFileWorkspace({ versions, canDownload, sensitive, canRemove, 
                 )}
               </div>}
             </div>
-            <div className="flex min-h-[15rem] items-center justify-center bg-muted/20 p-3 lg:min-h-[31rem]">
+            <div className={cn('flex justify-center bg-muted/20 p-3',
+              kind === 'office' ? 'min-h-48 items-start' : 'min-h-[15rem] items-center lg:min-h-[31rem]')}>
+              {canDownload && !sensitive && kind === 'office' && <DocOfficePreview key={selected.id} version={selected} />}
               {!canDownload && (
                 <div className="max-w-sm text-center">
                   <FileQuestion className="mx-auto mb-2 h-7 w-7 text-muted-foreground" />
@@ -235,6 +244,19 @@ export function DocFileWorkspace({ versions, canDownload, sensitive, canRemove, 
           </>
         )}
       </Card>
+      {selected && canDownload && !sensitive && previous.length > 0 && (
+        <section className={cn('order-3 min-w-0 space-y-3', !compact && 'xl:col-span-2')}>
+          <Label htmlFor={`${reasonId}-compare`}>Сравнить выбранную редакцию с другой</Label>
+          <select id={`${reasonId}-compare`} value={compareId} onChange={(event) => setCompareId(event.target.value)}
+            className="h-11 w-full rounded-md border bg-background px-3 text-sm">
+            <option value="">Выберите редакцию для сравнения</option>
+            {previous.map((version) =>
+              <option key={version.id} value={version.id}>Редакция {version.revision} · {version.file_name}</option>)}
+          </select>
+          {previous.find((version) => version.id === compareId) && <DocVersionCompare
+            before={previous.find((version) => version.id === compareId)!} after={selected} />}
+        </section>
+      )}
     </div>
   )
 }

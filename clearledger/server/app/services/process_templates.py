@@ -325,6 +325,9 @@ async def launch(
     # договор ТП, акт ввода; предметом их не привязать, он уникален на компанию
     # и описывает отношение один к одному («карточка ЭТОГО договора»).
     relate_to: str | None = None,
+    source_file=None,
+    due_at: datetime | None = None,
+    title: str | None = None,
 ) -> tuple[DocCard, dict[str, Any]]:
     if tpl.company_id != cid or not tpl.doc_kind_id:
         raise ProcessTemplateError("Шаблон процесса не найден")
@@ -348,7 +351,7 @@ async def launch(
         kind_code=kind.code,
         family=kind.family,
         direction=kind.direction,
-        title=tpl.title,
+        title=title or tpl.title,
         summary="\n\n".join(summary_parts) or None,
         author_id=actor.id,
         responsible_id=responsible,
@@ -357,7 +360,7 @@ async def launch(
         subject_ref=subject_ref,
         source=source,
         source_ref=source_ref,
-        due_at=(now + timedelta(days=tpl.due_days)
+        due_at=due_at or (now + timedelta(days=tpl.due_days)
                 if tpl.due_days is not None else None),
     )
     # Подстановку делаем после сборки карточки и до записи: значения берутся из
@@ -381,6 +384,10 @@ async def launch(
         to_value=kind.name,
         note=source_note or f"по шаблону «{tpl.name}»",
     ))
+
+    if source_file is not None:
+        from app.services.track_files import initial_version
+        await initial_version(db, cid, d, source_file, actor)
 
     missing = required_fields(kind)
     if kind.requires_registration or missing:

@@ -9,7 +9,9 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ProjectSuggestInput } from './ProjectSuggestInput'
+import { PROJECT_OBJECT_TYPES, type ProjectSuggestionField } from '@/services/sitesService'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -21,7 +23,7 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
 }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
-    title: '', region: '', city: '', address: '', install_place: '', owner: '',
+    title: '', region: '', city: '', address: '', place_kind: '', install_place: '', owner: '',
   })
   // Вид работы — ось маршрута: по нему процесс на входе решает, вести ли подбор
   // земли и договор или сразу планировать работы. Спросить потом уже поздно:
@@ -60,6 +62,8 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
       // Стадию старта берём у вида: переносу и демонтажу подбор локации не нужен.
       const s = await createSite(companyId, { ...form, kind, stage: kindDef?.startStage ?? 'lead' })
       await qc.invalidateQueries({ queryKey: ['pr-projects', companyId] })
+      await qc.invalidateQueries({ queryKey: ['pr-board', companyId] })
+      await qc.invalidateQueries({ queryKey: ['pr-suggestions', companyId] })
       await qc.invalidateQueries({ queryKey: ['pr-portfolio', companyId] })
       await qc.invalidateQueries({ queryKey: ['sites-list', companyId] })
       await qc.invalidateQueries({ queryKey: ['sites-overview', companyId] })
@@ -72,25 +76,40 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
 
   const field = (k: keyof typeof form, label: string, ph?: string) => (
     <div>
-      <div className="text-xs uppercase tracking-wide text-muted-foreground mb-0.5">{label}</div>
-      <Input className="h-8 text-sm" value={form[k]} placeholder={ph}
+      <label htmlFor={`project-${k}`} className="block text-xs uppercase tracking-wide text-muted-foreground mb-0.5">{label}</label>
+      <Input id={`project-${k}`} className="h-9 text-sm" value={form[k]} placeholder={ph}
         onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} />
     </div>
   )
 
+  const change = (key: ProjectSuggestionField, value: string) => setForm((current) => ({
+    ...current, [key]: value,
+    ...(key === 'region' ? { city: '', address: '' } : key === 'city' ? { address: '' } : {}),
+  }))
+  const suggestField = (key: ProjectSuggestionField, label: string, placeholder: string) => (
+    <ProjectSuggestInput companyId={companyId} field={key} label={label} value={form[key]} placeholder={placeholder}
+      region={key === 'city' || key === 'address' ? form.region : undefined}
+      city={key === 'address' ? form.city : undefined} onChange={(value) => change(key, value)}
+      onSelect={(item) => setForm((current) => ({ ...current,
+        ...(key === 'region' ? { city: '', address: '' } : key === 'city' ? { address: '' } : {}),
+        ...item.fields, [key]: item.value,
+      }))} />
+  )
+
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-lg w-[92vw]">
-        <DialogHeader><DialogTitle className="text-base">Новый проект</DialogTitle></DialogHeader>
+      <DialogContent className="sm:max-w-lg w-[92vw] max-h-[90dvh] overflow-y-auto">
+        <DialogHeader><DialogTitle className="text-base">Новый проект</DialogTitle>
+          <DialogDescription>Укажите вид работ и место. Остальные данные можно заполнить позже.</DialogDescription>
+        </DialogHeader>
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            Проект сразу получает номер. Право, мощность, экономика и документы
-            добавляются в карточке по мере проработки — гейт не пустит дальше без них.
+            Номер присваивается автоматически. Документы и детали можно добавить в карточке проекта.
           </p>
           <div>
-            <div className="text-xs uppercase tracking-wide text-muted-foreground mb-0.5">Вид работы</div>
+            <label htmlFor="project-kind" className="block text-xs uppercase tracking-wide text-muted-foreground mb-0.5">Вид работ</label>
             <Select value={kind} onValueChange={setKind}>
-              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectTrigger id="project-kind" className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {(kinds.data?.kinds ?? []).map((k) => (
                   <SelectItem key={k.key} value={k.key} className="text-sm">{k.label}</SelectItem>
@@ -102,19 +121,27 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
                 {/* Подсказка вида — обрывок фразы («площадка становится станцией»):
                     в справочнике она задумана как продолжение названия. Без него
                     строка начинается со строчной буквы и читается как ошибка. */}
-                {kindDef.label} — {kindDef.hint}. {kind === 'new_build'
-                  ? 'Маршрут начнётся с подбора локации, договора и техприсоединения.'
-                  : 'Подбор локации и договор пропускаем — маршрут начнётся с планирования работ.'}
+                {kindDef.label} — {kindDef.hint}.
               </p>
             )}
           </div>
-          {field('title', 'Название проекта', 'ЭЗС на парковке ТЦ «Гринвич»')}
+          {suggestField('title', 'Название проекта', 'ЭЗС на парковке ТЦ «Гринвич»')}
           <div className="grid grid-cols-2 gap-2">
-            {field('region', 'Регион', 'Свердловская область')}
-            {field('city', 'Город', 'Екатеринбург')}
+            {suggestField('region', 'Регион', 'Свердловская область')}
+            {suggestField('city', 'Город', 'Екатеринбург')}
           </div>
-          {field('address', 'Адрес', 'ул. Кирова, 12')}
-          {field('install_place', 'Место установки', 'ТЦ «Гринвич», парковка')}
+          {suggestField('address', 'Адрес', 'ул. Кирова, 12')}
+          <div>
+            <label htmlFor="project-object-type" className="block text-xs uppercase tracking-wide text-muted-foreground mb-1">Тип объекта</label>
+            <Select value={form.place_kind || '__none__'} onValueChange={(value) => setForm((current) => ({ ...current, place_kind: value === '__none__' ? '' : value }))}>
+              <SelectTrigger id="project-object-type" className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Не указан</SelectItem>
+                {PROJECT_OBJECT_TYPES.map((label) => <SelectItem key={label} value={label.toLocaleLowerCase('ru')}>{label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          {suggestField('install_place', 'Место установки', 'ТЦ «Гринвич», парковка')}
           {field('owner', 'Собственник', 'если известен')}
           {!canSave && (
             <p className="text-xs text-muted-foreground">

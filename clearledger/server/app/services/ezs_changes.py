@@ -90,7 +90,7 @@ FIELD_META: dict[str, tuple[str, str]] = {
     "address": ("Адрес", "object"),
     "full_address": ("Полный адрес", "object"),
     "install_place": ("Место установки", "object"),
-    "place_kind": ("Тип места", "object"),
+    "place_kind": ("Тип объекта", "object"),
     "route": ("Трасса", "object"),
     "owner": ("Собственник", "object"),
     "brand": ("Бренд площадки", "object"),

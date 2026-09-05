@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     # чтобы /api/_debug/state показывал, какой код реально задеплоен.
     git_sha: str = ""
 
+    dadata_api_key: str = ""
+
     # База данных
     database_url: str = (
         "postgresql+asyncpg://clearledger:clearledger@localhost:5432/clearledger"

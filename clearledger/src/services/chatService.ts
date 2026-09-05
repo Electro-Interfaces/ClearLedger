@@ -49,6 +49,8 @@ export interface ChatRoom {
   scopeTicketId?: string | null
   /** Предмет разговора: `site:<uuid>` и прочие виды пространства. Карточка
    *  предмета показывает свои чаты, работа из сообщения наследует привязку. */
+  scopePurpose?: string | null
+  audience?: 'internal' | 'mixed'
   scopeRef?: string | null
 }
 
@@ -212,7 +214,7 @@ export const addMailParticipant = (roomId: string, email: string, name?: string)
  * или админ чата (у системных — только пространство; '' очищает значение). */
 export const patchRoom = (roomId: string,
   body: { name?: string; avatarUrl?: string; scopeProduct?: string; scopeObjectId?: string;
-          scopeRef?: string }) =>
+          scopeRef?: string | null }) =>
   patch<{ ok: boolean; name: string | null; avatarUrl: string | null; scopeProduct: string | null;
           scopeObjectId: string | null; scopeRef?: string | null }>(
     `/api/chat/rooms/${roomId}`, body)
@@ -304,12 +306,12 @@ export type ChatProcessLaunchResult = {
 /** Поручение по сообщению — без шаблона: половина работы рождается в разговоре,
  *  и переписывать сообщение руками в форму постановки незачем. */
 export const taskFromMessage = (messageId: string,
-  body: { title?: string; assigneeId?: string; dueAt?: string }) =>
+  body: { title?: string; assigneeId?: string; dueAt?: string; subjectRef?: string | null }) =>
   post<{ taskId: string; number: number; title: string; url: string }>(
     `/api/chat/messages/${messageId}/task`, body)
 
 export const processFromMessage = (messageId: string,
-  body: { templateId: string; responsibleId?: string; title?: string }) =>
+  body: { templateId: string; responsibleId?: string; title?: string; subjectRef?: string | null; dueAt?: string }) =>
   post<ChatProcessLaunchResult>(`/api/chat/messages/${messageId}/process`, body)
 
 /** Чат задачи (скрытая группа): короткие «а когда сможешь?» не должны засорять
@@ -363,9 +365,9 @@ export const pinMessage = (roomId: string, messageId: string | null) =>
 // ── сообщения ──────────────────────────────────────────────────────────────
 /** Страница ленты. `before` — ISO-время самого раннего показанного сообщения:
  *  сервер отдаёт то, что было ДО него (догрузка истории вверх). */
-export const getMessages = (roomId: string, search?: string, before?: string) =>
+export const getMessages = (roomId: string, search?: string, before?: string, around?: string) =>
   get<ChatMessage[]>(`/api/chat/rooms/${roomId}/messages`,
-    search || before ? { ...(search ? { search } : {}), ...(before ? { before } : {}) } : undefined)
+    { search, before, around })
 
 export const sendMessage = (roomId: string, payload: SendPayload) =>
   post<ChatMessage>(`/api/chat/rooms/${roomId}/messages`, payload)

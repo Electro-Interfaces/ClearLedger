@@ -10,13 +10,14 @@
  * ручка переноса, название с метой, срок, личные действия, закрытие. Четвёртой
  * разновидности строки в продукте нет и не заводится.
  */
-import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useDeferredValue, useMemo, useState } from 'react'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Check, Eye, ListChecks, Loader2, UserPlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import { SearchPicker } from '@/components/tasks/SearchPicker'
 import { QueryError } from '@/components/common/QueryError'
 import { DragHandle } from '@/components/docs/DragHandle'
@@ -39,11 +40,24 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
   const navigate = useNavigate()
   const companyId = company?.id ?? ''
 
-  const q = useQuery({
-    queryKey: ['tasks', companyId, scope, '', '', ''],
-    queryFn: () => tasksService.listTasks(companyId, scope),
+  const [search, setSearch] = useState('')
+  const query = useDeferredValue(search.trim())
+  const q = useInfiniteQuery({
+    queryKey: ['tasks', companyId, scope, 'personal-pages', query],
+    queryFn: ({ pageParam }) => tasksService.listTasks(companyId, scope, {
+      q: query, limit: 100, offset: pageParam,
+    }),
+    initialPageParam: 0,
+    getNextPageParam: (page) => {
+      const next = page.offset + page.tasks.length
+      return page.tasks.length > 0 && next < page.total ? next : undefined
+    },
     enabled: !!companyId,
   })
+  const rows = useMemo(() => [...new Map(
+    (q.data?.pages.flatMap((page) => page.tasks) ?? []).map((task) => [task.id, task]),
+  ).values()], [q.data])
+  const total = q.data?.pages[0]?.total ?? 0
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['tasks'] })
     void qc.invalidateQueries({ queryKey: ['work-mine'] })
@@ -65,7 +79,7 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
    *  след, и общий запрос «примени ко всем» их бы обошёл. */
   const bulk = useMutation({
     mutationFn: async (data: (t: SpaceTask) => Parameters<typeof tasksService.taskAction>[1]) => {
-      const выбранные = (q.data?.tasks ?? []).filter((t) => picked.has(t.id))
+      const выбранные = rows.filter((t) => picked.has(t.id))
       // Отказ на одной задаче не отменяет остальные и не прячет то, что уже
       // применилось: иначе человек видит старый список, повторяет действие и
       // продлевает половину пачки дважды.
@@ -92,7 +106,6 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
     return { companyId, dueAt: от.toISOString() }
   })
 
-  const rows = useMemo(() => q.data?.tasks ?? [], [q.data])
   const все = rows.length > 0 && rows.every((t) => picked.has(t.id))
 
   if (!companyId) return null
@@ -105,6 +118,13 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
         </h1>
         <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">{hint}</p>
       </div>
+      <Input type="search" aria-label="Поиск в личных поручениях"
+        placeholder="Название или номер поручения" value={search}
+        onChange={(event) => { setSearch(event.target.value); setPicked(new Set()) }} />
+      {q.isError && (
+        <QueryError message={rows.length ? 'Не удалось обновить список' : 'Список не загрузился'}
+          error={q.error} onRetry={() => void (q.isFetchNextPageError ? q.fetchNextPage() : q.refetch())} />
+      )}
 
       {/* Панель видна только при выборе: постоянная полоса действий над пустым
           выбором занимает место и предлагает то, чего нет. */}
@@ -139,24 +159,22 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
         <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />Собираем список…
         </div>
-      ) : q.isError ? (
-        <QueryError message="Список не загрузился" error={q.error} onRetry={() => void q.refetch()} />
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && q.isError ? null : rows.length === 0 ? (
         <p className="rounded-lg border border-border px-4 py-8 text-center text-sm text-muted-foreground">
-          {empty}
+          {query ? 'Поручений по этому запросу нет. Измените поиск.' : empty}
         </p>
       ) : (
         <div className="overflow-hidden rounded-lg border">
           {/* Выбрать всё — там же, где выбирают строку: искать эту кнопку в
               другом месте человек не должен. */}
           <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1.5">
-            <Checkbox aria-label="Выбрать все"
+            <Checkbox aria-label="Выбрать показанные поручения"
               checked={все && rows.length > 0}
               onCheckedChange={(v) => setPicked(v
                 ? new Set(rows.map((t) => t.id))
                 : new Set())} />
             <span className="text-xs text-muted-foreground">
-              {все && rows.length > 0 ? 'все выбраны' : `строк: ${rows.length}`}
+              Показано {rows.length} из {total}{все ? ' · показанные выбраны' : ''}
             </span>
           </div>
           {rows.map((t) => (
@@ -171,6 +189,14 @@ export function TaskRows({ scope, title, hint, empty, icon: Icon = ListChecks }:
               onOpen={() => navigate(`/docs/company?view=errands&task=${t.id}`)}
               onChanged={refresh} onClose={() => close.mutate(t.id)} />
           ))}
+          {q.hasNextPage && (
+            <div className="flex justify-center border-t p-3">
+              <Button variant="outline" disabled={q.isFetchingNextPage}
+                onClick={() => void q.fetchNextPage()}>
+                {q.isFetchingNextPage ? 'Загрузка…' : 'Показать ещё'}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -188,12 +214,13 @@ function Row({ task, companyId, busy, picked, onPick, onOpen, onChanged, onClose
       picked && 'bg-primary/5')}>
       <Checkbox checked={picked} onCheckedChange={onPick}
         aria-label={`Выбрать ${tasksService.taskKey(task)}`} />
-      <DragHandle targetRef={ref} label={`${tasksService.taskKey(task)} ${task.title}`} />
+      <span className="hidden sm:contents"><DragHandle targetRef={ref} label={`${tasksService.taskKey(task)} ${task.title}`} /></span>
       <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
-        <div className="truncate text-sm leading-snug">{task.title}</div>
+        <div className="break-words text-sm leading-snug sm:truncate">{task.title}</div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           <span className="font-mono">{tasksService.taskKey(task)}</span>
           {task.stage && <span>{task.stage}</span>}
+          <span className={cn('sm:hidden', task.overdue && 'text-destructive')}>{task.due_at ? dt(task.due_at) : 'без срока'}</span>
           {task.assignee
             ? <span className="inline-flex items-center gap-1"><Eye className="h-3 w-3" />{task.assignee}</span>
             : <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
@@ -201,7 +228,7 @@ function Row({ task, companyId, busy, picked, onPick, onOpen, onChanged, onClose
               </span>}
         </div>
       </button>
-      <span className={cn('shrink-0 text-xs tabular-nums',
+      <span className={cn('hidden shrink-0 text-xs tabular-nums sm:inline',
         task.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
         {task.due_at ? dt(task.due_at) : 'без срока'}
       </span>
@@ -211,8 +238,8 @@ function Row({ task, companyId, busy, picked, onPick, onOpen, onChanged, onClose
           здесь не было. */}
       <PlaceActions companyId={companyId} targetRef={ref} mark={task.mark}
         dueAt={task.due_at} onChanged={onChanged} />
-      <Button size="sm" variant="ghost" className="h-8 shrink-0 px-2" disabled={busy}
-        title="Закрыть работу" onClick={onClose}>
+      <Button size="sm" variant="ghost" className="size-11 shrink-0 p-0 sm:h-8 sm:w-auto sm:px-2" disabled={busy}
+        aria-label="Закрыть работу" title="Закрыть работу" onClick={onClose}>
         <Check className="h-3.5 w-3.5" />
       </Button>
     </div>

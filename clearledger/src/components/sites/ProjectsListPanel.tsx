@@ -8,6 +8,9 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTabParams } from '@/hooks/useTabParams'
+import { useAuth } from '@/contexts/AuthContext'
+import { ProjectsWorkspaceControls } from './ProjectsWorkspaceControls'
+import { PROJECT_WORKSPACE_DEFAULTS, type ProjectWorkspacePreferences } from './projectWorkspacePreferences'
 import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
@@ -19,7 +22,7 @@ import {
 import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import { ExportButton } from './ExportButton'
 import {
-  getSites, getRouteNodes, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner,
+  getSites, getRouteNodes, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner, getProjectKinds, projectObjectLabel,
   PHASE_META, STAGE_META, FUNNEL_STAGES, type SiteStage,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
@@ -142,6 +145,11 @@ function StageBoard({ companyId, stages, filters, onOpen }: {
 }
 
 export function ProjectsListPanel({ companyId }: { companyId: string }) {
+  const { user } = useAuth()
+  const [workspace, patchWorkspace] = useTabParams(`pr_workspace_${user?.id ?? 'anonymous'}`, PROJECT_WORKSPACE_DEFAULTS)
+  const { kind, placeKind, columns } = workspace
+  const kinds = useQuery({ queryKey: ['pr-kinds', companyId], queryFn: () => getProjectKinds(companyId) })
+  const kindLabel = (key?: string) => kinds.data?.kinds.find((item) => item.key === (key || 'new_build'))?.label ?? key ?? '—'
   // Отбор живёт в параметрах пункта, а не в useState: уход в проект размонтирует
   // реестр, и по «вернуться к списку» человек получал полный список со сброшенным
   // отбором — искать свой населённый пункт заново (замечание И. Ступина 10.08.2026).
@@ -208,11 +216,12 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   }, [closed, stagePick, phase, stagesOfPhase])
   const boardFilters = useMemo(() => ({
     region: region || undefined, ownerId: ownerId || undefined, overdue,
+    kind: kind || undefined, placeKind: placeKind || undefined,
     search: search || undefined, risk: risk || undefined, node: node || undefined,
-  }), [region, ownerId, overdue, search, risk, node])
+  }), [region, ownerId, overdue, search, risk, node, kind, placeKind])
 
   const q = useQuery({
-    queryKey: ['pr-projects', companyId, phase, stagePick, node, ownerId, region, closed, overdue, search, risk, page],
+    queryKey: ['pr-projects', companyId, phase, stagePick, node, ownerId, region, closed, overdue, search, risk, page, kind, placeKind],
     queryFn: () => getSites({
       companyId,
       // «Отклонённые» — тоже проекты, просто закрытые с причиной: держим их за
@@ -221,6 +230,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         : stagePick
         || (phase && stagesOfPhase.length === 1 ? stagesOfPhase[0] : (phase ? undefined : 'active')),
       region: region || undefined,
+      kind: kind || undefined, placeKind: placeKind || undefined,
       ownerId: ownerId || undefined, overdue, search: search || undefined,
       risk: risk || undefined, node: node || undefined, page, pageSize: PAGE,
     }),
@@ -257,13 +267,24 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   })
 
   const [filtersOpen, setFiltersOpen] = useState(false)
+  const changeWorkspace = (next: Partial<ProjectWorkspacePreferences>) => {
+    patchWorkspace(next)
+    if ('kind' in next || 'placeKind' in next) { reset(); setPicked(new Set()) }
+  }
   // Сколько фильтров сейчас сужают выдачу — чтобы свёрнутая панель не скрывала
   // того, что список показан не целиком.
   const activeFilters = [phase, region, ownerId, overdue ? '1' : '', closed ? '1' : '',
-    risk, stagePick, node, search].filter(Boolean).length
+    risk, stagePick, node, search, kind, placeKind].filter(Boolean).length
 
   return (
     <div className="p-4 space-y-3">
+      <ProjectsWorkspaceControls value={workspace} onChange={changeWorkspace} kinds={kinds.data?.kinds ?? []} />
+      <label className="inline-flex flex-wrap items-center gap-2 text-sm">Контроль работы
+        <select className="h-9 max-w-full rounded-md border bg-background px-2" value={risk} onChange={(e) => { const value = e.target.value; setParams((prev) => { const next = new URLSearchParams(prev); if (value) next.set('risk', value); else next.delete('risk'); return next }, { replace: true }); reset() }}>
+          <option value="">Все проекты</option><option value="no_next">Без следующего действия</option><option value="step_overdue">Просрочен следующий шаг</option><option value="external_wait">Ждём внешних</option><option value="contact_overdue">Просрочен контакт</option><option value="result_pending">Ожидается возврат результата</option><option value="no_owner">Без ответственного</option>
+          {risk && !['no_next', 'step_overdue', 'external_wait', 'contact_overdue', 'result_pending', 'no_owner'].includes(risk) && <option value={risk}>Фильтр из обзора</option>}
+        </select>
+      </label>
       {/* Телефон: сначала данные, настройки по требованию. На широком экране
           панель всегда развёрнута — там она ничего не заслоняет. */}
       <div className="sm:hidden flex items-center gap-2">
@@ -499,18 +520,21 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                       className="w-full text-left px-3 py-3 active:bg-muted/40">
                       <div className="flex items-baseline gap-2">
                         <span className="font-mono text-xs text-muted-foreground shrink-0">{s.projectNo ?? '—'}</span>
-                        <span className={`text-[11px] rounded border px-1.5 py-0.5 shrink-0 ${STAGE_META[s.stage as SiteStage]?.cls ?? ''}`}>
+                        {columns.includes('stage') && <span className={`text-[11px] rounded border px-1.5 py-0.5 shrink-0 ${STAGE_META[s.stage as SiteStage]?.cls ?? ''}`}>
                           {s.stageLabel}
-                        </span>
+                        </span>}
                       </div>
                       <div className="mt-1 text-sm">
                         {s.title || s.address || s.installPlace || s.fullAddress || '—'}
                         <span className="text-muted-foreground"> · {s.city ?? s.region ?? ''}</span>
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-                        <span>{s.ownerName ?? 'ответственный не назначен'}</span>
-                        {s.nextAction && <span className="truncate max-w-[60%]">{s.nextAction}</span>}
-                        {s.nextActionDue && (
+                        {columns.includes('phase') && s.phaseLabel && <span>{s.phaseLabel}</span>}
+                        {columns.includes('kind') && <span>{kindLabel(s.kind)}</span>}
+                        {columns.includes('placeKind') && s.placeKind && <span>{projectObjectLabel(s.placeKind)}</span>}
+                        {columns.includes('owner') && <span>{s.ownerName ?? 'ответственный не назначен'}</span>}
+                        {columns.includes('nextAction') && s.nextAction && <span className="truncate max-w-[60%]">{s.nextAction}</span>}
+                        {columns.includes('due') && s.nextActionDue && (
                           <span className={late ? 'text-red-600 dark:text-red-400' : ''}>до {s.nextActionDue}</span>
                         )}
                       </div>
@@ -529,11 +553,13 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                   </th>
                   <th className="text-left p-2 font-medium">Проект</th>
                   <th className="text-left p-2 font-medium">Объект</th>
-                  <th className="text-left p-2 font-medium">Этап проекта</th>
-                  <th className="text-left p-2 font-medium">Стадия</th>
-                  <th className="text-left p-2 font-medium">Ответственный</th>
-                  <th className="text-left p-2 font-medium">Следующий шаг</th>
-                  <th className="text-left p-2 font-medium">Срок</th>
+                  {columns.includes('kind') && <th className="text-left p-2 font-medium">Вид работ</th>}
+                  {columns.includes('placeKind') && <th className="text-left p-2 font-medium">Тип объекта</th>}
+                  {columns.includes('phase') && <th className="text-left p-2 font-medium">Этап проекта</th>}
+                  {columns.includes('stage') && <th className="text-left p-2 font-medium">Стадия</th>}
+                  {columns.includes('owner') && <th className="text-left p-2 font-medium">Ответственный</th>}
+                  {columns.includes('nextAction') && <th className="text-left p-2 font-medium">Следующий шаг</th>}
+                  {columns.includes('due') && <th className="text-left p-2 font-medium">Срок</th>}
                 </tr>
               </thead>
               <tbody>
@@ -555,25 +581,27 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                         {s.title || s.address || s.installPlace || s.fullAddress || '—'}
                         <span className="text-muted-foreground"> · {s.city ?? s.region ?? ''}</span>
                       </td>
-                      <td className="p-2">
+                      {columns.includes('kind') && <td className="p-2">{kindLabel(s.kind)}</td>}
+                      {columns.includes('placeKind') && <td className="p-2">{projectObjectLabel(s.placeKind)}</td>}
+                      {columns.includes('phase') && <td className="p-2">
                         {s.phase && (
                           <span className={`text-xs rounded border px-1.5 py-0.5 ${PHASE_META[s.phase]?.cls ?? ''}`}>
                             {s.phaseLabel ?? PHASE_META[s.phase]?.label}
                           </span>
                         )}
-                      </td>
-                      <td className="p-2">
+                      </td>}
+                      {columns.includes('stage') && <td className="p-2">
                         <span className={`text-xs rounded border px-1.5 py-0.5 ${STAGE_META[s.stage as SiteStage]?.cls ?? ''}`}>
                           {s.stageLabel}
                         </span>
-                      </td>
-                      <td className="p-2 whitespace-nowrap text-muted-foreground">{s.ownerName ?? '—'}</td>
-                      <td className="p-2 max-w-[220px] truncate text-muted-foreground" title={s.nextAction ?? ''}>
+                      </td>}
+                      {columns.includes('owner') && <td className="p-2 whitespace-nowrap text-muted-foreground">{s.ownerName ?? '—'}</td>}
+                      {columns.includes('nextAction') && <td className="p-2 max-w-[220px] truncate text-muted-foreground" title={s.nextAction ?? ''}>
                         {s.nextAction ?? '—'}
-                      </td>
-                      <td className={`p-2 whitespace-nowrap font-mono ${late ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                      </td>}
+                      {columns.includes('due') && <td className={`p-2 whitespace-nowrap font-mono ${late ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
                         {s.nextActionDue ?? '—'}
-                      </td>
+                      </td>}
                     </tr>
                   )
                 })}

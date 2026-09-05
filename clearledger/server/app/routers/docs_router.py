@@ -177,7 +177,7 @@ _REF_TARGETS: dict[str, tuple[Any, bool]] = {
 
 
 async def _assert_ref(db: AsyncSession, cid: uuid.UUID, ref: str | None,
-                      field: str = "ссылка") -> None:
+                      field: str = "ссылка", *, user=None) -> None:
     """Проверить, что ссылка `<вид>:<ключ>` ведёт в эту же компанию.
 
     Компанию проверяем не из педантизма: без неё документ подшивается к договору
@@ -191,6 +191,11 @@ async def _assert_ref(db: AsyncSession, cid: uuid.UUID, ref: str | None,
     if not ref or ":" not in ref:
         return
     prefix, key = ref.split(":", 1)
+    if user is not None:
+        from app.services import work_contexts
+        if prefix in {p.prefix for p in work_contexts.providers()}:
+            await work_contexts.resolve(db, cid, user, ref)
+            return
     target = _REF_TARGETS.get(prefix)
     if target is None or not key:
         return
@@ -953,6 +958,7 @@ def _card_out(d: DocCard, names: dict[str, str] | None = None,
         "acl_revision": d.acl_revision,
         "approval_status": d.approval_status, "approval_round": d.approval_round,
         "created_at": d.created_at.isoformat() if d.created_at else None,
+        "edit_version": (d.updated_at or d.created_at).isoformat() if (d.updated_at or d.created_at) else None,
     }
 
 
@@ -1107,6 +1113,14 @@ async def resolve_refs(
         if ":" not in ref:
             continue
         prefix, key = ref.split(":", 1)
+        from app.services import work_contexts
+        if prefix in {p.prefix for p in work_contexts.providers()}:
+            try:
+                context = await work_contexts.resolve(db, cid, current_user, ref)
+                out[ref] = {"kind": prefix, "name": context["title"], "url": context["url"]}
+            except HTTPException:
+                out[ref] = {"kind": prefix, "name": None, "url": None}
+            continue
         target = _REF_TARGETS.get(prefix)
         if target is None or not key:
             continue
@@ -1124,7 +1138,7 @@ async def resolve_refs(
             continue
         if prefix == "site":
             name = row.title or row.address or row.city or "проект без названия"
-            url = f"/projects?site={row.id}"
+            url = f"/projects?mode=projects&sub=pr_project&project={row.id}&ptab=overview"
         elif prefix == "object":
             name = row.name or row.code or str(row.id)
             url = f"/ops?object={row.id}"
@@ -1409,7 +1423,8 @@ async def start_process_template(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Шаблон процесса не найден")
     responsible = (_uuid_or_400(payload.responsible_id, "responsible_id")
                    if payload.responsible_id else None)
-    await _assert_ref(db, cid, payload.subject_ref, "subject_ref")
+    await _assert_ref(db, cid, payload.subject_ref, "subject_ref", user=current_user)
+    await _assert_ref(db, cid, payload.relate_to, "relate_to", user=current_user)
     if payload.object_id:
         await _assert_ref(db, cid, f"object:{payload.object_id}", "object_id")
     if payload.counterparty_id:
@@ -1994,6 +2009,43 @@ async def reindex_doc_versions(
             "remaining": remaining or 0}
 
 
+@router.get("/duplicate-candidates")
+async def duplicate_candidates(
+    company_id: str = Query(...),
+    external_number: str | None = Query(None, max_length=200),
+    external_date: date_type | None = Query(None),
+    counterparty_id: str | None = Query(None),
+    counterparty_name: str | None = Query(None, max_length=500),
+    file_sha256: str | None = Query(None, pattern="^[a-f0-9]{64}$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    matches = []
+    if file_sha256:
+        matches.append(select(DocVersion.id).where(
+            DocVersion.doc_id == DocCard.id, DocVersion.sha256 == file_sha256,
+            DocVersion.is_current.is_(True), DocVersion.tombstoned_at.is_(None)).exists())
+    if external_number and (counterparty_id or counterparty_name):
+        identity = [func.lower(func.trim(DocCard.external_number)) == external_number.strip().lower()]
+        if counterparty_id:
+            identity.append(DocCard.counterparty_id == _uuid_or_400(counterparty_id, "counterparty_id"))
+        else:
+            identity.append(func.lower(func.trim(DocCard.counterparty_name)) == counterparty_name.strip().lower())
+        if external_date:
+            identity.append(DocCard.external_date == external_date)
+        matches.append(and_(*identity))
+    if not matches:
+        return {"docs": []}
+    stmt = select(DocCard).where(
+        DocCard.company_id == cid, or_(*matches),
+        await _readable_doc_clause(db, cid, current_user),
+    ).order_by(DocCard.created_at.desc()).limit(10)
+    rows = (await db.execute(stmt)).scalars().all()
+    return {"docs": [{"id": row.id, "title": row.title, "reg_number": row.reg_number,
+                       "external_number": row.external_number} for row in rows]}
+
+
 @router.get("")
 async def list_docs(
     company_id: str = Query(...),
@@ -2553,7 +2605,7 @@ async def create_doc(
     kind = await _kind_or_404(db, cid, payload.kind_id)
     attrs = _validate_attrs(kind, payload.attrs, required=False)
 
-    await _assert_ref(db, cid, payload.subject_ref, "subject_ref")
+    await _assert_ref(db, cid, payload.subject_ref, "subject_ref", user=current_user)
     if payload.object_id:
         await _assert_ref(db, cid, f"object:{payload.object_id}", "object_id")
 
@@ -2741,6 +2793,7 @@ async def register_doc(
 
 class ActionIn(BaseModel):
     company_id: str
+    expected_edit_version: datetime | None = None
     status: str | None = Field(None, pattern="^(draft|registered|in_force|executed|archived|cancelled)$")
     title: str | None = None
     summary: str | None = None
@@ -2786,7 +2839,7 @@ async def _assert_signatory_identity(db: AsyncSession, cid: uuid.UUID,
 
 
 def _material_action_fields(payload: ActionIn) -> set[str]:
-    return set(payload.model_fields_set) - {"company_id", "note", "status"}
+    return set(payload.model_fields_set) - {"company_id", "note", "status", "expected_edit_version"}
 
 
 @router.post("/{doc_id}/action")
@@ -2809,6 +2862,11 @@ async def doc_action(
     d = (await db.execute(select(DocCard).where(
         DocCard.id == d.id).execution_options(
             populate_existing=True).with_for_update())).scalar_one()
+    if (material_fields and payload.expected_edit_version is not None
+            and payload.expected_edit_version != (d.updated_at or d.created_at)):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Документ уже изменён. Сверьте актуальные реквизиты "
+                            "перед повторным сохранением. Ваш ввод не потерян.")
     if payload.status == "in_force" and not material_fields:
         await _assert_doc_permission(db, cid, d, current_user, "sign")
     else:
@@ -2891,6 +2949,9 @@ async def doc_action(
         d.status = payload.status
         if payload.status in ("executed", "archived", "cancelled"):
             d.closed_at = datetime.now(timezone.utc)
+        if payload.status == "executed":
+            from app.services.work_results import document_result
+            await document_result(db, d.id, "done", event_key=f"status:{d.closed_at.isoformat()}")
         if payload.status == "archived":
             d.retention_state = "archived"
             d.archive_accepted_at = datetime.now(timezone.utc)
@@ -2959,10 +3020,16 @@ async def doc_action(
         db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
                         actor_name=who, to_value=payload.object_id or "", note="object_id"))
 
-    if payload.due_at is not None and d.due_at != payload.due_at:
+    if "due_at" in payload.model_fields_set and d.due_at != payload.due_at:
+        db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
+                        actor_name=who, from_value=str(d.due_at or ""),
+                        to_value=str(payload.due_at or ""), note="due_at"))
         d.due_at = payload.due_at
         changed_material = True
-    if payload.external_date is not None and d.external_date != payload.external_date:
+    if "external_date" in payload.model_fields_set and d.external_date != payload.external_date:
+        db.add(DocEvent(doc_id=d.id, kind="field", user_id=current_user.id,
+                        actor_name=who, from_value=str(d.external_date or ""),
+                        to_value=str(payload.external_date or ""), note="external_date"))
         d.external_date = payload.external_date
         changed_material = True
     if payload.attrs is not None:
@@ -2976,6 +3043,7 @@ async def doc_action(
                         actor_name=who, to_value="нужно согласовать заново",
                         note="изменены реквизиты документа"))
     if changed_material:
+        d.updated_at = datetime.now(timezone.utc)
         await _supersede_pending_acquaints(db, d.id)
     if payload.note and payload.status is None:
         db.add(DocEvent(doc_id=d.id, kind="comment", user_id=current_user.id,
@@ -2991,9 +3059,35 @@ async def doc_action(
 
 class ApprovalStartIn(BaseModel):
     company_id: str
+    expected_edit_version: datetime | None = None
+    expected_route_token: str | None = None
     # Разовый маршрут, если у вида его нет: так согласуют документ, для которого
     # заводить отдельный вид незачем.
     route: list[dict] | None = None
+
+
+@router.get("/{doc_id}/approval/preview")
+async def approval_preview(
+    doc_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    doc = await _doc_or_404(db, cid, doc_id)
+    await _assert_doc_permission(db, cid, doc, current_user, "edit")
+    kind = await _kind_or_404(db, cid, doc.kind_id)
+    result = await doc_approvals.preview_route(db, cid, doc, kind.route or [])
+    if kind.requires_registration and not doc.reg_number:
+        result["problems"].append("Сначала зарегистрируйте документ")
+    try:
+        _validate_attrs(kind, doc.attrs, required=True)
+    except HTTPException as error:
+        result["problems"].append(str(error.detail))
+    if doc.status not in ("draft", "registered") or doc.approval_status == "pending":
+        result["problems"].append("Документ сейчас нельзя отправить на новый круг")
+    result["edit_version"] = _card_out(doc)["edit_version"]
+    return result
 
 
 @router.post("/{doc_id}/approval/start", status_code=status.HTTP_201_CREATED)
@@ -3029,9 +3123,14 @@ async def approval_start(
                             "Сначала зарегистрируйте документ")
     _validate_attrs(kind, d.attrs, required=True)
     route = payload.route if payload.route is not None else (kind.route if kind else None)
-    res = await doc_approvals.start(db, cid, d, route or [], current_user)
+    if (payload.expected_edit_version is not None
+            and payload.expected_edit_version != (d.updated_at or d.created_at)):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Документ изменился. Обновите предпросмотр маршрута")
+    res = await doc_approvals.start(db, cid, d, route or [], current_user,
+                                    expected_route_token=payload.expected_route_token)
     if "error" in res:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, res["error"])
+        raise HTTPException(status.HTTP_409_CONFLICT if res.get("conflict")
+                            else status.HTTP_400_BAD_REQUEST, res["error"])
     await db.commit()
     return res
 
@@ -5717,6 +5816,7 @@ async def upload_version(
         await db.flush()
     db.add(v)
     d.has_files = True
+    d.updated_at = datetime.now(timezone.utc)
     if role == "body":
         d.current_revision = v.revision
     await _supersede_pending_acquaints(db, d.id)
@@ -5779,6 +5879,7 @@ async def tombstone_version(
                             "Файлы действующего или закрытого документа неизменяемы")
     was_current = v.is_current
     v.tombstoned_at = datetime.now(timezone.utc)
+    d.updated_at = v.tombstoned_at
     v.tombstoned_by = current_user.id
     v.tombstone_reason = payload.reason
     v.is_current = False
@@ -5887,7 +5988,7 @@ async def add_relation(
         target = await _doc_or_404(db, cid, target_doc)
         await _assert_doc_permission(db, cid, target, current_user, "read")
     else:
-        await _assert_ref(db, cid, payload.target_ref, "target_ref")
+        await _assert_ref(db, cid, payload.target_ref, "target_ref", user=current_user)
     dup = (await db.execute(select(DocRelation.id).where(
         DocRelation.company_id == cid, DocRelation.doc_id == d.id,
         DocRelation.kind == payload.kind,

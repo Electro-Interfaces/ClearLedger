@@ -8,8 +8,9 @@
  * Каждое действие может нести реплику: она прицепляется к событию, а не
  * задваивается отдельным комментарием (так сделано на сервере, не ломать).
  */
+import { WorkOriginLink } from '@/components/work/WorkOriginLink'
+import { WorkResults } from '@/components/work/WorkResults'
 import { useRef, useState } from 'react'
-import { useSupportContext } from '@/contexts/SupportContext'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, ArrowRight, CheckCircle2, ChevronRight, Clock, Eye, EyeOff, Link2,
@@ -52,7 +53,6 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
   onBack?: () => void
 }) {
   const qc = useQueryClient()
-  const { openInteraction } = useSupportContext()
   const [note, setNote] = useState('')
   const [feedKind, setFeedKind] = useState<'all' | 'talk' | 'move' | 'meta'>('all')
   // Порядок ленты — выбор человека и его привычка, а не свойство задачи:
@@ -106,6 +106,12 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
   })
 
   const t = q.data
+  const типы = useQuery({
+    queryKey: ['task-types', companyId],
+    queryFn: () => tasksService.listTaskTypes(companyId),
+    enabled: !!t && !t.type_id && t.status === 'open',
+    staleTime: 5 * 60 * 1000,
+  })
   if (q.isLoading) {
     return (
       <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
@@ -121,16 +127,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
     )
   }
 
-  const origin = t.events.find(
-    (e) => e.kind === 'created' && e.from && e.from.includes('-'))?.from ?? null
   const live = t.status === 'open'
-  // Типы нужны только для работы без типа — запрос ленивый.
-  const типы = useQuery({
-    queryKey: ['task-types', companyId],
-    queryFn: () => tasksService.listTaskTypes(companyId),
-    enabled: !t.type_id && t.status === 'open',
-    staleTime: 5 * 60 * 1000,
-  })
 
   const stageIndex = t.route.findIndex((s) => s.code === t.stage_code)
   const next = stageIndex >= 0 ? t.route[stageIndex + 1] : t.route[0]
@@ -242,16 +239,8 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             </Button>
           )}
         </div>
-        {origin && (
-          // Разговор открывается той же панелью чата, что и кнопка «Чат» в шапке,
-          // наведённой на комнату. Раньше вело на `/messages?room=` — а это админский
-          // реестр чатов пространства, который параметр не читает: обычного человека
-          // он не пускал вовсе, администратора приводил в таблицу без разговора.
-          <button type="button" onClick={() => openInteraction('chat', `room:${origin}`)}
-            className="mt-2 text-xs text-muted-foreground hover:text-foreground hover:underline">
-            задача из обсуждения — открыть разговор
-          </button>
-        )}
+        <WorkOriginLink companyId={companyId} kind="task" id={t.id} />
+        {t.visibility !== 'personal' && <WorkResults companyId={companyId} kind="task" id={t.id} />}
 
         {/* Быстрые добавления: четыре видимые кнопки ведут туда, где действие
             и происходит. Прятать их под одну «Добавить» — ошибка, за которую

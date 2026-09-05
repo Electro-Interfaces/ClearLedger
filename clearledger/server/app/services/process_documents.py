@@ -49,7 +49,7 @@ def _state(doc: DocCard | None, row: ApprovalRequest) -> str:
 
 
 async def listing(db: AsyncSession, company_id: uuid.UUID,
-                  process_id: str) -> dict[str, Any]:
+                  process_id: str, *, user=None) -> dict[str, Any]:
     """Документы, запущенные маршрутом этого процесса.
 
     Порядок — по времени просьбы: срез читают сверху вниз как ход работы, а не
@@ -65,8 +65,11 @@ async def listing(db: AsyncSession, company_id: uuid.UUID,
     docs: dict[uuid.UUID, DocCard] = {}
     kinds: dict[uuid.UUID, str] = {}
     if doc_ids:
-        found = (await db.execute(select(DocCard).where(
-            DocCard.id.in_(doc_ids)))).scalars().all()
+        conditions = [DocCard.company_id == company_id, DocCard.id.in_(doc_ids)]
+        if user is not None:
+            from app.routers.docs_router import _readable_doc_clause
+            conditions.append(await _readable_doc_clause(db, company_id, user))
+        found = (await db.execute(select(DocCard).where(*conditions))).scalars().all()
         docs = {doc.id: doc for doc in found}
         kind_rows = (await db.execute(select(DocKind.id, DocKind.name).where(
             DocKind.company_id == company_id))).all()
@@ -75,6 +78,8 @@ async def listing(db: AsyncSession, company_id: uuid.UUID,
     items: list[dict[str, Any]] = []
     blocking = 0
     for row in rows:
+        if user is not None and row.doc_id not in docs:
+            continue
         doc = docs.get(row.doc_id) if row.doc_id else None
         # Маршрут ждёт исхода — значит эта бумага держит ход работы. Отличаем
         # «ждём» от «ждали»: закрытая просьба уже никого не держит.

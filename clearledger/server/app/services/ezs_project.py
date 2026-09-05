@@ -32,7 +32,7 @@ from app.services.ezs_changes import make_change
 from app.services.ezs_site_work import log_event
 from app.services.ezs_checklist import norm_days
 from app.services.ezs_sites import (
-    PHASE_LABELS, PHASES, STAGE_LABELS, STAGE_ORDER, STAGE_PHASE,
+    PHASE_LABELS, PHASES, STAGE_LABELS, STAGE_ORDER, STAGE_PHASE, next_step_overdue_sql, project_reporting_stage,
 )
 
 # Норматив стадии прямо в SQL: параметр перед `::` (`:norms::jsonb`) SQLAlchemy
@@ -661,7 +661,7 @@ async def costs_report(db: AsyncSession, company_id) -> dict[str, Any]:
     """
     rows = (await db.execute(text("""
         select c.kind,
-               case when s.stage = any(:active) then 'active'
+               case when s.stage = any(:active) and coalesce(s.workspace_data->'scenario'->>'stage', '') <> 'done' then 'active'
                     when s.stage = 'on_hold' then 'on_hold' else 'closed' end as bucket,
                count(distinct c.site_id) sites,
                coalesce(sum(c.plan_amount), 0) plan,
@@ -857,9 +857,10 @@ def subsidy_check(site: EzsSite) -> dict[str, Any]:
 async def portfolio(db: AsyncSession, company_id) -> dict[str, Any]:
     """Обзор портфеля: этапы, сроки, бюджет, риски."""
     S = EzsSite
+    stage_expr = project_reporting_stage(S)
     by_stage = {r.stage: int(r.n) for r in (await db.execute(
-        select(S.stage, func.count().label("n")).where(S.company_id == company_id)
-        .group_by(S.stage))).all()}
+        select(stage_expr.label("stage"), func.count().label("n")).where(S.company_id == company_id)
+        .group_by(stage_expr))).all()}
     phases = []
     for p in PHASES:
         phases.append({"key": p["key"], "label": p["label"], "hint": p["hint"],
@@ -934,7 +935,7 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     risks = (await db.execute(text(f"""
         with active as (
             select s.* from ezs_sites s
-            where s.company_id = :cid and s.stage = any(:active)
+            where s.company_id = :cid and s.stage = any(:active) and coalesce(s.workspace_data->'scenario'->>'stage', '') <> 'done'
         ),
         stage_events as (
             select e.site_id, e.from_stage, e.to_stage
@@ -976,7 +977,9 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
                    -- проект прошёл дальше, а собрано не всё.
                    coalesce(jsonb_path_exists(a.gates,
                        '$.*.*.waived ? (@ == true)'), false) as has_waived,
-                   (a.next_action_due is not null and a.next_action_due < :today) as step_overdue,
+                   {next_step_overdue_sql("a")} as step_overdue,
+                   (a.next_action is null and a.workspace_data->>'next_ref' is null
+                    and a.workspace_data->'external_wait'->>'waiting_for' is null) as missing_next,
                    exists (
                        select 1 from ezs_tech_connections t where t.site_id = a.id
                          and t.due_date is not null and t.done_date is null
@@ -996,7 +999,7 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
           count(*) filter (where tp_overdue) as tp_overdue,
           count(*) filter (where eq_overdue) as eq_overdue,
           count(*) filter (where owner_user_id is null) as no_owner,
-          count(*) filter (where next_action is null) as no_next,
+          count(*) filter (where missing_next) as no_next,
           count(*) filter (where stage_since is not null
              and (current_date - stage_since::date) > {_NORM_CASE}) as stage_overdue,
           count(*) filter (where coalesce(to_char(last_touch_at, 'YYYY-MM-DD'),
@@ -1007,7 +1010,7 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
           count(*) filter (where commissioning_mismatch) as commissioning_mismatch,
           count(*) filter (where step_overdue or tp_overdue or eq_overdue) as at_risk,
           count(*) filter (where step_overdue or tp_overdue or eq_overdue
-             or owner_user_id is null or next_action is null
+             or owner_user_id is null or missing_next
              or (stage_since is not null
                  and (current_date - stage_since::date) > {_NORM_CASE})
              or coalesce(to_char(last_touch_at, 'YYYY-MM-DD'), '1970-01-01') < :d30
@@ -1124,14 +1127,15 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     durations = (await phase_durations(db, company_id))["stages"]
     dur_by_stage = {d["stage"]: d for d in durations}
 
+    stage_expr = project_reporting_stage()
     counts = {r.stage: int(r.n) for r in (await db.execute(
-        select(EzsSite.stage, func.count().label("n"))
-        .where(EzsSite.company_id == company_id).group_by(EzsSite.stage))).all()}
+        select(stage_expr.label("stage"), func.count().label("n"))
+        .where(EzsSite.company_id == company_id).group_by(stage_expr))).all()}
 
     # Застрявшие — по нормативу своей стадии (см. `STAGE_NORM_DAYS`).
     stuck_by_stage = {r["stage"]: int(r["n"]) for r in (await db.execute(text("""
         select stage, count(*) n from ezs_sites
-        where company_id = :cid and stage = any(:active) and stage_since is not null
+        where company_id = :cid and stage = any(:active) and coalesce(workspace_data->'scenario'->>'stage', '') <> 'done' and stage_since is not null
           and (current_date - stage_since::date) > """ + _NORM_CASE + """
         group by 1
     """), {"cid": company_id, "active": STAGE_ORDER})).mappings().all()}
@@ -1216,14 +1220,13 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     """), {"cid": company_id})).mappings().one()
 
     # ── 5. Кто ведёт ───────────────────────────────────────────────────────
-    owners = (await db.execute(text("""
+    owners = (await db.execute(text(f"""
         select coalesce(u.name, u.email, '— не назначен') as owner,
                count(*) as projects,
-               count(*) filter (where s.next_action_due is not null
-                                 and s.next_action_due < :today) as overdue
+               count(*) filter (where {next_step_overdue_sql("s")}) as overdue
         from ezs_sites s
         left join users u on u.id = s.owner_user_id
-        where s.company_id = :cid and s.stage = any(:active)
+        where s.company_id = :cid and s.stage = any(:active) and coalesce(s.workspace_data->'scenario'->>'stage', '') <> 'done'
         group by 1 order by projects desc limit 10
     """), {"cid": company_id, "active": STAGE_ORDER, "today": today})).mappings().all()
 
@@ -1235,12 +1238,12 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
         select coalesce(sum(c.plan_amount), 0) plan, coalesce(sum(c.fact_amount), 0) fact,
                count(distinct c.site_id) sites
         from ezs_site_costs c join ezs_sites s on s.id = c.site_id
-        where c.company_id = :cid and s.stage = any(:active)
+        where c.company_id = :cid and s.stage = any(:active) and coalesce(s.workspace_data->'scenario'->>'stage', '') <> 'done'
     """), {"cid": company_id, "active": STAGE_ORDER})).mappings().one()
     eq_money = (await db.execute(text("""
         select coalesce(sum(e.price * e.qty), 0) total
         from ezs_site_equipment e join ezs_sites s on s.id = e.site_id
-        where e.company_id = :cid and e.status <> 'cancelled' and s.stage = any(:active)
+        where e.company_id = :cid and e.status <> 'cancelled' and s.stage = any(:active) and coalesce(s.workspace_data->'scenario'->>'stage', '') <> 'done'
     """), {"cid": company_id, "active": STAGE_ORDER})).scalar()
 
     active_total = sum(counts.get(s, 0) for s in STAGE_ORDER)
@@ -1249,7 +1252,7 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     kind_rows = (await db.execute(text("""
         select coalesce(kind, 'new_build') as kind, count(*) as n
         from ezs_sites
-        where company_id = :cid and stage = any(:active)
+        where company_id = :cid and stage = any(:active) and coalesce(workspace_data->'scenario'->>'stage', '') <> 'done'
         group by 1 order by 2 desc
     """), {"cid": company_id, "active": STAGE_ORDER})).mappings().all()
     return {
@@ -1352,7 +1355,7 @@ async def export_portfolio_xlsx(db: AsyncSession, company_id) -> bytes:
         from ezs_sites s
         left join users u on u.id = s.owner_user_id
         left join ezs_tech_connections tc on tc.site_id = s.id
-        where s.company_id = :cid and s.stage = any(:active)
+        where s.company_id = :cid and s.stage = any(:active) and coalesce(s.workspace_data->'scenario'->>'stage', '') <> 'done'
         order by s.project_no
     """), {"cid": company_id, "active": STAGE_ORDER})).mappings().all()
 

@@ -9,6 +9,7 @@
  * возвращают на то же место, а переход из любого реестра — это просто ссылка.
  * Пока проект не выбран, экран показывает поиск и последние тронутые проекты.
  */
+import { getProjectOverview } from '@/services/projectWorkspaceService'
 import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
@@ -43,7 +44,7 @@ export function ProjectWorkspacePanel({ companyId }: { companyId: string }) {
   // выглядели двумя разными разделами, хотя это один и тот же объект.
   // Вкладка тоже живёт в URL: по ссылке «открыть присоединение» человек попадает
   // на нужную вкладку, а правая панель «Инфо» знает, какой экран сейчас открыт.
-  const tab = (params.get('ptab') as ProjectTabKey | null) ?? 'roadmap'
+  const tab = (params.get('ptab') as ProjectTabKey | null) ?? 'overview'
   const setTab = (k: ProjectTabKey) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev)
@@ -72,7 +73,9 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
     queryKey: ['site-detail', companyId, id], queryFn: () => getSite(companyId, id),
     staleTime: 0, refetchOnMount: 'always',
   })
+  const workspace = useQuery({ queryKey: ['project-workspace', companyId, id], queryFn: () => getProjectOverview(companyId, id) })
   const s = q.data
+  const specialized = !!s && ['warehouse', 'procurement', 'corporate_client'].includes(s.kind ?? '')
 
   const refresh = async () => {
     // `site-roadmap` — вкладка «Схема»: без неё схема маршрута обновится, а
@@ -87,10 +90,13 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
     }
   }
 
-  const late = useMemo(
-    () => !!s?.nextActionDue && s.nextActionDue < today() && s.stage !== 'archive',
-    [s],
-  )
+  const nextLabel = workspace.data?.next_work?.title || workspace.data?.external_wait?.waiting_for || s?.nextAction
+  const nextDate = workspace.data?.next_work?.due_at?.slice(0, 10) || workspace.data?.external_wait?.follow_up || s?.nextActionDue
+  const nextClosed = ['done', 'executed', 'cancelled', 'archived'].includes(workspace.data?.next_work?.status ?? '')
+  const late = !!nextDate && nextDate < today() && s?.stage !== 'archive' && !nextClosed && workspace.data?.scenario?.stage !== 'done'
+  const scenario = workspace.data?.scenario
+  const scenarioLabel = scenario?.steps.find((step) => step.code === scenario.stage)?.name || (scenario?.stage === 'done' ? 'Завершено' : undefined)
+
 
   // Вкладки с незакрытыми пунктами гейта: пункт-документ ждёт «Документы»,
   // пункт-поставка — «Оборудование», ручной и графовый — «Работу» и «Паспорт».
@@ -142,8 +148,8 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
               {s.title || s.fullAddress || s.address || [s.region, s.city].filter(Boolean).join(', ') || 'Проект'}
             </h2>
             <span className={`text-xs rounded border px-1.5 py-0.5 ${STAGE_META[s.stage]?.cls ?? ''}`}
-              title={STAGE_META[s.stage]?.hint}>{s.stageLabel}</span>
-            {s.phase && (
+              title={specialized ? undefined : STAGE_META[s.stage]?.hint}>{scenarioLabel || s.stageLabel}</span>
+            {!specialized && s.phase && (
               <span className={`text-xs rounded border px-1.5 py-0.5 ${PHASE_META[s.phase]?.cls ?? ''}`}>
                 {s.phaseLabel ?? PHASE_META[s.phase]?.label}
               </span>
@@ -158,9 +164,9 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
             </span>
             <span className={`inline-flex items-center gap-1 ${late ? 'text-red-600 dark:text-red-400' : ''}`}>
               <CalendarClock className="h-3 w-3" />
-              {s.nextAction ? `${s.nextAction}${s.nextActionDue ? ` · до ${s.nextActionDue}` : ''}` : 'следующий шаг не задан'}
+              {nextLabel ? `${nextLabel}${nextDate ? ` · до ${nextDate}` : ''}` : workspace.isPending ? 'Загрузка следующего шага…' : workspace.isError ? 'Не удалось получить следующий шаг' : 'следующий шаг не задан'}
             </span>
-            {s.gate && (() => {
+            {!specialized && s.gate && (() => {
               // Зелёный «гейт 2/8» читается как «всё собрано». С послаблением
               // переход открыт не потому, что работа сделана, а потому, что за
               // неё подписались, — и цвет обязан это различать, иначе строка
@@ -182,12 +188,12 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
       </div>
 
       {/* Где проект в жизненном цикле — видно на любой вкладке */}
-      <ProjectPhaseStrip current={s.phase ?? undefined} kind={s.kind}
+      {!specialized && <ProjectPhaseStrip current={s.phase ?? undefined} kind={s.kind}
         note={s.kind && s.kind !== 'new_build'
           ? 'Работа на действующем объекте: место известно, подбор площадки не нужен.'
-          : 'Подбор места — первый этап этого же проекта, дальше земля, реализация и ввод.'} />
+          : 'Подбор места — первый этап этого же проекта, дальше земля, реализация и ввод.'} />}
 
-      <NextStepBar site={s} onGoTab={onTab} onPlanStep={async (label) => {
+      {!specialized && <NextStepBar site={s} onGoTab={onTab} onPlanStep={async (label) => {
         // Пишем сразу, а не «переносим на вкладку и ждём»: смысл кнопки в том,
         // чтобы шаг оказался в плане одним нажатием. Срок ставит человек — дата
         // без обсуждения была бы выдумкой системы.
@@ -198,7 +204,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
         } catch (e) {
           toast.error(e instanceof Error ? e.message : 'Не удалось записать шаг')
         }
-      }} />
+      }} />}
 
       {/* Вкладки. Точка отмечает те, где на этой стадии есть незакрытая работа:
           девять одинаковых кнопок не подсказывают, с какой начинать.
@@ -209,7 +215,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
       <div data-zone="Разделы проекта: точка = есть незакрытое"
         className="-mx-4 px-4 overflow-x-auto sm:mx-0 sm:px-0 sm:overflow-visible">
         <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5 sm:flex-wrap">
-          {PROJECT_TABS.map((t) => (
+          {PROJECT_TABS.filter((t) => !specialized || !['roadmap', 'work', 'tp', 'equipment', 'economics'].includes(t.k)).map((t) => (
             <button key={t.k} type="button" onClick={() => onTab(t.k)}
               title={pending.has(t.k) ? 'Здесь есть незакрытые пункты текущей стадии' : undefined}
               className={`inline-flex shrink-0 items-center gap-1.5 px-3 py-2 sm:py-1.5 text-sm rounded-[5px] transition-colors ${tab === t.k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
@@ -224,7 +230,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
 
       <Card>
         <CardContent className="p-4">
-          <ProjectTabContent tab={tab} site={s} companyId={companyId} onDone={refresh} />
+          <ProjectTabContent tab={specialized && ['roadmap', 'work', 'tp', 'equipment', 'economics'].includes(tab) ? 'overview' : tab} site={s} companyId={companyId} onDone={refresh} />
         </CardContent>
       </Card>
     </div>

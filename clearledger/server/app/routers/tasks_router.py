@@ -1588,6 +1588,7 @@ class TaskIn(BaseModel):
     # механизм, что у документа, — иначе поручение по проекту без объекта сети
     # не найти ни из карточки проекта, ни из реестра.
     subject_ref: str | None = Field(None, max_length=120)
+    watcher_ids: list[uuid.UUID] = Field(default_factory=list, max_length=50)
     priority: str | None = Field(None, pattern=_PRIORITY)
     due_at: datetime | None = None
     # Круг видимости задаётся сразу. Прежде он выставлялся вторым вызовом, и
@@ -1646,6 +1647,11 @@ async def create_task(
     assignee = _uuid_or_400(payload.assignee_id, "assignee_id") if payload.assignee_id else None
     if assignee is not None and await db.get(UserCompany, (assignee, cid)) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Исполнитель не состоит в пространстве")
+    if payload.visibility == "personal" and payload.watcher_ids:
+        raise HTTPException(400, "Личная запись не имеет наблюдателей")
+    for uid in set(payload.watcher_ids):
+        if await db.get(UserCompany, (uid, cid)) is None:
+            raise HTTPException(400, "Наблюдатель не состоит в пространстве")
 
     # Ссылка на предмет проверяется, как у документа: с несуществующим проектом
     # поручение потерялось бы молча — формально запись верна, а найти её по
@@ -1653,7 +1659,7 @@ async def create_task(
     if payload.subject_ref:
         from app.routers.docs_router import _assert_ref
 
-        await _assert_ref(db, cid, payload.subject_ref, "subject_ref")
+        await _assert_ref(db, cid, payload.subject_ref, "subject_ref", user=current_user)
     t = Task(
         company_id=cid, project_id=project.id if project else None,
         found_version_id=found_v, fix_version_id=fix_v,
@@ -1670,6 +1676,8 @@ async def create_task(
     await db.flush()
     db.add(TaskEvent(task_id=t.id, kind="created", user_id=current_user.id,
                      to_value=_stage_name(route, t.stage_code)))
+    for uid in set(payload.watcher_ids):
+        db.add(TaskWatcher(task_id=t.id, user_id=uid, reason="manual", added_by=current_user.id))
     # Напоминание о собственной записи ставится тем же действием: человек думает
     # «записать и напомнить», а не «записать, потом открыть и напомнить».
     if payload.remind_at is not None:
@@ -2463,7 +2471,7 @@ async def task_action(
             if waiting is not None:
                 db.add(TaskEvent(
                     task_id=t.id, kind="status", user_id=current_user.id,
-                    actor_name="Процесс", to_value="исход уехал в процесс",
+                    actor_name="Процесс", to_value="исход ожидает доставки в процесс",
                     note=f"процесс {waiting.process_id}"))
 
     # Правка поля — тоже событие. Молча сдвинутый срок или снятая срочность
@@ -2774,6 +2782,9 @@ async def bulk_action(
                              from_value=t.status, to_value=payload.status, note=payload.note))
             t.status = payload.status
             t.closed_at = None if payload.status == "open" else datetime.now(timezone.utc)
+            if payload.status in ("done", "cancelled"):
+                from app.services import errands
+                await errands.close(db, t, payload.status)
         if payload.priority is not None:
             t.priority = payload.priority
         if payload.due_at is not None:

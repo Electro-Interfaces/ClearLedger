@@ -228,7 +228,7 @@ async def resolve_actors(db: AsyncSession, cid: uuid.UUID,
                 continue
             rows = (await db.execute(select(UserCompany.user_id).where(
                 UserCompany.company_id == cid,
-                UserCompany.department_id == dep_id))).scalars().all()
+                UserCompany.department_id == dep_id).order_by(UserCompany.user_id))).scalars().all()
             for uid in rows:
                 add("department", ref, uid)
         elif by == "role":
@@ -241,13 +241,13 @@ async def resolve_actors(db: AsyncSession, cid: uuid.UUID,
                 continue
             rows = (await db.execute(select(UserCompany.user_id).where(
                 UserCompany.company_id == cid,
-                UserCompany.role_id == role_id))).scalars().all()
+                UserCompany.role_id == role_id).order_by(UserCompany.user_id))).scalars().all()
             for uid in rows:
                 add("role", ref, uid)
         elif by == "position":
             rows = (await db.execute(select(UserCompany.user_id).where(
                 UserCompany.company_id == cid,
-                UserCompany.position == ref))).scalars().all()
+                UserCompany.position == ref).order_by(UserCompany.user_id))).scalars().all()
             for uid in rows:
                 add("position", ref, uid)
         elif by == "partner":
@@ -386,8 +386,35 @@ def _activate(rows: list[DocApproval], now: datetime) -> int:
     return len(selected)
 
 
+async def preview_route(db: AsyncSession, cid: uuid.UUID, doc: DocCard, route: list[dict],
+                        *, resolved=None):
+    steps = [step for step in clean_route(route) if step_applies(step, doc)]
+    problems = [] if steps else ["По условиям документа нет шагов согласования"]
+    rows = []
+    for number, step in enumerate(steps, start=1):
+        actors = (resolved[number - 1] if resolved is not None
+                  else await resolve_actors(db, cid, step["actors"]))
+        if not actors:
+            problems.append(f"На шаге «{step['name']}» некому согласовывать")
+        if step["quorum"].isdigit() and int(step["quorum"]) > len(actors):
+            problems.append(f"На шаге «{step['name']}» кворум больше числа согласующих")
+        people = []
+        for actor_kind, ref, uid in actors:
+            person = await db.get(User, uid) if uid else None
+            people.append({"id": str(uid) if uid else None, "kind": actor_kind,
+                           "name": (person.name or person.email) if person else ref})
+        rows.append({"number": number, "name": step["name"],
+                     "mode": step["mode"], "quorum": step["quorum"],
+                     "step_kind": step.get("step_kind", "approve"),
+                     "sla_hours": step.get("sla_hours"), "people": people})
+    token = hashlib.sha256(json.dumps(
+        {"route": steps, "steps": rows}, ensure_ascii=False,
+        sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {"steps": rows, "problems": problems, "route_token": token}
+
+
 async def start(db: AsyncSession, cid: uuid.UUID, doc: DocCard, route: list[dict],
-                actor: User | None) -> dict[str, Any]:
+                actor: User | None, *, expected_route_token: str | None = None) -> dict[str, Any]:
     """Запустить круг согласования по маршруту вида.
 
     Живой круг один: повторный запуск открывает следующий, прошлые остаются в
@@ -417,6 +444,13 @@ async def start(db: AsyncSession, cid: uuid.UUID, doc: DocCard, route: list[dict
         if step["quorum"].isdigit() and int(step["quorum"]) > len(people):
             return {"error": f"на шаге «{step['name']}» кворум больше числа согласующих"}
         prepared.append((i, step, people))
+
+    if expected_route_token is not None:
+        preview = await preview_route(db, cid, doc, steps,
+                                      resolved=[people for _, _, people in prepared])
+        if preview["route_token"] != expected_route_token:
+            return {"error": "Состав согласующих изменился. Обновите предпросмотр маршрута",
+                    "conflict": True}
 
     round_no = (doc.approval_round or 0) + 1
     now = datetime.now(timezone.utc)

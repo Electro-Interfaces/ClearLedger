@@ -12,7 +12,8 @@ import {
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
+import { DocApprovalStart } from './DocApprovalStart'
+import { DocFileWorkspace } from './DocFileWorkspace'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -30,21 +31,16 @@ const ROW_STATUS: Record<string, { label: string; icon: typeof CheckCircle2 }> =
   skipped: { label: 'снято', icon: CircleDashed },
 }
 
-export function DocApprovalTab({ doc, companyId, onChanged }: {
+export function DocApprovalTab({ doc, companyId, onChanged, dirty = false }: {
   doc: DocDetails
   companyId: string
   onChanged: () => void
+  dirty?: boolean
 }) {
   const { user } = useAuth()
   const commentId = useId()
   const qc = useQueryClient()
   const [comment, setComment] = useState('')
-
-  const start = useMutation({
-    mutationFn: () => docsService.startApproval(companyId, doc.id),
-    onSuccess: (r) => { toast.success(`Круг ${r.round}: виз ${r.approvals}`); onChanged() },
-    onError: (e) => toast.error((e as Error).message),
-  })
 
   const decide = useMutation({
     mutationFn: (v: { id: string; approved: boolean; stepKind: 'approve' | 'sign' }) =>
@@ -85,17 +81,12 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
               разворачиваются в конкретных людей в момент запуска.
             </div>
           </div>
-          <ConfirmActionDialog
+          <DocApprovalStart companyId={companyId} id={doc.id} onStarted={onChanged}
             trigger={(
-              <Button size="sm" disabled={start.isPending}>
+              <Button size="sm" disabled={dirty}>
                 <PlayCircle className="mr-1.5 h-4 w-4" />Запустить
               </Button>
             )}
-            title="Запустить согласование?"
-            description="Текущая редакция и реквизиты войдут в зафиксированный пакет. До завершения или отмены круга менять их нельзя."
-            confirmLabel="Запустить"
-            pending={start.isPending}
-            onConfirm={() => start.mutateAsync()}
           />
         </Card>
       )}
@@ -198,7 +189,11 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
       ))}
 
       {mine && (
-        <Card className="space-y-2 p-4">
+        <div className="grid min-w-0 items-start gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(240px,0.55fr)]">
+          <DocFileWorkspace versions={doc.versions.filter((version) => state.snapshot?.files.some((file) => file.id === version.id))}
+            canDownload={doc.capabilities.download} sensitive={doc.confidentiality === 'strict'}
+            canRemove={false} removing={false} onRemove={() => {}} compact comparisonVersions={doc.versions} />
+        <Card className="min-w-0 space-y-2 p-4 xl:sticky xl:top-3">
           <div className="text-sm font-medium">
             {mine.step_kind === 'sign' ? 'Ваша подпись' : 'Ваша виза'} по шагу «{mine.step_name}»
           </div>
@@ -226,6 +221,7 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
             </Button>
           </div>
         </Card>
+        </div>
       )}
 
       {state.status === 'rejected' && canStart && (
@@ -234,10 +230,8 @@ export function DocApprovalTab({ doc, companyId, onChanged }: {
             Документ возвращён автору. Исправьте и запустите новый круг —
             прошлые визы останутся в истории.
           </div>
-          <Button size="sm" variant="outline" onClick={() => start.mutate()}
-            disabled={start.isPending}>
-            Запустить круг {state.round + 1}
-          </Button>
+          <DocApprovalStart companyId={companyId} id={doc.id} onStarted={onChanged}
+            trigger={<Button size="sm" variant="outline" disabled={dirty}>Запустить круг {state.round + 1}</Button>} />
         </Card>
       )}
 

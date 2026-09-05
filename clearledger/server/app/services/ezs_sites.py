@@ -26,7 +26,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import cast, func, select
+from sqlalchemy import and_, case, cast, func, select
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -935,7 +935,7 @@ async def _sync_tech_connections(
 
 
 def _place_kind(v: Any) -> str | None:
-    """«город»/«Город»/«трасса» → канон; мусор («Магнит», «псковэнерго») → None."""
+    """Тип объекта из реестра; неизвестные значения не становятся категориями."""
     t = _norm(v)
     if not t:
         return None
@@ -943,6 +943,8 @@ def _place_kind(v: Any) -> str | None:
         return "город"
     if t.startswith("трасс"):
         return "трасса"
+    if t in {"азс/агнс", "гостиница", "бц/тц", "автосалон", "общепит", "девелопмент"}:
+        return t
     return None
 
 
@@ -1023,6 +1025,26 @@ def _advance_stage(site: EzsSite, stage: str, today: str, apply: bool) -> str | 
     return None
 
 
+def project_reporting_stage(model=EzsSite):
+    return case((and_(model.stage.in_(STAGE_ORDER), model.workspace_data["scenario"]["stage"].astext == "done"), "completed"), else_=model.stage)
+
+
+def next_step_overdue_sql(alias="ezs_sites"):
+    if alias not in ("ezs_sites", "a", "s"):
+        raise ValueError("Неизвестный источник проекта")
+    return f"""(
+        ({alias}.workspace_data->>'next_ref' is null
+         and {alias}.next_action_due < to_char(current_date, 'YYYY-MM-DD'))
+        or exists (select 1 from tasks w where w.company_id = {alias}.company_id
+            and 'task:' || w.id::text = {alias}.workspace_data->>'next_ref'
+            and w.status = 'open' and coalesce(w.stage_column, 'in_work') <> 'done' and w.due_at < now())
+        or exists (select 1 from doc_cards w where w.company_id = {alias}.company_id
+            and 'doc:' || w.id::text = {alias}.workspace_data->>'next_ref'
+            and w.status not in ('executed', 'archived', 'cancelled') and w.due_at < now())
+        or {alias}.workspace_data->'external_wait'->>'follow_up' < to_char(current_date, 'YYYY-MM-DD')
+    )"""
+
+
 def _risk_conditions(risk: str) -> list[Any]:
     """Фильтры под цифры обзора портфеля — чтобы «297 без ответственного» можно
     было раскрыть и увидеть, кто именно за этим числом стоит.
@@ -1030,7 +1052,7 @@ def _risk_conditions(risk: str) -> list[Any]:
     Считаются ровно так же, как в `portfolio_overview`: иначе список не сойдётся
     с цифрой, и доверия к экрану не будет.
     """
-    from sqlalchemy import case, exists, literal, literal_column, select as _select
+    from sqlalchemy import String, case, exists, literal, literal_column, select as _select
 
     from app.models import (
         EzsSiteEquipment, EzsSiteEvent, EzsSiteParticipant, EzsTechConnection,
@@ -1040,14 +1062,25 @@ def _risk_conditions(risk: str) -> list[Any]:
     today = date.today().isoformat()
     d30 = (date.today() - timedelta(days=30)).isoformat()
     d90 = (date.today() - timedelta(days=90)).isoformat()
-    active = [S.stage.in_(STAGE_ORDER)]
+    active = [project_reporting_stage(S).in_(STAGE_ORDER)]
 
     if risk == "step_overdue":
-        return [*active, S.next_action_due.is_not(None), S.next_action_due < today]
+        return [*active, literal_column(next_step_overdue_sql())]
     if risk == "no_owner":
         return [*active, S.owner_user_id.is_(None)]
     if risk == "no_next":
-        return [*active, S.next_action.is_(None)]
+        return [*active, S.next_action.is_(None), S.workspace_data["next_ref"].astext.is_(None),
+                S.workspace_data["external_wait"]["waiting_for"].astext.is_(None)]
+    if risk == "external_wait":
+        return [*active, S.workspace_data["external_wait"]["waiting_for"].astext.is_not(None)]
+    if risk == "contact_overdue":
+        return [*active, S.workspace_data["external_wait"]["follow_up"].astext < today]
+    if risk == "result_pending":
+        from app.models import WorkContextResult
+        return [*active, select(WorkContextResult.id).where(WorkContextResult.company_id == S.company_id,
+            WorkContextResult.context_ref == literal("site:") + S.id.cast(String),
+            WorkContextResult.delivered_at.is_(None)).correlate(S).exists()]
+
     if risk in ("stage_overdue", "stuck_90"):   # старый ключ — из закладок и ссылок
         # Норматив своей стадии, как в обзоре портфеля: сравниваем через SQL,
         # чтобы условие считалось одинаково в обоих местах.
@@ -1175,18 +1208,23 @@ async def list_sites(
     db: AsyncSession, company_id, *, stage: str | None = None, region: str | None = None,
     search: str | None = None, owner_id=None, overdue: bool = False,
     risk: str | None = None, node: str | None = None,
+    kind: str | None = None, place_kind: str | None = None,
     page: int = 1, page_size: int = 100,
 ) -> dict[str, Any]:
     from app.models import User
 
     S = EzsSite
     conds = [S.company_id == company_id]
+    if kind:
+        conds.append(func.coalesce(S.kind, "new_build") == kind)
+    if place_kind:
+        conds.append(func.lower(S.place_kind) == place_kind.lower())
     if risk:
         conds += _risk_conditions(risk)
     if stage == "active":            # вся живая часть воронки одним фильтром
-        conds.append(S.stage.in_(STAGE_ORDER))
+        conds.append(project_reporting_stage(S).in_(STAGE_ORDER))
     elif stage:
-        conds.append(S.stage == stage)
+        conds.append(project_reporting_stage(S) == stage)
     if node:
         # Стадия воронки отвечает «далеко ли до станции», узел маршрута — «у кого
         # сейчас работа». Это разные вопросы: в «Оформлении земли» стоят и те, кто
@@ -1198,9 +1236,7 @@ async def list_sites(
         conds.append(S.owner_user_id == owner_id)
     if overdue:
         # Просрочен следующий шаг — то, ради чего у площадки вообще есть срок.
-        conds.append(S.next_action_due.is_not(None))
-        conds.append(S.next_action_due < _today())
-        conds.append(S.stage.in_(STAGE_ORDER))
+        conds += _risk_conditions("step_overdue")
     if search:
         like = f"%{search.lower()}%"
         # Название, номер и адрес карточки ищутся наравне: менеджер помнит проект по
@@ -1229,11 +1265,15 @@ async def list_sites(
 
 
 def _site_out(s: EzsSite) -> dict[str, Any]:
+    from app.services.project_scenarios import scenario
+    flow = scenario(s)
+    current = next((step for step in flow["steps"] if step["code"] == flow["stage"]), None) if flow else None
     return {
         "id": str(s.id), "projectNo": s.project_no, "title": s.title,
         # Вид работы: карточка по нему понимает, был ли подбор площадки вообще.
         "kind": s.kind or "new_build",
-        "stage": s.stage, "stageLabel": STAGE_LABELS.get(s.stage, s.stage),
+        "stage": s.stage, "stageLabel": (current["name"] if current else "Завершено") if flow else STAGE_LABELS.get(s.stage, s.stage),
+        "scenarioStage": flow["stage"] if flow else None,
         "phase": STAGE_PHASE.get(s.stage), "phaseLabel": PHASE_LABELS.get(STAGE_PHASE.get(s.stage, "")),
         "stageSince": s.stage_since, "prevStage": s.prev_stage,
         "archiveReason": s.archive_reason, "cadastralNo": s.cadastral_no,
@@ -1279,9 +1319,10 @@ async def site_detail(db: AsyncSession, company_id, site_id) -> dict[str, Any] |
 async def sites_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     S = EzsSite
     base = S.company_id == company_id
+    stage_expr = project_reporting_stage(S)
     total = int((await db.execute(select(func.count()).select_from(S).where(base))).scalar_one() or 0)
     by_stage = {r.stage: int(r.n) for r in (await db.execute(
-        select(S.stage, func.count().label("n")).where(base).group_by(S.stage))).all()}
+        select(stage_expr.label("stage"), func.count().label("n")).where(base).group_by(stage_expr))).all()}
     reg_expr = func.coalesce(S.region_norm, S.region, "— не указан")
     regions = (await db.execute(
         select(reg_expr.label("region"), func.count().label("n"))
@@ -1304,12 +1345,11 @@ async def sites_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     stale_before = (datetime.now(timezone.utc) - timedelta(days=STALE_DAYS))
     work = (await db.execute(select(
         func.count().filter(S.owner_user_id.is_(None)).label("no_owner"),
-        func.count().filter(S.next_action.is_(None)).label("no_next"),
-        func.count().filter(S.next_action_due.is_not(None),
-                            S.next_action_due < _today()).label("overdue"),
+        func.count().filter(*_risk_conditions("no_next")).label("no_next"),
+        func.count().filter(*_risk_conditions("step_overdue")).label("overdue"),
         func.count().filter(func.coalesce(S.last_touch_at, S.first_seen_at) < stale_before)
         .label("stale"),
-    ).where(base, S.stage.in_(STAGE_ORDER)))).one()
+    ).where(base, project_reporting_stage(S).in_(STAGE_ORDER)))).one()
     return {
         "total": total,
         "active": active,

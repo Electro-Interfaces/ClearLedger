@@ -146,6 +146,8 @@ async def mark_outcome(db: AsyncSession, doc_id: uuid.UUID, outcome: str) -> Non
     именно поэтому исход не может потеряться при обрыве связи. Доставку берёт на
     себя фоновый проход.
     """
+    from app.services.work_results import document_result
+    await document_result(db, doc_id, outcome)
     row = (await db.execute(select(ApprovalRequest).where(
         ApprovalRequest.doc_id == doc_id,
         ApprovalRequest.outcome.is_(None)).limit(1))).scalar_one_or_none()
@@ -182,13 +184,20 @@ async def deliver_pending(db: AsyncSession, limit: int = 20) -> int:
                 # виз закрыт, его исход существует только у нас, и без записи в
                 # следе документа человек узнает о потере, когда придёт спросить,
                 # почему стройка стоит. След — то место, куда он и так смотрит.
-                db.add(DocEvent(
-                    doc_id=row.doc_id, kind="approval", user_id=None,
-                    actor_name="Процесс",
-                    to_value="исход круга не доставлен",
-                    note=(f"попыток {row.attempts}; {row.last_error}")[:2000]))
+                if row.doc_id:
+                    db.add(DocEvent(
+                        doc_id=row.doc_id, kind="approval", user_id=None,
+                        actor_name="Процесс",
+                        to_value="исход круга не доставлен",
+                        note=(f"попыток {row.attempts}; {row.last_error}")[:2000]))
+                elif row.task_id:
+                    from app.models import TaskEvent
+                    db.add(TaskEvent(task_id=row.task_id, kind="system", actor_name="Процесс",
+                        note=f"Исход поручения не доставлен после {row.attempts} попыток"))
                 log.error("Исход круга по документу %s потерян после %s попыток",
                           row.doc_id, row.attempts)
+    from app.services import work_contexts
+    await work_contexts.deliver_pending(db, limit)
     return done
 
 

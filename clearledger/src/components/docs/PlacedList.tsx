@@ -76,11 +76,11 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
           <div key={`${item.kind}-${item.id}`}
             className="group/строка flex items-center gap-2 border-b px-3 py-2 last:border-b-0 hover:bg-muted/40">
             <DragHandle targetRef={workService.targetRef(item)}
-              label={`${item.key} ${item.title}`} />
-            <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              label={`${item.key} ${item.title}`} className="hidden sm:inline-flex" />
+            <Icon className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:block" aria-hidden />
             <button type="button" onClick={() => navigate(href(item))}
               className="min-w-0 flex-1 text-left">
-              <div className="truncate text-sm leading-snug">{item.title}</div>
+              <div className="break-words text-sm leading-snug sm:truncate">{item.title}</div>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                 <span className="font-mono">{item.key}</span>
                 {/* Срок на узком экране — здесь: см. ту же правку в строке

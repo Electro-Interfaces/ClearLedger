@@ -12,6 +12,7 @@
  * прячется, — и отказ показывается человеку словами, а не молчаливым откатом.
  */
 import { useState } from 'react'
+import { useMaxWidth } from '@/hooks/use-mobile'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CalendarCheck, CalendarClock, FolderPlus, MoreHorizontal, Star, Sun, X,
@@ -46,7 +47,7 @@ const завтра = () => {
 }
 
 export function PlaceActions({
-  companyId, targetRef, mark, dueAt, onChanged, compact,
+  companyId, targetRef, mark, dueAt, onChanged, compact: compactProp,
 }: {
   companyId: string
   targetRef: string
@@ -62,6 +63,8 @@ export function PlaceActions({
   compact?: boolean
 }) {
   const qc = useQueryClient()
+  const mobile = useMaxWidth(640)
+  const compact = compactProp || mobile
   /** Что именно выбирают днём: запланировать работу или спрятать до даты.
    *  Поле ввода одно, намерения два — и путать их нельзя. */
   const [pickingDate, setPickingDate] = useState<'plan' | 'defer' | null>(null)
@@ -182,8 +185,8 @@ export function PlaceActions({
       {!compact && кнопкаЗвезды}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="ghost" className="h-8 px-2"
-            title="Как разложить у себя">
+          <Button size="sm" variant="ghost" className="size-11 p-0 sm:h-8 sm:w-auto sm:px-2"
+            aria-label="Личные действия" title="Как разложить у себя">
             <MoreHorizontal className="h-3.5 w-3.5" />
           </Button>
         </DropdownMenuTrigger>
