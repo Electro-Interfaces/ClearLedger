@@ -262,7 +262,9 @@ async def support_reply(
         # Состояние вдогонку репликой не уедет — оно едет своим путём, и делать это
         # надо ПОСЛЕ сообщения: иначе клиент увидит «решено» раньше, чем ответ.
         if topic is not None and payload.state:
-            await partner_bridge.send_state(partner, self_code, topic)
+            error = await partner_bridge.send_state(partner, self_code, topic)
+            if error:
+                raise HTTPException(502, error)
         return {"status": "sent", "id": str(row.id)}
 
     error = await partner_bridge.send_state(partner, self_code, topic)

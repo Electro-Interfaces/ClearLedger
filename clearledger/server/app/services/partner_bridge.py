@@ -235,6 +235,9 @@ async def record_incoming(
             title=str(payload.get("topicTitle") or ""),
             subject_label=(payload.get("subjectLabel") or None))
         topic.last_message_at = datetime.now(UTC)
+        if partner.role == "client" and topic.state in {"resolved", "closed"}:
+            topic.state = "open"
+            topic.closed_at = None
 
     row = PartnerMessage(
         company_id=company_id, partner_id=partner.id, direction="in",
@@ -305,27 +308,34 @@ async def send(
     Координатор шлёт очередью с ретраями: без ключа второй заход положил бы в
     ленту клиента ту же реплику второй раз.
     """
+    row = None
     if external_id:
-        already = (await db.execute(select(PartnerMessage).where(
+        row = (await db.execute(select(PartnerMessage).where(
             PartnerMessage.partner_id == partner.id,
             PartnerMessage.direction == "out",
             PartnerMessage.external_id == external_id,
         ))).scalars().first()
-        if already is not None:
-            return already
+        if row is not None and row.delivered_at is not None:
+            return row
 
-    row = PartnerMessage(
-        company_id=company_id, partner_id=partner.id, direction="out",
-        topic_id=topic.id if topic is not None else None,
-        author_email=author_email, author_name=author_name, body=body.strip(),
-        subject_kind=subject_kind, subject_ref=subject_ref,
-        external_id=external_id,
-    )
-    db.add(row)
-    if topic is not None:
-        topic.last_message_at = datetime.now(UTC)
-    await db.commit()
-    await db.refresh(row)
+    if row is None:
+        row = PartnerMessage(
+            company_id=company_id, partner_id=partner.id, direction="out",
+            topic_id=topic.id if topic is not None else None,
+            author_email=author_email, author_name=author_name, body=body.strip(),
+            subject_kind=subject_kind, subject_ref=subject_ref,
+            external_id=external_id,
+        )
+        db.add(row)
+        if topic is not None:
+            topic.last_message_at = datetime.now(UTC)
+            if partner.role == "vendor" and topic.state in {"resolved", "closed"}:
+                topic.state = "open"
+                topic.closed_at = None
+        await db.commit()
+        await db.refresh(row)
+    else:
+        topic = await db.get(PartnerTopic, row.topic_id) if row.topic_id else None
 
     key = partner_key(partner)
     if not partner.base_url or not key:
@@ -365,7 +375,7 @@ async def send(
         await db.commit()
         return row
 
-    if resp.status_code >= 400:
+    if not 200 <= resp.status_code < 300:
         row.delivery_error = f"Партнёр ответил {resp.status_code}: {resp.text[:200]}"
     else:
         row.delivered_at = datetime.now(UTC)
