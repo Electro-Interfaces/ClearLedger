@@ -199,10 +199,40 @@ export function StoreMarkingIntegrationsPanel({ view }: { view: 'perm_mode' | 'g
             <div className="text-[10px] text-muted-foreground/70">их продажа зависит от модуля</div>
           </div>
           <div className="rounded-lg border border-border/50 bg-card/40 p-3">
-            <div className="text-[11px] text-muted-foreground">Товарные группы</div>
-            <div className="mt-0.5 text-sm leading-relaxed">
-              {Object.values(data.groups).slice(0, 4).join(' · ')}
+            <div className="text-[11px] text-muted-foreground">Без товарной группы</div>
+            <div className={`mt-0.5 text-xl font-semibold tabular-nums ${
+              (data.unassigned?.total ?? 0) > 0 ? 'text-amber-400/90' : ''}`}>
+              {data.unassigned?.total ?? 0}
             </div>
+            <div className="text-[10px] text-muted-foreground/70">
+              маркируются, а чем — неизвестно
+            </div>
+          </div>
+        </div>
+
+        {/* Группы «Честного знака»: у каждой свои правила приёмки и свой срок
+            обязательности, поэтому важно не название списком, а сколько за ним
+            стоит товара. */}
+        <div className="rounded-lg border border-border/50 bg-card/40 p-3">
+          <div className="text-[11px] text-muted-foreground">Товарные группы «Честного знака»</div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {(data.group_stats ?? []).filter((г) => г.items > 0).map((г) => (
+              <span
+                key={г.code}
+                title={[г.since ? `обязательна с ${г.since}` : null,
+                        г.cash_code ? `в кассе номер ${г.cash_code}` : null,
+                        г.note].filter(Boolean).join(' · ')}
+                className="rounded border border-border/50 bg-muted/30 px-2 py-0.5 text-[11px]"
+              >
+                {г.name}
+                <span className="ml-1.5 tabular-nums text-muted-foreground">{г.items}</span>
+              </span>
+            ))}
+            {(data.group_stats ?? []).every((г) => г.items === 0) && (
+              <span className="text-[11px] text-muted-foreground">
+                справочник заполнен, товар по группам ещё не разложен
+              </span>
+            )}
           </div>
         </div>
 

@@ -5,6 +5,10 @@
  * удаление, медиа-альбомы + Lightbox, архив, видеозвонок. REST — chatService,
  * live — useChatWs. Рендерится в InteractionHost (модалка «Взаимодействие»).
  */
+import { TaskFromMessageDialog, ProcessFromMessageDialog } from '@/components/work/MessageWorkDialogs'
+import { WorkContextPicker } from '@/components/work/WorkContextPicker'
+import { WorkContextActions, WorkContextBadge } from '@/components/work/WorkContextActions'
+import { getRoomWork, workHref } from '@/services/workContextService'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -32,9 +36,8 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import { Label } from '@/components/ui/label'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuTrigger, DropdownMenuSeparator, DropdownMenuLabel,
@@ -53,10 +56,8 @@ import { downloadAttachment, humanSize, useAuthBlobUrl } from '@/lib/authFiles'
 import { RegionCapture } from './RegionCapture'
 import { ensurePushSubscription, pushPreview, pushSupported, requestPushPermission, setPushPreview } from '@/lib/chatPush'
 import * as chat from '@/services/chatService'
-import * as docsService from '@/services/docsService'
 import { isMuted } from '@/services/chatService'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
-import { listTaskPeople } from '@/services/tasksService'
 import { useDocsApp } from '@/hooks/useDocsApp'
 import { useSendMode } from '@/hooks/useSendMode'
 import { useSupportContext } from '@/contexts/SupportContext'
@@ -715,7 +716,7 @@ function MailInvite({ roomId, onAdded }: { roomId: string; onAdded: () => void }
 // ── панель информации о комнате (участники) ──────────────────────────────────
 function RoomInfoPanel({
   room, participants, userId, canManage, canOwn, onAdd, onMailAdded, onRename, onAvatar,
-  onScope, onObject, onRemove, onSetRole, onLeave, onMessageUser, onShowProfile, presenceMap,
+  onScope, onObject, onContextRef, onRemove, onSetRole, onLeave, onMessageUser, onShowProfile, presenceMap,
 }: {
   room?: ChatRoom
   participants?: ChatParticipant[]
@@ -734,6 +735,7 @@ function RoomInfoPanel({
   onScope: (code: string) => void
   /** Смена привязки к объекту; '' — отвязать. */
   onObject: (objectId: string) => void
+  onContextRef: (ref: string | null) => void
   onRemove: (uid: string) => void
   onSetRole: (uid: string, role: 'admin' | 'member') => void
   onLeave: () => void
@@ -841,6 +843,7 @@ function RoomInfoPanel({
           </div>
         )}
         <div className="mt-0.5 text-[11px] text-muted-foreground">{kindText}</div>
+        {editable && !room?.scopePurpose && companyId && <div className="mt-3"><WorkContextPicker companyId={companyId} value={room?.scopeRef || null} onChange={onContextRef} /></div>}
         <dl className="mt-2 space-y-1 text-[11px]">
           {peer ? (
             <>
@@ -1121,216 +1124,6 @@ function GlobalSearchResults({ q, onOpen }: {
  * Заголовок берётся из сообщения и правится на месте: сообщение бывает длинным,
  * а поручение должно читаться строкой в списке.
  */
-function TaskFromMessageDialog({ message, companyId, onClose, onDone }: {
-  message: ChatMessage
-  companyId: string
-  onClose: () => void
-  onDone: (result: Awaited<ReturnType<typeof chat.taskFromMessage>>) => void
-}) {
-  const src = (message.content || message.fileName || '').trim()
-  const [title, setTitle] = useState(() => src.slice(0, 300))
-  const [assigneeId, setAssigneeId] = useState('')
-  const [dueAt, setDueAt] = useState('')
-
-  const peopleQ = useQuery({
-    queryKey: ['task-people', companyId],
-    queryFn: () => listTaskPeople(companyId),
-    enabled: !!companyId, staleTime: 5 * 60 * 1000,
-  })
-  const send = useMutation({
-    mutationFn: () => chat.taskFromMessage(message.id, {
-      title: title.trim(),
-      assigneeId: assigneeId || undefined,
-      dueAt: dueAt ? new Date(`${dueAt}T00:00`).toISOString() : undefined,
-    }),
-    onSuccess: onDone,
-    onError: (e) => toast.error((e as Error).message || 'Не удалось поставить поручение'),
-  })
-
-  return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-sm gap-0 p-0 sm:max-w-sm">
-        <DialogHeader className="border-b border-border/50 px-4 py-3">
-          <DialogTitle className="text-sm">Поручение по сообщению</DialogTitle>
-          <DialogDescription className="text-xs">
-            Сообщение станет основанием: в чате останется ссылка на поручение.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3 px-4 py-3">
-          <div className="space-y-1">
-            <Label className="text-xs">Что сделать</Label>
-            <Input value={title} maxLength={300} className="h-8 text-xs"
-              onChange={(e) => setTitle(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Кому</Label>
-            <Select value={assigneeId || 'none'}
-              onValueChange={(v) => setAssigneeId(v === 'none' ? '' : v)}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Пока никому</SelectItem>
-                {(peopleQ.data?.people ?? []).map((person) => (
-                  <SelectItem key={person.id} value={person.id}>{person.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">К какому сроку</Label>
-            <Input type="date" value={dueAt} className="h-8 text-xs"
-              onChange={(e) => setDueAt(e.target.value)} />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-border/50 px-4 py-3">
-          <Button size="sm" variant="ghost" className="h-8" onClick={onClose}>Отмена</Button>
-          <Button size="sm" className="h-8"
-            disabled={title.trim().length < 3 || send.isPending}
-            onClick={() => send.mutate()}>
-            {send.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            Поручить
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function ProcessFromMessageDialog({ message, companyId, onClose, onDone }: {
-  message: ChatMessage
-  companyId: string
-  onClose: () => void
-  onDone: (result: Awaited<ReturnType<typeof chat.processFromMessage>>) => void
-}) {
-  const src = (message.content || message.fileName || '').trim()
-  const [templateId, setTemplateId] = useState('')
-  const [responsibleId, setResponsibleId] = useState('')
-  const [title, setTitle] = useState(() => src.slice(0, 300))
-  const [busy, setBusy] = useState(false)
-
-  const templatesQ = useQuery({
-    queryKey: ['process-templates', companyId],
-    queryFn: () => docsService.listProcessTemplates(companyId),
-    enabled: !!companyId, staleTime: 5 * 60 * 1000,
-  })
-  const peopleQ = useQuery({
-    queryKey: ['task-people', companyId],
-    queryFn: () => listTaskPeople(companyId),
-    enabled: !!companyId, staleTime: 5 * 60 * 1000,
-  })
-  const templates = templatesQ.data?.templates ?? []
-  const selected = templates.find((template) => template.id === templateId)
-
-  const send = async () => {
-    if (!templateId) return
-    setBusy(true)
-    try {
-      const res = await chat.processFromMessage(message.id, {
-        templateId,
-        responsibleId: responsibleId || undefined,
-        title: selected?.kind === 'task' ? title.trim() : undefined,
-      })
-      onDone(res)
-    } catch (e) {
-      toast.error((e as Error).message || 'Не удалось запустить процесс')
-    } finally { setBusy(false) }
-  }
-
-  return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-sm gap-0 p-0 sm:max-w-sm">
-        <DialogHeader className="border-b border-border/50 px-4 py-3">
-          <DialogTitle className="text-sm">Запустить процесс из сообщения</DialogTitle>
-          <DialogDescription className="sr-only">
-            Выберите шаблон процесса и первого ответственного сотрудника.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3 p-4">
-          <p className="max-h-20 overflow-hidden rounded-md bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
-            {message.userName ? `${message.userName}: ` : ''}{src || 'вложение'}
-          </p>
-          <div className="space-y-1">
-            <Label className="text-xs">Шаблон процесса</Label>
-            <Select value={templateId} onValueChange={(value) => {
-              setTemplateId(value)
-              const template = templates.find((item) => item.id === value)
-              setResponsibleId(template?.defaultResponsibleId ?? '')
-              setTitle(template?.kind === 'task' ? src.slice(0, 300) : template?.title ?? '')
-            }}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder={templatesQ.isLoading ? 'Загрузка…' : 'Выберите шаблон'} />
-              </SelectTrigger>
-              <SelectContent>
-                {templates.map((template) => (
-                  <SelectItem key={template.id} value={template.id}>{template.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {templatesQ.isError && (
-            <p className="text-xs text-destructive">Не удалось загрузить доступные шаблоны.</p>
-          )}
-          {!templatesQ.isLoading && !templatesQ.isError && templates.length === 0 && (
-            <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-              Доступных шаблонов процессов нет. Их создают в
-              «Трек → Настройка → Шаблоны».
-            </p>
-          )}
-          {selected && (
-            <div className="rounded-md bg-muted/40 px-2.5 py-2 text-xs">
-              <div className="font-medium">{selected.title}</div>
-              <div className="mt-0.5 text-muted-foreground">
-                {selected.kind === 'task' ? selected.taskTypeName : selected.docKindName}
-                {' · '}этапов: {selected.steps}
-                {selected.dueDays != null && ` · срок ${selected.dueDays} дн.`}
-              </div>
-              {selected.kind === 'task' && (
-                <div className="mt-1 text-muted-foreground">
-                  Исполнитель сможет передать работу дальше; комментарии и файлы останутся в истории.
-                </div>
-              )}
-              {selected.requiresPreparation && (
-                <div className="mt-1 text-amber-700 dark:text-amber-400">
-                  Сначала подготовка: {selected.preparationReason}.
-                </div>
-              )}
-            </div>
-          )}
-          {selected?.kind === 'task' && (
-            <div className="space-y-1">
-              <Label className="text-xs">Тема задачи</Label>
-              <Input value={title} onChange={(event) => setTitle(event.target.value)}
-                maxLength={300} className="h-8 text-xs" placeholder="Что нужно сделать" />
-            </div>
-          )}
-          <div className="space-y-1">
-            <Label className="text-xs">
-              {selected?.kind === 'task' ? 'Первый исполнитель' : 'Ответственный'}
-            </Label>
-            <Select value={responsibleId || 'self'}
-              onValueChange={(value) => setResponsibleId(value === 'self' ? '' : value)}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="self">Я</SelectItem>
-                {(peopleQ.data?.people ?? []).map((person) => (
-                  <SelectItem key={person.id} value={person.id}>{person.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            Сообщение попадёт в карточку как основание, а в чате останется ссылка на процесс.
-          </p>
-        </div>
-        <DialogFooter className="border-t border-border/50 px-4 py-3">
-          <Button size="sm" disabled={busy || !templateId
-              || (selected?.kind === 'task' && title.trim().length < 3)} onClick={send}>
-            {busy && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}Запустить
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 function TicketFromMessageDialog({ message, defaultObjectId, defaultObjectName, onClose, onDone }: {
   message: ChatMessage
@@ -1747,7 +1540,7 @@ function ChatBubble({
   message, album, isOwn, grouping, canDelete, editingId, editText, searchHighlight,
   onReply, onEditStart, onEditCancel, onEditSave, onEditTextChange, onDelete,
   selectionMode, selected, onSelectToggle,
-  onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onProcess, onTask, onImageClick,
+  onAuthorClick, authorAvatar, withAvatar, selfId, onReact, onPin, onForward, onTicket, onProcess, onTask, onContext, onImageClick,
   actionsOpen, onToggleActions, onCloseActions, textSizeClass,
 }: {
   message: ChatMessage
@@ -1780,6 +1573,7 @@ function ChatBubble({
   onForward?: () => void
   onTicket?: () => void
   onProcess?: () => void
+  onContext?: () => void
   onTask?: () => void
   onImageClick?: (path: string) => void
   actionsOpen: boolean
@@ -1865,6 +1659,8 @@ function ChatBubble({
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Workflow className="size-4" /></button>}
       {/* Поручение без шаблона: «сделай, пожалуйста» — половина работы рождается
           именно так, и переписывать сообщение руками в форму постановки незачем. */}
+      {onContext && <button onClick={() => runAction(onContext)} title="Действие приложения"
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Folder className="size-4" /></button>}
       {onTask && <button onClick={() => runAction(onTask)} title="Поставить поручение по сообщению"
         className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><ListChecks className="size-4" /></button>}
       {onPin && <button onClick={() => runAction(onPin)} title="Закрепить"
@@ -2233,6 +2029,7 @@ export function ChatPanel({ compact, scopeProduct }: {
   // «В заявку»: сообщение, из которого создаётся заявка.
   const [ticketMsg, setTicketMsg] = useState<ChatMessage | null>(null)
   const [processMsg, setProcessMsg] = useState<ChatMessage | null>(null)
+  const [contextMsg, setContextMsg] = useState<ChatMessage | null>(null)
   const [taskMsg, setTaskMsg] = useState<ChatMessage | null>(null)
   // Кнопку показываем только там, где продукт подключён: иначе человек жмёт и
   // получает отказ гарда — обещание, которого система не держит.
@@ -2303,9 +2100,12 @@ export function ChatPanel({ compact, scopeProduct }: {
     queryFn: () => chat.getRooms(showArchived, scope),
     refetchInterval: 60000,
   })
+  const { interactionContext, openInteraction: openContextInteraction } = useSupportContext()
+  const contextParts = interactionContext?.split(':') ?? []
+  const requestedMessage = contextParts[0] === 'room' && contextParts[1] === selectedRoom && contextParts[2] === 'message' ? contextParts[3] : undefined
   const { data: pageMessages = [], isLoading: msgLoading, isError: msgError } = useQuery({
-    queryKey: ['chat-messages', selectedRoom, messageSearch],
-    queryFn: () => chat.getMessages(selectedRoom!, messageSearch || undefined),
+    queryKey: ['chat-messages', selectedRoom, messageSearch, requestedMessage],
+    queryFn: () => chat.getMessages(selectedRoom!, messageSearch || undefined, undefined, requestedMessage),
     enabled: !!selectedRoom,
     staleTime: 0,
   })
@@ -2319,6 +2119,10 @@ export function ChatPanel({ compact, scopeProduct }: {
   const messages = useMemo(
     () => (older.length ? [...older, ...pageMessages] : pageMessages),
     [older, pageMessages])
+  const visibleMessageIds = messages.slice(-200).map((m) => m.id)
+  const linkedWork = useQuery({ queryKey: ['chat-linked-work', companyId, selectedRoom, visibleMessageIds.join(',')],
+    queryFn: () => getRoomWork(companyId ?? '', selectedRoom!, visibleMessageIds),
+    enabled: !!selectedRoom && !!companyId && !!visibleMessageIds.length, refetchInterval: 30000 })
   const feedRef = useRef<HTMLDivElement>(null)
   useEffect(() => setMobileActionsFor(null), [selectedRoom])
   // Куда вернуть прокрутку после вставки истории сверху: без этого лента
@@ -2582,10 +2386,9 @@ export function ChatPanel({ compact, scopeProduct }: {
   useEffect(() => { ensurePushSubscription().catch(() => {}) }, [])
   // Открытие конкретной комнаты извне: карточка объекта зовёт
   // openInteraction('chat', 'room:<id>') — контекст доносит, какой чат показать.
-  const { interactionContext } = useSupportContext()
   useEffect(() => {
     if (interactionContext?.startsWith('room:')) {
-      setSelectedRoom(interactionContext.slice(5))
+      setSelectedRoom(interactionContext.split(':')[1])
       setShowRoomInfo(false)
     }
   }, [interactionContext])
@@ -2837,6 +2640,7 @@ export function ChatPanel({ compact, scopeProduct }: {
   // Прокрутка к найденному сообщению: id цели ставит поиск, эффект ниже доезжает
   // до неё, как только лента отрисована, и на пару секунд подсвечивает.
   const [jumpTo, setJumpTo] = useState<string | null>(null)
+  useEffect(() => { if (requestedMessage) setJumpTo(requestedMessage) }, [requestedMessage])
   const msgRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   useEffect(() => {
     if (!jumpTo) return
@@ -3143,6 +2947,8 @@ export function ChatPanel({ compact, scopeProduct }: {
   const conversationView = !selectedRoom ? null : (
     <div className="flex h-full flex-col bg-background">
       {/* Шапка */}
+      {activeRoom?.scopeRef && companyId && <WorkContextBadge companyId={companyId} subjectRef={activeRoom.scopeRef} />}
+      {requestedMessage && <Button variant="ghost" size="sm" onClick={() => openContextInteraction('chat', `room:${selectedRoom}`)}>Открыть последние сообщения</Button>}
       <div className="flex shrink-0 items-center gap-2.5 border-b border-border/50 px-3 py-2">
         <button className="inline-flex size-7 max-md:size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
           onClick={() => { if (showRoomInfo) setShowRoomInfo(false); else setSelectedRoom(null) }}>
@@ -3267,6 +3073,7 @@ export function ChatPanel({ compact, scopeProduct }: {
               .catch(() => toast.error('Не удалось загрузить файл'))
           }}
           onScope={(code) => { chat.patchRoom(selectedRoom!, { scopeProduct: code }).then(() => { qc.invalidateQueries({ queryKey: ['chat-rooms'] }); qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success(code ? 'Группа привязана к приложению' : 'Группа отвязана — чат всего пространства') }).catch((e: Error) => toast.error(e.message || 'Не удалось сменить привязку')) }}
+          onContextRef={(ref) => { chat.patchRoom(selectedRoom!, { scopeRef: ref }).then(() => { void qc.invalidateQueries({ queryKey: ['chat-rooms'] }); void qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success('Контекст обновлён') }).catch((e: Error) => toast.error(e.message)) }}
           onObject={(objectId) => { chat.patchRoom(selectedRoom!, { scopeObjectId: objectId }).then(() => { qc.invalidateQueries({ queryKey: ['chat-rooms'] }); qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success(objectId ? 'Группа привязана к объекту' : 'Группа отвязана от объекта') }).catch((e: Error) => toast.error(e.message || 'Не удалось сменить привязку')) }}
           onRemove={(uid) => { chat.removeParticipant(selectedRoom!, uid).then(() => { qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); qc.invalidateQueries({ queryKey: ['chat-rooms'] }); toast.success('Участник убран из чата') }).catch((e: Error) => toast.error(e.message || 'Не удалось убрать участника')) }}
           onSetRole={(uid, role) => { chat.setParticipantRole(selectedRoom!, uid, role).then(() => { qc.invalidateQueries({ queryKey: ['chat-room-detail', selectedRoom] }); toast.success(role === 'admin' ? 'Назначен админом чата' : 'Роль снята — участник') }).catch((e: Error) => toast.error(e.message || 'Не удалось изменить роль')) }}
@@ -3357,6 +3164,7 @@ export function ChatPanel({ compact, scopeProduct }: {
               setPendingFiles((p) => [...p, ...Array.from(e.dataTransfer.files)].slice(0, 5))
             }}>
             <div className="flex flex-col p-2.5">
+              {linkedWork.isError && <div role="alert" className="mb-2 rounded border p-2 text-xs">Не удалось обновить связанную работу. <button className="underline" onClick={() => void linkedWork.refetch()}>Повторить</button></div>}
               {/* Кнопка, а не подгрузка по прокрутке: в переписке с картинками
                   автозагрузка вверх дёргает ленту, и человек не понимает, куда
                   его унесло. Прячем при поиске — там своя выборка. */}
@@ -3420,12 +3228,14 @@ export function ChatPanel({ compact, scopeProduct }: {
                       onForward={() => setForwardMsg(msg)}
                       onTicket={activeRoom?.type !== 'direct' ? () => setTicketMsg(msg) : undefined}
                       onProcess={docsEnabled ? () => setProcessMsg(msg) : undefined}
+                      onContext={() => setContextMsg(msg)}
                       onTask={docsEnabled ? () => setTaskMsg(msg) : undefined}
                       onImageClick={openImage}
                       actionsOpen={mobileActionsFor === msg.id}
                       onToggleActions={() => setMobileActionsFor((id) => id === msg.id ? null : msg.id)}
                       onCloseActions={() => setMobileActionsFor(null)}
                       textSizeClass={CHAT_TEXT_SIZES[textSize].className} />
+                    {linkedWork.data?.items.filter((w) => w.message_id === msg.id).map((w) => <a key={`${w.kind}:${w.id}`} href={workHref(w)} className="mx-3 mb-2 block rounded border px-3 py-2 text-sm hover:bg-accent"><span className="font-medium">{w.title}</span><span className="mt-1 block text-xs text-muted-foreground">{w.state_name}</span></a>)}
                     </div>
                     </Fragment>
                   )
@@ -3599,11 +3409,13 @@ export function ChatPanel({ compact, scopeProduct }: {
             qc.invalidateQueries({ queryKey: ['chat-rooms'] })
           }} />
       )}
+      {contextMsg && <WorkContextActions companyId={companyId ?? ''} subjectRef={activeRoom?.scopeRef} message={contextMsg} onClose={() => setContextMsg(null)} />}
       {taskMsg && (
-        <TaskFromMessageDialog message={taskMsg} companyId={companyId ?? ''}
+        <TaskFromMessageDialog message={taskMsg} companyId={companyId ?? ''} subjectRef={activeRoom?.scopeRef}
           onClose={() => setTaskMsg(null)}
           onDone={(result) => {
             setTaskMsg(null)
+            void qc.invalidateQueries()
             toast.success(`Поручение №${result.number} поставлено`)
             qc.invalidateQueries({ queryKey: ['chat-messages', selectedRoom] })
             qc.invalidateQueries({ queryKey: ['tasks'] })
@@ -3611,10 +3423,11 @@ export function ChatPanel({ compact, scopeProduct }: {
           }} />
       )}
       {processMsg && (
-        <ProcessFromMessageDialog message={processMsg} companyId={companyId ?? ''}
+        <ProcessFromMessageDialog message={processMsg} companyId={companyId ?? ''} subjectRef={activeRoom?.scopeRef}
           onClose={() => setProcessMsg(null)}
           onDone={(result) => {
             setProcessMsg(null)
+            void qc.invalidateQueries()
             toast.success(result.kind === 'task'
               ? `Задача №${result.taskNumber} поставлена`
               : result.started

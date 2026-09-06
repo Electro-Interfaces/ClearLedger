@@ -15,14 +15,20 @@
  * а не по общему списку.
  */
 import { useQuery } from '@tanstack/react-query'
-import { Download, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { Download, Loader2, Printer, Search } from 'lucide-react'
+import { PanelViewTabs } from './PanelViewTabs'
+import { ViewParamsBar } from './ViewParamsBar'
+import { ReportPivot } from './ReportPivot'
+import { Input } from '@/components/ui/input'
+import { useFilters } from '@/contexts/FilterContext'
+import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { fmtMoney } from '@/services/analyticsService'
 import {
-  getStoreNetworkReport, скачатьОтчётСети, type StoreReportData,
+  getStoreNetworkReport, открытьЛистТоварногоОтчёта, скачатьОтчётСети,
+  type StoreReportData,
 } from '@/services/storeService'
 
 const nf = (n: number, d = 0) =>
@@ -30,6 +36,12 @@ const nf = (n: number, d = 0) =>
 
 /** Итоги, которые отчёты кладут рядом со строками. Показываем что есть. */
 const ИТОГИ: { поле: keyof StoreReportData; метка: string; деньги?: boolean }[] = [
+  // Товарный отчёт: те же четыре величины, которыми лист начинается и кончается.
+  // «Строк» у него не показываем — их число ни о чём не говорит бухгалтеру.
+  { поле: 'opening', метка: 'Остаток на начало', деньги: true },
+  { поле: 'incoming_retail', метка: 'Приход (розница)', деньги: true },
+  { поле: 'expense', метка: 'Расход (выручка)', деньги: true },
+  { поле: 'closing', метка: 'Остаток на конец', деньги: true },
   { поле: 'total', метка: 'Строк' },
   { поле: 'amount', метка: 'Сумма', деньги: true },
   { поле: 'revenue', метка: 'Выручка', деньги: true },
@@ -56,6 +68,21 @@ const ячейка = (v: unknown) => {
   return String(v)
 }
 
+/**
+ * Пресеты периода — те же четыре, что на рабочем месте станции. Меняют ОБЩИЙ
+ * контур наверху, а не заводят второй период внутри отчёта: правда о периоде
+ * должна быть одна, иначе человек смотрит на цифры и не знает, чей период
+ * применён — верхний или местный.
+ */
+const ПРЕСЕТЫ: { ключ: string; имя: string; дней: number }[] = [
+  { ключ: 'today', имя: 'Сегодня', дней: 0 },
+  { ключ: '7', имя: 'Неделя', дней: 6 },
+  { ключ: '30', имя: 'Месяц', дней: 29 },
+  { ключ: '90', имя: 'Квартал', дней: 89 },
+]
+
+const день = (d: Date) => d.toISOString().slice(0, 10)
+
 export function NetworkReportPanel({ kind, dateFrom, dateTo, stations }: {
   kind: string
   dateFrom: string
@@ -68,9 +95,46 @@ export function NetworkReportPanel({ kind, dateFrom, dateTo, stations }: {
     queryFn: () => getStoreNetworkReport(kind, { dateFrom, dateTo, stations }),
   })
 
+  const { setPeriod } = useFilters()
+  const [подача, сменитьПодачу] = useState<'list' | 'pivot'>('list')
+  const [поиск, искать] = useState('')
+  // Черновик произвольного периода: набирается в полях и применяется кнопкой,
+  // как в диалоге «Настройка периода» 1С и в шапке отчёта станции. Применять на
+  // каждое нажатие нельзя — первый же клик по «с» перезапросил бы отчёт за
+  // полураскрытый диапазон.
+  const [чС, поставитьС] = useState('')
+  const [чПо, поставитьПо] = useState('')
+  useEffect(() => { поставитьС(dateFrom ?? ''); поставитьПо(dateTo ?? '') }, [dateFrom, dateTo])
+
+  const пресет = (дней: number) => {
+    const по = new Date()
+    const с = new Date()
+    с.setDate(с.getDate() - дней)
+    setPeriod({ from: день(с), to: день(по) })
+  }
+
+  const показать = () => {
+    if (чС && чПо) setPeriod({ from: чС, to: чПо })
+  }
+  const черновикИной = (чС !== (dateFrom ?? '')) || (чПо !== (dateTo ?? ''))
+
   const д = отчёт.data
-  const строки = д?.rows ?? []
+  const все = д?.rows ?? []
+  // Бланк (товарный отчёт) узнаём по виду строк: у него порядок строк и есть
+  // документ, поэтому ни сводной, ни поиска по нему быть не должно —
+  // отфильтровав лист, человек получит не документ, а его обрывок.
+  const бланк = все.some((r) => r.kind)
+  // Поиск фильтрует только показанное на экране. На печатный лист и в книгу он
+  // не влияет: там документ, и обрезанный документ — не документ.
+  const строки = поиск.trim()
+    ? все.filter((r) => Object.values(r).some(
+        (v) => String(v ?? '').toLowerCase().includes(поиск.trim().toLowerCase())))
+    : все
   const показ = useVisible(строки)
+
+  const печатать = () => {
+    открытьЛистТоварногоОтчёта({ dateFrom, dateTo, stations })
+  }
 
   const скачать = async () => {
     скачивать(true)
@@ -105,8 +169,38 @@ export function NetworkReportPanel({ kind, dateFrom, dateTo, stations }: {
               {д.about}
             </p>
           )}
+          {/* Контур отчёта — рядом с заголовком, а не только в верхнем фильтре:
+              иначе человек смотрит на цифры и не знает, за какой они период и
+              по какой станции. Период и область задаются наверху, здесь их
+              видно применёнными. */}
+          <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5">
+              {dateFrom && dateTo ? `${dateFrom} — ${dateTo}` : 'период не задан'}
+            </span>
+            <span className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5">
+              {!stations?.length ? 'вся сеть'
+                : stations.map((s) => `АЗС №${s}`).join(', ')}
+            </span>
+            {kind === 'goods-report' && (stations?.length ?? 0) !== 1 && (
+              <span className="text-amber-500">
+                лист сдают за одну АЗС — выберите станцию в «Области учёта»,
+                иначе документы точек сложены вместе
+              </span>
+            )}
+          </p>
         </div>
-        <Button variant="outline" size="sm" className="ml-auto h-8 gap-1.5 text-xs"
+        {/* Товарный отчёт сдают листом с подписью, а не таблицей: печать
+            стоит первой — в Excel такой отчёт уносят, чтобы посмотреть, а
+            печатают, чтобы отчитаться. Лист тот же, что печатает станция. */}
+        {kind === 'goods-report' && (
+          <Button variant="outline" size="sm" className="ml-auto h-8 gap-1.5 text-xs"
+            onClick={печатать}>
+            <Printer className="h-3.5 w-3.5" />
+            Печать листа
+          </Button>
+        )}
+        <Button variant="outline" size="sm"
+          className={`h-8 gap-1.5 text-xs${kind === 'goods-report' ? '' : ' ml-auto'}`}
           onClick={скачать} disabled={скачивается}>
           {скачивается
             ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -128,6 +222,62 @@ export function NetworkReportPanel({ kind, dateFrom, dateTo, stations }: {
         </div>
       )}
 
+      {/* Уровень 4 «Параметры»: период теми же пресетами, что на станции, и
+          поиск по уже посчитанным строкам. Период меняет общий контур наверху —
+          второй правды о периоде в приложении быть не должно. */}
+      <ViewParamsBar>
+        <span className="flex items-center gap-1">
+          {ПРЕСЕТЫ.map((п) => (
+            <Button key={п.ключ} variant="outline" size="sm" className="h-7 px-2 text-xs"
+              onClick={() => пресет(п.дней)}>
+              {п.имя}
+            </Button>
+          ))}
+        </span>
+        {/* Произвольный период — теми же двумя полями и кнопкой «Показать», что
+            в шапке отчёта станции. Подпись перед полем, а не над ним: строка
+            остаётся строкой. */}
+        <span className="flex items-center gap-1.5 text-xs">
+          <label className="flex items-center gap-1">
+            с
+            <Input type="date" value={чС} onChange={(e) => поставитьС(e.target.value)}
+              className="h-7 w-36 text-xs" />
+          </label>
+          <label className="flex items-center gap-1">
+            по
+            <Input type="date" value={чПо} onChange={(e) => поставитьПо(e.target.value)}
+              className="h-7 w-36 text-xs" />
+          </label>
+          <Button size="sm" className="h-7 px-3 text-xs"
+            variant={черновикИной ? 'default' : 'outline'}
+            onClick={показать} disabled={!чС || !чПо}>
+            Показать
+          </Button>
+        </span>
+
+        <span className="flex items-center gap-1.5">
+          <Search className="size-3.5 text-muted-foreground" />
+          <Input value={поиск} onChange={(e) => искать(e.target.value)}
+            placeholder="поиск по строкам" className="h-7 w-52 text-xs" />
+          {поиск && (
+            <span className="text-[11px] text-muted-foreground">
+              {строки.length} из {все.length}
+            </span>
+          )}
+        </span>
+      </ViewParamsBar>
+
+      {/* Уровень 3 «Вид»: список и сводная — те же две подачи, что у отчётов
+          станции. У бланка подача одна: сводить документ нельзя. */}
+      {!бланк && (
+        <PanelViewTabs
+          tabs={[{ k: 'list', label: 'Список' }, { k: 'pivot', label: 'Сводная' }]}
+          value={подача} onChange={(k) => сменитьПодачу(k as 'list' | 'pivot')} />
+      )}
+
+      {подача === 'pivot' && !бланк ? (
+        <ReportPivot fields={д.fields} columns={д.columns} rows={строки} />
+      ) : (
       <div className="overflow-x-auto rounded-lg border border-border/50">
         <table className="w-full text-xs">
           <thead className="bg-muted/30 text-muted-foreground">
@@ -140,16 +290,37 @@ export function NetworkReportPanel({ kind, dateFrom, dateTo, stations }: {
             </tr>
           </thead>
           <tbody>
-            {показ.visible.map((строка, ri) => (
-              <tr key={ri} className="border-t border-border/30 hover:bg-accent/20">
-                {д.fields.map((f, ci) => (
-                  <td key={ci}
-                    className={`px-3 py-1.5 ${число(строка[f]) ? 'text-right tabular-nums' : ''}`}>
-                    {ячейка(строка[f])}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {показ.visible.map((строка, ri) => {
+              // Вид строки несут только отчёты-бланки: итог выделяем полужирным,
+              // раздел и остаток — курсивом на заливке, сноску печатаем во всю
+              // ширину. Экран обязан читаться так же, как лист на бумаге.
+              const вид = строка.kind as string | undefined
+              if (вид === 'сноска') {
+                return (
+                  <tr key={ri} className="border-t border-border/30">
+                    <td colSpan={д.fields.length}
+                      className="px-3 py-2 text-[11px] italic text-muted-foreground">
+                      {ячейка(строка[д.fields[0]])}
+                    </td>
+                  </tr>
+                )
+              }
+              const класс = вид === 'итог'
+                ? 'bg-muted/40 font-semibold'
+                : вид === 'раздел' || вид === 'остаток'
+                  ? 'bg-muted/20 italic font-medium'
+                  : 'hover:bg-accent/20'
+              return (
+                <tr key={ri} className={`border-t border-border/30 ${класс}`}>
+                  {д.fields.map((f, ci) => (
+                    <td key={ci}
+                      className={`px-3 py-1.5 ${число(строка[f]) ? 'text-right tabular-nums' : ''}`}>
+                      {ячейка(строка[f])}
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
           </tbody>
         </table>
         {строки.length > 300 && (
@@ -161,6 +332,7 @@ export function NetworkReportPanel({ kind, dateFrom, dateTo, stations }: {
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }

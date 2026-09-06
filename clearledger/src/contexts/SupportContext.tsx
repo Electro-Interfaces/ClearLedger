@@ -15,6 +15,7 @@ import { getRooms } from '@/services/chatService'
 import { listTasks } from '@/services/tasksService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useTasksApp } from '@/hooks/useTasksApp'
+import { openSectionOf, searchWithoutOpen } from '@/lib/openSection'
 
 // «Аудитор» здесь же, а не отдельным механизмом: он сквозной ровно как чат — его
 // зовут из любого экрана, и он должен знать, откуда позвали (`openInteraction`
@@ -62,6 +63,19 @@ export function SupportProvider({ children }: { children: ReactNode }) {
     setState((prev) => (prev.section ? { ...prev, mode } : prev))
   }, [])
   const closeInteraction = useCallback(() => setState((prev) => ({ ...prev, section: null })), [])
+
+  // Дверь снаружи: `…/?open=chat` открывает раздел ОКНОМ. Так в пространство
+  // ведёт шапка станционного агента: у станции своей переписки нет, а вести её
+  // на `/messages` значит открывать оператору приложение «Чаты» — управление
+  // каналами и составом, работа администратора. Параметр одноразовый: гасим его
+  // в адресе, иначе обновление страницы открывает окно снова.
+  useEffect(() => {
+    const section = openSectionOf(window.location.search)
+    if (!section) return
+    setState({ section, mode: 'modal', context: null })
+    window.history.replaceState({}, '',
+      window.location.pathname + searchWithoutOpen(window.location.search) + window.location.hash)
+  }, [])
 
   // Cmd/Ctrl+K — открыть/закрыть «Инфо» окном (как в TradeFrame).
   useEffect(() => {

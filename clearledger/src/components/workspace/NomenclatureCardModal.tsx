@@ -12,6 +12,7 @@ import {
   ClipboardList, Trash2, ChefHat, ShieldAlert, TrendingUp,
 } from 'lucide-react'
 import { getStoreSkuCard, type SkuMovementRow } from '@/services/storeService'
+import { ItemPassportSection } from './ItemPassportSection'
 import { fmtMoney } from '@/services/analyticsService'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 import { ModalCard } from '@/components/ui/modal-card'
@@ -71,6 +72,7 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, stati
     if (!data) return []
     const список: { key: string; label: string; count?: number }[] = [
       { key: 'card', label: 'Карточка' },
+      { key: 'network', label: 'Сеть и станции' },
       { key: 'price', label: 'Цена и остаток', count: data.stock.length || undefined },
       { key: 'moves', label: 'Движение', count: (data.purchases.length + data.movement.length) || undefined },
     ]
@@ -154,6 +156,9 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, stati
           </div>
           <div className="min-h-0 flex-1 overflow-auto p-4 space-y-3.5">
             {активна === 'card' && <NsiEditSection guid={guid} companyId={companyId} />}
+
+            {/* Сеть и станции: ярусы кодов, условия каждой АЗС, чья рецептура */}
+            {активна === 'network' && <ItemPassportSection guid={guid} />}
 
             {/* Паспорт + Штрихкоды */}
             {активна === 'card' && (

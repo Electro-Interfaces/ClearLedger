@@ -47,9 +47,25 @@ async def scope_company_id(user: User, db: AsyncSession) -> uuid.UUID:
     ref = _active_company.get()
     if ref:
         return await assert_company_member(ref, user, db)
-    if user.company_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Компания не определена")
-    return user.company_id
+    if user.company_id is not None:
+        return user.company_id
+    # Умолчания нет — но если членство ровно одно, выбирать не из чего, и
+    # отказывать не за что. Пока здесь стоял безусловный отказ, участник с
+    # единственной компанией получал 400 на части ручек: 31.08.2026 так молча
+    # гасла кнопка входа в рабочее место АЗС — экран не мог прочитать политику
+    # доступа и считал, что назначения на станцию нет.
+    свои = (await db.execute(
+        select(UserCompany.company_id).where(UserCompany.user_id == user.id)
+    )).scalars().all()
+    if len(свои) == 1:
+        return свои[0]
+    if not свои:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Компания не определена: участник не состоит ни в одной организации")
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST,
+        "Компания не определена: выберите организацию — их у вас несколько")
 
 # Текущий пользователь (для краткости в сигнатурах).
 CurrentUser = Annotated[User, Depends(get_current_user)]

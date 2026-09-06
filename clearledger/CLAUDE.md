@@ -1,6 +1,9 @@
 # CLAUDE.md — ClearLedger (продукт = TradeLedger)
 
 > Инструкции для Claude Code при работе внутри `clearledger/`.
+> Актуальные результаты всех агентов и версии стендов:
+> `D:/Users/magsp/ELSYPLUS/ecosystem-deploy/docs/CURRENT-STATE.md`.
+> Память Claude и общий канон: `docs/AGENT-MEMORY.md` в том же репозитории.
 > 📛 **Имя продукта = TradeLedger** (канон: `D:\Users\magsp\ELSYPLUS\Ledger\app\GLOSSARY.md`). `ClearLedger`/`clearledger/` — текущее имя кодовой базы; переименование в `tradeledger/` — отдельная Tier-3 миграция (затрагивает прод-деплой `ledger.dataworker.ru/ClearLedger/`). Термины входного слоя (Источник/Канал/Поток/Разрез сверки) и **4 слоя данных** (L1 RAW→L2 CLEAN→L3 EXPORT→L4 1C_REF) — по GLOSSARY.
 
 ---
@@ -17,7 +20,7 @@ TradeLedger — мультитенантная рабочая среда учё�
 
 ```bash
 npm run dev       # Vite dev-server :3010, авто-открытие браузера
-npm run build     # tsc -b && vite build → dist/
+npm run build     # vite build → dist/; типы проверяются отдельной командой
 npm run typecheck # tsc -b (инкрементально, ~25 с) — проверка перед выкаткой
 npm run lint      # eslint
 npm run preview   # превью production-сборки
@@ -68,14 +71,20 @@ SPA и выкатываются одним образом. Своих конст
 
 ---
 
-## Архитектура хранилища (текущая, v0.2)
+## Исторический локальный слой DataEntry
+
+Рабочие пространства используют FastAPI и PostgreSQL, изоляцию компаний и SSO.
+Ниже описан локальный слой раннего интерфейса/демо, а не база рабочего пространства.
+Его правила не переносить на API Ядра, Чаты, Трек и Поддержку.
 
 | Хранилище | Что хранит | Ключи |
 |-----------|-----------|-------|
 | localStorage | DataEntry[] (метаданные), компании, настройки | `clearledger-entries-{companyId}`, `clearledger-company`, `clearledger-companies`, `clearledger-customizations`, `clearledger-seeded` |
 | IndexedDB `clearledger-store` | sources (Blob), extracts (текст + поля) | По sourceId |
 
-**Целевая архитектура:** Docker (FastAPI + PostgreSQL 16 + nginx), 3 слоя данных. См. `../LAYER2_ARCHITECTURE.md`
+**Рабочая архитектура:** Docker (FastAPI + PostgreSQL 16 + nginx), Ядро в схеме
+`core`, Поддержка в `public` базы выбранного пространства. Контракт слоёв —
+`../LAYER2_ARCHITECTURE.md`, состав стека — `ecosystem-deploy/docs/CORE.md`.
 
 ---
 

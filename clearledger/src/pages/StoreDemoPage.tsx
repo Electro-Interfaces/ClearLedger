@@ -24,7 +24,7 @@ const PERIODS = [
   { days: 24, label: '1–24 августа' },
 ] as const
 
-const DEMO_VIEWS = new Set(['overview', 'sales', 'stock', 'stations'])
+const DEMO_VIEWS = new Set(['overview', 'sales', 'stock', 'stations', 'menu'])
 
 const DEFAULT_VIEW: Partial<Record<StoreMode, string>> = {
   store: 'overview',

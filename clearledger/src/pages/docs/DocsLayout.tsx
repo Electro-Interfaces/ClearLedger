@@ -8,11 +8,11 @@
  * «Пульса» — это такое же приложение Ядра, и человек, перешедший оттуда, не
  * должен заметить смены правил.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Outlet, useLocation, useSearchParams } from 'react-router-dom'
 import {
-  ChevronRight, GripVertical, PanelLeftClose, PanelLeftOpen, Plus,
+  GripVertical, PanelLeftClose, PanelLeftOpen, Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useMaxWidth } from '@/hooks/use-mobile'
@@ -165,7 +165,7 @@ export function useDocsView(route: string): string {
   // Надзорные отчёты — только тем, кто отвечает за чужую работу: сводка по
   // людям это ответ на вопрос руководителя, а не общая витрина.
   const views = (DOCS_VIEWS[route] ?? []).filter(
-    (view) => !['discipline', 'calendar'].includes(view.key) || isCompanyAdmin)
+    (view) => route !== '/docs/overview' || !['discipline', 'calendar'].includes(view.key) || isCompanyAdmin)
   const v = params.get('view')
   return v && views.some((x) => x.key === v) ? v : (views[0]?.key ?? '')
 }
@@ -178,11 +178,10 @@ export function DocsLayout() {
   const narrow = useMaxWidth(1024)
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1')
-  const mobileNavRef = useRef<HTMLElement>(null)
 
   const route = docsRouteOf(pathname)
   const views = (DOCS_VIEWS[route] ?? []).filter(
-    (view) => (!['discipline', 'calendar'].includes(view.key) || isCompanyAdmin)
+    (view) => (route !== '/docs/overview' || !['discipline', 'calendar'].includes(view.key) || isCompanyAdmin)
       && !view.hidden)
   const active = useDocsView(route)
 
@@ -287,13 +286,17 @@ export function DocsLayout() {
     else n.delete('new')
     n.delete('doc')
     n.delete('task')
+    n.delete('event')
+    n.delete('saved')
+    n.delete('tab')
+    n.delete('page')
     return n
-  }, { replace: true })
+  })
 
   // Отбор открывается на общей ленте: он её и описывает.
   const openSaved = (id: string, query: Record<string, string>) => setParams((p) => {
     const n = new URLSearchParams(p)
-    for (const key of ['scope', 'kind', 'state', 'query', 'page', 'doc', 'task']) {
+    for (const key of ['scope', 'kind', 'state', 'query', 'page', 'doc', 'task', 'event', 'tab', 'list']) {
       n.delete(key)
     }
     n.set('view', 'work')
@@ -302,7 +305,7 @@ export function DocsLayout() {
       if (value && ['scope', 'kind', 'state', 'query'].includes(key)) n.set(key, value)
     }
     return n
-  }, { replace: true })
+  })
 
   useEffect(() => {
     const requested = params.get('view')
@@ -313,7 +316,7 @@ export function DocsLayout() {
     // (ссылка на «Исполнительскую дисциплину» неадминистратору) обязан
     // переписаться, иначе экран показывает одно, а адрес говорит другое.
     const known = (DOCS_VIEWS[route] ?? [])
-      .filter((view) => view.key !== 'discipline' || isCompanyAdmin)
+      .filter((view) => route !== '/docs/overview' || !['discipline', 'calendar'].includes(view.key) || isCompanyAdmin)
       .some((view) => view.key === requested)
     if (!requested || known) return
     setParams((current) => {
@@ -326,12 +329,6 @@ export function DocsLayout() {
       return next
     }, { replace: true })
   }, [active, params, route, setParams, isCompanyAdmin])
-
-  useEffect(() => {
-    if (!narrow) return
-    const current = mobileNavRef.current?.querySelector<HTMLElement>('[aria-current="page"]')
-    current?.scrollIntoView({ block: 'nearest', inline: 'center' })
-  }, [active, narrow])
 
   const toggle = () => setCollapsed((c) => {
     localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
@@ -348,8 +345,10 @@ export function DocsLayout() {
     n.delete('tab')
     n.delete('page')
     n.delete('list')
+    n.delete('event')
+    n.delete('saved')
     return n
-  }, { replace: true })
+  })
 
   if (views.length === 0) {
     return <div className="h-full min-h-0 overflow-y-auto"><Outlet /></div>
@@ -358,59 +357,43 @@ export function DocsLayout() {
   if (narrow) {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        <div className="relative shrink-0 border-b border-border bg-card">
-          <nav ref={mobileNavRef} data-zone="Пункты раздела"
-            aria-label="Пункты раздела Трека"
-            className="flex gap-1 overflow-x-auto px-2 py-1.5 pr-12 scrollbar-hide">
-            {views.map((v) => (
-              <button key={v.key} type="button" onClick={() => open(v.key)} title={v.hint}
-                aria-current={v.key === active ? 'page' : undefined}
-                className={cn('min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  v.key === active && !savedView
-                    ? 'bg-primary/10 font-medium text-primary'
-                    : 'text-muted-foreground')}>
-                {v.label}
-              </button>
+        <nav data-zone="Пункты раздела" aria-label="Пункты раздела Трека"
+          className="shrink-0 border-b border-border bg-card p-2">
+          <select aria-label="Раздел Трека" className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-base"
+            value={savedView ? `saved:${savedView}` : openList ? `list:${openList}` : active}
+            onChange={(event) => {
+              const value = event.target.value
+              if (value.startsWith('list:')) openMyList(value.slice(5))
+              else if (value.startsWith('saved:')) {
+                const item = saved.find((entry) => entry.id === value.slice(6))
+                if (item) openSaved(item.id, item.query as Record<string, string>)
+              } else if (value === 'lists') openMyList(null)
+              else open(value)
+            }}>
+            {[...new Set(views.map((view) => view.group ?? 'Разделы'))].map((group) => (
+              <optgroup key={group} label={group}>
+                {views.filter((view) => (view.group ?? 'Разделы') === group).map((view) => (
+                  <option key={view.key} value={view.key}>
+                    {view.label}{view.badge ? ` · ${числоУ(view)}` : ''}{горит(view) ? `, просрочено ${горит(view)}` : ''}
+                  </option>
+                ))}
+              </optgroup>
             ))}
-            {saved.map((v) => (
-              <button key={v.id} type="button"
-                onClick={() => openSaved(v.id, v.query as Record<string, string>)}
-                aria-current={savedView === v.id ? 'page' : undefined}
-                className={cn('min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs transition-colors',
-                  savedView === v.id
-                    ? 'bg-primary/10 font-medium text-primary'
-                    : 'text-muted-foreground/80')}>
-                {v.name}
-              </button>
-            ))}
-            {myLists.map((l) => (
-              <button key={l.id} type="button" onClick={() => openMyList(l.id)}
-                aria-current={openList === l.id ? 'page' : undefined}
-                className={cn('min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs transition-colors',
-                  openList === l.id
-                    ? 'bg-primary/10 font-medium text-primary'
-                    : 'text-muted-foreground/80')}>
-                {l.name}{l.count > 0 && <span className="ml-1 tabular-nums opacity-70">{l.count}</span>}
-              </button>
-            ))}
-            {route === '/docs/work' && (
-              <button type="button" onClick={() => openMyList(null)}
-                aria-current={active === 'lists' && !openList ? 'page' : undefined}
-                className="min-h-11 shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-xs text-muted-foreground/80">
-                Подборки
-              </button>
+            {!views.some((view) => view.key === active) && active !== 'lists' && (
+              <option value={active}>{DOCS_VIEWS[route]?.find((view) => view.key === active)?.label}</option>
             )}
-          </nav>
-          <div className="pointer-events-none absolute inset-y-0 right-0 flex w-12 items-center justify-end bg-gradient-to-l from-card via-card/90 to-transparent pr-1">
-            <button type="button" aria-label="Показать следующие пункты раздела"
-              className="pointer-events-auto flex size-10 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-              onClick={() => mobileNavRef.current?.scrollBy({ left: 180, behavior: 'smooth' })}>
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-        {route !== '/docs/setup' && <DocsScopeBar />}
-        <div className="min-w-0 flex-1 overflow-y-auto px-3 py-3">
+            {saved.length > 0 && <optgroup label="Сохранённые представления">
+              {saved.map((view) => <option key={view.id} value={`saved:${view.id}`}>{view.name}</option>)}
+            </optgroup>}
+            {route === '/docs/work' && <optgroup label="Подборки">
+              <option value="lists">Все подборки</option>
+              {myLists.map((list) => <option key={list.id} value={`list:${list.id}`}>{list.name} · {list.count}</option>)}
+            </optgroup>}
+          </select>
+        </nav>
+        {route !== '/docs/setup' && <DocsScopeBar personal={route === '/docs/work'} />}
+        <div data-track-scroll className="min-w-0 flex-1 overflow-y-auto"
+          style={{ paddingBottom: 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))' }}>
           <Outlet />
         </div>
       </div>
@@ -571,7 +554,7 @@ export function DocsLayout() {
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Настройка — про справочники: у них нет ни периода, ни объектов, и
             кнопка «Создать» на экране видов заводит документ, а не вид. */}
-        {route !== '/docs/setup' && <DocsScopeBar />}
+        {route !== '/docs/setup' && <DocsScopeBar personal={route === '/docs/work'} />}
         <div className="min-h-0 flex-1 overflow-y-auto">
           <Outlet />
         </div>

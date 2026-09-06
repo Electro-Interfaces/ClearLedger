@@ -6551,6 +6551,7 @@ class EzsSite(Base):
     # ── ведение площадки (кто, что дальше, до какого срока) ──
     owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    workspace_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     next_action: Mapped[str | None] = mapped_column(String(300), nullable=True)
     next_action_due: Mapped[str | None] = mapped_column(String(10), nullable=True)  # ISO
     last_touch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -7366,6 +7367,8 @@ class ChatRoom(Base):
     # участка и сетевой идёт с первого дня. Отдельная колонка на каждую сущность
     # означала бы третью, четвёртую и пятую; одна строка вида и ключа покрывает
     # всё, что уже умеет пространство (site, contract, object, task, room).
+    scope_purpose: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    audience: Mapped[str] = mapped_column(String(16), nullable=False, default="mixed", server_default="mixed")
     scope_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # Аватар чата: относительный путь файла пространства (/api/files/<id>), грузится
     # владельцем/админом чата. NULL — иконка по типу комнаты.
@@ -12982,4 +12985,24 @@ class PartnerMessage(Base):
         UniqueConstraint("partner_id", "direction", "external_id",
                          name="uq_partner_message_external"),
         Index("idx_partner_messages_feed", "company_id", "partner_id", "created_at"),
+    )
+
+
+class WorkContextResult(Base):
+    __tablename__ = "work_context_results"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    context_ref: Mapped[str] = mapped_column(String(120), nullable=False)
+    work_kind: Mapped[str] = mapped_column(String(8), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    result_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        UniqueConstraint("company_id", "context_ref", "result_key", name="uq_work_context_result"),
+        Index("ix_work_context_result_pending", "created_at", postgresql_where=text("delivered_at IS NULL AND attempts < 10")),
+        Index("ix_work_context_result_work", "company_id", "work_kind", "entity_id"),
     )

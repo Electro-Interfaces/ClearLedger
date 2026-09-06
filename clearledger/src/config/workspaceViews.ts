@@ -44,7 +44,7 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   ops_economy: 'Эксплуатация · Хозяйство',
   projects: 'Проекты · Работа',
   projects_analytics: 'Проекты · Аналитика',
-  store: 'Магазин',
+  store: 'Торговый центр',
   store_documents: 'Магазин · Документы',
   store_catering: 'Магазин · Общепит',
   store_receipt: 'Магазин · Приёмка',

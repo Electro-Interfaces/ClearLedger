@@ -163,12 +163,53 @@ export interface StoreCateringData {
 export interface StoreCategoriesData {
   period: { from: string; to: string }
   categories: { category: string; revenue: number; revenue_net: number; sku_count: number; qty: number; share: number; margin: number | null; margin_pct: number | null }[]
-  summary: { count: number; revenue: number }
+  /** Разрез по товарным группам: «Табак / Сигареты», а не «Сопутка». */
+  groups?: {
+    path: string; sku_class: string; revenue: number; revenue_net: number
+    sku_count: number; qty: number; share: number; margin_pct: number | null
+  }[]
+  summary: { count: number; revenue: number; groups?: number }
 }
 export interface StoreBarcodesData {
+  /** Кодов в РАБОТЕ: активные и при живой карточке. */
   total: number
   by_type: Record<string, number>
-  items: { barcode: string; owner_name: string; type: string | null; main: boolean; owner_guid: string | null }[]
+  by_station?: Record<string, number>
+  /** По скольким кодам не было ни одной продажи. */
+  without_sales?: number
+  /** Осталось в снимке старого справочника 1С — к товару не привязаны, не показываются. */
+  archive_total?: number
+  /** Карточек, у которых код есть. */
+  items_with_barcode?: number
+  /** Кодов, встречающихся больше чем на одной карточке. */
+  duplicates?: number
+  /** Карточек, у которых кодов больше одного. */
+  multi_barcode_items?: number
+  /** Коротких внутренних номеров станции вместо кода с упаковки. */
+  internal_codes?: number
+  /** Кодов без кода кассы — по ним товар не пробить. */
+  without_ns_code?: number
+  /** Карточки без единого штрихкода: такой товар не пробить на кассе. */
+  items_without_barcode?: {
+    name: string; sku: string | null; sku_class: string
+    guid: string | null; stock_qty: number
+  }[]
+  items: {
+    barcode: string; owner_name: string; type: string | null; main: boolean
+    owner_guid: string | null
+    sku?: string | null
+    sku_class?: string
+    station_id?: number | null
+    last_sold?: string | null
+    /** Сколько кодов у этой карточки. */
+    item_barcodes?: number
+    /** На скольких карточках встречается этот код. Больше одного — дубль. */
+    dup_items?: number
+    /** Остаток именно по этому штрихкоду, а не по карточке целиком. */
+    stock_qty?: number
+    /** Код нефтесервера: без него товар по этому штрихкоду не пробьётся. */
+    ns_code?: number | null
+  }[]
 }
 export interface StoreRecipesData {
   period: { from: string; to: string }
@@ -445,7 +486,7 @@ export interface CateringIngredient {
 export interface CateringDaily { date: string; qty: number; revenue: number }
 export interface CateringDish {
   guid: string; name: string
-  qty: number; revenue: number; revenue_net: number; avg_price: number
+  qty: number; revenue: number; returns: number; vat: number; revenue_net: number; avg_price: number
   cost: number | null; cost_per_portion: number | null
   margin: number | null; food_cost_pct: number | null; margin_pct: number | null; cm_unit: number | null
   share: number; popularity_pct: number; menu_class: MenuClass
@@ -453,18 +494,43 @@ export interface CateringDish {
   /** Откуда себестоимость: 'release' — выпуск 1С (рецептура в момент продажи, готовая
    *  цифра), 'ttk' — сборка из средних закупок по составу. Покрытие ТТК к release
    *  отношения не имеет: 80% состава с ценой не делают цифру 1С неполной. */
-  cost_source: 'release' | 'ttk' | null
+  cost_source: 'edge_exact' | 'edge_estimate' | 'release' | 'ttk' | null
+  cost_status: 'exact' | 'estimate' | 'partial' | 'missing'
   preliminary: boolean
+}
+export interface CateringComparison {
+  station_id: string; week_from: string; week_to: string
+  sales_gross: number; customer_returns: number; vat: number; net_revenue: number
+  ingredient_cost: number; writeoffs: number; shortages: number; direct_losses: number
+  operating_contribution: number | null; preliminary_contribution: number
+  cost_status: 'exact' | 'estimate' | 'partial' | 'missing'
+  exact_coverage_pct: number; food_cost_pct: number | null; attach_rate: number | null
+}
+export interface CateringRecommendation { title: string; evidence: string; action: string }
+export interface CateringCrossSell {
+  available: boolean; cheques: number; kitchen_cheques: number; fuel_cheques: number
+  fuel_with_kitchen: number; attach_rate: number | null
+  kitchen_in_fuel: number; avg_kitchen_in_fuel: number | null
+  pairs: { dish: string; with_item: string; cheques: number; with_item_amount: number }[]
 }
 export interface CateringMenuData {
   period: { from: string; to: string }
   summary: {
     dishes_count: number; dishes_costed: number
-    revenue: number; revenue_net: number; portions: number
+    revenue: number; revenue_costed: number; revenue_net: number; portions: number
     cost: number; margin: number; food_cost_pct: number | null; margin_pct: number | null
+    sales_gross: number; customer_returns: number; gross_revenue: number; vat: number; net_revenue: number
+    ingredient_cost: number; ingredient_cost_exact: number; ingredient_cost_estimated: number
+    writeoffs: number; shortages: number; direct_losses: number
+    operating_contribution: number | null; preliminary_contribution: number
+    cost_status: 'exact' | 'estimate' | 'partial' | 'missing'
+    exact_coverage_pct: number; missing_loss_documents: number
   }
   matrix: Partial<Record<MenuClass, { count: number; revenue: number }>>
   dishes: CateringDish[]
+  comparison: CateringComparison[]
+  cross_sell: CateringCrossSell
+  recommendations: CateringRecommendation[]
 }
 
 export const getStoreCateringMenu = (dateFrom: string, dateTo: string, stations?: string[]) =>
@@ -565,10 +631,21 @@ export interface StoreNomenclatureItem {
   marked: boolean; weighed: boolean; kind: string; unit: string | null; has_barcode: boolean
   revenue: number; qty: number
   stock_qty: number; retail_price: number | null
+  /** Товарная группа сети — она же решает отдел кассы. */
+  group_path?: string | null
+  /** На скольких АЗС у позиции есть действующая цена. */
+  stations_count?: number
+  /** Номера АЗС, где позиция применяется: «208, 8». Пусто — не применяет никто. */
+  stations_list?: string
 }
 export interface StoreNomenclatureData {
   items: StoreNomenclatureItem[]
-  summary: { total: number; marked: number; weighed: number; with_sales: number; with_barcode: number }
+  summary: {
+    total: number; marked: number; with_sales: number; with_barcode: number
+    weighed?: number
+    /** Позиций, применяемых хотя бы на одной станции. */
+    on_stations?: number
+  }
   kinds: string[]
 }
 
@@ -1179,6 +1256,9 @@ export interface StoreReportData {
   stock_amount?: number; cost_amount?: number
   amount?: number
   violations?: number
+  // Товарный отчёт (форма офиса): величины, которыми лист начинается и кончается.
+  opening?: number | null; closing?: number | null
+  incoming_retail?: number; expense?: number
 }
 
 export const getStoreNetworkReports = () =>
@@ -1203,6 +1283,34 @@ export const storeNetworkReportCsvUrl = (kind: string, opts: {
   const q = отчётПараметры(opts)
   q.set('format', opts.format || 'csv')
   return `/api/store/reports/${kind}?${q.toString()}`
+}
+
+/**
+ * Открыть товарный отчёт печатным листом.
+ *
+ * Ссылкой это не работает по той же причине, что и выгрузка: эндпоинт закрыт
+ * авторизацией, а `<a href>` не несёт ни токен, ни выбранную компанию. Поэтому
+ * забираем ответ и показываем в окне, открытом по самому клику, — иначе
+ * браузер посчитает окно всплывающим и закроет.
+ */
+export async function открытьЛистТоварногоОтчёта(opts: {
+  dateFrom?: string; dateTo?: string; stations?: number[]
+}): Promise<void> {
+  const target = window.open('', '_blank')
+  try {
+    const q = отчётПараметры(opts)
+    const blob = await downloadBlob(`/api/store/reports/goods-report/print?${q.toString()}`)
+    const url = URL.createObjectURL(blob)
+    if (target) {
+      target.location.href = url
+    } else {
+      window.location.href = url
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (reason) {
+    target?.close()
+    throw reason
+  }
 }
 
 /**
@@ -1504,6 +1612,20 @@ export interface StoreMarkingIntegrations {
   }[]
   marked_skus: number
   groups: Record<string, string>
+  /** Группы «Честного знака» из справочника: сколько карточек в каждой. */
+  group_stats?: {
+    code: string
+    name: string
+    cash_code: number | null
+    since: string | null
+    note: string | null
+    items: number
+  }[]
+  /** Маркируемые карточки, которым группа не назначена, — работа товароведа. */
+  unassigned?: {
+    total: number
+    items: { sku: string; name: string; group_path: string }[]
+  }
 }
 
 export const getStoreMarkingIntegrations = () =>
@@ -1591,8 +1713,355 @@ export interface StoreAgentVersions {
 export const getStoreAgentVersions = () =>
   get<StoreAgentVersions>('/api/store/agent-versions')
 
-export const setStoreAgentVersion = (version: string) =>
-  put<{ ok: boolean; desired_version: string }>('/api/store/agent-versions', { version })
+
+/**
+ * Сеть одним взглядом: строка на станцию — связь, очередь в обе стороны,
+ * расхождение справочника, запас номеров. Ходить по тридцати рабочим местам
+ * не масштабируется.
+ */
+export interface StoreNetworkOverview {
+  desired_version: string
+  online: number
+  total: number
+  alerts: { station_id: number; level: string; text: string }[]
+  stations: {
+    station_id: number
+    name: string
+    state: string
+    silence_seconds: number | null
+    version: string | null
+    version_ok: boolean
+    queue_pending: number
+    downlink_waiting: number
+    downlink_oldest: string | null
+    last_packet_at: string | null
+    last_shift: number | null
+    sku_left: number | null
+    ns_code_left: number | null
+    catalog: {
+      checked_at: string | null
+      station_items: number | null
+      center_items: number | null
+      missing_in_center: number | null
+      missing_on_station: number | null
+      drafts_pending: number | null
+      examples: { uuid: string; sku: string; name: string; barcode: string }[]
+    } | null
+  }[]
+}
+
+export const getStoreNetworkOverview = () =>
+  get<StoreNetworkOverview>('/api/store/network-overview')
+
+/** Сверка «касса ↔ учёт» по сети: где касса разошлась с учётом. */
+export type StoreCashCheckStation = {
+  station_id: number
+  name: string
+  checked_at: string | null
+  taken_at: string | null
+  in_cash: number
+  should_be: number
+  matched: number
+  above: number
+  below: number
+  raw_material: number
+  not_in_cash: number
+  no_card: number
+  state: 'разбор' | 'разнесение' | 'сходится'
+}
+export type StoreCashCheckItem = {
+  ns_code: number | null
+  name: string
+  barcode: string
+  in_cash: number | null
+  should_be: number | null
+  section: number | null
+}
+export type StoreCashCheck = {
+  stations: StoreCashCheckStation[]
+  total: number
+  with_above: number
+  with_gap: number
+  above_items?: StoreCashCheckItem[]
+}
+export const getStoreCashCheck = (stationId?: number) =>
+  get<StoreCashCheck>('/api/store/cash-check'
+    + (stationId != null ? `?station_id=${stationId}` : ''))
+
+
+/**
+ * Номенклатурная матрица: кто что вправе делать по позиции на станции.
+ * Позиция заводится один раз; различия между станциями — правилами к ней.
+ */
+export interface MatrixRule {
+  id: string
+  subject: 'price' | 'assortment'
+  station_id: number | null
+  group_id: number | null
+  group_path: string
+  item_id: number | null
+  item_sku: string
+  item_name: string
+  allow: boolean
+  hard: boolean
+  reason: string
+  valid_from: string | null
+  valid_to: string | null
+  created_by: string | null
+  created_at: string | null
+  closed_at: string | null
+}
+
+export interface StoreMatrix {
+  rules: MatrixRule[]
+  stations: { station_id: number; name: string; on_air: boolean }[]
+  groups: { group_id: number; path: string; items: number }[]
+  defaults: Record<'price' | 'assortment', { allow: boolean; text: string }>
+}
+
+export interface MatrixRuleIn {
+  subject: 'price' | 'assortment'
+  allow: boolean
+  reason: string
+  station_id?: number | null
+  group_id?: number | null
+  item_id?: number | null
+  hard?: boolean
+  valid_from?: string | null
+  valid_to?: string | null
+}
+
+export interface MatrixExplain {
+  allow: boolean
+  subject: string
+  station_id: number
+  item_id: number
+  by_default: boolean
+  explanation: string
+  rule: { id: string; text: string; reason: string; allow: boolean; hard: boolean } | null
+  overridden: { id: string; text: string; reason: string; allow: boolean; hard: boolean }[]
+}
+
+/** Залить станции весь сетевой справочник одним заданием (первый запуск АЗС). */
+export const pushStoreNsi = (stationId: number) =>
+  post<{ ok: boolean; station_id: number; карточек: number; заданий: number }>(
+    `/api/store/nsi/push/${stationId}`, {})
+
+/** Одна строка разреза «товар × станция»: условия площадки по этой позиции. */
+export interface ItemLocationCell {
+  station_id: number
+  price: number | null
+  price_owner: 'station' | 'master'
+  assortment: boolean
+  ns_codes: number
+  stock: number | null
+  /** Есть цена и матрица не закрыла — значит позиция уедет в кассу этой АЗС. */
+  'живёт': boolean
+}
+
+export interface ItemLocationRow {
+  id: number
+  /** Внешний идентификатор карточки: по нему открывается её модалка. */
+  guid?: string | null
+  sku: string | null
+  name: string
+  unit: string
+  sku_class: string
+  group_path: string | null
+  barcodes: string[]
+  'источник': string
+  'станций': number
+  stations: ItemLocationCell[]
+}
+
+export interface ItemLocationsAnswer {
+  stations: number[]
+  total: number
+  items: ItemLocationRow[]
+  limit: number
+  offset: number
+}
+
+export interface ItemLocationsSummary {
+  stations: number[]
+  'итого': {
+    'общих': number
+    'своих': number
+    'всего_карточек': number
+    'без_станций': number
+  }
+  'по_станциям': { station_id: number; 'позиций': number; 'блюд': number; 'сырья': number }[]
+  'закрыто_матрицей': Record<number, number>
+}
+
+export const getStoreItemLocations = (
+  o: { q?: string; scope?: string; skuClass?: string; station?: number | null } = {},
+) => {
+  const p = new URLSearchParams()
+  if (o.q) p.set('q', o.q)
+  if (o.scope) p.set('scope', o.scope)
+  if (o.skuClass) p.set('sku_class', o.skuClass)
+  if (o.station != null) p.set('station', String(o.station))
+  return get<ItemLocationsAnswer>(`/api/store/item-locations?${p.toString()}`)
+}
+
+export interface ItemPassport {
+  item: {
+    id: number
+    uuid: string
+    sku: string | null
+    name: string
+    unit: string
+    vat_rate: string
+    sku_class: string
+    source: string
+    deleted: boolean
+    marked: boolean
+    mark_group: string | null
+    adult_only: boolean
+    mrc: number | null
+    brand: string | null
+    price_owner: string | null
+    group_path: string | null
+    cash_section: number | null
+  }
+  stations: number[]
+  barcodes: {
+    code: string
+    status: string
+    station_id: number | null
+    first_seen: string | null
+    last_sold: string | null
+    note: string | null
+    'кассы': number[] | null
+  }[]
+  conditions: {
+    station_id: number
+    price: number | null
+    price_author: string | null
+    price_since: string | null
+    price_owner: 'station' | 'master'
+    assortment: boolean
+    ns_codes: { code: number; barcode: string }[]
+    stock: number | null
+    'живёт': boolean
+  }[]
+  matrix_rules: {
+    subject: string
+    station_id: number | null
+    allow: boolean
+    reason: string | null
+  }[]
+  recipes: {
+    active: { station_id: number | null; version: number; 'строк': number }[]
+    effective: Record<string, { 'ярус': string | null; version: number | null; 'строк': number | null }>
+  }
+  origin: {
+    draft: {
+      station_id: number
+      author: string | null
+      created_at: string
+      resolved_at: string | null
+      sku: string | null
+    } | null
+    merged: { alias_uuid: string; reason: string; name: string | null; sku: string | null }[]
+    aliases: { code: string; kind: string; note: string | null }[]
+  }
+}
+
+export const getItemPassport = (guid: string) =>
+  get<ItemPassport>(`/api/store/catalog/item-passport/${encodeURIComponent(guid)}`)
+
+export interface StationPulseRow {
+  station_id: number
+  name: string
+  'позиций': number
+  'заявок_ждёт': number
+  'правок_цен': number
+  'закрыто_матрицей': number
+  'правил_цены': number
+  'своих_кодов': number
+  'без_кода_кассы': number
+  'блюд_без_ттк': number
+  'своих_карт': number
+  'сетевых_карт': number
+  'сверка': {
+    'момент': string | null
+    'на_станции': number | null
+    'в_центре': number | null
+    'нет_в_центре': number | null
+    'нет_на_станции': number | null
+  } | null
+  /** Справочники контрагентов: без них станция не проведёт ни одной накладной. */
+  'справочники': {
+    partners: СостояниеСправочника
+    contracts: СостояниеСправочника
+  } | null
+}
+
+export interface СостояниеСправочника {
+  'в_центре': number
+  'на_станции': number
+  'доставлено': string | null
+  'синхронно': boolean
+  'в_пути': boolean
+}
+
+export interface StationPulse {
+  days: number
+  stations: number[]
+  rows: StationPulseRow[]
+}
+
+export const getStationPulse = (days = 7) =>
+  get<StationPulse>(`/api/store/catalog/station-pulse?days=${days}`)
+
+export const getStoreItemLocationsSummary = () =>
+  get<ItemLocationsSummary>('/api/store/item-locations/summary')
+
+export interface CatalogTwinCard {
+  id: number
+  name: string
+  sku: string | null
+  sku_class: string
+  'живая': boolean
+  'станции': number[]
+  'штрихкодов': number
+  'кодов_кассы': number
+  'остаток': number
+}
+
+export interface CatalogTwins {
+  'пар': number
+  'только_живые': boolean
+  'вид': string | null
+  'по_видам': Record<string, number>
+  'группы': {
+    'ключ': string
+    'живых': number
+    'вид': string
+    'карточки': CatalogTwinCard[]
+  }[]
+}
+
+export const getCatalogTwins = (onlyLive = true, вид = '') =>
+  get<CatalogTwins>(
+    `/api/store/catalog/twins?only_live=${onlyLive}` +
+      (вид ? `&kind=${encodeURIComponent(вид)}` : ''),
+  )
+
+export const getStoreMatrix = (subject = '', includeClosed = false) =>
+  get<StoreMatrix>(`/api/store/matrix?subject=${subject}&include_closed=${includeClosed}`)
+
+export const addStoreMatrixRule = (body: MatrixRuleIn) =>
+  post<MatrixRule>('/api/store/matrix', body)
+
+export const closeStoreMatrixRule = (ruleId: string) =>
+  del<{ ok: boolean }>(`/api/store/matrix/${ruleId}`)
+
+export const explainStoreMatrix = (stationId: number, itemId: number, subject = 'price') =>
+  get<MatrixExplain>(
+    `/api/store/matrix/explain?station_id=${stationId}&item_id=${itemId}&subject=${subject}`)
 
 /** Очередь заданий центра станциям: НСИ, цены, заготовки приёмки, команды. */
 export type DownlinkState = 'ждёт станции' | 'доставлено' | 'применено' | 'отменено'
@@ -1791,6 +2260,54 @@ export interface StoreKktData {
   posts: StoreKktPost[]
   devices: { РНМ?: string; Пост?: number; МодельККТ?: string; ЗаводскойНомер?: string }[]
 }
+
+export interface StoreCashSyncStation {
+  station_id: number
+  name: string
+  version: string | null
+  last_seen: string | null
+  queue_pending: number | null
+  queue_failing: number | null
+  cash_ok: boolean
+  last_sent_at: string | null
+  snapshot_at: string | null
+  checked_at: string | null
+  in_cash: number | null
+  should_be: number | null
+  matched: number | null
+  above: number | null
+  below: number | null
+  not_in_cash: number | null
+  no_card: number | null
+  'позиций': number
+  'без_штрихкода': number
+  'без_цены': number
+  'без_кода_кассы': number
+}
+
+/** Канал справочника в кассу: очередь, отставание, карточки без реквизитов. */
+export const getStoreCashSync = () =>
+  get<{ stations: StoreCashSyncStation[]; 'заявки_на_перелив': unknown }>('/api/store/cash-sync')
+
+export interface StoreNsCodeStation {
+  station_id: number
+  name: string
+  ns_code_min: number
+  ns_code_max: number
+  'занято': number
+  'погашено': number
+  'первый': number | null
+  'последний': number | null
+  'вне_пула': number
+  'спящих': number
+  'всего_в_пуле': number
+  'свободно': number
+  'занято_долей': number
+}
+
+/** Коды нефтесервера по сети: запас номеров, спящие коды, выход за пул. */
+export const getStoreCashCodes = () =>
+  get<{ stations: StoreNsCodeStation[] }>('/api/store/cash-codes')
 
 export const getStoreKkt = (stationId: number, limit = 30) =>
   get<StoreKktData>('/api/store/kkt', { station_id: stationId, limit })
@@ -2089,6 +2606,9 @@ export interface StoreRecipeVersion {
   content_hash: string
 	source: 'center' | 'station' | 'import'
 	source_station_id: number | null
+	/** Ярус карты: null — сетевая норма, номер — карта этой станции. */
+	station_id?: number | null
+	'ярус'?: string
 	change_note: string | null
 	source_bundle_id: string | null
   valid_from: string | null
@@ -2143,7 +2663,27 @@ export interface StoreRecipeWorkspace {
     recipes: unknown[]
   } | null
   legacy_available: number
-  summary: { recipes: number; active: number; drafts: number }
+  summary: {
+    recipes: number
+    active: number
+    drafts: number
+    /** Карт, принадлежащих станциям: на ГИГ кухня ведёт свои на каждой АЗС. */
+    station_versions?: number
+    /** Сетевых норм — их может не быть вовсе. */
+    network_versions?: number
+    /** Позиций сырья с отрицательным остатком по всей сети. */
+    'сырьё_в_минусе'?: number
+    /** Во сколько это обходится: списано того, чего в учёте нет. */
+    'минус_денег'?: number
+  }
+  /** Набор доставки собирается ПО СТАНЦИИ: её карта, где нет своей — сетевая. */
+  'по_станциям'?: {
+    station_id: number
+    recipes: number
+    bundle_id: string | null
+    'сырьё_в_минусе'?: number
+    'минус_денег'?: number
+  }[]
   recipes: StoreRecipeEntry[]
   deliveries: StoreRecipeDelivery[]
 }
@@ -2266,6 +2806,9 @@ export interface StationItemDraft {
   /** Кто завёл карточку на станции. Пусто у заведённых до появления поля. */
   author?: string
   id?: number
+  /** Подсказка группы по названию: поле формы не должно оставаться пустым —
+   *  карточка без группы не уезжает в кассу (отдел приходит с группой). */
+  group_hint?: { group_id: number; path: string; cash_section: number | null } | null
 }
 
 export interface StationPartnerDraft {
@@ -2311,6 +2854,8 @@ export interface StationDrafts {
   partners: StationPartnerDraft[]
   prices: StationPriceChange[]
   proposals: StationNSIProposal[]
+  /** Дерево групп для выбора при заведении карточки. */
+  groups?: { group_id: number; path: string; cash_section: number | null }[]
 }
 
 /** Карточка сети, на которую похож черновик (совпал штрихкод). */
@@ -2350,7 +2895,14 @@ export const getDraftCandidates = (barcodes: string[]) =>
     `/api/store/station-drafts/candidates?barcodes=${encodeURIComponent(barcodes.join(','))}`)
 
 export const resolveItemDraft = (
-  draftId: number, body: { action: 'link' | 'create' | 'reject'; item_id?: number; note?: string },
+  draftId: number,
+  body: {
+    action: 'link' | 'create' | 'reject'
+    item_id?: number
+    note?: string
+    /** Группа новой карточки. Не передали — сервер возьмёт подсказку по названию. */
+    group_id?: number | null
+  },
 ) => post<Record<string, unknown>>(`/api/store/station-drafts/item/${draftId}`, body)
 
 /**
@@ -2395,6 +2947,8 @@ export interface BarcodeCollision {
   holder_last_sold: string | null
   holder_ns_codes: number
   holder_stock: number
+  /** Имена карточек совпадают: это не спор за код, а два дубля одного товара. */
+  same_item?: boolean
 }
 
 export const getBarcodeCollisions = () =>
@@ -2410,11 +2964,35 @@ export interface CatalogHealth {
   итого: {
     всего: number; живых: number
     без_класса: number; без_группы: number; без_штрихкода: number; без_цены: number
+    /** Позиции в корзине «Прочее»: группа есть, но категория ни о чём не говорит. */
+    в_прочем?: number
+    /** Из маркируемых без GTIN: столько получат его из собственного штрихкода. */
+    gtin_из_шк?: number
+    /** Всего маркируемых в живом ассортименте — знаменатель работы по GTIN. */
+    маркируемых_всего?: number
+    /** Устаревшая ставка по всему справочнику, включая архив. */
+    ставка_устарела_всего?: number
+    /** Привязки кода, отклонённые центром: код уже работал у другой карточки. */
+    привязок_отклонено?: number
+    /** Блюда с признаком маркировки: у готовой еды DataMatrix не бывает. */
+    блюда_маркируемые?: number
+    /** Блюда без карты вообще — включая те, что сейчас продать нельзя. */
+    блюда_без_ттк_всего?: number
     без_фото: number; без_бренда: number; без_состава: number
     ставка_устарела: number; маркируемые_без_gtin: number; табак_без_мрц: number
     коллизии_шк: number; блюда_без_ттк: number; предложений_ждёт: number
   }
-  дубли: { групп: number; лишних: number }
+  'по_станциям'?: { station_id: number; 'с_ценой': number; 'с_кодом_кассы': number }[]
+  /** Табак без МРЦ по станциям: нарушение ст. 13 ФЗ-15 происходит на конкретной АЗС. */
+  'мрц_по_станциям'?: { station_id: number; 'без_мрц': number }[]
+  дубли: {
+    'групп': number
+    'лишних': number
+    /** Обе карточки чем-то заняты (ШК, цена) — это работа, надо свести. */
+    'живых_пар': number
+    /** Наследие 1С: товара за ними нет, сводить нечего. */
+    'архивных': number
+  }
   по_группам: { path: string; карточек: number; живых: number }[]
   по_классам: { класс: string; карточек: number }[]
 }

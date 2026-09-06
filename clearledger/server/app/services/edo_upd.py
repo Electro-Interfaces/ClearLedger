@@ -114,11 +114,19 @@ def parse_upd(raw: bytes) -> dict:
                 if val:
                     packs.append(val)
 
-        barcode = _text(tov, "ШтрихКод", "Артикул")
+        # Штрихкод и артикул продавца — РАЗНЫЕ вещи, и складывать их в одно поле
+        # нельзя. Пока артикул подставлялся вместо отсутствующего штрихкода, он
+        # шёл дальше на сопоставление против `edge.barcode` и оседал в нашем
+        # реестре кодов: внутренние номера чужой учётной системы становились
+        # «штрихкодами» товара. Артикул продавца — ключ к его номенклатуре, а не
+        # к нашей, и живёт отдельным полем строки.
+        barcode = _text(tov, "ШтрихКод")
+        supplier_article = _text(tov, "Артикул")
         if name or qty:
             lines.append({
                 "name": name,
                 "barcode": barcode,
+                "supplier_article": supplier_article,
                 "qty_expected": qty,
                 "qty_fact": 0,          # ставит приёмщик, пересчитав товар
                 "price": price,

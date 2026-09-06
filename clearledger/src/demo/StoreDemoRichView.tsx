@@ -60,6 +60,7 @@ const VIEW_KINDS: Record<string, DemoKind> = {
   docs_stock: 'documents', docs_price: 'documents', docs_catering: 'documents',
   store_documents: 'documents', recompute: 'documents', 'cheque-journal': 'documents',
   station_health: 'network', agent_versions: 'network', downlink: 'network', storage: 'network',
+  network_overview: 'network', matrix: 'catalog',
   chain: 'integration', parity: 'integration', dedup: 'integration', cure: 'integration',
 }
 

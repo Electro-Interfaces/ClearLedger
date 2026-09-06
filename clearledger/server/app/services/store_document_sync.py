@@ -22,11 +22,12 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import StoreDocumentProjection
 from app.services.store_document_snapshot import queue_onec_document_snapshot
+from app.services.document_status_downlink import queue_document_status
 from app.services.store_documents import (
     ProjectionRevisionConflict,
     rebuild_store_document_projection,
@@ -62,9 +63,26 @@ async def сверить_документы(
     except ProjectionRevisionConflict as exc:
         # Правила разбора изменились: собрать начисто — отдельное решение
         # человека, молча переписывать историю обмен не должен.
+        #
+        # Но молчать об этом тоже нельзя. Один конфликт останавливает пересборку
+        # ВСЕГО реестра, и 22.08.2026 так вышло: приёмку поправили, ревизия не
+        # выросла, и девять дней документы станции не попадали в центр — а знал
+        # об этом только лог. Записываем отказ в состояние станции, чтобы он был
+        # виден там же, где остальная её работа.
         await db.rollback()
         итог["detail"] = f"реестр требует полной пересборки: {exc}"
         log.warning("сверка документов станции %s: %s", station_id, итог["detail"])
+        try:
+            await db.execute(text("""
+                UPDATE edge_agents
+                   SET payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object(
+                         'projection_conflict', jsonb_build_object(
+                             'at', now()::text, 'detail', :detail))
+                 WHERE company_id = :cid AND station_id = :st
+            """), {"cid": company_id, "st": station_id, "detail": итог["detail"]})
+            await db.commit()
+        except Exception:  # noqa: BLE001 — отметка не важнее обмена
+            await db.rollback()
         return итог
     except Exception as exc:  # noqa: BLE001 — обмен важнее сверки
         await db.rollback()
@@ -84,4 +102,14 @@ async def сверить_документы(
         await db.rollback()
         итог["detail"] += f", снимок не поставлен: {exc!r}"
         log.warning("снимок документов станции %s: %s", station_id, итог["detail"])
+
+    # Этап B: бух-статус собственных документов станции — обратно на станцию.
+    try:
+        n = await queue_document_status(db, company_id, station_id)
+        итог["statuses"] = n
+        итог["detail"] += f", статусов вниз: {n}"
+    except Exception as exc:  # noqa: BLE001 — статус не важнее обмена
+        await db.rollback()
+        итог["detail"] += f", статусы не поставлены: {exc!r}"
+        log.warning("статусы документов станции %s: %s", station_id, итог["detail"])
     return итог

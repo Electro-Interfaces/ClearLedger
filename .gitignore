@@ -35,6 +35,19 @@ pnpm-debug.log*
 # Claude Code
 .claude/
 
+# Временные сборки и диагностические выгрузки не являются исходниками.
+.artifacts/
+clearledger/artifacts/
+clearledger/e2e/shots*/
+clearledger/.views.json
+clearledger/.views_dump.txt
+clearledger/batch.json
+# Операционные HTML-отчёты сохранены в частном ecosystem-deploy/docs/ledger-reports/.
+clearledger/docs/orp-shema-predstavleniya.html
+clearledger/docs/razdel-kassa-razbor.html
+clearledger/docs/station-scope-audit.html
+clearledger/docs/sync-dokumentov-centr-agent.html
+
 # OS
 Thumbs.db
 Desktop.ini

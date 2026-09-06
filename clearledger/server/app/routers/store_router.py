@@ -12,9 +12,11 @@ import math
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import String, case, cast, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
@@ -48,8 +50,12 @@ from app.services import (edge_nsi, edge_projection, edge_service, store_baskets
                           store_costs, store_cure, store_dynamics,
                           store_mrc_prices, store_price_plans, store_repricing,
                           store_reports)
+from app.services.store_goods_report_print import лист_товарного_отчёта
 from app.services import recipe_versions, store_receipts as receipt_rules
 from app.services import store_receipt_accounting
+from app.services import matrix
+from app.services import item_group_guess
+from app.services import partner_sync
 from app.services.export_audit import log_export
 from app.services.edo_upd import parse_upd
 from app.services.goods_dashboard import GoodsDashboardService
@@ -260,7 +266,7 @@ async def store_stations(
 
     # Целевая версия — одна на компанию и объявляется в «Версиях агента»:
     # два разных ответа на «какой код текущий» рассинхронизировали бы экраны.
-    desired = edge_router.desired_version(await db.get(Company, cid))
+    desired = await edge_router.desired_version(db, await db.get(Company, cid))
     now = datetime.now(timezone.utc)
     stations = []
     for r in rows:
@@ -272,7 +278,9 @@ async def store_stations(
             "state": state,
             "silence_seconds": silence,
             "version": r.version,
-            "version_ok": bool(r.version) and r.version == desired,
+            "version_ok": not r.version or (
+                edge_router._номер_версии(r.version)
+                >= edge_router._номер_версии(desired)),
             "queue_pending": r.queue_pending,
             "queue_sent": r.queue_sent,
             "last_shift": r.last_shift,
@@ -323,6 +331,7 @@ PACKET_KIND_LABEL = {
     "station-nsi": "Черновики НСИ",
     "station-recipes": "Рецептуры станции",
     "station-mrc": "МРЦ станции",
+    "station-catalog": "Сводка каталога станции",
     "nsi_delta": "Карточка НСИ",
     "nsi_bulk": "Пакет НСИ",
     "user_roster": "Пользователи станции",
@@ -441,25 +450,43 @@ async def store_exchange(
     # происхождению, которое проекция кладёт в metadata документа, — отдельного
     # журнала для этого заводить не пришлось.
     ingest = [dict(r) for r in (await db.execute(text(f"""
+        -- Разбор пакетов: сколько пришло и сколько из них стало учётом.
+        --
+        -- Две свёртки вместо перебора. Раньше на каждый пакет выполнялся
+        -- подзапрос по всем записям учёта, а условие «по пакету ИЛИ по смене»
+        -- не давало планировщику соединить таблицы хешем: полторы тысячи
+        -- пакетов против восьми тысяч записей, с разбором JSON на каждой паре.
+        -- Экран «Парк станций» открывался 65 секунд — человек успевал решить,
+        -- что он сломан, и уйти. Те же цифры теперь считаются за 0,12 секунды.
+        WITH по_пакету AS (
+            SELECT d.metadata->'Edge'->>'packet_uuid' AS packet_uuid, count(*) AS n
+              FROM data_entries d
+             WHERE d.company_id = :cid AND d.source = 'edge'
+               AND d.metadata->'Edge'->>'packet_uuid' IS NOT NULL
+             GROUP BY 1
+        ),
+        по_смене AS (
+            -- Запасная привязка: перевыгрузка даёт второй пакет с теми же
+            -- документами, и по packet_uuid он выглядел бы неразобранным.
+            SELECT d.metadata->'Смена'->>'НомерСменыВнутр' AS внутр,
+                   d.metadata->'Смена'->>'КодАЗС' AS азс, count(*) AS n
+              FROM data_entries d
+             WHERE d.company_id = :cid AND d.source = 'edge'
+               AND d.metadata->'Смена'->>'НомерСменыВнутр' IS NOT NULL
+             GROUP BY 1, 2
+        )
         SELECT p.kind, count(*) AS packets,
-               count(*) FILTER (WHERE de.n > 0) AS projected,
+               count(*) FILTER (WHERE coalesce(пп.n, пс.n, 0) > 0) AS projected,
                -- Пакет без документов породить их не может: пустую смену ЦБ
                -- нельзя записывать в «не разобрано», это не дефект разбора.
                count(*) FILTER (
                    WHERE coalesce(jsonb_array_length(p.payload->'Документы'), 0) = 0) AS empty,
-               coalesce(sum(de.n), 0) AS entries
+               coalesce(sum(coalesce(пп.n, пс.n, 0)), 0) AS entries
         FROM edge_packets p
-        LEFT JOIN LATERAL (
-            -- Ищем документы этой СМЕНЫ, а не этого пакета: перевыгрузка даёт
-            -- второй пакет с теми же документами, и привязка к packet_uuid
-            -- показывала «не разобрано» там, где учёт на месте.
-            SELECT count(*) AS n FROM data_entries d
-            WHERE d.company_id = p.company_id AND d.source = 'edge'
-              AND (d.metadata->'Edge'->>'packet_uuid' = p.packet_uuid
-                   OR (p.shift_internal_no IS NOT NULL
-                       AND d.metadata->'Смена'->>'НомерСменыВнутр' = p.shift_internal_no::text
-                       AND d.metadata->'Смена'->>'КодАЗС' = p.station_id::text))
-        ) de ON true
+        LEFT JOIN по_пакету пп ON пп.packet_uuid = p.packet_uuid
+        LEFT JOIN по_смене пс ON p.shift_internal_no IS NOT NULL
+             AND пс.внутр = p.shift_internal_no::text
+             AND пс.азс = p.station_id::text
         WHERE p.company_id = :cid AND {period}
         GROUP BY p.kind ORDER BY count(*) DESC
     """), p)).mappings().all()]
@@ -586,7 +613,16 @@ async def store_exchange(
     # Станции, чьи пакеты в базе есть, а телеметрии нет: так выглядит АЗС, с
     # которой обмен шёл до появления таблицы агентов, или разовая заливка. Без
     # этих строк сумма по таблице не сходилась бы с итогом сверху.
-    for sid in sorted(set(by_station) - {s["station_id"] for s in stations}):
+    #
+    # Но только для станций, которые в сети ЕСТЬ. Пакет с кодом, которого нет
+    # ни среди агентов, ни в справочнике станций, — мусор канала: на 210 так
+    # появилась строка «агент не зарегистрирован, никогда не выходила на связь»
+    # из двух проб 01.08, и в парке она выглядела забытой АЗС.
+    известные = {r[0] for r in (await db.execute(text(
+        "SELECT id FROM edge.station WHERE company_id = :c OR company_id IS NULL"
+    ), {"c": cid})).all()}
+    for sid in sorted((set(by_station) & известные)
+                      - {s["station_id"] for s in stations}):
         ex, d = by_station[sid], down.get(sid, {})
         stations.append({
             "station_id": sid, "state": "нет агента", "silence_seconds": None,
@@ -861,8 +897,9 @@ async def store_exchange_station(
             "state": _station_state(silence),
             "silence_seconds": silence,
             "version": agent.version,
-            "version_ok": bool(agent.version) and agent.version == edge_router.desired_version(
-                await db.get(Company, cid)),
+            "version_ok": not agent.version or (
+                edge_router._номер_версии(agent.version)
+                >= edge_router._номер_версии(desired)),
             "queue_pending": agent.queue_pending,
             "queue_sent": agent.queue_sent,
             **_queue_metrics(details),
@@ -997,7 +1034,7 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
         SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.deleted,
                coalesce(i.price_owner, 'master') AS price_owner,
                g.path AS group_path, i.sku_class, i.marked, i.mark_group,
-               i.adult_only, i.mrc, i.brand, i.photo_url
+               i.adult_only, i.mrc, i.brand, i.photo_url, i.sku
         FROM edge.item i
         LEFT JOIN edge.item_group g ON g.id = i.group_id
         WHERE i.id = :id
@@ -1017,11 +1054,19 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
             SELECT station_id FROM edge_agents WHERE company_id = :c AND station_id IS NOT NULL
         """), {"c": cid})).all()]
 
-    codes = [r[0] for r in (await db.execute(text(
-        "SELECT code FROM edge.barcode WHERE item_id = :id AND status = 'active' ORDER BY code"
-    ), {"id": item_id})).all()]
+    # Коды карточки для КАЖДОЙ станции свои: сетевые (настоящие EAN) плюс её
+    # внутренние. Чужой внутренний код вниз не едет — на этой АЗС он означал
+    # бы другой товар.
+    коды_по_станциям: dict[int, list[str]] = {}
+    for st in targets:
+        коды_по_станциям[st] = [r[0] for r in (await db.execute(text("""
+            SELECT code FROM edge.barcode
+             WHERE item_id = :id AND status = 'active'
+               AND (station_id IS NULL OR station_id = :s)
+             ORDER BY code"""), {"id": item_id, "s": st})).all()]
 
     for st in targets:
+        codes = коды_по_станциям[st]
         # Не копим версии одной карточки в очереди.
         #
         # Задание несёт снимок карточки целиком, поэтому держать в очереди две
@@ -1039,13 +1084,23 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
             SELECT price FROM edge.price
             WHERE item_id = :id AND station_id = :s AND valid_to IS NULL
         """), {"id": item_id, "s": st})).scalar_one_or_none()
+        применяется = (await matrix.разрешить(
+            db, cid, matrix.ASSORTMENT, station_id=st, item_id=item_id)).allow
         db.add(EdgeDownlink(
             company_id=cid, station_id=st, kind="nsi_delta",
             payload={"uuid": str(card["external_uuid"]), "name": card["name"],
                      "unit": card["unit"], "vat_rate": card["vat_rate"],
                      "deleted": bool(card["deleted"]), "barcodes": codes,
-                     "price": float(price) if price is not None else None,
-                     "price_owner": card["price_owner"],
+                     # Закрытая матрицей позиция едет без цены — в кассу она не
+                     # попадёт, а карточка на станции останется (история смен).
+                     "price": (float(price) if price is not None
+                               and применяется else None),
+                     "assortment": bool(применяется),
+                     # Право на цену едет из матрицы, а не из колонки карточки:
+                     # правило товароведа обязано доезжать до станции тем же
+                     # тактом, что и сама карточка.
+                     "price_owner": "station" if await matrix.цену_ведёт_станция(
+                         db, cid, st, item_id) else "master",
                      # Свойства товара едут вниз вместе с ним: приёмка обязана
                      # требовать DataMatrix у маркируемого, а касса — паспорт
                      # у 18+, и решаться это должно на станции, офлайн.
@@ -1054,6 +1109,9 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
                      "adult_only": bool(card["adult_only"]),
                      "mrc": float(card["mrc"]) if card["mrc"] is not None else None,
                      "brand": card["brand"], "photo_url": card["photo_url"],
+                     # Артикул сети — тем же снимком, что и остальная карточка:
+                     # человеку у полки он нужен офлайн, а не в вебе центра.
+                     "sku": card["sku"],
                      **_оценка_себестоимости(
                          await store_costs.ориентиры(db, cid, [st]),
                          str(card["external_uuid"]))},
@@ -1070,7 +1128,10 @@ async def nsi_push_recipes(
 ):
     """Отправить станции атомарный набор действующих версий ТТК."""
     cid: uuid.UUID = await _require_central_commercial_control(user, db)
-    bundle = recipe_versions.build_bundle(await recipe_versions.active_versions(db, cid))
+    # Станции уезжает ЕЁ набор: своя карта там, где она есть, сетевая норма —
+    # там, где своей нет.
+    bundle = recipe_versions.build_bundle(
+        await recipe_versions.active_versions(db, cid, station_id=station_id))
     agent = (await db.execute(select(EdgeAgent).where(
         EdgeAgent.company_id == cid, EdgeAgent.station_id == station_id
     ))).scalar_one_or_none()
@@ -1174,13 +1235,31 @@ async def recipe_versions_workspace(
         if row.status == "active" and row.valid_to is None and item["active"] is None:
             item["active"] = data
 
-    active = await recipe_versions.active_versions(db, cid)
-    bundle = recipe_versions.build_bundle(active) if active else None
+    # ⚠ ВСЕ ЯРУСЫ, а не свёртка по одной станции.
+    #
+    # Раньше здесь звалось `active_versions(db, cid)` без station_id, и это
+    # молча означало «только сетевые карты»: при station_id=None условие
+    # `station_id == None` компилируется в `IS NULL`. На ГИГ сетевых карт нет ни
+    # одной — все 58 действующих принадлежат станциям (33 на 208, 25 на АЗС 8),
+    # поэтому список выходил пустым, у каждого блюда «действующая» становилась
+    # None, и экран показывал «0 из 65» при полностью живой кухне. Набор
+    # доставки по той же причине не собирался вовсе.
+    #
+    # Центру нужны именно все ярусы: он смотрит сеть целиком и обязан показать,
+    # где норма сетевая, а где станция её переопределила.
+    active = await recipe_versions.active_versions(db, cid, все_ярусы=True)
     active_ids = {row.id for row in active}
     for item in grouped.values():
         item["active"] = next(
             (version for version in item["history"]
              if uuid.UUID(version["id"]) in active_ids), None)
+        # Все действующие ярусы блюда: сетевой и станционные. Товаровед сети
+        # должен видеть, что латте на 208 и на 8 готовят по разным картам, —
+        # одной строки «действующая» для этого мало.
+        item["ярусы"] = [
+            {"station_id": row.station_id, "id": str(row.id), "version": row.version}
+            for row in active if row.dish_uuid == item["dish_uuid"]
+        ]
     agents = list((await db.execute(select(EdgeAgent).where(
         EdgeAgent.company_id == cid))).scalars().all())
     tasks = list((await db.execute(select(EdgeDownlink).where(
@@ -1191,10 +1270,32 @@ async def recipe_versions_workspace(
         latest_by_station.setdefault(task.station_id, task)
     agent_by_station = {agent.station_id: agent for agent in agents}
     station_ids = sorted(set(latest_by_station) | set(agent_by_station))
-    current_bundle = bundle["bundle_id"] if bundle else None
+    # Набор доставки собирается ПО СТАНЦИИ: у каждой кухни своя свёртка
+    # (её карта, а где своей нет — сетевая норма). Общий набор «на сеть» смысла
+    # не имеет — станция получает свой.
+    наборы: dict[int, dict] = {}
+    for station_id in station_ids:
+        свои = await recipe_versions.active_versions(db, cid, station_id=station_id)
+        if not свои:
+            continue
+        b = recipe_versions.build_bundle(свои)
+        наборы[station_id] = {"bundle_id": b["bundle_id"], "dishes": len(свои)}
+    bundle = None
+    if наборы:
+        первый = наборы[sorted(наборы)[0]]
+        bundle = {"bundle_id": первый["bundle_id"], "dishes": первый["dishes"]}
+
+    # ⚠ У каждой станции СВОЙ ожидаемый набор.
+    #
+    # Пока сравнивали с одним общим, состояние доставки для второй кухни было
+    # заведомо ложным: ей приписывался набор первой, и она всегда выглядела
+    # отставшей. При одной станции это не проявлялось, при двух — сразу «2 из 2
+    # требуют внимания».
     deliveries = [_delivery_state(latest_by_station.get(station_id),
-                                  agent_by_station.get(station_id), current_bundle)
+                                  agent_by_station.get(station_id),
+                                  наборы.get(station_id, {}).get("bundle_id"))
                   for station_id in station_ids]
+
 
     legacy_available = 0
     if not rows:
@@ -1203,13 +1304,58 @@ async def recipe_versions_workspace(
                 "SELECT count(*) FROM edge.recipe"))).scalar() or 0)
         except Exception:
             await db.rollback()
+    # Сырьё в минусе — главный сигнал кухни, и его негде было увидеть.
+    #
+    # Списание идёт по техкарте: каждая чашка снимает зерно, молоко и сахар.
+    # Если приход сырья не заводят, остаток уходит в минус и растёт молча —
+    # на 208 так набралось 19 210 мл молока и 3 467 г кофе за две недели.
+    # Станция это видит строкой в замечаниях, среди прочих; товаровед сети не
+    # видел вовсе — в разделе «Общепит» центра сигнала не было ни одного.
+    # Поэтому считаем здесь, рядом с картами: минус — прямое следствие того,
+    # что карта списывает, а приход не оформлен.
+    минусы = {r["station_id"]: r for r in (await db.execute(text("""
+        SELECT s.station_id,
+               count(*) AS позиций,
+               round(sum(-s.qty * coalesce(p.price, 0))::numeric, 2) AS деньги,
+               min(i.name) AS первая
+          FROM edge.stock s
+          JOIN edge.barcode b ON b.id = s.barcode_id
+          JOIN edge.item i ON i.id = b.item_id
+          JOIN edge.item_group g ON g.id = i.group_id
+          LEFT JOIN edge.price p ON p.item_id = i.id AND p.station_id = s.station_id
+                                AND p.valid_to IS NULL
+         WHERE g.path = 'Кухня / Сырьё' AND NOT i.deleted AND s.qty < 0
+           AND (i.company_id IS NULL OR i.company_id = :cid)
+         GROUP BY s.station_id
+    """), {"cid": cid})).mappings().all()}
+
+    # Разрез по станциям: сколько карт действует на каждой кухне и где кухня
+    # уже «съела» несуществующее сырьё.
+    по_станциям = [{
+        "station_id": station_id,
+        "recipes": наборы.get(station_id, {}).get("dishes", 0),
+        "bundle_id": наборы.get(station_id, {}).get("bundle_id"),
+        "сырьё_в_минусе": int(минусы.get(station_id, {}).get("позиций", 0)),
+        "минус_денег": float(минусы.get(station_id, {}).get("деньги", 0) or 0),
+    } for station_id in station_ids]
+
     return {
         "bundle": bundle, "legacy_available": legacy_available,
         "summary": {
             "recipes": len(grouped),
             "active": sum(1 for item in grouped.values() if item["active"]),
             "drafts": sum(1 for item in grouped.values() if item["draft"]),
+            # Сетевых карт на ГИГ пока нет вовсе: кухня ведёт свои на каждой
+            # АЗС. Показываем это явно, иначе «действующих 58» читается как
+            # 58 блюд, а их 57 на двух кухнях.
+            "station_versions": sum(1 for row in active if row.station_id is not None),
+            "network_versions": sum(1 for row in active if row.station_id is None),
+            # Сырьё в минусе по всей сети: сколько позиций и на сколько денег
+            # кухня списала того, чего в учёте нет.
+            "сырьё_в_минусе": sum(int(r["позиций"]) for r in минусы.values()),
+            "минус_денег": round(sum(float(r["деньги"] or 0) for r in минусы.values()), 2),
         },
+        "по_станциям": по_станциям,
         "recipes": list(grouped.values()), "deliveries": deliveries,
     }
 
@@ -1384,7 +1530,21 @@ async def store_reproject(
     p: dict = {"cid": cid, "lim": max(1, min(body.limit, 5000))}
     условия = ["p.company_id = :cid",
                "p.kind IN ('shift', 'purchase', 'writeoff', 'inventory', 'transfer',"
-               " 'return_sale', 'production')"]
+               " 'return_sale', 'production')",
+               # Служебный документ станции в учёт не идёт.
+               #
+               # Так помечен пересчёт, за которым НЕ стояло физического счёта
+               # товара: проверка приёмника, тестовый прогон, оформление правки
+               # сопровождения при рассогласовании кассы и учёта. Выпустить по
+               # нему списание недостачи или оприходование излишка значит
+               # завести в бухгалтерию документ о том, чего никто не считал —
+               # а суммы там нешуточные: у одного такого «пересчёта зала» 130
+               # тысяч недостачи и 590 тысяч излишка. Станция такие документы
+               # прячет у себя (agent doc-service), сюда признак приезжает
+               # полем «СлужебныйДокумент» в пакете.
+               """NOT EXISTS (
+            SELECT 1 FROM jsonb_array_elements(coalesce(p.payload->'Документы','[]'::jsonb)) sd
+             WHERE (sd->>'СлужебныйДокумент') IN ('true', 'True', '1'))"""]
     if body.station_id is not None:
         условия.append("p.station_id = :st")
         p["st"] = body.station_id
@@ -1614,6 +1774,8 @@ async def store_packet_revision_resolve(
                 db, cid, пакет.station_id, payload, str(пакет.packet_uuid))
         if пакет.kind in ("station-nsi", "station-mrc"):
             await edge_nsi.ingest_station_nsi(db, cid, пакет.station_id, docs)
+        if пакет.kind == "station-catalog":
+            await edge_nsi.ingest_station_catalog(db, cid, пакет.station_id, docs)
         if пакет.kind == "stock":
             await edge_router._sync_stock_packet(db, cid, пакет.station_id, payload)
         await edge_projection.project_packet(
@@ -2038,6 +2200,32 @@ async def store_repricing_apply(
                                        body.stations, body.items)
 
 
+@router.get("/reports/goods-report/print", response_class=HTMLResponse)
+async def store_goods_report_print(
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Товарный отчёт листом офиса — та же бумага, что печатает станция.
+
+    Подразделение подписывается кодом АЗС, когда выбрана одна: лист сдают за
+    конкретную точку. Выбрано несколько или вся сеть — так и печатаем, врать
+    названием одной станции нельзя.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    данные = await store_reports.BUILDERS["goods-report"](
+        db, cid, date_from, date_to, коды or None)
+    company = await db.get(Company, cid)
+    подразделение = (f"АЗС №{коды[0]}" if len(коды) == 1
+                     else (f"АЗС: {', '.join(map(str, коды))}" if коды else "вся сеть"))
+    return HTMLResponse(лист_товарного_отчёта(
+        данные, организация=getattr(company, "name", "") or "",
+        подразделение=подразделение))
+
+
 @router.get("/reports/{kind}")
 async def store_network_report(
     kind: str,
@@ -2100,8 +2288,12 @@ async def store_network_report(
             ("Сформирован", datetime.now(timezone.utc).astimezone().strftime("%d.%m.%Y %H:%M")),
             ("Источник", "Магазин · отчёты сети"),
         ]
+        # Вид строки бланка (итог/раздел/остаток/сноска) отдают только
+        # отчёты-бланки; выборки его не несут, и книга у них прежняя.
+        виды = [str(r.get("kind") or "") for r in данные["rows"]]
         книга = store_reports.xlsx_bytes(схема["columns"], строки, мета,
-                                         схема["title"], схема.get("about", ""))
+                                         схема["title"], схема.get("about", ""),
+                                         kinds=виды if any(виды) else None)
         имяКниги = f"{kind}-{date_from or 'все'}_{date_to or 'все'}.xlsx"
         return FileResponse(content=книга, media_type=XLSX_MIME,
                             headers={"Content-Disposition": content_disposition(имяКниги),
@@ -2227,14 +2419,72 @@ async def store_storage_cleanup(
 
 # Товарные группы ИСМП, до которых нам есть дело сейчас или в обозримом
 # будущем: правила и сроки у них разные, поэтому группа — справочник, а не флаг.
+# Товарные группы «Честного знака». Источник правды — таблица
+# `edge.mark_group` (заполняется миграцией v2.46): группы добавляются каждый
+# год, и держать их списком в коде значит выкатывать релиз ради строки
+# справочника. Здесь остаётся отступление на случай, до которого миграция ещё
+# не дошла, — экран не должен падать из-за пустой таблицы.
 MARK_GROUPS = {
-    "tobacco": "Табак",
+    "tobacco": "Табачная продукция",
     "nicotine": "Никотинсодержащая продукция",
     "water": "Упакованная вода",
-    "beer": "Пиво и слабый алкоголь",
+    "beer": "Пиво и слабоалкогольные напитки",
     "milk": "Молочная продукция",
-    "other": "Прочее",
 }
+
+
+async def _mark_groups(db: AsyncSession) -> list[dict]:
+    """Справочник групп с числом карточек в каждой.
+
+    Число рядом с названием отвечает на вопрос, ради которого справочник и
+    заводился: «что у нас лежит в этой группе» — раньше ответ был «236 штук
+    в корзине „по данным 1С"», то есть никакой.
+    """
+    try:
+        строки = (await db.execute(text("""
+            SELECT g.code, g.name, g.cash_code, g.since, g.note,
+                   count(i.id) FILTER (WHERE NOT i.deleted) AS items
+              FROM edge.mark_group g
+              LEFT JOIN edge.item i ON i.mark_group = g.name
+             GROUP BY g.code, g.name, g.cash_code, g.since, g.note
+             ORDER BY count(i.id) FILTER (WHERE NOT i.deleted) DESC, g.name
+        """))).mappings().all()
+    except Exception:  # noqa: BLE001 — таблицы ещё нет, миграция не дошла
+        return [{"code": code, "name": name, "cash_code": None,
+                 "since": None, "note": None, "items": 0}
+                for code, name in MARK_GROUPS.items()]
+    return [{"code": r["code"], "name": r["name"], "cash_code": r["cash_code"],
+             "since": r["since"].isoformat() if r["since"] else None,
+             "note": r["note"], "items": int(r["items"])} for r in строки]
+
+
+async def _marked_without_group(db: AsyncSession) -> dict:
+    """Маркируемые карточки, которым группа не назначена.
+
+    Это и есть работа товароведа: у каждой группы свои правила приёмки и свой
+    срок обязательности, и «маркируется, а чем — неизвестно» на тридцати точках
+    превращается в остановленную приёмку.
+    """
+    try:
+        строки = (await db.execute(text("""
+            SELECT i.sku, i.name, coalesce(g.path, '') AS group_path
+              FROM edge.item i
+              LEFT JOIN edge.item_group g ON g.id = i.group_id
+             WHERE i.marked AND NOT i.deleted
+               AND coalesce(i.mark_group, '') IN ('', 'Требует маркировки (по данным 1С)')
+             ORDER BY i.name
+             LIMIT 200
+        """))).mappings().all()
+        всего = (await db.execute(text("""
+            SELECT count(*) FROM edge.item i
+             WHERE i.marked AND NOT i.deleted
+               AND coalesce(i.mark_group, '') IN ('', 'Требует маркировки (по данным 1С)')
+        """))).scalar() or 0
+    except Exception:  # noqa: BLE001
+        return {"total": 0, "items": []}
+    return {"total": int(всего),
+            "items": [{"sku": r["sku"] or "", "name": r["name"],
+                       "group_path": r["group_path"]} for r in строки]}
 
 
 # Виды документов станции, которые ведёт агент. Ключ — тип в пакете, значение —
@@ -3325,11 +3575,17 @@ async def store_marking_integrations(
             "updated_at": строка.updated_at if строка else None,
         })
 
+    справочник = await _mark_groups(db)
+    без_группы = await _marked_without_group(db)
     return {
         "systems": системы,
         "modules": модули,
         "marked_skus": int(маркированных),
-        "groups": MARK_GROUPS,
+        # Плоский словарь оставлен ради совместимости с экраном; разбор по
+        # группам с числами — в `group_stats`.
+        "groups": {г["code"]: г["name"] for г in справочник},
+        "group_stats": справочник,
+        "unassigned": без_группы,
     }
 
 
@@ -3442,17 +3698,20 @@ async def store_agent_versions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Парк версий агента: какая объявлена целевой и у кого какая стоит.
+    """Парк версий агента: что реально стоит на станциях и кто отстал.
 
-    Обновление агента — осознанная операция с окном и откатом, а не автоматика
-    по факту расхождения. Центр здесь только объявляет, какой код считается
-    текущим; станция показывает расхождение у себя, а выкат выполняет деплой.
+    Текущей считается версия, которая РАБОТАЕТ в парке, — максимальная из
+    версий живых агентов. Ручное объявление убрано (решение МАГа 31.08.2026):
+    оно устаревало на следующий же день после выкатки, и станция писала в
+    журнал «центр ожидает другую версию» каждую минуту, хотя расхождение
+    ничему не мешает — обмен и рабочее место работают на любой версии.
+
+    Обновление агента остаётся осознанной операцией с окном и откатом: экран
+    отвечает на вопрос «кого пора обновить», а выкат выполняет деплой.
     """
     cid: uuid.UUID = await scope_company_id(user, db)
     company = await db.get(Company, cid)
-    желаемая = edge_router.desired_version(company)
-    объявлена = bool(((company.customization or {}).get("edge") or {})
-                     .get("desired_agent_version"))
+    желаемая = await edge_router.desired_version(db, company)
 
     rows = (await db.execute(
         select(EdgeAgent).where(EdgeAgent.company_id == cid).order_by(EdgeAgent.station_id)
@@ -3466,7 +3725,11 @@ async def store_agent_versions(
         stations.append({
             "station_id": r.station_id,
             "version": r.version,
-            "version_ok": r.version == желаемая,
+            # Отставшей считается станция НИЖЕ парка, а не «любая другая»:
+            # та, что первой получила новую сборку, отставшей не является.
+            "version_ok": not r.version or (
+                edge_router._номер_версии(r.version)
+                >= edge_router._номер_версии(желаемая)),
             "state": _station_state(silence),
             "silence_seconds": silence,
             "last_seen": r.last_seen,
@@ -3474,7 +3737,9 @@ async def store_agent_versions(
         })
     return {
         "desired_version": желаемая,
-        "declared": объявлена,
+        # Версия больше не объявляется руками — она считается по парку.
+        # Поле оставлено, чтобы экран прежней сборки не падал.
+        "declared": False,
         "fallback_version": edge_router.DESIRED_AGENT_VERSION,
         "total": len(stations),
         "outdated": sum(1 for s in stations if s["version"] and not s["version_ok"]),
@@ -3482,41 +3747,6 @@ async def store_agent_versions(
                      for v, n in sorted(versions.items(), key=lambda x: -x[1])],
         "stations": stations,
     }
-
-
-@router.put("/agent-versions")
-async def store_set_agent_version(
-    body: AgentVersionIn,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Объявить целевую версию агента для парка.
-
-    Раньше её знала только переменная окружения бэкенда: объявить новую версию
-    означало передеплоить стек. Право — у администратора компании: строка
-    решает, все ли станции считаются отставшими.
-    """
-    cid: uuid.UUID = await scope_company_id(user, db)
-    if not user.is_superadmin:
-        m = (await db.execute(select(UserCompany).where(
-            UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
-        if m is None or m.role != "admin":
-            raise HTTPException(403, "Целевую версию агента объявляет администратор компании")
-
-    версия = body.version.strip()
-    if not версия or len(версия) > 40:
-        raise HTTPException(400, "Версия не задана или слишком длинная")
-
-    company = await db.get(Company, cid)
-    cust = dict(company.customization or {})
-    edge = dict(cust.get("edge") or {})
-    edge["desired_agent_version"] = версия
-    cust["edge"] = edge
-    # Присваиваем НОВЫЙ словарь: JSONB-колонку SQLAlchemy не считает изменённой
-    # при правке вложенного объекта на месте, и настройка молча не сохранилась бы.
-    company.customization = cust
-    await db.commit()
-    return {"ok": True, "desired_version": версия}
 
 
 def _downlink_state(r: EdgeDownlink) -> str:
@@ -3688,6 +3918,344 @@ async def store_reconcile_same_item(
     return {"ok": True}
 
 
+@router.get("/network-overview")
+async def store_network_overview(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Вся сеть одним взглядом: где встала очередь, где справочник разошёлся.
+
+    Ходить по тридцати рабочим местам не масштабируется, а «Состояние станций»
+    отвечает про одну АЗС. Здесь по строке на станцию: связь, версия, очередь
+    в обе стороны, свежесть данных, расхождение справочника и запас номеров —
+    артикулов и кодов кассы.
+
+    Строка отвечает на один вопрос: нужен ли человек этой станции сегодня.
+    """
+    cid = await scope_company_id(user, db)
+    желаемая = await edge_router.desired_version(db, await db.get(Company, cid))
+
+    агенты = (await db.execute(text("""
+        SELECT a.station_id, a.version, a.last_seen, a.first_seen,
+               a.queue_pending, a.queue_sent, a.last_shift, a.payload,
+               coalesce(s.name, 'АЗС ' || a.station_id::text) AS name
+          FROM edge_agents a
+          LEFT JOIN edge.station s ON s.id = a.station_id
+         WHERE a.company_id = :cid
+         ORDER BY a.station_id
+    """), {"cid": cid})).mappings().all()
+
+    задания = {r["station_id"]: r for r in (await db.execute(text("""
+        SELECT station_id,
+               count(*) FILTER (WHERE acked_at IS NULL AND cancelled_at IS NULL) AS ждут,
+               min(created_at) FILTER (WHERE acked_at IS NULL AND cancelled_at IS NULL)
+                   AS самое_старое
+          FROM edge_downlink WHERE company_id = :cid GROUP BY station_id
+    """), {"cid": cid})).mappings().all()}
+
+    try:
+        сверка = {r["station_id"]: r for r in (await db.execute(text("""
+            SELECT station_id, checked_at, taken_at, station_items, center_items,
+                   drafts_pending,
+                   jsonb_array_length(missing_in_center)  AS нет_в_центре,
+                   jsonb_array_length(missing_on_station) AS нет_на_станции,
+                   missing_in_center
+              FROM edge_catalog_check WHERE company_id = :cid
+        """), {"cid": cid})).mappings().all()}
+    except Exception:  # noqa: BLE001 — таблицы ещё нет, миграция не дошла
+        сверка = {}
+
+    пакеты = {r["station_id"]: r["last_at"] for r in (await db.execute(text("""
+        SELECT station_id, max(received_at) AS last_at
+          FROM edge_packets WHERE company_id = :cid GROUP BY station_id
+    """), {"cid": cid})).mappings().all()}
+
+    now = datetime.now(timezone.utc)
+    станции = []
+    for a in агенты:
+        молчит = (now - a["last_seen"]).total_seconds() if a["last_seen"] else None
+        телеметрия = a["payload"] or {}
+        строка_сверки = сверка.get(a["station_id"])
+        задание = задания.get(a["station_id"])
+        последний_пакет = пакеты.get(a["station_id"])
+        станции.append({
+            "station_id": a["station_id"],
+            "name": a["name"],
+            "state": "офлайн" if молчит is None or молчит > 180 else "онлайн",
+            "silence_seconds": int(молчит) if молчит is not None else None,
+            "version": a["version"],
+            "version_ok": not a["version"] or (
+                edge_router._номер_версии(a["version"])
+                >= edge_router._номер_версии(желаемая)),
+            "queue_pending": a["queue_pending"] or 0,
+            "downlink_waiting": int(задание["ждут"]) if задание else 0,
+            "downlink_oldest": задание["самое_старое"] if задание else None,
+            "last_packet_at": последний_пакет,
+            "last_shift": a["last_shift"],
+            # Запас номеров: кончится — станция не заведёт карточку и не выдаст
+            # код кассе, то есть перестанет принимать товар.
+            "sku_left": телеметрия.get("sku_left"),
+            "ns_code_left": телеметрия.get("ns_code_left"),
+            "catalog": {
+                "checked_at": строка_сверки["checked_at"] if строка_сверки else None,
+                "station_items": строка_сверки["station_items"] if строка_сверки else None,
+                "center_items": строка_сверки["center_items"] if строка_сверки else None,
+                "missing_in_center": строка_сверки["нет_в_центре"] if строка_сверки else None,
+                "missing_on_station": строка_сверки["нет_на_станции"] if строка_сверки else None,
+                "drafts_pending": строка_сверки["drafts_pending"] if строка_сверки else None,
+                "examples": list(строка_сверки["missing_in_center"] or [])[:5]
+                            if строка_сверки else [],
+            } if строка_сверки else None,
+        })
+
+    # Что требует человека прямо сейчас — тем же порядком, что читает товаровед:
+    # сначала молчащие станции, потом разошедшийся справочник, потом запасы.
+    тревоги = []
+    for с in станции:
+        if с["state"] == "офлайн":
+            тревоги.append({"station_id": с["station_id"], "level": "critical",
+                            "text": "станция не выходит на связь"})
+        if (с["catalog"] or {}).get("missing_in_center"):
+            тревоги.append({"station_id": с["station_id"], "level": "warning",
+                            "text": f"карточек нет в центре: {с['catalog']['missing_in_center']}"})
+        if с["ns_code_left"] is not None and с["ns_code_left"] < 50:
+            тревоги.append({"station_id": с["station_id"], "level": "warning",
+                            "text": f"свободных кодов кассы осталось {с['ns_code_left']}"})
+        if с["sku_left"] is not None and с["sku_left"] < 100:
+            тревоги.append({"station_id": с["station_id"], "level": "warning",
+                            "text": f"артикулов в блоке осталось {с['sku_left']}"})
+        if с["downlink_waiting"] > 20:
+            тревоги.append({"station_id": с["station_id"], "level": "warning",
+                            "text": f"заданий вниз ждёт {с['downlink_waiting']}"})
+    return {"stations": станции, "alerts": тревоги,
+            "desired_version": желаемая,
+            "online": sum(1 for с in станции if с["state"] == "онлайн"),
+            "total": len(станции)}
+
+
+@router.get("/cash-sync")
+async def store_cash_sync(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Канал справочника в кассу: у какой станции касса отстала от учёта.
+
+    Монитор доставки, а не действие. Короткий файл количество только прибавляет
+    (и вычитает минусом с 31.08.2026), а полный перелив, который правит справочник
+    целиком, делает человек на станции. Центр в кассу не пишет никогда — здесь
+    видно, где «мало товара» при живом остатке, и откуда перейти на рабочее место.
+
+    Три источника, и путать их нельзя:
+      * телеметрия агента — очередь наверх, отставание, жив ли канал кассы;
+      * снимок сверки (`cash_state`) — разошлись ли остатки и на сколько;
+      * наш справочник — карточки, которые в кассу не уедут вовсе, потому что у
+        них нет штрихкода или кода кассы. Такая позиция лежит на полке и не
+        пробивается, сколько её ни досылай.
+    """
+    cid = await scope_company_id(user, db)
+    строки = [dict(r) for r in (await db.execute(text("""
+        WITH позиции AS (
+            -- Позиция станции: у неё есть цена, код кассы или остаток на этой АЗС.
+            -- Считаем по станции, а не по сети: код кассы локален, и «нет кода»
+            -- у товара на 208 ничего не говорит про АЗС 8.
+            SELECT s.id AS station_id, i.id AS item_id,
+                   EXISTS (SELECT 1 FROM edge.barcode b
+                            WHERE b.item_id = i.id AND b.status = 'active') AS есть_шк,
+                   EXISTS (SELECT 1 FROM edge.price p
+                            WHERE p.item_id = i.id AND p.station_id = s.id
+                              AND p.valid_to IS NULL AND p.price > 0)        AS есть_цена,
+                   EXISTS (SELECT 1 FROM edge.ns_code n
+                             JOIN edge.barcode b2 ON b2.id = n.barcode_id
+                            WHERE b2.item_id = i.id AND n.station_id = s.id
+                              AND n.status = 'active')                       AS есть_код
+              FROM edge.station s
+              JOIN edge.item i ON NOT i.deleted
+                              AND coalesce(i.sku_class, '') <> 'Сырьё'
+                              AND (i.company_id IS NULL OR i.company_id = :cid)
+             WHERE (s.company_id = :cid OR s.company_id IS NULL)
+               AND (EXISTS (SELECT 1 FROM edge.price p2
+                             WHERE p2.item_id = i.id AND p2.station_id = s.id
+                               AND p2.valid_to IS NULL)
+                 OR EXISTS (SELECT 1 FROM edge.ns_code n2
+                              JOIN edge.barcode b3 ON b3.id = n2.barcode_id
+                             WHERE b3.item_id = i.id AND n2.station_id = s.id
+                               AND n2.status = 'active')
+                 OR EXISTS (SELECT 1 FROM edge.stock st
+                              JOIN edge.barcode b4 ON b4.id = st.barcode_id
+                             WHERE b4.item_id = i.id AND st.station_id = s.id
+                               AND st.qty <> 0))
+        )
+        SELECT s.id AS station_id,
+               coalesce(s.name, 'АЗС ' || s.id::text) AS name,
+               a.version, a.last_seen,
+               a.queue_pending,
+               coalesce((a.payload::jsonb->>'queue_failing')::int, 0)  AS queue_failing,
+               coalesce((a.payload::jsonb->>'cash_ok')::bool, false)   AS cash_ok,
+               a.payload::jsonb->>'last_sent_at'                       AS last_sent_at,
+               a.payload::jsonb->>'snapshot_at'                        AS snapshot_at,
+               c.checked_at, c.in_cash, c.should_be, c.matched,
+               c.above, c.below, c.not_in_cash, c.no_card,
+               (SELECT count(*) FROM позиции z WHERE z.station_id = s.id)     AS позиций,
+               (SELECT count(*) FROM позиции z
+                 WHERE z.station_id = s.id AND NOT z.есть_шк)                 AS без_штрихкода,
+               (SELECT count(*) FROM позиции z
+                 WHERE z.station_id = s.id AND NOT z.есть_цена)               AS без_цены,
+               (SELECT count(*) FROM позиции z
+                 WHERE z.station_id = s.id AND NOT z.есть_код)                AS без_кода_кассы
+          FROM edge.station s
+          LEFT JOIN core.edge_agents a ON a.station_id = s.id AND a.company_id = :cid
+          LEFT JOIN core.edge_cash_check c ON c.station_id = s.id AND c.company_id = :cid
+         WHERE s.company_id = :cid OR s.company_id IS NULL
+         ORDER BY s.id
+    """), {"cid": cid})).mappings().all()]
+
+    return {"stations": строки,
+            # Заявок на перелив агент пока не шлёт: в телеметрии такого поля нет.
+            # Честно говорим об этом на экране, а не рисуем пустой блок.
+            "заявки_на_перелив": None}
+
+
+@router.get("/cash-codes")
+async def store_cash_codes(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Коды нефтесервера по сети: сколько номеров занято и сколько осталось.
+
+    Код кассы — расходник связки станция × штрихкод, а не свойство товара: он
+    переиспользуется и живёт в границах, которые нарезает центр
+    (`edge.station.ns_code_min/max`). Кончится пул — станция не сможет завести
+    новую позицию, и товар с полки не пробьётся. Поэтому запас смотрят до того,
+    как он кончился, а не после.
+
+    Спящий код здесь считается ТАК ЖЕ, как на станции: активная привязка есть,
+    а товара за ней нет — ни остатка, ни цены. Такой код держит номер и мешает
+    продать вторую упаковку того же товара; на 208 их гасили пачкой 31.07.2026.
+
+    ⚠ Экран показывает состояние, а не действие: снять или перевесить код может
+    только станция — центр в кассу не пишет никогда.
+    """
+    cid = await scope_company_id(user, db)
+    строки = [dict(r) for r in (await db.execute(text("""
+        SELECT s.id AS station_id,
+               coalesce(s.name, 'АЗС ' || s.id::text) AS name,
+               s.ns_code_min, s.ns_code_max,
+               count(c.id) FILTER (WHERE c.status = 'active')      AS занято,
+               count(c.id) FILTER (WHERE c.status <> 'active')     AS погашено,
+               min(c.ns_code) FILTER (WHERE c.status = 'active')   AS первый,
+               max(c.ns_code) FILTER (WHERE c.status = 'active')   AS последний,
+               -- За границей пула: код выдан вне нарезки центра. На 208 такие
+               -- есть (5207 при потолке 5199) — наследие 1С, которое станция
+               -- получила до того, как пул стал нарезаться заданием.
+               count(c.id) FILTER (WHERE c.status = 'active'
+                                     AND (c.ns_code < s.ns_code_min
+                                       OR c.ns_code > s.ns_code_max))
+                                                                   AS вне_пула,
+               -- Спящий: привязка активна, а товара за ней нет.
+               count(c.id) FILTER (WHERE c.status = 'active' AND NOT EXISTS (
+                   SELECT 1 FROM edge.stock st
+                    WHERE st.barcode_id = c.barcode_id AND st.qty <> 0)
+                 AND NOT EXISTS (
+                   SELECT 1 FROM edge.price pr
+                     JOIN edge.barcode bb ON bb.id = c.barcode_id
+                    WHERE pr.item_id = bb.item_id AND pr.station_id = s.id
+                      AND pr.valid_to IS NULL))                    AS спящих
+          FROM edge.station s
+          LEFT JOIN edge.ns_code c ON c.station_id = s.id
+         WHERE s.company_id = :cid OR s.company_id IS NULL
+         GROUP BY s.id, s.name, s.ns_code_min, s.ns_code_max
+         ORDER BY s.id
+    """), {"cid": cid})).mappings().all()]
+
+    for р in строки:
+        всего = (р["ns_code_max"] or 0) - (р["ns_code_min"] or 0) + 1
+        р["всего_в_пуле"] = max(всего, 0)
+        р["свободно"] = max(всего - (р["занято"] or 0), 0)
+        р["занято_долей"] = round((р["занято"] or 0) / всего * 100) if всего else 0
+
+    return {"stations": строки}
+
+
+@router.get("/cash-check")
+async def store_cash_check(
+    station_id: int | None = Query(None, description="код АЗС; пусто — вся сеть"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сверка «касса ↔ учёт» по сети: где касса разошлась с учётом.
+
+    Центр остаток кассы NeftoMS сам не видит — станция шлёт снимок сверки
+    пакетом cash_state своим тактом (edge_cash_check, одна строка на станцию).
+    Читается по НАПРАВЛЕНИЮ: касса выше учёта — разбор, ниже — окно разнесения
+    (уйдёт за такт), сырьё общепита — норма. Само выравнивание делает станция;
+    здесь надзор и приоритет.
+
+    Без station_id — строка на каждую АЗС для свода; с ним — плюс список
+    позиций «касса выше учёта» этой станции для разбора.
+    """
+    cid = await scope_company_id(user, db)
+
+    строки = (await db.execute(text("""
+        SELECT c.station_id, c.checked_at, c.taken_at, c.in_cash, c.should_be,
+               c.matched, c.above, c.below, c.raw_material, c.not_in_cash, c.no_card,
+               coalesce(s.name, 'АЗС ' || c.station_id::text) AS name
+          FROM edge_cash_check c
+          LEFT JOIN edge.station s ON s.id = c.station_id
+         WHERE c.company_id = :cid
+           -- ⚠ Приведение типа обязательно: у пустого параметра asyncpg не
+           -- может вывести тип и роняет запрос («could not determine data type
+           -- of parameter $2») — вся сеть без station_id падала с 500.
+           -- ⚠ CAST, а не `::int`: в SQLAlchemy text() двойное двоеточие читается
+           -- как начало ещё одного параметра, и запрос падает синтаксической
+           -- ошибкой. А без приведения типа вовсе asyncpg не выводит тип пустого
+           -- параметра — «could not determine data type of parameter $2».
+           AND (CAST(:st AS integer) IS NULL OR c.station_id = CAST(:st AS integer))
+         ORDER BY c.above DESC, c.not_in_cash DESC, c.station_id
+    """), {"cid": cid, "st": station_id})).mappings().all()
+
+    станции = [{
+        "station_id": r["station_id"],
+        "name": r["name"],
+        "checked_at": r["checked_at"],
+        "taken_at": r["taken_at"],
+        "in_cash": r["in_cash"],
+        "should_be": r["should_be"],
+        "matched": r["matched"],
+        # Направление — главный разрез: разбор, окно разнесения, норма.
+        "above": r["above"],           # касса выше учёта — разбор обязателен
+        "below": r["below"],           # касса ниже — окно разнесения
+        "raw_material": r["raw_material"],  # сырьё общепита — норма
+        # Наша карточка есть, а в кассе её нет — товар не пробивается («мало
+        # товара»). Это тоже разбор: справочник не доехал, а не сходится.
+        "not_in_cash": r["not_in_cash"],
+        "no_card": r["no_card"],       # строки кассы без нашей карточки
+        # Цвет строки по худшей графе. «Не в кассе» — разбор наравне с «выше»:
+        # покупателю всё равно, товар не продаётся. Иначе станция с недоехавшим
+        # справочником зеленела бы как сходящаяся.
+        "state": ("разбор" if r["above"] > 0 or r["not_in_cash"] > 0
+                  else "разнесение" if r["below"] > 0
+                  else "сходится"),
+    } for r in строки]
+
+    result = {
+        "stations": станции,
+        "total": len(станции),
+        "with_above": sum(1 for s in станции if s["above"] > 0),
+        "with_gap": sum(1 for s in станции if s["above"] > 0 or s["not_in_cash"] > 0),
+    }
+
+    # Список разбора — только для одной станции: тащить позиции всей сети незачем.
+    if station_id is not None and строки:
+        предметы = (await db.execute(text("""
+            SELECT above_items FROM edge_cash_check
+             WHERE company_id = :cid AND station_id = :st
+        """), {"cid": cid, "st": station_id})).scalar_one_or_none()
+        result["above_items"] = предметы or []
+
+    return result
+
+
+
 @router.get("/station-health")
 async def store_station_health(
     station_id: int = Query(..., description="код АЗС"),
@@ -3786,6 +4354,138 @@ async def store_places(
         "source": "edge_agent",
         "places": сводка,
         "not_on_floor": не_в_зале,
+    }
+
+
+class MatrixRuleIn(BaseModel):
+    """Новое правило матрицы. Причина обязательна: через полгода спросят «почему так»."""
+    subject: str                      # price | assortment
+    allow: bool
+    reason: str
+    station_id: int | None = None     # None — правило всей сети
+    group_id: int | None = None       # либо группа, либо позиция
+    item_id: int | None = None
+    hard: bool = False                # жёсткий запрет — только сетевой
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+
+
+@router.get("/matrix")
+async def store_matrix(
+    subject: str = Query("", description="price | assortment; пусто — оба"),
+    include_closed: bool = Query(False, description="показать историю закрытых правил"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Матрица: кто что вправе делать по каждой позиции на каждой станции.
+
+    Экран товароведа. Позиция заводится один раз; всё, что различается между
+    станциями, описано правилами к ней, а не второй карточкой. Вместе с
+    правилами отдаём станции и группы — без них форму заведения не построить,
+    а лишний запрос на каждый экран не нужен.
+    """
+    cid = await scope_company_id(user, db)
+    правила = await matrix.правила_компании(
+        db, cid, subject=subject or None, включая_закрытые=include_closed)
+
+    станции = [dict(r) for r in (await db.execute(text("""
+        SELECT s.id AS station_id, s.name,
+               EXISTS (SELECT 1 FROM core.edge_agents a
+                        WHERE a.company_id = :cid AND a.station_id = s.id) AS on_air
+          FROM edge.station s
+         WHERE s.company_id IS NULL OR s.company_id = :cid
+         ORDER BY s.id
+    """), {"cid": cid})).mappings().all()]
+
+    группы = [dict(r) for r in (await db.execute(text("""
+        SELECT g.id AS group_id, g.path,
+               count(i.id) FILTER (WHERE NOT i.deleted) AS items
+          FROM edge.item_group g
+          LEFT JOIN edge.item i ON i.group_id = g.id
+         GROUP BY g.id, g.path ORDER BY g.path
+    """))).mappings().all()]
+
+    # Умолчания показываем рядом с правилами: без них список правил читается
+    # как полная картина, а он — только исключения из умолчаний.
+    return {
+        "rules": правила,
+        "stations": станции,
+        "groups": группы,
+        "defaults": {
+            "price": {"allow": matrix.УМОЛЧАНИЯ[matrix.PRICE],
+                      "text": "цена сетевая: право станции назначается явно, с причиной"},
+            "assortment": {"allow": matrix.УМОЛЧАНИЯ[matrix.ASSORTMENT],
+                           "text": "позиция доступна всем станциям; правило нужно, чтобы исключить"},
+        },
+    }
+
+
+@router.post("/matrix")
+async def store_matrix_rule_add(
+    body: MatrixRuleIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Завести правило. Существующее на ту же четвёрку закрывается, не правится."""
+    cid = await _require_network_merchandiser(user, db)
+    try:
+        правило = await matrix.завести_правило(
+            db, cid, subject=body.subject, allow=body.allow, reason=body.reason,
+            station_id=body.station_id, group_id=body.group_id, item_id=body.item_id,
+            hard=body.hard, valid_from=body.valid_from, valid_to=body.valid_to,
+            author_id=user.id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    await db.commit()
+    return правило
+
+
+@router.delete("/matrix/{rule_id}")
+async def store_matrix_rule_close(
+    rule_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Закрыть правило. История остаётся: «почему в июле было иначе» обязано иметь ответ."""
+    cid = await _require_network_merchandiser(user, db)
+    if not await matrix.закрыть_правило(db, cid, rule_id, author_id=user.id):
+        raise HTTPException(404, "Правило не найдено или уже закрыто")
+    await db.commit()
+    return {"ok": True, "rule_id": rule_id}
+
+
+@router.get("/matrix/explain")
+async def store_matrix_explain(
+    station_id: int = Query(..., description="код АЗС"),
+    item_id: int = Query(..., description="позиция каталога"),
+    subject: str = Query("price", description="price | assortment"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """«Почему так»: какое правило решило и какие оно перебило.
+
+    Без этого ответа матрица непрозрачна: станция говорит «не могу поменять
+    цену», товаровед смотрит на список правил и гадает.
+    """
+    cid = await scope_company_id(user, db)
+    if subject not in (matrix.PRICE, matrix.ASSORTMENT):
+        raise HTTPException(400, f"неизвестный предмет правила: {subject}")
+    решение = await matrix.разрешить(db, cid, subject, station_id, item_id)
+
+    def как(п):
+        if п is None:
+            return None
+        return {"id": п.id, "station_id": п.station_id, "group_path": п.group_path,
+                "item_id": п.item_id, "allow": п.allow, "hard": п.hard,
+                "reason": п.reason, "text": п.как_текст()}
+
+    return {
+        "allow": решение.allow, "subject": subject,
+        "station_id": station_id, "item_id": item_id,
+        "by_default": решение.по_умолчанию,
+        "explanation": решение.объяснение(),
+        "rule": как(решение.сработало),
+        "overridden": [как(п) for п in решение.перебиты],
     }
 
 
@@ -3925,6 +4625,448 @@ async def assortment_publications(
     } for row in rows]}
 
 
+@router.get("/item-locations")
+async def store_item_locations(
+    q: str = Query("", description="имя, артикул или штрихкод"),
+    station: int | None = Query(None, description="только карточки этой станции"),
+    scope: str = Query("all", description="all | shared | single | none"),
+    sku_class: str = Query("", description="Сопутка | Блюдо | Сырьё"),
+    limit: int = Query(200, le=1000),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Товар × станции: где карточка применяется и на каких условиях.
+
+    Отраслевой аналог — item/location в Oracle Retail: у карточки есть сетевая
+    часть (имя, артикул, штрихкоды, группа) и часть, своя у каждой площадки
+    (цена, право на цену, применение, код кассы, остаток). Без такого разреза
+    вопрос «где этот товар продаётся и почём» решается обходом рабочих мест.
+
+    `scope`: shared — позиции больше чем одной станции, single — ровно одной,
+    none — сетевые карточки, которых не применяет никто (кандидаты в архив).
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    станции = [r[0] for r in (await db.execute(text(
+        "SELECT id FROM edge.station WHERE company_id = :c OR company_id IS NULL ORDER BY id"
+    ), {"c": cid})).all()]
+
+    условия = ["NOT i.deleted"]
+    параметры: dict = {"limit": limit, "offset": offset}
+    if q.strip():
+        условия.append("(i.name ILIKE :q OR i.sku = :точно"
+                       " OR EXISTS (SELECT 1 FROM edge.barcode b"
+                       "             WHERE b.item_id = i.id AND b.code = :точно))")
+        параметры["q"] = "%" + q.strip() + "%"
+        параметры["точно"] = q.strip()
+    if sku_class.strip():
+        условия.append("i.sku_class = :класс")
+        параметры["класс"] = sku_class.strip()
+    if station is not None:
+        условия.append("EXISTS (SELECT 1 FROM edge.price p"
+                       "         WHERE p.item_id = i.id AND p.station_id = :станция"
+                       "           AND p.valid_to IS NULL)")
+        параметры["станция"] = station
+
+    имеющие = ("(SELECT count(DISTINCT p.station_id) FROM edge.price p"
+               "  WHERE p.item_id = i.id AND p.valid_to IS NULL)")
+    if scope == "shared":
+        условия.append(имеющие + " > 1")
+    elif scope == "single":
+        условия.append(имеющие + " = 1")
+    elif scope == "none":
+        условия.append(имеющие + " = 0")
+
+    где = " AND ".join(условия)
+    всего = (await db.execute(text(
+        "SELECT count(*) FROM edge.item i WHERE " + где), параметры)).scalar() or 0
+    rows = (await db.execute(text(
+        "SELECT i.id, i.sku, i.name, i.unit, i.sku_class, i.source,"
+        " i.external_uuid::text AS guid,"
+        "       g.path AS group_path,"
+        "       coalesce((SELECT array_agg(b.code ORDER BY b.code) FROM edge.barcode b"
+        "                  WHERE b.item_id = i.id AND b.status = 'active'), ARRAY[]::text[])"
+        "         AS barcodes,"
+        "       " + имеющие + " AS станций"
+        "  FROM edge.item i"
+        "  LEFT JOIN edge.item_group g ON g.id = i.group_id"
+        " WHERE " + где +
+        " ORDER BY i.name LIMIT :limit OFFSET :offset"), параметры)).mappings().all()
+    ids = [r["id"] for r in rows]
+
+    цены, коды, остатки = {}, {}, {}
+    if ids:
+        for r in (await db.execute(text(
+            "SELECT item_id, station_id, price FROM edge.price"
+            " WHERE item_id = ANY(:ids) AND valid_to IS NULL"
+        ), {"ids": ids})).mappings().all():
+            цены[(r["item_id"], r["station_id"])] = float(r["price"])
+        for r in (await db.execute(text(
+            "SELECT b.item_id, n.station_id, count(*) AS кодов"
+            "  FROM edge.ns_code n JOIN edge.barcode b ON b.id = n.barcode_id"
+            " WHERE b.item_id = ANY(:ids) AND n.status = 'active'"
+            " GROUP BY 1, 2"
+        ), {"ids": ids})).mappings().all():
+            коды[(r["item_id"], r["station_id"])] = int(r["кодов"])
+        for r in (await db.execute(text(
+            "SELECT b.item_id, s.station_id, sum(s.qty) AS qty"
+            "  FROM edge.stock s JOIN edge.barcode b ON b.id = s.barcode_id"
+            " WHERE b.item_id = ANY(:ids)"
+            " GROUP BY 1, 2"
+        ), {"ids": ids})).mappings().all():
+            остатки[(r["item_id"], r["station_id"])] = float(r["qty"] or 0)
+
+    # Матрица считается пачкой на станцию: правил единицы, позиций сотни.
+    пары = [(r["id"], r["group_path"] or "") for r in rows]
+    матрица = {}
+    for st in станции:
+        матрица[st] = (
+            await matrix.применение(db, cid, st, пары),
+            await matrix.владельцы_цены(db, cid, st, пары),
+        )
+
+    items = []
+    for r in rows:
+        по_станциям = []
+        for st in станции:
+            применяется, владельцы = матрица[st]
+            цена = цены.get((r["id"], st))
+            разрешена = bool(применяется.get(r["id"], True))
+            по_станциям.append({
+                "station_id": st,
+                "price": цена,
+                "price_owner": "station" if владельцы.get(r["id"]) else "master",
+                "assortment": разрешена,
+                "ns_codes": коды.get((r["id"], st), 0),
+                "stock": остатки.get((r["id"], st)),
+                # Позиция живёт на станции, когда у неё там есть цена и матрица
+                # её не закрыла: ровно эта пара решает, уедет ли товар в кассу.
+                "живёт": bool(цена is not None and разрешена),
+            })
+        items.append({
+            "id": r["id"], "sku": r["sku"], "name": r["name"], "unit": r["unit"],
+            "sku_class": r["sku_class"], "group_path": r["group_path"],
+            "barcodes": list(r["barcodes"] or []),
+            "источник": r["source"],
+            # GUID нужен экрану, чтобы открыть карточку товара по строке:
+            # модалка карточки адресуется внешним идентификатором, а не нашим id.
+            "guid": r["guid"],
+            "станций": int(r["станций"] or 0),
+            "stations": по_станциям,
+        })
+    return {"stations": станции, "total": всего, "items": items,
+            "limit": limit, "offset": offset}
+
+
+@router.get("/catalog/item-passport/{guid}")
+async def catalog_item_passport(
+    guid: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Паспорт карточки: чем она является в сети и на каждой станции.
+
+    Отвечает на четыре вопроса, которых не было в карточке товара:
+    какие коды у неё сетевые, а какие принадлежат одной АЗС; на каких условиях
+    она живёт на каждой станции; чья рецептура по ней действует; откуда она
+    вообще взялась и что в неё слито.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    карточка = (await db.execute(text("""
+        SELECT i.id, i.external_uuid::text AS uuid, i.sku, i.name, i.unit, i.vat_rate,
+               i.sku_class, i.source, i.deleted, i.marked, i.mark_group, i.adult_only,
+               i.mrc, i.brand, i.price_owner, i.created_at, i.updated_at,
+               g.path AS group_path, g.cash_section
+          FROM edge.item i
+          LEFT JOIN edge.item_group g ON g.id = i.group_id
+         WHERE i.external_uuid::text = :g OR i.sku = :g
+         LIMIT 1
+    """), {"g": guid})).mappings().first()
+    if карточка is None:
+        raise HTTPException(404, "Карточка не найдена")
+    item_id = карточка["id"]
+
+    станции = [r[0] for r in (await db.execute(text(
+        "SELECT id FROM edge.station WHERE company_id = :c OR company_id IS NULL ORDER BY id"
+    ), {"c": cid})).all()]
+
+    # Штрихкоды с ярусом: сетевой EAN против внутреннего кода одной АЗС.
+    коды = [dict(r) for r in (await db.execute(text("""
+        SELECT b.code, b.status::text AS status, b.station_id, b.first_seen,
+               b.last_sold, b.note,
+               (SELECT array_agg(DISTINCT n.station_id ORDER BY n.station_id)
+                  FROM edge.ns_code n
+                 WHERE n.barcode_id = b.id AND n.status = 'active') AS кассы
+          FROM edge.barcode b WHERE b.item_id = :i
+         ORDER BY (b.status = 'active') DESC, b.code
+    """), {"i": item_id})).mappings().all()]
+
+    # Условия станции: цена, её владелец, применение, код кассы, остаток.
+    цены = {r["station_id"]: r for r in (await db.execute(text("""
+        SELECT station_id, price, author, valid_from FROM edge.price
+         WHERE item_id = :i AND valid_to IS NULL
+    """), {"i": item_id})).mappings().all()}
+    остатки = {r["station_id"]: float(r["qty"] or 0) for r in (await db.execute(text("""
+        SELECT s.station_id, sum(s.qty) AS qty FROM edge.stock s
+          JOIN edge.barcode b ON b.id = s.barcode_id
+         WHERE b.item_id = :i GROUP BY 1
+    """), {"i": item_id})).mappings().all()}
+    коды_кассы = {}
+    for r in (await db.execute(text("""
+        SELECT n.station_id, n.ns_code AS code, b.code AS barcode FROM edge.ns_code n
+          JOIN edge.barcode b ON b.id = n.barcode_id
+         WHERE b.item_id = :i AND n.status = 'active'
+    """), {"i": item_id})).mappings().all():
+        коды_кассы.setdefault(r["station_id"], []).append(
+            {"code": r["code"], "barcode": r["barcode"]})
+
+    пары = [(item_id, карточка["group_path"] or "")]
+    условия = []
+    for st in станции:
+        применение = await matrix.применение(db, cid, st, пары)
+        владелец = await matrix.владельцы_цены(db, cid, st, пары)
+        цена = цены.get(st)
+        разрешена = bool(применение.get(item_id, True))
+        условия.append({
+            "station_id": st,
+            "price": float(цена["price"]) if цена else None,
+            "price_author": цена["author"] if цена else None,
+            "price_since": цена["valid_from"] if цена else None,
+            "price_owner": "station" if владелец.get(item_id) else "master",
+            "assortment": разрешена,
+            "ns_codes": коды_кассы.get(st, []),
+            "stock": остатки.get(st),
+            "живёт": bool(цена is not None and разрешена),
+        })
+
+    # Правила матрицы, которые касаются именно этой карточки.
+    правила = [dict(r) for r in (await db.execute(text("""
+        SELECT subject, station_id, allow, reason, valid_from, created_at
+          FROM edge.matrix_rule
+         WHERE item_id = :i AND valid_to IS NULL AND closed_at IS NULL
+         ORDER BY subject, station_id NULLS FIRST
+    """), {"i": item_id})).mappings().all()]
+
+    # Рецептура: чья карта действует. Ярус станции перебивает сетевую норму.
+    карты = [dict(r) for r in (await db.execute(text("""
+        SELECT station_id, version, status, output_qty, output_unit,
+               jsonb_array_length(coalesce(lines, '[]'::jsonb)) AS строк,
+               source, source_station_id, valid_from, change_note
+          FROM store_recipe_versions
+         WHERE company_id = :cid AND dish_uuid = :u
+           AND status = 'active' AND valid_to IS NULL
+         ORDER BY station_id NULLS FIRST
+    """), {"cid": cid, "u": карточка["uuid"]})).mappings().all()]
+    действует = {}
+    сетевая = next((к for к in карты if к["station_id"] is None), None)
+    for st in станции:
+        своя = next((к for к in карты if к["station_id"] == st), None)
+        выбор = своя or сетевая
+        действует[st] = {
+            "ярус": None if выбор is None else ("сеть" if выбор["station_id"] is None
+                                                else f"АЗС {выбор['station_id']}"),
+            "version": выбор["version"] if выбор else None,
+            "строк": выбор["строк"] if выбор else None,
+        }
+
+    # Происхождение: заявка станции и всё, что слито в эту карточку.
+    заявка = (await db.execute(text("""
+        SELECT station_id, author, created_at, resolved_at, sku, barcodes, note
+          FROM edge.item_draft
+         WHERE resolved_item = :item_id
+            OR (sku IS NOT NULL AND sku = :sku)
+         ORDER BY created_at LIMIT 1
+    """), {"item_id": item_id, "sku": карточка["sku"]})).mappings().first()
+    слито = [dict(r) for r in (await db.execute(text("""
+        SELECT a.alias_uuid, a.reason, a.created_at, d.name, d.sku
+          FROM store_item_aliases a
+          LEFT JOIN edge.item d ON d.external_uuid::text = a.alias_uuid
+         WHERE a.canonical_uuid = :u AND a.company_id = :cid
+         ORDER BY a.created_at DESC
+    """), {"u": карточка["uuid"], "cid": cid})).mappings().all()]
+    прежние = [dict(r) for r in (await db.execute(text("""
+        SELECT code, kind, note FROM edge.item_code WHERE item_id = :i ORDER BY kind, code
+    """), {"i": item_id})).mappings().all()]
+
+    return {
+        "item": dict(карточка),
+        "stations": станции,
+        "barcodes": коды,
+        "conditions": условия,
+        "matrix_rules": правила,
+        "recipes": {"active": карты, "effective": действует},
+        "origin": {"draft": dict(заявка) if заявка else None,
+                   "merged": слито, "aliases": прежние},
+    }
+
+
+@router.get("/catalog/station-pulse")
+async def catalog_station_pulse(
+    days: int = Query(7, ge=1, le=90, description="глубина по правкам станций"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Что происходит со справочником на станциях — одним экраном из центра.
+
+    Товаровед сети не сидит на АЗС и узнаёт о её работе с карточками только тогда,
+    когда что-то сломалось. Здесь собрано то, что станция делает со справочником
+    сама: заводит карточки, меняет цены, накапливает позиции, которые в кассу не
+    уедут. Каждая цифра — отбор, который можно открыть и разобрать.
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    станции = [r[0] for r in (await db.execute(text(
+        "SELECT id FROM edge.station WHERE company_id = :c OR company_id IS NULL ORDER BY id"
+    ), {"c": cid})).all()]
+
+    рядом = (await db.execute(text("""
+        SELECT s.id AS station_id, s.name,
+               (SELECT count(*) FROM edge.item_draft d
+                 WHERE d.station_id = s.id AND d.resolved_at IS NULL) AS заявок_ждёт,
+               (SELECT count(*) FROM edge.item_draft d
+                 WHERE d.station_id = s.id AND d.resolved_at IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM edge.barcode b
+                                    WHERE b.item_id IS NOT NULL AND b.code = ANY(d.barcodes)))
+                                                                        AS заявок_новых,
+               (SELECT count(*) FROM edge.station_price_change c
+                 WHERE c.station_id = s.id
+                   AND c.changed_at > now() - make_interval(days => :days)) AS правок_цен,
+               (SELECT count(*) FROM edge.price p JOIN edge.item i ON i.id = p.item_id
+                 WHERE p.station_id = s.id AND p.valid_to IS NULL AND NOT i.deleted)
+                                                                        AS позиций,
+               (SELECT count(*) FROM edge.matrix_rule r
+                 WHERE r.station_id = s.id AND r.subject = 'assortment'
+                   AND NOT r.allow AND r.valid_to IS NULL AND r.closed_at IS NULL)
+                                                                        AS закрыто_матрицей,
+               (SELECT count(*) FROM edge.matrix_rule r
+                 WHERE r.station_id = s.id AND r.subject = 'price'
+                   AND r.valid_to IS NULL AND r.closed_at IS NULL)       AS правил_цены,
+               (SELECT count(*) FROM edge.barcode b
+                 WHERE b.station_id = s.id AND b.status = 'active')      AS своих_кодов
+          FROM edge.station s
+         WHERE s.company_id = :cid OR s.company_id IS NULL
+         ORDER BY s.id
+    """), {"cid": cid, "days": days})).mappings().all()
+
+    # Позиции, которые в кассу не уедут: цена есть, а кода кассы нет. Это не
+    # авария, а работа — товар заведён, но пробить его на этой АЗС нельзя.
+    без_кода = {r["station_id"]: r["сколько"] for r in (await db.execute(text("""
+        SELECT p.station_id, count(*) AS сколько
+          FROM edge.price p JOIN edge.item i ON i.id = p.item_id
+         WHERE p.valid_to IS NULL AND NOT i.deleted
+           AND NOT EXISTS (
+               SELECT 1 FROM edge.ns_code n JOIN edge.barcode b ON b.id = n.barcode_id
+                WHERE b.item_id = i.id AND n.station_id = p.station_id
+                  AND n.status = 'active')
+         GROUP BY 1
+    """))).mappings().all()}
+
+    # Блюда без действующей карты: продаются, а сырьё под них не списывается.
+    без_ттк = {r["station_id"]: r["сколько"] for r in (await db.execute(text("""
+        SELECT p.station_id, count(*) AS сколько
+          FROM edge.price p JOIN edge.item i ON i.id = p.item_id
+         WHERE p.valid_to IS NULL AND NOT i.deleted AND i.sku_class = 'Блюдо'
+           AND NOT EXISTS (
+               SELECT 1 FROM store_recipe_versions v
+                WHERE v.company_id = :cid AND v.dish_uuid = i.external_uuid::text
+                  AND v.status = 'active' AND v.valid_to IS NULL
+                  AND (v.station_id IS NULL OR v.station_id = p.station_id))
+         GROUP BY 1
+    """), {"cid": cid})).mappings().all()}
+
+    # Карты рецептур по ярусам: сколько блюд станция ведёт по-своему.
+    карты = {}
+    for r in (await db.execute(text("""
+        SELECT station_id, count(DISTINCT dish_uuid) AS блюд
+          FROM store_recipe_versions
+         WHERE company_id = :cid AND status = 'active' AND valid_to IS NULL
+         GROUP BY 1
+    """), {"cid": cid})).mappings().all():
+        карты[r["station_id"]] = r["блюд"]
+
+    сверка = {r["station_id"]: dict(r) for r in (await db.execute(text("""
+        SELECT DISTINCT ON (station_id) station_id, checked_at, station_items,
+               center_items,
+               coalesce(jsonb_array_length(missing_in_center), 0) AS нет_в_центре,
+               coalesce(jsonb_array_length(missing_on_station), 0) AS нет_на_станции,
+               drafts_pending
+          FROM core.edge_catalog_check
+         WHERE company_id = :cid
+         ORDER BY station_id, checked_at DESC
+    """), {"cid": cid})).mappings().all()}
+
+    строки = []
+    for r in рядом:
+        st = r["station_id"]
+        c = сверка.get(st) or {}
+        строки.append({
+            "station_id": st, "name": r["name"],
+            "позиций": r["позиций"],
+            "заявок_ждёт": r["заявок_ждёт"],
+            "правок_цен": r["правок_цен"],
+            "закрыто_матрицей": r["закрыто_матрицей"],
+            "правил_цены": r["правил_цены"],
+            "своих_кодов": r["своих_кодов"],
+            "без_кода_кассы": без_кода.get(st, 0),
+            "блюд_без_ттк": без_ттк.get(st, 0),
+            "своих_карт": карты.get(st, 0),
+            "сетевых_карт": карты.get(None, 0),
+            "сверка": {
+                "момент": c.get("checked_at"),
+                "на_станции": c.get("station_items"),
+                "в_центре": c.get("center_items"),
+                "нет_в_центре": c.get("нет_в_центре"),
+                "нет_на_станции": c.get("нет_на_станции"),
+            } if c else None,
+        })
+    # Справочники контрагентов: станция без поставщика и договора приёмку не
+    # проведёт, а рассинхрон виден только отсюда — на самой АЗС «список пуст»
+    # неотличим от «поставщиков ещё не заводили».
+    справочники = await partner_sync.сводка(db, cid)
+    for строка in строки:
+        строка["справочники"] = справочники.get(строка["station_id"])
+    return {"days": days, "stations": станции, "rows": строки}
+
+
+@router.get("/item-locations/summary")
+async def store_item_locations_summary(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сводка каталога: сколько позиций общих для сети, сколько своих у станции."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    станции = [r[0] for r in (await db.execute(text(
+        "SELECT id FROM edge.station WHERE company_id = :c OR company_id IS NULL ORDER BY id"
+    ), {"c": cid})).all()]
+    сводка = (await db.execute(text(
+        "WITH ц AS (SELECT p.item_id, count(DISTINCT p.station_id) AS станций"
+        "             FROM edge.price p JOIN edge.item i ON i.id = p.item_id"
+        "            WHERE p.valid_to IS NULL AND NOT i.deleted"
+        "            GROUP BY 1)"
+        " SELECT count(*) FILTER (WHERE станций > 1) AS общих,"
+        "        count(*) FILTER (WHERE станций = 1) AS своих,"
+        "        (SELECT count(*) FROM edge.item WHERE NOT deleted) AS всего_карточек,"
+        "        (SELECT count(*) FROM edge.item i WHERE NOT i.deleted"
+        "           AND NOT EXISTS (SELECT 1 FROM edge.price p"
+        "                            WHERE p.item_id = i.id AND p.valid_to IS NULL))"
+        "          AS без_станций"
+        "   FROM ц"))).mappings().first()
+    по_станциям = (await db.execute(text(
+        "SELECT p.station_id, count(*) AS позиций,"
+        "       count(*) FILTER (WHERE i.sku_class = 'Блюдо') AS блюд,"
+        "       count(*) FILTER (WHERE i.sku_class = 'Сырьё') AS сырья"
+        "  FROM edge.price p JOIN edge.item i ON i.id = p.item_id"
+        " WHERE p.valid_to IS NULL AND NOT i.deleted"
+        " GROUP BY 1 ORDER BY 1"))).mappings().all()
+    закрыто = (await db.execute(text(
+        "SELECT station_id, count(*) AS позиций FROM edge.matrix_rule"
+        " WHERE subject = 'assortment' AND NOT allow AND valid_to IS NULL"
+        "   AND closed_at IS NULL AND item_id IS NOT NULL"
+        " GROUP BY 1"))).mappings().all()
+    return {"stations": станции, "итого": dict(сводка or {}),
+            "по_станциям": [dict(r) for r in по_станциям],
+            "закрыто_матрицей": {r["station_id"]: r["позиций"] for r in закрыто}}
+
+
 @router.post("/nsi/push/{station_id}")
 async def nsi_push(
     station_id: int,
@@ -3955,14 +5097,16 @@ async def nsi_push(
     """ if only_known else ""
 
     rows = (await db.execute(text(f"""
-        SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.deleted,
+        SELECT i.id, i.external_uuid, i.sku, i.name, i.unit, i.vat_rate, i.deleted,
                coalesce(i.price_owner, 'master') AS price_owner,
-               g.path AS group_path, i.sku_class, i.marked, i.mark_group,
+               g.path AS group_path, g.cash_section, i.sku_class, i.marked, i.mark_group,
                i.adult_only, i.mrc, i.brand, i.photo_url,
                (SELECT price FROM edge.price p
                  WHERE p.item_id = i.id AND p.station_id = :s AND p.valid_to IS NULL) AS price,
                coalesce((SELECT array_agg(b.code ORDER BY b.code) FROM edge.barcode b
-                          WHERE b.item_id = i.id AND b.status = 'active'), '{{}}') AS codes
+                          WHERE b.item_id = i.id AND b.status = 'active'
+                            AND (b.station_id IS NULL OR b.station_id = :s)),
+                        '{{}}') AS codes
         FROM edge.item i
         LEFT JOIN edge.item_group g ON g.id = i.group_id
         WHERE NOT i.deleted {фильтр}
@@ -3975,11 +5119,32 @@ async def nsi_push(
     # бесполезно показывает «стоимость запаса 0,00» при полных полках.
     оценки = await store_costs.ориентиры(db, cid, [station_id])
 
-    items = [{"uuid": str(r["external_uuid"]), "name": r["name"], "unit": r["unit"],
+    # Владельца цены считает МАТРИЦА, а не колонка карточки.
+    #
+    # Право станции менять цену описано правилом («АЗС 208 · все позиции ·
+    # разрешение»), а вниз оно едет единственным полем, которое станция про это
+    # понимает, — `price_owner`. Пока поле возили из колонки, выданное
+    # товароведом право до станции не доезжало вовсе: 30.08.2026 его пришлось
+    # переносить руками по 1290 карточкам.
+    пары = [(r["id"], r["group_path"] or "") for r in rows]
+    владельцы = await matrix.владельцы_цены(db, cid, station_id, пары)
+    # Применение — это листинг: позиция, закрытая товароведом для станции,
+    # уезжает БЕЗ ЦЕНЫ и потому не попадает в кассу. Саму карточку шлём: она
+    # встречается в сменах прошлых дней, и ставку по ней брать неоткуда.
+    применяется = await matrix.применение(db, cid, station_id, пары)
+
+    items = [{"uuid": str(r["external_uuid"]), "sku": r["sku"],
+              "name": r["name"], "unit": r["unit"],
               "vat_rate": r["vat_rate"], "deleted": bool(r["deleted"]),
-              "price": float(r["price"]) if r["price"] is not None else None,
-              "price_owner": r["price_owner"],
+              "price": (float(r["price"]) if r["price"] is not None
+                        and применяется.get(r["id"], True) else None),
+              "price_owner": "station" if владельцы.get(r["id"]) else "master",
+              "assortment": bool(применяется.get(r["id"], True)),
               "group_path": r["group_path"], "sku_class": r["sku_class"],
+              # Отдел кассы — свойство группы, а не догадка станции: у новой
+              # АЗС в кассе нет ни одной нашей позиции, и выводить его по
+              # соседям не из чего.
+              "cash_section": r["cash_section"],
               "marked": bool(r["marked"]), "mark_group": r["mark_group"],
               "adult_only": bool(r["adult_only"]),
               "mrc": float(r["mrc"]) if r["mrc"] is not None else None,
@@ -4037,6 +5202,7 @@ async def nsi_items(
     db: AsyncSession = Depends(get_db),
 ):
     """Реестр карточек мастер-НСИ с ценой, штрихкодами и остатком станции."""
+    cid = await scope_company_id(user, db)
     sql = """
         SELECT i.id, i.external_uuid, i.code_1c, i.name, i.unit, i.vat_rate,
                i.kind, i.sku_class, i.is_dish, i.deleted,
@@ -4054,7 +5220,11 @@ async def nsi_items(
                  WHERE b2.item_id = i.id AND s.station_id = :st)      AS qty
         FROM edge.item i
         LEFT JOIN edge.item_group g ON g.id = i.group_id
-        WHERE (:q = '' OR i.name ILIKE :like OR coalesce(i.code_1c,'') ILIKE :like
+        -- Карточки только своей компании. Строка без владельца видна всем:
+        -- до миграции company_id его не было ни у одной, и прятать весь
+        -- справочник ради строгости значит показать товароведу пустой экран.
+        WHERE (i.company_id IS NULL OR i.company_id = :cid)
+          AND (:q = '' OR i.name ILIKE :like OR coalesce(i.code_1c,'') ILIKE :like
                OR EXISTS (SELECT 1 FROM edge.barcode b3
                            WHERE b3.item_id = i.id AND b3.code ILIKE :like))
     """
@@ -4079,7 +5249,7 @@ async def nsi_items(
         """
     sql += " ORDER BY i.name LIMIT :lim"
     rows = (await db.execute(text(sql), {
-        "q": q, "like": f"%{q}%", "st": station_id, "lim": limit,
+        "q": q, "like": f"%{q}%", "st": station_id, "lim": limit, "cid": cid,
         "gpath": group_path, "gpath_like": f"{group_path} / %",
         "sku_class": sku_class})).mappings().all()
     return {"items": [dict(r) for r in rows], "total": len(rows), "station_id": station_id}
@@ -4824,6 +5994,23 @@ async def _reverse_receipt_acceptance(
         ))
 
 
+def _дата_накладной(value) -> str | None:
+    """Дата бумажного документа — календарная дата станции, без времени.
+
+    Центр хранит моменты в UTC, станция живёт по Москве и ждёт «ГГГГ-ММ-ДД»
+    (`ValidateReceipt` другой формат не принимает). Полный ISO с временем ронял
+    проверку черновика: «дата входящего документа должна быть в формате
+    ГГГГ-ММ-ДД» — оператор видел красную строку на документе, к которому мы его
+    и позвали. А `.date()` от UTC съезжает на день назад: накладная от 31.08
+    хранится как 2026-08-30T21:00Z и стала бы тридцатым.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(ZoneInfo("Europe/Moscow")).date().isoformat()
+
+
 def _receipt_downlink_payload(row: StoreReceipt) -> dict:
     evidence = row.evidence or {}
     lines = _normalized_receipt_lines(row)
@@ -4839,14 +6026,14 @@ def _receipt_downlink_payload(row: StoreReceipt) -> dict:
         "warehouse_id": (str(row.warehouse_id)
                          if getattr(row, "warehouse_id", None) else None),
         "incoming_number": row.incoming_number,
-        "incoming_date": row.incoming_date.isoformat() if row.incoming_date else None,
+        "incoming_date": _дата_накладной(row.incoming_date),
         "doc_date": row.doc_date.isoformat() if row.doc_date else None,
         "place": evidence.get("place") or "",
         "purpose": evidence.get("purpose") or (next(iter(purposes)) if len(purposes) == 1 else ""),
         "invoice_kind": evidence.get("invoice_kind") or "",
         "invoice_number": evidence.get("invoice_number") or row.incoming_number or "",
         "invoice_date": evidence.get("invoice_date")
-                        or (row.incoming_date.date().isoformat() if row.incoming_date else ""),
+                        or _дата_накладной(row.incoming_date) or "",
         "currency": evidence.get("currency") or "",
         "vat_included": evidence.get("vat_included"),
         "vat_deductible": evidence.get("vat_deductible"),
@@ -5023,6 +6210,7 @@ async def receipt_from_upd(
     lines = [{
         "nomenclature_ref": None,
         "name": l["name"], "barcode": l["barcode"] or None,
+        "supplier_article": l.get("supplier_article") or None,
         "qty_expected": l["qty_expected"], "qty_fact": 0,
         "price": l["price"], "vat_rate": l["vat_rate"] or None,
         "vat_amount": l.get("vat_amount") or 0, "amount": 0,
@@ -6171,19 +7359,42 @@ async def catalog_health(
     иначе шеститысячный архив хоронит любую метрику: «фото нет у 7 500 карточек»
     звучит безнадёжно, «нет у 865 торгуемых» это работа на неделю.
     """
-    await scope_company_id(user, db)
+    cid = await scope_company_id(user, db)
+    # Здоровье считаем по своему справочнику: чужая компания в том же
+    # пространстве не должна ни добавлять работы, ни прятать её. Карточка без
+    # владельца — своя: до миграции company_id его не было ни у одной.
     строка = (await db.execute(text("""
-        WITH живой AS (
+        WITH мои AS (
             SELECT i.* FROM edge.item i
-            WHERE NOT i.deleted AND i.sku_class IN ('Сопутка', 'Блюдо')
+            WHERE i.company_id IS NULL OR i.company_id = :cid
+        ), живой AS (
+            -- Живой ассортимент — то, что ТОРГУЕТСЯ, а не всё с товарным классом.
+            -- Позиция считается торгуемой, когда у неё есть цена станции, код
+            -- кассы или остаток: без этого она лежит в справочнике и в работу
+            -- не входит. Пока условием был один класс, в знаменателе процентов
+            -- стояли 229 карточек, которых нет ни на одной полке, и «заполнено
+            -- 77 %» означало не то, что написано под цифрой.
+            SELECT i.* FROM мои i
+            WHERE NOT i.deleted AND coalesce(i.sku_class, '') <> 'Сырьё'
+              AND (EXISTS (SELECT 1 FROM edge.price p
+                            WHERE p.item_id = i.id AND p.valid_to IS NULL)
+                OR EXISTS (SELECT 1 FROM edge.ns_code n
+                             JOIN edge.barcode b ON b.id = n.barcode_id
+                            WHERE b.item_id = i.id AND n.status = 'active')
+                OR EXISTS (SELECT 1 FROM edge.stock st
+                             JOIN edge.barcode b2 ON b2.id = st.barcode_id
+                            WHERE b2.item_id = i.id AND st.qty <> 0))
         )
         SELECT
-          (SELECT count(*) FROM edge.item WHERE NOT deleted)              AS всего,
+          (SELECT count(*) FROM мои WHERE NOT deleted)              AS всего,
           (SELECT count(*) FROM живой)                                    AS живых,
-          (SELECT count(*) FROM edge.item WHERE sku_class IS NULL AND NOT deleted) AS без_класса,
-          (SELECT count(*) FROM живой WHERE group_id IS NULL
-              OR group_id IN (SELECT id FROM edge.item_group WHERE path = 'Прочее'))
-                                                                          AS без_группы,
+          (SELECT count(*) FROM мои WHERE sku_class IS NULL AND NOT deleted) AS без_класса,
+          (SELECT count(*) FROM живой WHERE group_id IS NULL)             AS без_группы,
+          -- «Прочее» — настоящая группа, и матрица по ней работает. Но это
+          -- корзина: пока позиция там, отчёт по категориям о ней не расскажет.
+          (SELECT count(*) FROM живой
+            WHERE group_id IN (SELECT id FROM edge.item_group WHERE path = 'Прочее'))
+                                                                          AS в_прочем,
           (SELECT count(*) FROM живой i WHERE NOT EXISTS
               (SELECT 1 FROM edge.barcode b WHERE b.item_id = i.id AND b.status = 'active'))
                                                                           AS без_штрихкода,
@@ -6193,41 +7404,182 @@ async def catalog_health(
           (SELECT count(*) FROM живой WHERE photo_url IS NULL)            AS без_фото,
           (SELECT count(*) FROM живой WHERE brand IS NULL)                AS без_бренда,
           (SELECT count(*) FROM живой WHERE composition IS NULL)          AS без_состава,
-          (SELECT count(*) FROM edge.item WHERE NOT deleted
-             AND vat_rate IN ('НДС18_118', 'НДС20'))                      AS ставка_устарела,
+          -- По ЖИВОМУ ассортименту, как и всё остальное на этой странице.
+          -- Пока считалось по всему справочнику, в цифре сидела архивная
+          -- карточка, по которой работы нет: 8 против 7 (01.09.2026).
+          (SELECT count(*) FROM живой WHERE vat_rate NOT IN ('НДС22', 'БезНДС'))
+                                                                          AS ставка_устарела,
+          (SELECT count(*) FROM мои WHERE NOT deleted
+             AND vat_rate NOT IN ('НДС22', 'БезНДС'))                     AS ставка_устарела_всего,
+          (SELECT count(*) FROM живой WHERE marked)                       AS маркируемых_всего,
           (SELECT count(*) FROM живой WHERE marked AND gtin IS NULL)      AS маркируемые_без_gtin,
+          -- У большинства GTIN не надо добывать: он и есть штрихкод товара.
+          -- Разделяем, иначе работа выглядит втрое больше, чем она есть.
+          (SELECT count(*) FROM живой i WHERE i.marked AND i.gtin IS NULL
+             AND EXISTS (SELECT 1 FROM edge.barcode b
+                          WHERE b.item_id = i.id AND b.status = 'active'
+                            AND length(b.code) IN (8, 12, 13, 14)))
+                                                                          AS gtin_из_шк,
           (SELECT count(*) FROM живой i
-             WHERE i.group_id IN (SELECT id FROM edge.item_group WHERE path LIKE 'Табак%')
+             WHERE i.group_id IN (SELECT id FROM edge.item_group
+                                   WHERE path IN ('Табак / Сигареты',
+                                                  'Табак / Стики и капсулы'))
                AND i.mrc IS NULL)                                         AS табак_без_мрц,
+          -- Готовая еда «Честным знаком» не маркируется: у бургера и хот-дога
+          -- DataMatrix не бывает. Признак, стоящий у блюда, — ошибка справочника,
+          -- и она мешает дважды: раздувает счётчик GTIN и уезжает в кассу.
+          (SELECT count(*) FROM живой WHERE marked AND sku_class = 'Блюдо')
+                                                                          AS блюда_маркируемые,
+          -- Действующая коллизия — это когда один код активен у двух карточек
+          -- В ОДНОМ ЯРУСЕ: сетевой EAN у двух позиций либо внутренний код одной
+          -- станции у двух её товаров. Именно тогда касса продаёт ту строку,
+          -- что выгрузилась последней.
+          (SELECT count(*) FROM (
+              SELECT b.code FROM edge.barcode b JOIN мои i ON i.id = b.item_id
+               WHERE b.status = 'active'
+               GROUP BY b.code, coalesce(b.station_id, -1)
+              HAVING count(*) > 1) t)                                     AS коллизии_шк,
+          -- Отклонённая привязка — не авария, а сработавшая защита: центр не дал
+          -- перевесить код, который уже работает у другой карточки.
           (SELECT count(*) FROM edge.barcode b
-             JOIN edge.item i ON i.id = b.item_id
-            WHERE b.status = 'rejected' AND NOT i.deleted)                AS коллизии_шк,
+             JOIN мои i ON i.id = b.item_id
+            WHERE b.status = 'rejected' AND NOT i.deleted)                AS привязок_отклонено,
           -- по «живой», а не по всей таблице: удалённые дубли карточек
           -- («Американо 200 мл» против «Американо 200 мл.») давали восемь
           -- несуществующих блюд без техкарты, и счётчик врал месяцами
-          (SELECT count(*) FROM живой i WHERE i.sku_class = 'Блюдо'
-             AND NOT EXISTS (SELECT 1 FROM edge.recipe r WHERE r.dish_uuid = i.external_uuid))
+          -- Блюдо без карты считаем ПАРАМИ «блюдо × станция»: с ярусами карта
+          -- может быть на одной АЗС и отсутствовать на другой, и общая цифра
+          -- «у блюда нет ТТК» такую дыру не показывает.
+          -- Считаем только то, что МОЖЕТ БЫТЬ ПРОДАНО прямо сейчас: у блюда на
+          -- этой станции есть код кассы и матрица его не закрыла. Иначе счётчик
+          -- набирает вес станцией, которая ещё не запущена: на АЗС 8 карт не
+          -- было у 45 блюд, но ни одно из них не стояло в кассе, а двадцать были
+          -- закрыты товароведом — работы там ноль, а плитка горела красным.
+          (SELECT count(*) FROM живой i
+             JOIN edge.price p ON p.item_id = i.id AND p.valid_to IS NULL
+            WHERE i.sku_class = 'Блюдо'
+              AND EXISTS (SELECT 1 FROM edge.ns_code n
+                            JOIN edge.barcode b ON b.id = n.barcode_id
+                           WHERE b.item_id = i.id AND n.station_id = p.station_id
+                             AND n.status = 'active')
+              AND NOT EXISTS (SELECT 1 FROM edge.matrix_rule r
+                               WHERE r.item_id = i.id AND r.station_id = p.station_id
+                                 AND r.subject = 'assortment' AND NOT r.allow
+                                 AND r.valid_to IS NULL AND r.closed_at IS NULL)
+              AND NOT EXISTS (SELECT 1 FROM store_recipe_versions v
+                               WHERE v.dish_uuid = i.external_uuid::text
+                                 AND v.status = 'active' AND v.valid_to IS NULL
+                                 AND (v.station_id IS NULL OR v.station_id = p.station_id)))
                                                                           AS блюда_без_ттк,
+          -- Отдельно — те, у кого карты нет, но и продать их сейчас нельзя:
+          -- станция не запущена или позиция закрыта. Это не работа, а состояние.
+          (SELECT count(*) FROM живой i
+             JOIN edge.price p ON p.item_id = i.id AND p.valid_to IS NULL
+            WHERE i.sku_class = 'Блюдо'
+              AND NOT EXISTS (SELECT 1 FROM store_recipe_versions v
+                               WHERE v.dish_uuid = i.external_uuid::text
+                                 AND v.status = 'active' AND v.valid_to IS NULL
+                                 AND (v.station_id IS NULL OR v.station_id = p.station_id)))
+                                                                          AS блюда_без_ттк_всего,
           (SELECT count(*) FROM edge.item_enrichment e
-             JOIN edge.item i ON i.id = e.item_id
+             JOIN мои i ON i.id = e.item_id
             WHERE e.resolved_at IS NULL AND NOT i.deleted)
                                                                           AS предложений_ждёт
-    """))).mappings().first()
+    """), {"cid": cid})).mappings().first()
 
     # Дубли считаем нормализованным именем — тем же способом, что и раздел
     # «Дубли»: пока карточки не сведены, обогащать их бессмысленно, обогатим
     # не ту из пары.
+    # Тёзки делятся на живых и архивных, и путать их нельзя.
+    #
+    # Живая пара — обе карточки чем-то заняты (штрихкод, цена, код кассы): это
+    # работа, её надо свести. Архивная — наследие 1С, товара за ней нет, и
+    # сводить нечего. 31.08.2026 сплошная сверка после импорта АЗС 8 дала 89
+    # пар, из которых живых оказалось одиннадцать: без такого деления счётчик
+    # показывал бы 89 и не значил ничего.
     дубли = (await db.execute(text("""
         WITH n AS (
-            SELECT id, lower(regexp_replace(name, '[^a-zа-я0-9]', '', 'g')) k
-            FROM edge.item WHERE NOT deleted
-        ), g AS (SELECT k, count(*) c FROM n GROUP BY k HAVING count(*) > 1)
-        SELECT count(*) AS групп, coalesce(sum(c) - count(*), 0) AS лишних FROM g
+            SELECT i.id,
+                   -- ⚠ lower ДО regexp: класс [a-zа-я0-9] строчный, и при
+                   -- обратном порядке вырезались ВСЕ заглавные буквы — ключ
+                   -- искажался у 1591 карточки из 1595 (01.09.2026). Тёзок
+                   -- насчитывалось 85 при настоящих 82, а имя капсом целиком
+                   -- («ДВОЙНОЙ ЭСПРЕССО») давало пустой ключ и выпадало вовсе.
+                   regexp_replace(lower(translate(i.name,'ёЁ','ее')),
+                                  '[^a-zа-я0-9]', '', 'g') k,
+                   (EXISTS (SELECT 1 FROM edge.barcode b
+                             WHERE b.item_id = i.id AND b.status = 'active')
+                    OR EXISTS (SELECT 1 FROM edge.price p
+                                WHERE p.item_id = i.id AND p.valid_to IS NULL)) AS живая
+            FROM edge.item i WHERE NOT i.deleted
+        ), g AS (
+            SELECT k, count(*) c, count(*) FILTER (WHERE живая) живых
+              FROM n WHERE k <> '' GROUP BY k HAVING count(*) > 1
+        )
+        SELECT count(*) AS групп,
+               coalesce(sum(c) - count(*), 0) AS лишних,
+               count(*) FILTER (WHERE живых > 1) AS живых_пар,
+               count(*) FILTER (WHERE живых <= 1) AS архивных
+          FROM g
     """))).mappings().first()
 
+    # Цена — величина станции, и «без цены» тоже станционное. Общая цифра
+    # («нет цены ни на одной АЗС») благополучна ровно до вопроса «а что не
+    # продать на 208»: там таких позиций в полтора раза больше.
+    по_станциям_цена = [dict(r) for r in (await db.execute(text("""
+        SELECT s.id AS station_id,
+               (SELECT count(*) FROM edge.item i
+                 WHERE NOT i.deleted AND i.sku_class IN ('Сопутка','Блюдо')
+                   AND (i.company_id IS NULL OR i.company_id = :cid)
+                   AND EXISTS (SELECT 1 FROM edge.price p
+                                WHERE p.item_id = i.id AND p.station_id = s.id
+                                  AND p.valid_to IS NULL)) AS с_ценой,
+               (SELECT count(*) FROM edge.item i
+                 WHERE NOT i.deleted AND i.sku_class IN ('Сопутка','Блюдо')
+                   AND (i.company_id IS NULL OR i.company_id = :cid)
+                   AND EXISTS (SELECT 1 FROM edge.ns_code n
+                                 JOIN edge.barcode b ON b.id = n.barcode_id
+                                WHERE b.item_id = i.id AND n.station_id = s.id
+                                  AND n.status = 'active')) AS с_кодом_кассы
+          FROM edge.station s
+         WHERE s.company_id = :cid OR s.company_id IS NULL
+         ORDER BY s.id
+    """), {"cid": cid})).mappings().all()]
+
+    # «Из них торгуются» обязано считать ТОРГУЕМОСТЬ — цену станции, код кассы
+    # или остаток, — а не класс SKU. Пока считался класс, колонка повторяла
+    # первую цифру у каждой строки («Автохимия 59 / 59») и не значила ничего:
+    # на деле из 187 сигарет торгуются 167, из 158 газированных — 123.
+    # МРЦ станционен ровно так же, как цена: сигарета продаётся на конкретной
+    # АЗС, и там же нарушается ст. 13 ФЗ-15. Общая цифра 79 не говорит, где
+    # работа, — на 208 таких 38, на 8 их 51.
+    мрц_по_станциям = [dict(r) for r in (await db.execute(text("""
+        SELECT p.station_id, count(DISTINCT i.id) AS без_мрц
+          FROM edge.item i
+          JOIN edge.price p ON p.item_id = i.id AND p.valid_to IS NULL
+         WHERE NOT i.deleted AND i.mrc IS NULL
+           AND (i.company_id IS NULL OR i.company_id = :cid)
+           AND i.group_id IN (SELECT id FROM edge.item_group
+                               WHERE path IN ('Табак / Сигареты',
+                                              'Табак / Стики и капсулы'))
+         GROUP BY p.station_id ORDER BY p.station_id
+    """), {"cid": cid})).mappings().all()]
+
     группы = (await db.execute(text("""
+        WITH торгуемые AS (
+            SELECT i.id FROM edge.item i
+             WHERE NOT i.deleted AND coalesce(i.sku_class, '') <> 'Сырьё'
+               AND (EXISTS (SELECT 1 FROM edge.price p
+                             WHERE p.item_id = i.id AND p.valid_to IS NULL)
+                 OR EXISTS (SELECT 1 FROM edge.ns_code n
+                              JOIN edge.barcode b ON b.id = n.barcode_id
+                             WHERE b.item_id = i.id AND n.status = 'active')
+                 OR EXISTS (SELECT 1 FROM edge.stock st
+                              JOIN edge.barcode b2 ON b2.id = st.barcode_id
+                             WHERE b2.item_id = i.id AND st.qty <> 0))
+        )
         SELECT g.path, count(i.id) AS карточек,
-               count(i.id) FILTER (WHERE i.sku_class IN ('Сопутка','Блюдо')) AS живых
+               count(i.id) FILTER (WHERE i.id IN (SELECT id FROM торгуемые)) AS живых
         FROM edge.item_group g
         LEFT JOIN edge.item i ON i.group_id = g.id AND NOT i.deleted
         GROUP BY g.path ORDER BY g.path
@@ -6240,7 +7592,111 @@ async def catalog_health(
 
     return {"итого": dict(строка), "дубли": dict(дубли),
             "по_группам": [dict(g) for g in группы],
-            "по_классам": [dict(k) for k in классы]}
+            "по_классам": [dict(k) for k in классы],
+            "по_станциям": по_станциям_цена,
+            "мрц_по_станциям": мрц_по_станциям}
+
+
+@router.get("/catalog/twins")
+async def catalog_twins(
+    only_live: bool = Query(True, description="только пары, где занята не одна карточка"),
+    вид: str | None = Query(None, alias="kind",
+                            description="наследие | ассортимент | дубль сети"),
+    limit: int = Query(100, le=500),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Карточки-тёзки: кто с кем и где применяется.
+
+    Дубль в сетевом каталоге ломает сводный отчёт молча — цифры расходятся по
+    двум строкам с одинаковым именем. Ловить его глазами нельзя: при импорте
+    справочника новой станции пар набирается десятками (АЗС 8, 31.08.2026 — 89),
+    и появляются они не поодиночке, а пачкой в день подключения.
+
+    Пара живая, когда занята больше чем одна карточка (штрихкод, цена или код
+    кассы): такую надо свести. Остальные — архив 1С, товара за ними нет.
+
+    ⚠ Ключ сравнения строится ПОСЛЕ приведения к строчным. Пока `lower` стоял
+    снаружи `regexp_replace`, класс `[a-zа-я0-9]` вырезал все заглавные буквы, и
+    сравнивался огрызок имени — 1591 карточка из 1595 (01.09.2026). «СТИКИ HEETS
+    from Parliament AMBER SELECTION» превращалась в `fromarliament`: четыре вкуса
+    стиков объявлялись одним товаром. А имя, набранное капсом целиком («ДВОЙНОЙ
+    ЭСПРЕССО» с АЗС 8), давало пустой ключ и не попадало сюда вовсе — ровно те
+    карточки, что задвоились при импорте новой станции.
+
+    Вид группы отделяет беду от шума: списком в 82 строки, где 66 строк норма,
+    не пользуется никто.
+      * `наследие` — карточка со штрихкодом всего одна, рядом пустышка с ценой
+        из справочника 1С. Товара за ней нет, торговле не мешает;
+      * `ассортимент` — несколько живых карточек, у каждой свой штрихкод. Это не
+        дубль, а неразличимое имя: «Жев. конф. Love is в ассортименте» — четыре
+        вкуса, «Чай Рич в ассорт. 1 л.» — три. Лечится именем, а не слиянием:
+        сольёшь — пропадёт вкус, который кассир пробивает отдельным кодом;
+      * `дубль сети` — один товар заведён карточкой на каждой станции. Вот это
+        настоящая беда: артикул сети обязан быть один (кофе 208 и 8, 01.09.2026).
+    """
+    cid: uuid.UUID = await scope_company_id(user, db)
+    отбор = ["g.живых > 1"] if only_live else []
+    if вид:
+        отбор.append("g.вид = :вид")
+    условие = ("WHERE " + " AND ".join(отбор)) if отбор else ""
+    rows = (await db.execute(text(f"""
+        WITH n AS (
+            SELECT i.id, i.name, i.sku, i.sku_class,
+                   regexp_replace(lower(translate(i.name,'ёЁ','ее')),
+                                  '[^a-zа-я0-9]', '', 'g') k,
+                   (SELECT count(*) FROM edge.barcode b
+                     WHERE b.item_id = i.id AND b.status = 'active') AS шк,
+                   (SELECT array_agg(DISTINCT p.station_id) FROM edge.price p
+                     WHERE p.item_id = i.id AND p.valid_to IS NULL) AS станции,
+                   (SELECT count(*) FROM edge.ns_code c
+                      JOIN edge.barcode b2 ON b2.id = c.barcode_id
+                     WHERE b2.item_id = i.id AND c.status = 'active') AS кодов,
+                   (SELECT coalesce(sum(s.qty), 0) FROM edge.stock s
+                      JOIN edge.barcode b3 ON b3.id = s.barcode_id
+                     WHERE b3.item_id = i.id) AS остаток
+              FROM edge.item i
+             WHERE NOT i.deleted AND (i.company_id IS NULL OR i.company_id = :cid)
+        ), m AS (
+            SELECT *, (шк > 0 OR станции IS NOT NULL) AS живая FROM n
+        ), g AS (
+            SELECT k, count(*) c, count(*) FILTER (WHERE живая) живых,
+                   CASE
+                     WHEN count(*) FILTER (WHERE шк > 0) <= 1 THEN 'наследие'
+                     WHEN count(DISTINCT coalesce(станции::text, '')) > 1
+                       THEN 'дубль сети'
+                     ELSE 'ассортимент'
+                   END AS вид
+              FROM m WHERE k <> '' GROUP BY k HAVING count(*) > 1
+        ), взяли AS (
+            SELECT * FROM g {условие}
+             ORDER BY (вид = 'дубль сети') DESC, живых DESC, k
+             LIMIT :limit
+        )
+        SELECT взяли.k, взяли.живых, взяли.вид,
+               m.id, m.name, m.sku, m.sku_class, m.живая, m.станции, m.шк,
+               m.кодов, m.остаток
+          FROM взяли JOIN m ON m.k = взяли.k
+         ORDER BY (взяли.вид = 'дубль сети') DESC, взяли.живых DESC,
+                  взяли.k, m.шк DESC, m.id
+    """), {"cid": cid, "limit": limit, "вид": вид})).mappings().all()
+
+    группы: dict[str, dict] = {}
+    for r in rows:
+        группа = группы.setdefault(r["k"], {"ключ": r["k"], "живых": r["живых"],
+                                            "вид": r["вид"], "карточки": []})
+        группа["карточки"].append({
+            "id": r["id"], "name": r["name"], "sku": r["sku"],
+            "sku_class": r["sku_class"], "живая": bool(r["живая"]),
+            "станции": sorted(r["станции"] or []), "штрихкодов": int(r["шк"] or 0),
+            "кодов_кассы": int(r["кодов"] or 0), "остаток": float(r["остаток"] or 0),
+        })
+    список = list(группы.values())
+    сводка: dict[str, int] = {}
+    for г in список:
+        сводка[г["вид"]] = сводка.get(г["вид"], 0) + 1
+    return {"пар": len(список), "только_живые": only_live, "вид": вид,
+            "по_видам": сводка, "группы": список}
 
 
 @router.get("/catalog/enrichment")
@@ -7514,7 +8970,17 @@ async def store_station_drafts(
     ним видно, кто и почему поменял цену на полке.
     """
     cid = await scope_company_id(user, db)
-    return await edge_nsi.station_drafts(db, cid, station_id)
+    очередь = await edge_nsi.station_drafts(db, cid, station_id)
+    # Подсказка группы к каждой заявке и справочник групп для формы:
+    # карточка без группы не уезжает в кассу, а пустое поле в форме —
+    # самый верный способ её такой и оставить.
+    очередь["groups"] = [dict(r) for r in (await db.execute(text(
+        "SELECT id AS group_id, path, cash_section FROM edge.item_group ORDER BY path"
+    ))).mappings().all()]
+    for заявка in очередь.get("items", []):
+        заявка["group_hint"] = await item_group_guess.предложить(
+            db, заявка.get("name") or "")
+    return очередь
 
 
 @router.post("/station-drafts/item/{draft_id}")
@@ -7533,9 +8999,15 @@ async def store_resolve_item_draft(
     """
     cid: uuid.UUID = await _require_network_merchandiser(user, db)
     try:
+        # ⚠ group_id передаётся ИМЕНОВАННО и обязательно (03.09.2026). Пять
+        # позиционных аргументов молча теряли выбор товароведа: интерфейс группу
+        # требует и везёт в теле, а роутер её выбрасывал — карточка сети
+        # рождалась с group_id = NULL. Из группы наследуется отдел кассы, без
+        # отдела строка в кассу не встаёт, и товар не пробивается на полке.
         res = await edge_nsi.resolve_item_draft(
             db, cid, draft_id, str(body.get("action") or ""),
-            body.get("item_id"), body.get("note"))
+            body.get("item_id"), body.get("note"),
+            group_id=body.get("group_id"))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -7722,7 +9194,17 @@ async def edge_merge_items(
         StoreStockBalance.item_uuid == alias["uuid"],
     ).limit(1))).scalar_one_or_none()
     if linked is None:
-        raise HTTPException(409, "Дубль не связан с остатком выбранной компании")
+        # Карточка без остатка — самый безопасный случай слияния, а не запрещённый:
+        # сливать нечего, кроме имени и штрихкодов. Прежнее условие запрещало
+        # ровно то, ради чего слияние и нужно на новой станции: импорт справочника
+        # АЗС 8 (31.08.2026) дал 37 карточек-тёзок 208 — те же сигареты с другим
+        # EAN партии, те же перчатки, тот же кофе, — и слить их было нечем.
+        # Проверяем лишь, что дубль принадлежит компании товароведа.
+        свой = (await db.execute(text("""
+            SELECT 1 FROM edge.item WHERE id = :id AND (company_id = :cid OR company_id IS NULL)
+        """), {"id": body.alias_id, "cid": cid})).scalar_one_or_none()
+        if свой is None:
+            raise HTTPException(409, "Дубль не принадлежит выбранной компании")
     exists = (await db.execute(select(StoreItemAlias.id).where(
         StoreItemAlias.company_id == cid,
         StoreItemAlias.alias_uuid == alias["uuid"],
@@ -7731,7 +9213,7 @@ async def edge_merge_items(
         raise HTTPException(409, "Карточка уже была слита")
 
     stats = {"barcodes": 0, "prices": 0, "stock_rows": 0, "recipes": 0,
-             "assortment": 0}
+             "assortment": 0, "matrix_rules": 0}
     canonical_codes = set((await db.execute(text("""
         SELECT code FROM edge.barcode WHERE item_id = :id AND status = 'active'
     """), {"id": body.canonical_id})).scalars().all())
@@ -7752,8 +9234,15 @@ async def edge_merge_items(
                 canonical_codes.add(barcode["code"])
         stats["barcodes"] += 1
 
-    stations = (await db.execute(select(EdgeAgent.station_id).where(
-        EdgeAgent.company_id == cid))).scalars().all()
+    # Станции берём из справочника, а не по наличию агента: станция заводится
+    # в центре ДО первого запуска агента, и её цены слияние обязано перенести.
+    # 31.08.2026 на АЗС 8 (агента ещё нет) цены остались на слитых карточках —
+    # то есть на удалённых, и позиция теряла цену молча.
+    stations = (await db.execute(text("""
+        SELECT id FROM edge.station WHERE company_id = :cid OR company_id IS NULL
+    """), {"cid": cid})).scalars().all()
+    stations = sorted(set(stations) | set((await db.execute(select(EdgeAgent.station_id).where(
+        EdgeAgent.company_id == cid))).scalars().all()))
     for station_id in stations:
         canonical_price = (await db.execute(text("""
             SELECT id FROM edge.price WHERE item_id = :id AND station_id = :st
@@ -7810,13 +9299,43 @@ async def edge_merge_items(
             await db.delete(rule)
         stats["assortment"] += 1
 
+    # Правила матрицы ходят за карточкой: правило смотрит на item_id, и после
+    # слияния оно осиротело бы вместе с дублем. 31.08.2026 так снова открылся
+    # «ХОТ ДОГ XL», закрытый на АЗС 8 за отсутствием продаж, — молча.
+    matrix_moved = await db.execute(text("""
+        UPDATE edge.matrix_rule r SET item_id = :canon
+         WHERE r.item_id = :alias
+           AND NOT EXISTS (
+               SELECT 1 FROM edge.matrix_rule x
+                WHERE x.item_id = :canon AND x.subject = r.subject
+                  AND x.station_id IS NOT DISTINCT FROM r.station_id
+                  AND x.valid_to IS NULL)
+    """), {"canon": body.canonical_id, "alias": body.alias_id})
+    stats["matrix_rules"] = matrix_moved.rowcount or 0
+    await db.execute(text("""
+        UPDATE edge.matrix_rule SET valid_to = now()
+         WHERE item_id = :alias AND valid_to IS NULL
+    """), {"alias": body.alias_id})
+
+    # ⚠ Техкарты разложены ПО СТАНЦИЯМ: у одного блюда своя карта на каждой АЗС
+    # (сырьё у станций разное — у «Двойного Эспрессо» на 208 пять строк, на
+    # 8 три). Поэтому занятость версии проверяется по тройке
+    # «блюдо + станция + версия», а не по паре без станции.
+    #
+    # Без станции в ключе слияние теряло карту дубля молча: у канона и у дубля
+    # версия одна и та же (v1), условие «у канона такой версии нет» не
+    # выполнялось, и карта оставалась висеть на удалённой карточке. Станция,
+    # чей справочник только что импортировали, оказывалась без техкарт —
+    # блюдо продаётся, а расход сырья не считается. Видно это не сразу, а на
+    # первой сверке остатков.
     recipes = (await db.execute(select(StoreRecipeVersion).where(
         StoreRecipeVersion.company_id == cid))).scalars().all()
-    recipe_keys = {(recipe.dish_uuid, recipe.version) for recipe in recipes}
+    recipe_keys = {(recipe.dish_uuid, recipe.station_id, recipe.version)
+                   for recipe in recipes}
     for recipe in recipes:
         changed = False
         if (recipe.dish_uuid == alias["uuid"] and
-                (canonical["uuid"], recipe.version) not in recipe_keys):
+                (canonical["uuid"], recipe.station_id, recipe.version) not in recipe_keys):
             recipe.dish_uuid = canonical["uuid"]
             recipe.dish_name = canonical["name"]
             changed = True
@@ -7832,8 +9351,19 @@ async def edge_merge_items(
             recipe.lines = lines
             stats["recipes"] += 1
 
+    # Артикул слитой карточки живёт дальше алиасом канона: человек помнит
+    # старый номер, он напечатан на прошлогоднем ценнике и стоит в уже
+    # проведённых документах. У самого дубля номер снимаем — иначе он ищется
+    # в двух местах сразу и приводит к удалённой карточке.
     await db.execute(text("""
-        UPDATE edge.item SET deleted = true, updated_at = now() WHERE id = :id
+        INSERT INTO edge.item_code (item_id, code, kind, note)
+        SELECT :canon, i.sku, 'sku', :note FROM edge.item i
+         WHERE i.id = :alias AND i.sku IS NOT NULL
+        ON CONFLICT DO NOTHING
+    """), {"canon": body.canonical_id, "alias": body.alias_id,
+           "note": f"артикул слитой карточки «{alias['name']}»"})
+    await db.execute(text("""
+        UPDATE edge.item SET deleted = true, sku = NULL, updated_at = now() WHERE id = :id
     """), {"id": body.alias_id})
     db.add(StoreItemAlias(
         company_id=cid, alias_uuid=alias["uuid"], canonical_uuid=canonical["uuid"],
@@ -8127,43 +9657,15 @@ async def store_push_contracts(
     access = await _receipt_access(user, db)
     _require_receipt_station(access, station_id)
     cid = access.company_id
-    фильтр = "" if all_network else """
-        AND EXISTS (SELECT 1 FROM edge.partner p
-                     JOIN edge.partner_station ps ON ps.partner_id = p.id
-                    WHERE p.external_uuid = c.counterparty_id AND ps.station_id = :s)
-    """
-    rows = (await db.execute(text(f"""
-        SELECT c.id, c.number, c.date, c.title, c.kind,
-               c.counterparty_id, cp.name AS counterparty_name,
-               c.organization_id, o.name AS organization_name
-          FROM contracts c
-          JOIN counterparties cp ON cp.id = c.counterparty_id
-          LEFT JOIN organizations o ON o.id = c.organization_id
-         WHERE c.company_id = :cid AND NOT coalesce(c.is_closed, false) {фильтр}
-         ORDER BY cp.name, c.number
-    """), {"cid": cid, "s": station_id})).mappings().all()
-    if not rows:
+    договоры = await partner_sync.договоры_payload(db, cid, station_id,
+                                                   вся_сеть=all_network)
+    if not договоры:
         raise HTTPException(404, "Для станции нет ни одного договора")
     db.add(EdgeDownlink(
         company_id=cid, station_id=station_id, kind="contracts",
-        payload={"contracts": [
-            {"id": str(r["id"]), "partner_id": str(r["counterparty_id"]),
-             "partner_name": r["counterparty_name"],
-             "name": r["title"] or r["number"],
-             # Номер, дословно повторяющий наименование, — след импорта из 1С,
-             # где номера у большинства договоров нет вовсе. Отдать его станции
-             # значит показать администратору «Основной договор №Основной
-             # договор»: выбор превращается в шараду вместо подсказки.
-             "number": "" if (r["number"] or "").strip().casefold()
-                             == (r["title"] or "").strip().casefold()
-                       else (r["number"] or ""),
-             "signed_on": str(r["date"] or "")[:10],
-             "org_name": r["organization_name"] or "",
-             "org_uuid": str(r["organization_id"]) if r["organization_id"] else "",
-             "kind": "supplier", "archived": False} for r in rows]},
-    ))
+        payload={"contracts": договоры}, note=f"договоров {len(договоры)}"))
     await db.commit()
-    return {"station_id": station_id, "contracts": len(rows)}
+    return {"station_id": station_id, "contracts": len(договоры)}
 
 
 @router.post("/partners/push/{station_id}")
@@ -8185,42 +9687,16 @@ async def store_push_partners(
     if all_network and not access.network:
         raise HTTPException(403, "Весь справочник сети доступен только товароведу сети")
     cid = access.company_id
-    фильтр = "" if all_network else """
-        AND EXISTS (SELECT 1 FROM edge.partner_station ps
-                     WHERE ps.partner_id = p.id AND ps.station_id = :s)
-    """
-    rows = (await db.execute(text(f"""
-        SELECT p.id, p.external_uuid, p.name, p.name_full, p.inn, p.kpp,
-               p.role, p.comment, p.archived
-        FROM edge.partner p
-        WHERE p.company_id = :cid AND NOT p.archived {фильтр}
-        ORDER BY p.name
-    """), {"cid": cid, "s": station_id})).mappings().all()
-    if not rows:
+    поставщики = await partner_sync.поставщики_payload(db, cid, station_id,
+                                                       вся_сеть=all_network)
+    if not поставщики:
         raise HTTPException(404, "Для станции нет ни одного контрагента")
-
-    # История работы — из документов 1С, а не только из локальных приёмок.
-    #
-    # Станция видит лишь то, что принимала сама: на 208 это единицы документов,
-    # а реальные поставки за годы лежат в ЦБ. Без них справочник на станции
-    # выглядел пустым («поставок —»), хотя человек точно помнит, что этот
-    # поставщик возит каждую неделю. Считаем в центре и отдаём сводкой: цифры
-    # маленькие, канал не жалко, зато на станции они доступны офлайн.
-    svc = GoodsDashboardService(db, cid)
-    история = await svc.supplier_history(str(station_id))
-
     db.add(EdgeDownlink(
         company_id=cid, station_id=station_id, kind="partners",
-        payload={"partners": [
-            {"id": str(r["external_uuid"]) if r["external_uuid"] else f"m{r['id']}",
-             "name": r["name"], "name_full": r["name_full"] or "",
-             "inn": r["inn"] or "", "kpp": r["kpp"] or "", "role": r["role"],
-             "comment": r["comment"] or "", "archived": r["archived"],
-             **(история.get(r["name"]) or {})} for r in rows]},
-    ))
+        payload={"partners": поставщики}, note=f"поставщиков {len(поставщики)}"))
     await db.commit()
-    return {"station_id": station_id, "partners": len(rows),
-            "с_историей": sum(1 for r in rows if r["name"] in история)}
+    return {"station_id": station_id, "partners": len(поставщики),
+            "с_историей": sum(1 for p in поставщики if p.get("docs_1c"))}
 
 
 # ─────────────────────── Отчёты по периоду (ПОСЛЕДНИМИ) ─────────────────────

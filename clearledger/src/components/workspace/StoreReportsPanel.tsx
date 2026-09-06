@@ -60,8 +60,8 @@ const ЭКРАНЫ: Record<string, { label: string; hint: string; to: string }[]
   ],
   skvoz: [
     { label: 'Сверка с 1С', hint: 'расхождения переходного контура', to: '/shop?mode=store_1c&sub=parity' },
-    { label: 'Состояние станций', hint: 'связь, очередь, свежесть данных', to: '/shop?mode=store_network&sub=station_health' },
-    { label: 'Хранение сырья', hint: 'пакеты и их разбор', to: '/shop?mode=store_network&sub=storage' },
+    { label: 'Станции', hint: 'связь, очередь, свежесть данных, находки АЗС', to: '/shop?mode=store_network&sub=network_overview' },
+    { label: 'Архив файлов со станций', hint: 'пакеты, образы документов, перевыгрузки', to: '/shop?mode=store_network&sub=storage' },
   ],
 }
 

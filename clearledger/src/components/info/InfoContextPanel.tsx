@@ -36,8 +36,8 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
   // Ключ места двухуровневый: раздел плюс вкладка карточки («pr_project:work»).
   // Без вкладки панель на «Паспорте» и на «Документах» показывала одно и то же —
   // общую статью раздела, хотя вопросы у человека там разные.
-  const sub = params.get('sub')
-  const tab = params.get('ptab')
+  const sub = params.get('sub') || (appCode === 'projects' ? 'pr_project' : null)
+  const tab = params.get('ptab') || (appCode === 'projects' && params.get('project') ? 'overview' : null)
   // «Трек» разрезает себя не `?sub=`, а `?view=`, и до этой ветки подсказка в нём
   // всегда получала пустой раздел: на «Разборе» и в «Нумераторах» показывалась
   // одна общая статья приложения. Ключ собирается из последнего сегмента

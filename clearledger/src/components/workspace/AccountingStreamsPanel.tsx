@@ -40,7 +40,7 @@ function CbLoadPanel({ companyId, dateFrom, dateTo }: { companyId: string; dateF
         <p className="text-xs text-muted-foreground mt-0.5 max-w-3xl">
           Источник — <b>ЦБ 1С ЭЛСИ.АЗК</b> (<code>azs_centre</code>, АЗС 208), механизм — COM-коннектор
           (<code>com_worker</code>, read-only). Отдельный поток от нефтепродуктов (те грузятся из STS).
-          Детальная аналитика загруженного — в разделе «Магазин».
+          Детальная аналитика загруженного — в разделе «Торговый центр».
         </p>
       </div>
 

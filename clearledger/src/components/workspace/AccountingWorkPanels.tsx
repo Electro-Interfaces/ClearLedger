@@ -272,7 +272,7 @@ export function CateringPackagePanel() {
       <div className="flex flex-wrap items-baseline gap-2">
         <h2 className="text-sm font-semibold">Комплектация в пакете</h2>
         <span className="text-xs text-muted-foreground">
-          разрез общепита в пакете смены · выгрузка — общая, в разделе «Магазин»
+          разрез общепита в пакете смены · выгрузка — общая, в разделе «Торговый центр»
         </span>
         <Button variant="ghost" size="sm" className="ml-auto h-7 gap-1 text-xs"
           onClick={() => setCoreMode('acc_store', 'export')}>

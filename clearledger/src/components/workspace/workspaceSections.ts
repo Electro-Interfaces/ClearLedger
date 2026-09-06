@@ -10,6 +10,7 @@
  */
 
 import type { ComponentType } from 'react'
+import { useLocation } from 'react-router-dom'
 import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark, Cable, PackageOpen, Shield, Handshake, Banknote, Settings } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
@@ -92,6 +93,7 @@ export interface WorkspaceSection {
  */
 export function useWorkspaceSections(): WorkspaceSection[] {
   const { company, canModule } = useCompany()
+  const { pathname } = useLocation()
   const isEnergy = company.profileId === 'energy'
   const { conn } = useModuleConnections()
   const on = (id: string) => {
@@ -156,14 +158,13 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   const salesHelpItems = !isEnergy && fuelSales ? FUEL_HELP_MENU : []
   const salesHelp: WorkspaceSection = { mode: 'sales_help', label: 'Помощь',
     icon: BookOpen, items: salesHelpItems, connected: salesHelpItems.length > 0 }
-  // «Проекты» — стройка сети: от подбора участка до ввода станции в эксплуатацию.
-  // Только у energy: у топливного профиля своего девелоперского контура нет.
+  // Подключённые «Проекты» доступны любому профилю через свой маршрут.
   // Два раздела на один продукт: «Работа» — где ведут дела, «Аналитика» — где
   // смотрят сводку. В левой рельсе это два пункта, их содержимое — во второй панели.
   const projects: WorkspaceSection = { mode: 'projects', label: 'Работа', icon: HardHat,
-    items: isEnergy ? SITES_WORK_MENU : [], connected: isEnergy }
+    items: SITES_WORK_MENU, connected: true }
   const projectsAnalytics: WorkspaceSection = { mode: 'projects_analytics', label: 'Аналитика',
-    icon: BarChart3, items: isEnergy ? SITES_ANALYTICS_MENU : [], connected: isEnergy }
+    icon: BarChart3, items: SITES_ANALYTICS_MENU, connected: true }
   const ops: WorkspaceSection = { mode: 'operations', label: isEnergy ? 'Мониторинг' : 'Управленческий',
     icon: Gauge, items: opsItems, connected: opsItems.length > 0 }
   const opsEquipment: WorkspaceSection = { mode: 'ops_equipment', label: 'Оборудование',
@@ -290,6 +291,9 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // пункт ни в гармошке, ни в контенте. Гейт есть только у продуктов разреза: там код
   // пункта однозначен (`config/productAccess.ts`), в цельном Учёте коды разделов
   // пересекаются между видами учёта, и права остаются на уровне разделов, как были.
+  if (!isEnergy && pathname === '/projects') {
+    all.push(projects, projectsAnalytics)
+  }
   if (!isCarvedProfile(company.profileId)) return all
   return all.map((s) => {
     const app = productForMode(s.mode)

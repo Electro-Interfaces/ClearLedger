@@ -28,6 +28,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { QueryError } from '@/components/common/QueryError'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { dayLoad } from '@/lib/dayLoad'
@@ -121,6 +122,9 @@ function DayLoad({ companyId }: { companyId: string }) {
 
   const н = dayLoad(события.data?.events ?? [], план.data?.[день] ?? 0,
     new Date(), user?.work_start, user?.work_end)
+  if (план.isError) return <QueryError message="План дня не загрузился"
+    error={план.error} onRetry={() => void план.refetch()} />
+  if (события.isError || события.isLoading || план.isLoading) return null
   if (!н.text) return null
   return (
     <p className={cn('mt-1 text-xs',
@@ -154,7 +158,10 @@ function Meetings({ companyId }: { companyId: string }) {
   const rows = (q.data?.events ?? [])
     .slice()
     .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
-  if (q.isLoading || rows.length === 0) return null
+  if (q.isError) return <QueryError message="Встречи не загрузились"
+    error={q.error} onRetry={() => void q.refetch()} />
+  if (q.isLoading) return <p role="status" className="text-sm text-muted-foreground">Загружаем встречи…</p>
+  if (rows.length === 0) return null
 
   return (
     <section>
@@ -232,6 +239,9 @@ function CarryOver({ companyId }: { companyId: string }) {
     onError: (e: Error) => toast.error(e.message || 'Не перенеслось'),
   })
 
+  if (q.isError) return <QueryError message="Вчерашние дела не загрузились"
+    error={q.error} onRetry={() => void q.refetch()} />
+  if (q.isLoading) return <p role="status" className="text-sm text-muted-foreground">Загружаем вчерашние дела…</p>
   if (rows.length === 0) return null
 
   return (
@@ -269,6 +279,9 @@ function Deferred({ companyId }: { companyId: string }) {
     queryFn: () => workService.placed(companyId, { scope: 'deferred' }),
   })
   const count = q.data?.items.length ?? 0
+  if (q.isError) return <QueryError message="Отложенные дела не загрузились"
+    error={q.error} onRetry={() => void q.refetch()} />
+  if (q.isLoading) return <p role="status" className="text-sm text-muted-foreground">Загружаем отложенные дела…</p>
   if (count === 0) return null
 
   return (
@@ -318,6 +331,8 @@ function Reminders({ companyId }: { companyId: string }) {
   })
 
   const rows = q.data?.items ?? []
+  if (q.isError) return <QueryError message="Напоминания не загрузились"
+    error={q.error} onRetry={() => void q.refetch()} />
   if (q.isLoading) {
     return (
       <p className="flex items-center gap-2 text-xs text-muted-foreground">

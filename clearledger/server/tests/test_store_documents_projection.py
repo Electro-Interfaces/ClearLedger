@@ -1059,9 +1059,14 @@ async def test_counter_filter_reuses_the_expression_that_produced_the_number(mon
         )
         stats_params = repr(session.statements[0].compile().params)
         result_params = repr(session.statements[2].compile().params)
+        # waiting_receipt — фильтр-переход из Разбора без своей карточки-числа:
+        # он попадает в отбор (result), но не в статистику (stats). Остальные
+        # счётчики обязаны совпадать и там, и там.
+        в_статистике = name != "waiting_receipt"
         for condition in store_documents_router.COUNTER_CONDITIONS[name]():
             for value in condition.compile().params.values():
-                assert repr(value) in stats_params
+                if в_статистике:
+                    assert repr(value) in stats_params
                 assert repr(value) in result_params, (
                     f"счётчик {name} считает не то, что отбирает его кнопка")
 
@@ -1858,3 +1863,75 @@ async def test_реестр_документов_не_топит_накладн�
     )
     запрос = str(session.statements[-1])
     assert "document_kind NOT IN" in запрос or "not_in" in запрос.lower()
+
+
+@pytest.mark.asyncio
+async def test_replay_edge_derived_reprojects_document_packet(monkeypatch):
+    """Этап D: вынесенное переигрывание derived вызывает документные проекции
+    (project_packet + приёмки) — на нём держится авто-применение новой ревизии."""
+    called: list[str] = []
+
+    async def fake_receipts(db, c, s, payload, docs):
+        called.append("receipts")
+
+    async def fake_transfer(db, c, s, payload):
+        called.append("transfer")
+
+    async def fake_project(db, c, u, s, payload):
+        called.append("project")
+
+    monkeypatch.setattr(edge_router, "_ingest_receipts", fake_receipts)
+    monkeypatch.setattr(edge_router, "_route_transfer_packet", fake_transfer)
+    monkeypatch.setattr(edge_router.edge_projection, "project_packet", fake_project)
+
+    await edge_router._replay_edge_derived(
+        None, uuid.uuid4(), 208, "transfer", {"Документы": []}, "pkt-1")
+
+    assert "receipts" in called
+    assert "transfer" in called
+    assert "project" in called
+
+
+@pytest.mark.asyncio
+async def test_replay_edge_derived_skips_transfer_for_plain_shift(monkeypatch):
+    """Не-transfer пакет маршрутизацию перемещений не трогает, но проецируется."""
+    called: list[str] = []
+    monkeypatch.setattr(edge_router, "_ingest_receipts",
+                        lambda *a, **k: called.append("receipts") or _acoro())
+    monkeypatch.setattr(edge_router, "_route_transfer_packet",
+                        lambda *a, **k: called.append("transfer") or _acoro())
+    monkeypatch.setattr(edge_router.edge_projection, "project_packet",
+                        lambda *a, **k: called.append("project") or _acoro())
+
+    await edge_router._replay_edge_derived(
+        None, uuid.uuid4(), 208, "shift", {"Документы": []}, "pkt-2")
+
+    assert "transfer" not in called
+    assert "project" in called
+
+
+async def _acoro():
+    return None
+
+
+def test_vypusk_smen_odnogo_dnya_ne_shlopyvaetsya():
+    """19.08.2026 на 208 работали три смены, и печатный номер выпуска у них один
+    (строится из даты открытия). Пока ключ шёл по номеру, в реестр попадала одна
+    смена — из учёта выпадало 2 697,48 ₽ выпуска. Ключ выпуска — по смене."""
+    from app.services.store_documents import _edge_document_identity
+
+    def пакет(внутр):
+        return SimpleNamespace(
+            station_id=208, packet_uuid=uuid.uuid4(),
+            payload={"Смена": {"НомерСменыВнутр": внутр}})
+
+    выпуск = {"Тип": "production_release", "Номер": "2082081908202601"}
+    ид7082 = _edge_document_identity(пакет("7082"), выпуск, "production_release")
+    ид7083 = _edge_document_identity(пакет("7083"), выпуск, "production_release")
+    ид7084 = _edge_document_identity(пакет("7084"), выпуск, "production_release")
+    assert len({ид7082, ид7083, ид7084}) == 3, "выпуски разных смен схлопнулись в один"
+
+    # А копии ОДНОЙ смены обязаны остаться одним документом.
+    копия1 = _edge_document_identity(пакет("7082"), выпуск, "production_release")
+    копия2 = _edge_document_identity(пакет("7082"), выпуск, "production_release")
+    assert копия1 == копия2, "пересборка одной смены раздвоила документ"

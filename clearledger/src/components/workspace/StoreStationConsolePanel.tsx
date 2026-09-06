@@ -76,9 +76,29 @@ export function StoreStationConsolePanel() {
         {stations.map((s) => {
           const онлайн = s.state === 'онлайн'
           const назначен = accessPolicy?.capabilities.station_administrator.includes(String(s.station_id)) === true
+          // Кликается вся карточка, а не только кнопка: выбирают станцию, а не
+          // жмут кнопку — целиться мышью незачем. Кнопка остаётся: она называет
+          // действие и держит состояние «Открываем…».
+          const можно = онлайн && назначен && открываем === null
+          const почему = !назначен
+            ? 'Нужно назначение «Администратор АЗС» на эту станцию'
+            : онлайн ? 'Открыть рабочее место станции' : 'Станция не на связи'
           return (
             <div key={s.station_id}
-                 className={`rounded-lg border p-4 ${онлайн ? 'border-border' : 'border-dashed border-border'}`}>
+                 role={можно ? 'button' : undefined}
+                 tabIndex={можно ? 0 : undefined}
+                 title={почему}
+                 onClick={можно ? () => void войти(s.station_id) : undefined}
+                 onKeyDown={можно ? (e) => {
+                   if (e.key === 'Enter' || e.key === ' ') {
+                     e.preventDefault()
+                     void войти(s.station_id)
+                   }
+                 } : undefined}
+                 className={`rounded-lg border p-4 transition-colors ${
+                   онлайн ? 'border-border' : 'border-dashed border-border'} ${
+                   можно ? 'cursor-pointer hover:border-primary/60 hover:bg-primary/5'
+                         : 'cursor-not-allowed opacity-90'}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 font-medium">
@@ -100,10 +120,9 @@ export function StoreStationConsolePanel() {
                     </div>
                   )}
                 </div>
-                <Button size="sm" disabled={!онлайн || !назначен || открываем !== null}
-                        onClick={() => void войти(s.station_id)}
-                        title={!назначен ? 'Нужно назначение «Администратор АЗС» на эту станцию'
-                          : онлайн ? 'Открыть рабочее место станции' : 'Станция не на связи'}>
+                <Button size="sm" disabled={!можно}
+                        onClick={(e) => { e.stopPropagation(); void войти(s.station_id) }}
+                        title={почему}>
                   {открываем === s.station_id ? 'Открываем…' : 'Работать'}
                 </Button>
               </div>

@@ -56,7 +56,7 @@ export const ACCOUNTING_SECTIONS: {
 }[] = [
   { mode: 'acc_period',  label: 'Период',        icon: CalendarCheck },
   { mode: 'accounting',  label: 'Нефтепродукты', icon: Fuel, separatorBefore: true },
-  { mode: 'acc_store',   label: 'Магазин',       icon: ShoppingCart },
+  { mode: 'acc_store',   label: 'Торговый центр', icon: ShoppingCart },
   { mode: 'acc_food',    label: 'Общепит',       icon: UtensilsCrossed },
   { mode: 'acc_recon',   label: 'Сверка',        icon: GitCompare, separatorBefore: true },
   { mode: 'acc_docs',    label: 'Документы',     icon: FileText },

@@ -22,6 +22,9 @@
 """
 from __future__ import annotations
 
+import re as _re
+
+import json
 import logging
 import hashlib
 import uuid
@@ -32,6 +35,9 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Counterparty, EdgeDownlink
+from app.services import sku
+from app.services import item_group_guess
+from app.services import matrix
 
 # Ставка в снимке приходит процентом (так её хранит касса), в контракте БП —
 # именем. Ноль это «Без НДС», законная ставка, а не отсутствие данных.
@@ -162,24 +168,31 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
         if len(uuid) == 36 and price > 0:
             seen_price[uuid] = price
 
+    # ⚠⚠ ЦЕНУ ИЗ КАССЫ НЕ ЧИТАЕМ. Направление одностороннее: цену назначает
+    # станция (или центр, если политика это разрешает), и мы грузим её В кассу
+    # файлом тарифов. Механизма смены цены на самой кассе нет — значит цифра
+    # оттуда не факт о цене, а эхо нашей же прошлой выгрузки либо наследие
+    # прежнего владельца оборудования.
+    #
+    # Пока снимок переписывал цену, на только что подключённой станции мы
+    # затягивали к себе чужой прайс: касса АЗС 8 в сентябре 2026 держала цены
+    # Норд-Лайна, и 225 таких приехали «снимком станции» — при том, что
+    # администратор ГИГ не назначил ни одной. В первой же накладной они
+    # подставились в графу «Продажа».
+    #
+    # Расхождение цены кассы с нашей — не повод переписать своё, а повод
+    # показать его человеку: считаем и отдаём числом, решение за станцией.
     for uuid, price in seen_price.items():
         current = (await db.execute(text("""
-            SELECT p.id, p.price FROM edge.price p
+            SELECT p.price FROM edge.price p
             JOIN edge.item i ON i.id = p.item_id
             WHERE i.external_uuid = CAST(:u AS uuid)
               AND p.station_id = :s AND p.valid_to IS NULL
         """), {"u": uuid, "s": station_id})).first()
-        if current is not None and abs(float(current.price) - price) < 0.005:
-            continue
-        if current is not None:
-            await db.execute(text("UPDATE edge.price SET valid_to = :t WHERE id = :id"),
-                             {"t": now, "id": current.id})
-        await db.execute(text("""
-            INSERT INTO edge.price (item_id, station_id, price, author)
-            SELECT i.id, :s, :p, 'снимок станции' FROM edge.item i
-            WHERE i.external_uuid = CAST(:u AS uuid)
-        """), {"u": uuid, "s": station_id, "p": price})
-        stats["prices_changed"] += 1
+        if current is None:
+            stats["prices_absent"] = stats.get("prices_absent", 0) + 1
+        elif abs(float(current.price) - price) >= 0.005:
+            stats["prices_differ"] = stats.get("prices_differ", 0) + 1
 
     # ── Ставки НДС ───────────────────────────────────────────────────────
     # Ставка приезжает в кассу из 1С той же выгрузкой ассортимента, что и цена,
@@ -211,7 +224,9 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
             continue
         bc = (await db.execute(text(
             "SELECT id FROM edge.barcode WHERE code = :c AND status = 'active'"
-        ), {"c": code})).scalar_one_or_none()
+            "   AND (station_id IS NULL OR station_id = :st)"
+            " ORDER BY (station_id IS NULL) LIMIT 1"
+        ), {"c": code, "st": station_id})).scalar_one_or_none()
         if bc is None:
             continue
         cur = (await db.execute(text("""
@@ -257,7 +272,9 @@ async def sync_from_snapshot(db: AsyncSession, station_id: int, payload: dict) -
             continue
         bc = (await db.execute(text(
             "SELECT id FROM edge.barcode WHERE code = :c AND status = 'active'"
-        ), {"c": code})).scalar_one_or_none()
+            "   AND (station_id IS NULL OR station_id = :st)"
+            " ORDER BY (station_id IS NULL) LIMIT 1"
+        ), {"c": code, "st": station_id})).scalar_one_or_none()
         if bc is None:
             continue
         await db.execute(text("""
@@ -355,22 +372,34 @@ async def ingest_station_nsi(db: AsyncSession, company_id, station_id: int,
             continue
 
         if вид == "item_draft":
+            # Артикул станция чеканит сама из выданного блока, и карточка
+            # приезжает наверх уже с номером. Принимаем только настоящий номер
+            # станционного пула: битую строку лучше не иметь вовсе, чем выдать
+            # карточке номер, который человек назвать не сможет.
+            артикул_станции = str(doc.get("Артикул") or "").strip()
+            if артикул_станции and sku.разобрать(артикул_станции) is None:
+                log.warning("станция %s: черновик %s с негодным артикулом %r — номер отброшен",
+                            station_id, ключ, артикул_станции)
+                артикул_станции = ""
             await db.execute(text("""
                 INSERT INTO edge.item_draft
                     (company_id, station_id, source_uuid, name, unit, vat_rate, barcodes,
-                     created_at, author)
+                     created_at, author, sku)
                 VALUES (:cid, :st, :key, :name, :unit, :vat, :codes,
-                        coalesce(CAST(:at AS timestamptz), now()), :author)
+                        coalesce(CAST(:at AS timestamptz), now()), :author,
+                        nullif(:sku, ''))
                 ON CONFLICT (company_id, station_id, source_uuid) DO UPDATE
                    SET name = excluded.name, unit = excluded.unit,
                        vat_rate = excluded.vat_rate, barcodes = excluded.barcodes,
                        author = coalesce(nullif(excluded.author, ''),
-                                         edge.item_draft.author)
+                                         edge.item_draft.author),
+                       sku = coalesce(edge.item_draft.sku, excluded.sku)
                  WHERE edge.item_draft.resolved_at IS NULL
             """), {"cid": company_id, "st": station_id, "key": ключ,
                    "name": doc.get("Наименование") or "", "unit": doc.get("Единица") or "шт",
                    "vat": doc.get("СтавкаНДС"), "codes": doc.get("Штрихкоды") or [],
-                   "at": _ts(doc.get("Заведена")), "author": doc.get("Автор") or ""})
+                   "at": _ts(doc.get("Заведена")), "author": doc.get("Автор") or "",
+                   "sku": артикул_станции})
             stats["item_drafts"] += 1
 
         elif вид == "partner_draft":
@@ -457,27 +486,52 @@ async def ingest_station_nsi(db: AsyncSession, company_id, station_id: int,
                 continue
             stats["price_changes"] += 1
 
-            # Политика v1 отдаёт станции весь ассортимент. Её новая цена — не
-            # только журнал, а текущая цена мастер-проекции этой АЗС.
+            # Право станции менять цену спрашиваем У МАТРИЦЫ — и на приёме
+            # тоже, а не только при выгрузке вниз.
+            #
+            # Раньше входящая цена применялась безусловно: станция без права
+            # всё равно переписывала цену своей АЗС, а колонка карточки
+            # выставлялась в «station» ГЛОБАЛЬНО, то есть за всю сеть. Правило
+            # товароведа «цену ведёт центр» не значило ничего в ту сторону,
+            # откуда цена и приходит (найдено независимым аудитом 31.08.2026).
+            #
+            # Сам факт правки остаётся в журнале `station_price_change` при
+            # любом решении: станция это сделала, и человек должен видеть, что
+            # именно она пыталась поставить.
             item = (await db.execute(text("""
                 SELECT id, coalesce(price_owner, 'master') AS price_owner
                 FROM edge.item WHERE external_uuid::text = :u
             """), {"u": doc.get("НоменклатураUUID") or ""})).first()
-            new_price = float(doc.get("ЦенаСтала") or 0)
+            # Пустое «ЦенаСтала» — снятие цены, а не ноль. Станция снимает
+            # цену законно (товар выведен из продажи; станцию только подключили
+            # и цен ГИГ ещё нет), и это состояние должно доехать снятием: ноль
+            # открытой ценой означал бы «продаём даром». 05.09.2026 так в центр
+            # приехали 393 нуля с АЗС 8.
+            сырая_цена = doc.get("ЦенаСтала")
+            цену_сняли = сырая_цена is None or float(сырая_цена) <= 0
+            new_price = 0.0 if цену_сняли else float(сырая_цена)
+            if item is not None and not await matrix.цену_ведёт_станция(
+                    db, company_id, station_id, item.id):
+                stats["price_denied"] = stats.get("price_denied", 0) + 1
+                log.warning(
+                    "АЗС %s прислала цену по позиции, на которую матрица не даёт "
+                    "права: item_id=%s, цена %s — в проекцию не применена",
+                    station_id, item.id, new_price)
+                continue
             if item is not None and new_price >= 0:
-                await db.execute(text(
-                    "UPDATE edge.item SET price_owner = 'station' WHERE id = :item"
-                ), {"item": item.id})
                 changed_at = _ts(doc.get("Момент")) or datetime.now(timezone.utc)
                 await db.execute(text("""
                     UPDATE edge.price SET valid_to = :at
                     WHERE item_id = :item AND station_id = :st AND valid_to IS NULL
                 """), {"at": changed_at, "item": item.id, "st": station_id})
-                await db.execute(text("""
-                    INSERT INTO edge.price (item_id, station_id, price, valid_from, author)
-                    VALUES (:item, :st, :price, :at, :author)
-                """), {"item": item.id, "st": station_id, "price": new_price,
-                       "at": changed_at, "author": doc.get("Автор") or "станция"})
+                if not цену_сняли:
+                    await db.execute(text("""
+                        INSERT INTO edge.price (item_id, station_id, price, valid_from, author)
+                        VALUES (:item, :st, :price, :at, :author)
+                    """), {"item": item.id, "st": station_id, "price": new_price,
+                           "at": changed_at, "author": doc.get("Автор") or "станция"})
+                else:
+                    stats["price_cleared"] = stats.get("price_cleared", 0) + 1
 
     await db.commit()
     if any(stats.values()):
@@ -561,7 +615,8 @@ async def draft_candidates(db: AsyncSession, company_id, barcodes: list[str]) ->
 
 async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
                              action: str, item_id: int | None = None,
-                             note: str | None = None) -> dict:
+                             note: str | None = None,
+                             group_id: int | None = None) -> dict:
     """Решение центра по черновику карточки.
 
     Три исхода, и все три обязаны быть явными:
@@ -575,7 +630,7 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
     не разобрал, — это товар, который станция продаёт, а сеть не видит.
     """
     draft = (await db.execute(text("""
-        SELECT id, station_id, name, unit, vat_rate, barcodes, resolved_at, source_uuid
+        SELECT id, station_id, name, unit, vat_rate, barcodes, resolved_at, source_uuid, sku
         FROM edge.item_draft WHERE id = :id AND company_id = :cid
     """), {"id": draft_id, "cid": company_id})).mappings().first()
     if draft is None:
@@ -598,11 +653,46 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
                 "source_uuid": str(draft["source_uuid"] or "")}
 
     if action == "create":
+        # Артикул выдаётся В МОМЕНТ РОЖДЕНИЯ карточки, а не когда-нибудь потом.
+        # Позиция матрицы без номера — та же невидимка: её не назвать по
+        # телефону, не напечатать на ценнике и не найти в 1С.
+        # Станция чеканит номер из своего блока и уже назвала им товар — на
+        # ценнике, в накладной, в разговоре. Признание не имеет права его
+        # сменить: человек продолжает называть карточку тем же номером.
+        # Свой выдаём только карточке, приехавшей без номера (агент старой
+        # версии или блок кончился).
+        артикул = str(draft["sku"] or "").strip()
+        if артикул and sku.разобрать(артикул) is None:
+            артикул = ""
+        if артикул:
+            занят = (await db.execute(text(
+                "SELECT 1 FROM edge.item WHERE sku = :s"), {"s": артикул})).first()
+            if занят is not None:
+                log.warning("артикул %s станции %s уже занят в сети — выдаём свой",
+                            артикул, draft["station_id"])
+                артикул = ""
+        if not артикул:
+            артикул = await sku.выдать_центральный(db)
+        # Товарная группа проставляется В МОМЕНТ ЗАВЕДЕНИЯ, а не «потом».
+        #
+        # Карточка без группы — невидимка: она не попадает в отчёты по группам и
+        # НЕ УЕЗЖАЕТ В КАССУ, потому что отдел кассы приходит свойством группы.
+        # 31.08.2026 так на 208 висели десять позиций с товаром на полке.
+        # Не указали явно — берём подсказку по названию; не сработала и она —
+        # заводим без группы, но это видно счётчиком «без группы» в здоровье
+        # каталога, а не тишиной.
+        if group_id is None:
+            подсказка = await item_group_guess.предложить(db, draft["name"])
+            if подсказка is not None:
+                group_id = подсказка["group_id"]
         row = (await db.execute(text("""
-            INSERT INTO edge.item (external_uuid, name, unit, vat_rate, source, price_owner)
-            VALUES (gen_random_uuid(), :name, :unit, :vat, 'station', 'station')
+            INSERT INTO edge.item (external_uuid, sku, name, unit, vat_rate, source,
+                                   price_owner, company_id, group_id)
+            VALUES (gen_random_uuid(), :sku, :name, :unit, :vat, 'station', 'station',
+                    :cid, :group)
             RETURNING id, external_uuid
-        """), {"name": draft["name"], "unit": draft["unit"] or "шт",
+        """), {"sku": артикул, "cid": company_id, "group": group_id,
+               "name": draft["name"], "unit": draft["unit"] or "шт",
                # Ставка обязательна в схеме, и форма станции её всегда
                # спрашивает. Подставляем розничную только на случай карточки,
                # заведённой до появления поля: молча уронить признание хуже.
@@ -625,9 +715,14 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
     # сломать кассу тому товару, который сейчас по нему пробивается.
     привязано, коллизий = 0, 0
     for code in codes:
+        # Занятость проверяем В ЯРУСЕ КОДА: сетевой EAN занят для всех, а
+        # внутренний номер кухни — только для своей станции. Иначе «9233» с
+        # АЗС 8 считался бы занятым чизкейком 208, где это другой товар.
         занят = (await db.execute(text("""
-            SELECT item_id FROM edge.barcode WHERE code = :c AND status = 'active'
-        """), {"c": code})).first()
+            SELECT item_id FROM edge.barcode
+             WHERE code = :c AND status = 'active'
+               AND (station_id IS NULL OR station_id = :st)
+        """), {"c": code, "st": draft["station_id"]})).first()
         if занят is not None:
             if занят.item_id != item_id:
                 # Штрихкод уже работает у другой карточки. Перевесить молча
@@ -643,20 +738,53 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
                                f"код активен у карточки {занят.item_id}"})
                 коллизий += 1
             continue
+        # Короткий номер — внутренний код станции, а не GTIN: закрепляем его
+        # за станцией, иначе соседняя АЗС со своей нумерацией не сможет завести
+        # свой товар под тем же номером.
         await db.execute(text("""
-            INSERT INTO edge.barcode (item_id, code, status) VALUES (:i, :c, 'active')
+            INSERT INTO edge.barcode (item_id, code, status, station_id)
+            VALUES (:i, :c, 'active', :st)
             ON CONFLICT DO NOTHING
-        """), {"i": item_id, "c": code})
+        """), {"i": item_id, "c": code,
+               "st": draft["station_id"] if len(code) < 8 else None})
         привязано += 1
 
     await db.execute(text("""
         UPDATE edge.item_draft SET resolved_at = now(), resolved_item = :item, note = :n
         WHERE id = :id
     """), {"id": draft_id, "item": item_id, "n": note})
+
+    # Закрываем заявки-близнецы — те же штрихкоды, тот же товар.
+    #
+    # Станция заводит карточку заново, когда не видит уже заведённую: 04.09.2026
+    # «Печенье Чоко-Пай» приехало ТРЕМЯ заявками за девять минут, от одного
+    # человека, с тремя разными артикулами. Разбирать одно и то же трижды —
+    # работа впустую, а оставить непризнанным хоть одну значит держать смену.
+    близнецы: list[int] = []
+    if codes:
+        близнецы = [int(r[0]) for r in (await db.execute(text("""
+            SELECT d.id FROM edge.item_draft d
+            WHERE d.company_id = :cid AND d.id <> :id
+              AND d.resolved_at IS NULL AND NOT d.rejected
+              AND EXISTS (
+                  SELECT 1 FROM unnest(d.barcodes) AS c
+                  WHERE regexp_replace(c, '[^0-9]', '', 'g') = ANY(:codes)
+              )
+        """), {"cid": company_id, "id": draft_id,
+               "codes": [_re.sub(r"[^0-9]", "", c) for c in codes]})).all()]
+        if близнецы:
+            await db.execute(text("""
+                UPDATE edge.item_draft
+                SET resolved_at = now(), resolved_item = :item,
+                    note = coalesce(note, '') || ' · закрыт вместе с заявкой #' || :id
+                WHERE id = ANY(:ids)
+            """), {"item": item_id, "id": str(draft_id), "ids": близнецы})
+
     await db.commit()
     return {"action": action, "draft_id": draft_id, "item_id": item_id,
             "uuid": canon_uuid, "barcodes_linked": привязано, "collisions": коллизий,
-            "station_id": draft["station_id"], "codes": codes}
+            "station_id": draft["station_id"], "codes": codes,
+            "twins_closed": близнецы}
 
 
 async def resolve_partner_draft(db: AsyncSession, company_id, draft_id: int,
@@ -882,13 +1010,26 @@ async def barcode_collisions(db: AsyncSession, company_id, limit: int = 200) -> 
         JOIN edge.barcode a ON a.code = r.code AND a.status = 'active'
         JOIN edge.item oi ON oi.id = a.item_id
         WHERE r.status = 'rejected'
+          -- Удалённая карточка не спорит за код.
+          --
+          -- Из ста претензий восемь стояли за карточками, помеченными
+          -- удалёнными: решать там нечего, а список они раздували и заставляли
+          -- разбирать вручную то, чего уже нет.
+          AND NOT ci.deleted AND NOT oi.deleted
         ORDER BY r.created_at DESC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 
+    def сжать(имя: str) -> str:
+        return "".join(c for c in (имя or "").lower() if c.isalnum())
+
     out = []
     for r in rows:
         d = dict(r)
+        # Совпали имена — это не спор за код, а две карточки одного товара.
+        # Передача кода тут ничего не решит: он останется у одного из дублей, а
+        # второй продолжит жить своей рецептурой. Лечится слиянием.
+        d["same_item"] = сжать(r["claimant_name"]) == сжать(r["holder_name"])
         for k, v in d.items():
             if hasattr(v, "isoformat"):
                 d[k] = v.isoformat()
@@ -942,3 +1083,188 @@ async def resolve_collision(db: AsyncSession, company_id, claim_id: int,
     await db.commit()
     return {"action": "move", "code": row["code"],
             "claimant_id": row["claimant_id"], "holder_id": row["holder_id"]}
+
+
+# Сколько расхождений держим списком. Счётчики считаем по всем, но экрану нужны
+# примеры, а не выгрузка: если разошлась тысяча позиций, беда видна и по сотне.
+ПОКАЗЫВАТЬ_РАСХОЖДЕНИЙ = 200
+
+
+async def ingest_station_catalog(db: AsyncSession, company_id, station_id: int,
+                                 docs: list[dict]) -> dict:
+    """Сверить каталог станции с сетевым и запомнить расхождения.
+
+    Отвечает на вопрос «что станция знает, а центр — нет». 30.08.2026 десять
+    напитков торговались на 208 четыре дня, а в центре их не было вовсе:
+    карточка, легшая в базу станции не через приём пакета НСИ, называла себя
+    сетевой, и заявка по ней не собиралась. Нашлись случайно — при раздаче
+    артикулов. Теперь сравнение идёт каждым тактом станции.
+
+    Черновики станции в расхождения не попадают: они ждут признания на своём
+    экране, это работа, а не дыра.
+    """
+    сводка = next((d for d in docs
+                   if isinstance(d, dict) and d.get("Тип") == "catalog_digest"), None)
+    if сводка is None:
+        return {"catalog_digest": 0}
+
+    позиции = [p for p in (сводка.get("Позиции") or []) if isinstance(p, dict)]
+    на_станции = {str(p.get("UUID") or ""): p for p in позиции if p.get("UUID")}
+
+    все_карточки = {
+        str(r["uuid"]): r for r in (await db.execute(text("""
+            SELECT external_uuid::text AS uuid, coalesce(sku, '') AS sku, name,
+                   id, deleted
+            FROM edge.item
+        """))).mappings().all()
+    }
+    в_центре = {u: r for u, r in все_карточки.items() if not r["deleted"]}
+
+    нет_в_центре, черновиков = [], 0
+    удаление_не_доехало = []
+    for uuid_, позиция in на_станции.items():
+        if uuid_ in в_центре:
+            continue
+        # Карточка, удалённая в центре, но живая на станции, — не «дыра в
+        # сети», а отставшая станция: сеть о товаре знает и решила его убрать,
+        # просто дельта не доехала. Диагноз «нет в центре» тут пугает зря, а
+        # чинится это само — задание с карточкой везёт признак удаления.
+        удалённая = все_карточки.get(uuid_)
+        if удалённая is not None and удалённая["deleted"]:
+            удаление_не_доехало.append(int(удалённая["id"]))
+            continue
+        # Карточка, заведённая станцией и ещё не признанная, живёт под своим
+        # временным идентификатором — это очередь на разбор, а не потеря.
+        if uuid_.startswith("draft-") or str(позиция.get("Источник") or "") == "station":
+            черновиков += 1
+            continue
+        нет_в_центре.append({
+            "uuid": uuid_, "sku": позиция.get("Артикул") or "",
+            "name": позиция.get("Наименование") or "",
+            "barcode": позиция.get("Штрихкод") or "",
+        })
+
+    # Обратная сторона: карточка сети, которой на станции нет. В версии, где
+    # станция получает справочник целиком, это значит, что дельта не доехала.
+    нет_на_станции = [
+        {"uuid": uuid_, "sku": строка["sku"], "name": строка["name"]}
+        for uuid_, строка in в_центре.items() if uuid_ not in на_станции
+    ]
+
+    # Досылаем отставшие удаления тем же тактом, каким заметили: станция на
+    # связи прямо сейчас, а ждать, пока кто-то нажмёт кнопку в центре, значит
+    # держать на полке товар, выведенный из ассортимента месяц назад.
+    if удаление_не_доехало:
+        from app.routers.store_router import _queue_nsi_delta  # цикл импорта
+        for item_id in удаление_не_доехало[:200]:
+            try:
+                await _queue_nsi_delta(db, company_id, item_id, station_id)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("АЗС %s: удаление карточки %s не досланo: %s",
+                            station_id, item_id, exc)
+        log.info("АЗС %s: досланы удаления карточек — %d",
+                 station_id, len(удаление_не_доехало))
+
+    await db.execute(text("""
+        INSERT INTO edge_catalog_check
+               (company_id, station_id, checked_at, taken_at, station_items,
+                center_items, missing_in_center, missing_on_station,
+                drafts_pending)
+        VALUES (:cid, :st, now(), :taken, :station_items,
+                :center_items, CAST(:missing_center AS jsonb),
+                CAST(:missing_station AS jsonb), :drafts)
+        ON CONFLICT (company_id, station_id) DO UPDATE
+           SET checked_at = now(), taken_at = excluded.taken_at,
+               station_items = excluded.station_items,
+               center_items = excluded.center_items,
+               missing_in_center = excluded.missing_in_center,
+               missing_on_station = excluded.missing_on_station,
+               drafts_pending = excluded.drafts_pending
+    """), {"cid": company_id, "st": station_id,
+           # Момент съёмки приводим НА СТОРОНЕ PYTHON: asyncpg типизирует
+           # параметр по колонке и строку в timestamptz не превращает, а CAST
+           # в SQL тут не спасает — та же грабля, что у `_ts` выше.
+           "taken": _ts(сводка.get("Снято")),
+           "station_items": len(на_станции), "center_items": len(в_центре),
+           "missing_center": json.dumps(нет_в_центре[:ПОКАЗЫВАТЬ_РАСХОЖДЕНИЙ],
+                                        ensure_ascii=False),
+           "missing_station": json.dumps(нет_на_станции[:ПОКАЗЫВАТЬ_РАСХОЖДЕНИЙ],
+                                         ensure_ascii=False),
+           "drafts": черновиков})
+    await db.commit()
+
+    if нет_в_центре:
+        log.warning("АЗС %s: карточек нет в центре — %d (пример: %s)",
+                    station_id, len(нет_в_центре), нет_в_центре[0]["name"])
+    return {"catalog_digest": len(позиции),
+            "deletions_resent": len(удаление_не_доехало),
+            "missing_in_center": len(нет_в_центре),
+            "missing_on_station": len(нет_на_станции),
+            "drafts_pending": черновиков}
+
+
+async def ingest_cash_check(db: AsyncSession, company_id, station_id: int,
+                            docs: list[dict]) -> dict:
+    """Запомнить сверку «касса ↔ учёт» станции для надзора сети.
+
+    Центр остаток кассы NeftoMS сам не видит — станция шлёт снимок пакетом
+    cash_state. Направление уже разложено на станции (выше учёта — разбор, ниже
+    — окно разнесения, сырьё — норма), центр только сохраняет одну строку на
+    станцию. Список «касса выше учёта» приходит обрезанным до лимита станции.
+    """
+    св = next((d for d in docs
+               if isinstance(d, dict) and d.get("Тип") == "cash_state"), None)
+    if св is None:
+        return {"cash_state": 0}
+
+    позиции = [p for p in (св.get("Позиции") or []) if isinstance(p, dict)]
+    above_items = [{
+        "ns_code": p.get("КодНС"),
+        "name": p.get("Наименование") or "",
+        "barcode": p.get("Штрихкод") or "",
+        "in_cash": p.get("ВКассе"),
+        "should_be": p.get("Должно"),
+        "section": p.get("Отдел"),
+    } for p in позиции]
+
+    await db.execute(text("""
+        INSERT INTO edge_cash_check
+               (company_id, station_id, checked_at, taken_at, in_cash, should_be,
+                matched, above, below, raw_material, not_in_cash, no_card, above_items)
+        VALUES (:cid, :st, now(), :taken, :in_cash, :should_be, :matched,
+                :above, :below, :raw, :not_in_cash, :no_card, CAST(:items AS jsonb))
+        ON CONFLICT (company_id, station_id) DO UPDATE
+           SET checked_at = now(), taken_at = excluded.taken_at,
+               in_cash = excluded.in_cash, should_be = excluded.should_be,
+               matched = excluded.matched, above = excluded.above,
+               below = excluded.below, raw_material = excluded.raw_material,
+               not_in_cash = excluded.not_in_cash, no_card = excluded.no_card,
+               above_items = excluded.above_items
+         -- ⚠ Старый снимок не перетирает свежий.
+         --
+         -- Сверка — СОСТОЯНИЕ, а не событие: у неё есть время съёмки, и назад
+         -- время не идёт. Пакет, застрявший в очереди станции, доставляется
+         -- повторно раз за разом; ревизия при этом не создаётся (тело то же),
+         -- а обработка идёт — и утренний снимок ложился поверх вечернего.
+         -- 01.09.2026 на 208 экран так показывал «снято в 11:51», когда
+         -- последний снимок был снят в 20:48, и цифры стояли мёртво весь день.
+           WHERE edge_cash_check.taken_at IS NULL
+              OR excluded.taken_at IS NULL
+              OR excluded.taken_at >= edge_cash_check.taken_at
+    """), {"cid": company_id, "st": station_id,
+           "taken": _ts(св.get("Снято")),
+           "in_cash": int(св.get("ВКассе") or 0),
+           "should_be": int(св.get("ДолжноБыть") or 0),
+           "matched": int(св.get("Совпадает") or 0),
+           "above": int(св.get("ВышеУчёта") or 0),
+           "below": int(св.get("НижеУчёта") or 0),
+           "raw": int(св.get("Сырьё") or 0),
+           "not_in_cash": int(св.get("НетВКассе") or 0),
+           "no_card": int(св.get("БезСправочника") or 0),
+           "items": json.dumps(above_items, ensure_ascii=False)})
+    await db.commit()
+
+    if св.get("ВышеУчёта"):
+        log.warning("АЗС %s: касса выше учёта — %d позиций",
+                    station_id, св.get("ВышеУчёта"))
+    return {"cash_state": 1, "above": int(св.get("ВышеУчёта") or 0)}

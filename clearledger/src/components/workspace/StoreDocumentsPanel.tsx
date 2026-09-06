@@ -7,10 +7,9 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { ShiftPassportSheet } from './ShiftPassportSheet'
@@ -39,6 +38,37 @@ const KIND_LABELS: Record<string, string> = {
   store_shift: 'Смена магазина', revaluation: 'Переоценка',
 }
 
+// Виды движений остатка (по строке на товар) — для свёрнутой строки в «Связи и
+// движения», чтобы не сыпать техническими кодами receipt_acceptance ×N.
+const MOVEMENT_LABELS: Record<string, string> = {
+  receipt_acceptance: 'приёмка на склад', sale: 'продажа', return_sale: 'возврат продажи',
+  writeoff: 'списание', gain: 'оприходование', inventory: 'инвентаризация',
+  transfer: 'перемещение', return_purchase: 'возврат поставщику',
+}
+
+// Секции-фильтры реестра смен: группа → виды документов, входящие в неё. Клик по
+// чипу оставляет смены, где такой разрез есть («где были поступления»). Группы
+// совпадают с секциями листа документа ОРП (макет orp-shema-predstavleniya).
+const SECTION_FILTERS: { key: string; label: string; kinds: string[] }[] = [
+  { key: 'sale', label: 'Продажи', kinds: ['retail_sale_sidegoods', 'return_sale'] },
+  { key: 'food', label: 'Общепит', kinds: ['production_release', 'recipe', 'ingredients_writeoff'] },
+  { key: 'purchase', label: 'Поступления', kinds: ['purchase', 'return_purchase'] },
+  { key: 'inventory', label: 'Инвентаризации', kinds: ['inventory'] },
+  { key: 'transfer', label: 'Перемещения', kinds: ['transfer'] },
+  { key: 'gain', label: 'Оприходования', kinds: ['gain'] },
+  { key: 'writeoff', label: 'Списания', kinds: ['writeoff'] },
+  { key: 'price', label: 'Переоценки', kinds: ['revaluation'] },
+]
+
+// Готовность смены к выгрузке в бухгалтерию — светофор макета. Пока двухцветно:
+// Светофор смены — из readiness бэка (тот же источник, что лист смены), чтобы
+// цвет в списке и внутри совпадал. g готова · y можно грузить · r не грузить.
+function shiftReadiness(s: StoreShiftBrief): { color: 'g' | 'y' | 'r'; label: string } {
+  if (s.readiness === 'r') return { color: 'r', label: 'не уедет' }
+  if (s.readiness === 'y') return { color: 'y', label: 'можно грузить' }
+  return { color: 'g', label: 'готова' }
+}
+
 // Чек и кассовая смена в фильтр не выносятся: они доказательство продажи, а не
 // учётный документ, и разбираются в разделе «Касса». Раздел «Документы» —
 // про всё остальное: приёмки, перемещения, пересчёты, списания, отчёты смен.
@@ -48,7 +78,9 @@ const KIND_OPTIONS = Object.entries(KIND_LABELS)
 
 // Каждый счётчик — рабочий отбор: сервер считает и фильтрует одним выражением,
 // поэтому число над таблицей и содержимое таблицы не могут разойтись.
-const COUNTERS: Array<{ key: StoreDocumentCounter; label: string; icon: typeof AlertCircle }> = [
+// Карточки-счётчики наверху — только те, что есть в StoreDocumentStats
+// (waiting_receipt своей карточки не имеет, живёт лишь как переход из Разбора).
+const COUNTERS: Array<{ key: keyof StoreDocumentStats; label: string; icon: typeof AlertCircle }> = [
   { key: 'attention', label: 'Требуют внимания', icon: AlertCircle },
   { key: 'missing_evidence', label: 'Нет подтверждений', icon: Files },
   { key: 'not_accounting_ready', label: 'Учёт вернул документ', icon: FileCheck2 },
@@ -88,6 +120,8 @@ interface StoreDocumentsPanelProps {
   stations: string[]
   /** С какого вида открывается пункт меню: разбор, смены или список. */
   startView?: 'triage' | 'list' | 'shifts'
+  /** Какие вкладки показывать в переключателе (по умолчанию все три). */
+  views?: Array<'triage' | 'shifts' | 'list'>
   /** Виды документов пункта: пусто — весь документооборот станции. */
   kinds?: string[]
   /** Заголовок пункта меню; без него — общий заголовок раздела. */
@@ -196,7 +230,9 @@ function DetailSection({ title, children }: { title: string; children: ReactNode
   )
 }
 
-function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null; onClose: () => void }) {
+type DocHint = { kind: string; number: string | null; document_at: string | null }
+
+function DocumentSheet({ recordId, hint, onClose }: { recordId: string | null; hint?: DocHint | null; onClose: () => void }) {
   const [bundle, setBundle] = useState<StoreDocumentBundle | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -212,11 +248,11 @@ function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null;
   const [printing, setPrinting] = useState(false)
 
   const printForm = async (variant: 'main' | 'diff' = 'main') => {
-    if (!record) return
+    if (!recordId) return
     setPrinting(true)
     setError('')
     try {
-      await openStoreDocumentPrintForm(record.record_id, variant)
+      await openStoreDocumentPrintForm(recordId, variant)
     } catch (reason) {
       setError(reason instanceof ApiError && reason.status === 409
         ? (reason.message || 'Печатной формы у этого документа нет')
@@ -227,7 +263,7 @@ function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null;
   }
 
   useEffect(() => {
-    if (!record) return
+    if (!recordId) return
     let active = true
     setLoading(true)
     setError('')
@@ -236,18 +272,18 @@ function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null;
     setFileWriteDenied(false)
     setUploadFile(null)
     setTombstoneId('')
-    getStoreDocumentBundle(record.record_id)
+    getStoreDocumentBundle(recordId)
       .then((next) => { if (active) setBundle(next) })
       .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : 'Не удалось открыть документ') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [record])
+  }, [recordId])
 
   const loadPayload = async () => {
-    if (!record) return
+    if (!recordId) return
     setPayloadLoading(true)
     try {
-      setPayload(await getStoreDocumentPayload(record.record_id))
+      setPayload(await getStoreDocumentPayload(recordId))
     } catch (reason) {
       setPayload({ available: false, detail: reason instanceof Error ? reason.message : 'Не удалось получить данные' })
     } finally {
@@ -264,8 +300,8 @@ function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null;
   }
 
   const refreshFiles = async () => {
-    if (!record) return
-    setBundle(await getStoreDocumentBundle(record.record_id))
+    if (!recordId) return
+    setBundle(await getStoreDocumentBundle(recordId))
   }
 
   const handleFileError = (reason: unknown) => {
@@ -278,11 +314,11 @@ function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null;
   }
 
   const addFile = async () => {
-    if (!record || !uploadFile) return
+    if (!recordId || !uploadFile) return
     setFileBusy(true)
     setError('')
     try {
-      await uploadStoreDocumentFile(record.record_id, uploadFile, uploadRole, uploadNote.trim() || undefined)
+      await uploadStoreDocumentFile(recordId, uploadFile, uploadRole, uploadNote.trim() || undefined)
       await refreshFiles()
       setUploadFile(null)
       setUploadNote('')
@@ -294,11 +330,11 @@ function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null;
   }
 
   const tombstone = async () => {
-    if (!record || !tombstoneId || tombstoneReason.trim().length < 3) return
+    if (!recordId || !tombstoneId || tombstoneReason.trim().length < 3) return
     setFileBusy(true)
     setError('')
     try {
-      await tombstoneStoreDocumentFile(record.record_id, tombstoneId, tombstoneReason.trim())
+      await tombstoneStoreDocumentFile(recordId, tombstoneId, tombstoneReason.trim())
       await refreshFiles()
       setTombstoneId('')
       setTombstoneReason('')
@@ -310,6 +346,11 @@ function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null;
   }
 
   const detail = bundle?.detail
+  // Шапку показываем сразу из подсказки (kind/number/дата от строки-источника),
+  // а после загрузки уточняем из detail — статус и печать зависят от него.
+  const вид = detail?.kind ?? hint?.kind ?? ''
+  const номер = detail?.number ?? hint?.number ?? null
+  const когда = detail?.document_at ?? hint?.document_at ?? null
   const lines = detail ? documentLines(detail.document) : []
   // «строк нет» и «источник их не отдаёт» — разные вещи, и путать их нельзя
   const headerOnly = detail?.document.detail_mode === 'header_only'
@@ -317,36 +358,36 @@ function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null;
   const canWriteFiles = Boolean(detail?.file_write_allowed) && !readOnlyFiscal && !fileWriteDenied
 
   return (
-    <Sheet open={Boolean(record)} onOpenChange={(open) => { if (!open) onClose() }}>
-      <SheetContent className="w-full gap-0 p-0 sm:max-w-3xl [&>button.absolute]:min-h-6 [&>button.absolute]:min-w-6">
-        <SheetHeader className="border-b pr-14">
+    <Dialog open={Boolean(recordId)} onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="flex max-h-[92vh] max-w-4xl flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="border-b px-6 py-4 pr-14 text-left">
           <div className="flex flex-wrap items-center gap-2">
-            <SheetTitle>{record ? KIND_LABELS[record.kind] ?? record.kind : 'Документ'}</SheetTitle>
-            {record && <StatusBadge value={record.accounting_status} attention={record.requires_attention} />}
+            <DialogTitle>{вид ? KIND_LABELS[вид] ?? вид : 'Документ'}</DialogTitle>
+            {detail && <StatusBadge value={detail.accounting_status} attention={detail.requires_attention} />}
             {readOnlyFiscal && <Badge variant="outline">только просмотр</Badge>}
           </div>
-          <SheetDescription>
-            {record?.number ? `№ ${record.number}` : 'Без номера'} · {fmtDate(record?.document_at)}
-          </SheetDescription>
+          <DialogDescription>
+            {номер ? `№ ${номер}` : 'Без номера'} · {fmtDate(когда)}
+          </DialogDescription>
           <div className="flex flex-wrap gap-2">
-            {record && PRINTABLE_KINDS.has(record.kind) && (
+            {вид && PRINTABLE_KINDS.has(вид) && (
               <Button variant="outline" size="sm" disabled={printing}
                 onClick={() => void printForm()}>
                 {printing ? <LoaderCircle data-icon className="animate-spin" /> : <Printer data-icon />}
                 Печатная форма
               </Button>
             )}
-            {record && DIFF_PRINTABLE_KINDS.has(record.kind) && (
+            {вид && DIFF_PRINTABLE_KINDS.has(вид) && (
               <Button variant="outline" size="sm" disabled={printing}
                 onClick={() => void printForm('diff')}>
                 <Printer data-icon />
-                {record.kind === 'purchase' ? 'Акт расхождения (ТОРГ-2)' : 'Сличительная ведомость (ИНВ-19)'}
+                {вид === 'purchase' ? 'Акт расхождения (ТОРГ-2)' : 'Сличительная ведомость (ИНВ-19)'}
               </Button>
             )}
           </div>
-        </SheetHeader>
+        </DialogHeader>
 
-        <ScrollArea className="min-h-0 flex-1">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="grid gap-5 p-4 sm:p-5">
             {loading && <div className="grid gap-3" aria-label="Загрузка документа"><Skeleton className="h-24" /><Skeleton className="h-40" /><Skeleton className="h-28" /></div>}
             {error && (
@@ -412,11 +453,20 @@ function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null;
                     <DetailField label="Сумма">{fmtMoney(detail.amount)}</DetailField>
                     <DetailField label="НДС">{fmtMoney(detail.vat_amount)}</DetailField>
                     <DetailField label="Источник">{SOURCE_LABELS[detail.projection_source] ?? detail.projection_source}</DetailField>
+                    {detail.transfer_route && <DetailField label="Направление">{detail.transfer_route}</DetailField>}
                   </dl>
                 </DetailSection>
                 <Separator />
-                <DetailSection title="2. Строки">
-                  {headerOnly ? (
+                <DetailSection title={detail.revaluation ? '2. Изменение цены' : '2. Строки'}>
+                  {detail.revaluation ? (
+                    <dl className="grid gap-3 rounded-md border p-3 sm:grid-cols-2">
+                      <DetailField label="Товар">{detail.revaluation.name || detail.revaluation.barcode || '—'}</DetailField>
+                      <DetailField label="Штрихкод">{detail.revaluation.barcode || '—'}</DetailField>
+                      <DetailField label="Было">{fmtMoney(detail.revaluation.from)}</DetailField>
+                      <DetailField label="Стало">{fmtMoney(detail.revaluation.to)}</DetailField>
+                      <DetailField label="Причина">{detail.revaluation.reason || '—'}</DetailField>
+                    </dl>
+                  ) : headerOnly ? (
                     <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
                       Доступна только шапка документа. {detail.document.detail_note}
                     </p>
@@ -455,14 +505,37 @@ function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null;
                 </DetailSection>
                 <Separator />
                 <DetailSection title="4. Связи и движения">
-                  {bundle.relations.length ? <div className="grid gap-2">{bundle.relations.map((relation, index) => (
-                    <div key={`${relation.kind}-${index}`} className="flex items-center gap-2 rounded-md border p-3 text-sm">
-                      <Link2 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                      {'movement' in relation
-                        ? <span>Движение: {relation.movement.kind} · {relation.movement.count}</span>
-                        : <span>{KIND_LABELS[relation.related.kind] ?? relation.related.kind} {relation.related.number ? `№ ${relation.related.number}` : ''}</span>}
-                    </div>
-                  ))}</div> : <p className="text-sm text-muted-foreground">Связанные документы и движения не найдены.</p>}
+                  {bundle.relations.length ? (() => {
+                    // Приёмка на 28 строк даёт 28 движений receipt_acceptance по одной
+                    // штуке — портянка. Сворачиваем однотипные движения в одну строку с
+                    // суммой, связанные документы оставляем поштучно.
+                    const движения = new Map<string, number>()
+                    const документы = bundle.relations.filter(
+                      (r): r is { kind: string; related: StoreDocumentBrief } => 'related' in r)
+                    for (const rel of bundle.relations) {
+                      if ('movement' in rel)
+                        движения.set(rel.movement.kind, (движения.get(rel.movement.kind) ?? 0) + rel.movement.count)
+                    }
+                    return (
+                      <div className="grid gap-2">
+                        {документы.map((rel, i) => (
+                          <div key={`doc-${i}`} className="flex items-center gap-2 rounded-md border p-3 text-sm">
+                            <Link2 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                            <span>{KIND_LABELS[rel.related.kind] ?? rel.related.kind}{rel.related.number ? ` № ${rel.related.number}` : ''}</span>
+                          </div>
+                        ))}
+                        {[...движения].map(([kind, count]) => (
+                          <div key={`mv-${kind}`} className="flex items-center justify-between gap-2 rounded-md border p-3 text-sm">
+                            <span className="flex items-center gap-2">
+                              <Link2 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                              Движение остатка · {MOVEMENT_LABELS[kind] ?? kind}
+                            </span>
+                            <span className="tabular-nums text-muted-foreground">{count} {count === 1 ? 'позиция' : 'позиций'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })() : <p className="text-sm text-muted-foreground">Связанные документы и движения не найдены.</p>}
                 </DetailSection>
                 <Separator />
                 <DetailSection title="5. Ревизии и сверка">
@@ -488,20 +561,20 @@ function DocumentSheet({ record, onClose }: { record: StoreDocumentBrief | null;
               </>
             )}
           </div>
-        </ScrollArea>
-      </SheetContent>
-    </Sheet>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
-export function StoreDocumentsPanel({ dateFrom, dateTo, stations, startView = 'triage', kinds, heading }: StoreDocumentsPanelProps) {
+export function StoreDocumentsPanel({ dateFrom, dateTo, stations, startView = 'triage', kinds, views, heading }: StoreDocumentsPanelProps) {
   const [documents, setDocuments] = useState<StoreDocumentBrief[]>([])
   const [stats, setStats] = useState(EMPTY_STATS)
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
   const [error, setError] = useState('')
   const [refreshKey, setRefreshKey] = useState(0)
-  const [selected, setSelected] = useState<StoreDocumentBrief | null>(null)
+  const [selected, setSelected] = useState<{ recordId: string; hint?: DocHint } | null>(null)
   const [search, setSearch] = useState('')
   const deferredSearch = useDeferredValue(search.trim())
   const [supplier, setSupplier] = useState('')
@@ -525,6 +598,12 @@ export function StoreDocumentsPanel({ dateFrom, dateTo, stations, startView = 't
   const [triageLoading, setTriageLoading] = useState(false)
   const [shifts, setShifts] = useState<StoreShiftBrief[]>([])
   const [shiftsLoading, setShiftsLoading] = useState(false)
+  // Фильтр реестра по секции: пусто — все смены, иначе только те, где разрез есть.
+  // Набор выбранных разрезов: можно выбрать несколько (Продажи + Инвентаризации),
+  // смена проходит, если содержит любой из них. Пустой набор = «Все».
+  const [secFilters, setSecFilters] = useState<string[]>([])
+  // Отбор по светофору готовности: g готова · y можно грузить · r не грузить.
+  const [readyFilters, setReadyFilters] = useState<Array<'g' | 'y' | 'r'>>([])
   const [passport, setPassport] = useState<{ station: number; shift: number } | null>(null)
   const [shiftNo, setShiftNo] = useState<number | null>(null)
   const [filtersExpanded, setFiltersExpanded] = useState(false)
@@ -614,10 +693,8 @@ export function StoreDocumentsPanel({ dateFrom, dateTo, stations, startView = 't
     if (код === 'shifts_review') { setView('shifts'); return }
     setOffset(0); setShiftNo(null); setCounter('')
     setKind(''); setOperationalStatus('')
-    if (код === 'waiting_receipt') {
-      setKind('purchase'); setOperationalStatus('expected')
-    } else if (код === 'missing_evidence' || код === 'attention' || код === 'onec_mismatch'
-        || код === 'not_accounting_ready') {
+    if (код === 'waiting_receipt' || код === 'missing_evidence' || код === 'attention'
+        || код === 'onec_mismatch' || код === 'not_accounting_ready') {
       setCounter(код as StoreDocumentCounter)
     }
     setView('list')
@@ -648,16 +725,18 @@ export function StoreDocumentsPanel({ dateFrom, dateTo, stations, startView = 't
           )}
           {/* Переключатель нужен только на входном экране: в пункте меню человек
               уже выбрал, что смотрит, и вторая навигация внутри путает. */}
-          {!kinds && (
-          <div className="flex rounded-md border p-0.5" role="group" aria-label="Как показывать реестр">
-            <Button variant={view === 'triage' ? 'secondary' : 'ghost'} size="sm" className="h-7"
-              onClick={() => { setView('triage'); setShiftNo(null) }}>Разбор</Button>
-            <Button variant={view === 'shifts' ? 'secondary' : 'ghost'} size="sm" className="h-7"
-              onClick={() => setView('shifts')}>Смены</Button>
-            <Button variant={view === 'list' ? 'secondary' : 'ghost'} size="sm" className="h-7"
-              onClick={() => setView('list')}>Документы</Button>
-          </div>
-          )}
+          {!kinds && (() => {
+            const вкладки = views ?? ['triage', 'shifts', 'list']
+            const подпись: Record<string, string> = { triage: 'Разбор', shifts: 'Смены', list: 'Документы' }
+            return вкладки.length > 1 && (
+              <div className="flex rounded-md border p-0.5" role="group" aria-label="Как показывать реестр">
+                {вкладки.map((v) => (
+                  <Button key={v} variant={view === v ? 'secondary' : 'ghost'} size="sm" className="h-7"
+                    onClick={() => { setView(v); if (v === 'triage') setShiftNo(null) }}>{подпись[v]}</Button>
+                ))}
+              </div>
+            )
+          })()}
           <Button variant="outline" size="sm" onClick={() => setRefreshKey((value) => value + 1)} disabled={loading}>
             <RefreshCw data-icon className={loading ? 'animate-spin' : ''} />Обновить
           </Button>
@@ -761,52 +840,97 @@ export function StoreDocumentsPanel({ dateFrom, dateTo, stations, startView = 't
                 </p>
               </div>
             )}
-            {!shiftsLoading && shifts.length > 0 && (
-              <Table>
-                <TableHeader className="sticky top-0 z-10 bg-background">
-                  <TableRow>
-                    <TableHead>Смена</TableHead><TableHead>АЗС</TableHead><TableHead>Открыта</TableHead>
-                    <TableHead>Закрыта</TableHead><TableHead className="text-right">Выручка</TableHead>
-                    <TableHead className="text-right">Документов</TableHead><TableHead>Состав</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>{shifts.map((смена) => (
-                  <TableRow
-                    key={`${смена.station_id}-${смена.shift_no}`}
-                    className="cursor-pointer"
-                    onClick={() => {
-                      if (смена.station_id != null) {
-                        setPassport({ station: смена.station_id, shift: смена.shift_no })
-                      }
-                    }}
-                  >
-                    <TableCell>
-                      <span className="font-medium text-primary underline-offset-2 hover:underline">
-                        № {смена.shift_no}
-                      </span>
-                      {смена.requires_attention && (
-                        <Badge variant="outline" className="ml-2 text-amber-500">внимание</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell>{смена.station_id ?? '—'}</TableCell>
-                    <TableCell>{fmtDate(смена.started_at)}</TableCell>
-                    <TableCell>{fmtDate(смена.finished_at)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmtMoney(смена.revenue)}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      <Button type="button" variant="link" className="h-auto p-0"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          setShiftNo(смена.shift_no); setOffset(0); setView('list')
-                        }}>{смена.documents}</Button>
-                    </TableCell>
-                    <TableCell className="max-w-72 whitespace-normal text-xs text-muted-foreground">
-                      {Object.entries(смена.kinds)
-                        .map(([вид, шт]) => `${KIND_LABELS[вид] ?? вид}: ${шт}`).join(' · ')}
-                    </TableCell>
-                  </TableRow>
-                ))}</TableBody>
-              </Table>
-            )}
+            {!shiftsLoading && shifts.length > 0 && (() => {
+              const выбраны = SECTION_FILTERS.filter((s) => secFilters.includes(s.key))
+              // Несколько разрезов объединяются по ИЛИ: смена видна, если в ней
+              // есть хотя бы один из выбранных («Поступления или Инвентаризации»).
+              // Плюс отбор по светофору готовности, если он задан.
+              const видимые = shifts
+                .filter((с) => !выбраны.length || выбраны.some((g) => g.kinds.some((k) => (с.kinds[k] ?? 0) > 0)))
+                .filter((с) => !readyFilters.length || readyFilters.includes(с.readiness))
+              const счёт = (g: (typeof SECTION_FILTERS)[number]) =>
+                shifts.filter((с) => g.kinds.some((k) => (с.kinds[k] ?? 0) > 0)).length
+              const chipCls = (on: boolean) =>
+                `rounded-full border px-3 py-1.5 text-xs transition ${on ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}`
+              const bulbCls = (c: 'g' | 'y' | 'r') =>
+                c === 'g' ? 'bg-emerald-500' : c === 'y' ? 'bg-amber-500' : 'bg-red-500'
+              const gotovCls = (c: 'g' | 'y' | 'r') =>
+                c === 'g' ? 'text-emerald-500' : c === 'y' ? 'text-amber-500' : 'text-red-500'
+              return (
+              <div className="p-3">
+                <div className="mb-3 flex flex-wrap gap-1.5">
+                  <button type="button" className={chipCls(secFilters.length === 0)} onClick={() => setSecFilters([])}>Все</button>
+                  {SECTION_FILTERS.map((g) => (
+                    <button key={g.key} type="button" className={chipCls(secFilters.includes(g.key))}
+                      onClick={() => setSecFilters((prev) =>
+                        prev.includes(g.key) ? prev.filter((k) => k !== g.key) : [...prev, g.key])}>
+                      {g.label}<span className="ml-1 tabular-nums opacity-60">{счёт(g)}</span>
+                    </button>
+                  ))}
+                  <span className="mx-1 w-px self-stretch bg-border" aria-hidden="true" />
+                  {([
+                    ['g', 'Готовы'], ['y', 'Можно грузить'], ['r', 'Не грузить'],
+                  ] as const).map(([c, подпись]) => {
+                    const кол = shifts.filter((с) => с.readiness === c).length
+                    return (
+                      <button key={c} type="button" className={chipCls(readyFilters.includes(c))}
+                        onClick={() => setReadyFilters((prev) =>
+                          prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c])}>
+                        <span className={`mr-1.5 inline-block size-2 rounded-full ${bulbCls(c)}`} aria-hidden="true" />
+                        {подпись}<span className="ml-1 tabular-nums opacity-60">{кол}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <Table>
+                  <TableHeader className="sticky top-0 z-10 bg-background">
+                    <TableRow>
+                      <TableHead className="w-8" aria-label="Готовность"></TableHead>
+                      <TableHead>Смена</TableHead><TableHead>АЗС</TableHead><TableHead>Открыта</TableHead>
+                      <TableHead>Закрыта</TableHead><TableHead className="text-right">Выручка</TableHead>
+                      <TableHead className="text-right">Докум.</TableHead><TableHead>Состав</TableHead>
+                      <TableHead>Готовность</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>{видимые.map((смена) => {
+                    const гот = shiftReadiness(смена)
+                    return (
+                    <TableRow key={`${смена.station_id}-${смена.shift_no}`} className="cursor-pointer"
+                      onClick={() => { if (смена.station_id != null) setPassport({ station: смена.station_id, shift: смена.shift_no }) }}>
+                      <TableCell><span className={`inline-block size-2.5 rounded-full ${bulbCls(гот.color)}`} aria-hidden="true" /></TableCell>
+                      <TableCell><span className="font-medium text-primary underline-offset-2 hover:underline">№ {смена.shift_no}</span></TableCell>
+                      <TableCell>{смена.station_id ?? '—'}</TableCell>
+                      <TableCell className="tabular-nums text-muted-foreground">{fmtDate(смена.started_at)}</TableCell>
+                      <TableCell className="tabular-nums text-muted-foreground">{fmtDate(смена.finished_at)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtMoney(смена.revenue)}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        <Button type="button" variant="link" className="h-auto p-0"
+                          onClick={(event) => { event.stopPropagation(); setShiftNo(смена.shift_no); setOffset(0); setView('list') }}>{смена.documents}</Button>
+                      </TableCell>
+                      <TableCell className="max-w-80 whitespace-normal">
+                        <div className="flex flex-wrap gap-1">
+                          {Object.entries(смена.kinds).map(([вид, шт]) => (
+                            <span key={вид} className="rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                              {KIND_LABELS[вид] ?? вид}{шт > 1 ? ` ${шт}` : ''}
+                            </span>
+                          ))}
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-64 whitespace-normal">
+                        <span className={`whitespace-nowrap text-xs ${gotovCls(гот.color)}`}>● {гот.label}</span>
+                        {(смена.blockers ?? []).length > 0 && (
+                          <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                            {(смена.blockers ?? []).join(' · ')}
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                    )
+                  })}</TableBody>
+                </Table>
+              </div>
+              )
+            })()}
           </>
         )}
         {view === 'list' && error && <div className="m-4 flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive" role="alert"><span>{error}</span><Button variant="outline" size="sm" onClick={() => setRefreshKey((value) => value + 1)}>Повторить</Button></div>}
@@ -819,7 +943,7 @@ export function StoreDocumentsPanel({ dateFrom, dateTo, stations, startView = 't
               <TableHead>Источник</TableHead></TableRow></TableHeader>
             <TableBody>{documents.map((document) => (
               <TableRow key={document.record_id}>
-                <TableCell><Button type="button" variant="link" className="h-auto max-w-72 flex-col items-start gap-0 whitespace-normal p-0 text-left" onClick={() => setSelected(document)}><span className="font-medium">{KIND_LABELS[document.kind] ?? document.kind}</span><span className="text-xs font-normal text-muted-foreground">{document.number ? `№ ${document.number}` : 'без номера'} · рев. {document.revision}</span></Button></TableCell>
+                <TableCell><Button type="button" variant="link" className="h-auto max-w-72 flex-col items-start gap-0 whitespace-normal p-0 text-left" onClick={() => setSelected({ recordId: document.record_id, hint: { kind: document.kind, number: document.number, document_at: document.document_at } })}><span className="font-medium">{KIND_LABELS[document.kind] ?? document.kind}</span><span className="text-xs font-normal text-muted-foreground">{document.number ? `№ ${document.number}` : 'без номера'} · рев. {document.revision}</span>{document.transfer_route && <span className="text-xs font-normal text-primary/80">{document.transfer_route}</span>}{document.revaluation && (document.revaluation.name || document.revaluation.from != null || document.revaluation.to != null) && <span className="text-xs font-normal text-primary/80">{document.revaluation.name ? `${document.revaluation.name}: ` : ''}{fmtMoney(document.revaluation.from)} → {fmtMoney(document.revaluation.to)}</span>}</Button></TableCell>
                 <TableCell>{fmtDate(document.document_at)}</TableCell><TableCell>{document.station_id ?? 'Центральный склад'}</TableCell>
                 <TableCell>
                   {document.shift_no && document.station_id != null ? (
@@ -844,7 +968,7 @@ export function StoreDocumentsPanel({ dateFrom, dateTo, stations, startView = 't
       <footer className="flex items-center justify-between gap-3 border-t px-4 py-2 text-xs text-muted-foreground">
         <span>{range}</span><div className="flex items-center gap-2"><span>Страница {page} из {pageCount}</span><Button size="icon-sm" variant="outline" disabled={offset === 0 || loading} onClick={() => setOffset((value) => Math.max(0, value - PAGE_SIZE))} aria-label="Предыдущая страница"><ChevronLeft data-icon /></Button><Button size="icon-sm" variant="outline" disabled={offset + PAGE_SIZE >= total || loading} onClick={() => setOffset((value) => value + PAGE_SIZE)} aria-label="Следующая страница"><ChevronRight data-icon /></Button></div>
       </footer>
-      <DocumentSheet record={selected} onClose={() => setSelected(null)} />
+      <DocumentSheet recordId={selected?.recordId ?? null} hint={selected?.hint} onClose={() => setSelected(null)} />
       <ShiftPassportSheet
         station={passport?.station ?? null}
         shift={passport?.shift ?? null}
@@ -852,6 +976,7 @@ export function StoreDocumentsPanel({ dateFrom, dateTo, stations, startView = 't
         onOpenDocuments={(_station, shift) => {
           setPassport(null); setShiftNo(shift); setOffset(0); setView('list')
         }}
+        onOpenDocument={(recordId, hint) => setSelected({ recordId, hint })}
       />
     </div>
   )

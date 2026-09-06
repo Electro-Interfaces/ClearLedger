@@ -101,6 +101,7 @@ export interface DocLabel {
 }
 
 export interface DocCard {
+  edit_version?: string | null
   id: string
   kind_id: string
   kind_code: string
@@ -898,8 +899,33 @@ export async function createErrand(
 /** Запустить круг согласования. Без маршрута берётся маршрут вида документа. */
 export async function startApproval(
   companyId: string, id: string, route?: Array<Record<string, unknown>>,
+  preview?: ApprovalPreview,
 ): Promise<{ round: number; approvals: number; steps: number; snapshot_sha256: string }> {
-  return post(`/api/docs/${id}/approval/start`, { company_id: companyId, route: route ?? null })
+  return post(`/api/docs/${id}/approval/start`, {
+    company_id: companyId, route: route ?? null,
+    expected_edit_version: preview?.edit_version,
+    expected_route_token: preview?.route_token,
+  })
+}
+
+export interface ApprovalPreview {
+  edit_version: string | null
+  route_token: string
+  problems: string[]
+  steps: Array<{
+    number: number; name: string; mode: string; quorum: string
+    step_kind: string; sla_hours: number | null
+    people: Array<{ id: string | null; name: string; kind: string }>
+  }>
+}
+
+export function previewApproval(companyId: string, id: string) {
+  return get<ApprovalPreview>(`/api/docs/${id}/approval/preview`, { company_id: companyId })
+}
+
+export function duplicateCandidates(companyId: string, fields: Record<string, string>) {
+  return get<{ docs: Array<Pick<DocCard, 'id' | 'title' | 'reg_number' | 'external_number'>> }>(
+    '/api/docs/duplicate-candidates', { company_id: companyId, ...fields })
 }
 
 export async function listDocViews(companyId: string) {

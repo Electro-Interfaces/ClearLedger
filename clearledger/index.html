@@ -13,9 +13,23 @@
          глобус. Путь через %BASE_URL% — на случай сборки под путь; относительная ссылка
          ломалась бы на вложенных маршрутах вроде /finance/objects. -->
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+      if (!/(^|\/)demo(\/|$)/.test(window.location.pathname)) {
+        var fontPreconnect = document.createElement('link');
+        fontPreconnect.rel = 'preconnect';
+        fontPreconnect.href = 'https://fonts.googleapis.com';
+        document.head.appendChild(fontPreconnect);
+        var fontOrigin = document.createElement('link');
+        fontOrigin.rel = 'preconnect';
+        fontOrigin.href = 'https://fonts.gstatic.com';
+        fontOrigin.crossOrigin = 'anonymous';
+        document.head.appendChild(fontOrigin);
+        var fontStyles = document.createElement('link');
+        fontStyles.rel = 'stylesheet';
+        fontStyles.href = 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap';
+        document.head.appendChild(fontStyles);
+      }
+    </script>
     <!-- Стартовый заголовок; дальше его ведёт приложение (DocumentTitle) — иначе все
          вкладки продуктов назывались бы одинаково. -->
     <title>Рабочее пространство</title>

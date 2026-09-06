@@ -6,6 +6,7 @@ import type {
   StoreExchangeData,
   StoreExchangeStationDetail,
   StoreOverviewData,
+  CateringMenuData,
   StoreSalesData,
   StoreStockData,
   StoreVisitsData,
@@ -644,6 +645,167 @@ export async function getDemoStoreExchangeStation(
     downlink: [
       { kind: 'price', label: 'Новые цены', note: 'пакет 24.08', state: stationId === 315 ? 'ждёт станции' : 'применено', created_at: at(dateTo, '11:20:00'), delivered_at: stationId === 315 ? null : at(dateTo, '11:21:00'), acked_at: stationId === 315 ? null : at(dateTo, '11:22:00'), size_bytes: 8_600, delivery_seconds: stationId === 315 ? null : 54, ack_seconds: stationId === 315 ? null : 112 },
       { kind: 'nsi', label: 'Карточки НСИ', note: '3 позиции', state: 'применено', created_at: at(dateTo, '09:05:00'), delivered_at: at(dateTo, '09:06:00'), acked_at: at(dateTo, '09:07:00'), size_bytes: 4_200, delivery_seconds: 48, ack_seconds: 96 },
+    ],
+  }
+}
+
+export async function getDemoStoreCateringMenu(
+  dateFrom: string,
+  dateTo: string,
+  stations?: string[],
+): Promise<CateringMenuData> {
+  const selected = (stations?.length ? stations : STORE_DEMO_STATIONS.map((station) => station.id))
+    .filter((station) => STATION_FACTOR[station])
+  const stationIds = selected.length ? selected : STORE_DEMO_STATIONS.map((station) => station.id)
+  const allFactor = Object.values(STATION_FACTOR).reduce((sum, value) => sum + value, 0)
+  const scale = stationIds.reduce((sum, station) => sum + STATION_FACTOR[station], 0) / allFactor
+  const hasPartial = stationIds.includes('315')
+  const end = new Date(`${dateTo}T00:00:00Z`)
+  const monday = new Date(end)
+  monday.setUTCDate(end.getUTCDate() - ((end.getUTCDay() + 6) % 7))
+  const iso = (value: Date) => value.toISOString().slice(0, 10)
+  const weekStarts = [14, 7, 0].map((offset) => {
+    const value = new Date(monday)
+    value.setUTCDate(value.getUTCDate() - offset)
+    return value
+  })
+  const comparison = stationIds.flatMap((station, stationIndex) => weekStarts.map((week, weekIndex) => {
+    const factor = STATION_FACTOR[station] * [0.91, 1, 1.08][weekIndex]
+    const salesGross = round(54_800 * factor)
+    const customerReturns = round(salesGross * (station === '315' ? 0.021 : 0.011))
+    const vat = round((salesGross - customerReturns) * 22 / 122)
+    const netRevenue = round(salesGross - customerReturns - vat)
+    const ingredientCost = round(netRevenue * (station === '315' ? 0.43 : 0.34 + stationIndex * 0.012))
+    const writeoffs = round(1_020 * factor)
+    const shortages = round((station === '315' ? 890 : 330) * factor)
+    const preliminaryContribution = round(netRevenue - ingredientCost - writeoffs - shortages)
+    const weekTo = new Date(week)
+    weekTo.setUTCDate(weekTo.getUTCDate() + 6)
+    const costStatus = station === '315' ? 'partial' as const : 'exact' as const
+    return {
+      station_id: station,
+      week_from: iso(week),
+      week_to: iso(weekTo),
+      sales_gross: salesGross,
+      customer_returns: customerReturns,
+      vat,
+      net_revenue: netRevenue,
+      ingredient_cost: ingredientCost,
+      writeoffs,
+      shortages,
+      direct_losses: round(writeoffs + shortages),
+      operating_contribution: costStatus === 'exact' ? preliminaryContribution : null,
+      preliminary_contribution: preliminaryContribution,
+      cost_status: costStatus,
+      exact_coverage_pct: costStatus === 'exact' ? 100 : 73,
+      food_cost_pct: round(ingredientCost / netRevenue * 100, 1),
+      attach_rate: round((station === '208' ? 12.8 : station === '101' ? 10.4 : 7.1) + weekIndex * 0.4, 1),
+    }
+  }))
+  const scaled = (value: number) => round(value * scale)
+  const salesGross = scaled(527_640)
+  const customerReturns = scaled(6_840)
+  const vat = round((salesGross - customerReturns) * 22 / 122)
+  const netRevenue = round(salesGross - customerReturns - vat)
+  const ingredientCost = scaled(181_240)
+  const writeoffs = scaled(12_840)
+  const shortages = scaled(6_340)
+  const preliminaryContribution = round(netRevenue - ingredientCost - writeoffs - shortages)
+  const daily = (qty: number, revenue: number) => [2, 1, 0].map((offset, index) => {
+    const value = new Date(end)
+    value.setUTCDate(value.getUTCDate() - offset)
+    const factor = [0.31, 0.34, 0.35][index]
+    return { date: iso(value), qty: round(qty * factor, 1), revenue: round(revenue * factor) }
+  })
+  const dish = (
+    guid: string, name: string, qty: number, revenue: number, returns: number,
+    vatValue: number, cost: number | null, menuClass: CateringMenuData['dishes'][number]['menu_class'],
+    ingredients: CateringMenuData['dishes'][number]['ingredients'],
+    status: CateringMenuData['dishes'][number]['cost_status'] = 'exact',
+  ): CateringMenuData['dishes'][number] => {
+    const scaledQty = round(qty * scale, 1)
+    const scaledRevenue = scaled(revenue)
+    const scaledReturns = scaled(returns)
+    const scaledVat = scaled(vatValue)
+    const scaledCost = cost == null ? null : scaled(cost)
+    const revenueNet = round(scaledRevenue - scaledReturns - scaledVat)
+    const margin = scaledCost == null ? null : round(revenueNet - scaledCost)
+    const costPerPortion = scaledCost == null || scaledQty === 0 ? null : round(scaledCost / scaledQty, 2)
+    return {
+      guid, name, qty: scaledQty, revenue: scaledRevenue, returns: scaledReturns, vat: scaledVat,
+      revenue_net: revenueNet, avg_price: round(scaledRevenue / scaledQty, 2),
+      cost: scaledCost, cost_per_portion: costPerPortion, margin,
+      food_cost_pct: scaledCost == null ? null : round(scaledCost / revenueNet * 100, 1),
+      margin_pct: margin == null ? null : round(margin / revenueNet * 100, 1),
+      cm_unit: margin == null ? null : round(margin / scaledQty, 2),
+      share: round(scaledRevenue / salesGross * 100, 1), popularity_pct: round(scaledQty / scaled(2_946) * 100, 1),
+      menu_class: status === 'exact' ? menuClass : 'unknown', coverage: status === 'exact' ? 1 : 0.73,
+      ing_count: ingredients.length, ingredients, daily: daily(scaledQty, scaledRevenue),
+      cost_source: status === 'exact' ? 'edge_exact' : status === 'estimate' ? 'edge_estimate' : null,
+      cost_status: status, preliminary: status !== 'exact',
+    }
+  }
+  const ingredients = {
+    coffee: [
+      { ref: 'demo-coffee-beans', name: 'Кофе зерновой', marked: false, qty_total: scaled(18.4), qty_per_portion: 0.016, cost_total: scaled(32_180), cost_per_portion: 28 },
+      { ref: 'demo-cup', name: 'Стакан 300 мл с крышкой', marked: false, qty_total: scaled(1_149), qty_per_portion: 1, cost_total: scaled(13_790), cost_per_portion: 12 },
+    ],
+    hotdog: [
+      { ref: 'demo-sausage', name: 'Сосиска для хот-дога', marked: false, qty_total: scaled(742), qty_per_portion: 1, cost_total: scaled(49_850), cost_per_portion: 67.2 },
+      { ref: 'demo-bun', name: 'Булочка для хот-дога', marked: false, qty_total: scaled(742), qty_per_portion: 1, cost_total: scaled(17_810), cost_per_portion: 24 },
+    ],
+    croissant: [
+      { ref: 'demo-croissant', name: 'Круассан замороженный', marked: false, qty_total: scaled(611), qty_per_portion: 1, cost_total: scaled(35_440), cost_per_portion: 58 },
+    ],
+    cappuccino: [
+      { ref: 'demo-milk', name: 'Молоко', marked: true, qty_total: scaled(94), qty_per_portion: 0.18, cost_total: hasPartial ? null : scaled(14_100), cost_per_portion: hasPartial ? null : 27 },
+      { ref: 'demo-coffee-beans', name: 'Кофе зерновой', marked: false, qty_total: scaled(8.4), qty_per_portion: 0.016, cost_total: scaled(14_730), cost_per_portion: 28 },
+    ],
+  }
+  const dishes = [
+    dish('demo-americano', 'Кофе американо 300 мл', 1_149, 171_201, 1_192, 30_662, 45_970, 'star', ingredients.coffee),
+    dish('demo-hotdog', 'Хот-дог классический', 742, 169_918, 2_061, 30_223, 67_660, 'star', ingredients.hotdog),
+    dish('demo-croissant', 'Круассан с шоколадом', 611, 97_149, 1_194, 17_272, 35_440, 'plowhorse', ingredients.croissant),
+    dish('demo-cappuccino', 'Капучино 300 мл', 444, 89_372, 2_393, 15_718, hasPartial ? null : 30_480, 'puzzle', ingredients.cappuccino, hasPartial ? 'partial' : 'exact'),
+  ]
+  return {
+    period: { from: dateFrom, to: dateTo },
+    summary: {
+      dishes_count: dishes.length, dishes_costed: hasPartial ? 3 : 4,
+      revenue: salesGross, revenue_costed: dishes.filter((item) => item.cost != null).reduce((sum, item) => sum + item.revenue, 0),
+      revenue_net: netRevenue, portions: dishes.reduce((sum, item) => sum + item.qty, 0),
+      cost: ingredientCost, margin: preliminaryContribution,
+      food_cost_pct: round(ingredientCost / netRevenue * 100, 1), margin_pct: round(preliminaryContribution / netRevenue * 100, 1),
+      sales_gross: salesGross, customer_returns: customerReturns, gross_revenue: round(salesGross - customerReturns), vat,
+      net_revenue: netRevenue, ingredient_cost: ingredientCost,
+      ingredient_cost_exact: hasPartial ? round(ingredientCost * 0.87) : ingredientCost,
+      ingredient_cost_estimated: hasPartial ? round(ingredientCost * 0.13) : 0,
+      writeoffs, shortages, direct_losses: round(writeoffs + shortages),
+      operating_contribution: hasPartial ? null : preliminaryContribution,
+      preliminary_contribution: preliminaryContribution,
+      cost_status: hasPartial ? 'partial' : 'exact', exact_coverage_pct: hasPartial ? 87 : 100,
+      missing_loss_documents: hasPartial ? 2 : 0,
+    },
+    matrix: {
+      star: { count: 2, revenue: dishes[0].revenue + dishes[1].revenue },
+      plowhorse: { count: 1, revenue: dishes[2].revenue },
+      unknown: { count: hasPartial ? 1 : 0, revenue: hasPartial ? dishes[3].revenue : 0 },
+    },
+    dishes,
+    comparison,
+    cross_sell: {
+      available: true, cheques: scaled(5_824), kitchen_cheques: scaled(2_214), fuel_cheques: scaled(4_781),
+      fuel_with_kitchen: scaled(524), attach_rate: 11, kitchen_in_fuel: scaled(119_840), avg_kitchen_in_fuel: 228.7,
+      pairs: [
+        { dish: 'Кофе американо 300 мл', with_item: 'Вода минеральная 0,5 л', cheques: scaled(164), with_item_amount: scaled(14_596) },
+        { dish: 'Хот-дог классический', with_item: 'Напиток газированный 0,5 л', cheques: scaled(132), with_item_amount: scaled(18_348) },
+        { dish: 'Капучино 300 мл', with_item: 'Круассан с шоколадом', cheques: scaled(96), with_item_amount: scaled(15_264) },
+      ],
+    },
+    recommendations: [
+      { title: 'Закрыть пробелы себестоимости', evidence: hasPartial ? '87% затрат подтверждено; 2 документа потерь без полной оценки.' : 'Все затраты периода подтверждены.', action: hasPartial ? 'Проверить цены молока и два документа АЗС 315 перед сравнением вклада.' : 'Сохранить контроль полноты при закрытии следующей недели.' },
+      { title: 'Разобрать недостачи АЗС 315', evidence: 'Недостачи станции выше медианы сети в 2,6 раза.', action: 'Сверить пересчёты, выпуск кухни и возвраты по неделе 17–23 августа.' },
+      { title: 'Проверить пару кофе + вода', evidence: '164 совместных чека; наблюдение без вывода о причине.', action: 'Сравнить долю пары по сменам и выкладке, не создавая задачу автоматически.' },
     ],
   }
 }

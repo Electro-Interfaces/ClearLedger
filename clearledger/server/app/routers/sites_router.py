@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from typing import Literal
 
 from fastapi import (
     APIRouter, Depends, File, HTTPException, Query, UploadFile, status,
@@ -78,6 +79,7 @@ async def list_sites(
     search: str | None = Query(None), owner_id: uuid.UUID | None = Query(None),
     overdue: bool = Query(False), risk: str | None = Query(None),
     node: str | None = Query(None, description="узел маршрута: ezs_contract_approval и т. п."),
+    kind: str | None = Query(None), place_kind: str | None = Query(None),
     page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=2000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
@@ -87,7 +89,22 @@ async def list_sites(
     cid = await assert_company_member(company_id, user, db)
     return await ezs_sites.list_sites(db, cid, stage=stage, region=region, search=search,
                                       owner_id=owner_id, overdue=overdue, risk=risk,
-                                      node=node, page=page, page_size=page_size)
+                                      node=node, kind=kind, place_kind=place_kind,
+                                      page=page, page_size=page_size)
+
+
+@router.get("/meta/suggestions")
+async def project_suggestions(
+    company_id: str = Query(...),
+    field: Literal["title", "region", "city", "address", "install_place"] = Query(...),
+    q: str = Query("", max_length=300),
+    region: str = Query("", max_length=300), city: str = Query("", max_length=300),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.project_suggestions import suggest
+
+    cid = await assert_company_member(company_id, user, db)
+    return await suggest(db, cid, field, q, region=region, city=city)
 
 
 @router.get("/meta/members")
@@ -188,94 +205,23 @@ async def project_documents(
     одном счётчике — значит потерять ответ на вопрос «почему стоим».
     """
     cid = await assert_company_member(company_id, user, db)
-    return await process_documents.listing(db, cid, process_id)
+    return await process_documents.listing(db, cid, process_id, user=user)
 
 
 @router.get("/{site_id}/track")
 async def site_track(
-    site_id: uuid.UUID,
-    company_id: str = Query(...),
+    site_id: uuid.UUID, company_id: str = Query(...),
+    scope: Literal["all", "open", "mine", "overdue", "pending"] = Query("all"),
+    offset: int = Query(0, ge=0), limit: int = Query(40, ge=1, le=100),
+    common: bool = Query(False), kind: Literal["doc", "task"] | None = Query(None),
+    q: str = Query("", max_length=200),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Что «Трек» ведёт по этому проекту: документы и поручения одной лентой.
-
-    Связь между проектом и «Треком» была односторонней. Маршрут умел попросить
-    завести документ или поручить работу, исход возвращался и двигал проект —
-    но человек, открывший карточку, ничего этого не видел. Вкладка «Документы»
-    показывает файлы, приложенные к площадке, а не то, что по ней идёт.
-
-    Предметов у работы два, и оба законны. Пока объекта сети нет — а он
-    появляется только со вводом в эксплуатацию, — работа цепляется к самому
-    проекту (`site:<id>`); когда объект появился, к нему (`object:<ключ>`).
-    Спрашивать у человека, каким из двух искать, значило бы заставить его знать
-    внутреннее устройство: ищем по обоим.
-
-    Документы и поручения идут вместе намеренно. Разделить их значило бы
-    заставить читать два списка и складывать в уме — ровно то, ради чего
-    заводился общий ход работы.
-    """
+    from app.services import project_work
     cid = await assert_company_member(company_id, user, db)
-    site = (await db.execute(select(EzsSite).where(
-        EzsSite.id == site_id, EzsSite.company_id == cid))).scalar_one_or_none()
-    if site is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Проект не найден")
-
-    refs = [f"site:{site.id}"]
-    if site.location_id:
-        refs.append(f"object:{site.location_id}")
-
-    from app.models import DocCard, DocRelation, Task
-    from app.services import work_state
-
-    related = select(DocRelation.doc_id).where(
-        DocRelation.company_id == cid,
-        DocRelation.doc_id == DocCard.id,
-        DocRelation.target_ref.in_(refs)).exists()
-    docs = (await db.execute(select(DocCard).where(
-        DocCard.company_id == cid,
-        or_(DocCard.subject_ref.in_(refs), related,
-            DocCard.object_id == site.location_id if site.location_id else false()),
-    ).order_by(DocCard.created_at.desc()).limit(100))).scalars().all()
-
-    # Поручение ищется так же, как документ: по предмету и по объекту. Предмет
-    # важнее — он есть у площадки с первого дня, а объект появляется только со
-    # вводом в эксплуатацию.
-    task_where = [Task.subject_ref.in_(refs)]
-    if site.location_id:
-        task_where.append(Task.object_id == site.location_id)
-    tasks = (await db.execute(select(Task).where(
-        Task.company_id == cid, or_(*task_where),
-    ).order_by(Task.created_at.desc()).limit(100))).scalars().all()
-
-    items = [{
-        "id": str(d.id), "kind": "doc",
-        "key": d.reg_number or "черновик",
-        "title": d.title,
-        "type": d.kind_code or None,
-        "state": work_state.doc_state(d),
-        "state_name": work_state.COLUMN_NAMES.get(work_state.doc_state(d), ""),
-        "at": d.created_at.isoformat() if d.created_at else None,
-    } for d in docs] + [{
-        "id": str(t.id), "kind": "task",
-        "key": f"№{t.number}",
-        "title": t.title,
-        "type": None,
-        "state": t.stage_column or "new",
-        "state_name": work_state.COLUMN_NAMES.get(t.stage_column or "new", ""),
-        "at": t.created_at.isoformat() if t.created_at else None,
-    } for t in tasks]
-    items.sort(key=lambda i: i["at"] or "", reverse=True)
-
-    # «Чего ждём» — отдельным счётчиком: он отвечает на вопрос «почему стоим»,
-    # а общее число работ на него не отвечает.
-    waiting = sum(1 for i in items if i["state"] in ("approval", "external"))
-    return {
-        "site_id": str(site.id),
-        "object_id": site.location_id,
-        "subject_ref": f"site:{site.id}",
-        "items": items,
-        "waiting": waiting,
-    }
+    site = await _owned(db, cid, site_id)
+    return await project_work.listing(db, cid, user, site=site, scope=scope,
+                                      offset=offset, limit=limit, common=common, kind=kind, q=q)
 
 @router.post("/{site_id}/projects", status_code=201)
 async def start_project(

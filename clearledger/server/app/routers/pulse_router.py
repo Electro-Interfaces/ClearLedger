@@ -47,6 +47,8 @@ from app.services import tax_regime
 from app.services.ezs_changes import STAGE_LABELS
 
 router = APIRouter(prefix="/pulse", tags=["Пульс"])
+from app.routers.pulse_home import router as home_router
+router.include_router(home_router)
 
 # Пороги В1 — с большим запасом (решение МАГа 31.07.2026, PULSE.md §3):
 # период адаптации система проходит тихо. Настройка в «Управлении» — волна В3.

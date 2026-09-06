@@ -86,7 +86,7 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     // готовым товаром. Состав — в config/storeCatalog.ts, второго источника нет.
     // Закрытия периода здесь нет: приём из 1С и выгрузка в БП ГИГ — работа бухгалтера,
     // они живут в «Бухгалтерском» (`finance`), поток «Магазин и общепит» (04.08.2026).
-    code: 'shop', route: '/shop', label: 'Магазин',
+    code: 'shop', route: '/shop', label: 'Торговый центр',
     modes: ['store', 'store_receipt', 'store_stock', 'store_catering', 'store_reports', 'store_catalog', 'store_cash', 'store_marking', 'store_documents', 'store_network', 'store_1c', 'store_help'], paths: [],
   },
   {
@@ -223,7 +223,10 @@ export const PRODUCT_READINESS: Record<string, Readiness> = {
   books: 'ready', revenue: 'ready', econ: 'ready',
   corp: 'draft', shop: 'draft', marketing: 'partial',
   support: 'ready', finance: 'draft',
-  netlink: 'draft', accounting: 'draft', diag: 'draft',
+  accounting: 'draft', diag: 'draft',
+  // «Сеть передачи данных» — мост на живой хаб ElsyPlus Link (03.09.2026): узлы,
+  // VPN и удалённый доступ работают там, заставка «в подключении» больше не нужна.
+  netlink: 'ready',
   // Мосты на действующие инстансы: продукты рабочие, просто живут за пределами контейнера.
   monitor: 'ready', processing: 'ready',
 }
@@ -350,7 +353,7 @@ const LABEL_BY_PROFILE: Record<string, Record<string, string>> = {
     // «Бухгалтерия», а не «Бухгалтерский»: это рабочее место, а не вид учёта.
     // Прилагательное осталось от разреза по видам учёта, из которого продукт вырос,
     // и в шапке читалось как незаконченное словосочетание (04.08.2026).
-    sales: 'Топливо', shop: 'Магазин', ops: 'Управленческий', finance: 'Бухгалтерия',
+    sales: 'Топливо', shop: 'Торговый центр', ops: 'Управленческий', finance: 'Бухгалтерия',
   },
 }
 

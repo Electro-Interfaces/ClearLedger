@@ -4,7 +4,9 @@
  * Состояние меняется только контекстными действиями. Регистрационный номер,
  * пакет согласования и редакции файла показываются как факты, а не поля формы.
  */
-import { useId, useRef, useState } from 'react'
+import { WorkOriginLink } from '@/components/work/WorkOriginLink'
+import { WorkResults } from '@/components/work/WorkResults'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -34,10 +36,13 @@ import { DocAcquaintTab } from './DocAcquaintTab'
 import { DocAccessTab } from './DocAccessTab'
 import { DocArchiveTab } from './DocArchiveTab'
 import { DocApprovalTab } from './DocApprovalTab'
+import { DocApprovalStart } from './DocApprovalStart'
+import { useAuth } from '@/contexts/AuthContext'
+import { useTrackDraft } from '@/hooks/useTrackDraft'
 import { DocFileWorkspace } from './DocFileWorkspace'
 import { DocSendTab } from './DocSendTab'
 import { openAuthAttachment } from '@/lib/authFiles'
-import { formatDate } from '@/lib/formatDate'
+import { formatDate, formatDateTime } from '@/lib/formatDate'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { DocRegisterDialog, type DocRegisterValues } from './DocRegisterDialog'
@@ -81,6 +86,7 @@ const FIELD_LABEL: Record<string, string> = {
   counterparty_id: 'Карточка корреспондента',
   confidentiality: 'Доступ',
   responsible_id: 'Ответственный',
+  due_at: 'Срок исполнения',
   signatory_id: 'Подписант',
   object_id: 'Объект',
   attrs: 'Реквизиты вида',
@@ -116,7 +122,11 @@ const APPROVAL_LABEL: Record<string, string> = {
   rejected: 'На доработке',
 }
 
-export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
+export function DocCardPanel(props: Parameters<typeof DocCardContent>[0]) {
+  return <DocCardContent key={`${props.companyId}:${props.id}`} {...props} />
+}
+
+function DocCardContent({ id, companyId, onBack, onChanged, initialTab,
   headingLevel = 1 }: {
   id: string
   companyId: string
@@ -126,6 +136,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
   headingLevel?: 1 | 2
 }) {
   const qc = useQueryClient()
+  const { user } = useAuth()
   const { organizations, isCompanyAdmin } = useCompany()
   // Кого можно назначить подписантом. Та же ручка, что у выбора исполнителя:
   // служебных участников она не отдаёт — робот не подпишет.
@@ -145,6 +156,22 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
   const [emergencyPassword, setEmergencyPassword] = useState('')
   const [emergencyReason, setEmergencyReason] = useState('')
   const [emergencyTtl, setEmergencyTtl] = useState(15)
+  const editDraft = useTrackDraft<{ fields: Record<string, unknown>; version?: string | null }>(
+    `track:card:${user?.id}:${companyId}:${id}`, { fields: {} }, false)
+  const edits = editDraft.value.fields
+  const editVersion = editDraft.value.version
+  const setEdits = (next: Record<string, unknown> | ((previous: Record<string, unknown>) => Record<string, unknown>)) =>
+    editDraft.save((previous) => ({ ...previous, fields: typeof next === 'function' ? next(previous.fields) : next }))
+  const setEditVersion = (version?: string | null) => editDraft.save((previous) => ({ ...previous, version }))
+  const [saved, setSaved] = useState(false)
+  const [comparing, setComparing] = useState(false)
+  const dirty = Object.keys(edits).length > 0
+  useEffect(() => {
+    if (!dirty) return
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
 
   const q = useQuery({
     queryKey: ['doc', id, companyId],
@@ -215,24 +242,22 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
 
   const act = useMutation({
     mutationFn: (body: Record<string, unknown>) => docsService.docAction(companyId, id, body),
-    onSuccess: (_, body) => {
+    onSuccess: (result, body) => {
       if (body.status) toast.success('Состояние документа изменено')
-      setNote('')
+      if (body.note) setNote('')
+      if ('expected_edit_version' in body) {
+        qc.setQueryData<docsService.DocDetails>(['doc', id, companyId], (current) => current
+          ? { ...current, ...result } : current)
+        setEdits({})
+        setEditVersion(undefined)
+        setSaved(true)
+        setComparing(false)
+      }
       setReason('')
       setReasonMode(null)
       refresh()
     },
     onError: (e) => toast.error(`Не сохранилось: ${(e as Error).message}`),
-  })
-
-  const startApproval = useMutation({
-    mutationFn: () => docsService.startApproval(companyId, id),
-    onSuccess: (result) => {
-      toast.success(`Круг ${result.round} запущен`)
-      setActiveTab('processing')
-      refresh()
-    },
-    onError: (e) => toast.error((e as Error).message),
   })
 
   const cancelApproval = useMutation({
@@ -311,7 +336,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
 
   const registered = Boolean(d.reg_number)
   const actions = new Set(d.available_actions ?? [])
-  const editable = actions.has('edit')
+  const editable = actions.has('edit') && !act.isPending
   // Реплику отделяем от правки реквизитов: у действующего документа `edit`
   // снят намеренно (его меняют новой редакцией), а история продолжает жить.
   const canNote = actions.has('note')
@@ -368,8 +393,15 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
     </>
   )
 
+  const changeField = (field: string, value: unknown) => {
+    if (!dirty) setEditVersion(d.edit_version)
+    setEdits((current) => ({ ...current, [field]: value }))
+    setSaved(false)
+  }
+  const fieldValue = (field: keyof docsService.DocCard) =>
+    Object.hasOwn(edits, field) ? edits[field] : d[field]
   const updateAttr = (field: DocKindField, value: unknown) => {
-    act.mutate({ attrs: { ...d.attrs, [field.code]: value } })
+    changeField('attrs', { ...(fieldValue('attrs') as Record<string, unknown>), [field.code]: value })
   }
 
   const submitReason = () => {
@@ -384,6 +416,8 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
 
   return (
     <div className="space-y-4 pb-20 md:pb-0">
+      <WorkOriginLink companyId={companyId} kind="doc" id={d.id} />
+      <WorkResults companyId={companyId} kind="doc" id={d.id} />
       <header className="sticky top-0 z-20 border-b border-border bg-background py-2 md:py-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-2">
@@ -416,6 +450,18 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
       </header>
 
       <section aria-label="Состояние и действия" className="space-y-3">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+          <span>Ответственный: <strong>{people.data?.people.find((person) => person.id === d.responsible_id)?.name ?? (d.responsible_id ? people.isLoading ? 'Загрузка…' : 'имя недоступно' : 'не назначен')}</strong></span>
+          <span>Исполнить до: <strong>{d.due_at ? formatDateTime(d.due_at) : 'срок не задан'}</strong></span>
+          {d.approval.rows.some((row) => row.status === 'pending' && row.can_decide) && <span className="font-medium text-primary">Ждём вашего решения</span>}
+          {!d.approval.rows.some((row) => row.status === 'pending' && row.can_decide) && d.approval_status === 'pending' && (
+            <span>Ждём: <strong>{d.approval.rows.filter((row) => row.round === d.approval.round && row.status === 'pending')
+              .map((row) => row.assignee_name || 'внешний участник').join(', ') || 'следующего шага'}</strong></span>
+          )}
+        </div>
+        {dirty && activeTab !== 'document' && <Button variant="outline" onClick={() => setActiveTab('document')}>
+          Есть несохранённые реквизиты — вернуться к правке
+        </Button>}
         <div className="flex flex-wrap items-center gap-2 md:hidden">{headerActions}</div>
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border lg:grid-cols-4">
           <Fact label="Текущая редакция"
@@ -480,22 +526,18 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
             }} />
           )}
           {actions.has('register') && (
-            <Button size="sm" onClick={() => setRegisterOpen(true)} disabled={register.isPending}>
+            <Button size="sm" onClick={() => setRegisterOpen(true)} disabled={register.isPending || dirty}>
               <Stamp className="mr-1.5 h-4 w-4" />Зарегистрировать
             </Button>
           )}
           {actions.has('start_approval') && (
-            <ConfirmActionDialog
+            <DocApprovalStart companyId={companyId} id={id}
               trigger={(
-                <Button size="sm" disabled={startApproval.isPending}>
+                <Button size="sm" disabled={dirty}>
                   <Workflow className="mr-1.5 h-4 w-4" />На согласование
                 </Button>
               )}
-              title="Запустить согласование?"
-              description="Текущая редакция и реквизиты войдут в зафиксированный пакет. До завершения или отмены круга менять их нельзя."
-              confirmLabel="Запустить"
-              pending={startApproval.isPending}
-              onConfirm={() => startApproval.mutateAsync()}
+              onStarted={() => { setActiveTab('processing'); refresh() }}
             />
           )}
           {actions.has('cancel_approval') && (
@@ -617,6 +659,48 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
         </TabsList>
 
         <TabsContent value="document" className="space-y-3 pt-3">
+          {(dirty || saved) && (
+            <div className="flex flex-col gap-2 rounded-md border border-border bg-background p-3" aria-label="Сохранение реквизитов">
+              <div className="flex flex-wrap items-center gap-2">
+                <p role="status" className="min-w-0 flex-1 text-sm">
+                  {act.isPending ? 'Сохраняется…' : dirty ? 'Реквизиты изменены. Сохраните перед следующим действием.' : 'Сохранено'}
+                </p>
+                {dirty && <>
+                  <Button size="sm" disabled={act.isPending || !editable || !String(fieldValue('title') ?? '').trim()}
+                    onClick={() => act.mutate({ ...edits, expected_edit_version: editVersion })}>Сохранить реквизиты</Button>
+                  <Button size="sm" variant="outline" disabled={act.isPending}
+                    onClick={() => { setEdits({}); setEditVersion(undefined); setComparing(false); act.reset() }}>Отменить правки</Button>
+                </>}
+              </div>
+              {act.isError && dirty && (
+                <div role="alert" className="flex flex-col items-start gap-2 text-sm text-destructive">
+                  <span>{(act.error as Error).message}</span>
+                  <Button size="sm" variant="outline" disabled={q.isFetching}
+                    onClick={async () => {
+                      const result = await q.refetch()
+                      if (result.isSuccess) { setEditVersion(result.data.edit_version); setComparing(true) }
+                    }}>Сверить с последней версией</Button>
+                </div>
+              )}
+              {comparing && <div className="flex flex-col gap-2 text-sm">
+                <p>Сравните значения и сохраните свои правки повторно, если они ещё нужны.</p>
+                {Object.entries(edits).map(([field, value]) => {
+                  const display = (raw: unknown): string => {
+                    if (!raw) return 'Не задано'
+                    if (['responsible_id', 'signatory_id'].includes(field)) return people.data?.people.find((person) => person.id === raw)?.name ?? 'Имя недоступно'
+                    if (field === 'organization_id') return organizations.find((organization) => organization.id === raw)?.name ?? 'Название недоступно'
+                    if (field === 'due_at') return formatDateTime(String(raw))
+                    if (field === 'attrs' && typeof raw === 'object') return Object.entries(raw).map(([code, item]) =>
+                      `${d.kind?.fields.find((entry) => entry.code === code)?.label ?? code}: ${typeof item === 'boolean' ? item ? 'Да' : 'Нет' : String(item ?? 'Не задано')}`).join('; ') || 'Не заданы'
+                    return String(raw)
+                  }
+                  return <div key={field} className="break-words">
+                    <strong>{FIELD_LABEL[field] ?? field}</strong>: на сервере — {display(d[field as keyof docsService.DocCard])}; ваши правки — {display(value)}
+                  </div>
+                })}
+              </div>}
+            </div>
+          )}
           {approvalLocked && (
             <Card className="flex items-start gap-2.5 border-primary/30 p-3 text-sm">
               <LockKeyhole className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
@@ -630,10 +714,10 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
           )}
           <Card className="grid gap-3 p-4 sm:grid-cols-2">
             <Field label="Наше юрлицо">
-              {(controlId) => <select id={controlId} value={d.organization_id ?? ''}
+              {(controlId) => <select id={controlId} value={String(fieldValue('organization_id') ?? '')}
                 disabled={!editable || registered}
                 className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
-                onChange={(event) => act.mutate({ organization_id: event.target.value })}>
+                onChange={(event) => changeField('organization_id', event.target.value)}>
                 <option value="">Не выбрано</option>
                 {organizations.map((organization) => (
                   <option key={organization.id} value={organization.id}>{organization.name}</option>
@@ -645,49 +729,67 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
                 в ручке, а назначить его было нечем — и всякий заведённый
                 руками документ застревал в «Зарегистрирован» навсегда. */}
             <Field label="Подписант">
-              {(controlId) => <select id={controlId} value={d.signatory_id ?? ''}
+              {(controlId) => <select id={controlId} value={String(fieldValue('signatory_id') ?? '')}
                 disabled={!editable}
                 className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
-                onChange={(event) => act.mutate({ signatory_id: event.target.value })}>
+                onChange={(event) => changeField('signatory_id', event.target.value)}>
                 <option value="">Не назначен</option>
                 {(people.data?.people ?? []).map((человек) => (
                   <option key={человек.id} value={человек.id}>{человек.name}</option>
                 ))}
               </select>}
             </Field>
-            {!d.signatory_id && editable && (
+            {!fieldValue('signatory_id') && editable && (
               <p className="text-xs text-amber-700 dark:text-amber-400 sm:col-span-2">
                 Подписант не назначен — без него документ не ввести в действие.
               </p>
             )}
             <Field label="Заголовок">
-              {(controlId) => <Input id={controlId} defaultValue={d.title} required aria-required="true"
+              {(controlId) => <Input id={controlId} value={String(fieldValue('title') ?? '')} required aria-required="true"
                 className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 disabled={!editable}
-                onBlur={(event) => event.target.value.trim() !== d.title
-                  && act.mutate({ title: event.target.value.trim() })} />}
+                onChange={(event) => changeField('title', event.target.value)} />}
             </Field>
             <Field label={d.direction === 'in' ? 'От кого' : 'Кому'}>
-              {(controlId) => <Input id={controlId} defaultValue={d.counterparty_name}
+              {(controlId) => <Input id={controlId} value={String(fieldValue('counterparty_name') ?? '')}
                 className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 disabled={!editable}
-                onBlur={(event) => event.target.value !== d.counterparty_name
-                  && act.mutate({ counterparty_name: event.target.value })} />}
+                onChange={(event) => changeField('counterparty_name', event.target.value)} />}
             </Field>
             <Field label="Их номер">
-              {(controlId) => <Input id={controlId} defaultValue={d.external_number ?? ''}
+              {(controlId) => <Input id={controlId} value={String(fieldValue('external_number') ?? '')}
                 className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 disabled={!editable}
-                onBlur={(event) => event.target.value !== (d.external_number ?? '')
-                  && act.mutate({ external_number: event.target.value })} />}
+                onChange={(event) => changeField('external_number', event.target.value)} />}
             </Field>
             <Field label="Дата их документа">
-              {(controlId) => <Input id={controlId} type="date" defaultValue={d.external_date ?? ''}
+              {(controlId) => <Input id={controlId} type="date" value={String(fieldValue('external_date') ?? '')}
                 className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
                 disabled={!editable}
-                onBlur={(event) => event.target.value !== (d.external_date ?? '')
-                  && act.mutate({ external_date: event.target.value || null })} />}
+                onChange={(event) => changeField('external_date', event.target.value || null)} />}
             </Field>
+            <Field label="Ответственный">
+              {(controlId) => <select id={controlId} value={String(fieldValue('responsible_id') ?? '')}
+                disabled={!editable || !d.can_manage_access || people.isLoading || people.isError}
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                onChange={(event) => changeField('responsible_id', event.target.value)}>
+                <option value="">Не назначен</option>
+                {(people.data?.people ?? []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
+              </select>}
+            </Field>
+            <Field label="Срок исполнения">
+              {(controlId) => <Input id={controlId} type="datetime-local" disabled={!editable}
+                value={(() => {
+                  const raw = fieldValue('due_at')
+                  if (!raw) return ''
+                  const date = new Date(String(raw))
+                  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+                })()}
+                onChange={(event) => changeField('due_at', event.target.value ? new Date(event.target.value).toISOString() : null)} />}
+            </Field>
+            {people.isError && <div role="alert" className="text-sm text-destructive sm:col-span-2">
+              Сотрудники не загрузились. <Button size="sm" variant="outline" onClick={() => void people.refetch()}>Повторить</Button>
+            </div>}
             <div className="space-y-1.5">
               <div className="text-xs text-muted-foreground">Доступ</div>
               <div className="flex min-h-9 items-center rounded-md border border-input bg-muted/30 px-3 text-sm">
@@ -733,16 +835,15 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
               </div>
             </div>
             {(d.kind?.fields ?? []).map((field) => (
-              <AttrField key={field.code} field={field} value={d.attrs[field.code]}
+              <AttrField key={field.code} field={field} value={(fieldValue('attrs') as Record<string, unknown>)[field.code]}
                 disabled={!editable} onCommit={(value) => updateAttr(field, value)} />
             ))}
             <div className="sm:col-span-2">
               <Field label="Краткое содержание">
-                {(controlId) => <Textarea id={controlId} defaultValue={d.summary ?? ''}
+                {(controlId) => <Textarea id={controlId} value={String(fieldValue('summary') ?? '')}
                   rows={3} disabled={!editable}
                   className="disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
-                  onBlur={(event) => event.target.value !== (d.summary ?? '')
-                    && act.mutate({ summary: event.target.value })} />}
+                  onChange={(event) => changeField('summary', event.target.value)} />}
               </Field>
             </div>
           </Card>
@@ -752,7 +853,7 @@ export function DocCardPanel({ id, companyId, onBack, onChanged, initialTab,
         <TabsContent value="processing" className="space-y-5 pt-3">
           <section aria-labelledby="approval-heading">
             <h2 id="approval-heading" className="text-sm font-semibold">Согласование</h2>
-            <DocApprovalTab doc={d} companyId={companyId} onChanged={refresh} />
+            <DocApprovalTab doc={d} companyId={companyId} onChanged={refresh} dirty={dirty} />
           </section>
           <section aria-labelledby="acquaint-heading">
             <h2 id="acquaint-heading" className="text-sm font-semibold">Ознакомление</h2>
@@ -1032,7 +1133,7 @@ function AttrField({ field, value, disabled, onCommit }: {
   if (field.type === 'select') {
     return (
       <Field label={label}>
-        {(controlId) => <select id={controlId} defaultValue={String(value ?? '')}
+        {(controlId) => <select id={controlId} value={String(value ?? '')}
           disabled={disabled} required={field.required} aria-required={field.required}
           className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
           onChange={(event) => onCommit(event.target.value)}>
@@ -1047,7 +1148,7 @@ function AttrField({ field, value, disabled, onCommit }: {
       <Field label={label}>
         {(controlId) => <label htmlFor={controlId}
           className="flex h-9 items-center gap-2 rounded-md border border-input px-3 text-sm">
-          <input id={controlId} type="checkbox" defaultChecked={value === true}
+          <input id={controlId} type="checkbox" checked={value === true}
             disabled={disabled} aria-required={field.required}
             onChange={(event) => onCommit(event.target.checked)} />
           {value === true ? 'Да' : 'Нет'}
@@ -1059,11 +1160,10 @@ function AttrField({ field, value, disabled, onCommit }: {
     return (
       <div className="sm:col-span-2">
         <Field label={label}>
-          {(controlId) => <Textarea id={controlId} defaultValue={String(value ?? '')}
+          {(controlId) => <Textarea id={controlId} value={String(value ?? '')}
             rows={2} disabled={disabled} required={field.required} aria-required={field.required}
             className="disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
-            onBlur={(event) => event.target.value !== String(value ?? '')
-              && onCommit(event.target.value)} />}
+            onChange={(event) => onCommit(event.target.value)} />}
         </Field>
       </div>
     )
@@ -1072,10 +1172,10 @@ function AttrField({ field, value, disabled, onCommit }: {
     <Field label={label}>
       {(controlId) => <Input id={controlId}
         type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'}
-        defaultValue={String(value ?? '')}
+        value={String(value ?? '')}
         className="h-9 disabled:cursor-default disabled:opacity-100 disabled:text-foreground"
         disabled={disabled} required={field.required} aria-required={field.required}
-        onBlur={(event) => {
+        onChange={(event) => {
           if (event.target.value === String(value ?? '')) return
           onCommit(field.type === 'number'
             ? event.target.value === '' ? null : Number(event.target.value)

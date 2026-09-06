@@ -93,26 +93,31 @@ export function StoreDownlinkPanel() {
         <p className="text-xs text-muted-foreground">
           Канал вниз: карточки НСИ, цены, заготовки приёмки, политика кассы. Станция забирает
           задания сама своим тактом — «отправлено» не значит «доехало». Зависшее задание можно
-          отправить заново или снять с очереди.
+          отправить заново или снять с очереди. «Заново» безопасно и для применённого:
+          задание везёт снимок состояния, а не событие, и станция применяет его поверх
+          своего. Снять можно только то, что ещё не применено — применённое отменой не
+          откатывается.
         </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         {станции.length > 1 && (
           <div className="flex items-center gap-1">
-            <span className="text-[11px] text-muted-foreground">АЗС</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              АЗС
+            </span>
             <button type="button" onClick={() => выбрать(null)}
-              className={`rounded-md border px-2 py-1 text-xs ${станция === null
-                ? 'border-primary/60 bg-primary/10 text-foreground'
-                : 'border-border/60 text-muted-foreground hover:text-foreground'}`}>
+              className={`inline-flex h-9 items-center rounded-md border px-3.5 text-sm font-medium ${станция === null
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border text-muted-foreground hover:border-primary/60 hover:text-foreground'}`}>
               все
             </button>
             {станции.map((s) => (
               <button key={s.station_id} type="button"
                 onClick={() => выбрать(станция === s.station_id ? null : s.station_id)}
-                className={`rounded-md border px-2 py-1 text-xs tabular-nums ${станция === s.station_id
-                  ? 'border-primary/60 bg-primary/10 text-foreground'
-                  : 'border-border/60 text-muted-foreground hover:text-foreground'}`}>
+                className={`inline-flex h-9 items-center rounded-md border px-3.5 text-sm font-medium tabular-nums ${станция === s.station_id
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border text-muted-foreground hover:border-primary/60 hover:text-foreground'}`}>
                 {s.station_id}
               </button>
             ))}
@@ -205,17 +210,22 @@ export function StoreDownlinkPanel() {
                       <div className="flex justify-end gap-1.5">
                         <Button size="sm" variant="outline" disabled={занят}
                           onClick={() => переотправить.mutate(t.id)}
-                          title="Снять отметки доставки — станция заберёт задание следующим тактом">
+                          title={t.state === 'применено'
+                            ? 'Отправить снимок повторно: станция применит его заново поверх своего. Задание везёт состояние целиком (карточка, справочник, границы), поэтому дубля не будет — так же оно приходит второй раз при обрыве связи до подтверждения.'
+                            : 'Снять отметки доставки — станция заберёт задание следующим тактом'}>
                           <RefreshCw className="mr-1 h-3 w-3" />заново
                         </Button>
-                        <Button size="sm" variant="ghost"
-                          disabled={занят || t.state === 'применено' || t.state === 'отменено'}
-                          onClick={() => отменить.mutate(t.id)}
-                          title={t.state === 'применено'
-                            ? 'Станция уже применила задание'
-                            : 'Снять задание с очереди станции'}>
-                          <XCircle className="mr-1 h-3 w-3" />снять
-                        </Button>
+                        {/* Снять можно только то, что станция ещё не применила:
+                            применённое отменой не откатывается — сервер отвечает
+                            «отменять нечего». Кнопка-обманка тут хуже, чем её
+                            отсутствие: она обещает откат, которого нет. */}
+                        {t.state === 'применено' || t.state === 'отменено' ? null : (
+                          <Button size="sm" variant="ghost" disabled={занят}
+                            onClick={() => отменить.mutate(t.id)}
+                            title="Снять задание с очереди станции — она его больше не получит">
+                            <XCircle className="mr-1 h-3 w-3" />снять
+                          </Button>
+                        )}
                       </div>
                     </td>
                   </tr>

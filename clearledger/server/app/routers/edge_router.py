@@ -24,7 +24,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,6 +41,8 @@ from app.services.store_document_sync import сверить_документы
 from app.services import (edge_nsi, edge_projection, edge_service, edge_stock,
                           edge_transfers, recipe_versions, store_receipts as receipt_rules)
 from app.services import store_receipt_accounting
+from app.services import sku as sku_pool
+from app.services import partner_sync
 
 router = APIRouter(prefix="/edge", tags=["Edge (агенты АЗС)"])
 
@@ -228,16 +230,45 @@ async def _persist_edge_revision_error(
     await db.commit()
 
 
-def desired_version(company: Company | None) -> str:
-    """Целевая версия агента для компании.
+def _номер_версии(версия: str | None) -> tuple[int, ...]:
+    """Версия в сравнимый вид: «1.263.0» → (1, 263, 0).
 
-    Объявляется в интерфейсе и хранится в настройках компании: раньше её знала
-    только переменная окружения бэкенда, и «объявить новую версию» означало
-    передеплоить стек. Переменная осталась значением по умолчанию — для
-    компании, которая ничего не объявляла.
+    Строкой сравнивать нельзя: «1.9.0» тогда больше «1.263.0», и отставшей
+    объявляется самая свежая станция.
     """
-    edge = ((company.customization or {}).get("edge") or {}) if company else {}
-    return str(edge.get("desired_agent_version") or "").strip() or DESIRED_AGENT_VERSION
+    части = []
+    for кусок in str(версия or "").split("."):
+        цифры = "".join(c for c in кусок if c.isdigit())
+        части.append(int(цифры) if цифры else 0)
+    return tuple(части) if части else (0,)
+
+
+async def desired_version(db: AsyncSession, company: Company | None) -> str:
+    """Какая версия агента считается текущей.
+
+    Раньше её объявлял человек в интерфейсе, и она немедленно устаревала: агента
+    выкатывали, а объявление забывали — станция начинала писать в журнал
+    «центр ожидает другую версию» каждую минуту, хотя расхождение ничему не
+    мешает (решение МАГа 31.08.2026, ручное объявление убрано).
+
+    Теперь текущая — **та, что реально работает в парке**: максимальная из
+    версий живых агентов. Отставшей считается станция ниже неё, и это
+    единственный вопрос, ради которого версия вообще нужна: «кого пора
+    обновить». Пока агентов нет вовсе — значение из окружения, чтобы первой
+    станции было с чем сравниться.
+    """
+    if company is None:
+        return DESIRED_AGENT_VERSION
+    версии = (await db.execute(
+        select(EdgeAgent.version).where(
+            EdgeAgent.company_id == company.id,
+            EdgeAgent.version.isnot(None),
+        )
+    )).scalars().all()
+    живые = [v for v in версии if str(v).strip()]
+    if not живые:
+        return DESIRED_AGENT_VERSION
+    return max(живые, key=_номер_версии)
 
 
 async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
@@ -764,6 +795,70 @@ async def heartbeat(
                          version=row.version, queue_pending=row.queue_pending))
     await db.commit()
 
+    # Артикулы: станция чеканит их из блока, нарезанного заранее. Момент для
+    # нарезки — именно здесь: связь подтверждена, остаток номеров станция
+    # только что сообщила. Ждать, пока номера кончатся у полки, нельзя —
+    # к тому времени связи может не быть неделю.
+    осталось_артикулов = body.get("sku_left")
+    if not isinstance(осталось_артикулов, int):
+        осталось_артикулов = None
+    новый_блок = await sku_pool.обеспечить_блок(db, company.id, station_id, осталось_артикулов)
+    if новый_блок is not None:
+        db.add(EdgeDownlink(
+            company_id=company.id, station_id=station_id, kind="sku_block",
+            payload={"block_id": новый_блок["block_id"],
+                     "from": новый_блок["from"], "to": новый_блок["to"]},
+            note=f"артикулы {новый_блок['from_sku']}…{новый_блок['to_sku']}",
+            idempotency_key=f"sku_block:{новый_блок['block_id']}"))
+        await db.commit()
+        log.info("АЗС %s: нарезан блок артикулов %s…%s (у станции оставалось %s)",
+                 station_id, новый_блок["from_sku"], новый_блок["to_sku"],
+                 осталось_артикулов if осталось_артикулов is not None else "неизвестно")
+
+    # Границы кодов кассы станция получает от центра, а не держит в своём
+    # конфиге: тридцать конфигов — это тридцать мест, где никто не видит, у кого
+    # сколько номеров осталось. Задание идемпотентно по самим границам, поэтому
+    # уходит один раз, а при их изменении — заново.
+    пул = (await db.execute(text("""
+        SELECT ns_code_min, ns_code_max FROM edge.station WHERE id = :st
+    """), {"st": station_id})).first()
+    # Границы обязаны лежать в товарном диапазоне нефтесервера: код ≥ 5200 касса
+    # считает УСЛУГОЙ и ставит количество 1000 (подтверждено вендором). Отдать
+    # станции max=5207 значило бы разрешить назначить товару код услуги — и
+    # потом полный файл эту позицию молча выкинет. Не отдаём кривой пул вовсе,
+    # чем отдать опасный: пусть станция работает на прежних границах.
+    if пул is not None and пул.ns_code_min and пул.ns_code_max and (
+            int(пул.ns_code_min) < 302 or int(пул.ns_code_max) > 5199
+            or int(пул.ns_code_min) > int(пул.ns_code_max)):
+        log.error("АЗС %s: пул кодов кассы вне товарного диапазона 302..5199 "
+                  "(%s..%s) — задание не отправлено",
+                  station_id, пул.ns_code_min, пул.ns_code_max)
+        пул = None
+    if пул is not None and пул.ns_code_min and пул.ns_code_max:
+        ключ = f"ns_code_pool:{station_id}:{пул.ns_code_min}:{пул.ns_code_max}"
+        уже = (await db.execute(select(EdgeDownlink.id).where(
+            EdgeDownlink.company_id == company.id,
+            EdgeDownlink.idempotency_key == ключ))).scalar_one_or_none()
+        if уже is None:
+            db.add(EdgeDownlink(
+                company_id=company.id, station_id=station_id, kind="ns_code_pool",
+                payload={"min": int(пул.ns_code_min), "max": int(пул.ns_code_max)},
+                note=f"пул кодов кассы {пул.ns_code_min}…{пул.ns_code_max}",
+                idempotency_key=ключ))
+            await db.commit()
+
+    # Справочники контрагентов — тем же приёмом, что артикулы и коды кассы:
+    # состав сворачивается в отпечаток, отпечаток лежит в ключе задания. Не
+    # менялось — не поедет; завели поставщика в центре — станция получит его
+    # ближайшим тактом, не дожидаясь, пока кто-то вспомнит нажать «отправить».
+    try:
+        await partner_sync.обеспечить(db, company.id, station_id)
+    except Exception as exc:  # noqa: BLE001
+        # Телеметрия важнее справочника: станция не должна терять связь из-за
+        # того, что у нас не собрался список поставщиков.
+        await db.rollback()
+        log.warning("АЗС %s: справочники контрагентов не досланы: %s", station_id, exc)
+
     pending = (await db.execute(
         select(func.count()).select_from(EdgeDownlink).where(
             EdgeDownlink.company_id == company.id,
@@ -785,15 +880,20 @@ async def heartbeat(
             "state": "онлайн" if silence is not None and silence <= 180 else "офлайн",
         })
 
+    # Одним запросом на такт: версия парка нужна дважды, а heartbeat приходит
+    # от каждой станции ежеминутно.
+    текущая = await desired_version(db, company)
     return {
         "server_time": now.isoformat(),
-        "desired_version": desired_version(company),
+        "desired_version": текущая,
         # Сколько заданий ждёт станцию: агент пойдёт за ними только если есть
         # что забирать — лишний запрос в минуту по LTE не нужен.
         "downlink_pending": int(pending),
         "stations": stations,
-        "update_required": bool(row.version
-                               and row.version != desired_version(company)),
+        # Отставшей считается станция НИЖЕ версии парка, а не «любая другая»:
+        # та, что первой получила новую сборку, отставшей не является.
+        "update_required": bool(
+            row.version and _номер_версии(row.version) < _номер_версии(текущая)),
     }
 
 
@@ -877,7 +977,7 @@ async def agents(
     db: AsyncSession = Depends(get_db),
 ):
     """Парк станций для «Магазина»: кто на связи, какой код, что в очереди."""
-    желаемая = desired_version(company)
+    желаемая = await desired_version(db, company)
     rows = (await db.execute(
         select(EdgeAgent).where(EdgeAgent.company_id == company.id)
         .order_by(EdgeAgent.station_id)
@@ -917,6 +1017,43 @@ async def _route_transfer_packet(
         raise HTTPException(422, f"Перемещение не маршрутизировано: {exc}") from exc
 
 
+# Этап D двусторонней синхронизации (docs/sync-dokumentov-centr-agent.html).
+# Станция — владелец факта; изменённый ею документ (тот же packet_uuid, другой
+# content_hash — дописана смена, поправлена приёмка) должен применяться сам, а
+# не парковаться на ручной разбор. За флагом, по умолчанию ВЫКЛЮЧЕН: трогает
+# боевой приёмный конвейер, включаем осознанно после проверки на 208.
+AUTO_APPLY_REVISIONS = os.environ.get("EDGE_AUTO_APPLY_REVISIONS", "0") == "1"
+
+
+async def _replay_edge_derived(
+    db: AsyncSession, company_id, station_id: int,
+    packet_kind: str, payload: dict, packet_uuid: str,
+) -> None:
+    """Переиграть derived-проекции (L2) пакета: снимки заменяют срез, документы
+    UPSERT'ятся, project_packet детерминирован по source_id — всё идемпотентно,
+    поэтому годится и для повторной доставки, и для новой ревизии станции."""
+    payload = payload or {}
+    docs = payload.get("Документы") or []
+    if packet_kind == "station-recipes":
+        await recipe_versions.ingest_station_bundle(
+            db, company_id, station_id, payload.get("recipe_bundle") or {})
+    if packet_kind == "transfer":
+        await _route_transfer_packet(db, company_id, station_id, payload)
+    await _ingest_receipts(db, company_id, station_id, payload, docs)
+    if packet_kind == "cheques":
+        await _ingest_cheques(db, company_id, station_id, payload, packet_uuid)
+    if packet_kind == "station-catalog":
+        await edge_nsi.ingest_station_catalog(db, company_id, station_id, docs)
+    if packet_kind == "cash_state":
+        await edge_nsi.ingest_cash_check(db, company_id, station_id, docs)
+    if packet_kind in ("station-nsi", "station-mrc"):
+        await edge_nsi.ingest_station_nsi(db, company_id, station_id, docs)
+    if packet_kind == "stock":
+        await _sync_stock_packet(db, company_id, station_id, payload)
+    await edge_projection.project_packet(
+        db, company_id, packet_uuid, station_id, payload)
+
+
 @router.post("/packets", status_code=status.HTTP_201_CREATED)
 async def receive_packet(
     request: Request,
@@ -926,6 +1063,11 @@ async def receive_packet(
     """Принять пакет от агента станции. Тело — JSON, при Content-Encoding: gzip
     приходит сжатым (смена ~200 КБ → ~30 КБ, важно для LTE)."""
     company = identity.company
+    # Идентификатор компании — ДО первой возможной ошибки: объект ORM истекает
+    # после отката, и обращение к `company.id` из обработчика ошибки уходит в
+    # ленивую подгрузку вне живой сессии. Приёмник отвечал 500, настоящая
+    # причина терялась, а станция копила пакет в очереди (АЗС 8, 01.09.2026).
+    company_id = company.id
     raw = await request.body()
     wire_size = len(raw)
     if len(raw) > MAX_BODY:
@@ -978,7 +1120,7 @@ async def receive_packet(
     # неверны — и никакая починка агента не долетит до сверки.
     existing = (await db.execute(
         select(EdgePacket).where(
-            EdgePacket.company_id == company.id,
+            EdgePacket.company_id == company_id,
             EdgePacket.packet_uuid == packet_uuid,
         )
     )).scalar_one_or_none()
@@ -992,64 +1134,112 @@ async def receive_packet(
             try:
                 if packet_kind == "station-recipes":
                     await recipe_versions.ingest_station_bundle(
-                        db, company.id, int(station_id),
+                        db, company_id, int(station_id),
                         (existing.payload or {}).get("recipe_bundle") or {})
                 if packet_kind == "transfer":
                     await _route_transfer_packet(
-                        db, company.id, int(station_id), existing.payload)
+                        db, company_id, int(station_id), existing.payload)
                 await _ingest_receipts(
-                    db, company.id, int(station_id), existing.payload,
+                    db, company_id, int(station_id), existing.payload,
                     (existing.payload or {}).get("Документы") or [],
                 )
                 if packet_kind == "cheques":
                     await _ingest_cheques(
-                        db, company.id, int(station_id), existing.payload, str(packet_uuid))
+                        db, company_id, int(station_id), existing.payload, str(packet_uuid))
                 # Справочники переигрываем на повторе наравне с документами.
                 # Их первый разбор ошибку только логирует (пакет уже принят), и
                 # без этого повтор той же доставки ничего бы не починил: агент
                 # шлёт снимок и черновики заново, а центр отвечал 409, не
                 # прикоснувшись к мастер-НСИ. Оба разбора идемпотентны — снимок
                 # заменяет срез целиком, черновики идут UPSERT'ом.
+                # Значения объекта снимаем ДО разбора: внутри есть commit,
+                # после которого `existing` истекает, и чтение его полей из
+                # обработчика ошибки уходит в ленивую подгрузку вне сессии.
+                existing_id = existing.id
+                existing_payload = existing.payload or {}
+                existing_size = existing.size_bytes
+                existing_wire = existing.wire_size_bytes
+                if packet_kind == "station-catalog":
+                    await edge_nsi.ingest_station_catalog(
+                        db, company_id, int(station_id),
+                        existing_payload.get("Документы") or [])
+                if packet_kind == "cash_state":
+                    await edge_nsi.ingest_cash_check(
+                        db, company_id, int(station_id),
+                        existing_payload.get("Документы") or [])
                 if packet_kind in ("station-nsi", "station-mrc"):
                     await edge_nsi.ingest_station_nsi(
-                        db, company.id, int(station_id),
-                        (existing.payload or {}).get("Документы") or [])
+                        db, company_id, int(station_id),
+                        existing_payload.get("Документы") or [])
                 if packet_kind == "stock":
                     await _sync_stock_packet(
-                        db, company.id, int(station_id), existing.payload)
+                        db, company_id, int(station_id), existing_payload)
                 уже_есть = (await db.execute(
                     select(func.count(DataEntry.id)).where(
-                        DataEntry.company_id == company.id,
+                        DataEntry.company_id == company_id,
                         DataEntry.source == "edge",
                         DataEntry.meta["Edge"]["packet_uuid"].astext == str(packet_uuid),
                     )
                 )).scalar_one()
                 if not уже_есть:
                     await edge_projection.project_packet(
-                        db, company.id, str(packet_uuid), int(station_id), existing.payload)
+                        db, company_id, str(packet_uuid), int(station_id), existing_payload)
                 await db.commit()
             except Exception as exc:
                 await _persist_edge_revision_error(
-                    db, company_id=company.id, edge_packet_id=existing.id,
+                    db, company_id=company_id, edge_packet_id=existing_id,
                     packet_uuid=str(packet_uuid), content_hash=previous_raw_hash,
-                    payload=existing.payload, size_bytes=existing.size_bytes,
-                    wire_size_bytes=existing.wire_size_bytes, error=_derived_error(exc),
+                    payload=existing_payload, size_bytes=existing_size,
+                    wire_size_bytes=existing_wire, error=_derived_error(exc),
                 )
                 raise
             raise HTTPException(status.HTTP_409_CONFLICT, "Пакет уже принят ранее")
         revision = (await db.execute(select(EdgePacketRevision).where(
-            EdgePacketRevision.company_id == company.id,
+            EdgePacketRevision.company_id == company_id,
             EdgePacketRevision.packet_uuid == str(packet_uuid),
             EdgePacketRevision.content_hash == raw_content_hash,
         ))).scalar_one_or_none()
         if revision is None:
             db.add(EdgePacketRevision(
-                id=uuid.uuid4(), company_id=company.id, edge_packet_id=existing.id,
+                id=uuid.uuid4(), company_id=company_id, edge_packet_id=existing.id,
                 packet_uuid=str(packet_uuid), content_hash=raw_content_hash,
                 payload=payload, size_bytes=len(raw), wire_size_bytes=wire_size,
+                # Статус ограничен CHECK ('received' | 'needs_review'), поэтому
+                # факт автоприменения пишем пояснением, а не новым состоянием.
                 status="needs_review",
-                error="packet UUID повторён с другим raw content hash",
+                error=("новая ревизия станции применена к производному слою"
+                       if AUTO_APPLY_REVISIONS
+                       else "packet UUID повторён с другим raw content hash"),
             ))
+        if AUTO_APPLY_REVISIONS:
+            # Станция переписала свой документ (дописала смену, поправила приёмку).
+            # Она владелец факта — новая версия истина, и её надо ДОВЕСТИ ДО L2.
+            # Но сырьё доставки (L1) неприкосновенно: edge_packets и ревизии
+            # append-only, переписывать существующий пакет нельзя (это ловит тест
+            # test_stage3_ddl_and_raw_path_are_fail_closed_and_append_only).
+            # Поэтому применяем новую версию только к производному слою, а сама
+            # она остаётся в EdgePacketRevision(applied) как доказательство.
+            # ⚠ НЕЗАВЕРШЕНО: полная пересборка реестра читает L1 и вернёт первую
+            # версию — чтобы применённое пережило rebuild, адаптеру нужно брать
+            # последнюю applied-ревизию. Пока флаг выключен, это не в бою.
+            existing_id = existing.id
+            await db.commit()
+            try:
+                await _replay_edge_derived(
+                    db, company_id, int(station_id), packet_kind, payload, str(packet_uuid))
+                await db.commit()
+            except Exception as exc:
+                await _persist_edge_revision_error(
+                    db, company_id=company_id, edge_packet_id=existing_id,
+                    packet_uuid=str(packet_uuid), content_hash=raw_content_hash,
+                    payload=payload, size_bytes=len(raw), wire_size_bytes=wire_size,
+                    error=_derived_error(exc),
+                )
+                raise
+            return {
+                "accepted": True, "packet_uuid": packet_uuid,
+                "station_id": int(station_id), "applied_revision": True,
+            }
         await db.commit()
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -1058,7 +1248,7 @@ async def receive_packet(
 
     packet_row = EdgePacket(
         id=uuid.uuid4(),
-        company_id=company.id,
+        company_id=company_id,
         packet_uuid=packet_uuid,
         station_id=int(station_id),
         kind=packet_kind,
@@ -1072,7 +1262,7 @@ async def receive_packet(
     db.add(packet_row)
     await db.flush()
     db.add(EdgePacketRevision(
-        id=uuid.uuid4(), company_id=company.id, edge_packet_id=packet_row.id,
+        id=uuid.uuid4(), company_id=company_id, edge_packet_id=packet_row.id,
         packet_uuid=str(packet_uuid), content_hash=raw_content_hash,
         payload=payload, size_bytes=len(raw), wire_size_bytes=wire_size,
         status="received",
@@ -1084,18 +1274,26 @@ async def receive_packet(
         routed = 0
         if packet_kind == "transfer":
             routed = await _route_transfer_packet(
-                db, company.id, int(station_id), payload)
+                db, company_id, int(station_id), payload)
         docs = payload.get("Документы") or []
-        await _ingest_receipts(db, company.id, int(station_id), payload, docs)
+        await _ingest_receipts(db, company_id, int(station_id), payload, docs)
         if packet_kind == "cheques":
             await _ingest_cheques(
-                db, company.id, int(station_id), payload, str(packet_uuid))
+                db, company_id, int(station_id), payload, str(packet_uuid))
+        # Сверка касса↔учёт — в общем derived-блоке, а НЕ отдельным try с
+        # проглатыванием: снимок-состояние возвращается тем же UUID, и если
+        # ошибку разбора проглотить (accepted), агент снимет пакет с повтора
+        # (Enqueue дедупит по UUID), а неизменившееся состояние больше не
+        # пришлёт — центр навсегда остался бы без этой сверки. Здесь ошибка
+        # ведёт к revision_error и повтору, как у чеков.
+        if packet_kind == "cash_state":
+            await edge_nsi.ingest_cash_check(db, company_id, int(station_id), docs)
         projection = await edge_projection.project_packet(
-            db, company.id, str(packet_uuid), int(station_id), payload)
+            db, company_id, str(packet_uuid), int(station_id), payload)
         await db.commit()
     except Exception as exc:
         await _persist_edge_revision_error(
-            db, company_id=company.id, edge_packet_id=packet_row.id,
+            db, company_id=company_id, edge_packet_id=packet_row.id,
             packet_uuid=str(packet_uuid), content_hash=raw_content_hash,
             payload=payload, size_bytes=len(raw), wire_size_bytes=wire_size,
             error=_derived_error(exc),
@@ -1114,14 +1312,23 @@ async def receive_packet(
     # один (mrc_fact) и он не заявка — станция сообщает то, что напечатано на
     # пачке. Отдельный вид нужен, чтобы состояние справочника не смешивалось с
     # потоком событий и могло приезжать повторно без вреда.
+    if packet_kind == "station-catalog":
+        # Сверка каталога станции с сетевым: карточка, о которой центр не знает,
+        # продаётся на полке и не попадает ни в один сетевой отчёт.
+        try:
+            await edge_nsi.ingest_station_catalog(db, company_id, int(station_id), docs)
+        except Exception as exc:  # noqa: BLE001
+            await db.rollback()
+            log.warning("станция %s: сводка каталога не разобрана: %s", station_id, exc)
+
     if packet_kind in ("station-nsi", "station-mrc"):
         try:
-            await edge_nsi.ingest_station_nsi(db, company.id, int(station_id), docs)
+            await edge_nsi.ingest_station_nsi(db, company_id, int(station_id), docs)
         except Exception as exc:  # noqa: BLE001
             await db.rollback()
             log.warning("станция %s: черновики не приняты: %s", station_id, exc)
             await _persist_edge_revision_error(
-                db, company_id=company.id, edge_packet_id=packet_row.id,
+                db, company_id=company_id, edge_packet_id=packet_row.id,
                 packet_uuid=str(packet_uuid), content_hash=raw_content_hash,
                 payload=payload, size_bytes=len(raw), wire_size_bytes=wire_size,
                 error=_derived_error(exc),
@@ -1131,10 +1338,10 @@ async def receive_packet(
     if packet_kind == "station-recipes":
         try:
             recipe_stats = await recipe_versions.ingest_station_bundle(
-                db, company.id, int(station_id), payload.get("recipe_bundle") or {})
+                db, company_id, int(station_id), payload.get("recipe_bundle") or {})
         except Exception as exc:
             await _persist_edge_revision_error(
-                db, company_id=company.id, edge_packet_id=packet_row.id,
+                db, company_id=company_id, edge_packet_id=packet_row.id,
                 packet_uuid=str(packet_uuid), content_hash=raw_content_hash,
                 payload=payload, size_bytes=len(raw), wire_size_bytes=wire_size,
                 error=_derived_error(exc),
@@ -1145,12 +1352,12 @@ async def receive_packet(
     if packet_kind == "stock":
         try:
             nsi_stats = await _sync_stock_packet(
-                db, company.id, int(station_id), payload)
+                db, company_id, int(station_id), payload)
             if isinstance(nsi_stats, dict) and (
                 nsi_stats.get("error") or nsi_stats.get("catalog_error")
             ):
                 await _persist_edge_revision_error(
-                    db, company_id=company.id, edge_packet_id=packet_row.id,
+                    db, company_id=company_id, edge_packet_id=packet_row.id,
                     packet_uuid=str(packet_uuid), content_hash=raw_content_hash,
                     payload=payload, size_bytes=len(raw), wire_size_bytes=wire_size,
                     error=f"stock derived: {nsi_stats.get('error') or nsi_stats.get('catalog_error')}"[:4000],
@@ -1159,7 +1366,7 @@ async def receive_packet(
             await db.rollback()
             nsi_stats = {"error": str(exc)[:200]}
             await _persist_edge_revision_error(
-                db, company_id=company.id, edge_packet_id=packet_row.id,
+                db, company_id=company_id, edge_packet_id=packet_row.id,
                 packet_uuid=str(packet_uuid), content_hash=raw_content_hash,
                 payload=payload, size_bytes=len(raw), wire_size_bytes=wire_size,
                 error=_derived_error(exc),

@@ -1,5 +1,9 @@
 /**
- * «Магазин» → Станции → Хранение сырья.
+ * «Магазин» → Станции → Архив файлов со станций.
+ *
+ * Раздел назывался «Хранение сырья»: «сырьё» — слой L1 из архитектуры, но в
+ * «Магазине» сырьё это картошка и кофе на кухне, и товаровед читал заголовок
+ * ровно так. Здесь же архив того, что прислали станции.
  *
  * Пакет станции остаётся в базе как есть (L1) — из него можно переиграть
  * разбор, и это правило проекта. Но снимок остатков приходит каждый час и
@@ -14,6 +18,16 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Database, Trash2, Eye } from 'lucide-react'
+import { PanelViewTabs, type ViewTab } from './PanelViewTabs'
+
+// Раньше всё лежало одной лентой: образы документов, прореживание и
+// перевыгрузки уезжали под таблицу видов пакетов, и о них просто не знали.
+const ВИДЫ: readonly ViewTab[] = [
+  { k: 'stored', label: 'Что храним' },
+  { k: 'docs', label: 'Образы документов' },
+  { k: 'revisions', label: 'Перевыгрузки' },
+  { k: 'cleanup', label: 'Прореживание' },
+] as const
 import {
   getStoreStorage, cleanupStoreStorage, getStoreDocFilesSummary,
   storeDocFilesArchiveUrl, getStorePacketRevisions, resolveStorePacketRevision,
@@ -36,6 +50,7 @@ function когда(iso: string | null): string {
 }
 
 export function StoreStoragePanel() {
+  const [вид, задатьВид] = useState<string>('stored')
   const { company } = useCompany()
   const qc = useQueryClient()
   const [дней, задатьДней] = useState(14)
@@ -72,19 +87,27 @@ export function StoreStoragePanel() {
 
   return (
     <div className="space-y-4 p-6">
-      <div>
-        <h3 className="text-base font-semibold">Хранение сырья</h3>
-        <p className="text-xs text-muted-foreground">
-          Пакет станции хранится как есть — из него можно переиграть разбор. Но снимок остатков
-          приходит каждый час и весит около полумегабайта, а нужен из них последний. Документы и
-          смены — первичка учёта, они не прореживаются.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="flex items-center gap-2 text-base font-semibold">
+            <Database className="h-4 w-4" /> Архив файлов со станций
+          </h3>
+          <p className="max-w-3xl text-xs text-muted-foreground">
+            Всё, что станции прислали, хранится как есть: из пакета можно переиграть разбор, если
+            в правилах учёта нашлась ошибка. Смены и документы — первичка, они не трогаются
+            никогда. Прореживается только история снимков остатков: она приходит каждый час,
+            весит по полмегабайта, а нужен из неё последний за день.
+          </p>
+        </div>
+        <PanelViewTabs tabs={ВИДЫ} value={вид} onChange={задатьВид} />
       </div>
 
+      {вид === 'stored' ? (
+      <>
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-lg border border-border/50 bg-card/40 p-3">
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <Database className="h-3.5 w-3.5" />Всего сырья
+            <Database className="h-3.5 w-3.5" />Объём архива
           </div>
           <div className="mt-0.5 text-xl font-semibold tabular-nums">{объём(data.total_bytes)}</div>
         </div>
@@ -132,6 +155,10 @@ export function StoreStoragePanel() {
         </table>
       </div>
 
+      </>
+      ) : null}
+
+      {вид === 'docs' ? (
       <div className="rounded-lg border border-border/50 bg-card/30 p-3">
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">Образы первичных документов</span>
@@ -171,6 +198,9 @@ export function StoreStoragePanel() {
         )}
       </div>
 
+      ) : null}
+
+      {вид === 'cleanup' ? (
       <div className="rounded-lg border border-border/50 bg-card/30 p-3">
         <div className="mb-2 text-sm font-medium">Проредить историю</div>
         <div className="flex flex-wrap items-end gap-3">
@@ -220,7 +250,9 @@ export function StoreStoragePanel() {
         </p>
       </div>
 
-      <ОтложенныеПеревыгрузки />
+      ) : null}
+
+      {вид === 'revisions' ? <ОтложенныеПеревыгрузки /> : null}
     </div>
   )
 }

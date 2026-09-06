@@ -87,14 +87,14 @@ export function DocsWorkPage() {
     return (
       <>
         <div className="h-full min-h-0 overflow-y-auto px-4 py-4 lg:hidden">
-          <DocCardPanel id={openId} companyId={companyId} onBack={close}
+          <DocCardPanel key={openId} id={openId} companyId={companyId} onBack={close}
             headingLevel={1} onChanged={refresh} />
         </div>
         <div className="hidden h-full min-h-0 gap-3 lg:grid lg:grid-cols-[minmax(280px,0.66fr)_minmax(520px,1.4fr)]">
           <div className="min-h-0 overflow-y-auto">{content}</div>
           <section aria-label="Открытый документ"
             className="my-4 mr-4 min-h-0 overflow-y-auto rounded-lg border border-border bg-background px-4">
-            <DocCardPanel id={openId} companyId={companyId} onBack={close}
+            <DocCardPanel key={openId} id={openId} companyId={companyId} onBack={close}
               headingLevel={2} onChanged={refresh} />
           </section>
         </div>

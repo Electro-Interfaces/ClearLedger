@@ -32,6 +32,7 @@ import { SourcesView } from './SourcesView'
 import { VisibilityView } from './VisibilityView'
 import { TargetsView } from './TargetsView'
 import { usePulseView } from './PulseLayout'
+import { PulseHome, PulseApps } from './PulseHome'
 
 /** Дата данных словами: под цифрами видно, чему можно верить (правило №0). */
 function asOfLabel(asOf: string | null, staleDays: number | null): string {
@@ -46,6 +47,8 @@ import { ShowcaseView } from './ShowcaseView'
 
 export function PulseAppPage() {
   const view = usePulseView('/pulse')
+  if (view === 'home') return <PulseHome />
+  if (view === 'apps') return <PulseApps />
   if (view === 'accepted') return <AcceptedView />
   if (view === 'sources') return <SourcesPage />
   if (view === 'targets') return <TargetsPage />

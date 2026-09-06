@@ -4,9 +4,15 @@ import { useDocsScope } from '@/hooks/useDocsScope'
 import { formatPeriod } from '@/lib/formatDate'
 import { NewWorkButton } from '@/components/work/NewWorkButton'
 
-export function DocsScopeBar() {
+export function DocsScopeBar({ personal = false }: { personal?: boolean }) {
   const scope = useDocsScope()
   const selectedObjects = scope.objectIds.length
+  if (personal) return (
+    <div className="no-print flex shrink-0 items-center gap-3 border-b border-border px-3 py-2">
+      <NewWorkButton />
+      <span className="text-xs text-muted-foreground">Мои дела за всё время</span>
+    </div>
+  )
   return (
     <div className="no-print shrink-0 border-b border-border/60 bg-muted/35 px-3 py-2 text-xs"
       aria-live="polite">

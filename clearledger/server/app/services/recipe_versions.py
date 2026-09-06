@@ -108,22 +108,51 @@ def row_dict(row: StoreRecipeVersion) -> dict:
         "content_hash": row.content_hash, "valid_from": row.valid_from,
         "valid_to": row.valid_to, "activated_at": row.activated_at,
         "source": row.source, "source_station_id": row.source_station_id,
+        "station_id": row.station_id,
+        "ярус": "сеть" if row.station_id is None else f"АЗС {row.station_id}",
         "change_note": row.change_note, "source_bundle_id": row.source_bundle_id,
         "created_at": row.created_at, "updated_at": row.updated_at,
     }
 
 
 async def active_versions(db: AsyncSession, company_id: uuid.UUID,
-                          at: datetime | None = None) -> list[StoreRecipeVersion]:
+                          at: datetime | None = None,
+                          station_id: int | None = None,
+                          все_ярусы: bool = False) -> list[StoreRecipeVersion]:
+    """Действующие карты.
+
+    `station_id` — набор для конкретной АЗС: её карта, а где своей нет —
+    сетевая норма. Так у двух кухонь может быть свой латте, и при этом никто не
+    обязан заводить карту на каждое блюдо заново.
+
+    `все_ярусы` — всё, что действует в компании, без свёртки: нужно центру,
+    чтобы показать, где норма сетевая, а где станция её переопределила.
+    """
     at = at or datetime.now(timezone.utc)
-    return list((await db.execute(
-        select(StoreRecipeVersion).where(
-            StoreRecipeVersion.company_id == company_id,
-            StoreRecipeVersion.status == "active",
-            StoreRecipeVersion.valid_from <= at,
-            or_(StoreRecipeVersion.valid_to.is_(None), StoreRecipeVersion.valid_to > at),
-        ).order_by(StoreRecipeVersion.dish_name, StoreRecipeVersion.dish_uuid)
+    условия = [
+        StoreRecipeVersion.company_id == company_id,
+        StoreRecipeVersion.status == "active",
+        StoreRecipeVersion.valid_from <= at,
+        or_(StoreRecipeVersion.valid_to.is_(None), StoreRecipeVersion.valid_to > at),
+    ]
+    if not все_ярусы:
+        условия.append(or_(StoreRecipeVersion.station_id.is_(None),
+                           StoreRecipeVersion.station_id == station_id))
+    строки = list((await db.execute(
+        select(StoreRecipeVersion).where(*условия)
+        .order_by(StoreRecipeVersion.dish_name, StoreRecipeVersion.dish_uuid)
     )).scalars().all())
+    if все_ярусы:
+        return строки
+
+    # Свёртка по блюду: карта станции сильнее сетевой нормы.
+    по_блюду: dict[str, StoreRecipeVersion] = {}
+    for строка in строки:
+        прежняя = по_блюду.get(строка.dish_uuid)
+        if прежняя is None or (строка.station_id is not None
+                               and прежняя.station_id is None):
+            по_блюду[строка.dish_uuid] = строка
+    return sorted(по_блюду.values(), key=lambda r: (r.dish_name or "", r.dish_uuid))
 
 
 def build_bundle(rows: list[StoreRecipeVersion], generated_at: datetime | None = None) -> dict:
@@ -232,10 +261,23 @@ async def ingest_station_bundle(db: AsyncSession, company_id: uuid.UUID,
 
     for source, recipe in zip(source_recipes, recipes, strict=True):
         digest = content_hash(recipe)
+        # «Уже есть такая карта» ищем В СВОЁМ ЯРУСЕ и в сетевом: если станция
+        # прислала ровно сетевую норму, заводить её копию незачем.
+        # «Такая карта уже есть» значит ДЕЙСТВУЮЩАЯ такая карта.
+        #
+        # Пока статус не проверялся, возврат к прежней норме молча терялся:
+        # станция правит A → B, потом откатывает обратно к A, а центр находит
+        # архивную A, считает набор неизменившимся и оставляет активной B.
+        # Списание идёт по норме, от которой станция уже отказалась (найдено
+        # независимым аудитом 31.08.2026).
         same = (await db.execute(select(StoreRecipeVersion).where(
             StoreRecipeVersion.company_id == company_id,
             StoreRecipeVersion.dish_uuid == recipe["dish_uuid"],
             StoreRecipeVersion.content_hash == digest,
+            StoreRecipeVersion.status == "active",
+            StoreRecipeVersion.valid_to.is_(None),
+            or_(StoreRecipeVersion.station_id == station_id,
+                StoreRecipeVersion.station_id.is_(None)),
         ).limit(1))).scalar_one_or_none()
         if same is not None:
             unchanged += 1
@@ -243,6 +285,7 @@ async def ingest_station_bundle(db: AsyncSession, company_id: uuid.UUID,
         latest = (await db.execute(select(StoreRecipeVersion).where(
             StoreRecipeVersion.company_id == company_id,
             StoreRecipeVersion.dish_uuid == recipe["dish_uuid"],
+            StoreRecipeVersion.station_id == station_id,
         ).order_by(StoreRecipeVersion.version.desc()))).scalars().first()
         try:
             station_version = max(1, int(source.get("version") or 1))
@@ -259,10 +302,13 @@ async def ingest_station_bundle(db: AsyncSession, company_id: uuid.UUID,
         # на первом наборе, и центр показывал канон, которого на станции нет.
         # Предыдущая действующая закрывается: две активные карты одного блюда
         # это спор о том, что списывать.
+        # Закрываем предыдущую карту ЭТОЙ ЖЕ станции. Сетевую норму станция не
+        # трогает: она остаётся для тех АЗС, у которых своей карты нет.
         if latest is not None:
             await db.execute(update(StoreRecipeVersion).where(
                 StoreRecipeVersion.company_id == company_id,
                 StoreRecipeVersion.dish_uuid == recipe["dish_uuid"],
+                StoreRecipeVersion.station_id == station_id,
                 StoreRecipeVersion.status == "active",
             ).values(status="archived", valid_to=now))
         row = StoreRecipeVersion(
@@ -272,7 +318,7 @@ async def ingest_station_bundle(db: AsyncSession, company_id: uuid.UUID,
             output_qty=recipe["output_qty"], output_unit=recipe["output_unit"],
             lines=recipe["lines"], content_hash=digest,
             valid_from=now, activated_at=now,
-            source="station", source_station_id=station_id,
+            source="station", source_station_id=station_id, station_id=station_id,
             change_note=note, source_bundle_id=bundle_id,
         )
         db.add(row)
@@ -356,7 +402,7 @@ async def activate(db: AsyncSession, company_id: uuid.UUID, version_id: uuid.UUI
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
 
-    active = await active_versions(db, company_id)
+    active = await active_versions(db, company_id, station_id=row.station_id)
     candidate = []
     for current in active:
         if current.dish_uuid == row.dish_uuid:
@@ -378,6 +424,8 @@ async def activate(db: AsyncSession, company_id: uuid.UUID, version_id: uuid.UUI
     previous = (await db.execute(select(StoreRecipeVersion).where(
         StoreRecipeVersion.company_id == company_id,
         StoreRecipeVersion.dish_uuid == row.dish_uuid,
+        StoreRecipeVersion.station_id.is_(row.station_id)
+        if row.station_id is None else StoreRecipeVersion.station_id == row.station_id,
         StoreRecipeVersion.status == "active",
         StoreRecipeVersion.valid_to.is_(None),
     ))).scalars().all()

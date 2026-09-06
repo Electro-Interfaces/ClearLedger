@@ -3,7 +3,7 @@
   "short_name": "Пространство",
   "description": "Приложения, данные, задачи и коммуникации компании",
   "id": "/",
-  "start_url": "/",
+  "start_url": "/pwa-start",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f4f6fb",
@@ -18,7 +18,7 @@
   ],
   "shortcuts": [
     { "name": "Рабочий стол", "url": "/" },
-    { "name": "Пульс", "url": "/pulse" },
-    { "name": "Чаты", "url": "/messages" }
+    { "name": "Пульс", "url": "/pwa-start" },
+    { "name": "Моя работа", "url": "/docs/work?view=today" }
   ]
 }

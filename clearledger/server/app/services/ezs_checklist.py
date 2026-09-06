@@ -284,6 +284,8 @@ def gates_by_stage() -> dict[str, list[dict[str, Any]]]:
     for t in TASKS:
         item = {k: v for k, v in t.items() if k != "stage"}
         item["phase"] = PHASE_BY_TASK[t["key"]]
+        if item.get("doc"):
+            item["document_state"] = "approved" if item["doc"] == "project" else "signed"
         out.setdefault(t["stage"], []).append(item)
     return out
 

@@ -399,7 +399,7 @@ async def abc(db: AsyncSession, cid, date_from, date_to,
 # сырью. Но читать его надо по одному разу, иначе выручка складывается со
 # своими копиями: на 208 за месяц это 2,66 млн ₽ вместо 1,44 млн ₽.
 _КЛЮЧ_ДОКУМЕНТА = """p.station_id, d->>'Тип',
-        CASE WHEN d->>'Тип' = 'retail_sale_sidegoods'
+        CASE WHEN d->>'Тип' IN ('retail_sale_sidegoods', 'production_release')
              THEN 'смена:' || coalesce(nullif(p.payload->'Смена'->>'НомерСменыВнутр', '0'),
                                        p.packet_uuid)
              ELSE coalesce(nullif(d->>'Номер', ''), md5(d::text)) END"""
@@ -486,6 +486,30 @@ def _ключ_строки(l: dict) -> str:
     return str(l.get("Номенклатура") or l.get("item_uuid") or l.get("nomenclature_ref") or "")
 
 
+async def _алиасы(db: AsyncSession) -> dict[str, str]:
+    """UUID слитой карточки → UUID канона.
+
+    Документ несёт тот UUID, который был у карточки в момент продажи. После
+    слияния дубля этот UUID остаётся в уже принятых сменах навсегда — и без
+    подмены сетевой отчёт показывает одну позицию двумя строками, каждую со
+    своей долей выручки. 31.08.2026 в принятых сменах 208 таких строк нашлось
+    330 на 15 слитых карточек: 712 единиц и 106 657 ₽ (независимый аудит).
+
+    Цепочку разворачиваем до конца: дубль мог быть слит в карточку, которую
+    позже слили дальше.
+    """
+    прямые = {str(r["alias"]): str(r["canon"]) for r in (await db.execute(text("""
+        SELECT alias_uuid AS alias, canonical_uuid AS canon FROM store_item_aliases
+    """))).mappings().all()}
+    итог: dict[str, str] = {}
+    for алиас in прямые:
+        цель, шагов = прямые[алиас], 0
+        while цель in прямые and шагов < 10:
+            цель, шагов = прямые[цель], шагов + 1
+        итог[алиас] = цель
+    return итог
+
+
 def _по_станциям(строки: list[dict], сумма: str = "amount") -> list[dict]:
     """Свод по АЗС: сеть одной цифрой прячет провал отдельной точки."""
     свод: dict[int, dict] = {}
@@ -510,10 +534,14 @@ async def sales(db: AsyncSession, cid, date_from, date_to,
     d1, d2 = _период(date_from, date_to)
     доки = await _документы(db, cid, d1, d2, ["retail_sale_sidegoods"], stations)
     имена = await _справочник(db)
+    алиасы = await _алиасы(db)
     свод: dict[tuple, dict] = {}
     for d in доки:
         for l in d["lines"] or []:
             uuid_ = _ключ_строки(l)
+            # Слитая карточка отвечает за свои прошлые продажи именем канона:
+            # иначе одна позиция расходится по двум строкам отчёта.
+            uuid_ = алиасы.get(uuid_, uuid_)
             имя = имена.get(uuid_) or _имя(l)
             ключ = (d["station_id"], uuid_ or имя)
             у = свод.setdefault(ключ, {"station_id": d["station_id"], "name": имя,
@@ -1244,6 +1272,17 @@ REPORTS = {
         "fields": ["station_id", "number", "doc_date", "supplier", "incoming_number",
                    "amount", "vat", "deductible", "problem"],
     },
+    "goods-report": {
+        "title": "Товарный отчёт (форма офиса)",
+        "about": "Лист, к которому привыкла бухгалтерия: остаток на начало, приход по "
+                 "документам в пяти оценках, расход выручкой кассы, остаток на конец. "
+                 "Ведётся в розничных ценах; расход включает топливо и в баланс товара "
+                 "не входит. Тот же лист печатает рабочее место станции.",
+        "columns": ["Наименование", "Дата", "Номер", "Закупочная", "Без НДС", "НДС",
+                    "Наценка", "Розничная"],
+        "fields": ["name", "date", "number", "purchase", "net", "vat", "margin", "retail"],
+        "group": "skvoz",
+    },
     "turnover": {
         "title": "Оборотно-сальдовая по товарам",
         "about": "Остаток на начало, приход, расход и остаток на конец периода. Необъяснённая "
@@ -1445,7 +1484,14 @@ _ГРУППА_ПО_УМОЛЧАНИЮ = {
 for _ключ, _отчёт in REPORTS.items():
     _отчёт.setdefault("group", _ГРУППА_ПО_УМОЛЧАНИЮ.get(_ключ, "skvoz"))
 
+# Товарный отчёт живёт отдельным модулем: у него своя печатная форма и свой
+# порядок строк (лист офиса), а не таблица-выборка, как у остальных отчётов.
+# Импорт стоит здесь, а не в шапке: store_goods_report берёт отсюда
+# _остатки_карточек и _период, и в шапке это был бы цикл.
+from .store_goods_report import goods_report  # noqa: E402
+
 BUILDERS = {
+    "goods-report": goods_report,
     "documents": documents,
     "purchase-diff": purchase_diff,
     "vat-book": vat_book,
@@ -1471,7 +1517,7 @@ BUILDERS = {
 
 
 def xlsx_bytes(header: list[str], rows: list[list], meta: list[tuple[str, str]],
-               title: str, about: str) -> bytes:
+               title: str, about: str, kinds: list[str] | None = None) -> bytes:
     """Собрать книгу отчёта: лист описания и лист данных.
 
     CSV годится, чтобы утащить таблицу, но работать в нём нельзя: ни шапки, ни
@@ -1482,6 +1528,10 @@ def xlsx_bytes(header: list[str], rows: list[list], meta: list[tuple[str, str]],
     Формат совпадает со станцией (тот же лист «Отчёт», та же логика денежных и
     текстовых колонок): один отчёт не должен выглядеть по-разному в зависимости
     от того, откуда его выгрузили.
+
+    `kinds` — вид каждой строки для отчётов-бланков (товарный отчёт): «итог»,
+    «раздел», «остаток», «сноска». Без него книга на 23 строки читается сплошной
+    массой, и глазами в ней не найти ни «Итого по приходу», ни границу разделов.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -1527,13 +1577,39 @@ def xlsx_bytes(header: list[str], rows: list[list], meta: list[tuple[str, str]],
         for ячейка in лист[буква][1:]:
             ячейка.number_format = "#,##0.00"
 
+    # Строки бланка: итоги полужирным на светлой заливке, разделы и остатки —
+    # курсивом, сноска — мелким серым во всю ширину. Ровно те же выделения, что
+    # на бумаге: человек сверяет книгу с листом и обязан узнавать строки.
+    if kinds:
+        from openpyxl.styles import Border, Side
+        итог_шрифт = Font(bold=True)
+        итог_фон = PatternFill("solid", fgColor="EDF0FA")
+        раздел_шрифт = Font(bold=True, italic=True)
+        раздел_фон = PatternFill("solid", fgColor="F5F5F5")
+        сноска_шрифт = Font(italic=True, size=9, color="666666")
+        верх = Border(top=Side(style="thin", color="9AA4C7"))
+        for i, вид in enumerate(kinds):
+            строка = лист[i + 2]  # +1 шапка, +1 нумерация с единицы
+            if вид == "итог":
+                for я in строка:
+                    я.font, я.fill, я.border = итог_шрифт, итог_фон, верх
+            elif вид in ("раздел", "остаток"):
+                for я in строка:
+                    я.font, я.fill = раздел_шрифт, раздел_фон
+            elif вид == "сноска":
+                for я in строка:
+                    я.font = сноска_шрифт
+                строка[0].alignment = Alignment(wrap_text=True, vertical="top")
+
     ширины = _ширины(header, rows)
     for i, w in enumerate(ширины):
         лист.column_dimensions[get_column_letter(i + 1)].width = w
     # Шапка закреплена и с автофильтром: без этого таблица на тысячу строк
     # нечитаема уже со второго экрана.
     лист.freeze_panes = "A2"
-    if rows:
+    # Автофильтр — для отчётов-выборок. У бланка порядок строк и есть документ:
+    # отсортировав его, человек получит бессмыслицу вместо товарного отчёта.
+    if rows and not kinds:
         лист.auto_filter.ref = f"A1:{get_column_letter(len(header))}{len(rows) + 1}"
 
     буфер = io.BytesIO()

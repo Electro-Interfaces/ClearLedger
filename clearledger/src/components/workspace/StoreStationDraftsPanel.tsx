@@ -48,8 +48,16 @@ function when(iso: string): string {
 }
 
 /** Карточка черновика товара с кандидатами на сопоставление. */
-function ItemDraftCard({ draft, onDone }: { draft: StationItemDraft; onDone: () => void }) {
+function ItemDraftCard({ draft, groups, onDone }: {
+  draft: StationItemDraft
+  groups: { group_id: number; path: string; cash_section: number | null }[]
+  onDone: () => void
+}) {
   const [note, setNote] = useState('')
+  // Группа обязательна по сути: без неё карточка не уедет в кассу — отдел кассы
+  // приходит свойством группы. Поле предзаполнено подсказкой по названию,
+  // товаровед подтверждает или меняет.
+  const [groupId, setGroupId] = useState<number | null>(draft.group_hint?.group_id ?? null)
   const { data: cand } = useQuery({
     queryKey: ['draft-candidates', draft.id, draft.barcodes.join(',')],
     queryFn: () => getDraftCandidates(draft.barcodes),
@@ -59,7 +67,10 @@ function ItemDraftCard({ draft, onDone }: { draft: StationItemDraft; onDone: () 
 
   const resolve = useMutation({
     mutationFn: (body: { action: 'link' | 'create' | 'reject'; item_id?: number }) =>
-      resolveItemDraft(draft.id!, { ...body, note: note || undefined }),
+      resolveItemDraft(draft.id!, {
+        ...body, note: note || undefined,
+        group_id: body.action === 'create' ? groupId : undefined,
+      }),
     onSuccess: (res) => {
       const c = Number(res.collisions ?? 0)
       toast.success(
@@ -123,11 +134,27 @@ function ItemDraftCard({ draft, onDone }: { draft: StationItemDraft; onDone: () 
       )}
 
       <div className="mt-3 flex items-center gap-2 flex-wrap">
+        <select
+          className="min-w-[220px] rounded border border-border bg-background px-2 py-1.5 text-sm"
+          value={groupId ?? ''}
+          onChange={(e) => setGroupId(e.target.value ? Number(e.target.value) : null)}
+          title="Товарная группа: от неё зависит отдел кассы, без неё карточка в кассу не уедет"
+        >
+          <option value="">группа не выбрана</option>
+          {groups.map((g) => (
+            <option key={g.group_id} value={g.group_id}>
+              {g.path}{g.cash_section ? ` · отдел ${g.cash_section}` : ''}
+            </option>
+          ))}
+        </select>
         <input
-          className="flex-1 min-w-[200px] rounded border border-border bg-background px-2 py-1.5 text-sm"
+          className="flex-1 min-w-[160px] rounded border border-border bg-background px-2 py-1.5 text-sm"
           placeholder="примечание к решению (необязательно)"
           value={note} onChange={(e) => setNote(e.target.value)} />
-        <Button size="sm" disabled={resolve.isPending}
+        <Button size="sm" disabled={resolve.isPending || groupId === null}
+          title={groupId === null
+            ? 'Выберите товарную группу: от неё зависит отдел кассы'
+            : 'Завести карточку в сетевом справочнике'}
           onClick={() => resolve.mutate({ action: 'create' })}>
           <PackagePlus className="h-3.5 w-3.5 mr-1" />Завести в сети
         </Button>
@@ -203,7 +230,10 @@ export function StoreStationDraftsPanel() {
           </div>
         ) : (
           <div className="space-y-3">
-            {items.map((d) => <ItemDraftCard key={d.id ?? d.source_uuid} draft={d} onDone={refresh} />)}
+            {items.map((d) => (
+              <ItemDraftCard key={d.id ?? d.source_uuid} draft={d}
+                             groups={data?.groups ?? []} onDone={refresh} />
+            ))}
           </div>
         )}
       </section>

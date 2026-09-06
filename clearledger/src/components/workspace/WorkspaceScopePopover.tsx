@@ -22,6 +22,8 @@ import { useFilters } from '@/contexts/FilterContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useLocations } from '@/hooks/useLocations'
 import { getChargeDimensions } from '@/services/analyticsService'
+import { getStoreStations } from '@/services/storeService'
+import { locationStationCodes } from '@/services/locationService'
 
 function locationRegion(location: ReturnType<typeof useLocations>[number]): string {
   return String((location.metadata as Record<string, unknown> | undefined)?.federalSubject ?? '').trim()
@@ -150,14 +152,33 @@ export function WorkspaceScopeControl() {
     [dimensions?.stations],
   )
 
+  // Станции, у которых есть магазин. В «Магазине» выбирать не из чего, кроме
+  // них: остальные точки сети — заправки без сопутки, офис, склад — сузить
+  // товарный анализ не могут, а список из четырнадцати пунктов заставляет
+  // угадывать, какие две из них настоящие.
+  const { data: магазинные } = useQuery({
+    queryKey: ['store-stations-scope', companyId],
+    queryFn: getStoreStations,
+    enabled: open && !isEnergy,
+    staleTime: 5 * 60_000,
+  })
+  const кодыМагазинов = useMemo(
+    () => new Set((магазинные?.stations ?? []).map((s) => Number(s.station_id))),
+    [магазинные],
+  )
+
   // Точки (fuel) — регион сужает список; поиск по имени.
   const filteredLocations = useMemo(() => {
     const q = stationQuery.trim().toLowerCase()
     return locations
+      // Пока список станций магазина не приехал, показываем всё: пустой выбор
+      // хуже лишнего — человек решит, что точек нет вовсе.
+      .filter((l) => кодыМагазинов.size === 0
+        || locationStationCodes([l], [l.id]).some((c) => кодыМагазинов.has(c)))
       .filter((l) => draftRegions.length === 0 || regionSet.has(locationRegion(l)))
       .filter((l) => !q || l.name.toLowerCase().includes(q))
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
-  }, [locations, stationQuery, draftRegions.length, regionSet])
+  }, [locations, stationQuery, draftRegions.length, regionSet, кодыМагазинов])
 
   const selectedCount = isEnergy ? draftStations.length : draftLocations.length
   const scopeCount = draftRegions.length + selectedCount

@@ -1,15 +1,16 @@
-import { describe, expect, it } from 'vitest'
-import { openSectionOf, searchWithoutOpen } from './openSection'
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { openSectionOf, searchWithoutOpen } from './openSection.ts'
 
 describe('раздел из адреса', () => {
   it('узнаёт свой раздел и не пускает чужое', () => {
-    expect(openSectionOf('?open=chat')).toBe('chat')
-    expect(openSectionOf('?open=tasks&x=1')).toBe('tasks')
-    expect(openSectionOf('?open=workspace')).toBeNull()
-    expect(openSectionOf('')).toBeNull()
+    assert.equal(openSectionOf('?open=chat'), 'chat')
+    assert.equal(openSectionOf('?open=tasks&x=1'), 'tasks')
+    assert.equal(openSectionOf('?open=workspace'), null)
+    assert.equal(openSectionOf(''), null)
   })
   it('гасит параметр, сохраняя соседей', () => {
-    expect(searchWithoutOpen('?open=chat')).toBe('')
-    expect(searchWithoutOpen('?open=chat&mode=demo')).toBe('?mode=demo')
+    assert.equal(searchWithoutOpen('?open=chat'), '')
+    assert.equal(searchWithoutOpen('?open=chat&mode=demo'), '?mode=demo')
   })
 })

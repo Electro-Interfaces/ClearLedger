@@ -405,7 +405,7 @@ export function WorkspaceFilterBar() {
           последний элемент уезжал под «Сбросить» — со скрытой полосой прокрутки
           это читается как наложение («Сбросить так и налезает», 24.08.2026). */}
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-        <PeriodControl />
+        {coreMode !== 'projects' && <PeriodControl />}
         {isOffice ? null : <WorkspaceScopeControl />}
         {/* Вид нефтепродукта — третье измерение общего контура рядом с периодом и
             областью: у топливного профиля он меняет ответ на любом экране. */}

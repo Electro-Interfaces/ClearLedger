@@ -24,6 +24,13 @@ export interface StoreDocumentBrief {
   has_files: boolean
   has_fuel: boolean
   revision: number
+  /** Направление перемещения: «Торговый зал → Склад · внутри станции» и т.п. */
+  transfer_route?: string | null
+  /** Переоценка: товар + было → стало + причина (у неё нет товарных строк). */
+  revaluation?: {
+    from: number | null; to: number | null; barcode: string | null
+    reason: string | null; item?: string | null; name?: string | null
+  } | null
 }
 
 export interface StoreDocumentStats {
@@ -105,7 +112,9 @@ export interface StoreDocumentFilters {
   offset: number
 }
 
-export type StoreDocumentCounter = keyof StoreDocumentStats
+// Счётчики-карточки реестра + «ждут приёмки» (только переход из Разбора, своей
+// карточки-числа наверху не имеет — оттого не в StoreDocumentStats).
+export type StoreDocumentCounter = keyof StoreDocumentStats | 'waiting_receipt'
 
 export interface StoreDocumentIssue {
   code: string
@@ -194,6 +203,10 @@ export interface StoreShiftBrief {
   started_at: string | null
   finished_at: string | null
   requires_attention: boolean
+  /** Светофор смены (один источник с листом): g готова · y есть неточности · r не грузить. */
+  readiness: 'g' | 'y' | 'r'
+  /** Что мешает смене уехать в бухгалтерию. Пусто — уедет. */
+  blockers?: string[]
   kinds: Record<string, number>
 }
 
@@ -204,6 +217,10 @@ export interface StoreShiftPassport {
   started_at: string | null
   finished_at: string | null
   status: string
+  /** Светофор смены (один источник с реестром): g готова · y неточности · r не грузить. */
+  readiness: 'g' | 'y' | 'r'
+  /** Что мешает смене уехать в бухгалтерию. Пусто — уедет. */
+  blockers?: string[]
   revenue: number
   vat: number | null
   cheques: number
@@ -216,6 +233,20 @@ export interface StoreShiftPassport {
   }[]
   actions: { code: string; text: string; hint?: string }[]
   packet_uuid: string | null
+  /** Товарная часть смены — из первичных edge-пакетов (продажи, оплаты, блюда). */
+  sales: { guid: string | null; name: string; cls: string | null; qty: number; price: number; amount: number; vat: number }[]
+  payments: { form: string; amount: number }[]
+  /** guid — ключ сопоставления с продажей: у общепита есть тёзки с разным составом. */
+  dishes: { guid: string | null; name: string; qty: number; amount: number; recipe: { name: string; qty: number; unit: string | null }[] }[]
+  /** Склад-документы дня с товарами (поступления, инвентаризации, списания, …). */
+  stock: {
+    kind: string; number: string | null; meta: string; amount: number
+    /** Служебный документ — наше выравнивание остатка, не приход человека. */
+    service: boolean
+    /** Запись в реестре, которую открывает карточка документа (если есть). */
+    record_id: string | null
+    lines: { name: string; qty: number; price: number; amount: number; uchet: number | null; dev: number | null }[]
+  }[]
 }
 
 export function listStoreShifts(params: {
@@ -230,6 +261,23 @@ export function listStoreShifts(params: {
 
 export function getStoreShiftPassport(stationId: number, shiftNo: number): Promise<StoreShiftPassport> {
   return get(`/api/store/documents/shifts/${stationId}/${shiftNo}`)
+}
+
+/** Пересчёт документов: какие смены ждут пересборки (данные пришли после сборки). */
+export interface StoreRecomputeStatus {
+  rebuilt_at: string | null
+  freeze_period: string | null
+  shifts_total: number
+  waiting: {
+    station_id: number; shift_no: number; documents: number; amount: number
+    closed_at: string | null; built_at: string; arrived_at: string
+  }[]
+}
+
+export function getStoreRecompute(stations?: string[]): Promise<StoreRecomputeStatus> {
+  return get('/api/store/documents/recompute', {
+    stations: stations?.length ? stations.join(',') : undefined,
+  })
 }
 
 export function listStoreDocuments(filters: StoreDocumentFilters): Promise<StoreDocumentsResponse> {

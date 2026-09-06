@@ -1,5 +1,5 @@
 /**
- * «Магазин» → Станции → Состояние станций.
+ * «Магазин» → Станции, вид «Требует человека».
  *
  * Что на конкретной АЗС требует человека: товар, который касса не пробьёт;
  * позиции, не уехавшие в кассу; минусы в физике склада; устаревшие ставки НДС;
@@ -48,7 +48,7 @@ function Сводка({ label, value, cls, hint }: {
   )
 }
 
-export function StoreStationHealthPanel() {
+export function StoreStationHealthPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const { company } = useCompany()
   const [станция, выбрать] = useState<number | null>(null)
 
@@ -72,15 +72,19 @@ export function StoreStationHealthPanel() {
   })
 
   return (
-    <div className="space-y-4 p-6">
-      <div>
-        <h3 className="text-base font-semibold">Состояние станций</h3>
-        <p className="text-xs text-muted-foreground">
-          Что на АЗС требует человека прямо сейчас: касса и выгрузка, физика склада, НСИ
-          и коды нефтесервера. Считается по свежему снимку агента станции —
-          если снимка нет, это первая же строка отчёта.
-        </p>
-      </div>
+    <div className={embedded ? 'space-y-4' : 'space-y-4 p-6'}>
+      {/* Внутри «Станций» заголовок панели уже есть — второй только сдвигал бы
+          таблицу вниз и повторял то, что написано на табе. */}
+      {embedded ? null : (
+        <div>
+          <h3 className="text-base font-semibold">Состояние станций</h3>
+          <p className="text-xs text-muted-foreground">
+            Что на АЗС требует человека прямо сейчас: касса и выгрузка, физика склада, НСИ
+            и коды нефтесервера. Считается по свежему снимку агента станции —
+            если снимка нет, это первая же строка отчёта.
+          </p>
+        </div>
+      )}
 
       {станции.length > 1 && (
         <div className="flex flex-wrap items-center gap-1.5">

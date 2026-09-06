@@ -3,7 +3,7 @@
  * обогащённый продажами и штрихкодами. Фильтры: вид · маркировка · весовой ·
  * с продажами/без · поиск. Данные: /api/store/nomenclature.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ShowMore, useVisible } from '@/components/common/ShowMore'
 import { getStoreNomenclature, type SalesMarked } from '@/services/storeService'
@@ -44,6 +44,7 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }
   const [hasSales, setHasSales] = useState<'all' | 'yes' | 'no'>('all')
   const [q, setQ] = useState('')
   const [openGuid, setOpenGuid] = useState<string | null>(null)
+  const [станцияПрименения, задатьСтанциюПрименения] = useState('all')
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['store-nom', companyId, dateFrom, dateTo, kind, marked, weighed, hasSales, q, stations],
@@ -52,16 +53,80 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }
 
   // Список показывается порциями: обрезать его молча нельзя — товаровед
   // приходит смотреть весь справочник, а не первые строки по чужой сортировке.
-  const показ = useVisible(data?.items ?? [])
+  // Какие АЗС вообще встречаются в справочнике — из них и собирается
+  // переключатель. Зашивать номера нельзя: станция появляется без нашего
+  // участия, и на третьей АЗС список должен вырасти сам.
+  const станцииСписком = useMemo(() => {
+    const набор = new Set<string>()
+    for (const i of data?.items ?? []) {
+      for (const с of (i.stations_list ?? '').split(',')) {
+        const код = с.trim()
+        if (код) набор.add(код)
+      }
+    }
+    return [...набор].sort((a, b) => Number(a) - Number(b))
+  }, [data?.items])
+
+  const строки = useMemo(() => {
+    const все = data?.items ?? []
+    if (станцияПрименения === 'all') return все
+    return все.filter((i) => (i.stations_list ?? '')
+      .split(',').map((с) => с.trim()).includes(станцияПрименения))
+  }, [data?.items, станцияПрименения])
+
+  const показ = useVisible(строки)
 
   return (
     <div className="p-6 space-y-4">
       <div>
         <h3 className="text-base font-semibold">Номенклатура</h3>
-        <p className="text-xs text-muted-foreground">Мастер-НСИ из ЦБ ЭЛСИ.АЗК. Клик по строке — полная карточка товара: паспорт, штрихкоды, цена/остаток, продажи, поставки, движение, ТТК, МРЦ.</p>
+        <p className="text-xs text-muted-foreground">Сетевой справочник: карточка заводится один раз на сеть, условия станций описаны правилами к ней. Клик по строке — полная карточка: паспорт, штрихкоды и ярусы, условия каждой АЗС, продажи, поставки, движение, ТТК, МРЦ.</p>
+        {/* В каком разрезе читаются цифры.
+            Остаток, цена и выручка считаются по выбранной области учёта, а
+            выбирается она наверху, в шапке рабочего стола. Пока экран об этом
+            молчал, сетевые итоги и цифры одной АЗС выглядели одинаково — и
+            «почему остаток не тот» становилось вопросом к данным, а не к
+            фильтру. */}
+        <p className="mt-1 text-xs">
+          <span className="text-muted-foreground">Разрез: </span>
+          <span className="font-medium">
+            {stations && stations.length ? `АЗС ${stations.join(', ')}` : 'вся сеть'}
+          </span>
+          <span className="text-muted-foreground">
+            {' '}— остаток, цена и выручка показаны по нему. Меняется в шапке, «Область учёта».
+          </span>
+        </p>
+      </div>
+
+      {/* Поиск стоит ПЕРВЫМ и во всю ширину: справочник на полторы тысячи
+          позиций смотрят не листая, а ища. Раньше поле пряталось последним в
+          ряду фильтров и выглядело таким же второстепенным, как «весовые». */}
+      <div className="flex flex-wrap items-center gap-3">
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder="найти: название, артикул или штрихкод — можно сканером"
+          className="text-xs px-2.5 py-2 rounded-md border border-border/50 bg-background w-full sm:w-96" />
+        {q && (
+          <button type="button" onClick={() => setQ('')}
+            className="text-xs text-muted-foreground hover:text-foreground underline">сбросить</button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
+        {/* Быстрый разрез «где применяется». Он про КАРТОЧКУ (на каких АЗС у неё
+            есть цена), а не про цифры: остаток и выручка считаются по области
+            учёта из шапки — об этом сказано строкой выше. Смешивать их в одном
+            переключателе нельзя, иначе человек решит, что сузил всё сразу. */}
+        {станцииСписком.length > 1 && (
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Применяется на:</span>
+            <Seg
+              tabs={[{ key: 'all', label: 'любой' },
+                     ...станцииСписком.map((s) => ({ key: s, label: `АЗС ${s}` }))]}
+              value={станцияПрименения}
+              onChange={(v) => задатьСтанциюПрименения(v as string)}
+            />
+          </div>
+        )}
         <select value={kind} onChange={(e) => setKind(e.target.value)}
           className="text-xs px-2 py-1.5 rounded-md border border-border/50 bg-background">
           <option value="all">Все виды</option>
@@ -70,8 +135,6 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }
         <Seg tabs={MARK_TABS} value={marked} onChange={setMarked} />
         <Seg tabs={WEIGH_TABS} value={weighed} onChange={setWeighed} />
         <Seg tabs={SALES_TABS} value={hasSales} onChange={setHasSales} />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="поиск по товару/артикулу…"
-          className="text-xs px-2.5 py-1.5 rounded-md border border-border/50 bg-background w-52" />
       </div>
 
       {isLoading && <div className="text-sm text-muted-foreground">Загрузка…</div>}
@@ -79,9 +142,10 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }
       {data && (
         <>
           <div className="grid gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
-            <Kpi label="Позиций" value={nf(data.summary.total)} />
+            <Kpi label={строки.length === data.summary.total ? 'Позиций' : 'Найдено'}
+                 value={nf(строки.length)} />
             <Kpi label="Маркированных" value={nf(data.summary.marked)} />
-            <Kpi label="Весовых" value={nf(data.summary.weighed)} />
+            <Kpi label="Применяется на АЗС" value={nf(data.summary.on_stations ?? 0)} />
             <Kpi label="С продажами" value={nf(data.summary.with_sales)} />
             <Kpi label="Со штрихкодом" value={nf(data.summary.with_barcode)} />
           </div>
@@ -92,7 +156,8 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }
                 <tr>
                   <th className="px-3 py-2 text-left font-medium">Товар</th>
                   <th className="px-3 py-2 text-left font-medium">Артикул</th>
-                  <th className="px-3 py-2 text-left font-medium">Вид</th>
+                  <th className="px-3 py-2 text-left font-medium">Класс</th>
+                  <th className="px-3 py-2 text-center font-medium" title="АЗС, где у позиции есть действующая цена — то есть где она применяется">На АЗС</th>
                   <th className="px-3 py-2 text-left font-medium">НДС</th>
                   <th className="px-3 py-2 text-center font-medium">ШК</th>
                   <th className="px-3 py-2 text-center font-medium">ЧЗ</th>
@@ -108,6 +173,17 @@ export function StoreNomenclaturePanel({ companyId, dateFrom, dateTo, stations }
                     <td className="px-3 py-1.5">{i.name}</td>
                     <td className="px-3 py-1.5">{i.article ?? '—'}</td>
                     <td className="px-3 py-1.5">{i.kind}</td>
+                    {/* Номера станций, а не просто их количество. «2» у сети из
+                        двух АЗС и «1» рядом читаются одинаково, а вопрос у
+                        товароведа другой: где позиция есть, а где её нет. */}
+                    <td className="px-3 py-1.5 text-center tabular-nums"
+                        title={i.stations_list
+                          ? `Позиция применяется на АЗС: ${i.stations_list}`
+                          : 'Ни одна станция не применяет эту позицию — кандидат в архив'}>
+                      {i.stations_list
+                        ? <span className="text-[11px]">{i.stations_list}</span>
+                        : <span className="text-muted-foreground/60">—</span>}
+                    </td>
                     <td className="px-3 py-1.5">{i.vat ?? '—'}</td>
                     <td className="px-3 py-1.5 text-center">{i.has_barcode ? '✓' : ''}</td>
                     <td className="px-3 py-1.5 text-center">{i.marked && <ChzBadge />}</td>

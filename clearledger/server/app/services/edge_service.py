@@ -432,10 +432,21 @@ def analyze_stock(doc: dict) -> dict:
 
     cannot_sell, no_price, stale_vat = [], [], []
     видели: set[str] = set()
+    # Блюда и добавки станция помечает: в кассе у них не остаток, а служебный
+    # запас (у блюда — тысяча штук, у добавки — сто килограммов), из которого
+    # кассир пробивает порцию. Расход того и другого ведёт агент по
+    # технологической карте, поэтому сравнивать эти числа с учётом бессмысленно:
+    # без пометки соус приезжал бы сюда «расхождением» на сто тысяч граммов и
+    # заслонял настоящие. Старые пакеты пометки не несут — там поведение
+    # прежнее.
+    служебные_шк = {str(r.get("ШтрихКод") or "") for r in cash_rows if r.get("СлужебныйЗапас")}
+    служебные_шк.discard("")
     for r in cash_rows:
         bc = str(r.get("ШтрихКод") or "")
         uid = str(r.get("Номенклатура") or "")
         qty = float(r.get("Остаток") or 0)
+        if r.get("СлужебныйЗапас"):
+            continue
         # «Товар есть, продать нельзя»: по карточке в кассе ноль, в учёте остаток.
         if uid and uid not in видели and cash_by_item[uid] <= 0 and book_by_item.get(uid, 0) > 0:
             видели.add(uid)
@@ -461,6 +472,8 @@ def analyze_stock(doc: dict) -> dict:
     qty_diff = []
     for bc, cash_qty in cash_by_barcode.items():
         if not bc or bc not in book_by_barcode:
+            continue
+        if bc in служебные_шк:
             continue
         delta = cash_qty - book_by_barcode[bc]
         if abs(delta) > 0.001:

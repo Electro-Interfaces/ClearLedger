@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from types import SimpleNamespace
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -676,7 +678,62 @@ def sanitize_edge_document(document: dict, *, trusted_station_packet: bool) -> d
 # правка навсегда роняла пересборку реестра, и чинить приходилось руками, в
 # базе. Меняется логика — поднимаем версию, и расхождение хеша на строках
 # старой версии считается ожидаемым.
-PROJECTION_RULES_VERSION = 2
+# v3 (01.09.2026): слияние 47 карточек-дублей поменяло имена и идентификаторы
+# позиций в строках документов. Сами документы не менялись — изменился
+# справочник, — но хеш строки от этого другой, и защита «тот же revision с
+# другим hash» встала намертво: реестр не пересобирался девять дней, 36
+# документов станции не доехали до центра. Ровно для этого версия правил и
+# заведена: поднимаем — и расхождение хеша на старых строках считается
+# ожидаемым.
+# v4 (02.09.2026): в реестр добавлен адаптер документов 1С (`onec_entries`).
+# У документов, которые станция присылала и сама, рядом с прежним источником
+# встал второй — состав строк реестра поменялся, а вместе с ним и хеш. Сами
+# документы прежние.
+# v5 (02.09.2026): ключ документа 1С — сам `ИсточникUUID`, а не производный от
+# него. Первый заход с производным ключом дал вторую первичную строку у каждого
+# отчёта о продажах и удвоил выручку периода (4,89 млн против 2,86 млн).
+# v6 (02.09.2026): документ 1С склеивается со своим двойником от станции по
+# номеру, а не по UUID — идентификаторы в локальной и центральной базах разные.
+# v7 (02.09.2026): к склейке по номеру добавлен запасной ключ «день + сумма» —
+# вторая смена дня приезжает от станции под номером первой.
+# v8 (02.09.2026): ревизия документа 1С считается от времени записи — иначе
+# перезаливка того же документа роняет пересборку конфликтом хеша.
+# v9 (02.09.2026): третий ключ склейки — день. С 07.08 станция считает выпуск
+# сама, её номера и суммы не совпадают с 1С, и документы вставали парами.
+# v10 (02.09.2026): день, закрытый станцией, документами 1С не пополняется —
+# склейка по дню слепляла разные документы одного дня в один.
+# v16 (02.09.2026): реестр не берёт служебные документы станции.
+# v17 (02.09.2026): ключ выпуска продукции — по смене, а не по печатному номеру.
+# Номер выпуска строится из даты открытия, поэтому у всех смен одного дня он
+# один: 19.08 на 208 работали три смены с номером 2082081908202601, и в реестр
+# попадала только последняя. Из учёта выпадало 2 697,48 ₽ выпуска по девяти
+# сменам. Продажи так ключевались с самого начала — выпуск такой же посменный
+# документ. Состав реестра меняется законно: документы прежние, их стало видно.
+# v18 (02.09.2026): выпуск без единой строки в реестр не идёт — хвост переноса
+# смен 02.08, когда агент завёл документ на каждую смену, включая те, где блюд
+# не продавали. Сам агент это уже не делает; чистится сторона реестра.
+# v19 (02.09.2026): та же проверка по верному имени поля — «ВыпускБлюд».
+# v20 (02.09.2026): сведение записей 1С со станционными вынесено из адаптера в
+# общий этап после сбора всех кандидатов. Адаптер читал прошлое состояние
+# реестра, и пересборка после удаления давала задвоение (+30 628,73 ₽ по
+# выпуску за 12 дней). Теперь результат не зависит от числа прогонов.
+# v21 (02.09.2026): день закрывает только СОБСТВЕННЫЙ документ станции —
+# ретранслированный документ 1С (тот же номер) им не считается.
+# v22 (04.09.2026): реестр пересобирается после добора документов ЦБ (десять
+# переоценок 208 за 30.07–17.08, снимок cb_movement_doc стоял с 29.07).
+# ⚠ Версию пришлось поднять не из-за самого добора: пробная сборка показала
+# 80 записей, у которых при ТОЙ ЖЕ ревизии изменился хеш. Разобрано — у
+# документов 1С поменялся `document_id`: в реестре лежал производный uuid5, а
+# код (начиная с v5) ставит сам `ИсточникUUID`. То есть боевой реестр в этой
+# части собран правилами старше v5, и без поднятия версии пересборка падает
+# `ProjectionRevisionConflict`. Документы прежние, меняется только их ключ.
+# v23 (04.09.2026): станция документа ЦБ определяется и по ИМЕНИ склада, если
+# код не разобрался. Складское место кодируется «20800002» — восемь цифр подряд,
+# и `_station` по нему не находил ничего: документ оставался без станции и
+# отсеивался областью видимости. Так терялись переоценки, перемещения и списания
+# СКЛАДА (не торгового зала) — за 01.07–19.08.2026 это 2 переоценки и одно
+# перемещение на 9 280 ₽, за всю историю ЦБ — 960 движений и 288 пересчётов.
+PROJECTION_RULES_VERSION = 23
 
 
 def _candidate_hash(candidate: ProjectionCandidate) -> str:
@@ -751,7 +808,17 @@ async def _receipt_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Proj
             discrepancy_status="needs_review" if row.accounting_status == "needs_review" else "none",
             requires_attention=row.accounting_status == "needs_review",
             raw_payload_available=True,
-            revision=max(1, int(row.accounting_revision or row.version or 1)),
+            # Ревизию приёмки ведёт МОМЕНТ ИЗМЕНЕНИЯ, а не счётчик выгрузки.
+            #
+            # `accounting_revision` растёт, когда документ уходит в бухгалтерию,
+            # и стоит на месте, когда его правят в реестре. Правка при этом
+            # меняет содержимое — и сборка реестра упирается в защиту «тот же
+            # revision с другим hash». Одна такая приёмка (№ 208000000241,
+            # правлена 04.08) остановила пересборку ВСЕГО реестра на девять
+            # дней: 36 документов станции остались без проекции, и знал об этом
+            # только лог.
+            revision=_revision(getattr(row, "updated_at", None),
+                               max(1, int(row.accounting_revision or row.version or 1))),
             content_hash=row.content_hash,
             header={
                 "incoming_number": row.incoming_number,
@@ -788,7 +855,15 @@ def _edge_document_identity(packet: EdgePacket, document: dict, kind: str) -> tu
     смены (строится из даты открытия и склеивает две разные смены). Та же
     логика — в `store_reports._КЛЮЧ_ДОКУМЕНТА`.
     """
-    if kind == "retail_sale_sidegoods":
+    # Продажи и выпуск продукции — документы СМЕНЫ, и ключ им нужен по смене.
+    # Печатный номер у них строится из даты открытия, поэтому у всех смен одного
+    # дня он ОДИН. Пока выпуск ключевался номером, смены одного дня схлопывались
+    # в один документ: 19.08.2026 на 208 работали три смены (7082, 7083, 7084) с
+    # номером 2082081908202601, в реестр попала только последняя — из учёта
+    # выпало 2 697,48 ₽ выпуска по девяти сменам (найдено 02.09.2026 разбором
+    # припаркованных ревизий). Пересборка одной и той же смены по-прежнему
+    # схлопывается верно: у её копий внутренний номер один.
+    if kind in ("retail_sale_sidegoods", "production_release"):
         shift = (packet.payload or {}).get("Смена") or {}
         internal = str(shift.get("НомерСменыВнутр") or "").strip()
         # у служебных пакетов внутренний номер равен "0" — иначе они схлопнутся
@@ -801,9 +876,28 @@ def _edge_document_identity(packet: EdgePacket, document: dict, kind: str) -> tu
     return (packet.station_id, kind, tail)
 
 
+# Этап D двусторонней синхронизации: станция — владелец факта, и её последняя
+# присланная версия документа считается истиной. Флаг тот же, что у приёмника
+# (edge_router.AUTO_APPLY_REVISIONS); читаем окружение отдельно, чтобы сервис не
+# зависел от роутера. По умолчанию ВЫКЛЮЧЕН — реестр строится по первой доставке.
+_АВТО_РЕВИЗИИ = os.environ.get("EDGE_AUTO_APPLY_REVISIONS", "0") == "1"
+
+
 async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[ProjectionCandidate]:
     packets = (await db.execute(select(EdgePacket).where(
         EdgePacket.company_id == company_id))).scalars().all()
+    # Без этого пересборка откатывала бы применённую правку станции: приёмник
+    # кладёт новую версию в EdgePacketRevision (сырьё L1 append-only и не
+    # переписывается), а реестр читал бы первую доставку.
+    свежие: dict[str, dict] = {}
+    if _АВТО_РЕВИЗИИ:
+        from app.models import EdgePacketRevision
+        ревизии = (await db.execute(select(EdgePacketRevision).where(
+            EdgePacketRevision.company_id == company_id,
+        ).order_by(EdgePacketRevision.received_at))).scalars().all()
+        for rev in ревизии:  # последняя по времени перезаписывает предыдущие
+            if rev.payload:
+                свежие[str(rev.packet_uuid)] = rev.payload
     # Приёмка приезжает пакетом и тут же разворачивается в реестр приёмок: это
     # один документ, а не два. Связь известна по source_uuid — без неё каждая
     # накладная стояла в реестре дважды, причём копия из пакета с нулевой
@@ -818,11 +912,41 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
     # копия пакета — не второй документ: на ключ остаётся самая свежая доставка
     freshest: dict[tuple, tuple[datetime, str, ProjectionCandidate]] = {}
     for packet in packets:
+        # Свежую версию подставляем ОБЁРТКОЙ: менять packet.payload нельзя —
+        # это ORM-объект, правка улетела бы в БД, а сырьё L1 неприкосновенно.
+        _свежий = свежие.get(str(packet.packet_uuid))
+        if _свежий:
+            packet = SimpleNamespace(
+                station_id=packet.station_id, packet_uuid=packet.packet_uuid,
+                received_at=packet.received_at, kind=packet.kind, payload=_свежий)
         for index, document in enumerate((packet.payload or {}).get("Документы") or []):
             if not isinstance(document, dict):
                 continue
             document = _projection_edge_document(document)
+            # Служебный документ завела не станция, а сопровождение: проверка
+            # приёмника, тестовый прогон, оформление собственной правки. Станция
+            # прячет его у себя (agent doc-service), и признак приезжает полем
+            # «СлужебныйДокумент». Реестр его не читал вовсе, поэтому пометка
+            # действовала только на журнал станции, а в витрине товароведа и в
+            # сверке документ продолжал стоять как настоящий.
+            if document.get("СлужебныйДокумент") in (True, "true", "True", "1", 1):
+                continue
             kind = str(document.get("Тип") or "").strip()
+            # Выпуск без единой строки — не документ, а след старой сборки.
+            #
+            # 02.08.2026 при подключении общепита агент перенёс смены задним
+            # числом и завёл документ выпуска на каждую, даже там, где блюд не
+            # продавали: 101 пустышка одним махом плюс четыре до 06.08. Сам
+            # агент это уже не делает (`BuildProduction` возвращает false, когда
+            # блюд нет), но доставленные пакеты не пересобираются, и в журнале
+            # выпуска у товароведа 105 нулевых строк против 51 содержательной.
+            # Денег они не двоят: день такой документ не закрывает, и запись 1С
+            # за него берётся отдельным правилом ниже.
+            # Строки выпуска в пакете станции называются «ВыпускБлюд», а не
+            # «Товары»: «Товары» — имя табличной части в 1С, и проверка по нему
+            # отсекла разом ВСЕ станционные выпуски, а не одни пустые.
+            if kind == "production_release" and not (document.get("ВыпускБлюд") or []):
+                continue
             # чеки и смены приходят своим источником (архив кассы) и остаются
             # неучётным evidence: из пакета их сюда не пускаем вовсе
             if kind not in PROJECTION_DOCUMENT_KINDS or kind in {
@@ -873,6 +997,12 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
                 header={
                     "warehouse": document.get("Склад") or document.get("СкладОтправитель"),
                     "warehouse_to": document.get("СкладПолучатель"),
+                    # Перемещение: читаемое направление, чтобы в реестре было
+                    # видно, зал↔склад это или между станциями сети.
+                    "direction": document.get("Направление"),
+                    "sender": document.get("Отправитель"),
+                    "receiver": document.get("Получатель"),
+                    "receiver_station": document.get("КодАЗСПолучателя"),
                     "incoming_number": document.get("НомерВходящегоДокумента"),
                     "packet_uuid": packet.packet_uuid,
                     "document_index": index,
@@ -895,7 +1025,21 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
             previous = freshest.get(identity)
             if previous is None or (received_at, str(packet.packet_uuid)) > previous[:2]:
                 freshest[identity] = (received_at, str(packet.packet_uuid), candidate)
-    return [item[2] for item in freshest.values()]
+
+    # Исторический хвост июня: пока агент не слал внутренний номер смены, ключом
+    # документа продаж служил uuid пакета — свой у каждой доставки. Досланная
+    # позже та же смена пришла уже с номером и легла вторым документом: выручка
+    # 11.06, 15.06 и 18.06 считалась дважды (25 315 ₽). Смену без внутреннего
+    # номера гасим, если та же (станция · вид · номер · сумма) уже есть с ним.
+    со_сменой = {
+        (c.station_id, c.document_kind, c.number, c.amount)
+        for (_, _, tail), (_, _, c) in freshest.items() if tail.startswith("смена:")
+    }
+    return [
+        c for (_, _, tail), (_, _, c) in freshest.items()
+        if not (tail.startswith("пакет:")
+                and (c.station_id, c.document_kind, c.number, c.amount) in со_сменой)
+    ]
 
 
 async def _cheque_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[ProjectionCandidate]:
@@ -1100,6 +1244,19 @@ def _onec_scope(company: object) -> tuple[datetime | None, frozenset[int]]:
     return начало, frozenset(станции)
 
 
+def _станция_склада(row: object) -> int | None:
+    """Станция документа ЦБ по складу: код, а если он не разобрался — имя.
+
+    ⚠ Складское место станции кодируется «20800002» (код станции + суффикс) —
+    восемь цифр подряд, и `_station` по нему не находит ничего: шаблон берёт
+    группы 1–6 цифр, не окружённые цифрами. Документ оставался без станции и
+    отсеивался областью видимости. Имя склада — «АЗС №208, Склад» — называет
+    станцию прямо, поэтому служит запасным ключом.
+    """
+    return (_station(getattr(row, "warehouse_code", None))
+            or _station(getattr(row, "warehouse_name", None)))
+
+
 def _onec_in_scope(
     station_id: int | None, document_at: datetime | None,
     начало: datetime | None, станции: frozenset[int],
@@ -1145,7 +1302,7 @@ async def _onec_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
         # документом, когда она есть; без неё документ показывается сам по себе,
         # а не прячется из реестра.
         link = confirmed("onec_legacy", "inventory", source_document_id)
-        station_id = _station(row.warehouse_code or row.warehouse_name)
+        station_id = _станция_склада(row)
         if not _onec_in_scope(station_id, _datetime(row.doc_date), начало, станции):
             continue
         candidate = ProjectionCandidate(
@@ -1155,7 +1312,7 @@ async def _onec_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
             document_id=(link.canonical_document_id if link else source_document_id),
             document_kind="inventory", priority=200,
             document_role="accounting_derived",
-            station_id=_station(row.warehouse_code or row.warehouse_name),
+            station_id=_станция_склада(row),
             number=row.number, document_at=_datetime(row.doc_date),
             amount=_decimal(row.net_amount), operational_status="posted" if row.posted else "unposted",
             sync_status="onec_snapshot", accounting_status="accepted" if row.posted else "pending",
@@ -1174,7 +1331,7 @@ async def _onec_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
         source_document_id = _uuid(row.external_ref) or _derived_uuid(
             company_id, "cb_movement", row.external_ref)
         link = confirmed("onec_legacy", row.kind, source_document_id)
-        station_id = _station(row.warehouse_code or row.warehouse_name)
+        station_id = _станция_склада(row)
         if not _onec_in_scope(station_id, _datetime(row.doc_date), начало, станции):
             continue
         candidate = ProjectionCandidate(
@@ -1184,7 +1341,7 @@ async def _onec_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
             document_id=(link.canonical_document_id if link else source_document_id),
             document_kind=row.kind, priority=200,
             document_role="accounting_derived",
-            station_id=_station(row.warehouse_code or row.warehouse_name),
+            station_id=_станция_склада(row),
             number=row.number, document_at=_datetime(row.doc_date), amount=_decimal(row.total_amount),
             operational_status="posted" if row.posted else "unposted",
             sync_status="onec_snapshot", accounting_status="accepted" if row.posted else "pending",
@@ -1320,8 +1477,109 @@ async def _accounting_outbox_adapter(
     return out
 
 
+# Область учёта документа 1С — по его виду: у записей из ЦБ `category_id`
+# повторяет тип документа («purchase»), а не сопутку с общепитом, и общий
+# `_data_entry_scope` для них всегда возвращает None.
+# Виды, где документ станции сводный за день: её учёт закрывает день целиком.
+_СВОДНЫЕ_ЗА_ДЕНЬ = frozenset({"production_release", "retail_sale_sidegoods"})
+
+_ONEC_ENTRY_SCOPE = {
+    "purchase": "store", "retail_sale_sidegoods": "store", "return_purchase": "store",
+    "return_sale": "store", "transfer": "store", "gain": "store", "writeoff": "store",
+    "inventory": "store", "revaluation": "store",
+    "production_release": "food", "ingredients_writeoff": "food", "recipe": "food",
+}
+
+
+async def _onec_entry_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[ProjectionCandidate]:
+    """Документы 1С, приехавшие каналом ЦБ, — в реестр как есть.
+
+    Записи канала ложатся в `data_entries` и там же оставались: оба адаптера
+    выше требуют заполненного `document_id`, а его никто не проставляет —
+    признак канонического факта ставится только выгрузкой в бухгалтерию.
+    Из-за этого весь период работы 208 в 1С (11.06–19.08.2026) был в реестре
+    представлен лишь тем, что успел прислать агент: восемнадцать приёмок и
+    пятнадцать выпусков продукции за 25.06–09.07 лежали в базе, но ни в одном
+    отчёте не участвовали.
+
+    Ревизия — время записи, а не единица: канал перезаливает документы штатно
+    (правки задним числом, добор периода), и с постоянной ревизией пересборка
+    падала бы «тот же revision с другим hash» после каждой такой перезаливки.
+
+    Ключ документа — сам `ИсточникUUID` из 1С, тот же, что берёт адаптер
+    пакетов станции. Так документ, пришедший обоими путями, остаётся одним:
+    свой ключ здесь дал бы вторую первичную строку и удвоил выручку. Приоритет
+    ниже всех остальных — там, где станция прислала свой пакет, первичным
+    остаётся он, а запись 1С становится вторым свидетельством того же события.
+    """
+    rows = (await db.execute(select(DataEntry).where(
+        DataEntry.company_id == company_id,
+        DataEntry.source == "oneC",
+        DataEntry.layer == "clean",
+        DataEntry.document_id.is_(None),
+    ))).scalars().all()
+    # Ключ документа берём у станции, если тот же документ она уже присылала.
+    #
+    # UUID в двух базах разные: агент читает локальную базу АЗС, канал —
+    # центральную, и один отчёт о продажах имеет там два идентификатора. Общий
+    # у них номер — «2082080107202601» совпадает знак в знак, суммы тоже.
+    # Без склейки по номеру каждый отчёт давал вторую первичную строку, и
+    # выручка периода удваивалась: 4,87 млн вместо 2,86 млн.
+    out: list[ProjectionCandidate] = []
+    for row in rows:
+        meta = row.meta or {}
+        документ = meta.get("Документ")
+        if not isinstance(документ, dict):
+            continue
+        смена = meta.get("Смена") if isinstance(meta.get("Смена"), dict) else {}
+        kind = str(row.doc_type_id or документ.get("Тип") or "")
+        scope = _ONEC_ENTRY_SCOPE.get(kind)
+        if scope is None or kind not in PROJECTION_DOCUMENT_KINDS:
+            continue
+        источник = str(документ.get("ИсточникUUID") or "").strip()
+        if not источник:
+            continue
+        номер = str(документ.get("Номер") or "").strip() or None
+        станция = _station(смена.get("КодАЗС") or документ.get("КодАЗС"))
+        когда = _datetime(документ.get("Дата"))
+        # Свой ключ документа. Склейку со станционным и вытеснение закрытых
+        # дней делает _свести_записи_1с после сбора ВСЕХ кандидатов: здесь
+        # станционных документов этого прогона ещё не видно.
+        document_id = _uuid(источник) or uuid.uuid5(
+            uuid.NAMESPACE_URL, f"onec:{company_id}:{kind}:{источник}")
+        candidate = ProjectionCandidate(
+            company_id=company_id,
+            projection_source="onec_legacy",
+            source_kind="onec_entry",
+            source_record_id=str(row.id),
+            source_document_id=_uuid(источник),
+            document_id=document_id,
+            document_kind=kind,
+            priority=90,
+            document_role="primary_evidence",
+            shift_no=_shift_no(смена.get("НомерСменыВнутр")),
+            station_id=станция,
+            number=номер,
+            document_at=_datetime(документ.get("Дата")) or row.created_at,
+            counterparty_name=_counterparty(документ.get("Контрагент")),
+            amount=_decimal(документ.get("СуммаДокумента")),
+            vat_amount=_decimal(документ.get("СуммаНДС")),
+            operational_status=("posted" if документ.get("Проведен") else "draft"),
+            sync_status="accepted",
+            accounting_status="pending",
+            raw_payload_available=True,
+            revision=max(1, int((row.updated_at or row.created_at).timestamp())),
+            header={"title": row.title, "layer": row.layer,
+                    "accounting_scope": scope, "источник": "ЦБ ЭЛСИ.АЗК"},
+        )
+        candidate.content_hash = _candidate_hash(candidate)
+        out.append(candidate)
+    return out
+
+
 ADAPTER_REGISTRY = (
     ("onec_headers", _onec_adapter),
+    ("onec_entries", _onec_entry_adapter),
     ("edge_documents", _edge_adapter),
     ("canonical_entries", _canonical_adapter),
     ("accounting_outbox", _accounting_outbox_adapter),
@@ -1379,6 +1637,114 @@ def _row_values(candidate: ProjectionCandidate, *, primary: bool, has_files: boo
     }
 
 
+# Московское время: даты документов станции и 1С обязаны сравниваться по одному
+# календарю, иначе смена, закрытая после 21:00, попадает в разные дни.
+_МСК = timezone(timedelta(hours=3))
+
+
+def _день(момент: datetime | None) -> date | None:
+    """Календарный день документа по московскому времени."""
+    if момент is None:
+        return None
+    if момент.tzinfo is not None:
+        момент = момент.astimezone(_МСК)
+    return момент.date()
+
+
+def _свести_записи_1с(
+    candidates: list[ProjectionCandidate],
+) -> list[ProjectionCandidate]:
+    """Свести документы канала ЦБ с документами станции.
+
+    Делается ПОСЛЕ сбора всех кандидатов, и это принципиально. Раньше то же
+    решение принимал сам `_onec_entry_adapter`, читая станционные документы
+    запросом к `store_document_projections` — то есть к УЖЕ СУЩЕСТВУЮЩЕМУ
+    реестру. Адаптеры идут последовательно, `onec_entries` вторым, а
+    `edge_documents` третьим: на момент решения станционных кандидатов этого
+    прогона в базе ещё нет. Стоило пересборке что-нибудь удалить (или запустить
+    её на чистой базе) — правило «день закрыт станцией» молчало, и записи 1С
+    вставали вторыми документами: 02.09.2026 так удвоился выпуск 208 за
+    12 дней 07–18.08, +30 628,73 ₽. Лечилось повторной пересборкой, то есть
+    результат зависел от того, сколько раз её запустили. Теперь решение
+    принимается по фактическим кандидатам прогона и одинаково с первого раза.
+
+    Две операции:
+    1. **Вытеснение.** Сводный за день документ станции запись 1С не пополняет.
+       Выпуск продукции агент с 07.08.2026 ведёт по своим техкартам (номер и
+       сумма свои), продажи собирает по сменам — иначе запись 1С встаёт рядом
+       вторым документом и удваивает день. Приёмок, перемещений, списаний и
+       оприходований в одном дне бывает несколько разных: там правило отбросило
+       бы настоящие документы, и на них оно не распространяется.
+    2. **Склейка.** UUID в двух базах разные: агент читает локальную базу АЗС,
+       канал — центральную, и один отчёт о продажах имеет там два
+       идентификатора. Общий у них номер, а если номер не сошёлся — день и
+       сумма. Без склейки каждый отчёт давал вторую первичную строку, и выручка
+       периода удваивалась: 4,87 млн вместо 2,86 млн.
+    """
+    свои = [c for c in candidates if c.projection_source != "onec_legacy"]
+    # Номера, под которыми документ известен в 1С. Нужны, чтобы отличить
+    # СОБСТВЕННЫЙ документ станции от ретранслированного: пока выпуск вёл 1С,
+    # агент возил её документы под её же номерами, и такой документ днём
+    # станции не является. 18.06.2026 в 1С два выпуска — 598,18 и 3 424,80;
+    # станция принесла только первый, под номером 1С «208000174», и правило
+    # «день закрыт» вытеснило второй, потеряв 3 424,80 ₽.
+    номера_1с = {
+        (c.station_id, c.document_kind, c.number)
+        for c in candidates
+        if c.projection_source == "onec_legacy" and c.number
+    }
+    по_номеру: dict[tuple, uuid.UUID] = {}
+    по_сумме: dict[tuple, uuid.UUID] = {}
+    закрыто_станцией: dict[tuple, int] = {}
+    for c in свои:
+        if c.number:
+            по_номеру.setdefault((c.station_id, c.document_kind, c.number), c.document_id)
+        день = _день(c.document_at)
+        if день is None:
+            continue
+        # Закрытым день делает только НЕПУСТОЙ документ. В дни выпавших окон
+        # (25.06–06.07 и 03–06.08.2026) у станции документ выпуска есть, а сумма
+        # в нём нулевая — смена до центра не доехала. Такой документ ничего не
+        # свидетельствует, и запись 1С за тот день нужна: без этой оговорки из
+        # выпуска пропадало 35 468 ₽ за 16 дней.
+        # Ретранслированный документ 1С день не закрывает: он говорит лишь о
+        # том, что станция довезла чужую запись, а не что вела учёт сама.
+        if c.amount and (c.station_id, c.document_kind, c.number) not in номера_1с:
+            ключ = (c.station_id, c.document_kind, день)
+            закрыто_станцией[ключ] = закрыто_станцией.get(ключ, 0) + 1
+        по_сумме.setdefault(
+            (c.station_id, c.document_kind, день,
+             Decimal(c.amount or 0).quantize(Decimal("0.01"))), c.document_id)
+
+    out: list[ProjectionCandidate] = []
+    for c in candidates:
+        if c.projection_source != "onec_legacy":
+            out.append(c)
+            continue
+        день = _день(c.document_at)
+        свой_номер = (c.station_id, c.document_kind, c.number)
+        if c.document_kind in _СВОДНЫЕ_ЗА_ДЕНЬ and день is not None:
+            # Хватает одного непустого документа станции: выпуск за смену она
+            # считает целиком, и дробление на два документа в 1С (18.08.2026)
+            # не значит, что часть смены осталась неучтённой. Сравнение по
+            # числу документов на этом дне давало +2 938 ₽ задвоения.
+            if (закрыто_станцией.get((c.station_id, c.document_kind, день), 0) > 0
+                    and свой_номер not in по_номеру):
+                continue
+        document_id = по_номеру.get(свой_номер)
+        if document_id is None and день is not None:
+            document_id = по_сумме.get(
+                (c.station_id, c.document_kind, день,
+                 Decimal(c.amount or 0).quantize(Decimal("0.01"))))
+        if document_id is not None and document_id != c.document_id:
+            c.document_id = document_id
+            # Ключ документа входит в отпечаток: без пересчёта пересборка
+            # упрётся в «тот же revision с другим hash».
+            c.content_hash = _candidate_hash(c)
+        out.append(c)
+    return out
+
+
 async def rebuild_store_document_projection(
     db: AsyncSession, company_id: uuid.UUID,
 ) -> dict:
@@ -1394,6 +1760,13 @@ async def rebuild_store_document_projection(
                 raise ValueError(f"Adapter {name} попытался скопировать payload/строки в проекцию")
         adapter_counts[name] = len(rows)
         candidates.extend(rows)
+
+    # Записи канала ЦБ сводятся со станционными только здесь: раньше это решал
+    # сам адаптер, читая прошлое состояние реестра, и результат зависел от того,
+    # что осталось от предыдущей пересборки.
+    candidates = _свести_записи_1с(candidates)
+    adapter_counts["onec_entries"] = sum(
+        1 for c in candidates if c.projection_source == "onec_legacy")
 
     source_links = (await db.execute(select(AccountingSourceLink).where(
         AccountingSourceLink.company_id == company_id))).scalars().all()

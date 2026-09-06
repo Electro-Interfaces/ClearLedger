@@ -10,6 +10,8 @@
  * только полем привязки, разошёлся бы с первым на ближайшей правке — а вопрос
  * «что по нему обсуждали» у станции и у проекта один и тот же.
  */
+import { useState } from 'react'
+import { openContextChat, resolveWorkContext } from '@/services/workContextService'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2, MessageCircle, Plus, Users } from 'lucide-react'
@@ -23,12 +25,13 @@ const fmt = (iso?: string | null) => iso
   ? new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
   : null
 
-export function ChatsTab({ location, subject, plain }: {
+export function ChatsTab({ location, subject, plain, companyId }: {
   /** Карточка объекта сети: привязка идёт по `scope_object_id`. */
   location?: ServiceLocation
   /** Любой другой предмет пространства: проект, договор. `product` — приложение,
    *  в контексте которого живёт разговор (чтобы он был в его правой рельсе). */
   subject?: { ref: string; title: string; product?: string | null }
+  companyId?: string
   plain?: boolean
 }) {
   const { openInteraction } = useSupportContext()
@@ -39,9 +42,21 @@ export function ChatsTab({ location, subject, plain }: {
     queryFn: () => chat.getRooms(false, null, objectId, scopeRef),
     enabled: !!(scopeRef || objectId),
   })
+  const [opening, setOpening] = useState(false)
   const rooms = q.data ?? []
-  const what = subject ? 'этому проекту' : 'этому объекту'
+  const what = 'этому предмету работы'
 
+  const openMain = async () => {
+    if (!companyId || !scopeRef) return
+    setOpening(true)
+    try {
+      const context = await resolveWorkContext(companyId, scopeRef)
+      const room = await openContextChat(companyId, scopeRef, { purpose: 'main', audience: 'internal', participant_ids: context.suggested_people?.map((p) => p.id) })
+      openInteraction('chat', `room:${room.room_id}`); void q.refetch()
+    }
+    catch (e) { toast.error((e as Error).message) }
+    finally { setOpening(false) }
+  }
   const createGroup = () => {
     const title = subject?.title || location?.name || 'Группа'
     chat.createRoom('group', [], title, subject?.product ?? null, objectId, scopeRef)
@@ -55,12 +70,13 @@ export function ChatsTab({ location, subject, plain }: {
 
   return (
     <ScrollTab plain={plain}>
+      {companyId && scopeRef && <Button className="mb-3" size="sm" disabled={opening} onClick={() => void openMain()}>Основная группа</Button>}
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
           Обсуждения, привязанные к {what}: решения по нему остаются при нём.
         </p>
         <Button size="sm" variant="outline" className="h-8 shrink-0 gap-1.5" onClick={createGroup}>
-          <Plus className="size-4" /> {subject ? 'Группа проекта' : 'Группа объекта'}
+          <Plus className="size-4" /> {subject ? 'Дополнительная группа' : 'Группа объекта'}
         </Button>
       </div>
 
@@ -69,7 +85,8 @@ export function ChatsTab({ location, subject, plain }: {
           <Loader2 className="size-4 animate-spin" /> Загрузка…
         </div>
       )}
-      {!q.isLoading && rooms.length === 0 && (
+      {q.isError && <div role="alert" className="mb-3 text-sm"><p>Не удалось загрузить обсуждения.</p><Button variant="outline" onClick={() => void q.refetch()}>Повторить</Button></div>}
+      {!q.isLoading && !q.isError && rooms.length === 0 && (
         <Placeholder icon={MessageCircle}
           title="Обсуждений пока нет"
           text={subject

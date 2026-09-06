@@ -107,6 +107,9 @@ _BY_CODE = {c.code: c for c in CATEGORIES}
 ACTION_LABELS: dict[str, str] = {
     "project.stage": "проект сменил стадию",
     "project.gate": "движение по чек-листу проекта",
+    "project.decision": "зафиксировано решение по проекту",
+    "project.scenario": "принят результат этапа проекта",
+    "project.result": "получен результат из Трека",
 }
 
 

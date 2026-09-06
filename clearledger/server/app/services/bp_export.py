@@ -136,12 +136,54 @@ def package_filename(pkt: dict) -> str:
     return f"АЗС{код}_{дата}_смена-{ном}_{pkt.get('ИдентификаторПакета')}.json"
 
 
+#: Длина EAN-8 — самого короткого настоящего штрихкода. Ниже неё ведущий ноль
+#: значим: это внутренние номера общепита, а не обёртка сканера.
+_МИНИМАЛЬНЫЙ_ШТРИХКОД = 8
+
+
+def _код_для_сравнения(сырой: object) -> str:
+    """Вид кода, по которому его можно узнать, как бы сканер его ни завернул.
+
+    Повторяет `store.КодДляСравнения` агента — они обязаны совпадать, иначе
+    станция и центр опознают разные множества кодов. Сканер добавляет к коду
+    служебный символ (`#4607017098509`), дополняет короткий код нулями до
+    тринадцати знаков, печатает GTIN с ведущим нулём; в каталоге при этом лежит
+    короткая запись с пачки. Берём одни цифры и снимаем ведущие нули.
+    """
+    цифры = "".join(c for c in str(сырой or "") if c.isdigit())
+    if not цифры:
+        return str(сырой or "").strip()
+    обрезанный = цифры.lstrip("0")
+    if not обрезанный or len(обрезанный) < _МИНИМАЛЬНЫЙ_ШТРИХКОД:
+        return цифры
+    return обрезанный
+
+
+def _штрихкод_строки(строка: dict) -> str:
+    """Код из строки документа — под каким бы именем он ни лежал."""
+    for ключ in ("ШтрихКод", "Штрихкод", "штрихкод", "Barcode", "barcode"):
+        значение = строка.get(ключ)
+        if значение:
+            return str(значение)
+    return ""
+
+
 class BpPackageEmitter:
     def __init__(self, session: AsyncSession, company_id):
         self.session = session
         self.company_id = company_id
         self._shift_targets: dict[str, DataEntry] = {}
         self._shift_candidates_cache: dict[str, list[DataEntry]] = {}
+        # Записи станции: одна выборка на весь экземпляр эмиттера.
+        #
+        # Пакет собирается по одной смене, а выборка идёт по всей компании —
+        # 2 739 записей на каждый вызов. Пока пакет строили поштучно из
+        # интерфейса, это было незаметно; канал в бухгалтерию просит их подряд,
+        # и на 117 смен выходило 117 полных чтений таблицы, по секунде каждое.
+        self._edge_entries: list[DataEntry] | None = None
+        self._шк_станционных: dict[str, str] | None = None
+        self._код_карточки: dict[str, str] | None = None
+        self._sale_entries: list[DataEntry] | None = None
         self._accounting_context: dict[str, dict] = {}
         # Сводка правок последнего собранного пакета: экран показывает её рядом
         # с документом, в сам пакет она не попадает — верхний уровень контракта
@@ -162,15 +204,23 @@ class BpPackageEmitter:
         rows = (await self.session.execute(text("""
             SELECT i.external_uuid, i.code_1c, i.name, i.name_full, i.unit,
                    i.vat_rate, i.kind, i.sku_class, i.is_dish, i.deleted,
+                   i.sku, i.article,
                    coalesce(array_agg(b.code ORDER BY b.code)
                             FILTER (WHERE b.status = 'active'), '{}') AS barcodes
             FROM edge.item i
             LEFT JOIN edge.barcode b ON b.item_id = i.id
             GROUP BY i.id
         """))).mappings().all()
+        # Артикул в пакет — наш сквозной `sku`.
+        #
+        # До 30.08.2026 здесь стоял жёсткий `article=None`, и в бухгалтерию
+        # уезжала пустая строка: приёмник подставлял вместо неё КодЦБ, а у
+        # станционных карточек его нет вовсе — и связь уходила на сравнение
+        # имён. Артикул поставщика (`i.article`) сюда не годится: он чужой,
+        # у одного товара их столько, сколько поставщиков.
         return {str(row["external_uuid"]): SimpleNamespace(
             external_ref=str(row["external_uuid"]), code=row["code_1c"],
-            name=row["name"], full_name=row["name_full"], article=None,
+            name=row["name"], full_name=row["name_full"], article=row["sku"],
             vat=row["vat_rate"], unit=row["unit"], kind=row["kind"],
             sku_class=row["sku_class"], is_dish=row["is_dish"],
             deleted=row["deleted"], barcodes=list(row["barcodes"] or []),
@@ -413,10 +463,7 @@ class BpPackageEmitter:
         if retail["Склад"]:
             nsi_wh.add(retail["Склад"])
 
-        entries = (await self.session.execute(select(DataEntry).where(
-            DataEntry.company_id == self.company_id,
-            DataEntry.source == "edge",
-        ))).scalars().all()
+        entries = await self._edge_rows()
 
         def in_shift(entry: DataEntry) -> bool:
             entry_shift = (entry.meta or {}).get("Смена") or {}
@@ -434,11 +481,21 @@ class BpPackageEmitter:
             moment = _timestamp(doc.get("Дата") or entry_shift.get("Открытие"))
             if moment is None or shift_open is None:
                 return bool(shift_day) and _day(entry_shift) == shift_day
+            # Время не заполнено — привязываем по дню.
+            #
+            # У части оприходований станция ставит дату без времени, и полночь
+            # оказывается РАНЬШЕ открытия смены: документ не попадал ни в один
+            # интервал и не уезжал в бухгалтерию вовсе (03.09.2026 так висели
+            # четыре оприходования за 19–25.08). Полночь как время документа —
+            # это «дата известна, час нет», а не «случилось в 00:00».
+            if str(doc.get("Дата") or "").find("T00:00:00") > 0:
+                return bool(shift_day) and _day(entry_shift) == shift_day
             if shift_close is None or shift_close <= shift_open:
                 return moment == shift_open
-            # Полуинтервал не относит документ ровно на границе сразу к двум
-            # соседним сменам. Выпуск связывается выше по номеру смены.
-            return shift_open <= moment < shift_close
+            # Момент ровно на закрытии принадлежит ЭТОЙ смене: закрытие её и
+            # породило (выпуск блюд станция пишет секунда в секунду с закрытием).
+            # Соседней смене такой документ не достанется — её открытие позже.
+            return shift_open <= moment <= shift_close
 
         related = [entry for entry in entries if in_shift(entry) and entry.id != target.id]
 
@@ -446,6 +503,7 @@ class BpPackageEmitter:
         productions: list[dict] = []
         ingredient_writeoffs: list[dict] = []
         return_sales: list[dict] = []
+        возвраты_смены: list[dict] = []
         returns: list[dict] = []
         inventories: list[dict] = []
         gains: list[dict] = []
@@ -501,10 +559,23 @@ class BpPackageEmitter:
             # сети, ни в мастере: агент честно ставит «КарточкаНеОпознана» и
             # оставляет строку без номенклатуры. Грузить документ с дырой в
             # бухгалтерию нельзя — откладываем целиком, пока карточку не заведут.
-            безымянные = [str(строка.get("Наименование") or строка.get("ШтрихКод") or "?")
-                          for тч in ("Товары", "ВыпускБлюд", "ВозвращенныеТовары")
-                          for строка in (doc.get(тч) or [])
-                          if not str(строка.get("Номенклатура") or "").strip()]
+            # Строка без номенклатуры — но со штрихкодом, который каталог знает,
+            # — не повод откладывать документ: карточку подставим по коду, как
+            # и для неизвестного UUID. 03.09.2026 из-за этого не уезжало
+            # списание от 01.08 (код 4607091591112 в каталоге есть).
+            по_коду_кат = self._каталог_по_коду(nom)
+            безымянные = []
+            for тч in ("Товары", "ВыпускБлюд", "ВозвращенныеТовары"):
+                for строка in (doc.get(тч) or []):
+                    if str(строка.get("Номенклатура") or "").strip():
+                        continue
+                    найдено = по_коду_кат.get(
+                        _код_для_сравнения(_штрихкод_строки(строка)))
+                    if найдено:
+                        строка["Номенклатура"] = найдено
+                        continue
+                    безымянные.append(
+                        str(строка.get("Наименование") or строка.get("ШтрихКод") or "?"))
             if безымянные:
                 skipped.append({
                     "Тип": kind,
@@ -574,9 +645,20 @@ class BpPackageEmitter:
                     line["КлассSKU"] = "Общепит" if is_food else "Сопутка"
                     if item_uuid and is_food:
                         dishes.add(item_uuid)
-                return_sales.append(doc)
+                # Возврат розничной продажи — не самостоятельный документ для
+                # бухгалтерии, а строки «ВозвращенныеТовары» внутри отчёта той
+                # же смены. Приёмник отдельного kind не знает вовсе («kind
+                # 'return_sale' не покрыт фазой A3»), зато возвраты внутри ОРП
+                # обрабатывает штатно. Станция шлёт их отдельно и в сумму отчёта
+                # не включает — поэтому ниже уменьшаем СуммаДокумента.
+                возвраты_смены.extend(doc.get("Товары") or [])
                 continue
             if kind == "purchase":
+                # Вид операции приёмник сверяет с пулом и знает единственный —
+                # «ОтПоставщика»; пустое значение он отвергает, и приёмка не
+                # заводится (24 таких за прогон 03.09.2026). В ветке центральной
+                # базы он проставлялся всегда, в станционной его забыли.
+                doc["ВидОперации"] = str(doc.get("ВидОперации") or "") or "ОтПоставщика"
                 supplier_snapshot = str(doc.get("Контрагент") or "")
                 supplier_id = str(doc.get("supplier_id") or "").strip()
                 doc["Контрагент"] = partner_uuid(supplier_id or supplier_snapshot, supplier_snapshot)
@@ -760,10 +842,21 @@ class BpPackageEmitter:
         }
         missing_release = sorted(dishes - released_dishes)
         if missing_release:
-            raise ValueError(
-                "Пакет БП не собран: для проданных блюд нет выпуска этой смены: "
-                + ", ".join(missing_release[:5])
-            )
+            # Не роняем пакет: в модели учёта B (умолчание у ГИГ) приёмник
+            # выпуск ПРОПУСКАЕТ штатно — «себестоимость спишется при продаже
+            # через ТТК», и требовать документ, который бухгалтерия всё равно
+            # выбросит, незачем. 04.09.2026 из-за одной чашки кофе на 190 ₽
+            # стояла смена 7092 со всеми её приёмками на 209 тыс.
+            #
+            # Обязательна здесь только ТТК (проверка выше): без неё приёмник
+            # блюдо не раскроет. Отсутствие выпуска сообщаем как «не разложено» —
+            # видно в пакете и на экране, но загрузку не держит.
+            skipped.append({
+                "Тип": "production_release",
+                "Номер": shift["НомерСмены"],
+                "Причина": "проданы блюда без выпуска смены: "
+                           + ", ".join(missing_release[:5]),
+            })
 
         documents = [
             *recipes, *purchases, *productions, *ingredient_writeoffs,
@@ -811,6 +904,46 @@ class BpPackageEmitter:
                 "ВалютаВзаиморасчётов": clean(row["currency"]) or "RUB",
                 "ПометкаУдаления": bool(row["deleted"]),
             })
+        # Возвраты отдельных документов — в отчёт той же смены.
+        if возвраты_смены:
+            for line in возвраты_смены:
+                строка = item_line(line, len(returned) + 1)
+                строка["КлассSKU"] = line.get("КлассSKU") or "Сопутка"
+                returned.append(строка)
+            retail["ВозвращенныеТовары"] = returned
+            продано = sum(float(x.get("Сумма") or 0) for x in retail["Товары"])
+            возвращено = sum(float(x.get("Сумма") or 0) for x in returned)
+            retail["СуммаДокумента"] = round(продано - возвращено, 2)
+            retail["СуммаНДС"] = round(
+                sum(float(x.get("СуммаНДС") or 0) for x in retail["Товары"])
+                - sum(float(x.get("СуммаНДС") or 0) for x in returned), 2)
+
+        # Карточку, неизвестную по UUID, ищем в каталоге по штрихкоду: товар
+        # тот же, ключ разный. Делается ПОСЛЕ сборки документов и ДО сборки НСИ —
+        # чтобы наверх уехал каталожный ключ, а не станционный.
+        for старый, новый in (await self._опознать_по_штрихкоду(documents, nom)).items():
+            nsi_nom.discard(старый)
+            nsi_nom.add(новый)
+            if старый in dishes:
+                dishes.discard(старый)
+                dishes.add(новый)
+
+        # Позиция, которой нет в каталоге даже по штрихкоду, уезжала в НСИ
+        # пустой карточкой: имя пустое, код пустой. Приёмник такую не создаёт и
+        # пишет «Номенклатура не создана: (КодЦБ=)» — а документ всё равно
+        # заводит, только без строки. Пакет с дырой в бухгалтерию не отдаём:
+        # пусть смена подождёт, пока товаровед заведёт карточку.
+        неопознанные = sorted(uid for uid in nsi_nom if not (
+            nom.get(uid) and str(nom[uid].name or "").strip()))
+        if неопознанные:
+            черновиков = sum(1 for uid in неопознанные if uid.startswith("draft-"))
+            raise ValueError(
+                "Пакет БП не собран: нет карточек в каталоге — "
+                + f"{len(неопознанные)} поз."
+                + (f" (из них черновиков станции {черновиков})" if черновиков else "")
+                + ": " + ", ".join(неопознанные[:5])
+                + ("…" if len(неопознанные) > 5 else ""))
+
         for uid in sorted(nsi_nom):
             card = nom.get(uid)
             sku_class = clean(card.sku_class if card else "") or ("Общепит" if card and card.is_dish else "Сопутка")
@@ -853,15 +986,31 @@ class BpPackageEmitter:
             or f"{_day(shift)}|{shift.get('КодАЗС') or '—'}"
         )
 
+    async def _edge_rows(self) -> list[DataEntry]:
+        """Все записи станции компании. Читаются один раз на экземпляр."""
+        if self._edge_entries is None:
+            self._edge_entries = (await self.session.execute(select(DataEntry).where(
+                DataEntry.company_id == self.company_id,
+                DataEntry.source == "edge",
+            ))).scalars().all()
+        return self._edge_entries
+
+    async def _sale_rows(self) -> list[DataEntry]:
+        """Отчёты о продажах компании — оба источника. Тоже один раз."""
+        if self._sale_entries is None:
+            self._sale_entries = (await self.session.execute(select(DataEntry).where(
+                DataEntry.company_id == self.company_id,
+                DataEntry.source.in_(("edge", "oneC")),
+                DataEntry.doc_type_id == "retail_sale_sidegoods",
+            ))).scalars().all()
+        return self._sale_entries
+
     async def _shift_candidates(self, shift_key: str) -> list[DataEntry]:
         if shift_key in self._shift_candidates_cache:
             return self._shift_candidates_cache[shift_key]
         if shift_key in self._shift_targets:
             return [self._shift_targets[shift_key]]
-        rows = (await self.session.execute(select(DataEntry).where(
-            DataEntry.company_id == self.company_id, DataEntry.source.in_(("edge", "oneC")),
-            DataEntry.doc_type_id == "retail_sale_sidegoods",
-        ))).scalars().all()
+        rows = await self._sale_rows()
         candidates = [row for row in rows if self._candidate_shift_key(row) == shift_key]
         # При нескольких выгрузках одной смены (переоткрытие/перевыгрузка) берём
         # ФИНАЛЬНУЮ ревизию — с максимальным временем закрытия, а не первую по id.
@@ -1105,6 +1254,89 @@ class BpPackageEmitter:
         if not raw.isdigit():
             raise ValueError("у смены не указан числовой КодАЗС")
         return int(raw)
+
+    def _каталог_по_коду(self, nom: dict) -> dict[str, str]:
+        """Индекс «узнаваемый код → карточка каталога». Строится один раз."""
+        if self._код_карточки is None:
+            индекс: dict[str, str] = {}
+            for uid, card in nom.items():
+                for код in (card.barcodes or []):
+                    ключ = _код_для_сравнения(код)
+                    # Первый выигрывает: один код на две карточки — дубль
+                    # каталога, и гадать, какая «та самая», мы не вправе.
+                    if ключ and ключ not in индекс:
+                        индекс[ключ] = uid
+            self._код_карточки = индекс
+        return self._код_карточки
+
+    async def _штрихкоды_станционных(self) -> dict[str, str]:
+        """Штрихкод станционной карточки по её UUID — из того, что знает центр.
+
+        Строка документа несёт код не всегда: в смене 7095 у PEPSI его нет, и
+        по одной этой смене карточку не опознать, хотя в соседней код есть.
+        Центр же помнит код из двух своих журналов — изменений цены станции и
+        черновиков приёмки. Индекс строится один раз на пакет.
+        """
+        if self._шк_станционных is not None:
+            return self._шк_станционных
+        # Оба журнала читаем как текст и разбираем здесь: колонка кодов у
+        # черновиков — массив, и SQL-функция под конкретный тип роняет запрос
+        # целиком. Упавший запрос в asyncpg рвёт транзакцию, и следом перестают
+        # собираться ВСЕ пакеты — 03.09.2026 так на пару минут встал весь канал.
+        индекс: dict[str, str] = {}
+        rows = (await self.session.execute(text("""
+            SELECT item_uuid::text AS uuid, barcode::text AS коды
+            FROM edge.station_price_change WHERE barcode IS NOT NULL
+            UNION ALL
+            SELECT source_uuid::text, barcodes::text
+            FROM edge.item_draft WHERE barcodes IS NOT NULL
+        """))).mappings().all()
+        for row in rows:
+            uid = str(row["uuid"] or "")
+            if not uid:
+                continue
+            коды = _re.findall(r"\d{6,}", str(row["коды"] or ""))
+            if коды:
+                индекс.setdefault(uid, коды[0])
+        self._шк_станционных = индекс
+        return индекс
+
+    async def _опознать_по_штрихкоду(self, documents: list, nom: dict) -> dict[str, str]:
+        """Подменить неизвестные карточки на каталожные, найдя их по штрихкоду.
+
+        Станция ведёт свои карточки, и один и тот же товар живёт у неё под своим
+        UUID: 03.09.2026 так не доехали восемь напитков (Coca-Cola, Pepsi,
+        «Любимый Аромат»), заведённые со штрихкодом-с-решёткой до того, как агент
+        начал её срезать. Каталог их знает — под своим ключом и с чистым кодом.
+        Без подмены в НСИ уезжает карточка без имени, и бухгалтерия отвечает
+        «Номенклатура не создана: (КодЦБ=)» — на 40 623 ₽ за неделю августа.
+
+        Возвращает {старый UUID: новый UUID} — вызывающий чинит по нему `nsi_nom`.
+        """
+        по_коду = self._каталог_по_коду(nom)
+
+        подмены: dict[str, str] = {}
+        # Код из журналов центра — запасной, когда в самой строке его нет.
+        запасной = await self._штрихкоды_станционных()
+
+        def обойти(узел: object) -> None:
+            if isinstance(узел, dict):
+                uid = str(узел.get("Номенклатура") or "")
+                if uid and uid not in nom:
+                    код_строки = _штрихкод_строки(узел) or запасной.get(uid, "")
+                    новый = подмены.get(uid) or по_коду.get(
+                        _код_для_сравнения(код_строки))
+                    if новый:
+                        подмены[uid] = новый
+                        узел["Номенклатура"] = новый
+                for значение in узел.values():
+                    обойти(значение)
+            elif isinstance(узел, list):
+                for элемент in узел:
+                    обойти(элемент)
+
+        обойти(documents)
+        return подмены
 
     async def build_shift_package(self, shift_key: str) -> dict:
         """Собрать пакет для одной смены (retail_sale + НСИ). shift_key = GUID смены."""

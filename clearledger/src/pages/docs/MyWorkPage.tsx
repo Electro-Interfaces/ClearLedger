@@ -102,10 +102,10 @@ export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
     <div className={cn('space-y-4', heading && 'p-4')}>
       {heading && (
         <div>
-          <h1 className="text-lg font-semibold">На мне</h1>
+          <h1 className="text-lg font-semibold">Моя очередь</h1>
           <p className="mt-0.5 max-w-2xl text-xs text-muted-foreground">
             Всё, что ждёт лично меня: визы, поручения, ознакомления и свои документы.
-            Сгруппировано по сроку, а не по тому, какой движок за предметом стоит.
+            Сначала просроченное, затем — по сроку исполнения.
           </p>
         </div>
       )}
@@ -173,10 +173,10 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
       {/* Ручка — единственное, за что строку уносят: остальное остаётся текстом
           и кнопками, которые нажимают. */}
       <DragHandle targetRef={workService.targetRef(item)}
-        label={`${item.key} ${item.title}`} />
-      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-      <button type="button" onClick={onOpen} className="flex-1 text-left">
-        <div className="text-sm leading-snug">{item.title}</div>
+        label={`${item.key} ${item.title}`} className="hidden sm:inline-flex" />
+      <Icon className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:block" aria-hidden />
+      <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
+        <div className="break-words text-sm leading-snug">{item.title}</div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           <span className="font-mono">{item.key}</span>
           {/* На узком экране срок идёт сюда, в мету: в одной строке с названием
@@ -220,13 +220,14 @@ function Line({ item, busy, companyId, onChanged, onOpen, onDone }: {
       <PlaceActions companyId={companyId} dueAt={item.due_at} targetRef={workService.targetRef(item)}
         mark={item.mark} onChanged={onChanged} />
       {canFinish ? (
-        <Button size="sm" variant="ghost" className="h-7 px-2" disabled={busy}
+        <Button size="sm" variant="ghost" className="size-11 shrink-0 p-0 sm:h-7 sm:w-auto sm:px-2" disabled={busy}
+          aria-label={item.reason === 'do' ? 'Закрыть работу' : 'Отметить ознакомление'}
           title={item.reason === 'do' ? 'Закрыть работу' : 'Отметить ознакомление'}
           onClick={onDone}>
           <Check className="h-3.5 w-3.5" />
         </Button>
       ) : (
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
+        <Button size="sm" variant="ghost" className="min-h-11 shrink-0 px-2 text-xs sm:min-h-7"
           onClick={onOpen}>Открыть</Button>
       )}
     </div>

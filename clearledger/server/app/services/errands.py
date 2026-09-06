@@ -157,6 +157,8 @@ async def close(db: AsyncSession, task: Task, status: str) -> ApprovalRequest | 
     Отметка ставится здесь, внутри закрывающей транзакции: доставка пойдёт фоном,
     но потерять исход нельзя — работа уже сделана, второй раз её не сделают.
     """
+    from app.services.work_results import task_result
+    await task_result(db, task, "done" if status == "done" else "cancelled")
     row = (await db.execute(select(ApprovalRequest).where(
         ApprovalRequest.task_id == task.id,
         ApprovalRequest.kind == "errand",

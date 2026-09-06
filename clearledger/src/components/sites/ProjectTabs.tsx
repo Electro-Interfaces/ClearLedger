@@ -17,6 +17,8 @@
  *
  * Правка любого поля помечает его «ручным»: следующий импорт файла его не тронет.
  */
+import { ProjectOverviewTab } from './ProjectOverviewTab'
+import { ProjectDocumentsTrack, PromoteProjectFile } from './ProjectDocumentsTrack'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
@@ -40,7 +42,7 @@ import {
   linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
   getProjectCase, openProjectCase, applyProjectStep, undoProjectStep,
   getSiteParticipants, addSiteParticipant, removeSiteParticipant, registerEquipmentUnit,
-  STAGE_META, FUNNEL_STAGES, CLOSING_STAGES, QUADRANT_META,
+  STAGE_META, FUNNEL_STAGES, CLOSING_STAGES, QUADRANT_META, PROJECT_OBJECT_TYPES, projectObjectLabel,
   type SiteDetail, type SiteStage, type ProjectContext, type CaseAction,
   type SiteEquipment,
 } from '@/services/sitesService'
@@ -59,6 +61,7 @@ const CONTROL_FORMS = ['аренда', 'сервитут', 'разрешение
 
 /** Набор вкладок карточки — один и тот же в диалоге и в полноэкранном режиме. */
 export const PROJECT_TABS = [
+  { k: 'overview', label: 'Обзор' },
   { k: 'roadmap', label: 'Схема' },
   { k: 'work', label: 'Работа' },
   { k: 'passport', label: 'Паспорт' },
@@ -81,6 +84,7 @@ export type ProjectTabKey = (typeof PROJECT_TABS)[number]['k']
 export function ProjectTabContent({ tab, site, companyId, onDone }: {
   tab: ProjectTabKey; site: SiteDetail; companyId: string; onDone: () => Promise<void>
 }) {
+  if (tab === 'overview') return <ProjectOverviewTab site={site} companyId={companyId} />
   if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId} />
   if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'passport') return <PassportTab site={site} companyId={companyId} onDone={onDone} />
@@ -89,7 +93,7 @@ export function ProjectTabContent({ tab, site, companyId, onDone }: {
   if (tab === 'docs') return <DocsTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'track') return <ProjectTrackTab site={site} companyId={companyId} />
   if (tab === 'chats') return (
-    <ChatsTab plain subject={{
+    <ChatsTab plain companyId={companyId} subject={{
       ref: `site:${site.id}`,
       title: `Проект ${site.projectNo ?? site.title ?? ''}`.trim(),
       product: 'projects',
@@ -1104,8 +1108,8 @@ const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: st
       { k: 'region', label: 'Регион' },
       { k: 'city', label: 'Город' },
       { k: 'address', label: 'Адрес' },
+      { k: 'placeKind', label: 'Тип объекта', type: 'select', options: PROJECT_OBJECT_TYPES.map((label) => label.toLocaleLowerCase('ru')) },
       { k: 'installPlace', label: 'Место установки' },
-      { k: 'placeKind', label: 'Тип места', type: 'select', options: ['город', 'трасса'] },
       { k: 'lat', label: 'Широта', type: 'number' },
       { k: 'lon', label: 'Долгота', type: 'number' },
       { k: 'areaM2', label: 'Площадь, м²', type: 'number' },
@@ -1206,6 +1210,9 @@ const emailIn = (text: string): string | null =>
   text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)?.[0] ?? null
 
 export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
+  const specialized = ['warehouse', 'procurement', 'corporate_client'].includes(site.kind ?? '')
+  const groups = specialized ? PASSPORT_GROUPS.filter((g) => ['Объект', 'План и участники'].includes(g.title)).map((g) => ({ ...g,
+    fields: g.fields.filter((f) => ['region', 'city', 'address', 'placeKind', 'installPlace', 'supplier', 'contractor', 'comment'].includes(f.k)) })) : PASSPORT_GROUPS
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [showRaw, setShowRaw] = useState(false)
   useEffect(() => setDraft({}), [site])
@@ -1235,7 +1242,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
       const ref = `site:${site.id}`
       const rooms = await chatApi.getRooms(false, null, null, ref)
       const title = `Проект ${site.projectNo ?? site.title ?? ''}`.trim()
-      const room = rooms[0]
+      const room = rooms.find((r) => r.audience !== 'internal' && !r.scopePurpose)
         ?? await chatApi.createRoom('group', [], title, 'projects',
           site.locationId ?? null, ref)
       await chatApi.addMailParticipant(room.id, email)
@@ -1284,7 +1291,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
         </Button>
       </div>
 
-      {PASSPORT_GROUPS.map((g) => (
+      {groups.map((g) => (
         <section key={g.title} className="rounded-lg border border-border">
           <div className="px-3 py-1.5 text-sm font-semibold border-b bg-muted/40">{g.title}</div>
           <div className="p-3 grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -1332,7 +1339,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
                       <SelectContent>
                         <SelectItem value="__none__" className="text-sm">—</SelectItem>
                         {(f.type === 'bool' ? ['да', 'нет'] : f.options ?? []).map((o) => (
-                          <SelectItem key={o} value={o} className="text-sm">{o}</SelectItem>
+                          <SelectItem key={o} value={o} className="text-sm">{key === 'placeKind' ? projectObjectLabel(o) : o}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -1874,10 +1881,11 @@ export function DocsTab({ site, companyId, onDone }: {
   // Какой документ ждёт гейт именно сейчас — по незакрытым пунктам текущей стадии.
   const docGateHint = (site.gate?.items ?? [])
     .filter((i) => !i.done && !i.waived && i.doc)
-    .map((i) => i.label)
+    .map((i) => `${i.label} — ${i.documentState === 'signed' ? 'подписанный документ' : i.documentState === 'approved' ? 'согласованный документ' : 'файл'}`)
     .join('; ')
   return (
-    <div className="space-y-3">
+    <div className="space-y-5">
+      <h3 className="font-medium">Приложенные файлы</h3>
       <div className="flex flex-wrap items-center gap-2">
         <Select value={kind} onValueChange={setKind}>
           <SelectTrigger className="h-8 w-[220px] text-sm"><SelectValue /></SelectTrigger>
@@ -1894,11 +1902,11 @@ export function DocsTab({ site, companyId, onDone }: {
           Приложить документ
         </Button>
         <span className="text-xs text-muted-foreground ml-auto">
-          Часть пунктов гейта закрывается именно документом: договор, ТУ, акт приёмки.
+          Наличие файла не подтверждает согласование или подписание.
         </span>
       </div>
 
-      {docs.isLoading ? (
+      {docs.isError ? <div role="alert" className="text-sm"><p>Не удалось загрузить файлы проекта.</p><Button onClick={() => void docs.refetch()}>Повторить</Button></div> : docs.isLoading ? (
         <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
       ) : rows.length === 0 ? (
         // Пустая вкладка обязана сказать, чем её наполнить: «Документов пока нет»
@@ -1908,7 +1916,7 @@ export function DocsTab({ site, companyId, onDone }: {
           {docGateHint ? (
             <div className="mt-1 text-sm">
               На стадии «{site.stageLabel}» ждём: {docGateHint}. Выберите тип слева и приложите файл —
-              пункт гейта закроется сам.
+              затем оформите документ и подтвердите требуемое состояние.
             </div>
           ) : (
             <div className="mt-1 text-sm">
@@ -1919,7 +1927,7 @@ export function DocsTab({ site, companyId, onDone }: {
       ) : (
         <div className="rounded-lg border border-border divide-y divide-border/40">
           {rows.map((d) => (
-            <div key={d.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+            <div key={d.id} className="flex flex-wrap items-center gap-2 px-3 py-3 text-sm">
               <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground shrink-0">{d.kindLabel}</span>
               {/* Имя файла — ссылка на сам файл: список документов, который нельзя
                   открыть, бесполезен. */}
@@ -1932,6 +1940,7 @@ export function DocsTab({ site, companyId, onDone }: {
               <span className="text-xs text-muted-foreground whitespace-nowrap">
                 {d.stageLabel ?? ''}{d.uploadedBy ? ` · ${d.uploadedBy}` : ''} {fmtDate(d.createdAt)}
               </span>
+              <PromoteProjectFile file={d} companyId={companyId} siteId={site.id} />
               <button type="button" onClick={() => remove(d.id)}
                 className="text-muted-foreground hover:text-red-500 shrink-0" title="Удалить">
                 <Trash2 className="h-3.5 w-3.5" />
@@ -1940,6 +1949,7 @@ export function DocsTab({ site, companyId, onDone }: {
           ))}
         </div>
       )}
+      <ProjectDocumentsTrack site={site} companyId={companyId} />
     </div>
   )
 }
@@ -2228,6 +2238,7 @@ function ObjectTicketsSection({ site, companyId }: { site: SiteDetail; companyId
 export function AccountingTab({ site, companyId, onDone }: {
   site: SiteDetail; companyId: string; onDone: () => Promise<void>
 }) {
+  const specialized = ['warehouse', 'procurement', 'corporate_client'].includes(site.kind ?? '')
   const ctx = useQuery({
     queryKey: ['site-project', companyId, site.id],
     queryFn: () => getProjectContext(companyId, site.id),
@@ -2254,6 +2265,7 @@ export function AccountingTab({ site, companyId, onDone }: {
     onSuccess: async () => { toast.success('Объект сети привязан'); await onDone(); await ctx.refetch() },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось привязать объект'),
   })
+  if (ctx.isError) return <div role="alert" className="space-y-2 text-sm"><p>Не удалось загрузить связи с учётом: {ctx.error.message}</p><Button onClick={() => void ctx.refetch()}>Повторить</Button></div>
   if (ctx.isLoading || !ctx.data) {
     return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
   }
@@ -2267,7 +2279,7 @@ export function AccountingTab({ site, companyId, onDone }: {
         <div data-zone="Связь с учётом: договор и объект" className="text-sm font-semibold">Записи в учёте</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
           <div>
-            <Label>Договор на землю</Label>
+            <Label>{specialized ? 'Договор проекта' : 'Договор на землю'}</Label>
             {d.contract ? (
               <div>№ {d.contract.number} от {d.contract.date}
                 {d.contract.basis && <span className="text-muted-foreground"> · {d.contract.basis}</span>}
@@ -2294,7 +2306,7 @@ export function AccountingTab({ site, companyId, onDone }: {
               <div>{d.location.name} <span className="text-muted-foreground">({d.location.code})</span></div>
             ) : (
               <div>
-                <div className="text-muted-foreground">не связан — проект ещё не стал станцией</div>
+                <div className="text-muted-foreground">{specialized ? 'Не связан. Укажите объект, если работа относится к существующему объекту сети.' : 'не связан — проект ещё не стал станцией'}</div>
                 {/* Пункт регламента 8.8 закрывается именно этой связью: пока кнопки
                     не было, обязательный пункт стадии «В эксплуатации» закрыть было нечем. */}
                 <LinkPicker label="Привязать объект сети" pending={mLinkLocation.isPending}
@@ -2312,12 +2324,12 @@ export function AccountingTab({ site, companyId, onDone }: {
         </p>
       </section>
 
-      <ObjectWorksSection site={site} companyId={companyId} onDone={onDone} />
+      {!specialized && <ObjectWorksSection site={site} companyId={companyId} onDone={onDone} />}
 
-      <ObjectTicketsSection site={site} companyId={companyId} />
+      {!specialized && <ObjectTicketsSection site={site} companyId={companyId} />}
 
       {/* субсидия */}
-      <section className="rounded-lg border border-border">
+      {!specialized && <section className="rounded-lg border border-border">
         <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
           <span>Субсидия — соответствие требованиям</span>
           <span className={`font-mono ${sub.eligible ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
@@ -2343,6 +2355,7 @@ export function AccountingTab({ site, companyId, onDone }: {
         </div>
       </section>
 
+      }
       {/* бюджет */}
       <section className="rounded-lg border border-border">
         <div className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">

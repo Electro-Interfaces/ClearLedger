@@ -49,9 +49,12 @@ function localDate(value: string | null | undefined): string {
 }
 
 function sourceLabel(version: StoreRecipeVersion): string {
-  if (version.source === 'station') return `АЗС ${version.source_station_id ?? '—'}`
+  // Ярус важнее происхождения: карта яруса станции действует только на ней,
+  // сетевая — там, где своей нет. У двух кухонь может быть свой латте.
+  if (version.station_id != null) return `ярус АЗС ${version.station_id}`
+  if (version.source === 'station') return `АЗС ${version.source_station_id ?? '—'} → сеть`
   if (version.source === 'import') return 'исходный импорт'
-  return 'центр'
+  return 'сетевая норма'
 }
 
 function SummaryCard({ icon: Icon, label, value, hint, alarm }: {
@@ -287,6 +290,15 @@ function RecipeEditor({ entry, createNew, canWrite, onChanged }: {
   )
 }
 
+function техкарт(n: number) {
+  const с = Math.abs(n) % 100
+  const е = с % 10
+  if (с > 10 && с < 20) return 'техкарт'
+  if (е > 1 && е < 5) return 'техкарты'
+  if (е === 1) return 'техкарта'
+  return 'техкарт'
+}
+
 export function StoreRecipeVersionsPanel() {
   const centralWrite = useCentralCommercialWrite()
   const { company } = useCompany()
@@ -339,6 +351,11 @@ export function StoreRecipeVersionsPanel() {
 			Центр утверждает сетевые версии, а станция может предложить новую ТТК и сразу работать
 			по ней офлайн. Такие изменения приходят сюда черновиком с номером АЗС. Подтверждённый
 			набор доставляется атомарно; блюдо продаётся как сопутствующий товар по НДС 22%.
+			<span className="mt-1 block">
+			  Кухонь в сети несколько, и техкарта у каждой своя: латте на разных АЗС готовят по
+			  разным нормам. Поэтому набор собирается ПО СТАНЦИИ — её техкарта, а где своей нет,
+			  берётся сетевая норма.
+			</span>
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => query.refetch()} disabled={query.isFetching}>
@@ -347,10 +364,31 @@ export function StoreRecipeVersionsPanel() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard icon={ChefHat} label="Действующие ТТК" value={`${data.summary.active}/${data.summary.recipes}`} hint="на текущую дату" alarm={data.summary.active !== data.summary.recipes} />
+        <SummaryCard icon={ChefHat} label="Блюда с действующей ТТК"
+                     value={`${data.summary.active}/${data.summary.recipes}`}
+                     hint={data.summary.active === data.summary.recipes
+                       ? 'у каждого блюда есть техкарта'
+                       : `${data.summary.recipes - data.summary.active} без техкарты — продажа спишет само блюдо, а не сырьё`}
+                     alarm={data.summary.active !== data.summary.recipes} />
         <SummaryCard icon={GitBranch} label="Черновики" value={data.summary.drafts} hint="ещё не влияют на станции" alarm={data.summary.drafts > 0} />
-        <SummaryCard icon={PackageCheck} label="Набор" value={shortBundle(data.bundle?.bundle_id)} hint={data.bundle ? `${data.bundle.recipes.length} карт · атомарная доставка` : 'пока не сформирован'} alarm={!data.bundle} />
+        <SummaryCard icon={PackageCheck} label="Наборы станций"
+                     value={(data.по_станциям ?? []).filter((с) => с.bundle_id).length || '—'}
+                     hint={(data.по_станциям ?? []).length > 0
+                       ? (data.по_станциям ?? []).map((с) => `АЗС ${с.station_id}: ${с.recipes} ${техкарт(с.recipes)}` +
+                           (с['сырьё_в_минусе'] ? `, сырьё в минусе ${с['сырьё_в_минусе']}` : '')).join(' · ')
+                       : 'пока не сформирован'}
+                     alarm={(data.по_станциям ?? []).some((с) => !с.bundle_id)} />
         <SummaryCard icon={CircleAlert} label="Требуют внимания" value={problemStations} hint={`из ${data.deliveries.length} станций`} alarm={problemStations > 0} />
+        {/* Сырьё в минусе — прямое следствие того, что карта списывает, а приход
+            не оформлен. Сигнала об этом в центре не было вовсе: станция видела
+            строку среди прочих замечаний, товаровед сети не видел ничего, и на
+            208 молча набралось 19 210 мл молока и 3 467 г кофе. */}
+        <SummaryCard icon={PackageCheck} label="Сырьё в минусе"
+                     value={data.summary['сырьё_в_минусе'] ?? 0}
+                     hint={(data.summary['сырьё_в_минусе'] ?? 0) > 0
+                       ? `на ${Math.round(data.summary['минус_денег'] ?? 0).toLocaleString('ru-RU')} ₽ — техкарта списывает, а приход не оформлен`
+                       : 'списание по техкартам обеспечено приходом'}
+                     alarm={(data.summary['сырьё_в_минусе'] ?? 0) > 0} />
       </div>
 
       {data.recipes.length === 0 && data.legacy_available > 0 && (
@@ -363,14 +401,20 @@ export function StoreRecipeVersionsPanel() {
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="grid items-start gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+        {/* Список карт держим по высоте ОКНА, а не по числу пикселей.
+            Было max-h-[680px] — произвольная величина, не связанная ни с чем:
+            на любом экране ниже её последняя карточка резалась ровно посередине
+            строки и выглядела как поломка вёрстки. На широком экране колонка
+            ещё и липкая: состав ТТК длинный, и прокручивать его, потеряв из
+            виду список блюд, неудобно. */}
+        <div className="overflow-hidden rounded-xl border border-border bg-card xl:sticky xl:top-4">
           <div className="flex items-center justify-between border-b border-border p-3">
-            <span className="text-sm font-medium">Карты</span>
+            <span className="text-sm font-medium">Техкарты</span>
             <Button size="icon-xs" variant="outline" aria-label="Новая ТТК" disabled={!centralWrite}
               onClick={() => setSelected('__new')}><Plus /></Button>
           </div>
-          <div className="max-h-[680px] overflow-y-auto p-1.5">
+          <div className="max-h-[min(680px,calc(100vh-16rem))] overflow-y-auto p-1.5 pb-3">
             {data.recipes.map((recipe) => {
               const version = recipe.draft ?? recipe.active
               return (

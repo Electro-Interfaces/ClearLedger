@@ -18,7 +18,7 @@
  * эта ошибка». Поэтому вставка из буфера, перетаскивание и скрепка есть прямо
  * в поле записи, а изображения видны миниатюрами в строке.
  */
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   keepPreviousData, useMutation, useQuery, useQueryClient,
 } from '@tanstack/react-query'
@@ -46,6 +46,8 @@ import * as workService from '@/services/workService'
 import type { SpaceTask, TaskFile } from '@/services/tasksService'
 import { dtT } from '@/components/tasks/taskWords'
 import { humanSize, openAuthAttachment, useAuthBlob } from '@/lib/authFiles'
+import { useAuth } from '@/contexts/AuthContext'
+import { useTrackDraft } from '@/hooks/useTrackDraft'
 import { nextEvening, nextMorning, toItems, toText } from '@/lib/noteText'
 import { cn } from '@/lib/utils'
 
@@ -429,13 +431,37 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
   task: SpaceTask; companyId: string; onChanged: () => void; onOpen: () => void
 }) {
   const navigate = useNavigate()
+  const { user } = useAuth()
+  const backup = useTrackDraft<string | null>(`track:note:${user?.id}:${companyId}:${task.id}`, null)
   const [editing, setEditing] = useState<Режим>(null)
   const [value, setValue] = useState('')
-  const [draft, setDraft] = useState<string | null>(null)
+  const [draft, setDraft] = useState<string | null>(backup.value)
   const [newItem, setNewItem] = useState('')
   const [docOpen, setDocOpen] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const сохранение = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const текстПравки = useRef<string | null>(backup.value)
+  const закрытьПравку = useRef(false)
+  const [savedText, setSavedText] = useState<string | null>(null)
+  const saveText = useMutation({
+    scope: { id: `note-text:${companyId}:${task.id}` },
+    mutationFn: (text: string) => {
+      const [head, ...rest] = text.trim().split('\n')
+      return tasksService.taskAction(task.id, {
+        companyId, title: head.slice(0, 300) || 'Без названия',
+        description: rest.join('\n').trim(),
+      })
+    },
+    onSuccess: (_, text) => {
+      setSavedText(text)
+      if (текстПравки.current === text) backup.clear(text)
+      if (текстПравки.current === text && закрытьПравку.current) setDraft(null)
+      onChanged()
+    },
+  })
+  useEffect(() => () => {
+    if (сохранение.current) clearTimeout(сохранение.current)
+  }, [])
 
   const act = useMutation({
     mutationFn: (data: Parameters<typeof tasksService.taskAction>[1]) =>
@@ -535,15 +561,11 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
    *  закрывают на полуслове, и «не нажал сохранить» здесь недопустимо. */
   const отложенноеСохранение = (текст: string) => {
     setDraft(текст)
+    backup.save(текст)
+    текстПравки.current = текст
+    закрытьПравку.current = false
     if (сохранение.current) clearTimeout(сохранение.current)
-    сохранение.current = setTimeout(() => {
-      const [head, ...rest] = текст.trim().split('\n')
-      act.mutate({
-        companyId,
-        title: head.slice(0, 300) || 'Без названия',
-        description: rest.join('\n').trim(),
-      })
-    }, 1200)
+    сохранение.current = setTimeout(() => saveText.mutate(текст), 1200)
   }
 
   const done = task.status === 'done'
@@ -561,7 +583,9 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
           aria-label={done ? 'Вернуть в работу' : 'Отметить сделанным'}
           onChange={() => act.mutate({ companyId, status: done ? 'open' : 'done' })} />
         {draft !== null ? (
-          <Textarea value={draft} autoFocus rows={Math.min(12, draft.split('\n').length + 1)}
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <Textarea value={draft} autoFocus aria-label="Текст заметки"
+            rows={Math.min(12, draft.split('\n').length + 1)}
             onChange={(e) => отложенноеСохранение(e.target.value)}
             // Esc закрывает правку — как и везде в продукте. Сохраняет, а не
             // отменяет: уход фокусом уже сохраняет, и два разных исхода у двух
@@ -573,16 +597,33 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
             }}
             onBlur={() => {
               if (сохранение.current) clearTimeout(сохранение.current)
-              const [head, ...rest] = draft.trim().split('\n')
-              act.mutate({
-                companyId, title: head.slice(0, 300) || 'Без названия',
-                description: rest.join('\n').trim(),
-              })
-              setDraft(null)
+              закрытьПравку.current = true
+              if (draft === savedText && !saveText.isPending) setDraft(null)
+              else if (!saveText.isPending || saveText.variables !== draft) saveText.mutate(draft)
             }}
             className="min-w-0 flex-1 resize-none text-sm" />
+          {saveText.isError ? (
+            <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+              <span>Не сохранено. Текст остался в редакторе.</span>
+              <Button variant="outline" size="sm" onMouseDown={(event) => event.preventDefault()}
+                onClick={() => saveText.mutate(draft)}>Повторить сохранение</Button>
+            </div>
+          ) : (
+            <p role="status" className="text-xs text-muted-foreground">
+              {saveText.isPending ? 'Сохраняется…' : draft === savedText ? 'Сохранено' : 'Есть несохранённые изменения'}
+            </p>
+          )}
+          {backup.error && <p role="alert" className="text-xs text-destructive">Копия хранится только в памяти. Не перезагружайте страницу до сохранения.</p>}
+          {!saveText.isPending && !saveText.isError && draft !== savedText && <Button variant="outline" size="sm"
+            onMouseDown={(event) => event.preventDefault()} onClick={() => saveText.mutate(draft)}>Сохранить заметку</Button>}
+          </div>
         ) : (
-          <button onClick={() => setDraft(текстЗаписи)}
+          <button onClick={() => {
+            setDraft(текстЗаписи)
+            текстПравки.current = текстЗаписи
+            закрытьПравку.current = false
+            saveText.reset()
+          }}
             className="min-w-0 flex-1 text-left">
             <p className={cn('text-sm text-foreground', done && 'line-through')}>
               {task.title}
@@ -730,7 +771,10 @@ function NoteRow({ task, companyId, onChanged, onOpen }: {
             )}
             {(revisions.data?.revisions ?? []).map((r) => (
               <button key={r.id}
-                onClick={() => { setDraft(r.text); setEditing(null) }}
+                onClick={() => {
+                  setDraft(r.text); backup.save(r.text); текстПравки.current = r.text
+                  закрытьПравку.current = false; saveText.reset(); setEditing(null)
+                }}
                 className="block w-full rounded border border-border px-2 py-1 text-left hover:border-primary/50">
                 <span className="text-muted-foreground">
                   {r.at ? dtT(r.at) : '—'}

@@ -161,6 +161,12 @@ export async function demoGet<T>(path: string, params: Params = {}): Promise<T> 
   const urlPath = url.pathname
   const param = (key: string) => params[key] ?? url.searchParams.get(key) ?? undefined
 
+  if (urlPath === '/api/work-contexts') return clone({ providers: [] }) as T
+  if (urlPath === '/api/work-contexts/search') return clone({ items: [] }) as T
+  if (/^\/api\/work-contexts\/work\/(doc|task)\/[^/]+\/origin$/.test(urlPath)) return clone({ origin: null }) as T
+  if (/^\/api\/work-contexts\/work\/(doc|task)\/[^/]+\/results$/.test(urlPath)
+    || /^\/api\/work-contexts\/rooms\/[^/]+\/work$/.test(urlPath)) return clone({ items: [] }) as T
+
   if (urlPath === '/api/auth/me') return clone(DEMO_AUTH_USER) as T
   if (urlPath === '/api/sso/apps') {
     return clone({ enabled: true, sso_enabled: true, chat_enabled: true, apps: DEMO_SSO_APPS, allowed_apps: null }) as T

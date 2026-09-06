@@ -132,7 +132,7 @@ export function Markdown({ content }: { content: string }) {
       flushList(`${key}-l`)
       blocks.push(
         <figure key={key} className="my-3">
-          <img src={img[2]} alt={img[1]} loading="lazy" referrerPolicy="no-referrer"
+          <img src={img[2].startsWith('/help/') ? `${import.meta.env.BASE_URL}${img[2].slice(1)}` : img[2]} alt={img[1]} loading="lazy" referrerPolicy="no-referrer"
             className="w-full rounded-lg border border-border/60" />
           {img[1] && <figcaption className="mt-1 text-[11px] text-muted-foreground">{img[1]}</figcaption>}
         </figure>,

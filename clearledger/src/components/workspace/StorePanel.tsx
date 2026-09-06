@@ -42,6 +42,7 @@ import { NetworkReportPanel } from './NetworkReportPanel'
  */
 const СЕТЕВЫЕ_ОТЧЁТЫ = new Set([
   'turnover', 'no-cost', 'pay-mix', 'vat-book', 'purchase-diff', 'abc', 'purchases',
+  'goods-report',
 ])
 import { StoreRecipeVersionsPanel } from './StoreRecipeVersionsPanel'
 import { StoreCateringPanel } from './StoreCateringPanel'
@@ -53,9 +54,10 @@ import { StoreShiftsPanel } from './StoreShiftsPanel'
 import { StoreDedupPanel } from './StoreDedupPanel'
 import { StoreStationsPanel } from './StoreStationsPanel'
 import { StoreStationConsolePanel } from './StoreStationConsolePanel'
-import { StoreStationHealthPanel } from './StoreStationHealthPanel'
+import { StoreMatrixPanel } from './StoreMatrixPanel'
+import { StoreItemLocationsPanel } from './StoreItemLocationsPanel'
+import { StoreNetworkOverviewPanel } from './StoreNetworkOverviewPanel'
 import { StoreDownlinkPanel } from './StoreDownlinkPanel'
-import { StoreAgentVersionsPanel } from './StoreAgentVersionsPanel'
 import { StoreStoragePanel } from './StoreStoragePanel'
 import { StoreMarkCodesPanel } from './StoreMarkCodesPanel'
 import { StoreChequesPanel } from './StoreChequesPanel'
@@ -66,11 +68,15 @@ import { StoreParityPanel } from './StoreParityPanel'
 import { StoreChainPanel } from './StoreChainPanel'
 import { StoreCurePanel } from './StoreCurePanel'
 import { StoreKktPanel } from './StoreKktPanel'
+import { StoreCashCheckPanel } from './StoreCashCheckPanel'
+import { StoreNsCodesPanel } from './StoreNsCodesPanel'
+import { StoreCashSyncPanel } from './StoreCashSyncPanel'
 import { StoreStationDraftsPanel } from './StoreStationDraftsPanel'
 import { StoreBarcodeCollisionsPanel } from './StoreBarcodeCollisionsPanel'
 import { StoreCatalogHealthPanel } from './StoreCatalogHealthPanel'
 import { StoreReceiptDocsPanel } from './StoreReceiptDocsPanel'
 import { StoreDocumentsPanel } from './StoreDocumentsPanel'
+import { RecomputePanel } from './RecomputePanel'
 import { Info } from 'lucide-react'
 import {
   STORE_ROUTE_KEYS, STORE_MODES, STORE_MENU, STORE_HELP_KEYS, getStoreView,
@@ -196,7 +202,7 @@ export function StorePanel() {
         <div className="max-w-md text-center">
           <p className="text-sm font-medium text-foreground/80 mb-2">Раздел в разработке</p>
           <p className="text-sm text-muted-foreground">
-            «Магазин» для {company.shortName || company.name} появится после подключения
+            «Торговый центр» для {company.shortName || company.name} появится после подключения
             интернет-магазина.
           </p>
         </div>
@@ -241,14 +247,25 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations, demo = f
   // Пункты документооборота — один экран с разным входом: разбор, смены и
   // срезы по смыслу работы. Разводить их по отдельным компонентам нечем —
   // отличается только начальный вид и набор видов документов.
-  const документныеПункты: Record<string, { view: 'triage' | 'shifts' | 'list'; kinds?: string[] }> = {
-    store_documents: { view: 'triage' },
+  if (sub === 'recompute') {
+    return <RecomputePanel stations={stations} heading={пунктМеню(sub)} />
+  }
+  const документныеПункты: Record<string, {
+    view: 'triage' | 'shifts' | 'list'; kinds?: string[]
+    views?: Array<'triage' | 'shifts' | 'list'>
+  }> = {
+    // «Все документы» — общий плоский список всех документов (не сгруппированный
+    // по сменам: смены живут отдельным пунктом ОРП). Разбор доступен вкладкой.
+    store_documents: { view: 'list', views: ['list', 'triage'] },
     docs_shifts: { view: 'shifts' },
     docs_supply: { view: 'list', kinds: ['purchase', 'return_purchase'] },
     docs_movement: { view: 'list', kinds: ['transfer'] },
     docs_stock: { view: 'list', kinds: ['inventory', 'gain', 'writeoff'] },
     docs_price: { view: 'list', kinds: ['revaluation'] },
     docs_catering: { view: 'list', kinds: ['recipe', 'production_release', 'ingredients_writeoff'] },
+    // Архив чеков сети — доказательство продажи. Отдельным пунктом, потому что в
+    // общий реестр чеки не выводятся (полторы тысячи чеков топят учётные документы).
+    'cheque-journal': { view: 'list', kinds: ['fiscal_receipt'] },
   }
   const документный = документныеПункты[sub]
   if (документный) {
@@ -256,7 +273,7 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations, demo = f
       <StoreDocumentsPanel
         key={`${sub}:${dateFrom}:${dateTo}:${stations.join(',')}`}
         dateFrom={dateFrom} dateTo={dateTo} stations={stations}
-        startView={документный.view} kinds={документный.kinds}
+        startView={документный.view} kinds={документный.kinds} views={документный.views}
         heading={пунктМеню(sub)}
       />
     )
@@ -341,7 +358,7 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations, demo = f
   if (sub === 'menu') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreCateringPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} />
+        <StoreCateringPanel companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} stations={stations} demo={demo} />
       </div>
     )
   }
@@ -481,13 +498,6 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations, demo = f
       </div>
     )
   }
-  if (sub === 'agent_versions') {
-    return (
-      <div className="h-full overflow-y-auto">
-        <StoreAgentVersionsPanel />
-      </div>
-    )
-  }
   if (sub === 'downlink') {
     return (
       <div className="h-full overflow-y-auto">
@@ -495,10 +505,26 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations, demo = f
       </div>
     )
   }
-  if (sub === 'station_health') {
+  if (sub === 'item_locations') {
     return (
       <div className="h-full overflow-y-auto">
-        <StoreStationHealthPanel />
+        <StoreItemLocationsPanel />
+      </div>
+    )
+  }
+  if (sub === 'matrix') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreMatrixPanel />
+      </div>
+    )
+  }
+  // «Состояние станций» и «Версии агента» стали видами этого экрана: старые
+  // ссылки (закладки, отчёты) ведут сюда же, а не в пустоту.
+  if (sub === 'network_overview' || sub === 'station_health' || sub === 'agent_versions') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreNetworkOverviewPanel />
       </div>
     )
   }
@@ -506,6 +532,27 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations, demo = f
     return (
       <div className="h-full overflow-y-auto">
         <StoreKktPanel />
+      </div>
+    )
+  }
+  if (sub === 'cash-sync') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreCashSyncPanel />
+      </div>
+    )
+  }
+  if (sub === 'ns-codes') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreNsCodesPanel />
+      </div>
+    )
+  }
+  if (sub === 'cash-check') {
+    return (
+      <div className="h-full overflow-y-auto">
+        <StoreCashCheckPanel />
       </div>
     )
   }

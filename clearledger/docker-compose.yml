@@ -38,6 +38,7 @@ services:
       SECRET_KEY: ${SECRET_KEY:-clearledger-demo-secret-change-in-production}
       CORS_ORIGINS: http://localhost,http://localhost:3000,http://localhost:5173
       OCR_ENABLED: "true"
+      DADATA_API_KEY: ${DADATA_API_KEY:-}
     volumes:
       - uploads:/app/uploads
 

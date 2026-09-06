@@ -8,12 +8,13 @@ KPI на имеющихся данных (продажи): выручка (вс�
 позиций/единиц, число смен, средний чек ≈, структура категорий, оплаты (нал/безнал),
 дневная динамика, разрез по АЗС, Δ% к прошлому периоду.
 
-Маржа/себестоимость (нужен FIFO-матч с поступлениями) — отдельным блоком, не здесь.
+Для общепита экономика собирается отдельным мостом: выручка, возвраты, НДС,
+фактическая/оценочная стоимость ингредиентов, списания и недостачи.
 """
 import calendar
 import uuid
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     DataEntry, CbNomenclature, CbRef, CbBarcode, StockOnHand,
     CbInventoryDoc, CbMovementDoc, StorePlan, StoreStockBalance, TobaccoMrc,
+    StoreCheque, StoreRecipeVersion,
 )
 
 # секция meta → категория UI
@@ -30,6 +32,103 @@ _SECTIONS = (("продажа_сопутка", "Сопутка"), ("продаж
 # известной закупочной себестоимостью. При меньшем покрытии food-cost занижен
 # (считается по части состава) → блюдо «предварительное», вне сводной маржи.
 _TTK_COVERAGE_MIN = 0.9
+
+
+def _num(value) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _week_of(value: str | date) -> str:
+    day = value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
+    return (day - timedelta(days=day.weekday())).isoformat()
+
+
+def _edge_cost_by_dish(meta: dict) -> dict[str, dict]:
+    """Себестоимость смены из CostEvidence, без пересчёта по текущей ТТК."""
+    evidence = ((meta.get("Edge") or {}).get("CostEvidence") or {})
+    production: dict[str, float] = defaultdict(float)
+    for row in evidence.get("production") or []:
+        dish = str(row.get("dish_uuid") or "")
+        if dish:
+            production[dish] += _num(row.get("quantity_millis")) / 1000
+    result: dict[str, dict] = defaultdict(
+        lambda: {"cost": 0.0, "exact": 0.0, "estimated": 0.0,
+                 "qty": 0.0, "ingredients": 0})
+    for row in evidence.get("ingredients") or []:
+        dish = str(row.get("dish_uuid") or "")
+        if not dish:
+            continue
+        amount = _num(row.get("required_amount_micros")) / 1_000_000
+        item = result[dish]
+        item["cost"] += amount
+        item["ingredients"] += 1
+        if row.get("status") == "known":
+            item["exact"] += amount
+        else:
+            item["estimated"] += amount
+    for dish, item in result.items():
+        item["qty"] = production.get(dish, 0.0)
+        item["status"] = "exact" if item["estimated"] == 0 and item["ingredients"] else "estimate"
+    return dict(result)
+
+
+def _catering_sale_facts(metas: list[dict]) -> dict[str, dict]:
+    facts: dict[str, dict] = defaultdict(lambda: {
+        "qty": 0.0, "gross": 0.0, "vat": 0.0, "returns": 0.0,
+        "return_vat": 0.0, "vat_missing": 0, "daily": defaultdict(
+            lambda: {"qty": 0.0, "rev": 0.0}),
+        "ings": defaultdict(lambda: {"qty": 0.0, "cost": 0.0, "known": False}),
+        "edge_cost": 0.0, "edge_exact": 0.0, "edge_estimated": 0.0,
+        "edge_statuses": set(),
+    })
+    for meta in metas:
+        day = _day(meta.get("Смена") or {})
+        section = ((meta.get("Секции") or {}).get("продажа_общепит") or {})
+        for line in section.get("строки") or []:
+            dish = str(line.get("Номенклатура") or "")
+            if not dish:
+                continue
+            fact = facts[dish]
+            qty, gross = _num(line.get("Количество")), _num(line.get("Сумма"))
+            fact["qty"] += qty
+            fact["gross"] += gross
+            if line.get("СуммаНДС") is None:
+                fact["vat_missing"] += 1
+            else:
+                fact["vat"] += _num(line.get("СуммаНДС"))
+            fact["daily"][day]["qty"] += qty
+            fact["daily"][day]["rev"] += gross
+            for ingredient in line.get("Ингредиенты") or []:
+                item_uuid = str(ingredient.get("Номенклатура") or "")
+                if item_uuid:
+                    fact["ings"][item_uuid]["qty"] += _num(ingredient.get("Количество"))
+        for dish, cost in _edge_cost_by_dish(meta).items():
+            fact = facts[dish]
+            fact["edge_cost"] += cost["cost"]
+            fact["edge_exact"] += cost["exact"]
+            fact["edge_estimated"] += cost["estimated"]
+            fact["edge_statuses"].add(cost["status"])
+
+    for meta in metas:
+        for line in (((meta.get("Секции") or {}).get("возвраты") or {}).get("строки") or []):
+            dish = str(line.get("Номенклатура") or "")
+            fact = facts[dish]
+            fact["returns"] += abs(_num(line.get("Сумма")))
+            if line.get("СуммаНДС") is None:
+                fact["vat_missing"] += 1
+            else:
+                fact["return_vat"] += abs(_num(line.get("СуммаНДС")))
+    return facts
+
+
+def _merge_customer_returns(facts: dict[str, dict], returned: dict[str, dict]) -> None:
+    for dish, value in returned.items():
+        facts[dish]["returns"] += value.get("returns", 0)
+        facts[dish]["return_vat"] += value.get("return_vat", 0)
+        facts[dish]["vat_missing"] += value.get("vat_missing", 0)
 
 
 def _day(smena: dict) -> str:
@@ -1680,7 +1779,7 @@ class GoodsDashboardService:
         return await self.catering_menu(date_from, date_to, stations)
 
     # ── Общепит — инжиниринг меню (продажи блюд + состав ТТК + динамика) ──
-    async def catering_menu(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
+    async def _catering_menu_legacy(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
         """Менеджерская аналитика общепита: по каждому блюду — продажи, фудкост, маржа,
         класс меню (Звезда/Загадка/Рабочая лошадка/Собака), состав ТТК (ингредиенты с
         себестоимостью на порцию) и дневная динамика продаж (для раскрытия строки)."""
@@ -1825,6 +1924,350 @@ class GoodsDashboardService:
             "dishes": rows,
         }
 
+    async def _catering_return_documents(self, date_from: date, date_to: date,
+                                           stations: list[str] | None,
+                                           dish_ids: set[str]) -> dict:
+        rows = (await self.session.execute(select(DataEntry).where(
+            DataEntry.company_id == self.company_id,
+            DataEntry.layer == "clean",
+            DataEntry.source == "edge",
+            DataEntry.doc_type_id == "return_sale",
+            DataEntry.status != "superseded",
+        ))).scalars().all()
+        total: dict[str, dict] = defaultdict(lambda: {
+            "returns": 0.0, "return_vat": 0.0, "vat_missing": 0})
+        by_key: dict[tuple[str, str], dict[str, dict]] = defaultdict(
+            lambda: defaultdict(lambda: {"returns": 0.0, "return_vat": 0.0,
+                                          "vat_missing": 0}))
+        for row in rows:
+            meta, document = row.meta or {}, (row.meta or {}).get("Документ") or {}
+            station = str((meta.get("Смена") or {}).get("КодАЗС") or
+                          (meta.get("Edge") or {}).get("station_id") or "")
+            day = str(document.get("Дата") or _day(meta.get("Смена") or {}))[:10]
+            if not day or not (date_from.isoformat() <= day <= date_to.isoformat()):
+                continue
+            if stations and station not in stations:
+                continue
+            for line in document.get("Товары") or []:
+                dish = str(line.get("Номенклатура") or "")
+                if dish not in dish_ids:
+                    continue
+                for target in (total[dish], by_key[(station, _week_of(day))][dish]):
+                    target["returns"] += abs(_num(line.get("Сумма")))
+                    if line.get("СуммаНДС") is None:
+                        target["vat_missing"] += 1
+                    else:
+                        target["return_vat"] += abs(_num(line.get("СуммаНДС")))
+        return {"total": total, "by_key": by_key}
+
+    async def _catering_losses(self, date_from: date, date_to: date,
+                               stations: list[str] | None,
+                               kitchen_items: set[str]) -> dict:
+        rows = (await self.session.execute(select(DataEntry).where(
+            DataEntry.company_id == self.company_id,
+            DataEntry.layer == "clean",
+            DataEntry.source == "edge",
+            DataEntry.doc_type_id.in_(("writeoff", "inventory")),
+            DataEntry.status != "superseded",
+        ))).scalars().all()
+        empty = lambda: {"writeoffs": 0.0, "shortages": 0.0, "exact": 0.0,
+                         "estimated": 0.0, "missing_docs": 0, "documents": 0}
+        total = empty()
+        by_key: dict[tuple[str, str], dict] = defaultdict(empty)
+        for row in rows:
+            meta = row.meta or {}
+            document = meta.get("Документ") or {}
+            if document.get("СлужебныйДокумент"):
+                continue
+            station = str((meta.get("Смена") or {}).get("КодАЗС") or
+                          (meta.get("Edge") or {}).get("station_id") or "")
+            day = str(document.get("Дата") or _day(meta.get("Смена") or {}))[:10]
+            if not day or not (date_from.isoformat() <= day <= date_to.isoformat()):
+                continue
+            if stations and station not in stations:
+                continue
+            targets = (total, by_key[(station, _week_of(day))])
+            evidence = document.get("СебестоимостьИнгредиентов") or {}
+            evidence_items = [item for item in evidence.get("items") or []
+                              if str(item.get("item_uuid") or "") in kitchen_items]
+            if evidence_items:
+                for target in targets:
+                    target["documents"] += 1
+                for item in evidence_items:
+                    amount = _num(item.get("amount"))
+                    bucket = "shortages" if row.doc_type_id == "inventory" else "writeoffs"
+                    status = "exact" if item.get("status") == "known" else "estimated"
+                    for target in targets:
+                        target[bucket] += amount
+                        target[status] += amount
+                continue
+            touches = any(
+                str(line.get("Номенклатура") or "") in kitchen_items or
+                line.get("КлассSKU") == "Общепит"
+                for line in document.get("Товары") or [])
+            if touches:
+                for target in targets:
+                    target["missing_docs"] += 1
+        return {"total": total, "by_key": by_key}
+
+    async def _catering_cheques(self, date_from: date, date_to: date,
+                                stations: list[str] | None,
+                                dish_ids: set[str]) -> dict:
+        conditions = [
+            StoreCheque.company_id == self.company_id,
+            StoreCheque.at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc),
+            StoreCheque.at < datetime.combine(date_to + timedelta(days=1), time.min,
+                                               tzinfo=timezone.utc),
+        ]
+        if stations:
+            conditions.append(StoreCheque.station_id.in_([int(station) for station in stations]))
+        rows = (await self.session.execute(select(StoreCheque).where(*conditions))).scalars().all()
+        empty = lambda: {"cheques": 0, "kitchen_cheques": 0, "fuel_cheques": 0,
+                         "fuel_with_kitchen": 0, "kitchen_in_fuel": 0.0}
+        total = empty()
+        by_key: dict[tuple[str, str], dict] = defaultdict(empty)
+        pairs: dict[tuple[str, str], dict] = defaultdict(lambda: {"cheques": 0, "amount": 0.0})
+        for cheque in rows:
+            if cheque.is_return:
+                continue
+            key = (str(cheque.station_id), _week_of(cheque.at.date()))
+            targets = (total, by_key[key])
+            kitchen = [line for line in cheque.lines or []
+                       if str(line.get("item_uuid") or "") in dish_ids]
+            for target in targets:
+                target["cheques"] += 1
+                if cheque.had_fuel:
+                    target["fuel_cheques"] += 1
+            if not kitchen:
+                continue
+            kitchen_amount = sum(abs(_num(line.get("amount"))) for line in kitchen)
+            for target in targets:
+                target["kitchen_cheques"] += 1
+                if cheque.had_fuel:
+                    target["fuel_with_kitchen"] += 1
+                    target["kitchen_in_fuel"] += kitchen_amount
+            others = [line for line in cheque.lines or []
+                      if str(line.get("item_uuid") or "") not in dish_ids]
+            for dish in kitchen:
+                for other in others:
+                    pair = (str(dish.get("name") or "Блюдо"),
+                            str(other.get("name") or "Товар"))
+                    pairs[pair]["cheques"] += 1
+                    pairs[pair]["amount"] += abs(_num(other.get("amount")))
+        for target in [total, *by_key.values()]:
+            target["attach_rate"] = round(
+                target["fuel_with_kitchen"] / target["fuel_cheques"] * 100, 1
+            ) if target["fuel_cheques"] else None
+            target["avg_kitchen_in_fuel"] = round(
+                target["kitchen_in_fuel"] / target["fuel_with_kitchen"], 2
+            ) if target["fuel_with_kitchen"] else None
+            target["kitchen_in_fuel"] = round(target["kitchen_in_fuel"], 2)
+        top_pairs = [{"dish": dish, "with_item": item, "cheques": value["cheques"],
+                      "with_item_amount": round(value["amount"], 2)}
+                     for (dish, item), value in pairs.items()]
+        top_pairs.sort(key=lambda item: (-item["cheques"], -item["with_item_amount"]))
+        total["pairs"] = top_pairs[:12]
+        total["available"] = bool(rows)
+        return {"total": total, "by_key": by_key}
+
+    async def catering_menu(self, date_from: date, date_to: date,
+                            stations: list[str] | None = None) -> dict:
+        """Один экономический контракт для станции и сети."""
+        base = await self._catering_menu_legacy(date_from, date_to, stations)
+        sale_metas = self._select(await self._load(), date_from, date_to, stations)
+        facts = _catering_sale_facts(sale_metas)
+        dish_ids = set(facts)
+        recipe_versions = (await self.session.execute(select(StoreRecipeVersion).where(
+            StoreRecipeVersion.company_id == self.company_id,
+        ))).scalars().all()
+        recipe_names = {recipe.dish_uuid: recipe.dish_name for recipe in recipe_versions
+                        if recipe.recipe_kind in ("dish", "combo")}
+        dish_ids.update(recipe_names)
+        return_documents = await self._catering_return_documents(
+            date_from, date_to, stations, dish_ids)
+        _merge_customer_returns(facts, return_documents["total"])
+        kitchen_items = set(dish_ids)
+        for recipe in recipe_versions:
+            kitchen_items.update(str(line.get("item") or "")
+                                 for line in recipe.lines or [] if line.get("item"))
+        for fact in facts.values():
+            kitchen_items.update(fact["ings"])
+        losses = await self._catering_losses(date_from, date_to, stations, kitchen_items)
+        cheques = await self._catering_cheques(date_from, date_to, stations, dish_ids)
+        base_rows = {row["guid"]: row for row in base["dishes"]}
+        fallback = {}
+        for guid, row in base_rows.items():
+            unit = row["cost"] / row["qty"] if row.get("cost") is not None and row.get("qty") else None
+            source = row.get("cost_source")
+            fallback[guid] = (unit, "exact" if source == "release" else
+                              "estimate" if unit is not None else "missing", source)
+
+        def evaluate(source_facts: dict[str, dict], loss: dict) -> tuple[dict, dict[str, dict]]:
+            evaluated = {}
+            for guid, fact in source_facts.items():
+                if fact["edge_cost"] > 0:
+                    cost = fact["edge_cost"]
+                    status = "estimate" if fact["edge_estimated"] > 0 else "exact"
+                    source = "edge_estimate" if status == "estimate" else "edge_exact"
+                else:
+                    unit, status, source = fallback.get(guid, (None, "missing", None))
+                    cost = unit * fact["qty"] if unit is not None else None
+                gross_after_returns = fact["gross"] - fact["returns"]
+                vat = fact["vat"] - fact["return_vat"]
+                net = gross_after_returns - vat
+                evaluated[guid] = {**fact, "cost": cost, "cost_status": status,
+                                   "cost_source": source, "vat_net": vat, "net": net,
+                                   "contribution": net - cost if cost is not None else None}
+            statuses = {item["cost_status"] for item in evaluated.values()}
+            sales = sum(item["gross"] for item in evaluated.values())
+            returns = sum(item["returns"] for item in evaluated.values())
+            vat = sum(item["vat_net"] for item in evaluated.values())
+            net = sales - returns - vat
+            ingredients = sum(item["cost"] or 0 for item in evaluated.values())
+            direct = loss.get("writeoffs", 0) + loss.get("shortages", 0)
+            if not evaluated or "missing" in statuses:
+                status = "missing"
+            elif loss.get("missing_docs", 0) or any(item["vat_missing"] for item in evaluated.values()):
+                status = "partial"
+            elif "estimate" in statuses or loss.get("estimated", 0) > 0:
+                status = "estimate"
+            else:
+                status = "exact"
+            preliminary = net - ingredients - direct
+            exact_cost = sum((item["cost"] or 0) for item in evaluated.values()
+                             if item["cost_status"] == "exact") + loss.get("exact", 0)
+            total_cost = ingredients + direct
+            summary = {
+                "dishes_count": len(evaluated),
+                "dishes_costed": sum(1 for item in evaluated.values() if item["cost"] is not None),
+                "revenue": round(sales, 2), "sales_gross": round(sales, 2),
+                "customer_returns": round(returns, 2),
+                "gross_revenue": round(sales - returns, 2), "vat": round(vat, 2),
+                "revenue_net": round(net, 2), "net_revenue": round(net, 2),
+                "revenue_costed": round(sum(item["gross"] for item in evaluated.values()
+                                               if item["cost"] is not None), 2),
+                "portions": round(sum(item["qty"] for item in evaluated.values()), 2),
+                "cost": round(ingredients, 2), "ingredient_cost": round(ingredients, 2),
+                "ingredient_cost_exact": round(sum((item["cost"] or 0)
+                                                    for item in evaluated.values()
+                                                    if item["cost_status"] == "exact"), 2),
+                "ingredient_cost_estimated": round(sum((item["cost"] or 0)
+                                                        for item in evaluated.values()
+                                                        if item["cost_status"] == "estimate"), 2),
+                "writeoffs": round(loss.get("writeoffs", 0), 2),
+                "shortages": round(loss.get("shortages", 0), 2),
+                "direct_losses": round(direct, 2),
+                "operating_contribution": round(preliminary, 2) if status == "exact" else None,
+                "preliminary_contribution": round(preliminary, 2),
+                "margin": round(preliminary, 2),
+                "food_cost_pct": round(ingredients / net * 100, 1) if net else None,
+                "margin_pct": round(preliminary / net * 100, 1) if net else None,
+                "cost_status": status,
+                "exact_coverage_pct": round(exact_cost / total_cost * 100, 1) if total_cost else 0.0,
+                "missing_loss_documents": loss.get("missing_docs", 0),
+            }
+            return summary, evaluated
+
+        summary, evaluated = evaluate(facts, losses["total"])
+        total_qty = sum(item["qty"] for item in evaluated.values()) or 1.0
+        exact = [item for item in evaluated.values()
+                 if item["cost_status"] == "exact" and item["qty"]]
+        avg_cm = (sum(item["contribution"] or 0 for item in exact) /
+                  sum(item["qty"] for item in exact)) if exact else 0.0
+        pop_threshold = 70 / (len(evaluated) or 1)
+        matrix: dict[str, dict] = defaultdict(lambda: {"count": 0, "revenue": 0.0})
+        rows = []
+        for guid, fact in evaluated.items():
+            row = dict(base_rows.get(guid) or {
+                "guid": guid, "name": recipe_names.get(guid) or guid[:8],
+                "ingredients": [], "daily": [],
+                "coverage": 0, "ing_count": 0,
+            })
+            qty, contribution = fact["qty"], fact["contribution"]
+            popularity = qty / total_qty * 100
+            cm_unit = contribution / qty if contribution is not None and qty else None
+            if fact["cost_status"] != "exact":
+                menu_class = "unknown"
+            else:
+                high_pop, high_cm = popularity >= pop_threshold, (cm_unit or 0) >= avg_cm
+                menu_class = ("star" if high_pop and high_cm else
+                              "plowhorse" if high_pop else
+                              "puzzle" if high_cm else "dog")
+            matrix[menu_class]["count"] += 1
+            matrix[menu_class]["revenue"] += fact["gross"]
+            row.update({
+                "qty": round(qty, 2), "revenue": round(fact["gross"], 2),
+                "returns": round(fact["returns"], 2), "vat": round(fact["vat_net"], 2),
+                "revenue_net": round(fact["net"], 2),
+                "avg_price": round(fact["gross"] / qty, 2) if qty else 0.0,
+                "cost": round(fact["cost"], 2) if fact["cost"] is not None else None,
+                "cost_per_portion": round(fact["cost"] / qty, 2)
+                if fact["cost"] is not None and qty else None,
+                "cost_source": fact["cost_source"], "cost_status": fact["cost_status"],
+                "margin": round(contribution, 2) if contribution is not None else None,
+                "food_cost_pct": round(fact["cost"] / fact["net"] * 100, 1)
+                if fact["cost"] is not None and fact["net"] else None,
+                "margin_pct": round(contribution / fact["net"] * 100, 1)
+                if contribution is not None and fact["net"] else None,
+                "cm_unit": round(cm_unit, 2) if cm_unit is not None else None,
+                "popularity_pct": round(popularity, 1), "menu_class": menu_class,
+                "preliminary": fact["cost_status"] != "exact",
+            })
+            rows.append(row)
+        rows.sort(key=lambda row: -row["revenue"])
+
+        grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
+        for meta in sale_metas:
+            shift = meta.get("Смена") or {}
+            station, day = str(shift.get("КодАЗС") or ""), _day(shift)
+            if station and day:
+                grouped[(station, _week_of(day))].append(meta)
+        comparison = []
+        for key, metas in sorted(grouped.items()):
+            grouped_facts = _catering_sale_facts(metas)
+            _merge_customer_returns(grouped_facts, return_documents["by_key"].get(key, {}))
+            item_summary, _ = evaluate(grouped_facts, losses["by_key"].get(key, {}))
+            comparison.append({
+                "station_id": key[0], "week_from": key[1],
+                "week_to": (date.fromisoformat(key[1]) + timedelta(days=6)).isoformat(),
+                "attach_rate": cheques["by_key"].get(key, {}).get("attach_rate"),
+                **item_summary,
+            })
+
+        recommendations = []
+        def recommend(title: str, evidence: str, action: str):
+            if len(recommendations) < 5:
+                recommendations.append({"title": title, "evidence": evidence, "action": action})
+        if summary["cost_status"] != "exact":
+            recommend("Довести экономику до точной",
+                      f"статус {summary['cost_status']}, покрытие {summary['exact_coverage_pct']}%",
+                      "проверить CostEvidence, цены сырья, НДС и неоценённые потери")
+        if summary["shortages"] > 0:
+            recommend("Сравнить недостачи по АЗС", f"{summary['shortages']:.2f} ₽",
+                      "найти станцию и неделю с наибольшим отклонением")
+        if summary["writeoffs"] > 0:
+            recommend("Сравнить списания по неделям", f"{summary['writeoffs']:.2f} ₽",
+                      "проверить рост и причины на станции")
+        if summary["customer_returns"] > 0:
+            recommend("Разобрать возвраты гостей", f"{summary['customer_returns']:.2f} ₽",
+                      "сравнить блюда, станции и недели")
+        puzzles = matrix.get("puzzle", {}).get("count", 0)
+        if puzzles:
+            recommend("Проверить выгодные позиции с низким спросом", f"позиций: {puzzles}",
+                      "сопоставить витрину и наблюдаемые пары в чеках; это не доказанная причина")
+        if not recommendations:
+            recommend("Сохранить текущий режим", "экономика точная, явных отклонений нет",
+                      "сверить динамику на следующей неделе")
+
+        return {
+            "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
+            "summary": summary,
+            "matrix": {key: {"count": value["count"], "revenue": round(value["revenue"], 2)}
+                       for key, value in matrix.items()},
+            "dishes": rows, "comparison": comparison,
+            "cross_sell": cheques["total"], "recommendations": recommendations,
+        }
+
     # ── Категории (Сопутка/Общепит) ──
     async def categories(self, date_from: date, date_to: date, stations: list[str] | None = None) -> dict:
         skus = (await self.sku_analytics(date_from, date_to, stations))["skus"]
@@ -1848,31 +2291,195 @@ class GoodsDashboardService:
             "margin_pct": round(100 * a["margin"] / a["margin_known"], 1) if a["margin_known"] else None,
         } for c, a in agg.items()]
         rows.sort(key=lambda x: -x["revenue"])
+
+        # Второй разрез — по ТОВАРНЫМ ГРУППАМ, а не по двум классам.
+        #
+        # «Сопутка» и «Общепит» — это вид учёта, и на них экран заканчивался:
+        # две строки на весь каталог. Работают же с группами — «Табак /
+        # Сигареты», «Автотовары / Автохимия», — и вопрос у товароведа именно
+        # там: какая группа кормит, а какая лежит. Путь группы отдаём как есть,
+        # дерево из него собирает экран: уровней бывает два, а бывает три, и
+        # раскладывать их на сервере значит зашить глубину навсегда.
+        пути = {r["external_uuid"]: (r["path"], r["sku_class"]) for r in (await self.session.execute(text("""
+            SELECT i.external_uuid::text AS external_uuid,
+                   coalesce(g.path, '') AS path,
+                   coalesce(i.sku_class, '') AS sku_class
+              FROM edge.item i
+              LEFT JOIN edge.item_group g ON g.id = i.group_id
+             WHERE NOT i.deleted AND (i.company_id IS NULL OR i.company_id = :cid)
+        """), {"cid": self.company_id})).mappings().all()}
+
+        по_группам: dict[str, dict] = defaultdict(
+            lambda: {"revenue": 0.0, "revenue_net": 0.0, "margin": 0.0,
+                     "margin_known": 0.0, "sku": 0, "qty": 0.0, "sku_class": ""})
+        for s_ in skus:
+            путь, класс = пути.get(s_["guid"], ("", ""))
+            ключ = путь or "— без группы —"
+            g = по_группам[ключ]
+            g["revenue"] += s_["revenue"]
+            g["revenue_net"] += s_["revenue_net"]
+            g["sku"] += 1
+            g["qty"] += s_["qty"]
+            g["sku_class"] = g["sku_class"] or класс
+            if s_["margin"] is not None:
+                g["margin"] += s_["margin"]
+                g["margin_known"] += s_["revenue_net"]
+
+        группы = [{
+            "path": путь, "sku_class": g["sku_class"],
+            "revenue": round(g["revenue"], 2), "revenue_net": round(g["revenue_net"], 2),
+            "sku_count": g["sku"], "qty": round(g["qty"], 2),
+            "share": round(100 * g["revenue"] / total, 1),
+            "margin_pct": round(100 * g["margin"] / g["margin_known"], 1) if g["margin_known"] else None,
+        } for путь, g in по_группам.items()]
+        группы.sort(key=lambda x: -x["revenue"])
+
         return {
             "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
             "categories": rows,
-            "summary": {"count": len(rows), "revenue": round(sum(r["revenue"] for r in rows), 2)},
+            "groups": группы,
+            "summary": {"count": len(rows), "revenue": round(sum(r["revenue"] for r in rows), 2),
+                        "groups": len(группы)},
         }
 
     # ── Штрихкоды (справочник-снимок, не по периоду) ──
     async def barcodes(self) -> dict:
-        """Снимок справочника штрихкодов ЦБ (cb_barcode). У сущности нет ни даты, ни
-        станции — период/станции неприменимы и раньше принимались вхолостую
-        (разные периоды давали одинаковый ответ). Параметры убраны, чтобы UI не
-        показывал фильтр, который ничего не делает."""
-        rows = (await self.session.execute(select(CbBarcode).where(
-            CbBarcode.company_id == self.company_id))).scalars().all()
+        """Штрихкоды рабочего справочника: код всегда при своём товаре.
+
+        Раньше экран показывал снимок справочника ЦБ 1С (`cb_barcode`) — 11 025
+        строк на всю историю сети. Из них в работе 1 455: остальное архив чужих
+        станций и позиций, снятых годы назад. Список читался как «у нас
+        одиннадцать тысяч кодов», хотя это не так, и найти в нём рабочий код
+        было нельзя.
+
+        Штрихкод сам по себе — просто цифра. Значение он имеет только вместе с
+        карточкой, поэтому показываем пары «код → товар» и ничего больше:
+        код без живого товара в список не попадает вовсе.
+        """
+        rows = (await self.session.execute(text("""
+            WITH живые AS (
+                SELECT b.id, b.code, b.status, b.station_id, b.last_sold, b.item_id
+                  FROM edge.barcode b
+                  JOIN edge.item i ON i.id = b.item_id
+                 WHERE (b.company_id IS NULL OR b.company_id = :cid)
+                   AND NOT i.deleted AND b.status = 'active'
+            ),
+            -- Сколько РАЗНЫХ карточек носит один и тот же код. Оконная функция
+            -- здесь не годится: Postgres не умеет DISTINCT внутри OVER, а
+            -- считать строки вместо карточек значит объявить дублем код,
+            -- дважды записанный одной и той же позиции.
+            дубли AS (
+                SELECT code, count(DISTINCT item_id) AS n FROM живые GROUP BY code
+            )
+            SELECT b.code, b.status, b.station_id, b.last_sold,
+                   i.name AS owner_name, i.external_uuid AS owner_guid, i.sku,
+                   coalesce(i.sku_class, '') AS sku_class,
+                   -- Сколько кодов у ЭТОЙ карточки и на скольких карточках
+                   -- висит ЭТОТ код. Оба вопроса задаёт товаровед, и оба
+                   -- отвечаются здесь же, а не отдельным разбором.
+                   count(*) OVER (PARTITION BY b.item_id) AS item_barcodes,
+                   d.n AS dup_items,
+                   -- Остаток и код кассы — по ЭТОМУ штрихкоду, а не по карточке.
+                   --
+                   -- У карточки с несколькими кодами остаток лежит на каждом
+                   -- своём, и в кассе они разные строки: «сколько числится
+                   -- именно под этим кодом» — вопрос, из-за которого товар и не
+                   -- пробивается. Поле last_sold в справочнике не заполняется
+                   -- ничем (0 из 1455), и колонка «Продавали» стояла пустой у
+                   -- всех — вместо неё показываем то, что есть.
+                   coalesce((SELECT sum(st.qty) FROM edge.stock st
+                              WHERE st.barcode_id = b.id), 0) AS stock_qty,
+                   (SELECT nc.ns_code FROM edge.ns_code nc
+                     WHERE nc.barcode_id = b.id AND nc.status = 'active'
+                     ORDER BY nc.ns_code LIMIT 1) AS ns_code,
+                   -- Тип определяем по самому коду: в справочнике он не
+                   -- хранится, а человеку нужен — по нему видно, чужой это код
+                   -- с упаковки или внутренний номер станции.
+                   CASE
+                     WHEN b.code ~ '^[0-9]{13}$' THEN 'EAN13'
+                     WHEN b.code ~ '^[0-9]{12}$' THEN 'UPC-A'
+                     WHEN b.code ~ '^[0-9]{8}$'  THEN 'EAN8'
+                     WHEN b.code ~ '^[0-9]{14}$' THEN 'ITF-14'
+                     WHEN b.code ~ '^[0-9]+$'    THEN 'внутренний'
+                     ELSE 'иной'
+                   END AS btype
+              FROM живые b
+              JOIN edge.item i ON i.id = b.item_id
+              JOIN дубли d ON d.code = b.code
+             ORDER BY i.name, b.code
+        """), {"cid": self.company_id})).mappings().all()
+
         by_type: dict[str, int] = defaultdict(int)
+        станции: dict[str, int] = defaultdict(int)
+        без_продаж = 0
+        items = []
         for r in rows:
-            by_type[r.btype or "—"] += 1
-        # резолв владельца в GUID (owner_ref в регистре ЦБ пуст → по имени) для карточки
-        name2ref = {n.name: n.external_ref for n in (await self._names()).values() if n.name}
-        items = [{"barcode": r.barcode, "owner_name": r.owner_name, "type": r.btype, "main": r.main,
-                  "owner_guid": r.owner_ref or name2ref.get(r.owner_name)} for r in rows]
-        items.sort(key=lambda x: x["owner_name"])
+            by_type[r["btype"]] += 1
+            if r["station_id"] is not None:
+                станции[str(r["station_id"])] += 1
+            if not r["last_sold"]:
+                без_продаж += 1
+            items.append({
+                "barcode": r["code"],
+                "owner_name": r["owner_name"],
+                "owner_guid": str(r["owner_guid"]) if r["owner_guid"] else None,
+                "sku": r["sku"],
+                "sku_class": r["sku_class"],
+                "type": r["btype"],
+                "station_id": r["station_id"],
+                "last_sold": r["last_sold"].isoformat() if r["last_sold"] else None,
+                "stock_qty": float(r["stock_qty"] or 0),
+                "ns_code": r["ns_code"],
+                "item_barcodes": int(r["item_barcodes"] or 1),
+                "dup_items": int(r["dup_items"] or 1),
+                # Поле осталось ради прежней разметки: «основным» в нашем
+                # справочнике код не помечается — у карточки их может быть
+                # несколько, и все равноправны.
+                "main": False,
+            })
+
+        # Карточки БЕЗ единого кода — отдельный список, а не пропуск.
+        #
+        # Такой товар не пробить на кассе: касса ищет только по штрихкоду. Пока
+        # экран показывал одни коды, эти позиции были невидимы — их нет ни в
+        # одной строке, потому что кода у них нет.
+        без_кода = (await self.session.execute(text("""
+            SELECT i.name, i.sku, coalesce(i.sku_class, '') AS sku_class,
+                   i.external_uuid AS guid,
+                   coalesce((SELECT sum(st.qty) FROM edge.stock st
+                              JOIN edge.barcode b2 ON b2.id = st.barcode_id
+                             WHERE b2.item_id = i.id), 0) AS stock_qty
+              FROM edge.item i
+             WHERE NOT i.deleted AND (i.company_id IS NULL OR i.company_id = :cid)
+               AND NOT EXISTS (SELECT 1 FROM edge.barcode b
+                                WHERE b.item_id = i.id AND b.status = 'active')
+             ORDER BY i.name
+        """), {"cid": self.company_id})).mappings().all()
+
+        # Архив старого справочника считаем, но не показываем: цифра объясняет,
+        # куда делись «одиннадцать тысяч», и не даёт решить, что список урезали.
+        архив = (await self.session.execute(text(
+            "SELECT count(*) FROM cb_barcode WHERE company_id = :cid"),
+            {"cid": self.company_id})).scalar() or 0
+
+        карточек = len({i["owner_guid"] for i in items})
         return {
-            "total": len(rows),
+            "total": len(items),
             "by_type": dict(sorted(by_type.items(), key=lambda x: -x[1])),
+            "by_station": dict(sorted(станции.items())),
+            "without_sales": без_продаж,
+            "without_ns_code": sum(1 for i in items if not i["ns_code"]),
+            "archive_total": int(архив),
+            "items_with_barcode": карточек,
+            "duplicates": sum(1 for i in items if i["dup_items"] > 1),
+            "multi_barcode_items": len({i["owner_guid"] for i in items if i["item_barcodes"] > 1}),
+            "internal_codes": by_type.get("внутренний", 0),
+            "items_without_barcode": [
+                {"name": r["name"], "sku": r["sku"], "sku_class": r["sku_class"],
+                 "guid": str(r["guid"]) if r["guid"] else None,
+                 "stock_qty": float(r["stock_qty"] or 0)}
+                for r in без_кода
+            ],
             "items": items,
         }
 
@@ -2581,69 +3188,115 @@ class GoodsDashboardService:
     async def nomenclature_catalog(self, date_from: date, date_to: date, *, kind: str = "all",
                                    marked: str = "all", weighed: str = "all", has_sales: str = "all",
                                    q: str = "", stations: list[str] | None = None) -> dict:
-        nom = (await self.session.execute(select(CbNomenclature).where(
-            CbNomenclature.company_id == self.company_id))).scalars().all()
-        kinds = await self._refs("nom_kind")
-        sk = {s["guid"]: s for s in (await self.sku_analytics(date_from, date_to, stations))["skus"]}
-        bc_names = {r[0] for r in (await self.session.execute(select(CbBarcode.owner_name).where(
-            CbBarcode.company_id == self.company_id))).all()}
-        # остаток + розн. цена по SKU (цена Торгового зала 208 приоритетна)
-        stock_map: dict[str, dict] = defaultdict(lambda: {"qty": 0.0, "hall": None, "any": None})
-        for r in (await self.session.execute(select(StockOnHand).where(
-                StockOnHand.company_id == self.company_id))).scalars().all():
-            d = stock_map[r.nomenclature_ref]
-            d["qty"] += float(r.quantity or 0)
-            if r.retail_price is not None:
-                p = float(r.retail_price)
-                if d["any"] is None:
-                    d["any"] = p
-                if r.warehouse_code == "208":
-                    d["hall"] = p
-        ql = (q or "").lower().strip()
+        """Справочник сети: карточки, которыми торгуют станции.
 
+        Источник — `edge.item`, наш сетевой каталог, а не выгрузка мастер-НСИ
+        центральной базы 1С. Прежде здесь показывался снимок ЦБ ЭЛСИ.АЗК —
+        7 547 карточек с топливом, услугами и ставками 10/20 %, — и раздел
+        «Каталог» расходился сам с собой: здоровье и матрица считали по нашему
+        каталогу, а список показывал чужой. Топливо в «Магазине» не ведут вовсе
+        (канон, п. 7a), поэтому ГСМ отсюда исчез вместе со сменой источника.
+
+        «Вид» теперь — класс позиции (Сопутка · Блюдо · Сырьё): именно он решает,
+        как считается остаток и что уезжает в кассу.
+        """
+        sk = {s["guid"]: s for s in (await self.sku_analytics(date_from, date_to, stations))["skus"]}
+        станции = [int(x) for x in stations if str(x).isdigit()] if stations else None
+
+        параметры: dict = {"cid": self.company_id}
+        фильтр_станций = ""
+        if станции:
+            параметры["st"] = станции
+            фильтр_станций = " AND p.station_id = ANY(:st)"
+
+        rows = (await self.session.execute(text(f"""
+            SELECT i.external_uuid::text AS guid, i.name, i.sku AS article,
+                   i.vat_rate AS vat, i.marked, i.unit,
+                   coalesce(i.sku_class, '— не разобрано') AS kind,
+                   g.path AS group_path,
+                   EXISTS (SELECT 1 FROM edge.barcode b
+                            WHERE b.item_id = i.id AND b.status = 'active') AS has_barcode,
+                   (SELECT sum(st.qty) FROM edge.stock st
+                      JOIN edge.barcode b2 ON b2.id = st.barcode_id
+                     WHERE b2.item_id = i.id) AS stock_qty,
+                   (SELECT p.price FROM edge.price p
+                     WHERE p.item_id = i.id AND p.valid_to IS NULL{фильтр_станций}
+                     ORDER BY p.station_id LIMIT 1) AS retail_price,
+                   (SELECT count(DISTINCT p.station_id) FROM edge.price p
+                     WHERE p.item_id = i.id AND p.valid_to IS NULL) AS stations_count,
+                   -- Не только СКОЛЬКО станций, но и какие именно.
+                   --
+                   -- Пока в колонке стояло число, оно ничего не говорило: «2» у
+                   -- сети из двух АЗС и «1» рядом читаются одинаково, а вопрос
+                   -- у товароведа другой — «где эта позиция есть, а где её нет».
+                   (SELECT string_agg(DISTINCT p.station_id::text, ', '
+                                      ORDER BY p.station_id::text)
+                      FROM edge.price p
+                     WHERE p.item_id = i.id AND p.valid_to IS NULL) AS stations_list,
+                   -- Штрихкоды карточки — чтобы найти позицию сканером.
+                   --
+                   -- Поиск шёл по имени и артикулу, а человек за прилавком
+                   -- держит в руках упаковку: он сканирует код, а не набирает
+                   -- «Сигареты Winston XS Compact 100s Blue» по буквам.
+                   (SELECT string_agg(b.code, ' ') FROM edge.barcode b
+                     WHERE b.item_id = i.id AND b.status = 'active') AS barcodes
+              FROM edge.item i
+              LEFT JOIN edge.item_group g ON g.id = i.group_id
+             WHERE NOT i.deleted AND (i.company_id IS NULL OR i.company_id = :cid)
+             ORDER BY i.name
+        """), параметры)).mappings().all()
+
+        ql = (q or "").lower().strip()
         items = []
         kinds_seen: set = set()
-        for n in nom:
-            if ql and not (ql in (n.name or "").lower() or ql in (n.article or "").lower()):
+        for n in rows:
+            if ql and not (ql in (n["name"] or "").lower()
+                           or ql in (n["article"] or "").lower()
+                           or ql in (n["barcodes"] or "")):
                 continue
-            if marked == "marked" and not n.marked:
+            if marked == "marked" and not n["marked"]:
                 continue
-            if marked == "plain" and n.marked:
+            if marked == "plain" and n["marked"]:
                 continue
-            if weighed == "weighed" and not n.weighed:
+            # Весовой признак живёт в единице измерения: отдельной колонки у
+            # карточки сети нет, а грамм и килограмм — это и есть вес.
+            весовой = (n["unit"] or "").strip().lower() in ("г", "гр", "кг", "мл", "л")
+            if weighed == "weighed" and not весовой:
                 continue
-            s = sk.get(n.external_ref)
-            if has_sales == "yes" and not s:
+            карточка = sk.get(n["guid"])
+            if has_sales == "yes" and not карточка:
                 continue
-            if has_sales == "no" and s:
+            if has_sales == "no" and карточка:
                 continue
-            kind_name = (kinds.get(n.kind_ref) or "— вид не указан") if n.kind_ref else "— вид не указан"
-            if kind != "all" and kind_name != kind:
+            kinds_seen.add(n["kind"])
+            if kind != "all" and n["kind"] != kind:
                 continue
-            kinds_seen.add(kind_name)
-            st = stock_map.get(n.external_ref)
             items.append({
-                "guid": n.external_ref, "name": n.name, "article": n.article, "vat": n.vat,
-                "marked": n.marked, "weighed": n.weighed, "kind": kind_name, "unit": n.unit,
-                "has_barcode": n.name in bc_names,
-                "revenue": s["revenue"] if s else 0.0, "qty": s["qty"] if s else 0.0,
-                "stock_qty": round(st["qty"], 3) if st else 0.0,
-                "retail_price": (st["hall"] if st and st["hall"] is not None else (st["any"] if st else None)),
+                "guid": n["guid"], "name": n["name"], "article": n["article"],
+                "vat": n["vat"], "marked": bool(n["marked"]), "weighed": весовой,
+                "kind": n["kind"], "unit": n["unit"],
+                "group_path": n["group_path"],
+                "has_barcode": bool(n["has_barcode"]),
+                "stations_count": int(n["stations_count"] or 0),
+                "stations_list": n["stations_list"] or "",
+                "revenue": карточка["revenue"] if карточка else 0.0,
+                "qty": карточка["qty"] if карточка else 0.0,
+                "stock_qty": round(float(n["stock_qty"] or 0), 3),
+                "retail_price": float(n["retail_price"]) if n["retail_price"] is not None else None,
             })
         items.sort(key=lambda x: (-x["revenue"], x["name"]))
         return {
             "items": items,
+            "kinds": sorted(kinds_seen),
             "summary": {
                 "total": len(items),
                 "marked": sum(1 for i in items if i["marked"]),
-                "weighed": sum(1 for i in items if i["weighed"]),
-                "with_sales": sum(1 for i in items if i["revenue"]),
                 "with_barcode": sum(1 for i in items if i["has_barcode"]),
+                "with_sales": sum(1 for i in items if i["revenue"]),
+                "on_stations": sum(1 for i in items if i["stations_count"] > 0),
             },
-            "kinds": sorted(kinds_seen),
         }
 
-    # ── Продажи: гибкая группировка + фильтры (инструмент менеджера) ──
     async def sales_analysis(self, date_from: date, date_to: date, *, group_by: str = "sku",
                              category: str = "all", marked: str = "all", q: str = "",
                              stations: list[str] | None = None) -> dict:
