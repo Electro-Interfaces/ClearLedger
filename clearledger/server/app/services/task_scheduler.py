@@ -889,6 +889,7 @@ async def run_digests(db, now: datetime, bucket: digest.Bucket) -> int:
 
 async def tick() -> dict[str, int]:
     """Один проход регламента. Ошибка одной части не отменяет остальные."""
+    from app.services.support_mirror import deliver_pending
     now = datetime.now(timezone.utc)
     out = {"recurrences": 0, "reminders": 0, "escalations": 0,
            "acquaints": 0, "approvals": 0, "events": 0, "exchange": 0, "break_glass": 0, "project_reconcile": 0,
@@ -913,6 +914,7 @@ async def tick() -> dict[str, int]:
                         ("series", run_meeting_series),
                         ("meetings", run_meetings),
                         ("partner_topics", run_partner_topics),
+                        ("support_mirror", deliver_pending),
                         ("digests", run_digests)):
             try:
                 out[key] = await (fn(db, now, bucket) if key in _WITH_BUCKET

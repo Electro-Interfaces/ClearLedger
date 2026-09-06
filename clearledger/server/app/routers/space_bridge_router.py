@@ -21,6 +21,7 @@ import base64
 import json
 import secrets
 import uuid
+from datetime import UTC, datetime
 from urllib.parse import quote
 from typing import Any
 
@@ -135,8 +136,8 @@ async def accept_partner_message(
     row, is_new = await partner_bridge.record_incoming(db, company.id, partner, payload)
     # Пришло клиенту — это ответ поддержки, и ему довольно ленты. Пришло НАМ —
     # это обращение, и оно должно встать в очередь оператора рядом со звонками.
-    if is_new and partner.role == "client":
-        await support_mirror.mirror_incoming(db, company.id, partner, row)
+    if partner.role == "client" and row.mirror_pending:
+        await support_mirror.deliver_pending(db, datetime.now(UTC), message_id=row.id)
     if is_new and row.topic_id is not None:
         await _return_ball(db, company.id, row.topic_id)
     return {"status": "accepted" if is_new else "duplicate", "id": str(row.id)}

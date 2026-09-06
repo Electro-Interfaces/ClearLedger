@@ -245,6 +245,7 @@ async def record_incoming(
         subject_kind=(payload.get("subjectKind") or None),
         subject_ref=(payload.get("subjectRef") or None),
         external_id=external_id,
+        mirror_pending=partner.role == "client",
     )
     db.add(row)
     await db.flush()

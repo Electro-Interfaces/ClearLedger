@@ -94,6 +94,12 @@ STORE_RECEIPT_MIGRATION_DDL = (
     # Отметки «Секретаря» по обращению: create_all заводит только новые таблицы.
     "ALTER TABLE eco_partner_topics ADD COLUMN IF NOT EXISTS notified_at TIMESTAMPTZ",
     "ALTER TABLE eco_partner_topics ADD COLUMN IF NOT EXISTS notified_state VARCHAR(20)",
+    "ALTER TABLE eco_partner_messages ADD COLUMN IF NOT EXISTS mirror_pending BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE eco_partner_messages ADD COLUMN IF NOT EXISTS mirror_attempts INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE eco_partner_messages ADD COLUMN IF NOT EXISTS mirror_next_at TIMESTAMPTZ",
+    "ALTER TABLE eco_partner_messages ADD COLUMN IF NOT EXISTS mirror_error TEXT",
+    "ALTER TABLE eco_partner_messages ADD COLUMN IF NOT EXISTS mirrored_at TIMESTAMPTZ",
+    "CREATE INDEX IF NOT EXISTS idx_partner_messages_mirror ON eco_partner_messages (mirror_pending, mirror_next_at)",
     "ALTER TABLE user_companies ADD COLUMN IF NOT EXISTS app_roles JSONB",
     "ALTER TABLE company_roles ADD COLUMN IF NOT EXISTS chat_scope VARCHAR(40)",
     "ALTER TABLE company_roles ADD COLUMN IF NOT EXISTS app_roles JSONB",

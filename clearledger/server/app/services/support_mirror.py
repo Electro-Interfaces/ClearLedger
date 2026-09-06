@@ -17,15 +17,19 @@
 """
 from __future__ import annotations
 
+import logging
 import uuid
+from datetime import datetime, timedelta
 
 import httpx
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import PartnerMessage, PartnerSpace, PartnerTopic
 from app.services import space_projection
 
 TIMEOUT = 10.0
+log = logging.getLogger("clearledger.support_mirror")
 
 
 async def mirror_incoming(
@@ -39,7 +43,8 @@ async def mirror_incoming(
     """
     try:
         app_row, link, token = await space_projection._target(db, company_id, "support")
-    except space_projection.ProjectionError:
+    except space_projection.ProjectionError as exc:
+        message.mirror_error = str(exc)[:500]
         return False
 
     url = (f"{space_projection._internal_base_url(app_row, 'support')}"
@@ -56,6 +61,7 @@ async def mirror_incoming(
         "email": message.author_email or f"{partner.code}@space.local",
         "name": f"{message.author_name or 'Сотрудник'} · {who}",
         "body": message.body,
+        "externalId": f"partner:{company_id}:{message.id}",
         # Чей это разговор — тредом, а не догадкой по тексту темы: по этой метке
         # ответ оператора уедет обратно в пространство клиента, а не упрётся в
         # отсутствующий канальный коннектор.
@@ -75,9 +81,48 @@ async def mirror_incoming(
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             resp = await client.post(url, json=payload,
                                      headers={"Authorization": f"Bearer {token}"})
-    except httpx.HTTPError:
+    except httpx.HTTPError as exc:
+        message.mirror_error = f"{type(exc).__name__}: Поддержка не подтвердила приём"
         return False
-    return resp.status_code < 400
+    if not 200 <= resp.status_code < 300:
+        message.mirror_error = f"Поддержка ответила HTTP {resp.status_code}"
+        return False
+    try:
+        result = resp.json()
+    except ValueError:
+        result = None
+    if not isinstance(result, dict) or result.get("ok") is not True or not result.get("threadId"):
+        message.mirror_error = "Поддержка не подтвердила создание обращения"
+        return False
+    return True
+
+
+async def deliver_pending(db, now: datetime, bucket=None, *, message_id=None) -> int:
+    stmt = (select(PartnerMessage, PartnerSpace)
+            .join(PartnerSpace, PartnerSpace.id == PartnerMessage.partner_id)
+            .where(PartnerMessage.mirror_pending.is_(True),
+                   PartnerMessage.direction == "in", PartnerSpace.role == "client",
+                   PartnerSpace.is_active.is_(True),
+                   or_(PartnerMessage.mirror_next_at.is_(None), PartnerMessage.mirror_next_at <= now))
+            .order_by(PartnerMessage.created_at)
+            .with_for_update(of=PartnerMessage, skip_locked=True).limit(20))
+    if message_id is not None:
+        stmt = stmt.where(PartnerMessage.id == message_id)
+    sent = 0
+    for message, partner in (await db.execute(stmt)).all():
+        message.mirror_attempts += 1
+        if await mirror_incoming(db, message.company_id, partner, message):
+            message.mirror_pending = False
+            message.mirrored_at = now
+            message.mirror_error = None
+            message.mirror_next_at = None
+            sent += 1
+        else:
+            delay = min(300 * (2 ** min(message.mirror_attempts - 1, 7)), 21600)
+            message.mirror_next_at = now + timedelta(seconds=delay)
+            log.warning("Обращение %s ожидает доставки в Поддержку: %s", message.id, message.mirror_error)
+    await db.commit()
+    return sent
 
 
 async def mirror_mail(

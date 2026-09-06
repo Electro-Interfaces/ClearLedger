@@ -505,6 +505,7 @@ async def pull_cabinet(
             space = {"domain": space_row.domain, "slug": space_row.slug}
     return {
         "email": addr, "level": row.level, "known": True,
+        "accessVersion": f"{row.id}:{row.updated_at.isoformat()}",
         "company": client.short_name or client.name if client else None,
         "counterpartyId": str(row.counterparty_id) if row.counterparty_id else None,
         "inn": client.inn if client else None,
@@ -528,6 +529,7 @@ async def pull_demos(
         "id": r.code, "title": r.title, "desc": r.description or "",
         "upstream": r.upstream_url or "", "external": r.external_url or "",
         "landing": r.landing or "",
+        "accessVersion": f"{r.id}:{r.updated_at.isoformat()}",
     } for r in res.scalars().all()]}
 
 

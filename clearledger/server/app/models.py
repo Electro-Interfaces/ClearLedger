@@ -12978,6 +12978,11 @@ class PartnerMessage(Base):
     # Ошибка последней попытки доставки — чтобы «не дошло» было видно, а не
     # выяснялось через неделю от клиента.
     delivery_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mirror_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    mirror_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    mirror_next_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    mirror_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mirrored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
 
@@ -12985,6 +12990,7 @@ class PartnerMessage(Base):
         UniqueConstraint("partner_id", "direction", "external_id",
                          name="uq_partner_message_external"),
         Index("idx_partner_messages_feed", "company_id", "partner_id", "created_at"),
+        Index("idx_partner_messages_mirror", "mirror_pending", "mirror_next_at"),
     )
 
 
