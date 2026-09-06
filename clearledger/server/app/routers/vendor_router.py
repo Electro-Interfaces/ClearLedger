@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -13,7 +14,7 @@ from app.auth import assert_company_product, get_company_by_api_key, get_current
 from app.database import get_db
 from app.models import (
     App, Company, CompanyApp, PartnerAttachment, PartnerMessage, PartnerTopic,
-    SiteCabinetUser, SourceFile, User,
+    SourceFile, User,
 )
 from app.routers.site_router import _call
 from app.routers.space_bridge_router import _verify_visit
@@ -75,6 +76,9 @@ async def _remote(db, cid, vendor, user, operation, demo_id=None):
 
 
 async def _client(db, company, payload, operation):
+    spaces = {code.strip() for code in os.getenv("ELSY_CLIENT_SPACES", "").split(",") if code.strip()}
+    if payload.space not in spaces:
+        raise HTTPException(403, "Приложение Элси+ не подключено для этого клиента")
     partner = await partner_bridge.get_partner(db, company.id, payload.space, role="client")
     if partner is None or not partner.counterparty_id:
         raise HTTPException(403, "Отношение с клиентом не настроено")
@@ -87,18 +91,7 @@ async def _client(db, company, payload, operation):
             or not claims.get("company_id") or not claims.get("sub")
             or not claims.get("exp") or not claims.get("email")):
         raise HTTPException(403, "Пропуск не подходит для этого действия")
-    row = (await db.execute(select(SiteCabinetUser).where(
-        SiteCabinetUser.company_id == company.id,
-        SiteCabinetUser.counterparty_id == partner.counterparty_id,
-        SiteCabinetUser.email == str(claims["email"]).strip().lower(),
-        SiteCabinetUser.is_active.is_(True),
-        SiteCabinetUser.level.in_(["client", "partner", "admin"]),
-    ))).scalar_one_or_none()
-    return partner, claims, row
-
-
-def _allowed(row, code):
-    return row is not None and (not row.demos or code in row.demos)
+    return partner, claims
 
 
 @router.get("/vendor/{code}/catalog")
@@ -122,7 +115,7 @@ async def launch_demo(code: str, payload: DemoRequest, company_id: str = Query(.
 async def provide_catalog(payload: VendorRequest,
                           company: Company = Depends(get_company_by_api_key),
                           db: AsyncSession = Depends(get_db)):
-    _, _, account = await _client(db, company, payload, "catalog")
+    await _client(db, company, payload, "catalog")
     result = await _call(db, company.id, "/api/space/catalog")
     if not result.get("connected") or not isinstance(result.get("data"), dict):
         raise HTTPException(503, "Каталог пока недоступен")
@@ -135,7 +128,7 @@ async def provide_catalog(payload: VendorRequest,
             if isinstance(image, str) and image.startswith("/products/") and ".." not in image else None
         demo = product.get("demo")
         if demo:
-            product["demo"] = {**demo, "allowed": _allowed(account, demo.get("code"))}
+            product["demo"] = {**demo, "allowed": bool(demo.get("ready"))}
         products.append(product)
     return {"products": products, "help": data.get("help", [])}
 
@@ -144,12 +137,12 @@ async def provide_catalog(payload: VendorRequest,
 async def provide_demo(payload: VendorRequest,
                        company: Company = Depends(get_company_by_api_key),
                        db: AsyncSession = Depends(get_db)):
-    _, claims, account = await _client(db, company, payload, "demo")
+    partner, claims = await _client(db, company, payload, "demo")
     demo_id = claims.get("demo_id")
-    if not demo_id or not _allowed(account, demo_id):
-        raise HTTPException(403, "Доступ к показу ещё не открыт")
+    if not demo_id:
+        raise HTTPException(403, "Не указан показ")
     result = await _call(db, company.id, "/api/space/demo/launch", method="POST",
-                         json_body={"email": account.email, "demo_id": demo_id})
+                         json_body={"space": partner.code, "actor_id": claims["sub"], "demo_id": demo_id})
     data = result.get("data")
     if not result.get("connected") or not isinstance(data, dict):
         raise HTTPException(503, "Показ сейчас недоступен. Попробуйте ещё раз")

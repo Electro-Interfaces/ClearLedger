@@ -17,6 +17,7 @@ from app.services import app_registry, sso
 
 @pytest.fixture
 def signed_actor(monkeypatch):
+    monkeypatch.setenv("ELSY_CLIENT_SPACES", "customer")
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     monkeypatch.setattr(sso, "_private_key", lambda: key)
     jwk = json.loads(RSAAlgorithm.to_jwk(key.public_key()))
@@ -71,7 +72,7 @@ async def test_disabled_portal_rejects_even_full_access_user(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", [{"operation": "catalog"}, {"space": "other"}, {"sub": ""}, {"email": ""}])
-async def test_actor_scope_checked_before_account_lookup(monkeypatch, signed_actor, change):
+async def test_actor_scope_checked(monkeypatch, signed_actor, change):
     key, keys, values = signed_actor
     claims = jwt.decode(sso.sign_vendor_token(**values), options={"verify_signature": False})
     claims.update(change)
@@ -87,7 +88,7 @@ async def test_actor_scope_checked_before_account_lookup(monkeypatch, signed_act
 
 
 @pytest.mark.asyncio
-async def test_account_lookup_bound_to_relationship(monkeypatch, signed_actor):
+async def test_space_member_needs_no_website_account(monkeypatch, signed_actor):
     _, keys, values = signed_actor
     cid, counterparty = uuid.uuid4(), uuid.uuid4()
     partner = SimpleNamespace(code="customer", counterparty_id=counterparty)
@@ -95,19 +96,16 @@ async def test_account_lookup_bound_to_relationship(monkeypatch, signed_actor):
     monkeypatch.setattr(vendor.partner_bridge, "partner_jwks", AsyncMock(return_value=keys))
     db = SimpleNamespace(execute=AsyncMock(return_value=Mock(scalar_one_or_none=lambda: None)))
     payload = vendor.VendorRequest(space="customer", token=sso.sign_vendor_token(**values))
-    _, _, account = await vendor._client(db, SimpleNamespace(id=cid, slug="supplier"), payload, "demo")
-    query = db.execute.call_args.args[0].compile()
-    assert cid in query.params.values()
-    assert counterparty in query.params.values()
-    assert values["user"].email in query.params.values()
-    assert "is_active IS true" in str(query)
-    assert account is None
-    assert not vendor._allowed(account, "monitor")
+    found, claims = await vendor._client(db, SimpleNamespace(id=cid, slug="supplier"), payload, "demo")
+    assert found is partner
+    assert claims["sub"] == str(values["user"].id)
+    db.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_revoked_demo_never_reaches_website(monkeypatch):
-    monkeypatch.setattr(vendor, "_client", AsyncMock(return_value=(None, {"demo_id": "monitor"}, None)))
+@pytest.mark.parametrize("spaces", ["", "other"])
+async def test_unconnected_space_never_reaches_demo_gateway(monkeypatch, spaces):
+    monkeypatch.setenv("ELSY_CLIENT_SPACES", spaces)
     call = AsyncMock()
     monkeypatch.setattr(vendor, "_call", call)
     with pytest.raises(HTTPException) as error:
@@ -117,10 +115,20 @@ async def test_revoked_demo_never_reaches_website(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_space_without_active_customer_relationship_rejected(monkeypatch):
+    monkeypatch.setenv("ELSY_CLIENT_SPACES", "customer")
+    monkeypatch.setattr(vendor.partner_bridge, "get_partner", AsyncMock(return_value=None))
+    with pytest.raises(HTTPException) as error:
+        await vendor._client(None, SimpleNamespace(id=uuid.uuid4()),
+                             vendor.VendorRequest(space="customer", token="token"), "demo")
+    assert error.value.status_code == 403
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["https://other.test/demo-run/monitor/", "//other.test/", "/demo-run/support/"])
 async def test_demo_redirect_cannot_leave_configured_site(monkeypatch, path):
-    account = SimpleNamespace(email="person@example.test", demos=["monitor"])
-    monkeypatch.setattr(vendor, "_client", AsyncMock(return_value=(None, {"demo_id": "monitor"}, account)))
+    monkeypatch.setattr(vendor, "_client", AsyncMock(return_value=(
+        SimpleNamespace(code="customer"), {"demo_id": "monitor", "sub": "actor"})))
     monkeypatch.setattr(vendor, "_call", AsyncMock(return_value={
         "connected": True, "url": "https://site.example.test", "data": {"url": path}}))
     with pytest.raises(HTTPException) as error:
@@ -130,11 +138,11 @@ async def test_demo_redirect_cannot_leave_configured_site(monkeypatch, path):
 
 @pytest.mark.asyncio
 async def test_demo_returns_website_one_time_ticket(monkeypatch):
-    account = SimpleNamespace(email="person@example.test", demos=["monitor"])
-    monkeypatch.setattr(vendor, "_client", AsyncMock(return_value=(None, {"demo_id": "monitor"}, account)))
+    monkeypatch.setattr(vendor, "_client", AsyncMock(return_value=(
+        SimpleNamespace(code="customer"), {"demo_id": "monitor", "sub": "actor"})))
     call = AsyncMock(return_value={"connected": True, "url": "https://site.example.test",
         "data": {"url": "/demo-run/monitor/?t=one-time", "expires_in": 60}})
     monkeypatch.setattr(vendor, "_call", call)
     result = await vendor.provide_demo(vendor.VendorRequest(space="customer", token="token"), SimpleNamespace(id=uuid.uuid4()), None)
     assert result["url"] == "https://site.example.test/demo-run/monitor/?t=one-time"
-    assert call.call_args.kwargs["json_body"] == {"email": account.email, "demo_id": "monitor"}
+    assert call.call_args.kwargs["json_body"] == {"space": "customer", "actor_id": "actor", "demo_id": "monitor"}
