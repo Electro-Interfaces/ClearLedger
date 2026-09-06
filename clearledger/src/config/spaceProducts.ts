@@ -431,6 +431,7 @@ const ROUTE_APPS: [string, string][] = [
   ['/auditor', 'auditor'],
   // «Сайт» — публичная витрина и кабинет клиента.
   ['/site', 'site'],
+  ['/elsy', 'elsy'],
 ]
 
 /**
@@ -440,7 +441,7 @@ const ROUTE_APPS: [string, string][] = [
  */
 const CORE_APP_TITLES: Record<string, string> = {
   chat: 'Чаты', admin: 'Управление', data: 'Данные', info: 'Инфо', pulse: 'Пульс',
-  plan: 'Задачи', support: 'Заявки', auditor: 'Аудитор', docs: 'Трек', site: 'Сайт',
+  plan: 'Задачи', support: 'Заявки', auditor: 'Аудитор', docs: 'Трек', site: 'Сайт', elsy: 'Элси+',
 }
 
 /** Имя приложения Ядра по адресу; null — адрес принадлежит Учёту или продукту. */

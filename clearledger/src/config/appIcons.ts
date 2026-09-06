@@ -8,7 +8,7 @@
 import {
   BarChart3, BookOpen, Building2, ClipboardList, Database, FileText, Gauge, HardHat,
   LayoutGrid, LifeBuoy, Megaphone, MessageCircle, MessagesSquare, ShieldCheck,
-  ShoppingCart, Video, Wallet,
+  Handshake, ShoppingCart, Video, Wallet,
 } from 'lucide-react'
 
 export type AppIcon = typeof LayoutGrid
@@ -31,6 +31,7 @@ const ICONS: Record<string, AppIcon> = {
   'building-2': Building2,
   'shopping-cart': ShoppingCart,
   'megaphone': Megaphone,
+  'handshake': Handshake,
 }
 
 export function appIcon(name?: string | null): AppIcon {

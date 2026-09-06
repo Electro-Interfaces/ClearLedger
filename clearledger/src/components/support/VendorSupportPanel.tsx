@@ -16,7 +16,7 @@
  * включена — остаётся прежний выход: чат приложения и телефон куратора, потому
  * что «написать некому» человек должен узнать до того, как напишет.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ArrowLeft, Loader2, LifeBuoy, Paperclip, Plus, Send,
@@ -61,7 +61,7 @@ function Header({ back, title, hint }: {
   return (
     <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2.5">
       {back ? (
-        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={back}>
+        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={back} aria-label="Назад к обращениям">
           <ArrowLeft className="h-4 w-4" />
         </Button>
       ) : (
@@ -130,24 +130,32 @@ function Feed({ messages, vendor, loading, companyId }: {
 }
 
 function Composer({ onSend, onAttach, attaching, pending, error, placeholder }: {
-  onSend: (text: string) => void
-  onAttach?: (file: File, note: string) => void
+  onSend: (text: string) => Promise<unknown>
+  onAttach?: (file: File, note: string) => Promise<unknown>
   attaching?: boolean
   pending: boolean; error?: string; placeholder: string
 }) {
   const [text, setText] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
-  const submit = () => { const t = text.trim(); if (t) { onSend(t); setText('') } }
+  const submit = async () => {
+    const draft = text
+    if (!draft.trim() || pending || attaching) return
+    try {
+      await onSend(draft.trim())
+      setText((current) => current === draft ? '' : current)
+    } catch { /* Ошибку показывает состояние отправки, черновик остаётся. */ }
+  }
   return (
     <div className="border-t border-border/60 p-3">
       <Textarea
+        aria-label={placeholder}
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder={placeholder}
         rows={3}
         className="resize-none text-sm"
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) submit()
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void submit() }
         }}
       />
       <div className="mt-2 flex items-center justify-between gap-2">
@@ -155,13 +163,19 @@ function Composer({ onSend, onAttach, attaching, pending, error, placeholder }: 
         {onAttach && (
           <>
             <input ref={fileRef} type="file" className="hidden"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const f = e.target.files?.[0]
-                if (f) { onAttach(f, text.trim()); setText('') }
                 e.target.value = ''
+                const draft = text
+                if (f && !attaching && !pending) {
+                  try {
+                    await onAttach(f, draft.trim())
+                    setText((current) => current === draft ? '' : current)
+                  } catch { /* Сохраняем текст при ошибке загрузки. */ }
+                }
               }} />
             <Button size="sm" variant="ghost" className="ml-auto gap-1.5"
-              disabled={attaching} onClick={() => fileRef.current?.click()}
+              disabled={attaching || pending} onClick={() => fileRef.current?.click()}
               title="Приложить файл — уйдёт вместе с репликой">
               {attaching ? <Loader2 className="h-4 w-4 animate-spin" />
                 : <Paperclip className="h-4 w-4" />}
@@ -169,12 +183,12 @@ function Composer({ onSend, onAttach, attaching, pending, error, placeholder }: 
             </Button>
           </>
         )}
-        <Button size="sm" className="gap-2" disabled={!text.trim() || pending} onClick={submit}>
+        <Button size="sm" className="gap-2" disabled={!text.trim() || pending || attaching} onClick={() => void submit()}>
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Отправить
         </Button>
       </div>
-      {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {error && <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
     </div>
   )
 }
@@ -215,17 +229,20 @@ function TopicView({ vendor, companyId, topicCode, back }: {
           topic?.subjectLabel,
         ].filter(Boolean).join(' · ') || vendor.name}
       />
-      <Feed messages={feed.data?.messages || []} vendor={vendor} loading={feed.isLoading}
-        companyId={companyId} />
-      <Composer
-        onSend={(t) => send.mutate(t)} pending={send.isPending}
-        onAttach={(file, note) => attach.mutate({ file, note })}
+      {feed.isError ? <div role="alert" className="space-y-3 p-4 text-sm">
+        <p>Не удалось загрузить переписку.</p>
+        <Button variant="outline" onClick={() => void feed.refetch()}>Попробовать ещё раз</Button>
+      </div> : <Feed messages={feed.data?.messages || []} vendor={vendor} loading={feed.isLoading}
+        companyId={companyId} />}
+      {feed.isSuccess && <Composer
+        onSend={(t) => send.mutateAsync(t)} pending={send.isPending}
+        onAttach={(file, note) => attach.mutateAsync({ file, note })}
         attaching={attach.isPending}
         error={send.isError || attach.isError
           ? (((send.error || attach.error) as Error)?.message || 'Не удалось отправить')
           : undefined}
         placeholder="Дополнить обращение"
-      />
+      />}
     </div>
   )
 }
@@ -255,14 +272,17 @@ function GeneralView({ vendor, companyId, back }: {
  *  Предмет приходит из карточки, откуда нажали «Спросить поддержку»: он и даёт
  *  теме первое название — переписывать его человек может, но с пустого места
  *  начинать не должен. */
-function NewTopicForm({ vendor, companyId, subject, done }: {
+function NewTopicForm({ vendor, companyId, subject, done, relationship }: {
   vendor: PartnerSpaceRef; companyId: string; subject?: AskSubject | null
   done: (code: string) => void
+  relationship?: boolean
 }) {
   const qc = useQueryClient()
   const { company } = useCompany()
   const [title, setTitle] = useState(subject?.label || '')
   const [body, setBody] = useState('')
+  const fieldId = useId()
+  const productQuestion = subject?.kind === 'product'
   // Шаблон спрашивает сведения, за которыми иначе идёт вторая переписка: объект,
   // время, что делали. Предмет из карточки уже назван — тогда тему не трогаем,
   // а болванку подставляем: она про содержание, а не про заголовок.
@@ -282,7 +302,7 @@ function NewTopicForm({ vendor, companyId, subject, done }: {
       <Header back={() => done('')} title="Новое обращение"
         hint={subject ? `${subject.label} · уйдёт в ${vendor.name}` : `Уйдёт в ${vendor.name}`} />
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-        <div className="space-y-1">
+        {!productQuestion && !relationship && <div className="space-y-1">
           <label className="text-xs text-muted-foreground">С чем обращение</label>
           <div className="flex flex-wrap gap-1.5">
             {templates.map((t) => (
@@ -296,17 +316,19 @@ function NewTopicForm({ vendor, companyId, subject, done }: {
               </button>
             ))}
           </div>
+        </div>}
+        <div className="space-y-1">
+          <label htmlFor={`${fieldId}-title`} className="text-xs text-muted-foreground">Тема</label>
+          <Input id={`${fieldId}-title`} value={title} onChange={(e) => setTitle(e.target.value)}
+            placeholder={relationship ? 'Коротко: что хотите обсудить' : 'Коротко: что не работает'} className="text-sm" />
         </div>
         <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Тема</label>
-          <Input value={title} onChange={(e) => setTitle(e.target.value)}
-            placeholder="Коротко: что не работает" className="text-sm" />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs text-muted-foreground">Что случилось</label>
-          <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={6}
+          <label htmlFor={`${fieldId}-body`} className="text-xs text-muted-foreground">{productQuestion || relationship ? 'Ваша задача или вопрос' : 'Что случилось'}</label>
+          <Textarea id={`${fieldId}-body`} value={body} onChange={(e) => setBody(e.target.value)} rows={6}
             className="resize-none text-sm"
-            placeholder="Экран, шаги и время — по ним поддержка найдёт событие быстрее, чем по одному «не работает»." />
+            placeholder={productQuestion || relationship
+              ? 'Расскажите, что хотите улучшить или посмотреть. Тему и продукт передадим вместе с обращением.'
+              : 'Укажите экран, шаги и время события.'} />
         </div>
         <Button className="w-full gap-2" disabled={!title.trim() || !body.trim() || open.isPending}
           onClick={() => open.mutate()}>
@@ -323,9 +345,10 @@ function NewTopicForm({ vendor, companyId, subject, done }: {
   )
 }
 
-export function VendorSupportPanel({ vendor, companyId, subject, openTopicCode }: {
+export function VendorSupportPanel({ vendor, companyId, subject, openTopicCode, relationship }: {
   vendor: PartnerSpaceRef; companyId: string; subject?: AskSubject | null
   openTopicCode?: string | null
+  relationship?: boolean
 }) {
   // '' — список, 'general' — прежняя переписка, 'new' — форма, иначе код обращения.
   // Пришли из карточки с предметом — сразу форма: человек нажал «спросить», а не
@@ -340,7 +363,7 @@ export function VendorSupportPanel({ vendor, companyId, subject, openTopicCode }
   })
 
   if (view === 'new') {
-    return <NewTopicForm vendor={vendor} companyId={companyId} subject={subject}
+    return <NewTopicForm vendor={vendor} companyId={companyId} subject={subject} relationship={relationship}
       done={(code) => setView(code)} />
   }
   if (view === 'general') {
@@ -354,17 +377,23 @@ export function VendorSupportPanel({ vendor, companyId, subject, openTopicCode }
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header title={vendor.name}
-        hint="Вопросы и ошибки по работе программы — сюда. Ответ придёт в обращение." />
+        hint={relationship ? 'Вопросы, показы и согласованные работы. Ответ придёт в обращение.'
+          : 'Вопросы и ошибки по работе программы. Ответ придёт в обращение.'} />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {topics.isLoading ? (
           <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />Открываю обращения…
           </div>
+        ) : topics.isError ? (
+          <div role="alert" className="flex flex-col items-start gap-3 p-4">
+            <p className="text-sm">Не удалось загрузить обращения.</p>
+            <Button variant="outline" onClick={() => void topics.refetch()}>Попробовать ещё раз</Button>
+          </div>
         ) : items.length === 0 ? (
           <p className="px-1 py-6 text-center text-sm text-muted-foreground">
-            Обращений пока нет. Опишите, что случилось: экран, шаги и время — по ним
-            поддержка найдёт событие быстрее, чем по одному «не работает».
+            {relationship ? 'Обращений пока нет. Напишите о своей задаче, продукте или документе.'
+              : 'Обращений пока нет. Опишите экран, шаги и время события.'}
           </p>
         ) : (
           <div className="space-y-1.5">

@@ -22,7 +22,7 @@ import {
 
 /** Предмет обращения: вид, идентификатор у себя и как его назвать соседу. */
 export interface AskSubject {
-  kind: 'doc' | 'task' | 'object' | 'ticket' | 'shift'
+  kind: 'doc' | 'task' | 'object' | 'ticket' | 'shift' | 'product'
   ref: string
   /** «Договор ВХ-114 от 02.09», «Объект 208, АЗС Светогорск» — номер и название. */
   label: string

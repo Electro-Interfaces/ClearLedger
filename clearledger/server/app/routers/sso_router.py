@@ -46,6 +46,7 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
                    "docs": "/docs",
                    # «Сайт» — публичная витрина и кабинет клиента (elsyplus.ru).
                    "site": "/site",
+                   "elsy": "/elsy",
                    # Продукты в подключении: маршрут есть, за ним заставка.
                    "netlink": "/netlink", "accounting": "/accounting", "diag": "/diagnostics",
                    # Рабочие места компании без объектов (профиль `office`): бухгалтерия-
@@ -74,13 +75,13 @@ INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect"
                    "books": "app", "revenue": "app", "auditor": "service",
                    # «Сайт» — рабочее место, а не служебная кухня: витрину и кабинет
                    # ведёт человек по своему делу, как бухгалтерию или реализацию.
-                   "site": "app"}
+                   "site": "app", "elsy": "app"}
 # Порядок в списке: сначала управление, потом приложения, сервисы — в конце.
 INTERNAL_SORT = {"admin": 5, "pulse": 8, "ledger": 10, "projects": 12, "ops": 14, "sales": 16,
                  "corp": 17, "shop": 18, "marketing": 19, "support": 20, "netlink": 22,
                  "finance": 25, "accounting": 26,
                  "books": 20, "revenue": 21,
-                 "chat": 30, "auditor": 31, "docs": 32, "site": 33,
+                 "chat": 30, "auditor": 31, "docs": 32, "site": 33, "elsy": 34,
                  "plan": 40, "conf": 50, "connect": 59, "data": 60,
                  "diag": 61, "info": 62}
 

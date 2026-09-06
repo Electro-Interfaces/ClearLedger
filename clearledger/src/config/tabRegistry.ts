@@ -6,7 +6,7 @@
  * скролла страницы (как раньше решала `MainLayout.isWorkspace`).
  */
 import { matchPath } from 'react-router-dom'
-import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone, Activity, ListChecks } from 'lucide-react'
+import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone, Activity, ListChecks, Handshake } from 'lucide-react'
 import { SPACE_PRODUCTS, SPACE_PAGES, productLabel } from './spaceProducts'
 import type { ComponentType } from 'react'
 import {
@@ -38,6 +38,7 @@ const WORKSPACE_PATHS = new Set<string>([
   '/docs', '/docs/work', '/docs/company', '/docs/overview', '/docs/regulation', '/docs/setup',
   // «Аудитор» — две колонки со своим скроллом внутри: разговор и каталог навыков.
   '/auditor',
+  '/elsy',
   ...SPACE_PRODUCTS.map((p) => p.route),
   // Та же страница под адресом продукта (`/finance/files`) — и раскладка та же.
   ...SPACE_PRODUCTS.map((p) => `${p.route}/files`),
@@ -48,6 +49,7 @@ const FUEL_ONLY = new Set<string>(oneCItems.map((i) => i.to))
 
 // Плоская карта статических путей → пункт меню.
 const STATIC: Record<string, NavItemDef> = {}
+STATIC['/elsy'] = { to: '/elsy', icon: Handshake, label: 'Элси+' }
 for (const it of [...mainNavItems, ...dataItems, ...oneCItems, ...settingsItems]) {
   STATIC[it.to] = it
 }
