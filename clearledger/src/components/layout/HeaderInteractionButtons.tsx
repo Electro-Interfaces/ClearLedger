@@ -18,6 +18,7 @@ import { isDemoMode } from '@/services/apiClient'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useDocsApp } from '@/hooks/useDocsApp'
 import { useCompany } from '@/contexts/CompanyContext'
+import { usePulseMobileNav } from '@/pulse/PulseMobileNav'
 
 /** Пилюля-кнопка: синий акцент, активное состояние — как у остальных кнопок шапки. */
 const btnCls = (active: boolean) =>
@@ -49,6 +50,10 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
   const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
   const [confBusy, setConfBusy] = useState(false)
   const tasksOn = useDocsApp()
+  // Там, где снизу стоит панель пульта, чат, «Трек» и календарь на телефоне уже
+  // есть — и есть крупной кнопкой под большим пальцем. Пилюли шапки в этом случае
+  // повтор, и место в мобильной шапке отдаётся имени экрана.
+  const belowOnPhone = usePulseMobileNav() ? 'hidden md:inline-flex' : ''
 
   async function startConference() {
     if (confBusy) return
@@ -83,12 +88,12 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
           рельсе и открывается доком. */}
       {tasksOn && (
         <Button variant="outline" size="sm" onClick={() => toggleInteraction('calendar')}
-          className={btnCls(interactionSection === 'calendar')} title="Календарь пространства">
+          className={`${belowOnPhone} ${btnCls(interactionSection === 'calendar')}`} title="Календарь пространства">
           <CalendarDays className="h-4 w-4" />
           <span className="hidden lg:inline">Календарь</span>
         </Button>
       )}
-      <Button variant="outline" size="sm" onClick={() => toggleInteraction('chat')} className={btnCls(interactionSection === 'chat')} title="Чаты пространства">
+      <Button variant="outline" size="sm" onClick={() => toggleInteraction('chat')} className={`${belowOnPhone} ${btnCls(interactionSection === 'chat')}`} title="Чаты пространства">
         <MessageCircle className="h-4 w-4" />
         <span className="hidden lg:inline">Чат</span>
         <Badge count={unreadCounts.chat} />
@@ -98,7 +103,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
           реестры, маршруты, регламент — живёт приложением, и в него ведёт
           «Открыть Трек» из этого же окна. */}
       {tasksOn && (
-        <Button variant="outline" size="sm" onClick={() => toggleInteraction('tasks')} className={btnCls(interactionSection === 'tasks')} title="Трек: что на мне сейчас">
+        <Button variant="outline" size="sm" onClick={() => toggleInteraction('tasks')} className={`${belowOnPhone} ${btnCls(interactionSection === 'tasks')}`} title="Трек: что на мне сейчас">
           <ListChecks className="h-4 w-4" />
           <span className="hidden lg:inline">Трек</span>
           <Badge count={unreadCounts.tasks} />

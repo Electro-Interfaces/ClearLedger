@@ -1,8 +1,29 @@
 import { Link, useLocation } from 'react-router-dom'
 import { Activity, CalendarDays, LayoutGrid, ListChecks, MessageCircle } from 'lucide-react'
+import { useCompany } from '@/contexts/CompanyContext'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useDocsApp } from '@/hooks/useDocsApp'
+import { useAppEnabled } from '@/hooks/useCompanyRegistry'
+import { isPwaInstalled } from '@/lib/pwaInstall'
 import { cn } from '@/lib/utils'
+
+/**
+ * Показана ли нижняя панель пульта — одно условие на всех, кто из-за неё прячет
+ * свой повтор.
+ *
+ * Чат и «Трек» стояли на телефоне в трёх местах сразу: пилюлями в шапке,
+ * кнопками в теле пульта и здесь (замечание МАГа 06.09.2026). Панель — самая
+ * доступная полоса экрана, поэтому на телефоне единственной остаётся она, а
+ * шапка и быстрые действия свои копии убирают. Признак нужен всем троим, и
+ * держать его в трёх местах значило бы починить повтор повтором.
+ */
+export function usePulseMobileNav(): boolean {
+  const { companyId, canApp } = useCompany()
+  const pulseOn = useAppEnabled(companyId, 'pulse')
+  const { pathname } = useLocation()
+  return canApp('pulse') && pulseOn !== false
+    && (pathname.startsWith('/pulse') || isPwaInstalled())
+}
 
 export function PulseMobileNav() {
   const { pathname, search } = useLocation()

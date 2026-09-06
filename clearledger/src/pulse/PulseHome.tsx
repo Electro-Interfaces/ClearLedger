@@ -19,6 +19,7 @@ import { getPulseDay, type PulseKpi } from './pulseService'
 import { KpiTile } from './parts'
 import { HOME_SECTIONS, getHomeSettings, saveHomeSettings, type HomeConfig, type HomeSection, type HomeSettings } from './pulseHomeService'
 import { availablePulseViews } from './PulseLayout'
+import { usePulseMobileNav } from './PulseMobileNav'
 
 const refreshInterval = 60_000
 const liveQuery = { staleTime: 30_000, refetchInterval: refreshInterval, refetchOnWindowFocus: true }
@@ -35,6 +36,9 @@ function Home() {
   const { openInteraction } = useSupportContext()
   const trackOn = useDocsApp()
   const { open, busy } = useOpenApp()
+  // Порог тот же, что у самой панели (`md:hidden`): разойдись они — на планшете в
+  // портрете было бы и то и другое.
+  const belowOnPhone = usePulseMobileNav() ? 'hidden md:flex' : ''
   const [params] = useSearchParams()
   const [editing, setEditing] = useState(false)
   const [online, setOnline] = useState(navigator.onLine)
@@ -74,12 +78,17 @@ function Home() {
         onClick={() => setEditing(!editing)} aria-expanded={editing} aria-label={editing ? 'Закрыть настройку' : 'Настроить пульт'}><Settings2 className="size-4" /><span className="hidden sm:inline">{editing ? 'Закрыть настройку' : 'Настроить пульт'}</span></Button>
     </header>
     {!online && <p role="status" className="flex items-start gap-2 rounded-lg border p-3 text-sm"><WifiOff className="size-5 shrink-0" />Нет сети. Показаны последние полученные сведения; действия потребуют подключения.</p>}
-    <nav aria-label="Быстрые действия пульта" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      <Button variant="outline" className="min-h-12 justify-start gap-2" onClick={() => openInteraction('chat')}><MessageCircle className="size-5" />Чат</Button>
-      {trackOn && <Button variant="outline" className="min-h-12 justify-start gap-2" onClick={() => openInteraction('tasks')}><ListChecks className="size-5" />Трек</Button>}
+    {/* На телефоне снизу стоит панель пульта, и чат, «Трек» и «Приложения» есть
+        там — крупной кнопкой под большим пальцем. Здесь они прячутся: одно и то
+        же действие в трёх местах экрана читается не как забота, а как беспорядок
+        (замечание МАГа 06.09.2026). Остаётся «Конференция» — её в панели нет.
+        На широком экране панели нет вовсе, и ряд показывается целиком. */}
+    <nav aria-label="Быстрые действия пульта" className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-4">
+      <Button variant="outline" className={`min-h-12 justify-start gap-2 ${belowOnPhone}`} onClick={() => openInteraction('chat')}><MessageCircle className="size-5" />Чат</Button>
+      {trackOn && <Button variant="outline" className={`min-h-12 justify-start gap-2 ${belowOnPhone}`} onClick={() => openInteraction('tasks')}><ListChecks className="size-5" />Трек</Button>}
       {conferenceOn && <Button variant="outline" className="min-h-12 justify-start gap-2" disabled={!online || !conf.data?.enabled || !!busy}
         onClick={() => void open('conf')}><Video className="size-5" />{busy === 'conf' ? 'Создаём…' : 'Конференция'}</Button>}
-      <Button variant="outline" className="min-h-12 justify-start gap-2" asChild><Link to="/pulse?view=apps"><LayoutGrid className="size-5" />Приложения</Link></Button>
+      <Button variant="outline" className={`min-h-12 justify-start gap-2 ${belowOnPhone}`} asChild><Link to="/pulse?view=apps"><LayoutGrid className="size-5" />Приложения</Link></Button>
     </nav>
     {conferenceOn && !conf.isPending && (!conf.data?.enabled || conf.isError) && <p className="text-sm text-muted-foreground">
       {conf.isError ? 'Не удалось проверить доступность конференций.' : 'Конференции пока не настроены в пространстве.'}
