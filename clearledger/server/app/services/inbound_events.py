@@ -18,10 +18,11 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, text, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,25 +64,31 @@ async def accept(db: AsyncSession, provider: str, event: dict[str, Any],
 
 async def process_pending(db: AsyncSession, limit: int = 50) -> int:
     """Обработать принятые события. Ошибка одного не отменяет остальные."""
-    rows = (await db.execute(
-        select(InboundEvent)
+    ids = (await db.execute(
+        select(InboundEvent.id)
         .where(InboundEvent.processed_at.is_(None))
         .order_by(InboundEvent.received_at)
         .limit(limit)
     )).scalars().all()
 
     done = 0
-    for row in rows:
+    for row_id in ids:
+        row = (await db.scalars(select(InboundEvent).where(
+            InboundEvent.id == row_id, InboundEvent.processed_at.is_(None)
+        ).with_for_update(skip_locked=True))).one_or_none()
+        if row is None:
+            continue
+        external_id, event_type = row.external_id, row.type
         try:
             result, error = await _handle(db, row)
         except Exception as exc:  # noqa: BLE001 — одно событие не валит проход
-            log.exception("Событие %s (%s) не обработано", row.external_id, row.type)
-            # Откат обязателен: после сорванной вставки сессия не принимает записи,
-            # и без него отметка «разобрано» не легла бы ни на это событие, ни на
-            # следующие. Отметка ставится отдельным запросом — объект после отката
-            # к сессии уже не привязан.
+            log.exception("Событие %s (%s) не обработано", external_id, event_type)
+            # После rollback ORM-объекты истекают. Для отметки и следующего
+            # события используем сохранённые ID и заново читаем строки.
             await db.rollback()
-            await db.execute(update(InboundEvent).where(InboundEvent.id == row.id).values(
+            await db.execute(update(InboundEvent).where(
+                InboundEvent.id == row_id, InboundEvent.processed_at.is_(None)
+            ).values(
                 processed_at=datetime.now(timezone.utc), result="failed",
                 error=f"{type(exc).__name__}: {exc}"[:500]))
             await db.commit()
@@ -219,26 +226,30 @@ async def _handle(db: AsyncSession, row: InboundEvent) -> tuple[str, str | None]
     if not ticket_id:
         return "skipped", "В событии нет ссылки на процесс"
 
-    # Проект находим через тот же процесс: Ядро читает витрину Поддержки прямым
-    # SQL — базы сведены, — и это дешевле, чем гонять идентификатор проекта в
-    # каждом событии и надеяться, что отправитель его положил.
-    project_id = await db.scalar(text(
-        "select eco_project_id from public.tickets where id = :tid"), {"tid": str(ticket_id)})
-    if not project_id:
+    if row.company_id is None:
+        return "skipped", "У события нет компании интеграции"
+    try:
+        process_id = str(uuid.UUID(str(ticket_id)))
+    except ValueError:
+        return "skipped", "Некорректная ссылка на процесс"
+
+    from app.services import projects_process
+
+    subjects = await projects_process.process_subjects(db, row.company_id, process_id)
+    project_ids = [uuid.UUID(s["id"]) for s in subjects if s["type"] == projects_process.SUBJECT_TYPE]
+    if not project_ids:
         return "skipped", "Процесс не связан с проектом"
 
-    site = (await db.execute(
-        select(EzsSite).where(EzsSite.id == project_id).limit(1)
-    )).scalar_one_or_none()
-    if site is None:
+    sites = (await db.scalars(select(EzsSite).where(
+        EzsSite.id.in_(project_ids), EzsSite.company_id == row.company_id
+    ))).all()
+    if not sites:
         return "skipped", "Проект не найден"
 
     # Отражаем исход тем же кодом, что и явная сверка: одна логика на два входа —
     # человек нажал «Сверить» и событие пришло само.
-    from app.services import projects_process
-
-    await projects_process.reconcile(db, site.company_id, site, user=None)
-    # Шаг доигран — отметка намерения больше не нужна.
-    site.pending_link_id = None
-    site.pending_at = None
+    for site in sites:
+        await projects_process.reconcile(db, row.company_id, site, user=None)
+        site.pending_link_id = None
+        site.pending_at = None
     return "ok", None

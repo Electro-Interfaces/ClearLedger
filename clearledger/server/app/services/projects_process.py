@@ -224,6 +224,17 @@ async def _call(db: AsyncSession, company_id, method: str, path: str,
 call_process = _call
 
 
+async def process_subjects(db: AsyncSession, company_id, process_id: str) -> list[dict[str, str]]:
+    data = await _call(db, company_id, "GET", f"{FACADE}/instances/{process_id}/subjects")
+    subjects = data.get("subjects")
+    if not isinstance(subjects, list) or any(
+        not isinstance(s, dict) or not isinstance(s.get("type"), str)
+        or not isinstance(s.get("id"), str) for s in subjects
+    ):
+        raise ProjectionError("Координатор вернул некорректные связи процесса")
+    return subjects
+
+
 async def send_verb(db: AsyncSession, company_id, process_id: str, verb: str, *,
                     branch_id: str | None = None,
                     payload: dict[str, Any] | None = None) -> dict[str, Any]:
