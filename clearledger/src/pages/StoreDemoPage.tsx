@@ -103,6 +103,7 @@ function DemoStationConsole({ onOpen }: { onOpen: (stationId: string) => void })
 }
 
 export function StoreDemoPage() {
+  const [menuOpen, setMenuOpen] = useState(false)
   const [section, setSection] = useState<StoreMode>('store_network')
   const [view, setView] = useState('station_console')
   const [periodDays, setPeriodDays] = useState(24)
@@ -114,6 +115,7 @@ export function StoreDemoPage() {
     const nextViews = STORE_VIEWS.filter((item) => item.section === mode)
     setSection(mode)
     setView(DEFAULT_VIEW[mode] ?? nextViews[0]?.key ?? 'overview')
+    setMenuOpen(false)
   }
 
   function toggleStation(id: string, checked: boolean) {
@@ -144,9 +146,23 @@ export function StoreDemoPage() {
         </div>
 
         <div className="flex min-w-0 items-center gap-2 px-3 sm:px-5 xl:px-7">
-          <Button variant="ghost" size="icon" className="xl:hidden" aria-label="Открыть меню">
-            <Menu />
-          </Button>
+          <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="icon" className="xl:hidden" aria-label="Открыть меню">
+                <Menu />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="dark max-h-[70dvh] w-64 overflow-y-auto p-2 xl:hidden">
+              <nav aria-label="Разделы магазина на телефоне">
+                {STORE_SECTIONS.map((item) => (
+                  <Button key={item.mode} variant={section === item.mode ? 'secondary' : 'ghost'}
+                    className="w-full justify-start" onClick={() => selectSection(item.mode)}>
+                    <item.icon className="size-4" />{item.label}
+                  </Button>
+                ))}
+              </nav>
+            </PopoverContent>
+          </Popover>
           <div className="flex items-center gap-2 xl:hidden">
             <img src={`${import.meta.env.BASE_URL}pwa/gig/icon.svg`} alt="" className="size-10 rounded-xl" />
             <span className="font-semibold">Магазин</span>

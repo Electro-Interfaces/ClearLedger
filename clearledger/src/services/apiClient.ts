@@ -16,7 +16,8 @@
 import { demoGet, demoPost, demoWrite } from '@/demo/demoApi'
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? ''
-const TOKEN_KEY = 'clearledger-token'
+const STORE_DEMO = import.meta.env.BASE_URL === '/demo-run/store/app/'
+const TOKEN_KEY = STORE_DEMO ? 'clearledger-store-demo-token' : 'clearledger-token'
 const DEMO_KEY = 'tradeledger-demo'
 const DEMO_PATH_PATTERN = /(^|\/)demo(\/|$)/
 
@@ -27,7 +28,7 @@ if (demoParam === '0') sessionStorage.removeItem(DEMO_KEY)
 /** Изолированный показ оригинального интерфейса на синтетических данных. */
 export const isDemoPath = (): boolean => DEMO_PATH_PATTERN.test(window.location.pathname)
 export const isDemoMode = (): boolean => {
-  if (isDemoPath()) return true
+  if (STORE_DEMO || isDemoPath()) return true
   if (sessionStorage.getItem(DEMO_KEY) !== '1') return false
   // Флаг `?demo=1` живёт во вкладке, и человек, открывший демо-ссылку, а затем
   // вошедший в своё пространство в той же вкладке, продолжал смотреть синтетику
