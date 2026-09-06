@@ -57,9 +57,13 @@
       })();
     </script>
     <script>
-      // Theme: apply dark class before paint to prevent flash
+      // Theme: apply dark class before paint to prevent flash.
+      // ?theme= выигрывает: встроенная фреймом витрина пространства одевается по
+      // приложению-хозяину, а не по своей настройке (см. public/eco-rail.js).
       (function() {
-        var t = localStorage.getItem('clearledger-theme');
+        var forced = new URLSearchParams(location.search).get('theme');
+        var t = forced === 'dark' || forced === 'light'
+          ? forced : localStorage.getItem('clearledger-theme');
         if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
           document.documentElement.classList.add('dark');
         }

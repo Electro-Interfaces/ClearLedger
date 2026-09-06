@@ -18,6 +18,13 @@
  * состав пространства). Теперь пункт меню открывает плашки ПОВЕРХ текущего экрана,
  * переход — только по плашке, а рабочий стол стал первой из них.
  *
+ * ВИТРИНА ОДНА. Плашки продуктов рисует НЕ этот файл: панель показывает фреймом стол
+ * Ядра во встроенном виде (`/apps` → `EcosystemHomePage embedded`). До 06.09.2026 здесь
+ * лежала своя разметка плиток, и она отставала от стола на несколько решений: в
+ * Поддержке не было ни выбора «карточки или список», ни избранного, ни переносимых
+ * строк, а карта готовности продуктов существовала во второй копии. Теперь каталог,
+ * слои, избранное и вид — одни на всё пространство, где бы панель ни открылась.
+ *
  * КАТАЛОГ. Продукты берутся из единого реестра Ядра (`GET /api/sso/apps`) — того же,
  * что питает рабочий стол Ledger, поэтому отключённый в «Управлении» продукт исчезает
  * и здесь. Приложения контейнера живут на ОДНОМ origin (docs/CORE.md §6), значит токен
@@ -27,6 +34,11 @@
  */
 ;(() => {
   if (customElements.get('eco-nav')) return
+
+  // База Ядра — от адреса этого файла (`<база>/eco/rail.js`): на стенде показа
+  // пространство отдаётся под /demo-run/<стенд>/app/, и корень там не корень.
+  const CORE_BASE = (document.currentScript && document.currentScript.src || '/eco/rail.js')
+    .replace(/eco\/rail\.js.*$/, '')
 
   // Ключ токена Ядра в localStorage — тот же, что у фронта Ledger (services/apiClient.ts).
   // Один origin на контейнер делает хранилище общим, поэтому приложению достаточно того,
@@ -67,13 +79,6 @@
   // Рабочие места Ledger: страница Ядра открывается под адресом одного из них
   // (`/finance/objects`) — по адресу видно, откуда смотрят, и от этого зависят права.
   const WORKPLACES = ['projects', 'ops', 'sales', 'corp', 'shop', 'marketing', 'finance', 'data']
-
-  // Продукты, у которых в шапке уже есть своя кнопка (Чат · Заявки · Конференция).
-  // В списке «Приложения» их нет: один и тот же вход, названный дважды в двух соседних
-  // местах, только удлиняет список. Тот же набор исключает лаунчер Ядра
-  // (`services/ssoService.ts` → SIDE_BUTTON_APPS). На рабочем столе они остаются —
-  // там витрина всего, что подключено компании.
-  const SIDE_BUTTON_APPS = ['chat', 'plan', 'conf']
 
   const token = () => {
     try { return localStorage.getItem(TOKEN_KEY) } catch { return null }
@@ -128,13 +133,7 @@
   function loadApps() {
     if (!appsPromise) {
       appsPromise = core('/api/sso/apps')
-        .then((d) => {
-          // Профиль решает готовность части продуктов: у розницы топлива «Магазин»
-          // рабочий, у энергетики заготовка. Ядро отдаёт профиль не всегда — без него
-          // берём базовую карту, как стол до появления профилей.
-          if (d && d.profile_id) profileId = d.profile_id
-          return d && d.enabled ? (d.apps || []) : []
-        })
+        .then((d) => (d && d.enabled ? (d.apps || []) : []))
         .catch(() => [])
     }
     return appsPromise
@@ -144,85 +143,15 @@
     try { return new URL(url, location.href).origin === location.origin } catch { return false }
   }
 
-  /** Пользователь просит новую вкладку — как в любой ссылке (Ctrl/⌘/Shift, средняя кнопка). */
-  const wantsNewTab = (e) => !!e && (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1)
-
   // Имя продукта приходит из реестра, где его вводит админ, а рисуем мы через innerHTML.
   const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ))
 
-  /**
-   * Иконки продуктов по имени из реестра Ядра (`eco_apps.icon`). Разметка снята с тех же
-   * иконок lucide, которыми рисует стол: одинаковая иконка на всех плитках делала панель
-   * нечитаемой, продукт узнавался только по названию.
-   */
-  const PRODUCT_ICONS = {
-    'life-buoy': '<circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/><circle cx="12" cy="12" r="4"/>',
-    'clipboard-list': '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>',
-    'list-checks': '<path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/>',
-    'video': '<path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/>',
-    'file-text': '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
-    'messages-square': '<path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/>',
-    'message-circle': '<path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/>',
-    'shield-check': '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
-    'book-open': '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
-    'activity': '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
-    'hard-hat': '<path d="M10 10V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5"/><path d="M14 6a6 6 0 0 1 6 6v3"/><path d="M4 15v-3a6 6 0 0 1 6-6"/><rect x="2" y="15" width="20" height="4" rx="1"/>',
-    'gauge': '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
-    'bar-chart-3': '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
-    'wallet': '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
-    'database': '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>',
-    'building-2': '<path d="M10 12h4"/><path d="M10 8h4"/><path d="M14 21v-3a2 2 0 0 0-4 0v3"/><path d="M6 10H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-2"/><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/>',
-    'shopping-cart': '<circle cx="8" cy="21" r="1"/><circle cx="19" cy="21" r="1"/><path d="M2.05 2.05h2l2.66 12.42a2 2 0 0 0 2 1.58h9.78a2 2 0 0 0 1.95-1.57l1.65-7.43H5.12"/>',
-    'megaphone': '<path d="M11 6a13 13 0 0 0 8.4-2.8A1 1 0 0 1 21 4v12a1 1 0 0 1-1.6.8A13 13 0 0 0 11 14H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/><path d="M6 14a12 12 0 0 0 2.4 7.2 2 2 0 0 0 3.2-2.4A8 8 0 0 1 10 14"/><path d="M8 6v8"/>',
-    'network': '<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>',
-    'calculator': '<rect width="16" height="20" x="4" y="2" rx="2"/><line x1="8" x2="16" y1="6" y2="6"/><line x1="16" x2="16" y1="14" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/>',
-    'stethoscope': '<path d="M11 2v2"/><path d="M5 2v2"/><path d="M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/><path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/>',
-    'layout-grid': '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
-  }
-
-  /**
-   * Готовность продукта — точка на плитке: зелёная рабочий, жёлтая в развитии,
-   * красная в подключении.
-   *
-   * КОПИЯ карты из `src/config/spaceProducts.ts` (PRODUCT_READINESS + READINESS_BY_PROFILE).
-   * Рельс это статика, импортировать TS ему нечем, поэтому карта продублирована, а
-   * расхождение ловит `scripts/eco-rail-smoke.mjs`: он читает оба файла и падает, если
-   * состояния разъехались. Правится в spaceProducts.ts, сюда переносится следом.
-   */
-  const READINESS = {
-    admin: 'ready', data: 'partial', info: 'partial', pulse: 'partial',
-    chat: 'ready', plan: 'partial', conf: 'ready', docs: 'partial',
-    projects: 'ready', ops: 'partial', sales: 'ready',
-    books: 'ready', revenue: 'ready', econ: 'ready',
-    corp: 'draft', shop: 'draft', marketing: 'partial',
-    support: 'ready', finance: 'draft',
-    netlink: 'ready', accounting: 'draft', diag: 'draft',
-    monitor: 'ready', processing: 'ready',
-  }
-  const READINESS_BY_PROFILE = {
-    fuel: { sales: 'ready', shop: 'ready', finance: 'ready', ops: 'draft', data: 'partial' },
-  }
-  const READINESS_LABEL = { ready: 'рабочий продукт', partial: 'в развитии', draft: 'в подключении' }
-  const DOT_COLOR = { ready: '#10b981', partial: '#fbbf24', draft: '#ef4444' }
-  let profileId = null
-  const readinessOf = (code) =>
-    (profileId && READINESS_BY_PROFILE[profileId] && READINESS_BY_PROFILE[profileId][code])
-    || READINESS[code]
-
   const svg = (paths) =>
     `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`
 
-  /**
-   * Слои продуктов: те же группы и в том же порядке, что на рабочем столе Ядра.
-   *
-   * Раскладка идёт по слою каталога (`layer`), а торговый контур вынесен отдельно —
-   * «Поддержка» числится сервисом, но работают с ней в одном ряду с продажами,
-   * и на столе она стоит именно там. Панель в приложении обязана повторять стол:
-   * иначе человек ищет продукт в двух местах и находит в разных группах.
-   */
   /**
    * Границы рабочей области приложения для панели.
    *
@@ -246,50 +175,6 @@
            ` width:${Math.round(right - left)}px; height:${Math.round(bottom - top)}px;`
   }
 
-  /* Раскладка стола: КОПИЯ списков из `src/config/spaceLauncher.ts`. Рельс это
-     статика, импортировать TS ему нечем, поэтому коды продублированы — правится
-     там, сюда переносится следом.
-     Приведено к столу 06.09.2026 (замечание МАГа: «в поддержке открывается
-     какой-то левый рабочий стол»): раскладка здесь отставала на несколько решений
-     — были строки «Руководство», «Сеть и учёт», «Сервисы экосистемы», «Ядро
-     системы» и «Планы», которых на столе давно нет. */
-  const LEAD = ['pulse', 'monitor', 'chat', 'docs', 'conf']
-  const COMMERCE = ['sales', 'support', 'revenue', 'retail_store']
-  /* Служебные экраны с прикладным слоем и бывшие «сервисы экосистемы» — всё это
-     идёт одной строкой «Системные», следом за экранами управления. */
-  const SYSTEM = ['netlink']
-  const SERVICE = ['marketing', 'shop', 'corp', 'processing']
-  const INTERNAL_ORDER = ['projects', 'econ', 'perimeter', 'books']
-
-  const layersOf = (apps) => {
-    const all = apps || []
-    const management = [
-      ...all.filter((a) => (a.layer === 'admin' || SYSTEM.includes(a.code))
-        && !COMMERCE.includes(a.code)),
-      ...SERVICE.map((code) => all.find((a) => a.code === code)).filter(Boolean),
-      ...all.filter((a) => a.layer === 'service' && !COMMERCE.includes(a.code)
-        && !SERVICE.includes(a.code) && !LEAD.includes(a.code) && !SYSTEM.includes(a.code)),
-    ]
-    const products = all.filter((a) => !SERVICE.includes(a.code) && !SYSTEM.includes(a.code)
-      && (COMMERCE.includes(a.code) || LEAD.includes(a.code)
-        || (a.layer !== 'admin' && a.layer !== 'service')))
-    // Порядок строк задан явно, а не порядком реестра.
-    const lead = LEAD.map((code) => products.find((a) => a.code === code)).filter(Boolean)
-    const commerce = COMMERCE.map((code) => products.find((a) => a.code === code)).filter(Boolean)
-    const internal = products
-      .filter((a) => !COMMERCE.includes(a.code) && !LEAD.includes(a.code))
-      .sort((a, b) => {
-        const ia = INTERNAL_ORDER.indexOf(a.code), ib = INTERNAL_ORDER.indexOf(b.code)
-        return (ia < 0 ? INTERNAL_ORDER.length : ia) - (ib < 0 ? INTERNAL_ORDER.length : ib)
-      })
-    return [
-      { title: 'Управление', hint: 'как идут дела, связь и документы', items: lead },
-      { title: 'Клиенты и продажи', hint: 'кому продаём и как обслуживаем', items: commerce },
-      { title: 'Учёт', hint: 'проекты, экономика, периметр и бухгалтерия', items: internal },
-      { title: 'Системные', hint: 'настройка пространства и служебные данные', items: management },
-    ].filter((group) => group.items.length)
-  }
-
   /**
    * Фон и цвет текста САМОЙ страницы — для непрозрачной панели поверх приложения.
    *
@@ -307,6 +192,13 @@
         : colorOk(h.backgroundColor) ? h.backgroundColor : '#ffffff',
       fg: colorOk(b.color) ? b.color : '#111111',
     }
+  }
+
+  /** Тёмный ли фон: берём среднюю яркость первых трёх чисел из rgb()/rgba(). */
+  const isDark = (bg) => {
+    const n = String(bg).match(/\d+(\.\d+)?/g)
+    if (!n || n.length < 3) return false
+    return (Number(n[0]) + Number(n[1]) + Number(n[2])) / 3 < 128
   }
 
   /** Переход в продукт пространства: внутренний — по адресу, чужой — через ключ Ядра. */
@@ -358,9 +250,7 @@
    */
   class EcoNav extends HTMLElement {
     #items = null
-    #apps = null
     #open = false
-    #busy = null
 
     static observedAttributes = ['collapsed', 'label', 'part', 'user']
 
@@ -374,17 +264,13 @@
           ...(host ? SPACE_PAGES.map((p) => ({ ...p, href: `${host.route}${p.path}` })) : []),
           ...SPACE_LINKS.filter((l) => codes.includes(l.app)),
         ]
-        // Чат · Задачи · Конференции показываем, хотя они же стоят кнопками в шапке:
-        // на столе Ядра они есть, а панель обязана повторять стол. Прятать их значило
-        // показывать в приложении не тот состав пространства, что на столе.
-        this.#apps = apps
         this.render()
       })
       this.onKey = (e) => { if (e.key === 'Escape') this.#close() }
       document.addEventListener('keydown', this.onKey)
       // Границы области померены в момент открытия, поэтому при смене размеров окна
       // панель надо переложить, иначе она уедет с рабочей области
-      this.onResize = () => { if (this.#open) this.render() }
+      this.onResize = () => { if (this.#open) this.#place() }
       window.addEventListener('resize', this.onResize)
       // Уход по любому пункту меню закрывает панель: человек выбрал, куда идти, и
       // держать карточки поверх нового экрана незачем. Клики внутри самого рельса
@@ -409,6 +295,15 @@
 
     #close() { if (this.#open) { this.#open = false; this.render() } }
 
+    /** Переложить открытую панель по рабочей области — без перерисовки разметки:
+     *  новый innerHTML пересоздал бы фрейм витрины, и она грузилась бы заново. */
+    #place() {
+      const root = this.shadowRoot
+      if (!root) return
+      const box = workareaBox()
+      root.querySelectorAll('.scrim, .panel').forEach((el) => { el.style.cssText = box })
+    }
+
     attributeChangedCallback() { if (this.#items) this.render() }
 
     render() {
@@ -420,9 +315,12 @@
       const showApps = part !== 'pages'
       const showPages = part !== 'apps'
       const label = this.getAttribute('label') || 'Пространство'
-      const home = this.getAttribute('home') || '/'
       const items = this.#items || []
       const { bg, fg } = pageColors()
+      // Витрина внутри фрейма одевается по ХОЗЯИНУ, а не по своей настройке: тема
+      // Ядра лежит в общем localStorage и у человека может быть светлой, а Поддержка
+      // всегда тёмная — светлая панель в тёмном приложении выглядит чужой страницей.
+      const dark = isDark(bg)
       const box = workareaBox()
       // Без токена Ядра человек вошёл прямой формой приложения: ни страниц Ядра, ни
       // перехода в соседний продукт ему показывать не на чем. Блок исчезает целиком,
@@ -451,21 +349,21 @@
           svg{ width:16px; height:16px; flex:none }
           /* Панель приложений — поверх страницы, а не вместо неё: экран под ней
              остаётся на месте, человек возвращается к работе закрытием.
-             Фон и цвет берём У САМОЙ СТРАНИЦЫ (см. pageColors), а не у
-             prefers-color-scheme: тема приложения задаётся его же классом, и на тёмной
-             Поддержке при светлой системной теме панель выходила белой со светлым
-             текстом — читать было нечего. */
-          /* Панель занимает рабочую область приложения, а не всё окно: шапка и меню
+             Панель занимает рабочую область приложения, а не всё окно: шапка и меню
              остаются на виду и кликабельны, как на рабочем столе Ядра. Границы берём
              у элемента с data-eco-workarea; приложение без такой пометки получает
-             прежнее поведение на весь экран. */
-          .scrim{ position:fixed; ${box} z-index:2147483000; background:rgba(0,0,0,.45);
+             прежнее поведение на весь экран (см. workareaBox), и ставятся они
+             отдельным стилем — при смене размеров окна панель перекладывается, а
+             фрейм витрины при этом не перезагружается.
+             Фон берём У САМОЙ СТРАНИЦЫ (см. pageColors), а не у prefers-color-scheme:
+             тема приложения задаётся его же классом, и на тёмной Поддержке при светлой
+             системной теме панель выходила белой со светлым текстом. */
+          .scrim{ position:fixed; z-index:2147483000; background:rgba(0,0,0,.45);
                   backdrop-filter:blur(4px) }
-          .panel{ position:fixed; ${box} z-index:2147483001; display:flex; flex-direction:column;
-                  padding:16px; box-sizing:border-box; overflow-y:auto;
-                  background:${bg}; color:${fg} }
+          .panel{ position:fixed; z-index:2147483001; display:flex; flex-direction:column;
+                  box-sizing:border-box; background:${bg}; color:${fg} }
           .ptop{ display:flex; align-items:flex-start; gap:12px; width:100%;
-                 padding-bottom:12px;
+                 padding:10px 16px;
                  border-bottom:1px solid rgba(127,127,127,.25) }
           .ptitle{ flex:1; min-width:0 }
           .ptitle b{ display:block; font-size:14px; font-weight:600 }
@@ -473,46 +371,16 @@
           .px{ border:0; background:none; color:inherit; font:inherit; font-size:18px;
                line-height:1; padding:6px; border-radius:8px; cursor:pointer; opacity:.6 }
           .px:hover{ opacity:1; background:rgba(127,127,127,.16) }
-          .layers{ width:100%; padding-top:14px }
-          /* Слой стола: подпись слева, плитки справа. Ширина колонки заголовка и
-             размеры карточек взяты со стола Ядра — панель обязана выглядеть тем же
-             местом, а не соседним. */
-          .layer{ display:grid; grid-template-columns:116px minmax(0,1fr); gap:16px;
-                  padding:14px 0; border-top:1px solid rgba(127,127,127,.25) }
-          .layer:first-child{ border-top:0; padding-top:0 }
-          .layer h4{ margin:6px 0 0; font-size:11px; font-weight:600; letter-spacing:.1em;
-                     text-transform:uppercase; opacity:.6 }
-          .layer h4 span{ display:block; margin-top:2px; font-size:11px; font-weight:400;
-                          letter-spacing:0; text-transform:none; opacity:.75 }
-          .grid{ display:grid; gap:8px; width:100%;
-                 grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)) }
-          .tile{ display:flex; flex-direction:column; gap:8px; padding:10px 12px; box-sizing:border-box;
-                 border:1px solid rgba(127,127,127,.28); border-radius:12px;
-                 background:rgba(127,127,127,.06); color:inherit; font:inherit; text-align:left;
-                 cursor:pointer; transition:border-color .2s, background .2s }
-          .tile:hover{ border-color:rgba(80,130,255,.5); background:rgba(127,127,127,.14) }
-          .tile .row{ display:flex; align-items:center; gap:10px; width:100% }
-          .tile .ico{ flex:0 0 auto; display:inline-flex; padding:6px; border-radius:8px;
-                      background:rgba(80,130,255,.14); color:#5b8cff }
-          .tile:hover .ico{ background:#3b7bff; color:#fff }
-          .tile .ico svg{ width:16px; height:16px }
-          .tile .nm{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-                     font-size:14px; font-weight:500 }
-          .tile .ext{ flex:0 0 auto; opacity:.55 }
-          .tile .ext svg{ width:14px; height:14px }
-          .tile .dot{ flex:0 0 auto; width:8px; height:8px; border-radius:50% }
-          .tile .desc{ font-size:11px; line-height:1.35; opacity:.7;
-                       border-top:1px solid rgba(127,127,127,.2); padding-top:7px;
-                       display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
-                       overflow:hidden }
-          .spin{ animation:eco-spin 1s linear infinite; display:inline-flex }
-          @keyframes eco-spin{ to{ transform:rotate(360deg) } }
+          /* Витрина — стол Ядра во встроенном виде. Своей разметки плиток у панели
+             нет: каталог, слои, избранное и вид «карточки/список» одни на всё
+             пространство (src/pages/EcosystemHomePage.tsx). */
+          .apps{ flex:1; width:100%; border:0; background:transparent }
         </style>
         ${showPages && !collapsed && showApps ? `<div class="head">${escapeHtml(label)}</div>` : ''}
         ${showApps ? `
           <button class="nav ${collapsed ? 'narrow' : ''}" id="apps" aria-expanded="${this.#open}"
                   title="Приложения пространства">
-            ${this.#busy ? `<span class="spin">${svg(ICONS.apps)}</span>` : svg(ICONS.apps)}
+            ${svg(ICONS.apps)}
             ${collapsed ? '' : '<span>Приложения</span>'}
           </button>
 ` : ''}
@@ -524,60 +392,23 @@
             ${svg(ICONS[i.icon])}${collapsed ? '' : `<span>${escapeHtml(i.label)}</span>`}
           </a>`).join('') : ''}
         ${this.#open ? `
-          <div class="scrim" data-close></div>
-          <section class="panel" role="dialog" aria-label="Приложения пространства">
+          <div class="scrim" data-close style="${box}"></div>
+          <section class="panel" role="dialog" aria-label="Приложения пространства" style="${box}">
             <div class="ptop">
               <div class="ptitle">
                 <b>Приложения пространства</b>
-                <span>Выберите, куда перейти - экран под панелью останется на месте</span>
+                <span>Выберите, куда перейти — экран под панелью останется на месте</span>
               </div>
               <button class="px" data-close title="Закрыть">✕</button>
             </div>
-            <div class="layers">
-              ${this.#apps === null ? '' : layersOf(this.#apps).map((group) => `
-                <div class="layer">
-                  <h4>${escapeHtml(group.title)}${group.hint ? `<span>${escapeHtml(group.hint)}</span>` : ''}</h4>
-                  <div class="grid">
-                    ${group.items.map((a) => {
-                      const state = readinessOf(a.code)
-                      const hint = [a.name || a.code, a.description,
-                        a.mode === 'link' ? 'вход отдельный' : '',
-                        state ? READINESS_LABEL[state] : ''].filter(Boolean).join(' · ')
-                      return `
-                      <button class="tile" data-app="${escapeHtml(a.code)}" title="${escapeHtml(hint)}">
-                        <span class="row">
-                          <span class="ico">${this.#busy === a.code
-                            ? `<span class="spin">${svg(ICONS.apps)}</span>`
-                            : svg(PRODUCT_ICONS[a.icon] || PRODUCT_ICONS['layout-grid'])}</span>
-                          <span class="nm">${escapeHtml(a.name || a.code)}</span>
-                          ${a.mode === 'link' ? `<span class="ext">${svg(ICONS.external)}</span>` : ''}
-                          ${state ? `<span class="dot" style="background:${DOT_COLOR[state]}"></span>` : ''}
-                        </span>
-                        ${a.description ? `<span class="desc">${escapeHtml(a.description)}</span>` : ''}
-                      </button>`
-                    }).join('')}
-                  </div>
-                </div>`).join('')}
-            </div>
-            ${this.#apps === null ? '<div class="head">Загрузка…</div>' : ''}
+            <iframe class="apps" title="Приложения пространства"
+                    src="${CORE_BASE}apps?theme=${dark ? 'dark' : 'light'}"></iframe>
           </section>` : ''}
       `
 
       const appsBtn = root.getElementById('apps')
       if (appsBtn) appsBtn.onclick = () => { this.#open = !this.#open; this.render() }
       root.querySelectorAll('[data-close]').forEach((el) => { el.onclick = () => this.#close() })
-      const deskTile = root.querySelector('[data-home]')
-      if (deskTile) deskTile.onclick = (e) => {
-        if (wantsNewTab(e)) window.open(home, '_blank', 'noopener,noreferrer')
-        else location.assign(home)
-      }
-      root.querySelectorAll('[data-app]').forEach((el) => {
-        const app = (this.#apps || []).find((a) => a.code === el.dataset.app)
-        if (!app) return
-        const busy = (code) => { this.#busy = code; this.render() }
-        el.onclick = (e) => { if (!this.#busy) openApp(app, wantsNewTab(e), busy) }
-        el.onauxclick = (e) => { if (e.button === 1 && !this.#busy) openApp(app, true, busy) }
-      })
     }
   }
 

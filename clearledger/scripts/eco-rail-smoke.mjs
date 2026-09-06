@@ -7,7 +7,8 @@
  * в левом меню Поддержки исчезал целиком. Синтаксис при этом был безупречен.
  *
  * Проверка исполняет render на крошечном стабе DOM: открывает панель приложений и
- * смотрит, что разметка собралась и содержит группы стола.
+ * смотрит, что разметка собралась. Плиток в ней больше нет — витрину показывает
+ * фреймом стол Ядра (`/apps`), поэтому проверяем именно фрейм и его адрес.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -94,35 +95,17 @@ if (!onclick) throw new Error('кнопка «Приложения» не пол
 onclick()
 
 const html = shadow.innerHTML
-// Строки — те же, что на столе Ядра (`src/config/spaceLauncher.ts`): проверка ловит
-// расхождение панели в приложении со столом пространства.
-const must = ['Приложения пространства', 'Управление', 'Клиенты и продажи',
-  'Системные', 'Чаты']
-for (const m of must) {
-  if (!html.includes(m)) throw new Error(`в разметке панели нет «${m}»`)
-}
+if (!html.includes('Приложения пространства')) throw new Error('панель без заголовка')
 if (!html.includes('position:fixed')) throw new Error('панель без позиционирования')
-// Плитка обязана нести иконку продукта и точку готовности - без них панель
-// вырождается в список одинаковых карточек, что и было до 06.08.2026
-if (!html.includes('class="ico"')) throw new Error('плитки без иконок продуктов')
-if (!html.includes('class="dot"')) throw new Error('плитки без точки готовности')
+// Витрина — фрейм со столом Ядра во встроенном виде. Своей разметки плиток у панели
+// нет с 06.09.2026: каталог, слои, избранное и вид одни на всё пространство.
+if (!/<iframe[^>]+class="apps"/.test(html)) throw new Error('панель без фрейма витрины')
+if (!/src="[^"]*\/apps\?theme=(dark|light)"/.test(html)) {
+  throw new Error('фрейм витрины без адреса стола или без темы хозяина')
+}
+// Тема берётся у приложения-хозяина: стаб отдаёт тёмный фон страницы.
+if (!html.includes('theme=dark')) throw new Error('тёмное приложение получило светлую витрину')
+// Блок Ядра в меню остаётся: страницы пространства открываются под рабочим местом.
+if (!html.includes('/ops/intake')) throw new Error('в меню нет страниц Ядра')
 
-// Карта готовности продублирована из spaceProducts.ts - сверяем, что не разъехалась
-const rail = readFileSync(file, 'utf8')
-const cfg = readFileSync(path.join(path.dirname(file), '..', 'src', 'config', 'spaceProducts.ts'), 'utf8')
-const mapOf = (src, marker) => {
-  const i = src.indexOf(marker)
-  const body = src.slice(src.indexOf('{', i) + 1, src.indexOf('}', src.indexOf('{', i)))
-  return Object.fromEntries([...body.matchAll(/(\w+):\s*'(\w+)'/g)].map((m) => [m[1], m[2]]))
-}
-const inRail = mapOf(rail, 'const READINESS = ')
-const inCfg = mapOf(cfg, 'PRODUCT_READINESS: Record<string, Readiness> = ')
-for (const [code, state] of Object.entries(inCfg)) {
-  if (inRail[code] !== state) {
-    throw new Error(`готовность «${code}» разъехалась: в spaceProducts.ts ${state}, в рельсе ${inRail[code]}`)
-  }
-}
-for (const code of Object.keys(inRail)) {
-  if (!(code in inCfg)) throw new Error(`в рельсе лишний продукт «${code}»`)
-}
-console.log('eco-rail: render и панель отработали, разметка собрана')
+console.log('eco-rail: render, меню Ядра и фрейм витрины отработали')

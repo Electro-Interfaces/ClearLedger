@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { authorizeApp, type SsoApp } from '@/services/ssoService'
 import { startMeeting } from '@/services/conferenceService'
 import { useCompany } from '@/contexts/CompanyContext'
+import { assignTop } from '@/lib/topNav'
 
 function isSameOrigin(url: string) {
   try {
@@ -46,7 +47,9 @@ export function useOpenApp() {
       const url = await authorizeApp(code, companyId)
       // Чужой домен (мост) всегда уходит в новую вкладку: там своя сессия и свой «назад».
       if (newTab || !isSameOrigin(url)) window.open(url, '_blank', 'noopener,noreferrer')
-      else window.location.assign(url)
+      // Витрина пространства бывает открыта фреймом в чужом приложении — тогда
+      // переход уводит верхнее окно, а не рамку панели (`lib/topNav`).
+      else assignTop(url)
     } catch (e) {
       const msg = (e as Error).message || ''
       toast.error(/503|не настроен/i.test(msg) ? 'Единый вход не настроен' : 'Не удалось открыть приложение')

@@ -59,6 +59,7 @@ const DocsOverviewPage = lazy(() => import('@/pages/docs/DocsOverviewPage').then
 const DocsWorkPage = lazy(() => import('@/pages/docs/DocsWorkPage').then((m) => ({ default: m.DocsWorkPage })))
 // «Сайт» — публичная витрина и кабинет клиента: данные ведёт сам сайт, экран их читает.
 const SitePage = lazy(() => import('@/pages/site/SitePage').then((m) => ({ default: m.SitePage })))
+const ElsyPage = lazy(() => import('@/pages/elsy/ElsyPage').then((m) => ({ default: m.ElsyPage })))
 const PulseAppPage = lazy(() => import('@/pulse/PulseAppPage').then((m) => ({ default: m.PulseAppPage })))
 const PulsePwaEntry = lazy(() => import('@/pulse/PulsePwaEntry').then((m) => ({ default: m.PulsePwaEntry })))
 const PulseBusinessPage = lazy(() => import('@/pulse/PulseSections').then((m) => ({ default: m.PulseBusinessPage })))
@@ -270,6 +271,14 @@ const router = createBrowserRouter([
         element: <ProtectedRoute><LazyPage><EcosystemHomePage /></LazyPage></ProtectedRoute>,
       },
       {
+        // Витрина пространства БЕЗ шапки стола — её показывает фреймом панель
+        // «Приложения» в приложениях вне Ledger (`public/eco-rail.js`). Своей
+        // разметки у той панели больше нет: каталог, слои, избранное и выбор
+        // «карточки или список» одни на всё пространство.
+        path: '/apps',
+        element: <ProtectedRoute><LazyPage><EcosystemHomePage embedded /></LazyPage></ProtectedRoute>,
+      },
+      {
         // «Управление» — отдельное приложение экосистемы, свой shell (не в Ledger).
         // Разделы — вложенные маршруты: на раздел даётся ссылка, работает «назад».
         path: '/admin',
@@ -358,6 +367,7 @@ const router = createBrowserRouter([
             path: '/site',
             element: <RequireApp code="site"><LazyPage><SitePage /></LazyPage></RequireApp>,
           },
+          { path: '/elsy', element: <RequireApp code="elsy"><LazyPage><ElsyPage /></LazyPage></RequireApp> },
           // «Пульс» — рабочее место руководителя (ecosystem-deploy/docs/PULSE.md):
           // разделы в рельсе приложения, их пункты — во второй колонке (PulseLayout),
           // как в «Продажах» и «Проектах».

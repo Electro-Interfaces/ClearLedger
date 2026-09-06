@@ -11,30 +11,32 @@
  *
  * Классификация слоя приходит с бэкенда (`layer` в /api/sso/apps), не хардкодится по коду.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Menu, LayoutGrid, Rows3, ExternalLink, Loader2, Network, FileText, Star, ChevronDown,
+  LayoutGrid, Rows3, ExternalLink, Loader2, Network, FileText, Star, ChevronDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
 import { MobileContextBar } from '@/components/layout/MobileContextBar'
 import { MobileShell } from '@/components/common/MobileShell'
+import { MobileBottomNav } from '@/components/layout/MobileBottomNav'
 import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { InteractionModal } from '@/components/support/InteractionModal'
 import { SidebarNavContent } from '@/components/layout/AppSidebar'
 import { SidebarProvider } from '@/components/ui/sidebar'
-import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { type SsoApp } from '@/services/ssoService'
 import { listPartnerSpaces, visitPartnerSpace } from '@/services/partnerSpaceService'
 import { useOpenApp } from '@/hooks/useOpenApp'
+import { assignTop, inFrame, spaceUrl } from '@/lib/topNav'
 import { useTouchInput } from '@/hooks/use-mobile'
 import { useFavoriteApps } from '@/hooks/useFavoriteApps'
 import { readSectionOpen } from '@/hooks/useSectionOpen'
@@ -53,10 +55,9 @@ import {
  * Выбор помнится между заходами: это привычка человека, а не настройка пространства,
  * поэтому живёт в браузере, а не в профиле.
  *
- * Под пальцем выбора нет — только список (решение МАГа 06.09.2026): плитки на телефоне
- * едут горизонтальной каруселью внутри каждого слоя, поэтому до половины приложений
- * нужно догадаться доскроллить в сторону. Список показывает всё сверху вниз одним
- * жестом, которым человек и так листает экран.
+ * Под пальцем выбора нет — только список (решение МАГа 06.09.2026): плитка на узком
+ * экране умещает в ряд одну-две штуки, и каталог растягивается на несколько экранов.
+ * Список показывает всё сверху вниз одним жестом, которым человек и так листает.
  */
 export type LauncherView = 'tiles' | 'list'
 const VIEW_KEY = 'space.launcher.view'
@@ -168,7 +169,7 @@ function Tile({
       disabled={busy || inactive}
       title={[title, availability, subtitle, badge, readiness && READINESS_LABEL[readiness]]
         .filter(Boolean).join(' · ')}
-      className={`group relative flex h-full min-h-12 snap-start items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left
+      className={`group relative flex h-full min-h-12 items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left
                   transition-colors duration-200 sm:min-h-0 sm:flex-col sm:items-stretch sm:gap-2
                   ${inactive
                     ? 'cursor-inherit border-dashed border-border bg-card'
@@ -287,8 +288,13 @@ function Row({
 
 /**
  * Слой стола: подпись слева, плитки справа. Заголовок отдельной строкой стоил трёх
- * строк высоты на каждый слой — при трёх слоях это уже экран. Карточки держатся одной
- * строкой на любой ширине; если строка не помещается, прокручивается только этот слой.
+ * строк высоты на каждый слой — при трёх слоях это уже экран.
+ *
+ * Плитки ПЕРЕНОСЯТСЯ на столько строк, сколько нужно (решение МАГа 06.09.2026).
+ * Раньше слой ехал одной строкой с горизонтальной прокруткой: в «Системных»
+ * половина приложений пряталась за краем экрана — о ней надо было догадаться, —
+ * а при перетаскивании соседние карточки наезжали друг на друга. Высоту стол
+ * никак не ограничивает: он и так прокручивается сверху вниз.
  */
 function Section({
   title, hint, children, divider, view = 'tiles', collapsible, storageKey,
@@ -314,54 +320,6 @@ function Section({
     setOpen(next)
     try { localStorage.setItem(`space.launcher.open.${storageKey ?? title}`, next ? '1' : '0') } catch { /* хранилище недоступно */ }
   }
-  const scrollerRef = useRef<HTMLDivElement>(null)
-  const dragRef = useRef({
-    active: false, moved: false, pointerId: -1, startX: 0, startScrollLeft: 0,
-  })
-
-  function startDrag(event: React.PointerEvent<HTMLDivElement>) {
-    const scroller = scrollerRef.current
-    if (event.pointerType !== 'mouse' || event.button !== 0
-      || !scroller || scroller.scrollWidth <= scroller.clientWidth) return
-    dragRef.current = {
-      active: true,
-      moved: false,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startScrollLeft: scroller.scrollLeft,
-    }
-  }
-
-  function moveDrag(event: React.PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current
-    if (!drag.active || drag.pointerId !== event.pointerId) return
-    const distance = event.clientX - drag.startX
-    if (!drag.moved && Math.abs(distance) < 5) return
-    if (!drag.moved) {
-      drag.moved = true
-      event.currentTarget.setPointerCapture(event.pointerId)
-    }
-    event.currentTarget.scrollLeft = drag.startScrollLeft - distance
-    event.preventDefault()
-  }
-
-  function finishDrag(event: React.PointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current
-    if (!drag.active || drag.pointerId !== event.pointerId) return
-    drag.active = false
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    }
-    window.setTimeout(() => { drag.moved = false }, 0)
-  }
-
-  function suppressClickAfterDrag(event: React.MouseEvent<HTMLDivElement>) {
-    if (!dragRef.current.moved) return
-    event.preventDefault()
-    event.stopPropagation()
-    dragRef.current.moved = false
-  }
-
   return (
     <section className={`grid min-w-0 gap-x-4 gap-y-2 md:grid-cols-[116px_minmax(0,1fr)]
                          ${divider ? 'border-t border-border/60 pt-4' : ''}`}>
@@ -391,21 +349,12 @@ function Section({
       </div>
       {open && (
       <div
-        ref={scrollerRef}
         role="region"
         aria-label={`${title}: приложения`}
-        tabIndex={0}
-        onPointerDownCapture={startDrag}
-        onPointerMove={moveDrag}
-        onPointerUp={finishDrag}
-        onPointerCancel={finishDrag}
-        onClickCapture={suppressClickAfterDrag}
-        onDragStart={(event) => event.preventDefault()}
         className={view === 'list'
           ? 'flex min-w-0 flex-col gap-1 pb-1 pr-1'
-          : `grid min-w-0 snap-x snap-proximity grid-flow-col auto-cols-[minmax(300px,330px)]
-             cursor-grab select-none gap-2 overflow-x-auto overscroll-x-contain pb-2 pr-1 active:cursor-grabbing
-             sm:auto-cols-[minmax(208px,244px)]`}
+          : `grid min-w-0 gap-2 pb-1 pr-1
+             grid-cols-[repeat(auto-fill,minmax(min(100%,208px),244px))]`}
       >
         {children}
       </div>
@@ -510,7 +459,10 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
    */
   async function openProduct(app: SsoApp) {
     if (app.mode === 'internal' && app.route) {
-      navigate(app.route)
+      // Витрина, открытая фреймом в чужом приложении (`public/eco-rail.js`), уводит
+      // ВЕРХНЕЕ окно: переход внутри фрейма показал бы продукт в рамке панели.
+      if (inFrame()) assignTop(spaceUrl(app.route))
+      else navigate(app.route)
       onNavigate?.()
       return
     }
@@ -550,7 +502,7 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
     try {
       const res = await visitPartnerSpace(code, company.id)
       // Пропуск живёт две минуты — открываем сразу, «на потом» он не годится.
-      window.location.href = res.url
+      assignTop(res.url)
     } catch (e) {
       setVisiting(null)
       toast.error('Не удалось войти', { description: (e as Error).message })
@@ -734,12 +686,9 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
           {/* Основное меню — в левом верхнем углу, как в любом приложении
               пространства. Стол живёт вне общего каркаса, поэтому шторку он
               держит свою, но содержимое то же самое (SidebarNavContent). */}
+          {/* Бургера здесь нет (решение МАГа 06.09.2026): меню открывает нижняя
+              панель — та, до которой достаёт палец. Сама шторка осталась. */}
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="shrink-0 sm:hidden" title="Меню">
-                <Menu className="size-5" />
-              </Button>
-            </SheetTrigger>
             <SheetContent side="left" className="p-0 w-72 mobile-safe-left">
               <SheetTitle className="sr-only">Меню навигации</SheetTitle>
               <SheetDescription className="sr-only">Разделы пространства</SheetDescription>
@@ -793,7 +742,7 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
           двенадцать и число их растёт — при нехватке высоты верхние слои иначе просто
           обрезаются, и добраться до них нечем. Шапка остаётся на месте. */}
       <MobileShell className="mx-auto flex w-full min-h-0 max-w-[1600px] flex-1 flex-col gap-5
-                             overflow-y-auto px-4 py-5 sm:px-8">
+                             overflow-y-auto px-4 py-5 max-md:pb-20 sm:px-8">
         {/* Приветствие — одна строка: компания уже названа в шапке, повторять её
             отдельным абзацем значит занять высоту ради того же слова. */}
         <h1 className="shrink-0 text-lg font-semibold">
@@ -811,6 +760,10 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
             составом, что и панель «Приложения» в рабочей области приложений. */}
         {renderLayers()}
       </MobileShell>
+
+      {/* Нижняя панель пространства — и на столе: на телефоне она не пропадает нигде
+          (решение МАГа 06.09.2026), и меню открывается ею же. */}
+      {touch && <MobileBottomNav onMenu={() => setMenuOpen(true)} />}
 
       {/* Окно «Взаимодействие» — то же, что открывают кнопки шапки в приложениях.
           Стол живёт вне AdminLayout, который его монтирует, и без этой строки
