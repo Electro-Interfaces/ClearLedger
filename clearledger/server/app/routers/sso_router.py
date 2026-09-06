@@ -11,15 +11,18 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
-from app.auth import get_current_user
+from app.auth import assert_company_member, get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.deps import scope_company_id
 from app.models import Company, User, UserCompany
+from app.routers.pulse_home import HomeConfig, PulseHomePreference
 from app.services import sso
 
 settings = get_settings()
@@ -46,6 +49,7 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
                    "docs": "/docs",
                    # «Сайт» — публичная витрина и кабинет клиента (elsyplus.ru).
                    "site": "/site",
+                   "elsy": "/elsy",
                    # Продукты в подключении: маршрут есть, за ним заставка.
                    "netlink": "/netlink", "accounting": "/accounting", "diag": "/diagnostics",
                    # Рабочие места компании без объектов (профиль `office`): бухгалтерия-
@@ -74,13 +78,13 @@ INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect"
                    "books": "app", "revenue": "app", "auditor": "service",
                    # «Сайт» — рабочее место, а не служебная кухня: витрину и кабинет
                    # ведёт человек по своему делу, как бухгалтерию или реализацию.
-                   "site": "app"}
+                   "site": "app", "elsy": "app"}
 # Порядок в списке: сначала управление, потом приложения, сервисы — в конце.
 INTERNAL_SORT = {"admin": 5, "pulse": 8, "ledger": 10, "projects": 12, "ops": 14, "sales": 16,
                  "corp": 17, "shop": 18, "marketing": 19, "support": 20, "netlink": 22,
                  "finance": 25, "accounting": 26,
                  "books": 20, "revenue": 21,
-                 "chat": 30, "auditor": 31, "docs": 32, "site": 33,
+                 "chat": 30, "auditor": 31, "docs": 32, "site": 33, "elsy": 34,
                  "plan": 40, "conf": 50, "connect": 59, "data": 60,
                  "diag": 61, "info": 62}
 
@@ -240,3 +244,79 @@ async def authorize(
 async def jwks() -> dict[str, Any]:
     """Публичный JWKS — приложения экосистемы проверяют токены по kid."""
     return sso.public_jwks()
+
+
+# ─── Избранные приложения каталога ────────────────────────────────────────────
+#
+# Просьба МАГа 06.09.2026: в каталоге приложений человеку нужен свой раздел с тем,
+# чем он пользуется чаще всего. Список тот же, что «Закреплённые приложения» в
+# настройке пульта (`pulse_home_preferences.config.favorite_apps`) — второго списка
+# «моих приложений» у одного человека не заводим: отметил звёздочкой в каталоге —
+# то же увидел на пульте.
+#
+# Ручка живёт здесь, а не в «Пульсе»: каталог приложений открыт любому участнику
+# пространства, а `/api/pulse/*` требует прав на продукт «Пульс». Гейт продукта у
+# настроек пульта остаётся как был.
+
+
+class FavoriteApps(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    codes: list[str] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_codes(self):
+        if len(self.codes) != len(set(self.codes)):
+            raise ValueError("Приложения не должны повторяться")
+        if any(not code or len(code) > 80 for code in self.codes):
+            raise ValueError("Некорректный код приложения")
+        return self
+
+
+async def _home_prefs(db: AsyncSession, cid: uuid.UUID, user: User):
+    """Личная и общая строки настроек пульта: избранное живёт в личной."""
+    rows = (await db.scalars(select(PulseHomePreference).where(
+        PulseHomePreference.company_id == cid,
+        PulseHomePreference.owner.in_(["space", str(user.id)]),
+    ))).all()
+    by_owner = {row.owner: row for row in rows}
+    return by_owner.get(str(user.id)), by_owner.get("space")
+
+
+@router.get("/apps/favorites")
+async def get_favorite_apps(company_id: str, user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    cid = await assert_company_member(company_id, user, db)
+    personal, shared = await _home_prefs(db, cid, user)
+    own = personal.config if personal else None
+    config = own if own is not None else (shared.config if shared else None)
+    return {"codes": list((config or {}).get("favorite_apps", []))}
+
+
+@router.put("/apps/favorites")
+async def set_favorite_apps(company_id: str, body: FavoriteApps,
+                            user: User = Depends(get_current_user),
+                            db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    """Отметить приложения избранными.
+
+    Личный экран при этом фиксируется: если человек жил на общем шаблоне
+    пространства, его состав переносится в личную настройку как есть — вид экрана
+    не меняется, но дальнейшие правки общего шаблона к этому человеку уже не едут.
+    Иначе звёздочка в каталоге пропадала бы при каждой правке общего экрана.
+    """
+    cid = await assert_company_member(company_id, user, db)
+    personal, shared = await _home_prefs(db, cid, user)
+    if personal is None:
+        await db.execute(insert(PulseHomePreference).values(
+            company_id=cid, owner=str(user.id), config=None, revision=0,
+        ).on_conflict_do_nothing())
+        personal = await db.scalar(select(PulseHomePreference).where(
+            PulseHomePreference.company_id == cid,
+            PulseHomePreference.owner == str(user.id),
+        ).with_for_update())
+    base = personal.config
+    if base is None:
+        base = shared.config if shared and shared.config is not None else HomeConfig().model_dump()
+    personal.config = {**base, "favorite_apps": body.codes}
+    personal.revision += 1
+    await db.commit()
+    return {"codes": list(body.codes)}

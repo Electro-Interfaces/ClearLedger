@@ -65,7 +65,9 @@ export function appIcon(icon: string | undefined) {
 // оказались началом дня, а не общей утилитой вроде чата).
 // «Топливо» и «Торговый центр» стоят здесь, а не в «Учёте» (решение МАГа
 // 03.09.2026): это то, ЧЕМ торгуем, и открывают их раньше всего остального.
-export const COMMERCE_APPS = ['sales', 'shop', 'support', 'revenue', 'corp', 'retail_store']
+// «Интернет-магазин» и «Процессинг» отсюда убраны (решение МАГа 06.09.2026): пока
+// у них нет своих экранов, они стоят в сервисах экосистемы, а не в рабочей строке дня.
+export const COMMERCE_APPS = ['sales', 'support', 'revenue', 'retail_store']
 // «Пульс» — рабочее место руководителя над ВСЕМ пространством, поэтому своя строка
 // вверху стола. Круг узкий: у кого права нет, тот этой строки не увидит вовсе.
 // «Монитор» стоит здесь (решение МАГа 03.09.2026): состояние оборудования сети —
@@ -75,22 +77,26 @@ export const COMMERCE_APPS = ['sales', 'shop', 'support', 'revenue', 'corp', 're
 // утилита где-то внизу стола. Слой в реестре у них остался `service` — он говорит,
 // ЧТО это, а строка стола говорит, ЗАЧЕМ к этому идут.
 export const LEAD_APPS = ['pulse', 'monitor', 'chat', 'docs', 'conf']
-// ⚠ «Управленческий» (ops) отсюда убран (решение МАГа 03.09.2026): договоры и
-// аренда объектов — учётная работа, а не связь и оборудование. Уходит в «Учёт»
-// сам, по остаточному правилу ниже.
-export const OPERATIONS_APPS = ['projects', 'netlink', 'diag']
+// Строки «Сеть» больше нет (решение МАГа 06.09.2026): «Проекты» — учётная работа
+// и стоят в «Учёте», «Сеть передачи данных» — служебный экран и уходит в «Системные»,
+// «Диагностика» и так была там по слою. Отдельная строка на один продукт не нужна.
+//
+// Служебные экраны, у которых слой в реестре прикладной, а место — в «Системных».
+export const SYSTEM_APPS = ['netlink']
 // Сервис экосистемы — то, что обслуживает работу, а не ведёт её. После переноса
 // связи и документов в «Управление» (05.09.2026) здесь остаётся продвижение;
 // «Магазин» числился сервисом с тех пор, как был универсальным интернет-магазином,
 // у розницы это полноценный продукт и стоит он в рабочей строке (03.09.2026).
-export const SERVICE_APPS = ['marketing']
+export const SERVICE_APPS = ['marketing', 'shop', 'corp', 'processing']
 // Учётная строка: содержание сети и деньги за неё — в том порядке, в каком
 // цифра идёт от объекта к отчётности.
-const INTERNAL_ORDER = ['econ', 'perimeter', 'books']
+// «Проекты» идут первыми: стройка и присоединение объектов — начало учётной цепочки,
+// дальше экономика, периметр и бухгалтерия.
+const INTERNAL_ORDER = ['projects', 'econ', 'perimeter', 'books']
 
 export interface LauncherSection {
   /** Ключ строки — им же различаются пустые строки при отрисовке. */
-  key: 'lead' | 'commerce' | 'internal' | 'operations' | 'services' | 'management'
+  key: 'lead' | 'commerce' | 'internal' | 'management'
   title: string
   hint?: string
   apps: SsoApp[]
@@ -107,14 +113,22 @@ export function isOptionalApp(a: SsoApp) {
  * а меню рельса само отбрасывает пустые.
  */
 export function launcherSections(all: SsoApp[]): LauncherSection[] {
-  const management = all.filter((a) => a.layer === 'admin' && !COMMERCE_APPS.includes(a.code))
-  const services = [
+  // «Системные»: экраны самого пространства и всё, к чему обращаются не каждый день.
+  // Отдельной строки «Сервисы экосистемы» больше нет (решение МАГа 06.09.2026) — её
+  // состав переехал сюда же, следом за экранами управления.
+  //
+  // «Чаты», «Трек» и «Конференции» сюда НЕ попадают: слой в реестре у них `service`,
+  // но место — в «Управлении» (решение МАГа 05.09.2026), и показывать их дважды нельзя.
+  const management = [
+    ...all.filter((a) => (a.layer === 'admin' || SYSTEM_APPS.includes(a.code))
+      && !COMMERCE_APPS.includes(a.code)),
     ...SERVICE_APPS.map((code) => all.find((a) => a.code === code))
       .filter((a): a is SsoApp => !!a),
-    ...all.filter((a) => a.layer === 'service' && !COMMERCE_APPS.includes(a.code)
-      && !SERVICE_APPS.includes(a.code)),
+    ...all.filter((a) => a.layer === 'service' && a.layer !== undefined
+      && !COMMERCE_APPS.includes(a.code) && !SERVICE_APPS.includes(a.code)
+      && !LEAD_APPS.includes(a.code) && !SYSTEM_APPS.includes(a.code)),
   ]
-  const apps = all.filter((a) => !SERVICE_APPS.includes(a.code)
+  const apps = all.filter((a) => !SERVICE_APPS.includes(a.code) && !SYSTEM_APPS.includes(a.code)
     && (COMMERCE_APPS.includes(a.code) || LEAD_APPS.includes(a.code)
       || (a.layer !== 'admin' && a.layer !== 'service')))
   // Порядок строки задан явно: сводка, сеть, связь, документы, встречи.
@@ -126,12 +140,8 @@ export function launcherSections(all: SsoApp[]): LauncherSection[] {
   const commerce = COMMERCE_APPS
     .map((code) => apps.find((a) => a.code === code))
     .filter((a): a is SsoApp => !!a)
-  const operations = OPERATIONS_APPS
-    .map((code) => apps.find((a) => a.code === code))
-    .filter((a): a is SsoApp => !!a)
   const internal = apps
-    .filter((a) => !COMMERCE_APPS.includes(a.code) && !LEAD_APPS.includes(a.code)
-      && !OPERATIONS_APPS.includes(a.code))
+    .filter((a) => !COMMERCE_APPS.includes(a.code) && !LEAD_APPS.includes(a.code))
     .sort((a, b) => {
       const ia = INTERNAL_ORDER.indexOf(a.code), ib = INTERNAL_ORDER.indexOf(b.code)
       // Незаданные продукты идут следом за перечисленными, порядком реестра.
@@ -141,9 +151,12 @@ export function launcherSections(all: SsoApp[]): LauncherSection[] {
   return [
     { key: 'lead', title: 'Управление', hint: 'как идут дела, связь и документы', apps: lead },
     { key: 'commerce', title: 'Клиенты и продажи', hint: 'кому продаём и как обслуживаем', apps: commerce },
-    { key: 'internal', title: 'Учёт', hint: 'экономика, периметр и бухгалтерия', apps: internal },
-    { key: 'operations', title: 'Сеть', hint: 'связь, оборудование и состояние систем', apps: operations },
-    { key: 'services', title: 'Сервисы экосистемы', hint: 'общие для всех приложений', apps: services },
-    { key: 'management', title: 'Ядро системы', apps: management },
+    { key: 'internal', title: 'Учёт', hint: 'проекты, экономика, периметр и бухгалтерия', apps: internal },
+    // Служебные экраны пространства (решение МАГа 06.09.2026): «Управление»,
+    // «Подключения», «Данные», «Инфо», «Диагностика». К ним заходят не каждый день,
+    // а когда что-то настраивают или разбирают, — поэтому строка стоит последней и
+    // на столе сворачивается. Кому доступа нет, у того её и не будет: состав
+    // приходит уже отфильтрованным по правам.
+    { key: 'management', title: 'Системные', hint: 'настройка пространства и служебные данные', apps: management },
   ]
 }

@@ -39,3 +39,12 @@ export function useIsMobile() {
 export function useMaxWidth(maxPx: number) {
   return useMediaMatch(`(max-width: ${maxPx}px)`)
 }
+
+/**
+ * Работа пальцем, а не курсором (`ecosystem-deploy/docs/MOBILE.md` §1): развилка
+ * идёт по способу ввода, а не по ширине окна — планшет держат в руках так же, как
+ * телефон, а узкое окно на ноутбуке остаётся десктопом.
+ */
+export function useTouchInput() {
+  return useMediaMatch('(hover: none) and (pointer: coarse)')
+}

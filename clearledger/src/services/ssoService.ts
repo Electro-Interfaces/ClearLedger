@@ -4,7 +4,7 @@
  * handoff-токеном. Бэкенд: routers/sso_router.py (вызывается ФРОНТОМ с bearer, не
  * редиректом — иначе токен не долетел бы).
  */
-import { get } from './apiClient'
+import { get, put } from './apiClient'
 
 export interface SsoApp {
   code: string
@@ -84,4 +84,21 @@ export async function authorizeApp(code: string, companyId?: string): Promise<st
     '/api/sso/authorize', { app: code, company_id: companyId },
   )
   return r.url
+}
+
+/**
+ * Избранные приложения каталога — тот же список, что «Закреплённые приложения»
+ * в настройке пульта: у человека одно избранное на пространство, а не два.
+ * Ручка живёт в SSO, а не в «Пульсе»: каталог открыт любому участнику.
+ */
+export async function getFavoriteApps(companyId: string): Promise<string[]> {
+  const r = await get<{ codes: string[] }>('/api/sso/apps/favorites', { company_id: companyId })
+  return r.codes
+}
+
+export async function saveFavoriteApps(companyId: string, codes: string[]): Promise<string[]> {
+  const r = await put<{ codes: string[] }>(
+    `/api/sso/apps/favorites?company_id=${encodeURIComponent(companyId)}`, { codes },
+  )
+  return r.codes
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ArrowUpRight, CalendarDays, LayoutGrid, ListChecks, MessageCircle, RefreshCw, Settings2, Video, WifiOff } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpRight, CalendarDays, RefreshCw, Settings2, Video, WifiOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,7 +32,6 @@ export function PulseHome() {
 
 function Home() {
   const { company, companyId, canModule, canApp } = useCompany()
-  const { openInteraction } = useSupportContext()
   const trackOn = useDocsApp()
   const { open, busy } = useOpenApp()
   const [params] = useSearchParams()
@@ -74,13 +73,17 @@ function Home() {
         onClick={() => setEditing(!editing)} aria-expanded={editing} aria-label={editing ? 'Закрыть настройку' : 'Настроить пульт'}><Settings2 className="size-4" /><span className="hidden sm:inline">{editing ? 'Закрыть настройку' : 'Настроить пульт'}</span></Button>
     </header>
     {!online && <p role="status" className="flex items-start gap-2 rounded-lg border p-3 text-sm"><WifiOff className="size-5 shrink-0" />Нет сети. Показаны последние полученные сведения; действия потребуют подключения.</p>}
-    <nav aria-label="Быстрые действия пульта" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      <Button variant="outline" className="min-h-12 justify-start gap-2" onClick={() => openInteraction('chat')}><MessageCircle className="size-5" />Чат</Button>
-      {trackOn && <Button variant="outline" className="min-h-12 justify-start gap-2" onClick={() => openInteraction('tasks')}><ListChecks className="size-5" />Трек</Button>}
-      {conferenceOn && <Button variant="outline" className="min-h-12 justify-start gap-2" disabled={!online || !conf.data?.enabled || !!busy}
-        onClick={() => void open('conf')}><Video className="size-5" />{busy === 'conf' ? 'Создаём…' : 'Конференция'}</Button>}
-      <Button variant="outline" className="min-h-12 justify-start gap-2" asChild><Link to="/pulse?view=apps"><LayoutGrid className="size-5" />Приложения</Link></Button>
-    </nav>
+    {/* Из четырёх кнопок осталась одна (замечание МАГа 06.09.2026): «Чат», «Трек» и
+        «Приложения» стоят в нижней панели пульта и в шапке — второй раз называть их
+        здесь значит отодвигать работу вниз. Конференция остаётся: в нижнюю панель
+        шестой пункт не влезает, а в мобильной шапке шестая кнопка наезжала на бургер. */}
+    {conferenceOn && (
+      <nav aria-label="Быстрые действия пульта" className="flex">
+        <Button variant="outline" className="min-h-12 justify-start gap-2 sm:w-auto"
+          disabled={!online || !conf.data?.enabled || !!busy}
+          onClick={() => void open('conf')}><Video className="size-5" />{busy === 'conf' ? 'Создаём…' : 'Конференция'}</Button>
+      </nav>
+    )}
     {conferenceOn && !conf.isPending && (!conf.data?.enabled || conf.isError) && <p className="text-sm text-muted-foreground">
       {conf.isError ? 'Не удалось проверить доступность конференций.' : 'Конференции пока не настроены в пространстве.'}
       {conf.isError && <Button variant="link" className="min-h-11" onClick={() => void conf.refetch()}>Повторить</Button>}

@@ -62,7 +62,9 @@ export function AppsPanelSurface() {
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2 sm:px-6">
         <div className="min-w-0">
           <div className="text-sm font-semibold">Приложения пространства</div>
-          <div className="truncate text-xs text-muted-foreground">
+          {/* Пояснение — только там, где оно помещается: на телефоне строка
+              обрывалась на «экран под панелью ос…» и объясняла ровно ничего. */}
+          <div className="hidden truncate text-xs text-muted-foreground sm:block">
             Выберите, куда перейти — экран под панелью останется на месте
           </div>
         </div>

@@ -24,8 +24,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ArrowUpRight, Bell, BookOpen, CalendarDays, Check, Clock3, Eye, FileText, Flame,
-  ListChecks, Loader2, Plus, Star, Stamp, Users,
+  ArrowUpRight, Bell, BookOpen, CalendarDays, Check, ChevronDown, Clock3, Eye, FileText,
+  Flame, ListChecks, Loader2, Plus, Star, Stamp, Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -41,6 +41,9 @@ import { DOCS_VIEWS } from '@/pages/docs/DocsLayout'
 import { MyWorkPage } from '@/pages/docs/MyWorkPage'
 import { PlacedList } from '@/components/docs/PlacedList'
 import { cn } from '@/lib/utils'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { useSectionOpen } from '@/hooks/useSectionOpen'
+import { SearchPicker } from '@/components/tasks/SearchPicker'
 import { workCounts } from '@/lib/workCounts'
 
 /** Срок словами: «сегодня» / «завтра» / «просрочена на 3 дн» — точная дата тут лишняя. */
@@ -194,11 +197,17 @@ function Grip({ label, onMouseDown, onNudge }: {
 }
 
 
-export function TasksQuickPanel({ compact = false }: {
+export function TasksQuickPanel({ compact: compactProp }: {
   /** Правый док узкий: рельса и день туда не помещаются, остаётся список с
    *  разрезами строкой поверх. */
   compact?: boolean
 } = {}) {
+  // На телефоне компактная раскладка включается сама (замечание МАГа 06.09.2026):
+  // окно взаимодействия открывало «Трек» тремя полосами — рельса разрезов, список и
+  // полоса дня, — и на 353 px от них оставались обрезанные надписи «ЖДУ…», «ВЕДУ…»,
+  // а низ окна занимал «Мой день» вместо самой работы.
+  const isMobile = useIsMobile()
+  const compact = compactProp ?? isMobile
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { companyId } = useCompany()
@@ -302,47 +311,48 @@ export function TasksQuickPanel({ compact = false }: {
   const openTask = (id: string) => go(`/docs/company?view=errands&task=${id}`)
   const current = VIEWS.find((v) => v.key === view) ?? VIEWS[0]
 
+  const renderView = (v: typeof VIEWS[number]) => {
+    const Icon = v.icon
+    const n = счётчик(v.key)
+    const active = v.key === view
+    return (
+      <button key={v.key} type="button" title={v.hint}
+        onClick={() => setView(v.key)}
+        aria-current={active ? 'page' : undefined}
+        className={cn('flex items-center gap-2 rounded-md text-sm transition-colors',
+          compact ? 'shrink-0 px-2.5 py-1' : 'w-full px-2 py-1.5 text-left',
+          active ? 'bg-primary text-primary-foreground'
+            : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
+        <Icon className="size-4 shrink-0" />
+        <span className={cn('truncate', compact ? '' : 'flex-1')}>{v.label}</span>
+        {n > 0 && (
+          <span className={cn('shrink-0 tabular-nums text-xs',
+            active ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
+            {n}
+          </span>
+        )}
+      </button>
+    )
+  }
+
   const railNav = (
     <nav aria-label="Разрезы работы"
       style={compact ? undefined : { width: rail.width }}
       className={cn(compact
         ? 'flex shrink-0 gap-1 overflow-x-auto border-b border-border/60 px-3 py-2'
         : 'shrink-0 space-y-3 overflow-y-auto p-3')}>
-      {GROUPS.map((group) => (
-        <div key={group} className={compact ? 'contents' : 'space-y-0.5'}>
-          {/* У личной раскладки (Сегодня · Важное · Отложено) заголовка нет —
-              как и в меню приложения: всякое название здесь оказывалось
-              жаргоном, а начинают работу именно с неё. */}
-          {!compact && group && (
-            <p className="px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {group}
-            </p>
-          )}
-          {VIEWS.filter((v) => v.group === group).map((v) => {
-            const Icon = v.icon
-            const n = счётчик(v.key)
-            const active = v.key === view
-            return (
-              <button key={v.key} type="button" title={v.hint}
-                onClick={() => setView(v.key)}
-                aria-current={active ? 'page' : undefined}
-                className={cn('flex items-center gap-2 rounded-md text-sm transition-colors',
-                  compact ? 'shrink-0 px-2.5 py-1' : 'w-full px-2 py-1.5 text-left',
-                  active ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
-                <Icon className="size-4 shrink-0" />
-                <span className={cn('truncate', compact ? '' : 'flex-1')}>{v.label}</span>
-                {n > 0 && (
-                  <span className={cn('shrink-0 tabular-nums text-xs',
-                    active ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
-                    {n}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
-      ))}
+      {GROUPS.map((group) => {
+        const views = VIEWS.filter((v) => v.group === group)
+        // Полоса разрезов на телефоне идёт строкой без заголовков — сворачивать
+        // там нечего.
+        if (compact) return <div key={group} className="contents">{views.map(renderView)}</div>
+        return (
+          <RailGroup key={group} title={group}
+            count={views.reduce((n, v) => n + счётчик(v.key), 0)}>
+            {views.map(renderView)}
+          </RailGroup>
+        )
+      })}
     </nav>
   )
 
@@ -362,17 +372,25 @@ export function TasksQuickPanel({ compact = false }: {
             («посмотри счёт», «позвони подрядчику») не стоит целого экрана.
             Поле нарисовано рамкой, а не подсказкой в цвет фона: прозрачный
             селектор у края строки человек просто не находит глазом. */}
-        <span className="flex shrink-0 items-center gap-1.5">
+        {/* Кому — с поиском и разбивкой на своих и сторонних (просьба МАГа 06.09.2026):
+            людей в пространстве десятки, внешних участников будет больше, и выбирать
+            их прокруткой длинного списка нельзя. Пикер тот же, что у объектов и
+            номенклатуры, — набрал буквы, увидел строку. */}
+        <span className="flex min-w-0 shrink-0 items-center gap-1.5">
           <span className="text-xs text-muted-foreground">кому</span>
-          <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}
-            disabled={!peopleQ.isSuccess} title="Кому поручить"
-            className="h-8 max-w-[13rem] rounded-md border border-input bg-background px-2 text-sm text-foreground">
-            <option value="">себе</option>
-            {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <SearchPicker items={people.map((p) => ({ id: p.id, name: p.name, party: p.partyType }))}
+            value={assigneeId} onChange={setAssigneeId}
+            placeholder="себе" emptyLabel="себе" searchPlaceholder="Найти сотрудника…"
+            disabled={!peopleQ.isSuccess} loading={peopleQ.isLoading}
+            groupByParty className="w-[11rem] text-sm" width="w-[16rem]" />
         </span>
+        {/* Почему кнопка бывает неактивна — сказано подсказкой: раньше человек
+            нажимал и не понимал, чего от него хотят (замечание МАГа 06.09.2026). */}
         <Button size="sm" className="h-8 shrink-0"
           disabled={draft.trim().length < 3 || add.isPending}
+          title={draft.trim().length < 3
+            ? 'Впишите, что нужно сделать, — не короче трёх букв'
+            : (assigneeId ? 'Поручить выбранному сотруднику' : 'Записать задачу себе')}
           onClick={() => add.mutate()}>
           {add.isPending
             ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
@@ -430,6 +448,36 @@ export function TasksQuickPanel({ compact = false }: {
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Группа разрезов в рельсе: заголовок сворачивает свой список (просьба МАГа
+ * 06.09.2026). Разрезов тринадцать, и «Ждут от меня» с «Веду сам» человеку нужны
+ * не одновременно; свёрнутая группа показывает, сколько в ней работы, чтобы её не
+ * приходилось открывать ради счёта. Что открыто — помним, как и строки каталога.
+ *
+ * У личной раскладки (Сегодня · Важное · Отложено) заголовка нет — как и в меню
+ * приложения: всякое название здесь оказывалось жаргоном, а начинают работу
+ * именно с неё, и сворачивать её незачем.
+ */
+function RailGroup({ title, count, children }: {
+  title: string; count: number; children: React.ReactNode
+}) {
+  const [open, toggle] = useSectionOpen(`track.${title}`, true)
+  if (!title) return <div className="space-y-0.5">{children}</div>
+  return (
+    <div className="space-y-0.5">
+      <button type="button" onClick={toggle} aria-expanded={open}
+        className="flex min-h-8 w-full items-center gap-1.5 px-2 text-left text-xs font-semibold
+                   uppercase tracking-wide text-muted-foreground transition-colors
+                   hover:text-foreground">
+        <ChevronDown className={cn('size-3 shrink-0 transition-transform', open ? '' : '-rotate-90')} />
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        {count > 0 && <span className="shrink-0 tabular-nums font-normal">{count}</span>}
+      </button>
+      {open && children}
     </div>
   )
 }

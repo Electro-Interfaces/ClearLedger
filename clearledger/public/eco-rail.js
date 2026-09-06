@@ -193,11 +193,12 @@
    */
   const READINESS = {
     admin: 'ready', data: 'partial', info: 'partial', pulse: 'partial',
-    chat: 'ready', plan: 'partial', conf: 'ready',
+    chat: 'ready', plan: 'partial', conf: 'ready', docs: 'partial',
     projects: 'ready', ops: 'partial', sales: 'ready',
+    books: 'ready', revenue: 'ready', econ: 'ready',
     corp: 'draft', shop: 'draft', marketing: 'partial',
     support: 'ready', finance: 'draft',
-    netlink: 'draft', accounting: 'draft', diag: 'draft',
+    netlink: 'ready', accounting: 'draft', diag: 'draft',
     monitor: 'ready', processing: 'ready',
   }
   const READINESS_BY_PROFILE = {
@@ -245,31 +246,35 @@
            ` width:${Math.round(right - left)}px; height:${Math.round(bottom - top)}px;`
   }
 
-  /* Раскладка стола: коды и порядок повторяют EcosystemHomePage Ядра. Слой каталога
-     говорит, ЧТО это, но место задаёт рабочий контур: «Поддержка» числится сервисом,
-     «Диагностика» ядром, а работают с ними в одной строке дня. */
-  const COMMERCE = [
-    'support', 'sales', 'projects', 'netlink', 'diag',
-    'shop', 'corp', 'marketing', 'monitor', 'processing',
-  ]
-  const LEAD = ['pulse']
-  /* Слой «Планы» — последним, ниже ядра, как на столе. Продукты заведены в реестре
-     и когда-нибудь заработают, но сегодня за дверью заставка. Панель повторяла стол
-     во всём, кроме этого: на столе они уже стояли отдельно, а здесь оставались в
-     рабочей строке — и человек каждый день видел пять дверей, за которыми нечего
-     делать. Список тот же, что в `EcosystemHomePage`. */
-  const PLANNED = ['netlink', 'diag', 'shop', 'corp', 'marketing']
-  const INTERNAL_ORDER = ['ops', 'finance', 'accounting']
+  /* Раскладка стола: КОПИЯ списков из `src/config/spaceLauncher.ts`. Рельс это
+     статика, импортировать TS ему нечем, поэтому коды продублированы — правится
+     там, сюда переносится следом.
+     Приведено к столу 06.09.2026 (замечание МАГа: «в поддержке открывается
+     какой-то левый рабочий стол»): раскладка здесь отставала на несколько решений
+     — были строки «Руководство», «Сеть и учёт», «Сервисы экосистемы», «Ядро
+     системы» и «Планы», которых на столе давно нет. */
+  const LEAD = ['pulse', 'monitor', 'chat', 'docs', 'conf']
+  const COMMERCE = ['sales', 'support', 'revenue', 'retail_store']
+  /* Служебные экраны с прикладным слоем и бывшие «сервисы экосистемы» — всё это
+     идёт одной строкой «Системные», следом за экранами управления. */
+  const SYSTEM = ['netlink']
+  const SERVICE = ['marketing', 'shop', 'corp', 'processing']
+  const INTERNAL_ORDER = ['projects', 'econ', 'perimeter', 'books']
 
   const layersOf = (apps) => {
     const all = apps || []
-    const management = all.filter((a) => a.layer === 'admin' && !COMMERCE.includes(a.code))
-    const services = all.filter((a) => a.layer === 'service' && !COMMERCE.includes(a.code))
-    const planned = PLANNED.map((code) => all.find((a) => a.code === code)).filter(Boolean)
-    const products = all.filter((a) => !PLANNED.includes(a.code) && (COMMERCE.includes(a.code)
-      || (a.layer !== 'admin' && a.layer !== 'service')))
-    const lead = products.filter((a) => LEAD.includes(a.code))
-    // Порядок рабочей строки задан явно, а не порядком реестра
+    const management = [
+      ...all.filter((a) => (a.layer === 'admin' || SYSTEM.includes(a.code))
+        && !COMMERCE.includes(a.code)),
+      ...SERVICE.map((code) => all.find((a) => a.code === code)).filter(Boolean),
+      ...all.filter((a) => a.layer === 'service' && !COMMERCE.includes(a.code)
+        && !SERVICE.includes(a.code) && !LEAD.includes(a.code) && !SYSTEM.includes(a.code)),
+    ]
+    const products = all.filter((a) => !SERVICE.includes(a.code) && !SYSTEM.includes(a.code)
+      && (COMMERCE.includes(a.code) || LEAD.includes(a.code)
+        || (a.layer !== 'admin' && a.layer !== 'service')))
+    // Порядок строк задан явно, а не порядком реестра.
+    const lead = LEAD.map((code) => products.find((a) => a.code === code)).filter(Boolean)
     const commerce = COMMERCE.map((code) => products.find((a) => a.code === code)).filter(Boolean)
     const internal = products
       .filter((a) => !COMMERCE.includes(a.code) && !LEAD.includes(a.code))
@@ -278,12 +283,10 @@
         return (ia < 0 ? INTERNAL_ORDER.length : ia) - (ib < 0 ? INTERNAL_ORDER.length : ib)
       })
     return [
-      { title: 'Руководство', hint: 'как идут дела и куда вмешаться', items: lead },
+      { title: 'Управление', hint: 'как идут дела, связь и документы', items: lead },
       { title: 'Клиенты и продажи', hint: 'кому продаём и как обслуживаем', items: commerce },
-      { title: 'Сеть и учёт', hint: 'чем владеем и как считаем', items: internal },
-      { title: 'Сервисы экосистемы', hint: 'общие для всех приложений', items: services },
-      { title: 'Ядро системы', hint: '', items: management },
-      { title: 'Планы', hint: 'заведены, но ещё не работают', items: planned },
+      { title: 'Учёт', hint: 'проекты, экономика, периметр и бухгалтерия', items: internal },
+      { title: 'Системные', hint: 'настройка пространства и служебные данные', items: management },
     ].filter((group) => group.items.length)
   }
 

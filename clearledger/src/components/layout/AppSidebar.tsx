@@ -34,6 +34,7 @@ import {
 import { productModuleAllowed, productHasModule } from '@/config/productAccess'
 import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
 import { useActiveMode } from '@/contexts/ActiveModeContext'
+import { ELSY_VIEWS, elsyView } from '@/config/elsyViews'
 
 /** Пункт левого меню. Общий для Учёта и Управления — вид навигации один на приложения.
  *  `active` — переопределить подсветку: у разделов рабочей области адрес один и тот же,
@@ -120,11 +121,11 @@ export function AppsNavItem({ collapsed, onNavigate }: {
             <button type="button" onClick={() => { toggle(); onNavigate?.() }}
               aria-expanded={open}
               aria-label={collapsed ? 'Приложения' : undefined}
-              className={`relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+              className={`relative flex w-full items-center gap-3 rounded-md py-2 pl-3 pr-12 text-sm transition-colors ${
                 open
                   ? 'bg-primary/15 font-semibold text-primary before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-0.5 before:rounded-full before:bg-primary'
                   : 'font-medium text-muted-foreground hover:bg-accent hover:text-foreground'
-              } ${collapsed ? 'justify-center px-2' : ''}`}>
+              } ${collapsed ? 'justify-center px-2 pr-2' : ''}`}>
               <LayoutDashboard className="h-4 w-4 shrink-0" />
               {!collapsed && <span>Приложения</span>}
             </button>
@@ -406,6 +407,22 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
   // «Сайт» — рабочее место того, кто ведёт витрину. Семь экранов стояли вкладками
   // в шапке рабочей области: за каждым приходят отдельно, значит по канону это
   // пункты рельсы, а не углы одного разбора (SPACE.md §4).
+  if (pathname === '/elsy' || pathname.startsWith('/elsy/')) {
+    const params = new URLSearchParams(search)
+    const view = elsyView(params.get('view'))
+    return <>
+      <SidebarGroup className="py-0"><SidebarMenu>
+        {ELSY_VIEWS.map((item) => {
+          const target = new URLSearchParams({ view: item.code })
+          if (params.get('vendor')) target.set('vendor', params.get('vendor')!)
+          return <NavItem key={item.code} to={`/elsy?${target}`} icon={item.icon}
+            label={item.label} collapsed={collapsed} onNavigate={onNavigate} active={view === item.code} />
+        })}
+      </SidebarMenu></SidebarGroup>
+      {spaceBlock}
+    </>
+  }
+
   if (pathname === '/site' || pathname.startsWith('/site/')) {
     const view = new URLSearchParams(search).get('view') || 'requests'
     const section = siteSectionOf(view)

@@ -32,6 +32,7 @@ export interface PickItem {
 export function SearchPicker({
   items, value, onChange, placeholder, emptyLabel, searchPlaceholder,
   className, disabled, loading, allowClear = true, width = 'w-[280px]',
+  groupByParty = false,
 }: {
   items: PickItem[]
   value: string
@@ -46,9 +47,33 @@ export function SearchPicker({
   loading?: boolean
   allowClear?: boolean
   width?: string
+  /**
+   * Разбить список на «своих» и «сторонних» (просьба МАГа 06.09.2026). Людей в
+   * пространстве десятки, и внешних участников будет больше: поручая работу, надо
+   * с первого взгляда видеть, свой это человек или подрядчик, — задача внешнему
+   * раскрывает ему внутреннее.
+   */
+  groupByParty?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const picked = items.find((i) => i.id === value)
+
+  const renderItem = (i: PickItem) => (
+    <CommandItem key={i.id} value={`${i.name} ${i.hint ?? ''}`}
+      className="text-xs"
+      onSelect={() => { onChange(i.id); setOpen(false) }}>
+      <Check className={cn('mr-2 h-3 w-3', i.id === value ? 'opacity-100' : 'opacity-0')} />
+      <span className="min-w-0">
+        <span className="flex items-center gap-1.5 truncate">
+          <PartyChip party={i.party} />
+          {i.name}
+        </span>
+        {i.hint && (
+          <span className="block truncate text-xs text-muted-foreground">{i.hint}</span>
+        )}
+      </span>
+    </CommandItem>
+  )
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -77,34 +102,29 @@ export function SearchPicker({
                 <CommandEmpty className="py-6 text-center text-xs text-muted-foreground">
                   Ничего не нашлось
                 </CommandEmpty>
-                <CommandGroup>
-                  {allowClear && (
+                {allowClear && (
+                  <CommandGroup>
                     <CommandItem value="__clear__" className="text-xs text-muted-foreground"
                       onSelect={() => { onChange(''); setOpen(false) }}>
                       <X className="mr-2 h-3 w-3" />
                       {emptyLabel ?? placeholder}
                     </CommandItem>
-                  )}
-                  {items.map((i) => (
-                    <CommandItem key={i.id} value={`${i.name} ${i.hint ?? ''}`}
-                      className="text-xs"
-                      onSelect={() => { onChange(i.id); setOpen(false) }}>
-                      <Check className={cn('mr-2 h-3 w-3',
-                        i.id === value ? 'opacity-100' : 'opacity-0')} />
-                      <span className="min-w-0">
-                        <span className="flex items-center gap-1.5 truncate">
-                          <PartyChip party={i.party} />
-                          {i.name}
-                        </span>
-                        {i.hint && (
-                          <span className="block truncate text-xs text-muted-foreground">
-                            {i.hint}
-                          </span>
-                        )}
-                      </span>
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
+                  </CommandGroup>
+                )}
+                {groupByParty ? (
+                  <>
+                    {([
+                      ['Ваша организация', items.filter((i) => !i.party || i.party === 'internal')],
+                      ['Сторонние участники', items.filter((i) => i.party && i.party !== 'internal')],
+                    ] as [string, PickItem[]][]).map(([heading, list]) => list.length > 0 && (
+                      <CommandGroup key={heading} heading={heading}>
+                        {list.map(renderItem)}
+                      </CommandGroup>
+                    ))}
+                  </>
+                ) : (
+                  <CommandGroup>{items.map(renderItem)}</CommandGroup>
+                )}
               </>
             )}
           </CommandList>

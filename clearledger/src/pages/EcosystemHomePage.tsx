@@ -15,7 +15,9 @@ import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Menu, LayoutGrid, Rows3, ExternalLink, Loader2, Network, FileText } from 'lucide-react'
+import {
+  Menu, LayoutGrid, Rows3, ExternalLink, Loader2, Network, FileText, Star, ChevronDown,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
 import { MobileContextBar } from '@/components/layout/MobileContextBar'
@@ -33,6 +35,9 @@ import { isApiEnabled } from '@/services/apiClient'
 import { type SsoApp } from '@/services/ssoService'
 import { listPartnerSpaces, visitPartnerSpace } from '@/services/partnerSpaceService'
 import { useOpenApp } from '@/hooks/useOpenApp'
+import { useTouchInput } from '@/hooks/use-mobile'
+import { useFavoriteApps } from '@/hooks/useFavoriteApps'
+import { readSectionOpen } from '@/hooks/useSectionOpen'
 import { useSpaceApps } from '@/hooks/useSpaceApps'
 import { appIcon } from '@/config/spaceLauncher'
 import {
@@ -47,9 +52,16 @@ import {
  *
  * Выбор помнится между заходами: это привычка человека, а не настройка пространства,
  * поэтому живёт в браузере, а не в профиле.
+ *
+ * Под пальцем выбора нет — только список (решение МАГа 06.09.2026): плитки на телефоне
+ * едут горизонтальной каруселью внутри каждого слоя, поэтому до половины приложений
+ * нужно догадаться доскроллить в сторону. Список показывает всё сверху вниз одним
+ * жестом, которым человек и так листает экран.
  */
 export type LauncherView = 'tiles' | 'list'
 const VIEW_KEY = 'space.launcher.view'
+
+// Свёрнута строка или раскрыта — общее состояние с меню в рельсе (`useSectionOpen`).
 
 function readView(): LauncherView {
   try {
@@ -86,6 +98,29 @@ function ViewSwitch({ value, onChange }: {
   )
 }
 
+/**
+ * Звёздочка «избранное» — РЯДОМ с плиткой, а не внутри её кнопки: вложенная кнопка
+ * невалидна в разметке, и клавиатура с экранным диктором до неё не доходят.
+ */
+function FavoriteStar({ active, title, onToggle, className }: {
+  active: boolean; title: string; onToggle: () => void; className?: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={active}
+      aria-label={`${title}: ${active ? 'убрать из избранного' : 'в избранное'}`}
+      title={active ? 'Убрать из избранного' : 'В избранное'}
+      className={`flex size-9 shrink-0 items-center justify-center rounded-lg transition-colors
+                  hover:bg-accent hover:text-amber-400 sm:size-8
+                  ${active ? 'text-amber-400' : 'text-muted-foreground/45'} ${className ?? ''}`}
+    >
+      <Star className={`size-4 ${active ? 'fill-current' : ''}`} />
+    </button>
+  )
+}
+
 interface TileProps {
   title: string
   subtitle: string
@@ -96,6 +131,10 @@ interface TileProps {
   inactive?: boolean
   readiness?: Readiness
   onClick: () => void
+  /** Отмечено ли приложение избранным (звёздочка справа). */
+  favorite?: boolean
+  /** Переключить избранное. Не передан — звёздочки нет (стенд показа, пространства клиентов). */
+  onToggleFavorite?: () => void
 }
 
 /** Точка готовности: зелёная — рабочий, жёлтая — в развитии, красная — в подключении. */
@@ -119,8 +158,10 @@ const DOT_CLASS: Record<Readiness, string> = {
  */
 function Tile({
   title, subtitle, icon: Icon, badge, availability, busy, inactive, readiness, onClick,
+  favorite, onToggleFavorite,
 }: TileProps) {
   return (
+    <div className="relative h-full">
     <button
       type="button"
       onClick={onClick}
@@ -136,7 +177,8 @@ function Tile({
     >
       {/* Имя продукта. Готовность — точка в конце строки, а не абсолютом в углу:
           в потоке она занимает своё место и не наезжает на длинное название. */}
-      <span className="flex min-w-0 flex-1 items-center gap-2.5 sm:w-full sm:flex-none">
+      <span className={`flex min-w-0 flex-1 items-center gap-2.5 sm:w-full sm:flex-none
+                       ${onToggleFavorite ? 'pr-8' : ''}`}>
         <span className={`shrink-0 rounded-lg p-1.5 transition-colors
                          ${inactive
                            ? 'bg-muted text-muted-foreground'
@@ -174,6 +216,11 @@ function Tile({
         {subtitle}
       </span>
     </button>
+      {onToggleFavorite && (
+        <FavoriteStar active={!!favorite} title={title} onToggle={onToggleFavorite}
+          className="absolute right-0.5 top-0.5" />
+      )}
+    </div>
   )
 }
 
@@ -188,15 +235,17 @@ function Tile({
  */
 function Row({
   title, subtitle, icon: Icon, badge, availability, busy, inactive, readiness, onClick,
+  favorite, onToggleFavorite,
 }: TileProps) {
   return (
+    <div className="flex min-w-0 items-center gap-1">
     <button
       type="button"
       onClick={onClick}
       disabled={busy || inactive}
       title={[title, availability, subtitle, badge, readiness && READINESS_LABEL[readiness]]
         .filter(Boolean).join(' · ')}
-      className={`group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left
+      className={`group flex min-w-0 flex-1 items-center gap-3 rounded-lg border px-3 py-2.5 text-left
                   transition-colors duration-200
                   ${inactive
                     ? 'cursor-inherit border-dashed border-border bg-card'
@@ -229,6 +278,10 @@ function Row({
         </span>
       )}
     </button>
+      {onToggleFavorite && (
+        <FavoriteStar active={!!favorite} title={title} onToggle={onToggleFavorite} />
+      )}
+    </div>
   )
 }
 
@@ -237,13 +290,30 @@ function Row({
  * строк высоты на каждый слой — при трёх слоях это уже экран. Карточки держатся одной
  * строкой на любой ширине; если строка не помещается, прокручивается только этот слой.
  */
-function Section({ title, hint, children, divider, view = 'tiles' }: {
+function Section({
+  title, hint, children, divider, view = 'tiles', collapsible, storageKey,
+  count, defaultOpen = false,
+}: {
   title: string; hint?: string; children: React.ReactNode
   /** Линия сверху — граница уровня стола (Ядро · Сервисы · Приложения). */
   divider?: boolean
   /** Плитки строкой с прокруткой или список сверху вниз. */
   view?: LauncherView
+  /** Строку можно свернуть. Свёрнутая строка по умолчанию — решение МАГа 06.09.2026. */
+  collapsible?: boolean
+  /** Ключ, под которым помнится «открыта или закрыта». */
+  storageKey?: string
+  /** Сколько приложений внутри — видно в свёрнутом заголовке. */
+  count?: number
+  /** Открыта ли строка, пока человек сам её не открывал и не закрывал. */
+  defaultOpen?: boolean
 }) {
+  const [open, setOpen] = useState(() => (collapsible ? readSectionOpen(storageKey ?? title, defaultOpen) : true))
+  function toggle() {
+    const next = !open
+    setOpen(next)
+    try { localStorage.setItem(`space.launcher.open.${storageKey ?? title}`, next ? '1' : '0') } catch { /* хранилище недоступно */ }
+  }
   const scrollerRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef({
     active: false, moved: false, pointerId: -1, startX: 0, startScrollLeft: 0,
@@ -296,9 +366,30 @@ function Section({ title, hint, children, divider, view = 'tiles' }: {
     <section className={`grid min-w-0 gap-x-4 gap-y-2 md:grid-cols-[116px_minmax(0,1fr)]
                          ${divider ? 'border-t border-border/60 pt-4' : ''}`}>
       <div className="md:pt-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">{title}</h2>
+        {collapsible ? (
+          // Заголовок сам открывает строку: отдельная кнопка-стрелка рядом с
+          // подписью — вторая цель на телефоне там, где хватает одной.
+          <button type="button" onClick={toggle} aria-expanded={open}
+            className="flex min-h-9 w-full items-center gap-1.5 text-left text-[11px] font-semibold
+                       uppercase tracking-widest text-muted-foreground/60 transition-colors
+                       hover:text-foreground">
+            <ChevronDown className={`size-3.5 shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
+            {title}
+            {/* Число рядом с подписью: у свёрнутой строки это единственный признак,
+                что внутри что-то есть и стоит её открыть. */}
+            {typeof count === 'number' && count > 0 && (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium
+                               tabular-nums text-muted-foreground/80">
+                {count}
+              </span>
+            )}
+          </button>
+        ) : (
+          <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">{title}</h2>
+        )}
         {hint && <p className="mt-0.5 hidden text-[11px] text-muted-foreground/50 md:block">{hint}</p>}
       </div>
+      {open && (
       <div
         ref={scrollerRef}
         role="region"
@@ -318,29 +409,33 @@ function Section({ title, hint, children, divider, view = 'tiles' }: {
       >
         {children}
       </div>
+      )}
     </section>
   )
 }
 
-function DemoAccessLegend() {
+/**
+ * Оговорка про продукты, которых в пространстве ещё нет.
+ *
+ * Метки «Открыть здесь» у каждого рабочего продукта больше нет (замечание МАГа
+ * 06.09.2026): она стояла на всех плитках подряд и ничего не сообщала — приложение
+ * и так открывается нажатием, а кнопка внутри строки заставляла целиться в неё
+ * вместо того, чтобы нажать строку. Метка осталась одна и только там, где поведение
+ * действительно другое: продукт заведён в реестре, но экрана в этом стеке у него нет.
+ *
+ * Поэтому и оговорка показывается лишь тогда, когда такие продукты в каталоге есть.
+ */
+function OptionalAppsLegend() {
   return (
     <div
-      className="flex shrink-0 flex-col gap-2 rounded-xl border border-border/70 bg-card/50 px-3 py-2.5
-                 text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-5"
-      aria-label="Доступность приложений в демонстрации"
+      className="flex shrink-0 items-center gap-2 rounded-xl border border-border/70 bg-card/50 px-3 py-2.5
+                 text-xs text-muted-foreground"
+      aria-label="Продукты, которые можно подключить"
     >
-      <span className="flex items-center gap-2">
-        <span className="shrink-0 whitespace-nowrap rounded-full bg-primary px-2 py-0.5 font-medium text-primary-foreground">
-          Открыть здесь
-        </span>
-        <span>можно нажать и посмотреть в этом демо</span>
+      <span className="shrink-0 whitespace-nowrap rounded-full border border-dashed border-border px-2 py-0.5 font-medium text-foreground">
+        Отдельное демо
       </span>
-      <span className="flex items-center gap-2">
-        <span className="shrink-0 whitespace-nowrap rounded-full border border-dashed border-border px-2 py-0.5 font-medium text-foreground">
-          Отдельное демо
-        </span>
-        <span>приложение можно подключить к компании, здесь оно не открывается</span>
-      </span>
+      <span>продукт можно подключить к компании, здесь он не открывается</span>
     </div>
   )
 }
@@ -364,9 +459,12 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
   }, [location, navigate])
   const [menuOpen, setMenuOpen] = useState(false)
   // Вид стола помним между заходами — привычка человека, а не настройка пространства.
-  const [view, setView] = useState<LauncherView>(readView)
+  const [storedView, setStoredView] = useState<LauncherView>(readView)
+  // Под пальцем вид один — список; выбор и переключатель остаются курсору.
+  const touch = useTouchInput()
+  const view: LauncherView = touch ? 'list' : storedView
   function changeView(v: LauncherView) {
-    setView(v)
+    setStoredView(v)
     try { localStorage.setItem(VIEW_KEY, v) } catch { /* хранилище недоступно */ }
   }
   const { user } = useAuth()
@@ -378,10 +476,23 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
   // Каталог продуктов и раскладка строк — общие с меню приложений в левом рельсе
   // (`hooks/useSpaceApps`): второго списка приложений в пространстве нет.
   const { apps: all, sections, isLoading } = useSpaceApps()
-  // Продукты (без сервисов и Ядра) — по ним считается «приложения не подключены».
+
+  /**
+   * Избранное человека (просьба МАГа 06.09.2026): раздел вверху каталога с тем, чем
+   * он пользуется чаще всего, — отмечается звёздочкой прямо в строке.
+   *
+   * Список тот же, что «Закреплённые приложения» в настройке пульта: избранное у
+   * человека одно на пространство, поэтому звёздочка в каталоге сразу меняет и блок
+   * «Приложения» на пульте. Живёт на сервере, а не в браузере: телефон и рабочий
+   * компьютер обязаны показывать одно и то же.
+   */
+  const { favorites, ready: favReady, toggle: toggleFavorite } = useFavoriteApps()
+  // Рабочие продукты (без служебных экранов) — по ним считается «приложения не подключены».
   const productCount = sections
-    .filter((x) => x.key !== 'services' && x.key !== 'management')
+    .filter((x) => x.key !== 'management')
     .reduce((n, x) => n + x.apps.length, 0)
+  // Оговорка про «Отдельное демо» нужна только там, где такие продукты в каталоге есть.
+  const hasOptional = all.some((a) => a.mode === 'internal' && !a.route)
 
   /**
    * Открыть продукт. Продукт пространства — это СТРАНИЦА, и открывается он обычным
@@ -460,11 +571,17 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
         subtitle={subtitle}
         icon={appIcon(a.icon)}
         badge={a.mode === 'link' ? 'вход отдельный' : undefined}
-        availability={isOptional ? 'Отдельное демо' : 'Открыть здесь'}
+        // Метка — только у продукта, который здесь не открывается. У рабочего её нет:
+        // «Открыть здесь» на каждой строке подряд не сообщало ничего.
+        availability={isOptional ? 'Отдельное демо' : undefined}
         busy={busy === a.code}
         inactive={isOptional}
         readiness={isOptional ? undefined : productReadiness(a.code, company.profileId)}
         onClick={() => openProduct(a)}
+        favorite={favorites.includes(a.code)}
+        // Звёздочка появляется, когда избранное вообще прочитано: без ответа сервера
+        // нажатие некуда сохранить, а пустая звезда врала бы про «не в избранном».
+        onToggleFavorite={favReady && !isOptional ? () => toggleFavorite(a.code) : undefined}
       />
     )
   }
@@ -528,10 +645,33 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
     // «Учёт» показывается всегда: в этой строке живут сообщения «загрузка» и
     // «приложения не подключены», и без неё стол пустого пространства молчит.
     const visible = sections.filter((x) => x.apps.length > 0 || x.key === 'internal')
+    // Избранное — первым слоем и в порядке, в котором человек его набирал.
+    const picked = favorites.flatMap((code) => all.filter((a) => a.code === code))
     return (
       <>
+        {favReady && (
+          <Section title="Избранное" hint="то, чем пользуетесь чаще всего" view={view}>
+            {picked.length > 0
+              ? picked.map(renderProductTile)
+              : (
+                // Пустоту объясняем словами, а раздел не прячем: иначе про звёздочку
+                // никто не узнает — её негде увидеть до первого нажатия.
+                <p className="px-1 py-2 text-sm text-muted-foreground">
+                  Отметьте звёздочкой приложения, которыми пользуетесь чаще всего, — они появятся здесь.
+                </p>
+              )}
+          </Section>
+        )}
+        {/* Под пальцем строки свёрнуты, пока человек их не открыл (решение МАГа
+            06.09.2026): на телефоне каталог иначе занимает несколько экранов. На
+            десктопе всё раскрыто — там места хватает, и прятать приложения незачем.
+            «Учёт» открыт, пока каталог грузится или пуст — там живут сообщения об этом,
+            и в свёрнутой строке их не увидеть. */}
         {visible.map((x, idx) => (
-          <Section key={x.key} title={x.title} hint={x.hint} view={view} divider={idx > 0}>
+          <Section key={x.key} title={x.title} hint={x.hint} view={view}
+                   divider={idx > 0 || favReady}
+                   collapsible={touch} storageKey={x.key} count={x.apps.length}
+                   defaultOpen={x.key === 'internal' && (isLoading || productCount === 0)}>
             {x.apps.map(renderProductTile)}
             {x.key === 'internal' && isLoading && (
               <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground">
@@ -546,7 +686,8 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
           </Section>
         ))}
         {clientSpaces.length > 0 && (
-          <Section title="Пространства клиентов" hint="войти своей учётной записью" view={view} divider>
+          <Section title="Пространства клиентов" hint="войти своей учётной записью" view={view} divider
+                   collapsible={touch} storageKey="client-spaces" count={clientSpaces.length}>
             {clientSpaces.map((c) => {
               const Item = view === 'list' ? Row : Tile
               return (
@@ -575,8 +716,8 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
         {/* Легенда доступности и вид стола — одной полосой: и то и другое про то,
             КАК читать список приложений, а не про сами приложения. */}
         <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
-          <DemoAccessLegend />
-          <ViewSwitch value={view} onChange={changeView} />
+          {hasOptional && <OptionalAppsLegend />}
+          {!touch && <ViewSwitch value={view} onChange={changeView} />}
         </div>
         {renderLayers()}
       </div>
@@ -662,8 +803,8 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
         {/* Легенда доступности и вид стола — одной полосой: и то и другое про то,
             КАК читать список приложений, а не про сами приложения. */}
         <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
-          <DemoAccessLegend />
-          <ViewSwitch value={view} onChange={changeView} />
+          {hasOptional && <OptionalAppsLegend />}
+          {!touch && <ViewSwitch value={view} onChange={changeView} />}
         </div>
 
         {/* Все слои — из ОДНОГО каталога продуктов пространства (`Layers`), тем же
