@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   Building2, Check, ChevronDown, ChevronRight, History, KeyRound, LifeBuoy, Loader2,
-  Search, ShieldCheck, SlidersHorizontal, Trash2, Undo2, Users2, X,
+  Mail, Search, ShieldCheck, SlidersHorizontal, Trash2, Undo2, Users2, X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import * as userService from '@/services/userService'
@@ -829,6 +829,16 @@ function MemberCard({
     },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
+  // Та же ссылка, но письмом: человеку, чью учётку завели за него, приглашение
+  // выписать нельзя — он уже член компании, и API отвечает 409.
+  const sendAccess = useMutation({
+    mutationFn: () => userService.issueResetLink(u.id, companyId, true),
+    onSuccess: (r) => {
+      if (r.email_sent) toast.success(`Письмо с доступом отправлено на ${u.email}`)
+      else toast.error('Письмо не ушло — почта не настроена, ссылку можно скопировать')
+    },
+    onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
 
   const dirty = name !== u.name || position !== (u.position ?? '')
 
@@ -910,9 +920,17 @@ function MemberCard({
                   <code className="block break-all font-mono text-[10px] leading-relaxed">{resetUrl}</code>
                 </div>
               )}
+              <Button variant="outline" size="sm" className="h-7 gap-1 text-xs"
+                disabled={sendAccess.isPending} onClick={() => sendAccess.mutate()}>
+                {sendAccess.isPending
+                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                  : <Mail className="h-3 w-3" />}
+                Выслать доступ письмом
+              </Button>
               <p className="text-[11px] text-muted-foreground">
-                Когда письма не доходят: одноразовая ссылка сброса пароля, действует 24 часа.
-                Передайте её человеку мессенджером — по ней он сам задаст новый пароль.
+                Одноразовая ссылка установки пароля. «Ссылка для входа» — скопировать и
+                передать мессенджером, действует 24 часа. «Выслать доступ письмом» —
+                отправить её человеку на почту, действует неделю.
               </p>
             </div>
           )}

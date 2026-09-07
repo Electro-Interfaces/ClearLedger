@@ -604,6 +604,7 @@ async def set_member_contracts(
 async def issue_reset_link(
     user_id: str,
     company_id: str = Query(...),
+    send: bool = Query(False, description="выслать ссылку письмом"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -614,6 +615,11 @@ async def issue_reset_link(
     наглухо: пригласительная ссылка существующему говорит «войдите с паролем».
     Пароль админ не видит и не задаёт — только одноразовая ссылка, по которой
     человек сам поставит новый. Тот же механизм, что «Забыли пароль».
+
+    `send=true` — та же ссылка, но письмом «вам открыт доступ». Это приглашение
+    для человека, чью учётку завели за него: обычное приглашение API отклонит
+    (он уже член компании), а письмо «вы запросили восстановление пароля» врёт —
+    он ничего не запрашивал.
     """
     cid = await require_company_admin(company_id, current_user, db)
     try:
@@ -629,13 +635,33 @@ async def issue_reset_link(
     raw = secrets.token_urlsafe(32)
     user.reset_token_hash = hashlib.sha256(raw.encode()).hexdigest()
     # Сутки, а не час письменного потока: ссылку передают мессенджером,
-    # и открывают её не сразу.
-    expires = datetime.now(timezone.utc) + timedelta(hours=24)
+    # и открывают её не сразу. Письмом — неделя: сменщик читает почту после
+    # смены, а не в час, когда администратор нажал кнопку.
+    expires = datetime.now(timezone.utc) + (timedelta(days=7) if send else timedelta(hours=24))
     user.reset_token_expires = expires
     await log_audit(db, actor=current_user, company_id=cid,
                     action="auth.reset_link_issued", target=user.email)
     await db.flush()
-    return {"reset_url": email_service.reset_link(raw), "expires_at": expires}
+
+    email_sent = False
+    if send:
+        company = await db.get(Company, cid)
+        # Роль в письме — та, что человек получит на входе; иначе оператор
+        # контакт-центра читает безымянное «вам открыт доступ» и не понимает,
+        # к чему именно.
+        role_label = (await db.execute(
+            select(CompanyRole.name).join(UserCompany, UserCompany.role_id == CompanyRole.id)
+            .where(UserCompany.user_id == user.id, UserCompany.company_id == cid)
+        )).scalar_one_or_none()
+        try:
+            email_sent = await email_service.send_access_invite(
+                user.email, raw, company.name if company else "",
+                current_user.name, role_label, expires)
+        except Exception as exc:  # noqa: BLE001 — сбой письма не должен ронять выдачу ссылки
+            logger.error("send_access_invite failed for %s: %s", user.email, exc)
+
+    return {"reset_url": email_service.reset_link(raw), "expires_at": expires,
+            "email_sent": email_sent}
 
 
 async def _leave_company_chats(uid: uuid.UUID, cid: uuid.UUID, db: AsyncSession) -> None:

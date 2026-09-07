@@ -119,11 +119,14 @@ export async function setMemberModules(
 
 /** Назначить доступ члену: именованная роль или ad-hoc набор модулей. */
 /** Ссылка сброса пароля — для передачи мессенджером, когда почта не доходит.
- *  Одноразовая, 24 часа; выдаётся админом компании, попадает в журнал. */
+ *  Одноразовая, 24 часа; выдаётся админом компании, попадает в журнал.
+ *  `send` — выслать ту же ссылку письмом «вам открыт доступ» (тогда неделя):
+ *  приглашение для человека, чью учётку завели за него. */
 export async function issueResetLink(
-  id: string, companyId: string,
-): Promise<{ reset_url: string; expires_at: string }> {
-  return post(`/api/users/${id}/reset-link?company_id=${encodeURIComponent(companyId)}`)
+  id: string, companyId: string, send = false,
+): Promise<{ reset_url: string; expires_at: string; email_sent?: boolean }> {
+  const q = `company_id=${encodeURIComponent(companyId)}${send ? '&send=true' : ''}`
+  return post(`/api/users/${id}/reset-link?${q}`)
 }
 
 export async function setMemberAccess(

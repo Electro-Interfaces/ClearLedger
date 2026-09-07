@@ -104,6 +104,91 @@ async def send_invite(
     return True
 
 
+async def send_access_invite(
+    to_email: str, token: str, company_name: str,
+    inviter: str | None, role_label: str | None = None,
+    expires_at: datetime | None = None,
+) -> bool:
+    """Приглашение человеку, у которого учётка уже есть, а входа ещё нет.
+
+    Пригласительная ссылка (`send_invite`) такому не подходит: приглашение
+    существующему члену компании API отклоняет, а сама ссылка сказала бы
+    «войдите с паролем» — которого человек не знает, потому что учётку завели
+    за него. Поэтому в письме ссылка установки пароля, а текст — про доступ,
+    а не про «вы запросили восстановление»: человек ничего не запрашивал.
+    """
+    link = reset_link(token)
+    valid_until = f" Ссылка действует до {expires_at.strftime('%d.%m.%Y')}." if expires_at else ""
+    in_role = f" в роли «{role_label}»" if role_label else ""
+    who = f"{inviter} открыл вам доступ" if inviter else "Вам открыт доступ"
+    subject = f"Доступ в рабочее пространство — {company_name}"
+    text = (
+        f"{who} к рабочему пространству компании «{company_name}»{in_role}.\n\n"
+        f"Учётная запись уже заведена на этот адрес — задайте пароль по ссылке "
+        f"и войдите:\n{link}\n\n"
+        f"Ссылка одноразовая: после того как пароль задан, повторный переход "
+        f"по ней не сработает.{valid_until}\n\n"
+        f"Если вы не ожидали это письмо — просто проигнорируйте его."
+    )
+    html = (
+        '<div style="font-family:system-ui,Arial,sans-serif;max-width:480px;margin:0 auto;color:#1f2937">'
+        '<h2 style="color:#2563eb;margin:0 0 8px">Рабочее пространство</h2>'
+        f'<p>{who} к рабочему пространству компании <b>«{company_name}»</b>{in_role}.</p>'
+        '<p>Учётная запись уже заведена на этот адрес — осталось задать пароль.</p>'
+        f'<p style="margin:24px 0"><a href="{link}" style="background:#2563eb;color:#fff;'
+        'text-decoration:none;padding:12px 20px;border-radius:8px;display:inline-block">'
+        'Задать пароль и войти</a></p>'
+        f'<p style="color:#6b7280;font-size:13px">Или скопируйте ссылку:<br>'
+        f'<a href="{link}" style="color:#2563eb">{link}</a></p>'
+        f'<p style="color:#9ca3af;font-size:12px;margin-top:24px">Ссылка одноразовая: '
+        f'после установки пароля повторный переход не сработает.{valid_until} '
+        'Если вы не ожидали это письмо — просто проигнорируйте его.</p></div>'
+    )
+    return await _deliver(to_email, subject, text, html)
+
+
+async def _deliver(to_email: str, subject: str, text: str, html: str) -> bool:
+    """Отправка письма по SMTP. Без SMTP_HOST — dev-режим: письмо уходит в лог.
+
+    Старые письма (`send_invite`, `send_password_reset`, `send_notice`,
+    `send_meeting_invite`) несут свою копию этого кода. Они работают, и
+    переносить их сюда стоит отдельной правкой, а не попутно с рассылкой доступа.
+    """
+    if not settings.smtp_host:
+        logger.warning("[mail:dev] письмо для %s: %s", to_email, subject)
+        return False
+
+    import aiosmtplib  # ленивый импорт — нужен только при реальной отправке
+
+    msg = EmailMessage()
+    msg["From"] = settings.smtp_from
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    # Date и Message-ID обязательны: без них rspamd ставит MISSING_DATE/MISSING_MID
+    # и письмо уезжает в спам.
+    from_domain = parseaddr(settings.smtp_from)[1].split("@")[-1] or "localhost"
+    msg["Date"] = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=from_domain)
+    msg.set_content(text)
+    msg.add_alternative(html, subtype="html")
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    common = dict(
+        hostname=settings.smtp_host, port=settings.smtp_port,
+        username=settings.smtp_user or None, password=settings.smtp_password or None,
+        tls_context=ctx, timeout=20,
+    )
+    if settings.smtp_secure:
+        await aiosmtplib.send(msg, use_tls=True, **common)
+    else:
+        await aiosmtplib.send(msg, start_tls=True, **common)
+    logger.info("Письмо доставлено на SMTP: %s — %s", to_email, subject)
+    return True
+
+
 async def send_notice(
     to_emails: list[str], subject: str, text: str, html: str | None = None,
     reply_to: str | None = None,
