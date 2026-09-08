@@ -39,7 +39,7 @@ import { useOpenApp } from '@/hooks/useOpenApp'
 import { assignTop, inFrame, spaceUrl } from '@/lib/topNav'
 import { useTouchInput } from '@/hooks/use-mobile'
 import { useFavoriteApps } from '@/hooks/useFavoriteApps'
-import { readSectionOpen } from '@/hooks/useSectionOpen'
+import { useSectionOpen, sectionDefaultOpen } from '@/hooks/useSectionOpen'
 import { useSpaceApps } from '@/hooks/useSpaceApps'
 import { appIcon } from '@/config/spaceLauncher'
 import {
@@ -297,7 +297,7 @@ function Row({
  * никак не ограничивает: он и так прокручивается сверху вниз.
  */
 function Section({
-  title, hint, children, divider, view = 'tiles', collapsible, storageKey,
+  title, hint, children, divider, view = 'tiles', storageKey,
   count, defaultOpen = false,
 }: {
   title: string; hint?: string; children: React.ReactNode
@@ -305,8 +305,6 @@ function Section({
   divider?: boolean
   /** Плитки строкой с прокруткой или список сверху вниз. */
   view?: LauncherView
-  /** Строку можно свернуть. Свёрнутая строка по умолчанию — решение МАГа 06.09.2026. */
-  collapsible?: boolean
   /** Ключ, под которым помнится «открыта или закрыта». */
   storageKey?: string
   /** Сколько приложений внутри — видно в свёрнутом заголовке. */
@@ -314,20 +312,16 @@ function Section({
   /** Открыта ли строка, пока человек сам её не открывал и не закрывал. */
   defaultOpen?: boolean
 }) {
-  const [open, setOpen] = useState(() => (collapsible ? readSectionOpen(storageKey ?? title, defaultOpen) : true))
-  function toggle() {
-    const next = !open
-    setOpen(next)
-    try { localStorage.setItem(`space.launcher.open.${storageKey ?? title}`, next ? '1' : '0') } catch { /* хранилище недоступно */ }
-  }
+  // Сворачивается любая строка и на любом экране (решение МАГа 08.09.2026):
+  // как человек разложил каталог, так он и остаётся до следующей его правки.
+  const [open, toggle] = useSectionOpen(storageKey ?? title, defaultOpen)
   return (
     <section className={`grid min-w-0 gap-x-4 gap-y-2 md:grid-cols-[116px_minmax(0,1fr)]
                          ${divider ? 'border-t border-border/60 pt-4' : ''}`}>
       <div className="md:pt-2">
-        {collapsible ? (
-          // Заголовок сам открывает строку: отдельная кнопка-стрелка рядом с
-          // подписью — вторая цель на телефоне там, где хватает одной.
-          <button type="button" onClick={toggle} aria-expanded={open}
+        {/* Заголовок сам открывает строку: отдельная кнопка-стрелка рядом с
+            подписью — вторая цель на телефоне там, где хватает одной. */}
+        <button type="button" onClick={toggle} aria-expanded={open}
             className="flex min-h-9 w-full items-center gap-1.5 text-left text-[11px] font-semibold
                        uppercase tracking-widest text-muted-foreground/60 transition-colors
                        hover:text-foreground">
@@ -341,10 +335,7 @@ function Section({
                 {count}
               </span>
             )}
-          </button>
-        ) : (
-          <h2 className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">{title}</h2>
-        )}
+        </button>
         {hint && <p className="mt-0.5 hidden text-[11px] text-muted-foreground/50 md:block">{hint}</p>}
       </div>
       {open && (
@@ -602,7 +593,9 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
     return (
       <>
         {favReady && (
-          <Section title="Избранное" hint="то, чем пользуетесь чаще всего" view={view}>
+          <Section title="Избранное" hint="то, чем пользуетесь чаще всего" view={view}
+                   storageKey="favorites" count={picked.length}
+                   defaultOpen={sectionDefaultOpen('favorites', touch)}>
             {picked.length > 0
               ? picked.map(renderProductTile)
               : (
@@ -616,14 +609,15 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
         )}
         {/* Под пальцем строки свёрнуты, пока человек их не открыл (решение МАГа
             06.09.2026): на телефоне каталог иначе занимает несколько экранов. На
-            десктопе всё раскрыто — там места хватает, и прятать приложения незачем.
+            десктопе свёрнутыми приходят только «Системные» (решение МАГа 08.09.2026).
             «Учёт» открыт, пока каталог грузится или пуст — там живут сообщения об этом,
             и в свёрнутой строке их не увидеть. */}
         {visible.map((x, idx) => (
           <Section key={x.key} title={x.title} hint={x.hint} view={view}
                    divider={idx > 0 || favReady}
-                   collapsible={touch} storageKey={x.key} count={x.apps.length}
-                   defaultOpen={x.key === 'internal' && (isLoading || productCount === 0)}>
+                   storageKey={x.key} count={x.apps.length}
+                   defaultOpen={(x.key === 'internal' && (isLoading || productCount === 0))
+                     || sectionDefaultOpen(x.key, touch)}>
             {x.apps.map(renderProductTile)}
             {x.key === 'internal' && isLoading && (
               <div className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground">
@@ -639,7 +633,8 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
         ))}
         {clientSpaces.length > 0 && (
           <Section title="Пространства клиентов" hint="войти своей учётной записью" view={view} divider
-                   collapsible={touch} storageKey="client-spaces" count={clientSpaces.length}>
+                   storageKey="client-spaces" count={clientSpaces.length}
+                   defaultOpen={sectionDefaultOpen('client-spaces', touch)}>
             {clientSpaces.map((c) => {
               const Item = view === 'list' ? Row : Tile
               return (

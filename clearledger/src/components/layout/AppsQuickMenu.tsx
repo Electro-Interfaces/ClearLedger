@@ -22,7 +22,7 @@ import { SidebarMenuAction } from '@/components/ui/sidebar'
 import { useSpaceApps } from '@/hooks/useSpaceApps'
 import { useOpenApp } from '@/hooks/useOpenApp'
 import { useTouchInput } from '@/hooks/use-mobile'
-import { useSectionOpen } from '@/hooks/useSectionOpen'
+import { useSectionOpen, sectionDefaultOpen } from '@/hooks/useSectionOpen'
 import { useFavoriteApps } from '@/hooks/useFavoriteApps'
 import { appIcon, isOptionalApp } from '@/config/spaceLauncher'
 import { productReadiness, READINESS_LABEL, type Readiness } from '@/config/spaceProducts'
@@ -37,41 +37,32 @@ const DOT_CLASS: Record<Readiness, string> = {
 }
 
 /**
- * Строка меню: подпись, счётчик и — под пальцем — сворачивание.
+ * Строка меню: подпись, счётчик и сворачивание.
  *
- * На десктопе строки раскрыты всегда (решение МАГа 06.09.2026): места хватает, и
- * прятать там приложения незачем. Сворачивание нужно телефону, где иначе список
- * занимает несколько экранов.
+ * Сворачивается на любом экране (решение МАГа 08.09.2026), состояние общее со столом:
+ * свернул строку там — свёрнута и здесь. Умолчание даёт `sectionDefaultOpen`.
  */
-function QuickSection({ title, count, storageKey, collapsible, children }: {
+function QuickSection({ title, count, storageKey, defaultOpen, children }: {
   title: string; count: number; storageKey: string
-  collapsible: boolean; children: React.ReactNode
+  defaultOpen: boolean; children: React.ReactNode
 }) {
-  const [open, toggle] = useSectionOpen(storageKey, !collapsible)
-  const shown = collapsible ? open : true
+  const [open, toggle] = useSectionOpen(storageKey, defaultOpen)
   return (
     <div className="py-0.5">
-      {collapsible ? (
-        <button type="button" onClick={toggle} aria-expanded={open}
-          className="flex min-h-9 w-full items-center gap-1.5 px-2 text-left text-[10px] font-semibold
-                     uppercase tracking-widest text-muted-foreground/60 transition-colors
-                     hover:text-foreground">
-          <ChevronDown className={`size-3 shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
-          {title}
-          {count > 0 && (
-            <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium
-                             tabular-nums text-muted-foreground/80">
-              {count}
-            </span>
-          )}
-        </button>
-      ) : (
-        <div className="px-2 pb-1 pt-1.5 text-[10px] font-semibold uppercase
-                        tracking-widest text-muted-foreground/60">
-          {title}
-        </div>
-      )}
-      {shown && children}
+      <button type="button" onClick={toggle} aria-expanded={open}
+        className="flex min-h-9 w-full items-center gap-1.5 px-2 text-left text-[10px] font-semibold
+                   uppercase tracking-widest text-muted-foreground/60 transition-colors
+                   hover:text-foreground">
+        <ChevronDown className={`size-3 shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
+        {title}
+        {count > 0 && (
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium
+                           tabular-nums text-muted-foreground/80">
+            {count}
+          </span>
+        )}
+      </button>
+      {open && children}
     </div>
   )
 }
@@ -157,13 +148,13 @@ export function AppsQuickList({ onNavigate, onPicked }: {
       )}
       {favReady && picked.length > 0 && (
         <QuickSection title="Избранное" count={picked.length}
-          storageKey="favorites" collapsible={false}>
+          storageKey="favorites" defaultOpen={sectionDefaultOpen('favorites', touch)}>
           {picked.map((a) => appRow(a, true))}
         </QuickSection>
       )}
       {visible.map((s) => (
         <QuickSection key={s.key} title={s.title} count={s.apps.length}
-          storageKey={s.key} collapsible={touch}>
+          storageKey={s.key} defaultOpen={sectionDefaultOpen(s.key, touch)}>
           {s.apps.map((a) => appRow(a, favorites.includes(a.code)))}
         </QuickSection>
       ))}

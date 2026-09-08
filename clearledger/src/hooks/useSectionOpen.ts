@@ -33,3 +33,14 @@ export function useSectionOpen(key: string, defaultOpen = false): [boolean, () =
   }
   return [open, toggle]
 }
+
+/**
+ * Открыта ли строка, пока человек сам её не сворачивал.
+ *
+ * Решение МАГа 08.09.2026: на десктопе строки тоже сворачиваются и «Системные»
+ * приходят свёрнутыми — к ним заходят, когда что-то настраивают, а не каждый день.
+ * Под пальцем по-прежнему свёрнуто всё: там каталог иначе занимает несколько экранов.
+ */
+export function sectionDefaultOpen(key: string, touch: boolean): boolean {
+  return touch ? false : key !== 'management'
+}
