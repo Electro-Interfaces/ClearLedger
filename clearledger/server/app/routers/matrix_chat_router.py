@@ -19,6 +19,7 @@ from app.database import get_db
 from app.deps import capture_company_header, scope_company_id
 from app.models import User
 from app.services import matrix_chat as mc
+from app.services.chat_scope import chat_scope_of
 
 settings = get_settings()
 
@@ -150,7 +151,9 @@ async def people(q: str = Query(""),
                  user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     _require_chat()
     cid = await scope_company_id(user, db)
-    return {"people": await mc.search_people(db, cid, q, user.id)}
+    # Контур роли сужает справочник до своих по линии — та же граница, что в чатах.
+    scope = await chat_scope_of(user, cid, db)
+    return {"people": await mc.search_people(db, cid, q, user.id, scope=scope)}
 
 
 @router.post("/support-channel")

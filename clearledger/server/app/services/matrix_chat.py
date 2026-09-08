@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (Counterparty, MatrixChatFolder, MatrixDmRoom, MatrixGroupRoom,
                         MatrixIdentity, User, UserCompany)
 from app.services import matrix_admin as ma
+from app.services.chat_scope import scope_member_ids
 
 
 # ── идентичность и сессия ──
@@ -195,17 +196,23 @@ async def reorder_folders(db: AsyncSession, company_id, user: User, ordered_ids:
 
 # ── люди (для выбора участников) ──
 
-async def search_people(db: AsyncSession, company_id, q: str, me_id, limit: int = 30) -> list[dict[str, Any]]:
+async def search_people(db: AsyncSession, company_id, q: str, me_id, limit: int = 30,
+                        scope: str | None = None) -> list[dict[str, Any]]:
     """Люди пространства для добавления в чаты (кроме себя).
 
     Отдаём не только имя: в чате должно быть видно, КТО собеседник — свой сотрудник или
     внешний участник (подрядчик, поставщик) и от какой организации. Иначе в общей комнате
     сотрудник и подрядчик выглядят одинаково, хотя разговор с ними разный.
+
+    `scope` — контур роли спрашивающего: с ним справочник сужается до своих по
+    контуру, иначе оператор подрядчика получает здесь весь состав заказчика.
     """
     stmt = (select(User, UserCompany, Counterparty)
             .join(UserCompany, UserCompany.user_id == User.id)
             .outerjoin(Counterparty, Counterparty.id == UserCompany.organization_id)
             .where(UserCompany.company_id == company_id, User.id != me_id))
+    if scope:
+        stmt = stmt.where(User.id.in_(scope_member_ids(company_id, scope)))
     ql = (q or "").strip()
     if ql:
         like = f"%{ql}%"

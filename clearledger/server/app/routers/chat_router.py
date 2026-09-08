@@ -35,6 +35,7 @@ from app.services import chat_mail, process_templates, web_push
 from app.services import link_preview as link_preview_service
 from app.services.space_projection import ProjectionError, create_object_ticket
 from app.services.chat_ws import manager
+from app.services.chat_scope import chat_scope_of, scope_member_ids
 
 # capture_company_header кладёт X-Company-Id в contextvar до тела эндпоинта —
 # так пространство чата/заявок = ВЫБРАННАЯ в UI организация (строгая изоляция).
@@ -281,19 +282,10 @@ SCOPE_ROOMS = {"support": "Контакт-центр"}
 async def _chat_scope(user: User, cid: uuid.UUID, db: AsyncSession) -> str | None:
     """Контур переписки человека в этом пространстве — код приложения или None.
 
-    Берётся из НАЗНАЧЕННОЙ роли (`company_roles.chat_scope`), а не из набора модулей:
-    набор отвечает, какие приложения открыть, контур — с кем человек в них
-    разговаривает. Владелец контейнера контура не имеет никогда: он и есть надзор.
+    Определение переехало в `services/chat_scope`: тем же контуром ограничен
+    справочник людей, и потребителей у правила стало трое.
     """
-    if user.is_superadmin:
-        return None
-    return (await db.execute(
-        select(CompanyRole.chat_scope)
-        .join(UserCompany, UserCompany.role_id == CompanyRole.id)
-        .where(UserCompany.user_id == user.id, UserCompany.company_id == cid,
-               CompanyRole.chat_scope.isnot(None))
-        .limit(1)
-    )).scalar_one_or_none()
+    return await chat_scope_of(user, cid, db)
 
 
 def _scoped_member_ids(cid: uuid.UUID):
@@ -2904,6 +2896,11 @@ async def search_users(
     stmt = (select(User.id, User.name, User.email, User.avatar_url, UserCompany.party_type)
             .join(UserCompany, UserCompany.user_id == User.id)
             .where(UserCompany.company_id == cid, User.id != current_user.id))
+    # Контур роли запирает и справочник: оператор подрядчика ищет своих по линии,
+    # а не весь состав заказчика с почтой и должностью.
+    scope = await _chat_scope(current_user, cid, db)
+    if scope:
+        stmt = stmt.where(User.id.in_(scope_member_ids(cid, scope)))
     if q.strip():
         like = f"%{q.strip()}%"
         stmt = stmt.where(or_(User.name.ilike(like), User.email.ilike(like)))
@@ -2925,7 +2922,8 @@ async def user_profile(
 
     Доступно любому участнику пространства (не только админу): должность,
     принадлежность и последний вход — не секрет от коллег, это и есть ответ
-    на вопрос «с кем я говорю»."""
+    на вопрос «с кем я говорю». Человеку с контуром роли — только про своих по
+    контуру: иначе карточка обходит границу, которую держит поиск."""
     try:
         uid = uuid.UUID(user_id)
     except (ValueError, TypeError):
@@ -2934,6 +2932,16 @@ async def user_profile(
     m = await db.get(UserCompany, (uid, cid))
     if m is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Человек не из вашего пространства")
+    scope = await _chat_scope(current_user, cid, db)
+    if scope and uid != current_user.id:
+        peer_in_scope = (await db.execute(
+            select(UserCompany.user_id).where(
+                UserCompany.user_id == uid,
+                UserCompany.user_id.in_(scope_member_ids(cid, scope))))).scalar_one_or_none()
+        if peer_in_scope is None:
+            # Тот же 404, что у чужого пространства: ответ не должен отличать
+            # «нет такого» от «есть, но не для тебя».
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Человек не из вашего пространства")
     u = await db.get(User, uid)
     if u is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
