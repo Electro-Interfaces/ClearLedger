@@ -6,7 +6,7 @@
 
 // ─── Типы ─────────────────────────────────────────────
 
-export type ProfileId = 'fuel' | 'trade' | 'retail' | 'energy' | 'general' | 'office'
+export type ProfileId = 'fuel' | 'trade' | 'retail' | 'energy' | 'general' | 'office' | 'works'
 
 export interface MetadataField {
   key: string
@@ -725,6 +725,10 @@ export const profiles: Record<ProfileId, CompanyProfile> = {
   // документов заводить нечего. От остальных профиль отличается СОСТАВОМ ПРОДУКТОВ
   // (`spaceProducts`, `app_registry._CARVED_BY_PROFILE`), а не типами документов.
   office: generalProfile,
+  // Производственное пространство: своя команда делает продукты. Документооборот у неё
+  // общий (договоры, акты, счета), как у офиса, — отличается СОСТАВ ПРОДУКТОВ
+  // (`CARVED_PROFILES`, `app_registry._CARVED_BY_PROFILE`), а не типы документов.
+  works: generalProfile,
 }
 
 export function getProfile(id: ProfileId): CompanyProfile {

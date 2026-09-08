@@ -334,7 +334,11 @@ export const PRODUCT_SETUP_NOTE: Record<string, {
 // смены, ТТН и товар), а свои рабочие места идут от бухгалтерии-эталона: «Бухгалтерия»
 // и «Реализация» из этой же карты плюс продукты Ядра (Задачи, Пульс, Чаты) и Поддержка;
 // см. `app_registry._CARVED_BY_PROFILE`.
-const CARVED_PROFILES = new Set(['energy', 'fuel', 'office'])
+const CARVED_PROFILES = new Set(['energy', 'fuel', 'office', 'works'])
+
+/** Пространства без объектов: единственный «объект» — собственный офис. Реестр объектов
+ *  и общая «База пространства» им не нужны — у них своя кухня данных или её нет вовсе. */
+const OBJECTLESS_PROFILES = new Set(['office', 'works'])
 
 export function isCarvedProfile(profileId: string | null | undefined): boolean {
   return CARVED_PROFILES.has(profileId ?? '')
@@ -398,7 +402,7 @@ export const SPACE_LINKS = [
  * ведя при этом на режим `normalize`, которого у неё нет вовсе.
  */
 export function spaceLinksFor(profileId: string | null | undefined) {
-  if (profileId !== 'office') return SPACE_LINKS
+  if (!OBJECTLESS_PROFILES.has(profileId ?? '')) return SPACE_LINKS
   return SPACE_LINKS.filter((l) => l.to !== '/data?mode=normalize')
 }
 
@@ -431,6 +435,7 @@ const ROUTE_APPS: [string, string][] = [
   ['/auditor', 'auditor'],
   // «Сайт» — публичная витрина и кабинет клиента.
   ['/site', 'site'],
+  ['/elsy', 'elsy'],
 ]
 
 /**
@@ -440,7 +445,7 @@ const ROUTE_APPS: [string, string][] = [
  */
 const CORE_APP_TITLES: Record<string, string> = {
   chat: 'Чаты', admin: 'Управление', data: 'Данные', info: 'Инфо', pulse: 'Пульс',
-  plan: 'Задачи', support: 'Заявки', auditor: 'Аудитор', docs: 'Трек', site: 'Сайт',
+  plan: 'Задачи', support: 'Заявки', auditor: 'Аудитор', docs: 'Трек', site: 'Сайт', elsy: 'Элси+',
 }
 
 /** Имя приложения Ядра по адресу; null — адрес принадлежит Учёту или продукту. */
@@ -522,7 +527,8 @@ export const isOneCPath = (to: string) => to.startsWith('/1c/')
 export function spaceNav(
   product: SpaceProduct, allowed?: PageGate, profileId?: string | null,
 ): NavItemDef[] {
-  const pages = profileId === 'office' ? SPACE_PAGES.filter((p) => p !== '/objects') : SPACE_PAGES
+  const pages = OBJECTLESS_PROFILES.has(profileId ?? '')
+    ? SPACE_PAGES.filter((p) => p !== '/objects') : SPACE_PAGES
   return navFor(product, pages, allowed)
 }
 
