@@ -70,11 +70,15 @@ export function WorkTrace({ events, empty, renderBadge, renderActions, renderExt
             event.tone === 'mail'
               ? 'border-sky-500/40 bg-sky-500/5'
               : 'border-border/70 bg-card/60')}>
-          <div className="flex flex-wrap items-baseline gap-1.5">
-            <span className="font-medium">{event.actor ?? 'система'}</span>
-            <span className="text-muted-foreground">{event.action}</span>
+          {/* Кто, что и когда — одной строкой (замечание МАГа 08.09.2026): при
+              переносе запись читалась в три этажа, а закрепление уезжало от даты. */}
+          <div className="flex items-center gap-1.5">
+            <span className="min-w-0 truncate font-medium">{event.actor ?? 'система'}</span>
+            {event.action && (
+              <span className="min-w-0 truncate text-muted-foreground">{event.action}</span>
+            )}
             {renderBadge?.(event)}
-            <span className="ml-auto text-xs text-muted-foreground">
+            <span className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground">
               {stamp(event.at)}
             </span>
             {renderActions?.(event)}

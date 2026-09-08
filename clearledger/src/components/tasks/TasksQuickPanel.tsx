@@ -20,7 +20,7 @@
  * объектам, командную строку над пачкой, доски и планирование. Это работа на
  * весь экран, и она живёт в «Треке» — кнопка ведёт ровно в открытый разрез.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -41,6 +41,10 @@ import { DOCS_VIEWS } from '@/pages/docs/DocsLayout'
 import { MyWorkPage } from '@/pages/docs/MyWorkPage'
 import { PlacedList } from '@/components/docs/PlacedList'
 import { cn } from '@/lib/utils'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useSectionOpen } from '@/hooks/useSectionOpen'
 import { SearchPicker } from '@/components/tasks/SearchPicker'
@@ -215,6 +219,8 @@ export function TasksQuickPanel({ compact: compactProp }: {
   const me = user?.id ?? ''
   const { closeInteraction } = useSupportContext()
   const [view, setView] = useState<ViewKey>(VIEWS[0]?.key ?? 'today')
+  /** Что показывать в очереди: всё, только поручения или только документы. */
+  const [kindFilter, setKindFilter] = useState<'all' | 'task' | 'doc'>('all')
   // Ширины полос человек ставит сам: у кого-то рельса с длинными словами, у
   // кого-то день с длинными названиями встреч. Значения переживают перезагрузку.
   const shellRef = useRef<HTMLDivElement>(null)
@@ -335,20 +341,114 @@ export function TasksQuickPanel({ compact: compactProp }: {
     )
   }
 
+  /**
+   * Разрезы в тесноте — селектом, а не полосой иконок (замечание МАГа 06.09.2026:
+   * «где это теперь?»).
+   *
+   * Полоса складывала все тринадцать разрезов в одну прокручиваемую строку, и от
+   * раскладки оставались три первых пункта: группы «Ждут от меня», «Веду сам»,
+   * «Слежу» с их числами уезжали за край, а они и есть ответ на вопрос «что на мне».
+   * Селект с группами держит структуру целиком в одной строке высоты — тем же
+   * приёмом, что компактная раскладка рабочего места (`docs/MOBILE.md` §2).
+   */
+  /**
+   * Разрезы в тесноте — той же раскладкой, что в широком окне, только сверху и
+   * свёрнутой (замечание МАГа 06.09.2026: «где это теперь?»).
+   *
+   * Сначала здесь была полоса иконок: тринадцать разрезов в одну прокручиваемую
+   * строку, из которых видно три, — группы «Ждут от меня», «Веду сам», «Слежу» с их
+   * числами уезжали за край. Потом селект: структура в нём есть, но спрятана за
+   * нажатием, а человек открывает окно как раз чтобы УВИДЕТЬ, что на нём.
+   * Теперь три строки групп с числами видны сразу; открывается та, в которой
+   * стоит выбранный разрез, остальные разворачиваются нажатием.
+   */
+  /**
+   * Разрезы в тесноте — одной строкой-фильтром (решение МАГа 08.09.2026, по образцу
+   * календаря).
+   *
+   * Сначала здесь была полоса иконок, потом раскладка списком: тринадцать разрезов
+   * с заголовками групп занимали до трети окна, а под саму работу оставалось меньше
+   * половины. Теперь строка одна: слева выбранный разрез со счётчиком, справа —
+   * просрочка и выход в приложение. Весь набор — в меню за нажатием, группами
+   * «Ждут от меня · Веду сам · Слежу», как в рельсе на большом экране.
+   */
+  const compactBar = (
+    <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" className="h-8 min-w-0 flex-1 justify-between gap-1.5 px-2.5 text-xs">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <current.icon className="size-3.5 shrink-0" />
+              <span className="truncate">{current.label}</span>
+              {счётчик(current.key) > 0 && (
+                <span className="shrink-0 tabular-nums text-muted-foreground">{счётчик(current.key)}</span>
+              )}
+            </span>
+            <ChevronDown className="size-3.5 shrink-0 opacity-60" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="max-h-[60vh] w-64 overflow-y-auto">
+          {GROUPS.map((group) => {
+            const views = VIEWS.filter((v) => v.group === group)
+            if (!views.length) return null
+            return (
+              <Fragment key={group || 'own'}>
+                {group && <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">{group}</DropdownMenuLabel>}
+                {views.map((v) => {
+                  const n = счётчик(v.key)
+                  return (
+                    <DropdownMenuItem key={v.key} onSelect={() => setView(v.key)}
+                      className={cn('gap-2 text-xs', v.key === view && 'bg-accent')}>
+                      <v.icon className="size-3.5 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">{v.label}</span>
+                      {n > 0 && <span className="shrink-0 tabular-nums text-muted-foreground">{n}</span>}
+                    </DropdownMenuItem>
+                  )
+                })}
+                {group !== GROUPS[GROUPS.length - 1] && <DropdownMenuSeparator />}
+              </Fragment>
+            )
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Поручения и документы «Трек» ведёт вместе, но разбирают их по одному
+          (замечание МАГа 08.09.2026): на телефоне очередь режется здесь же. */}
+      <div className="flex shrink-0 rounded-md border border-input p-0.5">
+        {([['all', 'Всё'], ['task', 'Поручения'], ['doc', 'Документы']] as const).map(([k, l]) => (
+          <button key={k} type="button" aria-pressed={kindFilter === k}
+            onClick={() => setKindFilter(k)}
+            className={cn('rounded px-1.5 py-1 text-[11px] transition-colors',
+              kindFilter === k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}>
+            {l}
+          </button>
+        ))}
+      </div>
+      {overdue > 0 && (
+        <span className="shrink-0 text-xs font-medium text-red-600 dark:text-red-400">
+          просрочено {overdue}
+        </span>
+      )}
+      <Button size="icon" variant="ghost" className="size-8 shrink-0"
+        aria-label="Открыть «Трек»" title="Открыть «Трек»" onClick={() => go(current.href)}>
+        <ArrowUpRight className="h-4 w-4" />
+      </Button>
+    </div>
+  )
+
   const railNav = (
     <nav aria-label="Разрезы работы"
       style={compact ? undefined : { width: rail.width }}
-      className={cn(compact
-        ? 'flex shrink-0 gap-1 overflow-x-auto border-b border-border/60 px-3 py-2'
-        : 'shrink-0 space-y-3 overflow-y-auto p-3')}>
+      className={cn('shrink-0 overflow-y-auto',
+        compact ? 'max-h-[35%] space-y-0.5 border-b border-border/60 px-2 py-1.5' : 'space-y-3 p-3')}>
       {GROUPS.map((group) => {
         const views = VIEWS.filter((v) => v.group === group)
-        // Полоса разрезов на телефоне идёт строкой без заголовков — сворачивать
-        // там нечего.
-        if (compact) return <div key={group} className="contents">{views.map(renderView)}</div>
         return (
           <RailGroup key={group} title={group}
-            count={views.reduce((n, v) => n + счётчик(v.key), 0)}>
+            count={views.reduce((n, v) => n + счётчик(v.key), 0)}
+            // В тесноте раскрыта только та группа, где стоит выбранный разрез:
+            // иначе тринадцать пунктов занимают половину окна.
+            defaultOpen={!compact || views.some((v) => v.key === view)}>
             {views.map(renderView)}
           </RailGroup>
         )
@@ -376,7 +476,11 @@ export function TasksQuickPanel({ compact: compactProp }: {
             людей в пространстве десятки, внешних участников будет больше, и выбирать
             их прокруткой длинного списка нельзя. Пикер тот же, что у объектов и
             номенклатуры, — набрал буквы, увидел строку. */}
-        <span className="flex min-w-0 shrink-0 items-center gap-1.5">
+        <span className={cn('flex min-w-0 shrink-0 items-center gap-1.5',
+          // В тесноте выбор исполнителя показывается, когда есть что поручать:
+          // пустая строка и так означает «себе» (замечание МАГа 08.09.2026 —
+          // форма съедала место у самой работы).
+          compact && !draft.trim() && 'hidden')}>
           <span className="text-xs text-muted-foreground">кому</span>
           <SearchPicker items={people.map((p) => ({ id: p.id, name: p.name, party: p.partyType }))}
             value={assigneeId} onChange={setAssigneeId}
@@ -386,7 +490,7 @@ export function TasksQuickPanel({ compact: compactProp }: {
         </span>
         {/* Почему кнопка бывает неактивна — сказано подсказкой: раньше человек
             нажимал и не понимал, чего от него хотят (замечание МАГа 06.09.2026). */}
-        <Button size="sm" className="h-8 shrink-0"
+        <Button size="sm" className={cn('h-8 shrink-0', compact && !draft.trim() && 'hidden')}
           disabled={draft.trim().length < 3 || add.isPending}
           title={draft.trim().length < 3
             ? 'Впишите, что нужно сделать, — не короче трёх букв'
@@ -399,8 +503,9 @@ export function TasksQuickPanel({ compact: compactProp }: {
         </Button>
       </div>
 
+      {compact && compactBar}
       <div ref={shellRef} className="flex min-h-0 flex-1 flex-col md:flex-row">
-        {railNav}
+        {!compact && railNav}
         {!compact && (
           <Grip label="Ширина списка разрезов" onNudge={rail.nudge}
             onMouseDown={rail.start((e) => {
@@ -410,7 +515,7 @@ export function TasksQuickPanel({ compact: compactProp }: {
         )}
 
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2">
+          {!compact && <div className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-2">
             <div className="min-w-0">
               <h2 className="truncate text-sm font-medium text-foreground">{current.label}</h2>
               <p className="truncate text-xs text-muted-foreground">{current.hint}</p>
@@ -427,10 +532,11 @@ export function TasksQuickPanel({ compact: compactProp }: {
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </Button>
             </div>
-          </div>
+          </div>}
 
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             <ViewBody view={view} companyId={companyId}
+              kinds={kindFilter === 'all' ? undefined : [kindFilter]}
               tasks={view === 'assigned' ? assignedQ.data?.tasks : watchingQ.data?.tasks}
               loading={view === 'assigned' ? assignedQ.isLoading : watchingQ.isLoading}
               onOpen={openTask} onChanged={refresh} />
@@ -462,10 +568,12 @@ export function TasksQuickPanel({ compact: compactProp }: {
  * приложения: всякое название здесь оказывалось жаргоном, а начинают работу
  * именно с неё, и сворачивать её незачем.
  */
-function RailGroup({ title, count, children }: {
+function RailGroup({ title, count, children, defaultOpen = true }: {
   title: string; count: number; children: React.ReactNode
+  /** Открыта ли группа, пока человек сам её не сворачивал. */
+  defaultOpen?: boolean
 }) {
-  const [open, toggle] = useSectionOpen(`track.${title}`, true)
+  const [open, toggle] = useSectionOpen(`track.${title}`, defaultOpen)
   if (!title) return <div className="space-y-0.5">{children}</div>
   return (
     <div className="space-y-0.5">
@@ -484,31 +592,33 @@ function RailGroup({ title, count, children }: {
 
 /** Содержимое выбранного разреза. Очередь и разложенное берём готовыми экранами
  *  приложения — здесь только выбор, что показать. */
-function ViewBody({ view, companyId, tasks, loading, onOpen, onChanged }: {
+function ViewBody({ view, companyId, tasks, loading, onOpen, onChanged, kinds }: {
   view: ViewKey; companyId: string
   tasks?: SpaceTask[]; loading: boolean
   onOpen: (id: string) => void; onChanged: () => void
+  /** Резать очередь по типу предмета: поручения или документы. */
+  kinds?: ('doc' | 'task')[]
 }) {
   switch (view) {
     // Ключи — те же, что в меню приложения: `today`, `mine-all`, `mine`.
     // Свои имена («горит», «очередь», «моё») окно уже носило, и разрез в нём
     // назывался не так, как тот же разрез на экране.
     case 'today':
-      return <MyWorkPage buckets={['overdue', 'today']} heading={false} hideDeferred
+      return <MyWorkPage buckets={['overdue', 'today']} heading={false} hideDeferred kinds={kinds}
         empty="На сегодня ничего не горит: сроки не поджимают." />
     case 'mine-all':
-      return <MyWorkPage heading={false} />
+      return <MyWorkPage heading={false} kinds={kinds} />
     case 'approvals':
-      return <MyWorkPage reasons={['approve']} heading={false}
+      return <MyWorkPage reasons={['approve']} heading={false} kinds={kinds}
         empty="Виз на вас нет." />
     case 'acquaints':
-      return <MyWorkPage reasons={['acquaint']} heading={false}
+      return <MyWorkPage reasons={['acquaint']} heading={false} kinds={kinds}
         empty="Ознакомиться пока не с чем." />
     case 'errands':
-      return <MyWorkPage reasons={['do']} heading={false}
+      return <MyWorkPage reasons={['do']} heading={false} kinds={kinds}
         empty="Поручений на вас нет." />
     case 'mine':
-      return <MyWorkPage reasons={['own']} heading={false}
+      return <MyWorkPage reasons={['own']} heading={false} kinds={kinds}
         empty="Документов, где вы автор или ответственный, сейчас нет." />
     case 'starred':
       return <PlacedList companyId={companyId} scope="starred" onChanged={onChanged}

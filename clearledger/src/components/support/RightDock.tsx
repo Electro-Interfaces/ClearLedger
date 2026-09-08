@@ -18,7 +18,8 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
-import { useMaxWidth } from '@/hooks/use-mobile'
+import { useIsMobile, useMaxWidth } from '@/hooks/use-mobile'
+import { MobileShell } from '@/components/common/MobileShell'
 import { useSupportContext, type InteractionSection } from '@/contexts/SupportContext'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { useOptionalWorkspace } from '@/contexts/WorkspaceContext'
@@ -27,6 +28,7 @@ import { productForPath } from '@/config/spaceProducts'
 import { TicketsPanel } from './InteractionPanels'
 import { TasksQuickPanel } from '@/components/tasks/TasksQuickPanel'
 import { CalendarDock } from '@/components/docs/CalendarDock'
+import { CalendarPage } from '@/pages/docs/CalendarPage'
 import { NotesPage } from '@/pages/docs/NotesPage'
 import { InfoContextPanel } from '@/components/info/InfoContextPanel'
 import { AuditorPanel } from '@/components/auditor/AuditorPanel'
@@ -73,6 +75,8 @@ export function RightDock() {
     openInteraction, setInteractionMode, closeInteraction, unreadCounts,
   } = useSupportContext()
   const isMobile = useMaxWidth(1024)
+  // Телефон (<768) — там внизу стоит панель пространства; планшет её не показывает.
+  const phone = useIsMobile()
   const [width, setWidth] = useState<number>(() => {
     const saved = Number(localStorage.getItem(DOCK_WIDTH_KEY))
     return saved >= MIN_W && saved <= MAX_W ? saved : 420
@@ -170,14 +174,35 @@ export function RightDock() {
     if (нужно) setWidth((w) => (w < нужно ? нужно : w))
   }, [section, mode, openInteraction, setInteractionMode, closeInteraction])
 
-  // ── Мобайл: рейла нет; при открытии дока — полноэкранный оверлей ──
+  // ── Мобайл: рейла нет; при открытии дока — оверлей на экран ──
   if (isMobile) {
     if (!dockOpen) return null
     return createPortal(
-      <div className="fixed inset-0 z-50 flex flex-col bg-card mobile-safe-top mobile-safe-bottom">
-        <DockHead tabs={tabs} section={section} badgeOf={badgeOf} isMobile
-          onTab={openFromRail} onPop={() => setInteractionMode('modal')} onClose={closeInteraction} />
-        <DockBody section={section} />
+      // На телефоне оверлей заканчивается НАД нижней панелью пространства: она
+      // единственная навигация под пальцем и пропадать не должна (решение МАГа
+      // 06.09.2026). Стилем, а не классом: `inset-0` задаёт `bottom:0` утилитой,
+      // и свой класс её не перебивает. На планшете (768–1024) панели нет — там
+      // оверлей по-прежнему во весь экран.
+      <div className="fixed inset-0 z-50 flex flex-col bg-card"
+        style={phone ? {
+          // Окно живёт МЕЖДУ шапкой пространства и нижней панелью (решение МАГа
+          // 07.09.2026). Раньше оно накрывало экран целиком, и шапка подменялась
+          // узкой полосой разделов дока: пропадали организация, версия, профиль,
+          // помощь и поддержка — всё, чем шапка и полезна.
+          top: 'calc(var(--header-height) + env(safe-area-inset-top))',
+          bottom: 'calc(3.5rem + env(safe-area-inset-bottom))',
+        } : undefined}>
+        {/* Своей полосы разделов на телефоне нет (замечание МАГа 07.09.2026): ровно
+            те же иконки стоят строкой выше, в шапке пространства, и две одинаковые
+            строки подряд — просто потерянная высота экрана. Закрывает окно повторное
+            нажатие на подсвеченную иконку в шапке или переход в нижней панели. */}
+        {/* Жест «потянуть — обновить» и здесь: чат и «Трек» на телефоне открывают
+            чаще всего, а обновление работало только на «Пульсе» и столе
+            (замечание МАГа 07.09.2026). Прокрутку ведёт сам раздел — оболочка
+            только слушает жест. */}
+        <MobileShell className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <DockBody section={section} />
+        </MobileShell>
       </div>,
       document.body,
     )
@@ -372,6 +397,8 @@ function RailButton({ tab, active, badge, primary, onClick, onDropItem }: {
 }
 
 function DockBody({ section }: { section: InteractionSection }) {
+  // Телефон: календарь показываем целиком, а не приёмником дел.
+  const phone = useIsMobile()
   // Док открыт ИЗ приложения — значит и чаты показываем его: код продукта выводится
   // из активного раздела рабочей области. Верхняя кнопка (модалка) продукт не
   // передаёт и показывает все чаты пространства — это тот же чат, другие предустановки.
@@ -391,8 +418,12 @@ function DockBody({ section }: { section: InteractionSection }) {
           показывает разрезы строкой поверх списка. */}
       {section === 'tasks' && <TasksQuickPanel compact />}
       {/* В доке — не второй календарь, а приёмник: сюда бросают дело, и оно
-          встаёт на день. Полный месяц с участниками живёт окном из шапки. */}
-      {section === 'calendar' && <CalendarDock />}
+          встаёт на день. Полный месяц с участниками живёт окном из шапки.
+          Под пальцем приёмник не нужен и не работает: перетащить строку в календарь
+          одним пальцем нечем, а «Поручить» со списком людей занимает пол-экрана
+          (замечание МАГа 07.09.2026). На телефоне показываем обычный календарь —
+          с режимами месяц · неделя · день · список. */}
+      {section === 'calendar' && (phone ? <CalendarPage /> : <CalendarDock />)}
       {section === 'notes' && <div className="h-full overflow-y-auto"><NotesPage /></div>}
       {/* Аудитор берёт контекст сам (маршрут и параметры адреса) — доку не нужно
           ничего ему передавать, и та же панель работает из шапки. */}

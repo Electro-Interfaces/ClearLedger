@@ -28,6 +28,7 @@ import { CalendarDays, Loader2, MapPin, UserCheck, UserPlus, Video } from 'lucid
 import { toast } from 'sonner'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { PlacedList } from '@/components/docs/PlacedList'
 import * as workService from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
@@ -46,6 +47,8 @@ function предмет(e: React.DragEvent): { kind: string; id: string } | null
 }
 
 export function CalendarDock() {
+  // Под пальцем перетаскивания нет — подсказка ниже говорит другое.
+  const phone = useIsMobile()
   const { company } = useCompany()
   const { user } = useAuth()
   const я = user?.id ?? ''
@@ -178,10 +181,14 @@ export function CalendarDock() {
         <span className="flex-1 text-sm font-medium">Пять недель</span>
       </header>
 
+      {/* Про перетаскивание — только там, где есть курсор (замечание МАГа 07.09.2026):
+          пальцем строку из «Трека» в календарь не перетащишь, окна открываются
+          по очереди. На телефоне подсказка объясняет то, что здесь и так делается:
+          записать себе на выбранный день или поручить человеку из списка ниже. */}
       <p className="shrink-0 px-3 pt-2 text-xs text-muted-foreground">
-        Тащите строку работы из «Трека» — из «Моей очереди», «Поручений» или с
-        доски (слева от названия есть ручка). На день — у неё станет этот срок,
-        на «Мне» внизу — заберёте себе, на человека — поручите ему.
+        {phone
+          ? 'Выберите день — ниже запишете работу себе на этот срок или поручите её человеку.'
+          : 'Тащите строку работы из «Трека» — из «Моей очереди», «Поручений» или с доски (слева от названия есть ручка). На день — у неё станет этот срок, на «Мне» внизу — заберёте себе, на человека — поручите ему.'}
       </p>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">

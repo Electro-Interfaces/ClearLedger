@@ -18,7 +18,6 @@ import { pathAllowed, homePath, SPACE_PRODUCTS } from '@/config/spaceProducts'
 import { productModuleAllowed } from '@/config/productAccess'
 import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
 import { PulseMobileNav } from '@/pulse/PulseMobileNav'
-import { isPwaInstalled } from '@/lib/pwaInstall'
 import { useAppEnabled } from '@/hooks/useCompanyRegistry'
 
 interface BottomNavItem {
@@ -46,7 +45,11 @@ const PULSE_ITEMS: BottomNavItem[] = [
  * Вне продукта — на рабочем столе, в админке, чатах — приложения нет, и полоса
  * возвращается к общим страницам: иначе она осталась бы пустой.
  */
-export function MobileBottomNav() {
+export function MobileBottomNav({ onMenu }: {
+  /** Открыть меню пространства (шторку). На телефоне это делает нижняя панель:
+   *  бургера в шапке больше нет (решение МАГа 06.09.2026). */
+  onMenu?: () => void
+} = {}) {
   const { company, companyId, companyModules, canApp, canModule, oversees } = useCompany()
   const pulseOn = useAppEnabled(companyId, 'pulse')
   const { pathname, search } = useLocation()
@@ -54,7 +57,12 @@ export function MobileBottomNav() {
   // области), поэтому продукт отбирает свои режимы сам — по списку из реестра.
   const sections = useWorkspaceSections()
 
-  if (canApp('pulse') && pulseOn !== false && (pathname.startsWith('/pulse') || isPwaInstalled())) return <PulseMobileNav />
+  // Панель пространства — ВСЕГДА, на любом экране телефона (решение МАГа 06.09.2026):
+  // это единственная навигация под пальцем, и пропадать она не должна ни в чате, ни
+  // в чужом приложении. Прежде она показывалась только на «Пульсе» и в установленном
+  // PWA, а в остальных местах её подменяли разделы текущего приложения — они и так
+  // лежат в меню.
+  if (canApp('pulse') && pulseOn !== false) return <PulseMobileNav onMenu={onMenu} />
 
   // Продукт определяем СТРОГО по его корню. `productForPath` для общих страниц Ядра
   // («Объекты», «Документы») отдаёт первый продукт по фолбэку — и полоса показывала

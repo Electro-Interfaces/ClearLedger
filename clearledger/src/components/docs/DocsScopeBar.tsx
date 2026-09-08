@@ -1,10 +1,12 @@
 import { CalendarRange, MapPin, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useDocsScope } from '@/hooks/useDocsScope'
+import { useIsMobile } from '@/hooks/use-mobile'
 import { formatPeriod } from '@/lib/formatDate'
 import { NewWorkButton } from '@/components/work/NewWorkButton'
 
 export function DocsScopeBar({ personal = false }: { personal?: boolean }) {
+  const phone = useIsMobile()
   const scope = useDocsScope()
   const selectedObjects = scope.objectIds.length
   if (personal) return (
@@ -23,7 +25,8 @@ export function DocsScopeBar({ personal = false }: { personal?: boolean }) {
         <NewWorkButton />
         <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
           <CalendarRange className="h-3.5 w-3.5" aria-hidden="true" />
-          Рабочий контур: {formatPeriod(scope.period.from, scope.period.to)}
+          {phone ? formatPeriod(scope.period.from, scope.period.to)
+            : `Рабочий контур: ${formatPeriod(scope.period.from, scope.period.to)}`}
         </span>
         <span className="inline-flex items-center gap-1.5 text-muted-foreground">
           <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
@@ -33,10 +36,15 @@ export function DocsScopeBar({ personal = false }: { personal?: boolean }) {
               ? `объектов: ${selectedObjects}`
               : 'все объекты'}
         </span>
-        <span className="text-muted-foreground">
-          Период применён к реестру и отчётам; объекты — к реестру и сводке документов;
-          личные очереди показывают все ожидающие действия.
-        </span>
+        {/* Пояснение к контуру — только там, где есть место (замечание МАГа
+            08.09.2026). На телефоне три строки служебного текста занимали больше,
+            чем сама работа, и первому зашедшему ничего не объясняли. */}
+        {!phone && (
+          <span className="text-muted-foreground">
+            Период применён к реестру и отчётам; объекты — к реестру и сводке документов;
+            личные очереди показывают все ожидающие действия.
+          </span>
+        )}
         {scope.sourceSpecific && (
           <span className="text-muted-foreground">
             Источник и топливо относятся только к учётным экранам.

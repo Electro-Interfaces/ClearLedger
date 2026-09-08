@@ -39,7 +39,10 @@ const REASON_ICON = {
 } as const
 
 export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
-  hideDeferred = false, hideTaken = false }: {
+  hideDeferred = false, hideTaken = false, kinds }: {
+  /** Оставить только поручения или только документы. На телефоне очередь режут
+   *  по этому вопросу: «Трек» ведёт и то и другое, но за раз человек разбирает
+   *  что-то одно (замечание МАГа 08.09.2026). */
   /** Какие корзины показывать. Пусто — все. «Сегодня» берёт две первые: там
    *  вопрос не «что на мне вообще», а «что на мне сегодня». */
   buckets?: MyWorkItem['bucket'][]
@@ -49,6 +52,7 @@ export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
    *  Нужно там, где очередь режут по вопросу («что ждёт моей визы»), а не по
    *  сроку. Своя копия строки очереди разошлась бы с этой на первой же правке. */
   reasons?: MyWorkItem['reason'][]
+  kinds?: MyWorkItem['kind'][]
   /** Чем объяснить пустоту, когда разрез узкий: «виз на вас нет» вместо общего. */
   empty?: string
   /** Спрятанное человеком до будущего дня не показывать. Включается там, где
@@ -94,8 +98,10 @@ export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
   const all = (q.data?.mine ?? []).filter(
     (r) => (!hideDeferred || !r.hidden) && (!hideTaken || !r.in_day))
   const byBucket = only?.length ? all.filter((r) => only.includes(r.bucket)) : all
-  const rows = reasons?.length
+  const byReason = reasons?.length
     ? byBucket.filter((r) => reasons.includes(r.reason)) : byBucket
+  const rows = kinds?.length
+    ? byReason.filter((r) => kinds.includes(r.kind)) : byReason
   const buckets = (q.data?.buckets ?? []).filter((b) => !only?.length || only.includes(b.code))
 
   return (

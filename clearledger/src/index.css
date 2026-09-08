@@ -383,6 +383,7 @@
     padding-right: env(safe-area-inset-right);
   }
 
+
   /* Touch optimizations */
   .mobile-optimized {
     -webkit-tap-highlight-color: transparent;

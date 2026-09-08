@@ -12,6 +12,7 @@ import { Loader2, PanelRight } from 'lucide-react'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 const ChatPanel = lazy(() => import('@/components/chat/ChatPanel').then((m) => ({ default: m.ChatPanel })))
 const TicketsPanel = lazy(() => import('./InteractionPanels').then((m) => ({ default: m.TicketsPanel })))
@@ -46,8 +47,36 @@ function AuditorAtHand() {
   return <AuditorWorkspace view={view} onView={setView} />
 }
 
+/**
+ * Прямоугольник окна связи на телефоне: от края до края, между шапкой пространства
+ * и нижней панелью.
+ *
+ * Задаём ВСЕ четыре стороны и гасим центрирование. Radix ставит окну `left:50%`,
+ * `top:50%` и сдвигает его на половину собственного размера; попытки поправить
+ * только высоту и верх ломали горизонталь — окно уезжало то вправо, то влево, а
+ * заголовок с крестиком оказывался за краем экрана (правки 07.09.2026).
+ */
+const MOBILE_WINDOW: React.CSSProperties = {
+  left: 0,
+  right: 0,
+  width: '100%',
+  maxWidth: 'none',
+  // Сдвиг «на половину себя» Tailwind 4 задаёт ОТДЕЛЬНЫМ свойством `translate`,
+  // а не `transform`. Две правки подряд гасили `transform` и не работали: окно
+  // так и уезжало влево-вверх (разбор в браузере 07.09.2026 — computed показал
+  // `transform: none`, `translate: -50% -50%`).
+  transform: 'none',
+  translate: 'none',
+  top: 'calc(var(--header-height) + env(safe-area-inset-top))',
+  bottom: 'calc(3.5rem + env(safe-area-inset-bottom))',
+  height: 'auto',
+  maxHeight: 'none',
+}
+
 export function InteractionModal() {
   const { interactionSection: section, interactionMode: mode, setInteractionMode, closeInteraction } = useSupportContext()
+  const isMobile = useIsMobile()
+  const aboveMobileNav = isMobile ? MOBILE_WINDOW : undefined
   // Заголовок окна берёт имя продукта у компании — там, где агентов зовут «Агенты»,
   // окно не должно называться «Аудитор».
   const { appName } = useCompany()
@@ -82,9 +111,19 @@ export function InteractionModal() {
       <Dialog open={isPanel && isOpen} onOpenChange={(o) => { if (!o) closeInteraction() }} modal={false}>
         <DialogContent
           onInteractOutside={(e) => e.preventDefault()}
+          // Окно заканчивается НАД нижней панелью: она единственная навигация под
+          // пальцем и пропадать не должна (решение МАГа 06.09.2026). Стилем, а не
+          // классом: утилиты диалога (`top-[50%]`, `translate-y-[-50%]`, высота)
+          // живут в слое utilities и перебивают любой свой класс — окно оставалось
+          // во весь экран, сколько его ни правь снаружи.
+          style={aboveMobileNav}
           className={
             'p-0 gap-0 bg-card border-border text-foreground shadow-2xl ring-1 ring-black/5 dark:ring-white/10 '
-            + 'w-screen h-[100dvh] max-w-none max-h-none rounded-none sm:rounded-xl overflow-hidden flex flex-col '
+            + 'w-screen max-w-none max-h-none rounded-none overflow-hidden flex flex-col '
+            // Нижняя панель не скрывается никогда (решение МАГа 06.09.2026):
+            // окно занимает экран до неё, а не поверх неё. Панель — единственная
+            // навигация на телефоне, и терять её, открыв чат, нельзя.
+            + 'sm:rounded-xl '
             // «Трек» идёт по мерке чата: это тоже рабочее окно, а не сводка —
             // строка задачи несёт номер, проект, стадию, срок и кнопки, и на
             // прежних 5xl всё это ломалось в три этажа.
@@ -96,8 +135,8 @@ export function InteractionModal() {
             // свой вопрос «свободен ли четверг».
             + (section === 'chat' || section === 'tasks' || section === 'auditor'
               || section === 'calendar'
-              ? 'sm:w-[96vw] sm:max-w-[1600px] sm:h-[92dvh] sm:max-h-[92dvh]'
-              : 'sm:w-[92vw] sm:max-w-2xl sm:h-[70vh] sm:max-h-[70vh]')
+              ? 'sm:w-[96vw] sm:max-w-[1600px] md:h-[92dvh] md:max-h-[92dvh]'
+              : 'sm:w-[92vw] sm:max-w-2xl md:h-[70vh] md:max-h-[70vh]')
           }
         >
           {DockButton}
@@ -124,7 +163,12 @@ export function InteractionModal() {
           страничка «о системе». Дерево слева, статья справа — из шапки человек
           идёт искать сам, поэтому ему нужен весь состав, а не подборка. */}
       <Dialog open={section === 'help' && isOpen} onOpenChange={(o) => { if (!o) closeInteraction() }}>
-        <DialogContent className="p-0 gap-0 bg-card border-border text-foreground shadow-2xl ring-1 ring-black/5 dark:ring-white/10 w-screen h-[100dvh] max-w-none max-h-none rounded-none sm:w-[94vw] sm:max-w-6xl sm:h-[88vh] sm:max-h-[88vh] sm:rounded-xl overflow-hidden flex flex-col">
+        <DialogContent style={aboveMobileNav}
+          className={'p-0 gap-0 bg-card border-border text-foreground shadow-2xl ring-1 ring-black/5 dark:ring-white/10 '
+          + 'w-screen max-w-none max-h-none rounded-none overflow-hidden flex flex-col '
+          // Как и у окон связи: на телефоне «Инфо» заканчивается над нижней панелью.
+
+          + 'sm:w-[94vw] sm:max-w-6xl md:h-[88vh] md:max-h-[88vh] sm:rounded-xl'}>
           {DockButton}
           <DialogHeader className="px-4 py-3 border-b border-border/50 shrink-0 text-left">
             <DialogTitle className="text-foreground text-base">Инфо — база знаний и инструкции</DialogTitle>

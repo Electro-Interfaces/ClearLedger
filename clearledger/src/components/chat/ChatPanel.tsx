@@ -2069,6 +2069,10 @@ export function ChatPanel({ compact, scopeProduct }: {
   const [folder, setFolder] = useState<string>('all')
   const [lightbox, setLightbox] = useState<{ items: { path: string; name?: string }[]; index: number } | null>(null)
   const [folderDialogOpen, setFolderDialogOpen] = useState(false)
+  // Курсор в поиске (или набранный запрос) — показываем деление по типу чата.
+  const [searchMode, setSearchMode] = useState(false)
+  // Какую папку правим в окне папки; null — окно заводит новую.
+  const [editFolderId, setEditFolderId] = useState<string | null>(null)
   const [newFolderName, setNewFolderName] = useState('')
   const [mentionQuery, setMentionQuery] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
@@ -2500,6 +2504,23 @@ export function ChatPanel({ compact, scopeProduct }: {
     chat.deleteFolder(id).then(() => { qc.invalidateQueries({ queryKey: ['chat-folders'] }); if (folder === id) setFolder('all') }).catch(() => toast.error('Не удалось удалить папку'))
   }
   /**
+   * Нажатие по папке: первое — выбрать, второе (по уже выбранной) — открыть правку.
+   * Отдельной шестерёнки в полосе нет: на телефоне это вторая мелкая цель в строке,
+   * которую всё равно не попасть пальцем (вопрос МАГа 07.09.2026 «как переименовать»).
+   */
+  const openFolder = (f: ChatFolderModel) => {
+    if (folder !== f.id) { setFolder(f.id); return }
+    setEditFolderId(f.id); setNewFolderName(f.name); setFolderDialogOpen(true)
+  }
+  /** Папка, открытая на правку в окне (null — окно заводит новую). */
+  const editFolder = editFolderId ? folders.find((f) => f.id === editFolderId) ?? null : null
+  /** Переименование папки: состав не трогаем — его правят отметками в том же окне. */
+  const renameFolder = (f: ChatFolderModel, name: string) => {
+    chat.updateFolder(f.id, name, f.roomIds)
+      .then(() => { qc.invalidateQueries({ queryKey: ['chat-folders'] }); toast.success('Папка переименована') })
+      .catch(() => toast.error('Не удалось переименовать папку'))
+  }
+  /**
    * Пункты меню чата — одни и те же для кнопки «⋮» и для правого клика по строке.
    * Radix требует СВОИ Item-компоненты в каждом меню, поэтому их передают
    * параметром: разметка одна, оболочек две. Иначе список пунктов пришлось бы
@@ -2775,7 +2796,16 @@ export function ChatPanel({ compact, scopeProduct }: {
         </div>
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="Поиск…" className="h-8 pl-8 text-xs" />
+          <Input value={listSearch} onChange={(e) => setListSearch(e.target.value)}
+            onFocus={() => setSearchMode(true)}
+            onBlur={() => {
+              if (listSearch.trim()) return
+              setSearchMode(false)
+              // Тип чата — фильтр поиска: уходя из поиска, возвращаем полный список,
+              // иначе полоса типов исчезает, а список остаётся урезанным без объяснения.
+              if (folder === 'channel' || folder === 'group' || folder === 'direct') setFolder('all')
+            }}
+            placeholder="Поиск…" className="h-8 pl-8 text-xs" />
         </div>
         {/* Область: сначала чаты этого приложения (плюс общие пространства и личные),
             и один щелчок, чтобы выйти ко всем. Виден сам факт отбора — иначе непонятно,
@@ -2794,22 +2824,38 @@ export function ChatPanel({ compact, scopeProduct }: {
             ))}
           </div>
         )}
-        {/* Чипы папок (одноколоночный режим: мобильный / узкий док) */}
+        {/* Полоса над списком — ПАПКИ человека, как в Telegram (решение МАГа 07.09.2026).
+            Деление по типу (каналы · группы · личные) из неё убрано: оно нужно, когда
+            ищешь, — и появляется в поиске, пока в поле стоит курсор или набран запрос.
+            Полоса прокручивается: папок бывает больше, чем помещается в строку. */}
         {singleColumn && (
           <div className="mt-2 flex gap-1 overflow-x-auto pb-0.5">
-            {FOLDERS.map((f) => (
+            {(searchMode ? FOLDERS : FOLDERS.slice(0, 1)).map((f) => (
               <button key={f.key} onClick={() => setFolder(f.key)}
+                // Клик по фильтру не должен гасить фокус поиска — иначе полоса типов
+                // исчезает ровно в тот момент, когда по ней нажимают.
+                onMouseDown={(e) => e.preventDefault()}
                 className={cn('inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] transition-colors', folder === f.key ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground')}>
                 <f.icon className="size-3" />{f.label}
                 {unreadByFolder[f.key] > 0 && <span className="ml-0.5 rounded-full bg-primary px-1 text-[9px] text-primary-foreground">{unreadByFolder[f.key]}</span>}
               </button>
             ))}
-            {folders.map((f) => (
-              <button key={f.id} onClick={() => setFolder(f.id)}
+            {!searchMode && folders.map((f) => (
+              <button key={f.id} onClick={() => openFolder(f)}
+                title={folder === f.id ? 'Нажмите ещё раз — имя, состав, удаление' : f.name}
                 className={cn('inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] transition-colors', folder === f.id ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground')}>
                 <Folder className="size-3" />{f.name}
+                {(unreadByFolder[f.id] || 0) > 0 && <span className="ml-0.5 rounded-full bg-primary px-1 text-[9px] text-primary-foreground">{unreadByFolder[f.id]}</span>}
               </button>
             ))}
+            {/* Завести папку — здесь же: иначе на телефоне их негде создать,
+                рейла с плюсом у него нет. */}
+            {!searchMode && (
+              <button onClick={() => { setEditFolderId(null); setNewFolderName(''); setFolderDialogOpen(true) }}
+                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-dashed border-border px-2.5 py-1 text-[11px] text-muted-foreground">
+                <Plus className="size-3" />Папка
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -3440,14 +3486,61 @@ export function ChatPanel({ compact, scopeProduct }: {
       )}
       <CreateChatDialog open={createOpen} onOpenChange={setCreateOpen} scopeProduct={scope}
         onCreated={(id) => { qc.invalidateQueries({ queryKey: ['chat-rooms'] }); setSelectedRoom(id); setShowRoomInfo(false) }} />
-      <Dialog open={folderDialogOpen} onOpenChange={setFolderDialogOpen}>
-        <DialogContent className="max-w-xs gap-3 sm:max-w-xs">
-          <DialogHeader><DialogTitle className="text-sm">Новая папка чатов</DialogTitle></DialogHeader>
+      {/* Папка: завести, переименовать, набрать состав, удалить — одно окно
+          (вопрос МАГа 07.09.2026: «как переименовать папку, как добавить в неё чат»).
+          Прежде оно только заводило папку, состав набирался из меню «⋮» у чата, а
+          переименования не было вовсе. */}
+      <Dialog open={folderDialogOpen} onOpenChange={(o) => { setFolderDialogOpen(o); if (!o) setEditFolderId(null) }}>
+        <DialogContent className="max-w-xs gap-3 sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm">{editFolder ? 'Папка чатов' : 'Новая папка чатов'}</DialogTitle>
+          </DialogHeader>
           <Input autoFocus value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && newFolderName.trim()) createFolderMutation.mutate(newFolderName.trim()) }}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || !newFolderName.trim()) return
+              if (editFolder) renameFolder(editFolder, newFolderName.trim())
+              else createFolderMutation.mutate(newFolderName.trim())
+            }}
             placeholder="Название папки…" className="h-8 text-xs" />
-          <p className="text-[11px] text-muted-foreground">Чаты добавляются в папку через меню «⋮» у чата в списке.</p>
-          <Button onClick={() => createFolderMutation.mutate(newFolderName.trim())} disabled={!newFolderName.trim() || createFolderMutation.isPending} className="h-8 w-full text-xs">Создать</Button>
+          {editFolder ? (
+            <>
+              <p className="text-[11px] text-muted-foreground">
+                Отметьте чаты, которые лежат в папке. Снятая отметка убирает чат из неё —
+                сам чат остаётся на месте.
+              </p>
+              <div className="max-h-60 space-y-0.5 overflow-y-auto rounded-md border border-border/60 p-1">
+                {rooms.map((r) => {
+                  const inFolder = editFolder.roomIds.includes(r.id)
+                  return (
+                    <button key={r.id} type="button"
+                      onClick={() => toggleRoomInFolder(editFolder, r.id)}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent">
+                      {inFolder ? <Check className="size-3.5 shrink-0 text-primary" />
+                        : <span className="size-3.5 shrink-0 rounded-sm border border-border" />}
+                      <span className="min-w-0 flex-1 truncate">{r.name || 'Чат'}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => renameFolder(editFolder, newFolderName.trim())}
+                  disabled={!newFolderName.trim() || newFolderName.trim() === editFolder.name}
+                  className="h-8 flex-1 text-xs">Переименовать</Button>
+                <Button variant="outline"
+                  onClick={() => { deleteFolder(editFolder.id); setFolderDialogOpen(false); setEditFolderId(null) }}
+                  className="h-8 text-xs text-red-600 hover:text-red-600">Удалить папку</Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-[11px] text-muted-foreground">
+                Состав наберёте сразу после создания — или через меню «⋮» у чата в списке.
+              </p>
+              <Button onClick={() => createFolderMutation.mutate(newFolderName.trim())}
+                disabled={!newFolderName.trim() || createFolderMutation.isPending}
+                className="h-8 w-full text-xs">Создать</Button>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </>
@@ -3478,11 +3571,13 @@ export function ChatPanel({ compact, scopeProduct }: {
         ))}
         {folders.length > 0 && <div className="my-1 h-px w-10 bg-border" />}
         {folders.map((f) => (
-          <button key={f.id} onClick={() => setFolder(f.id)} draggable
+          <button key={f.id} onClick={() => openFolder(f)} draggable
             onDragStart={() => { dragFolderRef.current = f.id }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => { e.preventDefault(); if (dragFolderRef.current) reorderFolders(dragFolderRef.current, f.id); dragFolderRef.current = null }}
-            title={`${f.name} · ${f.roomIds.length} чат(ов)`}
+            title={folder === f.id
+              ? `${f.name} · ${f.roomIds.length} чат(ов) · нажмите ещё раз, чтобы править`
+              : `${f.name} · ${f.roomIds.length} чат(ов)`}
             className={cn('group/folder relative flex w-14 cursor-grab flex-col items-center gap-0.5 rounded-lg px-1 py-2 text-[10px] transition-colors active:cursor-grabbing',
               folder === f.id ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
             <Folder className="size-4" />
@@ -3494,7 +3589,7 @@ export function ChatPanel({ compact, scopeProduct }: {
             </span>
           </button>
         ))}
-        <button onClick={() => setFolderDialogOpen(true)}
+        <button onClick={() => { setEditFolderId(null); setNewFolderName(''); setFolderDialogOpen(true) }}
           className="flex w-14 flex-col items-center gap-0.5 rounded-lg px-1 py-2 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
           <Plus className="size-4" />Папка
         </button>

@@ -1,4 +1,4 @@
-import { Menu, Lightbulb } from 'lucide-react'
+import { Lightbulb } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import { useGuideMode } from '@/hooks/useGuideMode'
 import { UiLevelHeaderButton } from '@/components/common/UiLevelToggle'
@@ -12,12 +12,7 @@ import { CompanySelector } from '@/components/company/CompanySelector'
 import { useCompany } from '@/contexts/CompanyContext'
 import { coreAppTitle, isCarvedProfile, productForPath, productLabel } from '@/config/spaceProducts'
 
-interface HeaderProps {
-  onMobileMenuToggle?: () => void
-  isMobile?: boolean
-}
-
-export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
+export function Header() {
   const guide = useGuideMode()
   const { company } = useCompany()
   const { pathname } = useLocation()
@@ -32,14 +27,10 @@ export function Header({ onMobileMenuToggle, isMobile }: HeaderProps) {
       <div className="flex h-full items-center justify-between gap-2 px-2 sm:gap-3 sm:px-4 md:px-6">
         {/* Левый блок: бургер (моб.) + лого + бренд + свёртка сайдбара */}
         <div className="flex min-w-0 items-center gap-3 md:gap-4">
-          {isMobile && (
-            <Button variant="ghost" size="icon"
-              className="-ml-1 size-11 shrink-0 rounded-xl"
-              aria-label="Меню разделов"
-              onClick={onMobileMenuToggle}>
-              <Menu className="size-6" />
-            </Button>
-          )}
+          {/* Бургера на телефоне нет (решение МАГа 06.09.2026): меню открывает
+              кнопка «Приложения» в нижней панели — та, до которой достаёт большой
+              палец. Две кнопки в одно и то же меню, одна из них в самом дальнем
+              углу экрана, — это повтор, а не выбор. */}
 
           {/* Логотип ведёт на рабочий стол ЭКОСИСТЕМЫ (`/`) — наружу, к списку
               приложений. Рабочий стол самого Ledger — `/workspace`.

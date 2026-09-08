@@ -1397,7 +1397,15 @@ async def pulse_day_data(db: AsyncSession, company_id: str,
     if (await db.execute(text(
             "select profile_id from companies where id = :cid"),
             {"cid": cid})).scalar_one_or_none() == "office":
-        return await _office_day_data(db, cid, visible)
+        # У office-профиля два разных дня. Где ведут учёт («Аудит») — деньги из 1С.
+        # Где учёта нет и ведут работу (ElsyPlus, решение МАГа 07.09.2026) — поручения,
+        # визы, встречи, заявки и люди: бухгалтерский набор давал там пять нулей и
+        # тревожную карточку «Данных учёта нет» про то, чего в пространстве и не должно
+        # быть. Разделяем по факту: есть ли хоть одна проводка.
+        has_ledger = (await db.execute(text(
+            "select 1 from gl_entries where company_id = CAST(:cid AS uuid) limit 1"),
+            {"cid": cid})).scalar()
+        return await (_office_day_data if has_ledger else _work_day_data)(db, cid, visible)
     profile = await _profile(db, cid)
     TBL, TS, AMT, VOL, VOL_LABEL, LOC, SESS_WORD = PROFILE_SALES[profile]
 
@@ -1661,6 +1669,171 @@ async def _office_week_data(db: AsyncSession, cid: str) -> dict[str, Any]:
          WHERE company_id = CAST(:cid AS uuid) AND source <> 'monthly'"""),
         {"cid": cid})).scalar()
     return {"rows": rows, "highlights": highlights, "as_of": as_of}
+
+
+async def _work_day_data(db: AsyncSession, cid: str,
+                         visible: set[str] | None = None) -> dict[str, Any]:
+    """Экран дня пространства, которое ведёт РАБОТУ, а не учёт.
+
+    Решение МАГа 07.09.2026 по пространству ElsyPlus: «это производственное
+    пространство, здесь не надо бухгалтерии». До этого office-профиль знал один
+    набор — деньги из 1С, — и в пространстве без учёта «Пульс» показывал пять нулей
+    и карточку «Данных учёта нет», хотя рядом жили поручения, документы на визе,
+    встречи и заявки.
+
+    Предмет здесь — дневная работа пространства: что просрочено, что ждёт решения,
+    что сегодня в календаре и кто из приглашённых так и не дошёл до системы.
+    Определения взяты у экранов, откуда цифры: поручение открыто, пока
+    `status = 'open'` («Трек»), виза и ознакомление ждут в `pending` («Дело»),
+    заявка открыта, пока не closed/cancelled (витрина Поддержки).
+    """
+    support_cid = await support_company_id(db, cid) or "-"
+
+    w = (await db.execute(text("""
+        select count(*) filter (where status = 'open') as open,
+               count(*) filter (where status = 'open' and due_at is not null
+                                and due_at < now()) as overdue,
+               count(*) filter (where status = 'open' and assignee_id is null) as no_owner,
+               count(*) filter (where status = 'open' and due_at is not null
+                                and due_at::date = current_date) as due_today
+          from tasks where company_id = :cid"""), {"cid": cid})).one()
+
+    ap = (await db.execute(text("""
+        select count(*) as pending,
+               count(*) filter (where activated_at is not null
+                                and activated_at < now() - interval '3 days') as stuck
+          from doc_approvals
+         where company_id = CAST(:cid AS uuid) and status = 'pending'"""), {"cid": cid})).one()
+
+    aq = (await db.execute(text("""
+        select count(*) as pending,
+               count(*) filter (where due_at is not null and due_at < now()) as overdue
+          from doc_acquaints
+         where company_id = CAST(:cid AS uuid) and status = 'pending'"""), {"cid": cid})).one()
+
+    ev = (await db.execute(text("""
+        select count(*) filter (where starts_at::date = current_date) as today,
+               count(*) filter (where starts_at > now()
+                                and starts_at < now() + interval '7 days') as week
+          from calendar_events
+         where company_id = CAST(:cid AS uuid)
+           and coalesce(status, '') <> 'cancelled'"""), {"cid": cid})).one()
+
+    # Заявки — тем же определением, что в сетевом наборе и в витрине Поддержки.
+    t = _TicketsZero() if not await _tickets_available(db) else (await db.execute(text(f"""
+        select count(*) filter (where external_system is null) as own_open,
+               count(*) filter (where external_system is null
+                                and coalesce(sla_breached, false)) as own_sla,
+               count(*) filter (where external_system is null
+                                and coalesce(sla_breached, false)
+                                and created_at < now() - interval '{OWN_SLA_DAYS} days') as own_sla_stale,
+               count(*) filter (where external_system is null
+                                and coalesce(reopen_count, 0) >= 2) as own_reopen,
+               count(*) filter (where external_system is not null) as ext_open,
+               count(*) filter (where external_system is not null
+                                and created_at < now() - interval '30 days') as ext_old
+          from public.tickets
+         where status not in ('closed', 'cancelled')
+           and coalesce(is_deleted, false) = false
+           and coalesce(is_archived, false) = false
+           and company_id::text = :support_cid"""), {"support_cid": support_cid})).one()
+
+    ppl = (await db.execute(text("""
+        select count(*) as total,
+               count(*) filter (where u.last_seen_at > now() - interval '24 hours') as today,
+               count(*) filter (where u.last_seen_at > now() - interval '7 days') as week,
+               count(*) filter (where u.last_seen_at is null) as never
+          from user_companies uc join users u on u.id = uc.user_id
+         where uc.company_id = :cid"""), {"cid": cid})).one()
+
+    kpi: list[dict[str, Any]] = [
+        _kpi("work_open", "Поручений в работе", w.open,
+             note=(f"срок сегодня у {w.due_today}" if w.due_today else None),
+             link="/docs/work?view=mine-all", higher_is_better=False),
+        _kpi("work_overdue", "Просрочено", w.overdue,
+             state="bad" if w.overdue else None,
+             link="/docs/work?view=today", higher_is_better=False),
+        _kpi("approvals", "Ждут визы", ap.pending,
+             note=(f"{ap.stuck} стоят дольше трёх дней" if ap.stuck else None),
+             link="/docs/work?view=approvals", higher_is_better=False),
+        _kpi("acquaints", "Ознакомиться", aq.pending,
+             link="/docs/work?view=acquaints", higher_is_better=False),
+        _kpi("meetings", "Встреч сегодня", ev.today,
+             note=(f"за неделю {ev.week}" if ev.week else None),
+             link="/docs/work?view=calendar"),
+        _kpi("own_open", "Заявки открыты", t.own_open,
+             note=(f"{t.own_sla} с нарушенным сроком" if t.own_sla else None),
+             link="/tickets?src=own", higher_is_better=False),
+        _kpi("people", "Заходили за неделю", ppl.week,
+             note=f"из {ppl.total} в пространстве", link="/pulse/team"),
+    ]
+
+    acked = {r.card_key for r in (await db.execute(text("""
+        select card_key from pulse_acks
+         where company_id = :cid
+           and (acked_on = current_date
+                or (snooze_until is not null and snooze_until >= current_date))"""),
+        {"cid": cid})).all()}
+
+    cards: list[dict[str, Any]] = []
+
+    def card(key: str, title: str, insight: str, *, count: int | None = None,
+             level: str = "warn", link: str | None = None) -> None:
+        if key in acked:
+            return
+        cards.append({"key": key, "title": title, "insight": insight,
+                      "count": count, "level": level, "link": link})
+
+    if w.overdue:
+        card("work_overdue", "Поручения просрочены",
+             f"{w.overdue} {plural(w.overdue, 'поручение', 'поручения', 'поручений')} "
+             f"с прошедшим сроком: решите или перенесите срок — сам он не сдвинется.",
+             count=w.overdue, level="alert", link="/docs/work?view=today")
+
+    if w.no_owner:
+        card("work_no_owner", "Работа без исполнителя",
+             f"{w.no_owner} {plural(w.no_owner, 'поручение', 'поручения', 'поручений')} "
+             f"никому не поручено: срок идёт, а делать некому.",
+             count=w.no_owner, link="/docs/work?view=mine-all")
+
+    if ap.stuck:
+        card("appr_stuck", "Визы стоят",
+             f"{ap.stuck} {plural(ap.stuck, 'документ ждёт', 'документа ждут', 'документов ждут')} "
+             f"решения дольше трёх дней.",
+             count=ap.stuck, link="/docs/work?view=approvals")
+
+    if aq.overdue:
+        card("acq_overdue", "Ознакомление просрочено",
+             f"{aq.overdue} {plural(aq.overdue, 'ознакомление', 'ознакомления', 'ознакомлений')} "
+             f"не закрыто в назначенный срок.",
+             count=aq.overdue, link="/docs/work?view=acquaints")
+
+    if t.own_sla_stale:
+        card("own_sla", "Заявки нарушили срок",
+             f"{t.own_sla_stale} {plural(t.own_sla_stale, 'заявка', 'заявки', 'заявок')} "
+             f"с нарушенным SLA лежит дольше {OWN_SLA_DAYS} дней.",
+             count=t.own_sla_stale, level="alert", link="/tickets?sla=breached")
+
+    if ppl.never:
+        card("people_never", "Приглашённые не дошли",
+             f"{ppl.never} из {ppl.total} "
+             f"{plural(ppl.never, 'человек ни разу не заходил', 'человека ни разу не заходили', 'человек ни разу не заходили')} "
+             f"в пространство.",
+             count=ppl.never, level="info", link="/pulse/team")
+
+    if visible is not None:
+        cards = [c for c in cards
+                 if CARD_SCOPE.get(c["key"]) is None or CARD_SCOPE[c["key"]] in visible]
+        kpi = [k for k in kpi if KPI_SCOPE.get(k["key"]) is None
+               or KPI_SCOPE[k["key"]] in visible]
+
+    return {
+        "as_of": None,
+        "stale_days": None,
+        "kpi": kpi,
+        "cards": cards,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 async def _office_day_data(db: AsyncSession, cid: str,

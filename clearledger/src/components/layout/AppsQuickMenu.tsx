@@ -76,11 +76,19 @@ function QuickSection({ title, count, storageKey, collapsible, children }: {
   )
 }
 
-export function AppsQuickMenu({ onNavigate }: {
-  /** Мобильная шторка закрывается вслед за выбором — как у обычного пункта меню. */
+/**
+ * Сам список приложений: избранное и группы каталога.
+ *
+ * Показывают его двое — поповер у стрелки в рельсе и меню-шторка на телефоне, где
+ * каталог теперь живёт целиком (решение МАГа 06.09.2026: панель плашек поверх
+ * работы на телефоне убрана, дверь одна — «Приложения» в нижней панели).
+ */
+export function AppsQuickList({ onNavigate, onPicked }: {
+  /** Закрыть меню вслед за выбором — как у обычного пункта. */
   onNavigate?: () => void
+  /** Хозяину списка: выбор сделан (поповеру — закрыться). */
+  onPicked?: () => void
 }) {
-  const [open, setOpen] = useState(false)
   const { sections, apps, isLoading } = useSpaceApps()
   const { openApp, busy } = useOpenApp()
   const { company } = useCompany()
@@ -91,7 +99,7 @@ export function AppsQuickMenu({ onNavigate }: {
   const picked = favorites.flatMap((code) => apps.filter((a) => a.code === code))
 
   async function choose(a: SsoApp) {
-    setOpen(false)
+    onPicked?.()
     onNavigate?.()
     await openApp(a)
   }
@@ -136,6 +144,40 @@ export function AppsQuickMenu({ onNavigate }: {
   }
 
   return (
+    <>
+      {isLoading && (
+        <div className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Загрузка каталога…
+        </div>
+      )}
+      {!isLoading && visible.length === 0 && (
+        <div className="px-2 py-2 text-sm text-muted-foreground">
+          Приложения не подключены.
+        </div>
+      )}
+      {favReady && picked.length > 0 && (
+        <QuickSection title="Избранное" count={picked.length}
+          storageKey="favorites" collapsible={false}>
+          {picked.map((a) => appRow(a, true))}
+        </QuickSection>
+      )}
+      {visible.map((s) => (
+        <QuickSection key={s.key} title={s.title} count={s.apps.length}
+          storageKey={s.key} collapsible={touch}>
+          {s.apps.map((a) => appRow(a, favorites.includes(a.code)))}
+        </QuickSection>
+      ))}
+    </>
+  )
+}
+
+export function AppsQuickMenu({ onNavigate }: {
+  /** Мобильная шторка закрывается вслед за выбором — как у обычного пункта меню. */
+  onNavigate?: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const touch = useTouchInput()
+  return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         {/* Своё поле нажатия с чертой слева: стрелка живёт в той же строке, что
@@ -155,28 +197,7 @@ export function AppsQuickMenu({ onNavigate }: {
       <PopoverContent side={touch ? 'bottom' : 'right'} align={touch ? 'center' : 'start'}
         sideOffset={8} collisionPadding={12}
         className="max-h-[70vh] w-[min(20rem,calc(100vw-1.5rem))] overflow-y-auto p-1.5">
-        {isLoading && (
-          <div className="flex items-center gap-2 px-2 py-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Загрузка каталога…
-          </div>
-        )}
-        {!isLoading && visible.length === 0 && (
-          <div className="px-2 py-2 text-sm text-muted-foreground">
-            Приложения не подключены.
-          </div>
-        )}
-        {favReady && picked.length > 0 && (
-          <QuickSection title="Избранное" count={picked.length}
-            storageKey="favorites" collapsible={false}>
-            {picked.map((a) => appRow(a, true))}
-          </QuickSection>
-        )}
-        {visible.map((s) => (
-          <QuickSection key={s.key} title={s.title} count={s.apps.length}
-            storageKey={s.key} collapsible={touch}>
-            {s.apps.map((a) => appRow(a, favorites.includes(a.code)))}
-          </QuickSection>
-        ))}
+        <AppsQuickList onNavigate={onNavigate} onPicked={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
   )

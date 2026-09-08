@@ -40,8 +40,27 @@ export function usePullToRefresh(
     let pulling = false
     let frame = 0
 
+    /**
+     * Прокручиваемая область ПОД ПАЛЬЦЕМ, а не только сам узел.
+     *
+     * Раньше жест смотрел на `el.scrollTop`, и работал лишь там, где прокрутка
+     * висит на самой оболочке («Пульс», стол). В рабочей области продукта скроллится
+     * внутренний список, у оболочки scrollTop всегда 0 — обновление либо не
+     * появлялось вовсе, либо (если оболочку навесить) срабатывало посреди списка,
+     * перебивая обычную прокрутку.
+     */
+    const scrollableAt = (target: EventTarget | null): HTMLElement => {
+      let n = target instanceof HTMLElement ? target : null
+      while (n && el.contains(n)) {
+        const oy = getComputedStyle(n).overflowY
+        if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight) return n
+        n = n.parentElement
+      }
+      return el
+    }
+
     const onStart = (e: TouchEvent) => {
-      if (el.scrollTop > 0) return       // тянем только от самого верха
+      if (scrollableAt(e.target).scrollTop > 0) return   // тянем только от самого верха
       startY = e.touches[0].clientY
       pulling = true
     }

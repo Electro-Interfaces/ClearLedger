@@ -49,8 +49,10 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border" style={{ minWidth: days.length > 1 ? 672 : 0 }}>
-      {/* Шапка дней */}
-      <div className="flex border-b border-border bg-muted/40">
+      {/* Шапка дней. В режиме одного дня её нет: дата уже стоит заголовком в шапке
+          календаря, и строка «ПН 7» под «7 сентября 2026» повторяла то же самое
+          (замечание МАГа 07.09.2026). */}
+      {days.length > 1 && <div className="flex border-b border-border bg-muted/40">
         <div className="w-12 shrink-0" />
         {days.map((d) => (
           <div key={d.toISOString()}
@@ -63,7 +65,7 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
             </span>
           </div>
         ))}
-      </div>
+      </div>}
 
       {/* Всёдневная полоса: командировки и СРОКИ. Срок здесь точкой — у него нет
           длительности, и место ему не в сетке часов. */}

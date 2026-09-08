@@ -19,7 +19,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger,
 } from '@/components/ui/select'
 import { MobileShell } from '@/components/common/MobileShell'
 
@@ -161,22 +161,42 @@ export function PulseLayout() {
   if (narrow) {
     return (
       <div className="flex h-full min-h-0 flex-col">
+        {/* Жест «потянуть — обновить» и слежение за выкаткой: на телефоне вкладку
+            не закрывают неделями, и без этого человек смотрит вчерашние цифры
+            вчерашней сборкой, не подозревая об этом. */}
+        <MobileShell className="min-w-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+          <Outlet />
+        </MobileShell>
         {views.length > 0 && (
-          // Пункты раздела списком, а не свайп-строкой: та уезжала за край экрана,
-          // и было не видно ни всего набора, ни того, где стоишь (замечание МАГа
-          // 15.08.2026). У «Пульса» к каждому пункту есть пояснение — в списке оно
-          // помещается второй строкой, а во вкладках пропадало вовсе.
+          // Выбор пункта раздела — ВНИЗУ, прямо над нижней панелью (решение МАГа
+          // 07.09.2026): переключаются им часто, а у верхнего края экрана до него
+          // не дотянуться большим пальцем. Заодно он больше не отодвигает работу
+          // вниз при каждом заходе.
+          //
+          // Списком, а не свайп-строкой: та уезжала за край экрана, и было не видно
+          // ни всего набора, ни того, где стоишь (замечание МАГа 15.08.2026).
+          // Пояснение пункта живёт в списке — в самой строке оно занимало второй
+          // этаж и делало полосу вдвое выше.
           <div data-zone="Пункты раздела"
-            className="shrink-0 border-b border-border bg-card px-2 py-1.5">
+            className="shrink-0 border-t border-border bg-card px-3 py-2">
             <Select value={active} onValueChange={open}>
-              <SelectTrigger size="sm" className="h-9 w-full gap-1.5 text-[13px] font-medium">
-                <SelectValue />
+              <SelectTrigger size="sm"
+                className="h-11 w-full justify-between rounded-lg border-border/70 bg-background
+                           px-3 text-sm font-medium">
+                <span className="min-w-0 truncate">
+                  {views.find((v) => v.key === active)?.label ?? 'Раздел'}
+                </span>
               </SelectTrigger>
-              <SelectContent>
+              {/* Открывается ВВЕРХ и только в режиме `popper`: по умолчанию Radix
+                  выравнивает список по выбранному пункту и `side` игнорирует —
+                  у нижнего края экрана ему не хватало места, и нажатие выглядело
+                  как «ничего не происходит» (замечание МАГа 07.09.2026). */}
+              <SelectContent position="popper" side="top" align="start" sideOffset={8}
+                className="max-h-[60vh] w-[calc(100vw-1.5rem)]">
                 {views.map((v) => (
-                  <SelectItem key={v.key} value={v.key}>
+                  <SelectItem key={v.key} value={v.key} className="py-2">
                     <span className="flex flex-col items-start leading-tight">
-                      <span>{v.label}</span>
+                      <span className="text-sm">{v.label}</span>
                       <span className="text-[11px] text-muted-foreground">{v.hint}</span>
                     </span>
                   </SelectItem>
@@ -185,15 +205,6 @@ export function PulseLayout() {
             </Select>
           </div>
         )}
-        {/* Жест «потянуть — обновить» и слежение за выкаткой: на телефоне вкладку
-            не закрывают неделями, и без этого человек смотрит вчерашние цифры
-            вчерашней сборкой, не подозревая об этом. */}
-        <MobileShell className="min-w-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
-          {/* Предложение поставить приложением — только в компактной раскладке:
-              на десктопе «Пульс» и так открыт вкладкой, а на телефоне его держат
-              под рукой. Ставится один раз, дальше плашка не показывается. */}
-          <Outlet />
-        </MobileShell>
       </div>
     )
   }

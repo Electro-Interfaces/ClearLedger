@@ -14,9 +14,7 @@
 import { useState } from 'react'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  CalendarCheck, CalendarClock, FolderPlus, MoreHorizontal, Star, Sun, X,
-} from 'lucide-react'
+import { CalendarCheck, CalendarClock, FolderPlus, MoreHorizontal, Star, Sun, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -26,6 +24,7 @@ import {
   DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import * as workService from '@/services/workService'
+import * as tasksService from '@/services/tasksService'
 import type { PersonalMark } from '@/services/workService'
 import { shortDay } from '@/lib/personalDay'
 import { cn } from '@/lib/utils'
@@ -67,8 +66,26 @@ export function PlaceActions({
   const compact = compactProp || mobile
   /** Что именно выбирают днём: запланировать работу или спрятать до даты.
    *  Поле ввода одно, намерения два — и путать их нельзя. */
-  const [pickingDate, setPickingDate] = useState<'plan' | 'defer' | null>(null)
+  const [pickingDate, setPickingDate] = useState<'plan' | 'defer' | 'due' | null>(null)
   const [date, setDate] = useState('')
+
+  /** Срок правим только у поручения: у документа он задаётся видом работы. */
+  const taskId = targetRef.startsWith('task:') ? targetRef.slice(5) : null
+  const срок = useMutation({
+    mutationFn: (day: string) => tasksService.taskAction(taskId!, {
+      companyId,
+      // Конец рабочего дня: срок «на сегодня» без времени сервер считает
+      // наступившим в полночь, и работа становится просроченной сразу.
+      dueAt: new Date(`${day}T18:00`).toISOString(),
+    }),
+    onSuccess: () => {
+      setPickingDate(null)
+      toast.success('Срок перенесён')
+      onChanged()
+      void qc.invalidateQueries({ queryKey: ['work-mine'] })
+    },
+    onError: (e: Error) => toast.error(e.message || 'Срок не перенёсся'),
+  })
 
   const lists = useQuery({
     queryKey: ['personal-lists', companyId],
@@ -164,14 +181,18 @@ export function PlaceActions({
 
   if (pickingDate) {
     const планирую = pickingDate === 'plan'
+    const срокДня = pickingDate === 'due'
     return (
       <span className="inline-flex items-center gap-1">
         <Input type="date" value={date} autoFocus className="h-8 w-[150px] text-xs"
           onChange={(e) => setDate(e.target.value)} />
-        <Button size="sm" className="h-8 px-2 text-xs" disabled={!date || act.isPending}
-          onClick={() => act.mutate(планирую
-            ? { takenFor: date } : { deferUntil: date })}>
-          {планирую ? 'Займусь' : 'Скрыть'}
+        <Button size="sm" className="h-8 px-2 text-xs"
+          disabled={!date || act.isPending || срок.isPending}
+          onClick={() => {
+            if (срокДня) срок.mutate(date)
+            else act.mutate(планирую ? { takenFor: date } : { deferUntil: date })
+          }}>
+          {срокДня ? 'Срок' : планирую ? 'Займусь' : 'Скрыть'}
         </Button>
         <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
           onClick={() => setPickingDate(null)}>Отмена</Button>
@@ -244,6 +265,38 @@ export function PlaceActions({
               )}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
+          {/* Срок — общий: его видят все и по нему считается просрочка. Поэтому
+              отдельным разделом, а не рядом с личными пометками. Только у
+              поручений: у документа срок задаёт его вид работы. */}
+          {taskId && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+                Срок работы — видят все
+              </DropdownMenuLabel>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <CalendarClock className="mr-2 h-3.5 w-3.5" />
+                  {dueAt ? `Срок: ${shortDay(dueAt.slice(0, 10))}` : 'Поставить срок'}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuItem onClick={() => срок.mutate(workService.todayKey())}>
+                    Сегодня
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => срок.mutate(завтра())}>
+                    Завтра
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => срок.mutate(nextWeekday(1))}>
+                    В понедельник
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setDate(завтра()); setPickingDate('due') }}>
+                    Выбрать день…
+                  </DropdownMenuItem>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            </>
+          )}
+
           {/* Сокрытие: предмет уходит с глаз до даты. Названо тем, что делает, —
               прежнее «Не сегодня» звучало как планирование, а планированием не
               было. */}

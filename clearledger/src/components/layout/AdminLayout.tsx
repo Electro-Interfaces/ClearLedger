@@ -23,6 +23,7 @@ import { AdminNavContent, AdminSidebar } from '@/components/layout/AdminSidebar'
 import { AppsPanelProvider, AppsPanelSurface } from '@/components/layout/AppsPanel'
 import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionButtons'
 import { HeaderUserMenu } from '@/components/layout/HeaderUserMenu'
+import { MobileBottomNav } from '@/components/layout/MobileBottomNav'
 import InteractionHost from '@/components/support/InteractionHost'
 import { findSection, type AdminScope } from '@/config/adminNav'
 import { useAuth } from '@/contexts/AuthContext'
@@ -171,7 +172,7 @@ export function AdminLayout() {
         <SidebarInset className="overflow-hidden">
           {/* Панель «Приложения» — в рабочей области, как в остальных продуктах. */}
           <AppsPanelSurface />
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 md:px-6">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 max-md:pb-20 md:px-6">
             {/* Ширину не ограничиваем: в разделах таблицы (сотрудники, объекты, аудит),
                 им нужна вся рабочая область — так же, как экранам Учёта. */}
             <div className="w-full space-y-4">
@@ -195,6 +196,10 @@ export function AdminLayout() {
             рабочей области), в правом рельсе его нет — один вход, а не три. */}
         <InteractionHost />
       </div>
+
+      {/* Нижняя панель пространства — и здесь: на телефоне она не пропадает нигде
+          (решение МАГа 06.09.2026). Меню открывает та же шторка разделов. */}
+      {isMobile && <MobileBottomNav onMenu={() => setMobileMenuOpen(true)} />}
     </SidebarProvider></AppsPanelProvider>
   )
 }

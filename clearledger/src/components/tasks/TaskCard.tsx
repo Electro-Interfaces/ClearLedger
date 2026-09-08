@@ -12,11 +12,7 @@ import { WorkOriginLink } from '@/components/work/WorkOriginLink'
 import { WorkResults } from '@/components/work/WorkResults'
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  ArrowLeft, ArrowRight, CheckCircle2, ChevronRight, Clock, Eye, EyeOff, Link2,
-  ListChecks, Loader2, Lock, Mail, MessagesSquare, Paperclip, Pin, Plus, RefreshCw,
-  Send, Trash2, X,
-} from 'lucide-react'
+import { ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, Clock, Eye, EyeOff, Link2, ListChecks, Loader2, Lock, Mail, Maximize2, MessagesSquare, Minimize2, Paperclip, Pin, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -29,6 +25,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { QueryError } from '@/components/common/QueryError'
 import { openAuthAttachment } from '@/lib/authFiles'
 import { cn } from '@/lib/utils'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import * as tasksService from '@/services/tasksService'
 import { WorkIdentity } from '@/components/work/WorkIdentity'
 import { AskSupportButton } from '@/components/support/AskSupportButton'
@@ -52,9 +58,19 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
   /** Возврат к списку. Есть — карточка показана экраном, нет — врезкой. */
   onBack?: () => void
 }) {
+  // На телефоне подсказки короче: приёмы вроде Ctrl+V там неприменимы.
+  const phone = useIsMobile()
   const qc = useQueryClient()
   const [note, setNote] = useState('')
   const [feedKind, setFeedKind] = useState<'all' | 'talk' | 'move' | 'meta'>('all')
+  /** Раскрыто ли поле записи в ленту (на телефоне закрыто, пока не позвали). */
+  const [noteOpen, setNoteOpen] = useState(false)
+  /** Спросили про отмену задачи и ждём ответа. */
+  const [cancelAsk, setCancelAsk] = useState(false)
+  /** Открыт список файлов задачи (из строки записи в ленту). */
+  const [filesOpen, setFilesOpen] = useState(false)
+  /** Лента развёрнута во весь экран. */
+  const [feedFull, setFeedFull] = useState(false)
   // Порядок ленты — выбор человека и его привычка, а не свойство задачи:
   // помним на пользователя, как это делает GitLab.
   const [feedNewFirst, setFeedNewFirst] = useState(
@@ -148,8 +164,23 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
 
   return (
     <div className="flex h-full flex-col">
-      <Header task={t} companyId={companyId} onBack={onBack}
-        onRename={(title) => act.mutate({ companyId, title })} />
+      {feedFull && phone ? (
+        // Лента во весь экран (просьба МАГа 08.09.2026): в разборе долгой работы
+        // читают именно её, а шапка с вкладками занимает треть окна.
+        <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
+          <span className="text-sm font-medium">Ход работы · {t.events.length}</span>
+          <Button size="sm" variant="ghost" className="h-8 gap-1.5"
+            onClick={() => setFeedFull(false)}>
+            <Minimize2 className="h-4 w-4" />Свернуть
+          </Button>
+        </div>
+      ) : (
+      <Header task={t} companyId={companyId} onBack={onBack} live={live} busy={act.isPending}
+        onRename={(title) => act.mutate({ companyId, title })}
+        onStage={(code) => act.mutate({ companyId, stageCode: code, note: note || undefined })}
+        onDone={() => act.mutate({ companyId, status: 'done', note: note || undefined })}
+        onCancel={() => setCancelAsk(true)} />
+      )}
 
       <div className="flex min-h-0 flex-1">
       <div className={cn('flex min-w-0 flex-1 flex-col px-5 py-4 text-sm',
@@ -157,7 +188,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
         {/* Маршрут первым: «где сейчас работа» — главный вопрос к карточке.
             Одинаковые пилюли одного размера, активная залита. Раньше здесь были
             три разные рамки, и полоса читалась как набор случайных плашек. */}
-        <div className="flex flex-wrap items-center gap-1">
+        {!phone && <div className="flex flex-wrap items-center gap-1">
           {t.route.map((s, i) => (
             <span key={s.code} className="flex items-center gap-1">
               {i > 0 && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />}
@@ -174,13 +205,13 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
               </button>
             </span>
           ))}
-        </div>
+        </div>}
 
         {/* Действия одной линейкой: все кнопки одной высоты и двух видов —
             главное действие залито, остальные одинаковые. Разрушительное
             («Отменить задачу») отодвинуто вправо и приглушено: рядом с
             «Выполнена» ему не место. */}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className={cn('mt-3 flex flex-wrap items-center gap-2', (feedFull && phone) && 'hidden')}>
           {live && next && (
             // `data-role` — единственный способ адресовать эту кнопку: она
             // называется именем следующего этапа, а оно у каждого маршрута
@@ -220,32 +251,35 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
               </select>
             </span>
           )}
-          {live && (
+          {live && !phone && (
             <Button size="sm" variant="outline" className="h-8" disabled={act.isPending}
               onClick={() => act.mutate({ companyId, status: 'done', note: note || undefined })}>
               <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />Выполнена
             </Button>
           )}
-          <Button size="sm" variant="outline" className="h-8"
-            onClick={() => setTab('chat')}>
-            <MessagesSquare className="mr-1.5 h-3.5 w-3.5" />Обсудить
-          </Button>
-          {live && (
+          {!phone && (
+            <Button size="sm" variant="outline" className="h-8"
+              onClick={() => setTab('chat')}>
+              <MessagesSquare className="mr-1.5 h-3.5 w-3.5" />Обсудить
+            </Button>
+          )}
+          {live && !phone && (
             <Button size="sm" variant="ghost"
               className="ml-auto h-8 text-muted-foreground hover:text-foreground"
               disabled={act.isPending}
-              onClick={() => act.mutate({ companyId, status: 'cancelled', note: note || undefined })}>
+              onClick={() => setCancelAsk(true)}>
               Отменить задачу
             </Button>
           )}
         </div>
-        <WorkOriginLink companyId={companyId} kind="task" id={t.id} />
-        {t.visibility !== 'personal' && <WorkResults companyId={companyId} kind="task" id={t.id} />}
+        {!(feedFull && phone) && <WorkOriginLink companyId={companyId} kind="task" id={t.id} />}
+        {!(feedFull && phone) && t.visibility !== 'personal'
+          && <WorkResults companyId={companyId} kind="task" id={t.id} />}
 
         {/* Быстрые добавления: четыре видимые кнопки ведут туда, где действие
             и происходит. Прятать их под одну «Добавить» — ошибка, за которую
             Jira получила отдельный разбор: чище на вид, дороже в работе. */}
-        {live && (
+        {live && !(feedFull && phone) && (
           <div className="mt-4 flex flex-wrap items-center gap-1.5">
             {/* Поле выбора файла живёт во вкладке «Файлы», а неактивные вкладки
                 Radix размонтирует: без перехода ссылка пуста и кнопка молчит. */}
@@ -260,12 +294,20 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
         )}
 
         <Tabs value={tab} onValueChange={setTab}
-          className={cn('mt-4', tab === 'chat' && 'flex min-h-0 flex-1 flex-col')}>
+          className={cn((feedFull && phone) ? 'mt-0' : 'mt-4', tab === 'chat' && 'flex min-h-0 flex-1 flex-col')}>
           {/* Вкладки вместо одной длинной колонки: у задачи с полусотней ходов
               история — отдельная работа, и ради неё не нужно прокручивать
               чек-лист и файлы. */}
-          <TabsList variant="line" className="h-9 w-full justify-start gap-5 border-b border-border/60">
+          <TabsList variant="line"
+            className={cn('h-9 w-full justify-start gap-5 overflow-x-auto border-b border-border/60',
+              feedFull && phone && 'hidden')}>
             <TabsTrigger value="work" className="flex-none px-0 text-sm">Работа</TabsTrigger>
+            {/* Лента — вторым пунктом на телефоне: именно её ищут после записи. */}
+            {phone && (
+              <TabsTrigger value="feed" className="flex-none px-0 text-sm">
+                Ход · {t.events.length}
+              </TabsTrigger>
+            )}
             {/* На узком экране свойства живут вкладкой, на широком — колонкой
                 справа: там они нужны постоянно, а не по клику. */}
             <TabsTrigger value="attrs" className="flex-none px-0 text-sm xl:hidden">Свойства</TabsTrigger>
@@ -284,9 +326,11 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             {/* Не «История»: в этом потоке и движение работы, и реплики —
                 единая лента, к которой пришли YouTrack и GitLab. Чат причастных
                 («Обсуждение») стоит отдельно намеренно: это разговор, а не след. */}
-            <TabsTrigger value="feed" className="flex-none px-0 text-sm">
-              Ход работы · {t.events.length}
-            </TabsTrigger>
+            {!phone && (
+              <TabsTrigger value="feed" className="flex-none px-0 text-sm">
+                Ход работы · {t.events.length}
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="work" className="space-y-5 pt-4">
@@ -366,7 +410,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           )}
         </Section>
           </TabsContent>
-          <TabsContent value="feed" className="space-y-5 pt-4">
+          <TabsContent value="feed" className={cn('space-y-5 pt-4', phone && 'pb-16')}>
         {/* Единая лента: события и реплики одним потоком — иначе «почему стоит»
             приходится собирать из двух списков. */}
         <Section title="Ход работы" action={
@@ -401,7 +445,10 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
                 приходит слотами: закрепление, пометка письма, ссылка на оригинал. */}
             <WorkTrace
               events={events.map((e) => ({
-                id: e.id, at: e.created_at, actor: e.user, action: eventText(e),
+                id: e.id, at: e.created_at, actor: e.user,
+                // У реплики действие не пишем: под ней сам текст, и слово
+                // «написал» ничего не добавляет (замечание МАГа 08.09.2026).
+                action: e.kind === 'comment' ? '' : eventText(e),
                 tone: e.kind === 'mail' ? 'mail' : 'default',
                 note: e.note
                   ? <RichText text={e.note} className="mt-0.5 text-foreground/90" />
@@ -451,12 +498,42 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
       </aside>
       </div>
 
-      {live && tab !== 'chat' && (
-        <div className="border-t bg-muted/20 px-5 py-3">
-          <div className="flex items-end gap-2">
+      {/* На телефоне поле не висит внизу постоянно (замечание МАГа 08.09.2026):
+          сначала кнопка, по ней раскрывается поле. На компьютере поле открыто —
+          там оно не отнимает работу. */}
+      {/* Строка действий ленты прижата к низу окна, над панелью пространства
+          (решение МАГа 08.09.2026): две кнопки рядом — записать в ход работы и
+          уйти в обсуждение. Раньше кнопка висела посреди пустого места. */}
+      {live && phone && tab === 'feed' && !noteOpen && (
+        <div className="fixed inset-x-0 z-30 flex gap-2 border-t bg-card px-4 py-2"
+          style={{ bottom: 'calc(3.5rem + env(safe-area-inset-bottom))' }}>
+          <Button variant="outline" size="sm" className="h-9 flex-1 gap-2"
+            onClick={() => setNoteOpen(true)}>
+            <MessagesSquare className="h-4 w-4" />Написать в ленту
+          </Button>
+          <Button variant="outline" size="sm" className="h-9 flex-1 gap-2"
+            onClick={() => setTab('chat')}>
+            <MessagesSquare className="h-4 w-4" />Обсудить
+          </Button>
+          <Button variant="outline" size="icon" className="size-9 shrink-0"
+            aria-label={feedFull ? 'Свернуть ленту' : 'Лента во весь экран'}
+            title={feedFull ? 'Свернуть ленту' : 'Лента во весь экран'}
+            onClick={() => setFeedFull((v) => !v)}>
+            {feedFull ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </Button>
+        </div>
+      )}
+      {live && (phone ? (tab === 'feed' && noteOpen) : tab !== 'chat') && (
+        <div className={cn('border-t bg-card px-4 py-3',
+          phone ? 'fixed inset-x-0 z-30' : 'bg-muted/20 px-5')}
+          style={phone ? { bottom: 'calc(3.5rem + env(safe-area-inset-bottom))' } : undefined}>
+          {/* Кнопка живёт ВНУТРИ поля (замечание МАГа 08.09.2026): подпись
+              «Записать» занимала треть строки, а поле — половину экрана. Теперь
+              поле во всю ширину, отправка — иконкой в правом нижнем углу. */}
+          <div className="relative">
             <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
-              maxLength={2000} className="text-sm"
-              placeholder="Написать в ленту. @имя — добавит человека в наблюдатели. Скриншот — Ctrl+V. Уйдёт вместе с действием."
+              maxLength={2000} className="w-full pr-12 text-sm"
+              placeholder={phone ? "Написать в ленту" : "Написать в ленту. @имя — добавит человека в наблюдатели. Скриншот — Ctrl+V. Уйдёт вместе с действием."}
               // Скриншот вставляется прямо в поле реплики: пока человек
               // объясняет, что не так, картинка уже прикладывается к задаче.
               onPaste={(e) => {
@@ -467,20 +544,96 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
                   imgs.forEach((f) => upload.mutate(f))
                 }
               }} />
-            <Button size="sm" className="h-8" disabled={!note.trim() || act.isPending}
-              onClick={() => act.mutate({ companyId, note: note.trim() })}>Записать</Button>
+            <Button size="icon" variant="ghost"
+              className="absolute bottom-2 right-12 size-8 rounded-full text-muted-foreground"
+              aria-label="Приложить файл" title="Файлы задачи"
+              disabled={upload.isPending}
+              onClick={() => setFilesOpen(true)}>
+              {upload.isPending
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Paperclip className="h-4 w-4" />}
+            </Button>
+            <Button size="icon" className="absolute bottom-2 right-2 size-8 rounded-full"
+              aria-label="Записать в ленту" title="Записать в ленту"
+              disabled={!note.trim() || act.isPending}
+              onClick={() => { act.mutate({ companyId, note: note.trim() }); setNoteOpen(false) }}>
+              <Send className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       )}
+      {/* Файлы задачи — из ленты: пока человек пишет, он и прикладывает. Окно
+          показывает уже приложенное и даёт добавить новое, не уходя с «Хода». */}
+      <Dialog open={filesOpen} onOpenChange={setFilesOpen}>
+        <DialogContent className="max-w-xs gap-3 sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm">Файлы задачи · {t.attachments.length}</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-60 space-y-1 overflow-y-auto">
+            {t.attachments.length === 0 && (
+              <p className="py-2 text-xs text-muted-foreground">Пока ничего не приложено.</p>
+            )}
+            {t.attachments.map((a) => (
+              // Файл закрыт JWT: прямая ссылка в новой вкладке отдаёт 401 —
+              // тянем тем же клиентом, что и вложения чата.
+              <button key={a.id} type="button"
+                onClick={() => {
+                  void openAuthAttachment(tasksService.taskFileUrl(a.id, companyId))
+                    .catch(() => toast.error('Файл не открылся'))
+                }}
+                className="flex w-full items-center gap-2 rounded px-1 py-1.5 text-left text-xs hover:bg-accent">
+                <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate">{a.file_name}</span>
+                <span className="shrink-0 text-muted-foreground">{fileSize(a.size)}</span>
+              </button>
+            ))}
+          </div>
+          {live && (
+            <Button variant="outline" className="h-10 w-full gap-2"
+              disabled={upload.isPending} onClick={() => fileRef.current?.click()}>
+              {upload.isPending
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Paperclip className="h-4 w-4" />}
+              Добавить файл
+            </Button>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Отмена спрашивает: это закрытие чужой работы, и промах здесь дорог. */}
+      <AlertDialog open={cancelAsk} onOpenChange={setCancelAsk}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Отменить задачу?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Работа закроется как отменённая: исполнитель увидит это в своей очереди,
+              а запись останется в ходе работы. Вернуть её потом можно только заново.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Не отменять</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => act.mutate({ companyId, status: 'cancelled', note: note || undefined })}>
+              Отменить задачу
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
 
 /* ── Шапка: номер, тип, заголовок правится на месте ──────────────────── */
 
-function Header({ task, companyId, onRename, onBack }: {
+function Header({ task, companyId, onRename, onBack, live, busy, onStage, onDone, onCancel }: {
   task: LoadedTask; companyId: string; onRename: (title: string) => void
   onBack?: () => void
+  /** Работа живая — состояние можно менять. */
+  live?: boolean
+  busy?: boolean
+  onStage?: (code: string) => void
+  onDone?: () => void
+  onCancel?: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(task.title)
@@ -495,9 +648,55 @@ function Header({ task, companyId, onRename, onBack }: {
       <div className="flex items-center gap-2">
         {/* Та же строка представления, что у документа (этап 13е): человек,
             перешедший из ленты работы, читает одни и те же слова. */}
-        <WorkIdentity itemKey={tasksService.taskKey(task)} type={task.type}
-          state={task.state} stateName={task.state_name}
-          extra={task.project} />
+        {live && onStage ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-mono text-[13px] font-semibold text-foreground">
+              {tasksService.taskKey(task)}
+            </span>
+            {task.type && <span>{task.type}</span>}
+            {/* Состояние — не подпись, а переключатель: нажал, выбрал, работа
+                поехала. Раньше менять его приходилось линейкой кнопок ниже, и
+                плашка рядом с номером выглядела как ещё одно слово. */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" disabled={busy}
+                  title="Сменить состояние работы"
+                  className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 px-2 py-0.5 text-xs text-sky-700 transition-colors hover:bg-accent dark:text-sky-300">
+                  {task.state_name ?? 'состояние'}
+                  <ChevronDown className="h-3 w-3 opacity-70" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">Перевести</DropdownMenuLabel>
+                {task.route.map((st) => (
+                  <DropdownMenuItem key={st.code} disabled={st.code === task.stage_code}
+                    onSelect={() => onStage(st.code)}>
+                    {st.name}{st.code === task.stage_code ? ' · сейчас' : ''}
+                  </DropdownMenuItem>
+                ))}
+                {onDone && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => onDone()}>
+                      Готово — работа сделана
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {onCancel && (
+                  <DropdownMenuItem className="text-destructive focus:text-destructive"
+                    onSelect={() => onCancel()}>
+                    Отменить задачу
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {task.project && <span>{task.project}</span>}
+          </div>
+        ) : (
+          <WorkIdentity itemKey={tasksService.taskKey(task)} type={task.type}
+            state={task.state} stateName={task.state_name}
+            extra={task.project} />
+        )}
         {/* Колонка работы уже названа рядом (`WorkIdentity`), и повторять её
             статусом значит поставить два слова об одном. Показываем статус,
             только когда он добавляет: закрыта, отменена. */}

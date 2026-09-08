@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useHref } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { EventReminder } from './EventReminder'
-import { BookmarkPlus, ListPlus, Loader2, Repeat, Video, X } from 'lucide-react'
+import { Bell, BookmarkPlus, ChevronDown, ListPlus, Loader2, Repeat, Video, X } from 'lucide-react'
 import { findSlots } from '@/lib/slots'
 import { GuestPanel } from '@/components/calendar/GuestPanel'
 import { PollPanel } from '@/components/calendar/PollPanel'
@@ -31,6 +31,7 @@ import type {
 } from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { cn } from '@/lib/utils'
+import { useIsMobile } from '@/hooks/use-mobile'
 
 /** Date → значение datetime-local в местном поясе браузера. */
 const local = (d: Date) =>
@@ -108,6 +109,12 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const [allDay, setAllDay] = useState(event?.all_day ?? false)
   const [peopleSearch, setPeopleSearch] = useState('')
   const [cancelConfirm, setCancelConfirm] = useState(false)
+  // Телефон открывает встречу простой: тема, время, место. Остальное — за
+  // «Подробнее» (решение МАГа 07.09.2026).
+  const phone = useIsMobile()
+  const [more, setMore] = useState(false)
+  /** За сколько минут до начала напомнить себе; null — не напоминать. */
+  const [напомнитьЗа, setНапомнитьЗа] = useState<number | null>(null)
   const [cancelReason, setCancelReason] = useState('')
   useEffect(() => { setEvent(initialEvent) }, [initialEvent?.id])
   const notifyChanged = () => {
@@ -260,11 +267,11 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   })
 
   const сохранить = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const начало = new Date(starts).toISOString()
       const конец = new Date(ends).toISOString()
       if (новая) {
-        return workService.createEvent(companyId, {
+        const created = await workService.createEvent(companyId, {
           title: title.trim(), startsAt: начало, endsAt: конец,
           description: description.trim() || undefined,
           location: location.trim() || undefined,
@@ -277,6 +284,17 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
           recurrence: ПОВТОРЫ.find((r) => r.key === повтор)?.rule ?? null,
           recurrenceUntil: повтор === 'none' ? null : (until || null),
         })
+        // Напоминание себе — сразу, тем же нажатием: иначе человек собирает
+        // встречу, закрывает окно и открывает его заново, чтобы «напомнить».
+        if (напомнитьЗа !== null) {
+          const at = new Date(new Date(начало).getTime() - напомнитьЗа * 60_000)
+          if (at > new Date()) {
+            await workService.createReminder(companyId, {
+              targetRef: `event:${created.id}`, remindAt: at.toISOString(), note: title.trim(),
+            }).catch(() => toast.error('Встреча собрана, а напоминание не поставилось'))
+          }
+        }
+        return created
       }
       return workService.eventAction(companyId, event!.id, {
         title: title.trim(), startsAt: начало, endsAt: конец,
@@ -386,9 +404,9 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
 
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={allDay} disabled={!мой} onChange={e => toggleAllDay(e.target.checked)} />Весь день</label>
-            {!allDay && мой && [30, 60, 90].map(minutes => <Button key={minutes} variant="outline" size="sm" disabled={!Number.isFinite(startMs)} onClick={() => setEnds(local(new Date(startMs + minutes * 60_000)))}>{minutes} мин</Button>)}
+            {!allDay && мой && (!phone || more) && [30, 60, 90].map(minutes => <Button key={minutes} variant="outline" size="sm" disabled={!Number.isFinite(startMs)} onClick={() => setEnds(local(new Date(startMs + minutes * 60_000)))}>{minutes} мин</Button>)}
           </div>
-          <p className="text-sm text-muted-foreground">Время показано в часовом поясе устройства: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>
+          {(!phone || more) && <p className="text-sm text-muted-foreground">Время показано в часовом поясе устройства: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>}
           {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
 
           {время_поехало && event!.attendees.length > 1 && (
@@ -403,15 +421,29 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
               <Input id={fieldId + "-location"} className="text-base sm:text-sm" value={location} onChange={(e) => setLocation(e.target.value)}
                 disabled={!мой} placeholder="Переговорная, адрес" />
             </div>
-            <div className="space-y-1.5">
+            {(!phone || more) && <div className="space-y-1.5">
               <Label htmlFor={fieldId + "-conference"} className="flex items-center gap-1.5">
                 <Video className="h-3.5 w-3.5" />Ссылка на видеовстречу
               </Label>
               <Input id={fieldId + "-conference"} className="text-base sm:text-sm" value={conference} onChange={(e) => setConference(e.target.value)}
                 disabled={!мой} placeholder="https://…" />
-            </div>
+            </div>}
           </div>
 
+
+          {/* Телефон открывает встречу в простом виде: о чём, когда, где — этого
+              хватает, чтобы записать или прочитать (решение МАГа 07.09.2026).
+              Заготовки, подбор времени, повторение, описание, участники и
+              напоминание живут за «Подробнее»: каждый день они не нужны, а
+              высоту занимали всю. На компьютере показываем всё сразу. */}
+          {phone && (
+            <Button type="button" variant="outline" size="sm" className="w-full"
+              aria-expanded={more} onClick={() => setMore(v => !v)}>
+              {more ? 'Свернуть подробности' : 'Подробнее'}
+              <ChevronDown className={cn('ml-1.5 h-4 w-4 transition-transform', more && 'rotate-180')} />
+            </Button>
+          )}
+          {(!phone || more) && <>
           {/* Заготовка — просто набор полей, который надоело набирать заново.
               Повторение здесь тоже поле: «планёрка по понедельникам» заводится
               одним нажатием вместе со своей серией. */}
@@ -435,6 +467,26 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
                 </Button>
               ))}
             </div>
+          )}
+
+          {/* За сколько напомнить — здесь же, при сборе встречи (вопрос МАГа 07.09.2026:
+              «почему нет напоминания с выбором, за сколько времени»). У созданной
+              встречи тем же занимается блок «Напомнить мне» ниже. */}
+          {новая && мой && (
+            <label className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="flex items-center gap-1.5"><Bell className="h-3.5 w-3.5" />Напомнить</span>
+              <select value={напомнитьЗа ?? ''}
+                onChange={(e) => setНапомнитьЗа(e.target.value === '' ? null : Number(e.target.value))}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+                <option value="">не напоминать</option>
+                <option value="0">в момент начала</option>
+                <option value="5">за 5 минут</option>
+                <option value="15">за 15 минут</option>
+                <option value="30">за 30 минут</option>
+                <option value="60">за час</option>
+                <option value="1440">за день</option>
+              </select>
+            </label>
           )}
 
           {мой && attendees.length > 0 && (
@@ -586,6 +638,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
                 .join(' · ')}
             </p>
           )}
+          </>}
         </div>
 
         {!новая && (мой || canRespond) && event!.status !== 'cancelled' && (
@@ -666,7 +719,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
           {event!.conference_url && /^https?:\/\//i.test(event!.conference_url) && event!.status !== 'cancelled' && <Button variant="outline" asChild><a href={event!.conference_url} target="_blank" rel="noopener noreferrer"><Video className="mr-2 h-4 w-4" />Открыть видеовстречу</a></Button>}
           {subjectHref && <Button variant="ghost" asChild><Link to={subjectHref} onClick={onClose}>Предмет встречи</Link></Button>}
         </div>}
-        {!новая && event!.status !== 'cancelled' && <EventReminder companyId={companyId} event={event!} />}
+        {!новая && event!.status !== 'cancelled' && (!phone || more) && <EventReminder companyId={companyId} event={event!} />}
 <div className="flex flex-wrap items-center gap-2">
           {!новая && мой && event!.status !== 'cancelled' && (
             <Button size="sm" variant="ghost" className="mr-auto text-destructive"

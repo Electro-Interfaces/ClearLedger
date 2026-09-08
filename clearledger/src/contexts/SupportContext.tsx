@@ -52,7 +52,11 @@ export function SupportProvider({ children }: { children: ReactNode }) {
 
   const toggleInteraction = useCallback((section: InteractionSection) => {
     setState((prev) =>
-      prev.section === section && prev.mode === 'modal'
+      // Повторное нажатие ЗАКРЫВАЕТ раздел, в какой бы подаче он ни был открыт
+      // (решение МАГа 07.09.2026). Раньше закрывалось только окно, а док кнопка
+      // шапки лишь «поднимала» в окно — на телефоне, где своей полосы у дока больше
+      // нет, чат становилось нечем закрыть.
+      prev.section === section
         ? { section: null, mode: 'modal', context: null }
         : { section, mode: 'modal', context: null })
   }, [])

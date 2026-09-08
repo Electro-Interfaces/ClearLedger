@@ -120,10 +120,7 @@ export function MainLayout() {
       </a>
       {/* Header — первый child в flex-col, sibling sidebar+inset группы.
           Так sidebar занимает только высоту ПОД header. */}
-      <Header
-        onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
-        isMobile={isMobile}
-      />
+      <Header />
 
       {/* Компания, юрлицо и текущее приложение — строкой под шапкой: в саму шапку
           телефона они не помещаются (см. MobileContextBar). */}
@@ -152,15 +149,22 @@ export function MainLayout() {
         <SidebarInset id="workspace-area" tabIndex={-1} className="overflow-hidden">
           {/* «Приложения» — меню пространства в рабочей области: плашки поверх
               текущего экрана, переход только по плашке (решение МАГа 06.08.2026). */}
-          <AppsPanelSurface />
+          {/* Плашки-каталог поверх рабочей области — только курсору. На телефоне
+              каталог живёт прямо в меню (шторка), а вторая поверхность поверх той же
+              работы была лишней дверью в то же самое. */}
+          {!isMobile && <AppsPanelSurface />}
           {isMobile ? (
             // Мобильный: одностраничная навигация без вкладок (как раньше).
             isWorkspace ? (
               // max-md:pb-14 — запас под нижнюю навигацию (<768px); workspace-страницы
               // (/, /files, /reconciliation, /normalization) не перекрываются навбаром.
-              <div className="flex-1 min-h-0 overflow-hidden max-md:pb-14">
+              // Оболочка здесь без своей прокрутки (её ведёт сам экран), но жест
+              // «потянуть — обновить» нужен и тут: он работал только там, где прокрутка
+              // висит на оболочке, и человек справедливо спрашивал, почему на «Пульсе»
+              // обновление есть, а на рабочем экране нет (замечание МАГа 07.09.2026).
+              <MobileShell className="flex-1 min-h-0 overflow-hidden max-md:pb-14">
                 <Outlet />
-              </div>
+              </MobileShell>
             ) : (
               // pb-20 — запас под нижнюю навигацию (h-14, <768px); ≥768 её нет → pb-12
               // MobileShell даёт жест «потянуть — обновить» и следит за выкаткой:
@@ -185,7 +189,9 @@ export function MainLayout() {
       </div>
 
       {/* Нижняя навигация телефонов (<768px; сама скрывается md:hidden) */}
-      {isMobile && <MobileBottomNav />}
+      {/* Меню открывает нижняя панель: на телефоне это единственная его дверь
+          (решение МАГа 06.09.2026). */}
+      {isMobile && <MobileBottomNav onMenu={() => setMobileMenuOpen(true)} />}
     </SidebarProvider>
     </AppsPanelProvider>
     </ActiveModeProvider>

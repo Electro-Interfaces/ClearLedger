@@ -13,7 +13,10 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { NavLink, useLocation } from 'react-router-dom'
 import { useAppsPanel } from './AppsPanel'
-import { AppsQuickMenu } from './AppsQuickMenu'
+import { AppsQuickMenu, AppsQuickList } from './AppsQuickMenu'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { useSectionOpen } from '@/hooks/useSectionOpen'
+import { cn } from '@/lib/utils'
 import {
   PanelLeftClose, PanelLeftOpen, ChevronDown, Database, Layers,
   Archive, Megaphone, MessagesSquare, UserRound, Users2,
@@ -113,6 +116,19 @@ export function AppsNavItem({ collapsed, onNavigate }: {
   onNavigate?: () => void
 }) {
   const { open, toggle } = useAppsPanel()
+  const isMobile = useIsMobile()
+  // На телефоне каталог живёт прямо здесь, а не за панелью плашек поверх работы
+  // (решение МАГа 06.09.2026): меню открывает нижняя кнопка «Приложения», и вторая
+  // поверхность внутри той же двери была бы лишним шагом.
+  if (isMobile) {
+    return (
+      <SidebarMenuItem>
+        <div className="px-1 pb-1 pt-0.5">
+          <AppsQuickList onNavigate={onNavigate} />
+        </div>
+      </SidebarMenuItem>
+    )
+  }
   return (
     <SidebarMenuItem>
       <Tooltip>
@@ -251,32 +267,47 @@ const CHAT_VIEWS: { key: string; label: string; icon: typeof MessagesSquare }[] 
  */
 export function SidebarNavContent(props: { collapsed?: boolean; onNavigate?: () => void }) {
   const { pathname } = useLocation()
-  return (
+  // Под пальцем меню читается СНИЗУ ВВЕРХ (решение МАГа 06.09.2026): у большого
+  // пальца оказывается то, чем пользуются каждый день — каталог приложений, выше
+  // разделы текущего приложения, а справочное («Объекты», «Загрузка», «Документы»,
+  // «Контрагенты», «Люди») уходит к верхнему краю, куда тянуться и приходится реже.
+  // На десктопе порядок обычный: там курсору всё равно, куда ехать.
+  const isMobile = useIsMobile()
+
+  /* Единственный вход в состав пространства: на десктопе пункт показывает плашки
+     ПОВЕРХ рабочей области (решение МАГа 06.08.2026), на телефоне — сам каталог
+     прямо здесь (см. AppsNavItem). */
+  const appsBlock = pathname !== '/' && (
     <>
-      {/* Единственный вход в состав пространства: пункт меню показывает плашки
-          ПОВЕРХ рабочей области, экран под ними остаётся. Переход происходит
-          только по нажатию плашки (решение МАГа 06.08.2026). Кнопки «Стол» и
-          «Приложения» в шапке убраны — они дублировали этот же пункт. */}
-      {pathname !== '/' && (
-        <>
-          <SidebarGroup className="py-0">
-            <SidebarMenu>
-              <AppsNavItem collapsed={props.collapsed} onNavigate={props.onNavigate} />
-            </SidebarMenu>
-          </SidebarGroup>
-          {/* Черта отделяет вход в пространство от разделов самого приложения:
-              выше — «куда уйти», ниже — «где я работаю». */}
-          <SidebarSeparator className="my-2" />
-        </>
-      )}
-      <SidebarNavBody {...props} />
+      {isMobile && <SidebarSeparator className="my-2" />}
+      <SidebarGroup className="py-0">
+        <SidebarMenu>
+          <AppsNavItem collapsed={props.collapsed} onNavigate={props.onNavigate} />
+        </SidebarMenu>
+      </SidebarGroup>
+      {/* Черта отделяет вход в пространство от разделов самого приложения:
+          выше — «куда уйти», ниже — «где я работаю». */}
+      {!isMobile && <SidebarSeparator className="my-2" />}
     </>
   )
+
+  // Порядок блоков внутри тела тоже переворачивается: «Пространство» стоит в нём
+  // последним, а на телефоне должно быть первым.
+  const body = isMobile
+    ? <div className="flex flex-col-reverse"><SidebarNavBody {...props} /></div>
+    : <SidebarNavBody {...props} />
+
+  return isMobile ? <>{body}{appsBlock}</> : <>{appsBlock}{body}</>
 }
 
 function SidebarNavBody({ collapsed = false, onNavigate }: {
   collapsed?: boolean; onNavigate?: () => void
 }) {
+  // На телефоне справочные экраны пространства свёрнуты; что открыто — помним,
+  // как и строки каталога.
+  const phone = useIsMobile()
+  const spaceCollapsible = phone
+  const [spaceOpen, toggleSpaceOpen] = useSectionOpen('space-pages', !phone)
   const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(false)   // 1С при запуске свёрнут
   const { company, companyModules, canApp, canModule, oversees, isCompanyAdmin } = useCompany()
@@ -296,12 +327,23 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
     <>
       <SidebarSeparator className="my-2" />
       <SidebarGroup className="py-0">
-        {!collapsed && (
+        {!collapsed && (spaceCollapsible ? (
+          // Справочные экраны пространства («Объекты», «Загрузка», «Документы»,
+          // «Контрагенты», «Люди») на телефоне свёрнуты (решение МАГа 07.09.2026):
+          // заходят в них редко, а пять строк занимали треть меню.
+          <button type="button" onClick={toggleSpaceOpen} aria-expanded={spaceOpen}
+            className="flex min-h-9 w-full items-center gap-1.5 px-3 text-left text-[11px]
+                       font-semibold uppercase tracking-widest text-muted-foreground/60
+                       transition-colors hover:text-foreground">
+            <ChevronDown className={cn('size-3 shrink-0 transition-transform', spaceOpen ? '' : '-rotate-90')} />
+            Пространство
+          </button>
+        ) : (
           <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60">
             Пространство
           </p>
-        )}
-        <SidebarMenu>
+        ))}
+        {spaceOpen && <SidebarMenu>
           {SPACE_PAGES.filter((x) => navByPath[x]).map((x) => navByPath[x]).map((item) => (
             <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
               collapsed={collapsed} onNavigate={onNavigate} />
@@ -310,7 +352,7 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
             <NavItem key={l.to} to={l.to} icon={l.icon} label={l.label}
               collapsed={collapsed} onNavigate={onNavigate} />
           ))}
-        </SidebarMenu>
+        </SidebarMenu>}
       </SidebarGroup>
     </>
   )
@@ -578,17 +620,25 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
           <>
             <SidebarSeparator className="my-2" />
             <SidebarGroup className="py-0">
-              {!collapsed && (
+              {!collapsed && (spaceCollapsible ? (
+                <button type="button" onClick={toggleSpaceOpen} aria-expanded={spaceOpen}
+                  className="flex min-h-9 w-full items-center gap-1.5 px-3 text-left text-[11px]
+                             font-semibold uppercase tracking-widest text-muted-foreground/60
+                             transition-colors hover:text-foreground">
+                  <ChevronDown className={cn('size-3 shrink-0 transition-transform', spaceOpen ? '' : '-rotate-90')} />
+                  Пространство
+                </button>
+              ) : (
                 <p className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest">
                   Пространство
                 </p>
-              )}
-              <SidebarMenu>
+              ))}
+              {spaceOpen && <SidebarMenu>
                 {[...spaceItems, ...links].map((item) => (
                   <NavItem key={item.to} to={item.to} icon={item.icon} label={item.label}
                     collapsed={collapsed} onNavigate={onNavigate} />
                 ))}
-              </SidebarMenu>
+              </SidebarMenu>}
             </SidebarGroup>
           </>
         )}
