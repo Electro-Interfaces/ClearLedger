@@ -483,6 +483,10 @@ class RoomOut(BaseModel):
     participantCount: int = 0
     unreadCount: int = 0
     directPeerId: str | None = None
+    # Кто собеседник личного чата пространству: `partner` — человек сторонней компании,
+    # `vendor` — инженер платформы. В списке чатов и в шапке комнаты у имени стоит знак:
+    # с кем идёт разговор, видно до того, как в него что-то написали (МАГ, 09.09.2026).
+    directPeerParty: str | None = None
     lastMessage: str | None = None
     lastMessageAt: str | None = None
     createdBy: str | None = None
@@ -702,6 +706,7 @@ async def list_rooms(
     unread_map: dict[uuid.UUID, int] = {}
     last_map: dict[uuid.UUID, ChatMessage] = {}
     peer_map: dict[uuid.UUID, tuple[str, str | None, str | None]] = {}
+    peer_parties: dict[uuid.UUID, str] = {}
     pin_map: dict[uuid.UUID, ChatMessage] = {}
     if rids:
         counts = dict((await db.execute(
@@ -742,6 +747,8 @@ async def list_rooms(
                 .join(User, User.id == ChatParticipant.user_id)
                 .where(ChatParticipant.room_id.in_(direct_ids),
                        ChatParticipant.user_id != current_user.id))).all()}
+        peer_parties = await _party_types(
+            db, cid, {uuid.UUID(uid) for uid, _nm, _av in peer_map.values()})
         pin_ids = [room.pinned_message_id for room, *_ in rows if room.pinned_message_id]
         if pin_ids:
             pin_map = {m.id: m for m in (await db.execute(
@@ -766,7 +773,9 @@ async def list_rooms(
         out.append(RoomOut(
             id=str(room.id), type=room.type, kind=room.kind, name=name,
             isArchived=room.is_archived, participantCount=int(pcount), unreadCount=int(unread),
-            directPeerId=peer_id, createdBy=str(room.created_by) if room.created_by else None,
+            directPeerId=peer_id,
+            directPeerParty=(peer_parties.get(uuid.UUID(peer_id)) if peer_id else None),
+            createdBy=str(room.created_by) if room.created_by else None,
             # Обрезаем: список чатов грузится у всех и постоянно, а одно длинное
             # сообщение утяжеляло бы ответ каждому участнику навсегда.
             # У вложения текст пуст, и список показывал «Нет сообщений» там, где файл
@@ -962,6 +971,7 @@ async def get_room(
     return RoomDetailOut(
         id=str(room.id), type=room.type, kind=room.kind, name=name,
         isArchived=room.is_archived, participantCount=len(plist), directPeerId=peer_id,
+        directPeerParty=next((p.partyType for p in plist if p.userId == peer_id), None),
         createdBy=str(room.created_by) if room.created_by else None, participants=plist,
         pinnedMessage=await _pinned_out(room, db, await _history_from(rid, current_user, db)),
         canWrite=can_write,

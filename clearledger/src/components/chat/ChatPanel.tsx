@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { SPACE_PRODUCTS } from '@/config/spaceProducts'
-import { PartyBadge, PartyMark } from '@/components/chat/PartyBadge'
+import { PartyBadge, PartyChip, PartyMark } from '@/components/chat/PartyBadge'
 import { MetricHint } from '@/components/workspace/analytics/MetricHint'
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -1386,7 +1386,8 @@ function PersonProfileDialog({ userId, online, selfId, onClose, onMessage }: {
                 {p.userId === selfId ? (
                   <MyAvatarPicker current={p.avatarUrl} name={p.name} userId={p.userId} />
                 ) : (
-                  <Avatar seed={p.userId} name={p.name} online={online} size={40} src={p.avatarUrl} />
+                  <Avatar seed={p.userId} name={p.name} online={online} size={40} src={p.avatarUrl}
+                    party={p.partyType} />
                 )}
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -1515,7 +1516,8 @@ function CreateChatDialog({ open, onOpenChange, onCreated, scopeProduct }: {
             {users.map((u) => (
               <button key={u.userId} onClick={() => setPicked((p) => (p[u.userId] ? (() => { const n = { ...p }; delete n[u.userId]; return n })() : { ...p, [u.userId]: u.name }))}
                 className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-accent">
-                <Avatar seed={u.userId} name={u.name} online={u.online} size={32} src={u.avatarUrl} />
+                <Avatar seed={u.userId} name={u.name} online={u.online} size={32} src={u.avatarUrl}
+                  party={u.partyType} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm">{u.name}</div>
                   <div className="truncate text-xs text-muted-foreground">{u.email}</div>
@@ -1788,6 +1790,7 @@ function ChatBubble({
 
           {!isOwn && isFirstInGroup && (
             <div className="mb-0.5 flex items-center gap-1.5">
+              <PartyChip party={message.authorParty} />
               <button type="button" onClick={onAuthorClick} disabled={!onAuthorClick}
                 title={onAuthorClick ? 'Кто это — карточка человека' : undefined}
                 className={cn('text-left text-[11px] font-semibold', getUserColor(message.userId || ''), onAuthorClick && 'cursor-pointer hover:underline')}>
@@ -1797,7 +1800,7 @@ function ChatBubble({
                   инженера поддержки платформы, своего сотрудника и человека партнёра
                   надо различать в момент чтения, не сверяясь со списком участников. */}
               {message.authorParty && message.authorParty !== 'internal' && (
-                <PartyBadge party={{ partyType: message.authorParty }} className="py-0" />
+                <PartyBadge party={{ partyType: message.authorParty }} className="py-0" withIcon={false} />
               )}
             </div>
           )}
@@ -2900,7 +2903,8 @@ export function ChatPanel({ compact, scopeProduct }: {
                 {/* Личный чат первым: у него фото собеседника и точка присутствия —
                     показ через AuthImage их бы потерял. */}
                 {room.type === 'direct' ? (
-                  <Avatar seed={room.id} name={room.name} online={!!peerOnline} size={40} src={room.avatarUrl} />
+                  <Avatar seed={room.id} name={room.name} online={!!peerOnline} size={40} src={room.avatarUrl}
+                    party={room.directPeerParty} />
                 ) : room.avatarUrl ? (
                   <AuthImage path={room.avatarUrl} alt={room.name || 'Чат'}
                     className="size-10 shrink-0 rounded-full object-cover" />
@@ -2913,6 +2917,9 @@ export function ChatPanel({ compact, scopeProduct }: {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-1">
                   <span className="flex min-w-0 items-center gap-1">
+                    {/* Знак перед именем: с человеком сторонней компании разговор
+                        другой, и понять это надо до того, как в чат написали. */}
+                    <PartyChip party={room.directPeerParty} />
                     <span className="truncate text-sm font-medium">{room.name || 'Чат'}</span>
                     {/* Метка «специализированной» группы: видно, при каком она приложении. */}
                     {room.scopeProduct && (
@@ -3010,11 +3017,15 @@ export function ChatPanel({ compact, scopeProduct }: {
                 {activeRoom.kind === 'news' ? <Megaphone className="size-4" /> : <Building2 className="size-4" />}
               </div>
             ) : (
-              <Avatar seed={activeRoom?.id || ''} name={activeRoom?.name} online={!!peerPresence?.online} size={32} />
+              <Avatar seed={activeRoom?.id || ''} name={activeRoom?.name} online={!!peerPresence?.online} size={32}
+                party={activeRoom?.directPeerParty} />
             )}
           </div>
           <div className="min-w-0">
-            <span className="block truncate text-sm font-semibold group-hover/header:text-primary">{activeRoom?.name || 'Чат'}</span>
+            <span className="flex min-w-0 items-center gap-1 text-sm font-semibold group-hover/header:text-primary">
+              <PartyChip party={activeRoom?.directPeerParty} />
+              <span className="truncate">{activeRoom?.name || 'Чат'}</span>
+            </span>
             <span className={cn('block truncate text-[11px]', peerPresence?.online ? 'text-emerald-500' : 'text-muted-foreground')}>
               {peerPresence ? presenceText(peerPresence) : activeRoom?.participantCount ? `${activeRoom.participantCount} участн.` : ''}
             </span>

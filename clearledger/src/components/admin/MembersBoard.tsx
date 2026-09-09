@@ -36,7 +36,6 @@ import {
   Building2, Check, ChevronDown, ChevronRight, History, KeyRound, LifeBuoy, Loader2,
   Mail, Search, ShieldCheck, SlidersHorizontal, Trash2, Undo2, Users2, X,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import * as userService from '@/services/userService'
 import type { AdminUser } from '@/services/userService'
 import * as roleService from '@/services/roleService'
@@ -96,10 +95,11 @@ export function MembersBoard({
     retry: false,
   })
   const activityById = new Map((activityQ.data?.people ?? []).map((p) => [p.user_id, p]))
-  // Группа «Поддержка платформы» по умолчанию свёрнута: организация видит своих
-  // сотрудников, а нашу команду раскрывает по клику (решение МАГа 31.07.2026).
+  // Группы «Внешние участники» и «Поддержка платформы» по умолчанию свёрнуты:
+  // организация видит своих сотрудников, а чужих людей раскрывает по клику
+  // (решение МАГа 31.07.2026, распространено на подрядчиков 09.09.2026).
   // Факт доступа не скрывается — заголовок с числом людей виден всегда.
-  const [platformOpen, setPlatformOpen] = useState(false)
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const [draft, setDraft] = useState<Record<string, string[] | null>>({})
   const [saving, setSaving] = useState(false)
 
@@ -118,12 +118,13 @@ export function MembersBoard({
     enabled: canManage,
     retry: false,
   })
-  // Договоры — основание допуска внешних участников: у своих сотрудников оснований
-  // не спрашивают, поэтому реестр тянем только в разделе компаний.
+  // Договоры — основание допуска внешних участников. Тянем и на экране сотрудников:
+  // внешние показаны и там, а без реестра у каждого из них честно, но ложно
+  // печаталось «без основания» — договоры просто не были загружены.
   const contractsQ = useQuery({
     queryKey: ['space-contracts', companyId],
     queryFn: () => listSpaceContracts(companyId),
-    enabled: canManage && party === 'external',
+    enabled: canManage,
     staleTime: 5 * 60_000,
     retry: false,
   })
@@ -144,6 +145,11 @@ export function MembersBoard({
   // кто ещё имеет доступ в его пространство. Отдельной группой, со статусом — не в общем
   // ряду сотрудников (решение МАГа 31.07.2026). На их статус лягут отдельные права.
   const platform = party === 'internal' ? (q.data ?? []).filter((m) => m.party_type === 'vendor') : []
+  // Люди компаний-подрядчиков — тоже отдельной группой на экране сотрудников, а не
+  // только в разделе «Компании». Иначе оператор контакт-центра, который сидит в
+  // пространстве заказчика по договору, читается как сотрудник заказчика: единственным
+  // отличием была почта в чужом домене, и её никто не сверяет (постановка МАГа 09.09.2026).
+  const partners = party === 'internal' ? (q.data ?? []).filter((m) => m.party_type === 'partner') : []
   const bySearch = (list: AdminUser[]) => {
     let out = search.trim()
       ? list.filter((m) => `${m.name} ${m.email} ${m.position ?? ''} ${m.organization_name ?? ''} ${m.department_name ?? ''}`
@@ -162,15 +168,26 @@ export function MembersBoard({
     : [...list].sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email, 'ru'))
   const filtered = bySort(bySearch(members))
   const filteredPlatform = bySort(bySearch(platform))
+  const filteredPartners = bySort(bySearch(partners))
+  /** Сворачивается любая группа; чужие люди свёрнуты сразу — видно, что они есть,
+   *  строки по клику. Список из пяти компаний иначе не пролистать до своих. */
+  const foldedByDefault = (kind: string) =>
+    party === 'internal' && (kind === 'vendor' || kind === 'external')
+  const isOpen = (key: string, kind: string) => openGroups[key] ?? !foldedByDefault(kind)
 
   /** Внешние — группами по компаниям: единица учёта здесь компания, а не человек. */
   const groups = useMemo(() => {
     if (party !== 'external') {
-      // Сотрудники + люди платформы: группы появляются, только когда есть кого отделять.
-      if (filteredPlatform.length === 0) return null
+      // Свои + чужие: группы появляются, только когда есть кого отделять.
+      if (filteredPlatform.length === 0 && filteredPartners.length === 0) return null
       return [
-        { key: 'staff', label: 'Сотрудники', kind: 'staff' as const, rows: filtered },
-        { key: 'vendor', label: 'Поддержка платформы', kind: 'vendor' as const, rows: filteredPlatform },
+        { key: 'staff', label: 'Сотрудники организации', kind: 'staff' as const, rows: filtered },
+        ...(filteredPartners.length ? [{
+          key: 'external', label: 'Внешние участники', kind: 'external' as const, rows: filteredPartners,
+        }] : []),
+        ...(filteredPlatform.length ? [{
+          key: 'vendor', label: 'Поддержка платформы', kind: 'vendor' as const, rows: filteredPlatform,
+        }] : []),
       ]
     }
     const byOrg = new Map<string, { label: string; kind: 'partner' | 'vendor' | 'none'; rows: AdminUser[] }>()
@@ -183,7 +200,7 @@ export function MembersBoard({
       byOrg.get(key)!.rows.push(m)
     }
     return [...byOrg.entries()].sort(([a], [b]) => a.localeCompare(b, 'ru')).map(([key, g]) => ({ key, ...g }))
-  }, [party, filtered, filteredPlatform])
+  }, [party, filtered, filteredPlatform, filteredPartners])
 
   /**
    * Столбцы группами по слою: приложения-разрезы, сервисы контейнера (чат, заявки,
@@ -351,9 +368,10 @@ export function MembersBoard({
               <Loader2 className="h-4 w-4 animate-spin" /> Загрузка…
             </div>
           )}
-          {!q.isLoading && filtered.length === 0 && filteredPlatform.length === 0 && (
+          {!q.isLoading && filtered.length === 0 && filteredPlatform.length === 0
+            && filteredPartners.length === 0 && (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-              {members.length + platform.length > 0 ? 'Ничего не найдено'
+              {members.length + platform.length + partners.length > 0 ? 'Ничего не найдено'
                 : party === 'external'
                   ? 'Внешних участников нет. Пригласите человека компании-партнёра — он появится здесь, а не в сотрудниках организации.'
                   : 'Нет сотрудников'}
@@ -362,27 +380,28 @@ export function MembersBoard({
           {(groups
             ? groups.flatMap((g) => [
                 { group: g },
-                // Свёрнутая «Поддержка платформы»: заголовок с числом людей остаётся,
-                // строки — по клику. Действует только на экране сотрудников.
-                ...(party === 'internal' && g.kind === 'vendor' && !platformOpen
-                  ? [] : g.rows.map((u) => ({ u }))),
+                // Свёрнутые «Внешние участники» и «Поддержка платформы»: заголовок с
+                // числом людей остаётся, строки — по клику. Только на экране сотрудников.
+                ...(isOpen(g.key, g.kind) ? g.rows.map((u) => ({ u })) : []),
               ] as Array<{ group?: typeof g; u?: AdminUser }>)
             : filtered.map((u) => ({ u } as { group?: never; u?: AdminUser }))
           ).map((item) => {
             if (item.group) {
               const g = item.group
+              const open = isOpen(g.key, g.kind)
+              const toggle = () => setOpenGroups((o) => ({ ...o, [g.key]: !o[g.key] }))
+              // Сколько компаний стоит за группой внешних: заказчик спрашивает не
+              // «сколько людей», а «кто ещё сюда пущен».
+              const orgCount = g.kind === 'external'
+                ? new Set(g.rows.map((r) => r.organization_id ?? '—')).size : 0
               return (
                 <div key={`g-${g.key}`}
-                  role={g.kind === 'vendor' && party === 'internal' ? 'button' : undefined}
-                  tabIndex={g.kind === 'vendor' && party === 'internal' ? 0 : undefined}
-                  aria-expanded={g.kind === 'vendor' && party === 'internal' ? platformOpen : undefined}
-                  onClick={g.kind === 'vendor' && party === 'internal'
-                    ? () => setPlatformOpen((v) => !v) : undefined}
-                  onKeyDown={g.kind === 'vendor' && party === 'internal'
-                    ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPlatformOpen((v) => !v) } }
-                    : undefined}
-                  className={cn('flex items-center gap-2 bg-muted/40 px-3 py-1.5 text-sm font-medium',
-                    g.kind === 'vendor' && party === 'internal' && 'cursor-pointer hover:bg-muted/60')}>
+                  role="button" tabIndex={0} aria-expanded={open}
+                  onClick={toggle}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle() }
+                  }}
+                  className="flex cursor-pointer items-center gap-2 bg-muted/40 px-3 py-1.5 text-sm font-medium hover:bg-muted/60">
                   {g.kind === 'vendor'
                     ? <LifeBuoy className="h-3.5 w-3.5 text-primary" />
                     : g.kind === 'staff'
@@ -390,18 +409,16 @@ export function MembersBoard({
                       : <Building2 className="h-3.5 w-3.5 text-muted-foreground" />}
                   {g.label}
                   <span className="text-xs font-normal text-muted-foreground">· {g.rows.length} чел.</span>
+                  {g.kind === 'external' && (
+                    <span className="text-xs font-normal text-muted-foreground">
+                      — люди сторонних компаний ({orgCount}), работают по договору и сотрудниками
+                      организации не являются
+                    </span>
+                  )}
                   {g.kind === 'vendor' && party === 'internal' && (
-                    <>
-                      <span className="text-xs font-normal text-muted-foreground">
-                        — выделенное подразделение разработчика платформы, не сотрудники компании
-                      </span>
-                      <span className="ml-auto flex items-center gap-1 text-xs font-normal text-muted-foreground">
-                        {platformOpen ? 'свернуть' : 'показать'}
-                        {platformOpen
-                          ? <ChevronDown className="h-3.5 w-3.5" />
-                          : <ChevronRight className="h-3.5 w-3.5" />}
-                      </span>
-                    </>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      — выделенное подразделение разработчика платформы, не сотрудники компании
+                    </span>
                   )}
                   {g.kind === 'none' && (
                     <span className="text-xs font-normal text-amber-500/90">
@@ -413,6 +430,12 @@ export function MembersBoard({
                   {g.kind === 'partner' && (
                     <ContractsHint items={contractsOf(g.rows[0]?.organization_id)} />
                   )}
+                  <span className="ml-auto flex items-center gap-1 text-xs font-normal text-muted-foreground">
+                    {open ? 'свернуть' : 'показать'}
+                    {open
+                      ? <ChevronDown className="h-3.5 w-3.5" />
+                      : <ChevronRight className="h-3.5 w-3.5" />}
+                  </span>
                 </div>
               )
             }
@@ -452,7 +475,9 @@ export function MembersBoard({
       <p className="text-xs text-muted-foreground">
         {party === 'external'
           ? `Внешних участников: ${members.length} из ${groups?.length ?? 0} компаний`
-          : `Сотрудников: ${members.length}${platform.length ? ` · поддержка платформы: ${platform.length}` : ''}`}
+          : `Сотрудников организации: ${members.length}`
+            + (partners.length ? ` · внешних участников: ${partners.length}` : '')
+            + (platform.length ? ` · поддержка платформы: ${platform.length}` : '')}
         {filtered.length !== members.length ? ` · показано ${filtered.length}` : ''}
         {' · администратор организации видит все продукты — ограничить его можно, переведя в «Сотрудники» в карточке'}
       </p>
@@ -547,7 +572,7 @@ function MemberRow({
       </button>
 
       <span className="hidden w-[150px] shrink-0 xl:block">
-        {party === 'external' || u.party_type === 'vendor' ? (
+        {party === 'external' || u.party_type === 'vendor' || u.party_type === 'partner' ? (
           <>
             <PartyBadge party={{
               partyType: u.party_type ?? 'internal', role: u.role,

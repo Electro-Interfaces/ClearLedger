@@ -28,6 +28,9 @@ export interface ChatRoom {
   participantCount: number
   unreadCount: number
   directPeerId: string | null
+  /** Кто собеседник личного чата: `partner` — человек сторонней компании,
+   *  `vendor` — инженер платформы. Знак у имени в списке и в шапке. */
+  directPeerParty?: PartyType | null
   lastMessage: string | null
   lastMessageAt: string | null
   createdBy: string | null
