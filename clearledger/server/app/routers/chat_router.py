@@ -394,6 +394,21 @@ async def _ensure_scope_rooms(cid: uuid.UUID, db: AsyncSession) -> None:
     for scope, uid in scoped:
         by_scope.setdefault(scope, set()).add(uid)
 
+    # Кто читает чат контура с ДРУГОЙ стороны: администраторы пространства и инженеры
+    # платформы. Без них комната контура — канал в пустоту: контур не даёт человеку
+    # общих чатов, он пишет свои вопросы сюда, а в составе стоят такие же операторы.
+    # Ровно это случилось на пилоте РусГидро: руководитель контакт-центра три раза за
+    # день написала про доступ к почте и рассылку — и никто этого не увидел, потому что
+    # в «Контакт-центре» были только восемь операторов подрядчика и две наши тестовые
+    # учётки (разбор 09.09.2026).
+    watchers = set((await db.execute(
+        select(UserCompany.user_id)
+        .join(User, and_(User.id == UserCompany.user_id,
+                         User.mail_only.is_(False), not_service()))
+        .where(UserCompany.company_id == cid,
+               or_(UserCompany.role == "admin", UserCompany.party_type == "vendor"))
+    )).scalars().all())
+
     for scope, uids in by_scope.items():
         kind = f"scope:{scope}"
         room = (await db.execute(select(ChatRoom).where(
@@ -416,8 +431,8 @@ async def _ensure_scope_rooms(cid: uuid.UUID, db: AsyncSession) -> None:
         member_ids = set((await db.execute(select(ChatParticipant.user_id).where(
             ChatParticipant.room_id == room.id))).scalars().all())
         # Сотрудников компании, которых позвали в этот чат руками, не трогаем: состав
-        # добирается людьми контура, а не сводится к ним.
-        missing = uids - member_ids
+        # добирается людьми контура и теми, кто обязан их слышать, а не сводится к ним.
+        missing = (uids | watchers) - member_ids
         if missing:
             await db.execute(pg_insert(ChatParticipant.__table__).values([
                 {"id": uuid.uuid4(), "room_id": room.id, "user_id": uid,
@@ -440,6 +455,23 @@ async def _is_company_admin(db: AsyncSession, company_id: uuid.UUID | None,
     role = (await db.execute(select(UserCompany.role).where(
         UserCompany.user_id == user.id, UserCompany.company_id == company_id))).scalar_one_or_none()
     return role == "admin"
+
+
+async def _can_edit_participants(db: AsyncSession, room: ChatRoom, user: User) -> bool:
+    """Кто ведёт состав группы: её владелец, админ чата, создатель — и администратор
+    пространства.
+
+    Последнего здесь не было, и это ломало комнаты контура: их создаёт система, своего
+    владельца у них нет (`created_by` пуст), поэтому позвать в «Контакт-центр» ни
+    сотрудника, ни человека партнёра было нельзя — блок «Добавить участника» в панели
+    администратору показывался, а сервер отвечал 403. Тем же правом уже пользуется
+    Центр управления (`/admin/rooms/{id}/participants`), так что это не новая власть,
+    а та же — из чата (постановка МАГа 09.09.2026).
+    """
+    my = await _my_room_role(room.id, user, db)
+    return bool(user.is_superadmin or room.created_by == user.id
+                or my in ("owner", "admin")
+                or await _is_company_admin(db, room.company_id, user))
 
 
 def _can_write(room: ChatRoom, user: User, room_role: str | None = None,
@@ -1503,10 +1535,7 @@ async def add_participant(
         if person is None or person.mail_only or not await _is_insider(person, room.company_id):
             raise HTTPException(403, "Внешних участников добавляют в отдельное обсуждение")
 
-    # право добавлять: создатель, admin комнаты или суперадмин
-    my = (await db.execute(select(ChatParticipant.role).where(
-        ChatParticipant.room_id == rid, ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
-    if not (current_user.is_superadmin or room.created_by == current_user.id or my in ("owner", "admin")):
+    if not await _can_edit_participants(db, room, current_user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет прав добавлять участников")
     if room.company_id not in await _member_ids(target, db):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Пользователь не из компании чата")
@@ -1569,8 +1598,7 @@ async def add_mail_participant(
     if room.audience == "internal":
         raise HTTPException(403, "Для переписки по почте создайте отдельное обсуждение")
 
-    my = await _my_room_role(rid, current_user, db)
-    if not (current_user.is_superadmin or room.created_by == current_user.id or my in ("owner", "admin")):
+    if not await _can_edit_participants(db, room, current_user):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет прав добавлять участников")
     # Личный чат — разговор двоих; третьего, пусть и почтового, туда не вводят.
     if room.type == "direct":
@@ -1794,12 +1822,17 @@ async def remove_participant(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     room = await _assert_participant(rid, current_user, db)
     my = await _my_room_role(rid, current_user, db)
+    company_admin = await _is_company_admin(db, room.company_id, current_user)
     is_owner = (current_user.is_superadmin or room.created_by == current_user.id
-                or my == "owner")
+                or my == "owner" or company_admin)
     if not (is_owner or my == "admin"):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Убирать участников может владелец или админ чата")
-    if room.kind is not None:
+    # Системный чат («Общий», «Объявления», канал платформы) состава руками не знает.
+    # Комната контура — исключение для администратора пространства: раз он может
+    # позвать туда гостя, он должен уметь его и убрать, иначе приглашение необратимо.
+    # Людей самого контура это не выкидывает надолго — их вернёт `_ensure_scope_rooms`.
+    if room.kind is not None and not (room.kind.startswith("scope:") and company_admin):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Состав системного чата ведёт пространство")
     if room.type == "direct":
