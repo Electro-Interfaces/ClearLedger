@@ -2504,7 +2504,15 @@ export function ChatPanel({ compact, scopeProduct }: {
     chat.updateFolder(f.id, f.name, roomIds).then(() => qc.invalidateQueries({ queryKey: ['chat-folders'] })).catch(() => toast.error('Не удалось обновить папку'))
   }
   const deleteFolder = (id: string) => {
-    chat.deleteFolder(id).then(() => { qc.invalidateQueries({ queryKey: ['chat-folders'] }); if (folder === id) setFolder('all') }).catch(() => toast.error('Не удалось удалить папку'))
+    const name = folders.find((f) => f.id === id)?.name
+    chat.deleteFolder(id).then(() => {
+      qc.invalidateQueries({ queryKey: ['chat-folders'] })
+      if (folder === id) setFolder('all')
+      // Папка исчезает молча — и человек не знает, попал он по нужной или нет.
+      // Сами чаты при этом на месте, об этом и говорим.
+      toast.success(name ? `Папка «${name}» удалена` : 'Папка удалена',
+        { description: 'Чаты остались на месте' })
+    }).catch(() => toast.error('Не удалось удалить папку'))
   }
   /**
    * Нажатие по папке: первое — выбрать, второе (по уже выбранной) — открыть правку.
@@ -3581,24 +3589,38 @@ export function ChatPanel({ compact, scopeProduct }: {
           </button>
         ))}
         {folders.length > 0 && <div className="my-1 h-px w-10 bg-border" />}
+        {/* Удаления на самой плитке нет. Крестик висел в её левом верхнем углу и
+            появлялся по наведению — то есть ровно там, куда идёт курсор, чтобы папку
+            ВЫБРАТЬ, и срабатывал без подтверждения (замечание МАГа 09.09.2026).
+            Удаляют папку осознанно: правым щелчком или в её окне. */}
         {folders.map((f) => (
-          <button key={f.id} onClick={() => openFolder(f)} draggable
-            onDragStart={() => { dragFolderRef.current = f.id }}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); if (dragFolderRef.current) reorderFolders(dragFolderRef.current, f.id); dragFolderRef.current = null }}
-            title={folder === f.id
-              ? `${f.name} · ${f.roomIds.length} чат(ов) · нажмите ещё раз, чтобы править`
-              : `${f.name} · ${f.roomIds.length} чат(ов)`}
-            className={cn('group/folder relative flex w-14 cursor-grab flex-col items-center gap-0.5 rounded-lg px-1 py-2 text-[10px] transition-colors active:cursor-grabbing',
-              folder === f.id ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
-            <Folder className="size-4" />
-            <span className="w-full truncate text-center">{f.name}</span>
-            {(unreadByFolder[f.id] || 0) > 0 && <span className="absolute right-1.5 top-1 min-w-[16px] rounded-full bg-primary px-1 text-[9px] leading-4 text-primary-foreground">{unreadByFolder[f.id]}</span>}
-            <span role="button" onClick={(e) => { e.stopPropagation(); deleteFolder(f.id) }}
-              className="absolute left-0.5 top-0.5 hidden rounded bg-background p-0.5 text-muted-foreground hover:text-red-500 group-hover/folder:block" title="Удалить папку">
-              <X className="size-2.5" />
-            </span>
-          </button>
+          <ContextMenu key={f.id}>
+            <ContextMenuTrigger asChild>
+              <button onClick={() => openFolder(f)} draggable
+                onDragStart={() => { dragFolderRef.current = f.id }}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); if (dragFolderRef.current) reorderFolders(dragFolderRef.current, f.id); dragFolderRef.current = null }}
+                title={folder === f.id
+                  ? `${f.name} · ${f.roomIds.length} чат(ов) · нажмите ещё раз, чтобы править`
+                  : `${f.name} · ${f.roomIds.length} чат(ов)`}
+                className={cn('relative flex w-14 cursor-grab flex-col items-center gap-0.5 rounded-lg px-1 py-2 text-[10px] transition-colors active:cursor-grabbing',
+                  folder === f.id ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
+                <Folder className="size-4" />
+                <span className="w-full truncate text-center">{f.name}</span>
+                {(unreadByFolder[f.id] || 0) > 0 && <span className="absolute right-1.5 top-1 min-w-[16px] rounded-full bg-primary px-1 text-[9px] leading-4 text-primary-foreground">{unreadByFolder[f.id]}</span>}
+              </button>
+            </ContextMenuTrigger>
+            <ContextMenuContent className="w-52">
+              <ContextMenuItem onClick={() => { setFolder(f.id); setEditFolderId(f.id); setNewFolderName(f.name); setFolderDialogOpen(true) }}>
+                <Folder className="mr-2 size-4" /> Настроить папку
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => deleteFolder(f.id)}
+                className="text-destructive focus:text-destructive">
+                <Trash2 className="mr-2 size-4" /> Удалить папку
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         ))}
         <button onClick={() => { setEditFolderId(null); setNewFolderName(''); setFolderDialogOpen(true) }}
           className="flex w-14 flex-col items-center gap-0.5 rounded-lg px-1 py-2 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
