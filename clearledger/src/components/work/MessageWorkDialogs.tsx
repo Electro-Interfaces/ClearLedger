@@ -145,9 +145,10 @@ export function ProcessFromMessageDialog({ message, companyId, subjectRef, onClo
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="max-w-sm gap-0 p-0 sm:max-w-sm">
         <DialogHeader className="border-b border-border/50 px-4 py-3">
-          <DialogTitle className="text-sm">Запустить процесс из сообщения</DialogTitle>
-          <DialogDescription className="sr-only">
-            Выберите шаблон процесса и первого ответственного сотрудника.
+          <DialogTitle className="text-sm">Процесс по сообщению</DialogTitle>
+          <DialogDescription className="text-xs">
+            Шаблон задаёт шаги, ответственных и сроки — дальше система ведёт работу
+            сама. Если нужно одно дело одному человеку, это «Поручение в „Трек“».
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 p-4">

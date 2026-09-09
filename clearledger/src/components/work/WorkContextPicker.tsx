@@ -16,7 +16,7 @@ export function WorkContextPicker({ companyId, value, onChange }: { companyId: s
     queryFn: () => searchWorkContexts(companyId, selectedPrefix, deferred), enabled: open && !!selectedPrefix })
   const selected = useQuery({ queryKey: ['work-context', companyId, value], queryFn: () => resolveWorkContext(companyId, value!), enabled: !!value })
   return <div className="space-y-2">
-    <label htmlFor={id} className="text-sm font-medium">Контекст работы</label>
+    <label htmlFor={id} className="text-sm font-medium">К чему относится: проект или объект</label>
     {value && <div className="flex items-start justify-between gap-2 text-sm"><span>{selected.data?.title || (selected.isError ? 'Контекст недоступен' : 'Загрузка…')}</span><Button type="button" variant="ghost" size="sm" onClick={() => onChange(null)}>Убрать</Button></div>}
     <select aria-label="Приложение контекста" className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={selectedPrefix}
       onChange={(e) => { setPrefix(e.target.value); setOpen(true); setSearch('') }}>{providers.data?.providers.map((p) => <option key={p.prefix} value={p.prefix}>{p.label}</option>)}</select>

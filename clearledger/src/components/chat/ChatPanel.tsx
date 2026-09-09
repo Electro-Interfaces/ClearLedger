@@ -19,7 +19,7 @@ import {
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList, Workflow,
   Mail, Palette, Smile, Images, Volume2, VolumeX, Mic, BarChart3, WifiOff,
-  CheckSquare, Copy, Square, Share2, ListPlus,
+  CheckSquare, Copy, Square, ListPlus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -1666,13 +1666,15 @@ function ChatBubble({
       hint: 'Режим выбора: отметить несколько реплик и переслать или удалить их сразу' } : null,
     onTask ? { icon: ListPlus, label: 'Поручение в «Трек»', group: 'work', run: onTask,
       hint: 'Поставить поручение по этому сообщению: исполнитель, срок, проект. Сообщение останется основанием' } : null,
-    onProcess ? { icon: Workflow, label: 'Запустить процесс', group: 'work', run: onProcess,
-      hint: 'Взять готовый маршрут — согласование, приём работ — и пустить его по этому сообщению' } : null,
+    onProcess ? { icon: Workflow, label: 'Запустить процесс по шаблону', group: 'work',
+      run: onProcess,
+      hint: 'Не одно дело, а маршрут: шаблон из «Трека» (согласование, приём работ) задаёт шаги и ответственных, система ведёт по ним сама' } : null,
     onTicket ? { icon: ClipboardList, label: 'Обращение в поддержку', group: 'work',
       run: onTicket,
       hint: 'Завести обращение в очередь поддержки с текстом и вложением этого сообщения' } : null,
-    onContext ? { icon: Share2, label: 'Передать в приложение', group: 'work', run: onContext,
-      hint: 'Отдать сообщение приложению как основание действия — приложить к документу, площадке, смене' } : null,
+    onContext ? { icon: Paperclip, label: 'Приложить к проекту или объекту', group: 'work',
+      run: onContext,
+      hint: 'Подшить сообщение к делу: обсуждением в проекте, зафиксированным решением или файлом в его документах' } : null,
     onPin ? { icon: Pin, label: 'Закрепить в чате', group: 'own', run: onPin,
       hint: 'Показать это сообщение вверху чата всем участникам' } : null,
     isOwn ? { icon: Pencil, label: 'Изменить текст', group: 'own', run: onEditStart,
