@@ -136,7 +136,12 @@ function FilterSection({
   )
 }
 
-export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; onOpenChange: (value: boolean) => void }) {
+export function WorkspaceFilterModal({ open, onOpenChange, initialSection = 'period' }: {
+  open: boolean
+  onOpenChange: (value: boolean) => void
+  /** С какого раздела открыть: из быстрого выбора области — сразу «Отбор станций». */
+  initialSection?: 'period' | 'scope'
+}) {
   const {
     state, applyState, commitToHistory,
     history, presets, savePreset, deletePreset,
@@ -157,7 +162,7 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
    * не за что зацепиться. Теперь раздел выбирается слева, справа только он —
    * прокрутка одна.
    */
-  const [section, setSection] = useState<'period' | 'scope' | 'source'>('period')
+  const [section, setSection] = useState<'period' | 'scope' | 'source'>(initialSection)
   const { isAdvanced } = useUiLevel()
 
   const { data: dimensions } = useQuery({
@@ -220,8 +225,8 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
   const { coreMode } = useWorkspace()
   const showSource = !isEnergy && isAdvanced && !STORE_MODES.includes(coreMode)
   const SECTIONS = [
-    { key: 'period' as const, label: 'Период', value: periodSummary, icon: CalendarDays },
-    { key: 'scope' as const, label: 'Область учёта', value: scopeSummary, icon: MapPinned },
+    { key: 'period' as const, label: 'Период и сравнение', value: periodSummary, icon: CalendarDays },
+    { key: 'scope' as const, label: 'Отбор станций по условиям', value: scopeSummary, icon: MapPinned },
     ...(showSource ? [{ key: 'source' as const, label: 'Источник STS', value: sourceSummary, icon: Database }] : []),
   ]
 
@@ -282,13 +287,15 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <DialogTitle>Фильтры рабочей области</DialogTitle>
+                <DialogTitle>Расширенный фильтр рабочей области</DialogTitle>
                 <Badge variant={count > 0 ? 'default' : 'secondary'}>
                   {count > 0 ? `Ограничений: ${count}` : 'Вся сеть'}
                 </Badge>
               </div>
               <DialogDescription className="mt-1">
-                Соберите выборку и примените её ко всем разделам рабочего стола.
+                Подробная выборка: период со сравнением и отбор станций по условиям.
+                Применяется ко всем разделам рабочего стола. Быстрые изменения —
+                кнопками «Период» и «Область учёта» в строке над экраном.
               </DialogDescription>
             </div>
             <Button
@@ -526,8 +533,8 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
               {section === 'scope' && !isEnergy && (
               <FilterSection
                 icon={MapPinned}
-                title="Область учёта"
-                description="Регион сужает список точек; выбранные точки задают рабочий контур."
+                title="Отбор точек по условиям"
+                description="Регион сужает список; отмеченные точки задают область учёта. Тот же контур, что у кнопки «Область учёта» в строке."
                 action={draft.locationIds.length + draft.regionIds.length + draft.stationCodes.length > 0 ? (
                   <Button
                     variant="ghost"
@@ -629,9 +636,12 @@ export function WorkspaceFilterModal({ open, onOpenChange }: { open: boolean; on
                     <MapPinned className="size-4" aria-hidden="true" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="text-sm font-semibold leading-5">Область учёта</h3>
+                    <h3 className="text-sm font-semibold leading-5">Отбор станций по условиям</h3>
                     <p className="text-xs leading-4 text-muted-foreground">
-                      Условия слева сужают сеть; отмеченные станции задают рабочий контур.
+                      Регион, город и класс скорости слева сужают список; отмеченные
+                      станции задают область учёта. Тот же контур, что у кнопки
+                      «Область учёта» в строке, — здесь его набирают по признакам,
+                      а не ищут поштучно.
                     </p>
                   </div>
                 </div>

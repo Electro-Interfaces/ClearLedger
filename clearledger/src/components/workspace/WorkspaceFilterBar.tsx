@@ -365,6 +365,9 @@ export function WorkspaceFilterBar() {
   const stations = getStsStationsFromLocations()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
+  // С какого раздела открыть расширенный фильтр: из быстрого выбора области
+  // человек хочет попасть сразу в подбор по условиям, а не искать его заново.
+  const [section, setSection] = useState<'period' | 'scope'>('period')
 
   const { isFetching } = useShifts(stationCode === 'all' ? undefined : Number(stationCode))
   const count = activeFilterCount(filters.state)
@@ -388,15 +391,21 @@ export function WorkspaceFilterBar() {
           блок справа `shrink-0`, поэтому сжимались сами элементы фильтра и
           кнопка на них наезжала (замечание заказчика 21.08.2026). */}
       <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5">
+      {/* «Фильтры» читалось как подпись к строке, а не как кнопка: человек не
+          пробовал нажать и не находил подробную настройку вовсе. Теперь кнопка
+          названа тем, что открывает, и говорит об этом вслух (МАГ, 09.09.2026). */}
       <Button
         variant="outline"
         size="sm"
         className="h-11 rounded-lg px-3.5"
         onClick={() => setOpen(true)}
-        aria-label={count > 0 ? `Настроить фильтры, активно: ${count}` : 'Настроить фильтры'}
+        title="Открыть окно подробной настройки: период, отбор станций по условиям, дополнительные ограничения"
+        aria-label={count > 0
+          ? `Открыть расширенный фильтр, ограничений: ${count}`
+          : 'Открыть расширенный фильтр'}
       >
         <SlidersHorizontal data-icon="inline-start" />
-        <span className="hidden sm:inline">Фильтры</span>
+        <span className="hidden sm:inline">Расширенный фильтр</span>
         {count > 0 ? <Badge className="min-w-5 px-1.5">{count}</Badge> : null}
       </Button>
 
@@ -406,7 +415,9 @@ export function WorkspaceFilterBar() {
           это читается как наложение («Сбросить так и налезает», 24.08.2026). */}
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
         {coreMode !== 'projects' && <PeriodControl />}
-        {isOffice ? null : <WorkspaceScopeControl />}
+        {isOffice ? null : (
+          <WorkspaceScopeControl onAdvanced={() => { setSection('scope'); setOpen(true) }} />
+        )}
         {/* Вид нефтепродукта — третье измерение общего контура рядом с периодом и
             областью: у топливного профиля он меняет ответ на любом экране. */}
         {топливныйКонтур ? <FuelKindControl /> : null}
@@ -467,7 +478,9 @@ export function WorkspaceFilterBar() {
         ) : null}
       </div>
 
-      <WorkspaceFilterModal key={open ? 'open' : 'closed'} open={open} onOpenChange={setOpen} />
+      <WorkspaceFilterModal key={open ? `open-${section}` : 'closed'} open={open}
+        initialSection={section}
+        onOpenChange={(next) => { setOpen(next); if (!next) setSection('period') }} />
       </div>
       <ActiveFilterChips />
     </div>

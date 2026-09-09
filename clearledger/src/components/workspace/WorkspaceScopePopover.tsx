@@ -10,7 +10,7 @@
 
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Check, MapPinned, RotateCcw, Search, X } from 'lucide-react'
+import { Check, MapPinned, RotateCcw, Search, SlidersHorizontal, X } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -47,7 +47,10 @@ function SelectedChip({ label, sub, onRemove }: { label: string; sub?: string; o
   )
 }
 
-export function WorkspaceScopeControl() {
+export function WorkspaceScopeControl({ onAdvanced }: {
+  /** Открыть расширенный фильтр на отборе по условиям — если он рядом есть. */
+  onAdvanced?: () => void
+} = {}) {
   const [open, setOpen] = useState(false)
   const [regionQuery, setRegionQuery] = useState('')
   const [stationQuery, setStationQuery] = useState('')
@@ -221,7 +224,8 @@ export function WorkspaceScopeControl() {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label={`Область учёта: ${scopeLabel}. Открыть выбор сети`}
+        title="Быстрый выбор области учёта: отметить регионы и станции. Отбор по региону, городу и классу скорости — в расширенном фильтре"
+        aria-label={`Область учёта: ${scopeLabel}. Открыть быстрый выбор сети`}
         className={`group flex h-11 shrink-0 items-center gap-2.5 rounded-lg border px-3.5 text-left transition-colors ${
           scopeCount > 0
             ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/15'
@@ -246,9 +250,9 @@ export function WorkspaceScopeControl() {
                 <MapPinned className="size-[18px]" aria-hidden="true" />
               </span>
               <div>
-                <DialogTitle className="text-base">Область учёта — сеть для анализа</DialogTitle>
+                <DialogTitle className="text-base">Область учёта · быстрый выбор</DialogTitle>
                 <DialogDescription className="text-xs">
-                  Ограничьте анализ регионами и/или конкретными {isEnergy ? 'станциями ЭЗС' : 'точками'}. Выбор применяется по кнопке — до неё цифры на экране не меняются.
+                  Отметьте регионы и/или конкретные {isEnergy ? 'станции ЭЗС' : 'точки'}: этот контур применится ко всем разделам. Выбор вступает в силу по кнопке — до неё цифры на экране не меняются.
                 </DialogDescription>
               </div>
             </div>
@@ -388,10 +392,23 @@ export function WorkspaceScopeControl() {
           </div>
 
           <DialogFooter className="shrink-0 flex-row items-center justify-between border-t border-border px-5 py-3">
-            <Button variant="ghost" size="sm" className="h-9 rounded-lg text-muted-foreground" onClick={resetAll} disabled={scopeCount === 0}>
-              <RotateCcw data-icon="inline-start" />
-              Сбросить всё
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" className="h-9 rounded-lg text-muted-foreground" onClick={resetAll} disabled={scopeCount === 0}>
+                <RotateCcw data-icon="inline-start" />
+                Сбросить всё
+              </Button>
+              {/* Здесь выбирают поштучно, а по признакам — в расширенном фильтре.
+                  Без этой ссылки два окна выглядели как два разных фильтра с одним
+                  названием, и никто не понимал, чем они отличаются (МАГ, 09.09.2026). */}
+              {onAdvanced ? (
+                <Button variant="ghost" size="sm" className="h-9 rounded-lg text-muted-foreground"
+                  title="Открыть расширенный фильтр: отбор по региону, городу и классу скорости"
+                  onClick={() => { setOpen(false); onAdvanced() }}>
+                  <SlidersHorizontal data-icon="inline-start" />
+                  Отбор по условиям
+                </Button>
+              ) : null}
+            </div>
             <div className="flex items-center gap-3">
               <span className="text-sm text-muted-foreground">
                 {/* Счёт по черновику: показываем то, что человек набрал сейчас,
