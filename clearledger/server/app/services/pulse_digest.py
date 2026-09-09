@@ -53,15 +53,24 @@ async def _companies_due(db) -> list[tuple[str, str]]:
 
 
 async def _recipients(db, cid: str) -> list[str]:
-    """Кому слать: у кого есть доступ к «Пульсу».
+    """Кому слать: своим сотрудникам, у которых есть доступ к «Пульсу».
 
     Набор модулей разбирает `auth.resolve_member_modules` — та же функция, что
     решает доступ на входе в продукт. Свой SQL здесь означал бы второй ответ на
     вопрос «кому можно», и однажды они разошлись бы.
 
     Спящие учётки исключены: письмо в мёртвый ящик — это не доставка.
+
+    **Внешние участники дайджест не получают.** Доступ к экрану и рассылка — разные
+    вещи: оператору подрядчика «Экран дня» нужен как рабочее место (его роль несёт
+    `pulse:today`), а ежедневная сводка компании в его собственный ящик — нет. На
+    пилоте РусГидро пять дней подряд управленческая сводка сети уезжала на восемь
+    адресов контакт-центра в чужих доменах, и его руководитель попросила это
+    прекратить (09.09.2026). Отключать людям доступ ради письма неправильно, а
+    единственная настройка `digest_hour` выключает рассылку сразу всей компании —
+    поэтому граница проходит по принадлежности.
     """
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
     from app.auth import resolve_member_modules
     from app.models import User, UserCompany
@@ -73,7 +82,10 @@ async def _recipients(db, cid: str) -> list[str]:
         # отсекаем только тех, кто месяц не заходил: письмо в мёртвый ящик
         # доставкой не считается.
         .where(UserCompany.company_id == uuid.UUID(cid),
-               User.last_seen_at > datetime.now(timezone.utc) - timedelta(days=30))
+               User.last_seen_at > datetime.now(timezone.utc) - timedelta(days=30),
+               # Пустая принадлежность — свой сотрудник: так было до появления
+               # партнёров, и у перенесённых людей заказчика она не заполнена.
+               func.coalesce(UserCompany.party_type, "internal") == "internal")
     )).all()
     out: list[str] = []
     for member, user in rows:
