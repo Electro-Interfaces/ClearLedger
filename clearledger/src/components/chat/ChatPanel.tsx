@@ -19,7 +19,7 @@ import {
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList, Workflow,
   Mail, Palette, Smile, Images, Volume2, VolumeX, Mic, BarChart3, WifiOff,
-  CheckSquare, Copy, Square, ListChecks,
+  CheckSquare, Copy, Square, Share2, ListPlus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -1637,7 +1637,7 @@ function ChatBubble({
     onCloseActions()
   }
   const reactionRow = onReact ? (
-    <div className="flex items-center gap-0.5">
+    <div className="flex items-center gap-0.5 border-b border-border/60 pb-0.5">
       {QUICK_REACTIONS.map((emoji) => (
         <button key={emoji} onClick={() => runAction(() => onReact(emoji))} title={emoji}
           className="flex size-7 items-center justify-center rounded-md text-[18px] leading-none transition-transform hover:scale-110 hover:bg-accent active:scale-95 [@media(pointer:coarse)]:size-10 [@media(pointer:coarse)]:text-[20px]">
@@ -1647,44 +1647,77 @@ function ChatBubble({
     </div>
   ) : null
 
+  // Ряд иконок без подписей читался как ребус: три «списочных» значка рядом
+  // (обращение, процесс, поручение) плюс папка непонятно чего. По замечанию МАГа
+  // 09.09.2026 действия названы словами: из сообщения рождается работа, и человек
+  // должен видеть КАКАЯ, а не угадывать по картинке. Подсказка у каждого пункта
+  // отвечает на второй вопрос — что именно случится с этим сообщением.
+  type ToolItem = {
+    icon: typeof Reply; label: string; hint: string; run: () => void
+    group: 'reply' | 'work' | 'own'
+  }
+  const tools: Array<ToolItem | null> = [
+    { icon: Reply, label: 'Ответить', group: 'reply', run: onReply,
+      hint: 'Ответить на это сообщение — оно встанет цитатой над вашим' },
+    onForward ? { icon: Forward, label: 'Переслать', group: 'reply', run: onForward,
+      hint: 'Отправить это сообщение в другой чат' } : null,
+    onSelectToggle ? { icon: CheckSquare, label: 'Выделить сообщения', group: 'reply',
+      run: onSelectToggle,
+      hint: 'Режим выбора: отметить несколько реплик и переслать или удалить их сразу' } : null,
+    onTask ? { icon: ListPlus, label: 'Поручение в «Трек»', group: 'work', run: onTask,
+      hint: 'Поставить поручение по этому сообщению: исполнитель, срок, проект. Сообщение останется основанием' } : null,
+    onProcess ? { icon: Workflow, label: 'Запустить процесс', group: 'work', run: onProcess,
+      hint: 'Взять готовый маршрут — согласование, приём работ — и пустить его по этому сообщению' } : null,
+    onTicket ? { icon: ClipboardList, label: 'Обращение в поддержку', group: 'work',
+      run: onTicket,
+      hint: 'Завести обращение в очередь поддержки с текстом и вложением этого сообщения' } : null,
+    onContext ? { icon: Share2, label: 'Передать в приложение', group: 'work', run: onContext,
+      hint: 'Отдать сообщение приложению как основание действия — приложить к документу, площадке, смене' } : null,
+    onPin ? { icon: Pin, label: 'Закрепить в чате', group: 'own', run: onPin,
+      hint: 'Показать это сообщение вверху чата всем участникам' } : null,
+    isOwn ? { icon: Pencil, label: 'Изменить текст', group: 'own', run: onEditStart,
+      hint: 'Поправить свою реплику — у неё останется пометка «изменено»' } : null,
+  ]
+
+  const toolItem = (t: ToolItem) => (
+    <button key={t.label} onClick={() => runAction(t.run)} title={t.hint}
+      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/90 hover:bg-accent [@media(pointer:coarse)]:py-2.5 [@media(pointer:coarse)]:text-sm">
+      <t.icon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="truncate">{t.label}</span>
+    </button>
+  )
+
   const toolRow = (
-    <div className="flex items-center gap-0.5">
-      <button onClick={() => runAction(onReply)} title="Ответить"
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Reply className="size-4" /></button>
-      {onSelectToggle && <button onClick={() => runAction(onSelectToggle)} title="Выбрать"
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><CheckSquare className="size-4" /></button>}
-      {onForward && <button onClick={() => runAction(onForward)} title="Переслать"
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Forward className="size-4" /></button>}
-      {onTicket && <button onClick={() => runAction(onTicket)} title="Создать заявку из сообщения"
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><ClipboardList className="size-4" /></button>}
-      {onProcess && <button onClick={() => runAction(onProcess)} title="Запустить процесс из сообщения"
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Workflow className="size-4" /></button>}
-      {/* Поручение без шаблона: «сделай, пожалуйста» — половина работы рождается
-          именно так, и переписывать сообщение руками в форму постановки незачем. */}
-      {onContext && <button onClick={() => runAction(onContext)} title="Действие приложения"
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Folder className="size-4" /></button>}
-      {onTask && <button onClick={() => runAction(onTask)} title="Поставить поручение по сообщению"
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><ListChecks className="size-4" /></button>}
-      {onPin && <button onClick={() => runAction(onPin)} title="Закрепить"
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Pin className="size-4" /></button>}
-      {isOwn && <button onClick={() => runAction(onEditStart)} title="Редактировать"
-        className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-10"><Pencil className="size-4" /></button>}
+    <div className="flex min-w-[218px] flex-col">
+      {(['reply', 'work', 'own'] as const).map((g) => {
+        const items = tools.filter((t): t is ToolItem => !!t && t.group === g)
+        if (!items.length) return null
+        return (
+          <div key={g} className="flex flex-col border-t border-border/60 pt-0.5 first:border-t-0 first:pt-0">
+            {items.map(toolItem)}
+          </div>
+        )
+      })}
       {canDelete && (
-        <ConfirmActionDialog
-          trigger={<button title="Удалить"
-            className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-red-500 [@media(pointer:coarse)]:size-10"><Trash2 className="size-4" /></button>}
-          title="Удалить сообщение?"
-          description={message.content
-            ? <>Будет удалено: «{message.content.slice(0, 120)}{message.content.length > 120 ? '…' : ''}». Восстановить нельзя.</>
-            : 'Сообщение с вложением будет удалено. Восстановить нельзя.'}
-          confirmLabel="Удалить" destructive onConfirm={() => runAction(onDelete)} />
+        <div className="flex flex-col border-t border-border/60 pt-0.5">
+          <ConfirmActionDialog
+            trigger={<button title="Удалить сообщение у всех участников, без возможности вернуть"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-destructive hover:bg-destructive/10 [@media(pointer:coarse)]:py-2.5 [@media(pointer:coarse)]:text-sm">
+              <Trash2 className="size-4 shrink-0" />
+              <span className="truncate">Удалить</span>
+            </button>}
+            title="Удалить сообщение?"
+            description={message.content
+              ? <>Будет удалено: «{message.content.slice(0, 120)}{message.content.length > 120 ? '…' : ''}». Восстановить нельзя.</>
+              : 'Сообщение с вложением будет удалено. Восстановить нельзя.'}
+            confirmLabel="Удалить" destructive onConfirm={() => runAction(onDelete)} />
+        </div>
       )}
     </div>
   )
 
-  // Две строки вместо одной ленты в двенадцать иконок: сверху то, чем отвечают
-  // чувством, снизу то, чем работают. Панель стала вдвое уже и перестала
-  // растягиваться на половину ленты.
+  // Реакции остаются строкой значков — эмодзи говорит сам за себя, — а работа идёт
+  // списком с названиями. Раньше было два ряда одинаково нарисованных иконок.
   const actionButtons = (
     <>
       {reactionRow}
@@ -1782,7 +1815,7 @@ function ChatBubble({
                 onClick={onCloseActions}
                 className="fixed inset-0 z-30 hidden bg-black/10 [@media(pointer:coarse)]:block" />
               <div id={actionsId} role="toolbar" aria-label="Действия с сообщением"
-                className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-40 hidden select-none flex-col items-center justify-center gap-1 rounded-2xl border border-border bg-popover p-2 text-popover-foreground shadow-2xl [@media(pointer:coarse)]:flex">
+                className="fixed inset-x-2 bottom-[calc(env(safe-area-inset-bottom)+4.75rem)] z-40 hidden max-h-[70dvh] select-none flex-col gap-1 overflow-y-auto rounded-2xl border border-border bg-popover p-2 text-popover-foreground shadow-2xl [@media(pointer:coarse)]:flex">
                 {actionButtons}
               </div>
             </>
