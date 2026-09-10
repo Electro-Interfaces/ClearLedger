@@ -7,6 +7,8 @@ env `JITSI_SIGNING_KEY` (PEM в base64), НЕ в git; публичный леж�
 должен быть в `JWT_ACCEPTED_ISSUERS` Jitsi-стека.
 """
 import base64
+import hashlib
+import hmac
 import secrets
 import time
 from urllib.parse import quote
@@ -28,6 +30,21 @@ def _private_key() -> str | None:
 def new_room() -> str:
     """Случайная неугадываемая комната."""
     return f"ledger-{secrets.token_hex(8)}"
+
+
+def room_for(subject: str) -> str:
+    """Постоянная комната предмета: `event:<uuid>`, `doc:<uuid>`.
+
+    Имя считается от предмета, а не выдаётся случайно на каждое нажатие. Иначе
+    в собственную комнату не вернуться: организатор, закрывший вкладку, заводил
+    новую, а участники оставались ждать в прежней. Считается на приватном ключе
+    пространства — угадать имя чужой комнаты по номеру встречи нельзя.
+    """
+    key = _private_key()
+    if not key:
+        return new_room()
+    return "ledger-" + hmac.new(key.encode(), subject.encode(),
+                                hashlib.sha256).hexdigest()[:16]
 
 
 def sign_token(room: str, display_name: str, *, moderator: bool = True, hours: int = 4) -> str | None:

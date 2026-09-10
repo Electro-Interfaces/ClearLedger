@@ -42,3 +42,26 @@ export async function startMeeting(): Promise<MeetingUrls> {
 export async function getMeetingsConfig(): Promise<{ enabled: boolean; domain: string }> {
   return get<{ enabled: boolean; domain: string }>('/api/meetings/config')
 }
+
+/**
+ * Открыть видеовстречу запланированной встречи — ведущим.
+ *
+ * Комната у встречи одна и та же всегда, поэтому ссылка из карточки и из
+ * приглашения ведёт туда же, куда входит ведущий. Вкладку, как и в
+ * `startMeeting`, заводим синхронно по клику: после `await` браузер считает
+ * её попапом и молча блокирует.
+ */
+export async function startEventMeeting(companyId: string, eventId: string): Promise<MeetingUrls> {
+  const вкладка = window.open('about:blank', '_blank')
+  if (вкладка) вкладка.opener = null
+  try {
+    const m = await post<MeetingUrls>(
+      `/api/work/calendar/${eventId}/meeting?company_id=${encodeURIComponent(companyId)}`)
+    if (вкладка) вкладка.location.href = m.moderator_url
+    else window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+    return m
+  } catch (e) {
+    вкладка?.close()
+    throw e
+  }
+}

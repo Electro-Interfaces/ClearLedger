@@ -1492,6 +1492,44 @@ async def calendar_card(
     return _event_out(ev, parts, current_user.id)
 
 
+@router.post("/calendar/{event_id}/meeting")
+async def calendar_meeting(
+    event_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Открыть видеовстречу этой встречи — ведущим.
+
+    Комната у встречи постоянная (`jitsi.room_for`), поэтому вернуться в неё
+    можно и через час, и на следующий день: ссылка в карточке всегда ведёт
+    туда же. Прежняя кнопка «Конференция» заводила случайную комнату на каждое
+    нажатие — организатор, закрывший вкладку, попадал в новую, а приглашённые
+    оставались ждать ведущего в прежней.
+
+    Ведущим входит любой участник встречи, а не только организатор: без ведущего
+    Jitsi держит остальных на «ждём организатора», и опоздание одного человека
+    отменяет совещание. Внешние гости приходят по гостевой ссылке из
+    приглашения — она и остаётся в карточке.
+    """
+    from app.services import jitsi
+
+    if not settings.jitsi_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Видеоконференции не настроены")
+    cid = await _assert_work(company_id, current_user, db)
+    ev = await _event_participant(db, cid, event_id, current_user)
+    if ev.status == "cancelled":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Встреча отменена")
+    urls = jitsi.meeting_urls(jitsi.room_for(f"event:{ev.id}"), current_user.name)
+    # Чужую ссылку (Zoom, Teams) не трогаем: её вписали руками, и подменять её
+    # своей комнатой значит развести участников по двум разным совещаниям.
+    if not ev.conference_url:
+        ev.conference_url = urls["guest_url"]
+        await db.commit()
+    return urls
+
+
 @router.post("/calendar", status_code=status.HTTP_201_CREATED)
 async def calendar_create(
     payload: EventIn,

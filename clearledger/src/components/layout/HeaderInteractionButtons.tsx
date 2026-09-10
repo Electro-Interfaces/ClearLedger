@@ -18,6 +18,7 @@ import { isDemoMode } from '@/services/apiClient'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useDocsApp } from '@/hooks/useDocsApp'
 import { useCompany } from '@/contexts/CompanyContext'
+import { cn } from '@/lib/utils'
 
 /** Пилюля-кнопка: синий акцент, активное состояние — как у остальных кнопок шапки. */
 const btnCls = (active: boolean) =>
@@ -71,9 +72,13 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
     // оставалась одна кнопка чата.
     <div className="flex items-center gap-1.5 pl-1 md:gap-2">
       <div className="hidden h-6 w-px bg-border/50 md:block" />
-      {conference && canApp('conf') && (
+      {/* Конференция стоит во всех шапках (просьба МАГа 10.09.2026): созвон зовут из
+          любого экрана, а не только с рабочего стола. На телефоне её прячем везде,
+          кроме стола: шестая кнопка наезжала на бургер и выдавливала профиль за край
+          (проверка МАГа 06.09.2026) — там вход остаётся на пульте и в меню профиля. */}
+      {canApp('conf') && (
         <Button variant="outline" size="sm" onClick={startConference} disabled={confBusy}
-          className={btnCls(false)} title="Видеоконференция">
+          className={cn(btnCls(false), !conference && 'hidden md:inline-flex')} title="Видеоконференция">
           <Video className="h-4 w-4" />
           <span className="hidden lg:inline">Конференция</span>
         </Button>

@@ -26,6 +26,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import * as workService from '@/services/workService'
+import { startEventMeeting } from '@/services/conferenceService'
 import type {
   CalendarEvent, EventResponse, EventVisibility, Recurrence,
 } from '@/services/workService'
@@ -129,6 +130,25 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
       catch { toast.error('Не удалось обновить встречу. Откройте её ещё раз.') }
     }
     notifyChanged()
+  }
+
+  // Видеовстреча этой встречи. Комнату держит сервер: имя постоянное, поэтому
+  // ссылка из приглашения и вход ведущего ведут в одно место, а вернуться в
+  // свою же комнату можно и после закрытой вкладки.
+  const [confBusy, setConfBusy] = useState(false)
+  const войтиВВидеовстречу = async () => {
+    if (confBusy || !event) return
+    setConfBusy(true)
+    try {
+      const m = await startEventMeeting(companyId, event.id)
+      try { await navigator.clipboard.writeText(m.guest_url) } catch { /* буфер недоступен */ }
+      toast.success('Вы ведущий — ссылка для участников скопирована', { description: m.guest_url })
+      await refreshEvent()
+    } catch (e) {
+      const msg = (e as Error).message || ''
+      toast.error(/503|не настроен/i.test(msg) ? 'Видеоконференции не настроены'
+        : 'Не удалось открыть видеовстречу')
+    } finally { setConfBusy(false) }
   }
 
   const [title, setTitle] = useState(event?.title ?? initialTitle ?? '')
@@ -716,7 +736,16 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             try { await navigator.clipboard.writeText(new URL(eventHref, window.location.origin).href); toast.success('Ссылка на встречу скопирована') }
             catch { toast.error('Не удалось скопировать ссылку. Проверьте разрешение браузера.') }
           }}>Ссылка на встречу</Button>
-          {event!.conference_url && /^https?:\/\//i.test(event!.conference_url) && event!.status !== 'cancelled' && <Button variant="outline" asChild><a href={event!.conference_url} target="_blank" rel="noopener noreferrer"><Video className="mr-2 h-4 w-4" />Открыть видеовстречу</a></Button>}
+          {/* Своя комната — своя кнопка: сервер подписывает вход ведущим, иначе
+              Jitsi держит всех на «ждём организатора». Чужую ссылку (Zoom,
+              Teams) открываем как есть — ведущего там назначаем не мы. */}
+          {event!.status !== 'cancelled' && (
+            event!.conference_url && !/\/ledger-[0-9a-f]+/i.test(event!.conference_url)
+              ? (/^https?:\/\//i.test(event!.conference_url) && <Button variant="outline" asChild><a href={event!.conference_url} target="_blank" rel="noopener noreferrer"><Video className="mr-2 h-4 w-4" />Открыть видеовстречу</a></Button>)
+              : <Button variant="outline" disabled={confBusy} onClick={войтиВВидеовстречу}>
+                  <Video className="mr-2 h-4 w-4" />{event!.conference_url ? 'Войти в видеовстречу' : 'Начать видеовстречу'}
+                </Button>
+          )}
           {subjectHref && <Button variant="ghost" asChild><Link to={subjectHref} onClick={onClose}>Предмет встречи</Link></Button>}
         </div>}
         {!новая && event!.status !== 'cancelled' && (!phone || more) && <EventReminder companyId={companyId} event={event!} />}
