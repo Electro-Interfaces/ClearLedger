@@ -10,6 +10,8 @@ import openpyxl
 
 from app.services.asuim_normalize import (
     _conn_type,
+    _read_sheet,
+    detect_sheets,
     _is_phone_stub,
     _keep_filled,
     _org_phone_stub,
@@ -221,3 +223,75 @@ def test_batch_orders_files_by_dependency():
     assert pos["organizations"] < pos["users"]
     assert pos["sessions"] < pos["payments"]
     assert "admins" not in VIEW_ORDER          # не грузим никогда
+
+
+# ---------------------------------------------------------------------------
+# Книга витрины: 14 листов одним файлом (как приходит выгрузка с 28.08.2026)
+# ---------------------------------------------------------------------------
+BOOK_SESSION_HEADERS = ["id_сессии", "дата_начала", "энергия_квтч", "сумма_руб"]
+BOOK_PAYMENT_HEADERS = ["id_платежа", "id_сессии", "сумма_холда_руб.", "дата", "сумма_руб."]
+
+
+def _book() -> bytes:
+    """Книга ODBC: пустой первый лист, дальше представления вперемешку."""
+    wb = openpyxl.Workbook()
+    wb.active.title = "Лист1"
+    for title, headers, rows in (
+        ("Лист2", BOOK_SESSION_HEADERS, [["190681", "2026-09-08 10:00:00", 35.6, 400],
+                                    ["198101", "2026-09-10 16:39:00", 13.4, 0]]),
+        ("Лист3", BOOK_PAYMENT_HEADERS, [["p1", "190681", 500, "2026-09-08 10:20:00", 400],
+                                    ["p2", "198101", 0, "2026-09-10 17:00:00", 0]]),
+        ("Лист4", STATION_HEADERS, [["000073", "Новая Рига", "643", "000073", "МО", "д.Покровское",
+                                     "Центральная", "33", "адрес", 55.81, 37.02, "Активная",
+                                     "Active", 3, "РусГидро", "Нартис", None, 0, None, 2, 0, 0, None]]),
+    ):
+        ws = wb.create_sheet(title)
+        ws.append(headers)
+        for r in rows:
+            ws.append(r)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_book_all_sheets_detected():
+    """Из книги должны доехать ВСЕ представления, а не первое опознанное.
+
+    `read_asuim_xlsx` возвращает первый лист — на книге это только сессии,
+    без платежей и справочников."""
+    content = _book()
+    view, _ = read_asuim_xlsx(content)
+    assert view == "sessions"
+
+    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    try:
+        sheets = detect_sheets(wb)
+        assert sheets == {"sessions": "Лист2", "payments": "Лист3", "stations": "Лист4"}
+    finally:
+        wb.close()
+
+
+def test_book_sheet_read_keeps_only_new_days():
+    """Сессии и платежи берутся с новых дней: книга отдаёт всю историю каждый раз."""
+    wb = openpyxl.load_workbook(io.BytesIO(_book()), read_only=True, data_only=True)
+    try:
+        assert len(_read_sheet(wb["Лист2"])) == 2
+        rows = _read_sheet(wb["Лист2"], "дата_начала", "2026-09-10")
+        assert [r["id_сессии"] for r in rows] == ["198101"]
+        rows = _read_sheet(wb["Лист3"], "дата", "2026-09-09")
+        assert [r["id_платежа"] for r in rows] == ["p2"]
+        # Справочник отсечке не подлежит: даты у него нет, берётся целиком.
+        assert len(_read_sheet(wb["Лист4"], None, "2026-09-10")) == 1
+    finally:
+        wb.close()
+
+
+def test_stations_mapper_marks_customer_test_stands():
+    """Стенд «(Тест)» с боевым номером не должен заводиться в реестр объектов."""
+    rows = [
+        {"id_станции": "756", "название": 'БЦ "Гидропроект" (Тест)', "номер": "756"},
+        {"id_станции": "643", "название": "Новая Рига", "номер": "643"},
+        {"id_станции": "900", "название": "Тестовая площадка сети", "номер": "900"},
+    ]
+    marked = {r["ext_id"]: r["is_test"] for r in map_stations(rows)}
+    assert marked == {"756": True, "643": False, "900": False}

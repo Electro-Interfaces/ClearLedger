@@ -525,8 +525,8 @@ async def _run_charge_sessions(db: AsyncSession, channel: Channel, src: Source,
         content = fh.read()
     # Выгрузка витрины АСУиМ (сессии или платежи) опознаётся по шапке и идёт своим
     # маппером; файл админпанели — прежним индексным разбором.
-    from app.services.asuim_normalize import ingest_asuim_file
-    vitrina = await ingest_asuim_file(db, channel.company_id, content,
+    from app.services.asuim_normalize import ingest_asuim_book
+    vitrina = await ingest_asuim_book(db, channel.company_id, content,
                                       channel_id=channel.id, mode=mode, log_id=log_id)
     if vitrina is not None:
         return vitrina
@@ -569,8 +569,8 @@ async def _run_stations(db: AsyncSession, channel: Channel, src: Source,
     with open(sf.storage_path, "rb") as fh:
         content = fh.read()
     # Витрина АСУиМ (станции, коннекторы, тарифы, организации) — по именам колонок.
-    from app.services.asuim_normalize import ingest_asuim_file
-    vitrina = await ingest_asuim_file(db, channel.company_id, content,
+    from app.services.asuim_normalize import ingest_asuim_book
+    vitrina = await ingest_asuim_book(db, channel.company_id, content,
                                       channel_id=channel.id, mode=mode, log_id=log_id)
     if vitrina is not None:
         return vitrina

@@ -35,7 +35,7 @@ from __future__ import annotations
 import io
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -43,7 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.station_passport import stations_by_location, write_value
 from app.models import (
-    ChargePayment, ChargeRejected, CorporateClient, EzsCustomer, EzsReference, EzsRfidCard,
+    ChargePayment, ChargeRejected, ChargeSession, CorporateClient, EzsCustomer, EzsReference, EzsRfidCard,
     EzsTariff, ServiceLocation,
 )
 from app.services.mapping import normalize_default
@@ -239,10 +239,11 @@ def map_stations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not ext:
             continue
         num = _s(r.get("номер"), 60)
+        name = _s(r.get("название"), 255)
         out.append({
             "partial": True,
             "ext_id": ext,
-            "name": _s(r.get("название"), 255),
+            "name": name,
             "number": num,
             "serial_number": _s(r.get("серийный_номер"), 120),
             # id владельца витрины — свой справочник, в owner_id Учёта живёт чужой
@@ -273,7 +274,15 @@ def map_stations(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "rating": _pos(r.get("средняя_оценка")),
             "success_pct": _pos(r.get("процент_успеха")),
             # Тест определяется форматом номера («Тест»), как и в выгрузках CPO.
-            "is_test": str(num or "").lower().startswith(("тест", "test")),
+            # Тест — это либо номер тестового формата (симуляторы CPO), либо стенд
+            # заказчика: «БЦ "Гидропроект" (Тест)» приходит с номером БОЕВОГО формата
+            # (753, 754, 756), и по номеру его не отличить — книга заводила такие
+            # стенды в реестр наравне с сетью. Правило по названию намеренно узкое:
+            # только «(Тест)» в скобках на конце, иначе отвалятся боевые станции со
+            # словом «тест» в имени. Тестовую станцию, которой у нас нет,
+            # `ingest_stations` в реестр не заводит.
+            "is_test": (str(num or "").lower().startswith(("тест", "test"))
+                        or (name or "").strip().lower().endswith("(тест)")),
             "extra": {k: v for k, v in {
                 "asuimStationId": ext,
                 "asuimOwnerId": _int(r.get("id_владельца")),
@@ -865,7 +874,7 @@ async def ingest_asuim_batch(
 
     for view, name, content in recognized:
         try:
-            res = await ingest_asuim_file(db, company_id, content,
+            res = await ingest_asuim_book(db, company_id, content,
                                           channel_id=channel_id, mode=mode)
         except Exception as exc:  # noqa: BLE001
             logger.exception("asuim batch: файл %s (%s) не загружен", name, view)
@@ -899,6 +908,150 @@ async def ingest_asuim_batch(
     }
 
 
+# Представления, которые растут день ото дня. Книга отдаёт их целиком (169 тыс.
+# сессий), но перезаливать всю историю незачем: дедуп по id всё равно снимет
+# повторы, зато прогон стоит минут и оживляет старые дни, где витрина расходится
+# с накопленным (решение МАГа 31.08.2026 — берём только новые дни).
+INCREMENTAL = {"sessions": "дата_начала", "payments": "дата"}
+
+
+async def _last_loaded_day(db: AsyncSession, company_id, view: str) -> str | None:
+    """Последний загруженный день МИНУС сутки: край выгрузки всегда неполон.
+
+    Выгрузку делают среди дня, поэтому последний день в базе почти всегда
+    короче настоящего — перекрытие в сутки добирает его хвост."""
+    col, owner = {
+        "sessions": (ChargeSession.started_at, ChargeSession.company_id),
+        "payments": (ChargePayment.paid_at, ChargePayment.company_id),
+    }[view]
+    last = (await db.execute(select(func.max(col)).where(owner == company_id))).scalar()
+    return (last - timedelta(days=1)).strftime("%Y-%m-%d") if last else None
+
+
+def _read_sheet(ws, date_key: str | None = None, since: str | None = None) -> list[dict[str, Any]]:
+    """Лист книги → строки словарями; `since` оставляет только дни от этой даты."""
+    it = ws.iter_rows(values_only=True)
+    head = next(it, None)
+    if not head:
+        return []
+    hdr = [str(h).strip().lower() if h is not None else "" for h in head]
+    di = hdr.index(date_key) if since and date_key and date_key in hdr else None
+    rows: list[dict[str, Any]] = []
+    for r in it:
+        if not r or not any(c is not None for c in r):
+            continue
+        if di is not None:
+            v = r[di]
+            day = v.strftime("%Y-%m-%d") if hasattr(v, "strftime") else str(v or "")[:10]
+            # Строку без даты не выбрасываем: потерять запись хуже, чем взять лишнюю.
+            if day and day < since:
+                continue
+        rows.append(dict(zip(hdr, r)))
+    return rows
+
+
+def detect_sheets(wb) -> dict[str, str]:
+    """Открытая книга → {представление: имя листа}. Первый лист ODBC оставляет пустым."""
+    sheets: dict[str, str] = {}
+    for ws in wb.worksheets:
+        head = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        if not head:
+            continue
+        hset = {str(h).strip().lower() for h in head if h is not None}
+        for view, need in VIEW_SIGNATURES.items():
+            if need <= hset and view not in sheets:
+                sheets[view] = ws.title
+                break
+    return sheets
+
+
+async def ingest_asuim_book(
+    db: AsyncSession, company_id, content: bytes, channel_id=None,
+    mode: str = "append", log_id=None, since: str | None = None,
+) -> dict[str, Any] | None:
+    """Книга витрины целиком: все листы за один заход, в порядке связей.
+
+    ODBC-выгрузка приезжает ОДНОЙ книгой на 14 листов, а `read_asuim_xlsx` берёт
+    ПЕРВЫЙ опознанный лист — из такой книги доехали бы только сессии, без платежей
+    и справочников. Здесь книга открывается один раз, листы читаются в порядке
+    `VIEW_ORDER` (в памяти живёт один лист, а не вся книга), сессии и платежи
+    берутся с новых дней.
+
+    Один опознанный лист → ведёт себя как `ingest_asuim_file`: тот же ответ, и
+    отсечка по дням не применяется (отдельный файл грузят за нужный период).
+    None — файл не витринный, вызывающий идёт прежним путём."""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    try:
+        sheets = detect_sheets(wb)
+        if not sheets:
+            return None
+
+        single = len(sheets) == 1
+        order = {v: i for i, v in enumerate(VIEW_ORDER)}
+        report: list[dict[str, Any]] = []
+        for view in sorted(sheets, key=lambda v: order.get(v, len(order))):
+            if view == "admins":
+                # Единственное представление, которое не берём принципиально:
+                # ФИО и почта сотрудников, потребителя в учёте нет (§9 постановки).
+                report.append({"view": view, "label": VIEW_LABELS[view], "status": "skipped",
+                               "message": "администраторы АСУиМ не загружаются: персональные данные"})
+                continue
+            day = since
+            # Отсечка по дням — только для «подгрузить новые». В режиме «переписать»
+            # приёмник сначала УДАЛЯЕТ датасет компании: обрезанная книга оставила бы
+            # от истории один хвост.
+            if day is None and not single and mode == "append" and view in INCREMENTAL:
+                day = await _last_loaded_day(db, company_id, view)
+            rows = _read_sheet(wb[sheets[view]], INCREMENTAL.get(view), day)
+            if not rows and day:
+                report.append({"view": view, "label": VIEW_LABELS.get(view, view), "since": day,
+                               "status": "success", "created": 0, "skipped": 0,
+                               "message": f"новых строк с {day} нет"})
+                continue
+            try:
+                res = await _ingest_view(db, company_id, view, rows, channel_id=channel_id,
+                                         mode=mode, log_id=log_id) or {}
+            except Exception as exc:  # noqa: BLE001 — один лист не роняет книгу
+                logger.exception("книга витрины: лист %s (%s) не загружен", sheets[view], view)
+                res = {"status": "error", "message": f"{type(exc).__name__}: {exc}"}
+            report.append({"view": view, "label": VIEW_LABELS.get(view, view),
+                           "sheet": sheets[view], **({"since": day} if day else {}), **res})
+    finally:
+        wb.close()
+
+    if single:
+        return {k: v for k, v in report[0].items() if k not in ("view", "label", "sheet")}
+
+    # Связь станций с брендами и группами витрина не отдаёт (колонки пусты), её
+    # восстанавливает сопоставление по содержимому — иначе протухает до ручного запуска.
+    if any(r.get("view") in ("stations", "brands", "groups") and r.get("status") == "success"
+           for r in report):
+        try:
+            from app.services.ezs_reference_link import link_references
+            link = await link_references(db, company_id, apply=True)
+            report.append({"view": "links", "label": "связи справочников",
+                           "status": "success", "message": link["message"]})
+        except Exception as exc:  # noqa: BLE001 — связывание не повод рушить загрузку
+            logger.warning("книга витрины: связывание справочников не выполнено: %s", exc)
+
+    ok = sum(1 for r in report if r.get("status") == "success")
+    bad = sum(1 for r in report if r.get("status") == "error")
+    created = sum(int(r.get("created") or 0) for r in report)
+    parts = [f"{r['label']} +{r.get('created') or 0}" for r in report
+             if r.get("status") == "success" and "created" in r]
+    return {
+        "status": "error" if bad and not ok else ("partial" if bad else "success"),
+        "kind": "asuim_book", "created": created,
+        "loaded": ok, "failed": bad,
+        "skipped": sum(int(r.get("skipped") or 0) for r in report),
+        "report": report,
+        "message": f"книга витрины: листов {len(sheets)}, добавлено {created}"
+                   + (f" ({', '.join(parts)})" if parts else "")
+                   + (f"; с ошибкой {bad}" if bad else ""),
+    }
+
+
 async def ingest_asuim_file(
     db: AsyncSession, company_id, content: bytes, channel_id=None,
     mode: str = "append", log_id=None,
@@ -907,6 +1060,15 @@ async def ingest_asuim_file(
     view, rows = read_asuim_xlsx(content)
     if view is None:
         return None
+    return await _ingest_view(db, company_id, view, rows,
+                              channel_id=channel_id, mode=mode, log_id=log_id)
+
+
+async def _ingest_view(
+    db: AsyncSession, company_id, view: str, rows: list[dict[str, Any]],
+    channel_id=None, mode: str = "append", log_id=None,
+) -> dict[str, Any]:
+    """Опознанное представление → свой приёмник. Общая часть файла и книги."""
     if not rows:
         return {"status": "error", "kind": f"asuim_{view}",
                 "message": f"витрина «{VIEW_LABELS.get(view, view)}»: в файле нет строк"}
