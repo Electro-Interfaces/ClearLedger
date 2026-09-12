@@ -8244,6 +8244,81 @@ class MarketSiteSnapshot(Base):
     )
 
 
+class MarketScenario(Base):
+    """Сценарий рынка: гипотеза с ценой, сроком проверки и контрольной группой.
+
+    Главная сущность продукта (принцип 5 docs/MARKET.md): «поднять тариф на восьми
+    станциях Белгорода на 1,5 ₽» с ожидаемым эффектом и датой замера. Без замера
+    продукт вырождается в генератор мнений.
+
+    Контрольная группа — обязательная часть, а не украшение (уточнение 12.09.2026).
+    Рост сессий после снижения цены с тем же успехом объясняется погодой, отпусками
+    и открытием соседнего торгового центра; отличить своё действие от фона можно
+    только сравнением с похожими объектами, которых действие не касалось.
+    """
+    __tablename__ = "market_scenarios"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    # Тип действия — открытый справочник, а не перечисление из двух значений
+    # (решение МАГа 28.07.2026): тариф, стройка, акция, режим работы, партнёрство.
+    action_kind: Mapped[str] = mapped_column(String(40), nullable=False, default="tariff")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Объекты действия и контрольная группа — списки id наших объектов.
+    scope_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    control_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Что ожидаем: свободная форма мер («сессии +10 %», «выручка +9 %»).
+    expect_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    cost: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    risk: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_on: Mapped[str | None] = mapped_column(String(10), nullable=True)   # дата действия
+    check_on: Mapped[str | None] = mapped_column(String(10), nullable=True)     # дата замера
+    # draft | running | measured | cancelled
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft")
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    owner_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_market_scenario_company", "company_id", "status", "check_on"),
+    )
+
+
+class MarketScenarioMeasure(Base):
+    """Замер сценария разностью разностей.
+
+    Эффект = (что стало с объектами действия) − (что стало с контрольной группой).
+    Так снимается сезон и общий тренд рынка: если у контрольной группы сессии тоже
+    выросли на 12 %, наше действие не сделало ничего.
+    """
+    __tablename__ = "market_scenario_measures"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    scenario_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_scenarios.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    measured_on: Mapped[str] = mapped_column(String(10), nullable=False)
+    fact_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Разность разностей по сессиям и выручке, в процентных пунктах.
+    did_sessions: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    did_revenue: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    # worked | no_effect | backfired | unclear — последнее честнее натянутого вывода.
+    verdict: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    author_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_market_measure_scenario", "scenario_id", "measured_on"),
+    )
+
+
 # ===========================================================================
 # «Эксплуатация» — денежный контур площадок: что мы должны собрать за месяц
 # ===========================================================================

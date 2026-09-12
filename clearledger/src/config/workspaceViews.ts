@@ -171,7 +171,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   marketing: {
     mk_position: 'Позиция', mk_map: 'Карта рынка', mk_sites: 'Точки рынка',
     mk_operators: 'Компании', mk_observations: 'Наблюдения',
-    mk_sources: 'Источники и свежесть',
+    mk_sources: 'Источники и свежесть', mk_scenarios: 'Сценарии',
   },
   marketing_area: {
     mk_territories: 'Территории', mk_whitespots: 'Белые пятна',

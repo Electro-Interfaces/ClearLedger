@@ -20,8 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import (ChargeSession, MarketObservation, MarketOperator, MarketSite,
-                        MarketSiteSnapshot, Region, ServiceLocation, User)
+from app.models import (ChargeSession, MarketObservation, MarketOperator, MarketScenario,
+                        MarketScenarioMeasure, MarketSite, MarketSiteSnapshot, Region,
+                        ServiceLocation, User)
 from app.services import market_ocm
 
 router = APIRouter(prefix="/market", tags=["Маркетинг — рынок"])
@@ -1325,6 +1326,304 @@ async def market_elasticity(
                  "сессий отброшены как шум; сезон и акции не сняты — одиночный случай "
                  "не доказателен, смотреть на распределение"),
     }
+
+
+# ── Сценарии: гипотеза, действие, замер ─────────────────────────────────────
+# Замкнутый цикл, ради которого строится всё остальное. Замер идёт разностью
+# разностей: эффект действия — это то, на сколько объекты действия разошлись с
+# контрольной группой, а не то, на сколько они изменились сами по себе. Иначе
+# продукт приписывает себе сезон (docs/MARKET-ROADMAP.md §3.3).
+
+class ScenarioIn(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    action_kind: str = "tariff"
+    description: str | None = None
+    scope: list[str] = Field(default_factory=list)
+    control: list[str] = Field(default_factory=list)
+    expect: dict[str, Any] | None = None
+    cost: float | None = None
+    risk: str | None = None
+    started_on: str | None = None
+    check_on: str | None = None
+    status: str = "draft"
+
+
+async def _sessions_by_location(
+    db: AsyncSession, cid: uuid.UUID, locations: list[str],
+    date_from: datetime, date_to: datetime,
+) -> dict[str, dict[str, float]]:
+    """Сессии и выручка по объектам за окно."""
+    if not locations:
+        return {}
+    rows = (await db.execute(
+        select(ChargeSession.location_id, func.count(),
+               func.coalesce(func.sum(ChargeSession.amount), 0))
+        .where(ChargeSession.company_id == cid,
+               ChargeSession.location_id.in_(locations),
+               ChargeSession.started_at >= date_from.replace(tzinfo=None),
+               ChargeSession.started_at < date_to.replace(tzinfo=None))
+        .group_by(ChargeSession.location_id))).all()
+    return {str(loc): {"sessions": float(cnt), "revenue": float(amount or 0)}
+            for loc, cnt, amount in rows}
+
+
+def _sum_of(values: dict[str, dict[str, float]], key: str) -> float:
+    return sum(v[key] for v in values.values())
+
+
+def _pct(before: float, after: float) -> float | None:
+    return round((after - before) / before * 100, 1) if before else None
+
+
+@router.get("/scenarios")
+async def list_scenarios(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Сценарии компании с последним замером каждого."""
+    cid = await _member(company_id, user, db)
+    rows = (await db.execute(select(MarketScenario).where(
+        MarketScenario.company_id == cid)
+        .order_by(MarketScenario.created_at.desc()))).scalars().all()
+    measures: dict[str, MarketScenarioMeasure] = {}
+    for m in (await db.execute(select(MarketScenarioMeasure)
+                               .where(MarketScenarioMeasure.company_id == cid)
+                               .order_by(MarketScenarioMeasure.measured_on.desc()))).scalars():
+        measures.setdefault(str(m.scenario_id), m)
+    return {"scenarios": [{
+        "id": str(r.id), "title": r.title, "actionKind": r.action_kind,
+        "description": r.description, "status": r.status,
+        "scope": r.scope_json or [], "control": r.control_json or [],
+        "expect": r.expect_json or {},
+        "cost": float(r.cost) if r.cost is not None else None,
+        "risk": r.risk, "startedOn": r.started_on, "checkOn": r.check_on,
+        "ownerName": r.owner_name,
+        "measure": ({
+            "measuredOn": measures[str(r.id)].measured_on,
+            "didSessions": (float(measures[str(r.id)].did_sessions)
+                            if measures[str(r.id)].did_sessions is not None else None),
+            "didRevenue": (float(measures[str(r.id)].did_revenue)
+                           if measures[str(r.id)].did_revenue is not None else None),
+            "verdict": measures[str(r.id)].verdict,
+            "fact": measures[str(r.id)].fact_json or {},
+            "note": measures[str(r.id)].note,
+        } if str(r.id) in measures else None),
+    } for r in rows]}
+
+
+@router.post("/scenarios", status_code=status.HTTP_201_CREATED)
+async def create_scenario(
+    company_id: str = Query(...), body: ScenarioIn = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    cid = await _member(company_id, user, db)
+    row = MarketScenario(
+        company_id=cid, title=body.title, action_kind=body.action_kind,
+        description=body.description, scope_json=body.scope, control_json=body.control,
+        expect_json=body.expect, cost=body.cost, risk=body.risk,
+        started_on=body.started_on, check_on=body.check_on, status=body.status,
+        owner_user_id=user.id, owner_name=getattr(user, "full_name", None) or user.email)
+    db.add(row)
+    await db.commit()
+    return {"id": str(row.id), "title": row.title}
+
+
+@router.patch("/scenarios/{scenario_id}")
+async def patch_scenario(
+    scenario_id: uuid.UUID, company_id: str = Query(...), body: dict = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    cid = await _member(company_id, user, db)
+    row = (await db.execute(select(MarketScenario).where(
+        MarketScenario.id == scenario_id,
+        MarketScenario.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Сценарий не найден")
+    fields = {"title": "title", "status": "status", "risk": "risk",
+              "description": "description", "startedOn": "started_on",
+              "checkOn": "check_on", "actionKind": "action_kind"}
+    for key, column in fields.items():
+        if key in body:
+            setattr(row, column, body[key])
+    if "scope" in body:
+        row.scope_json = body["scope"]
+    if "control" in body:
+        row.control_json = body["control"]
+    if "expect" in body:
+        row.expect_json = body["expect"]
+    row.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"id": str(row.id), "status": row.status}
+
+
+@router.get("/scenarios/control-suggest")
+async def suggest_control(
+    company_id: str = Query(...),
+    scope: str = Query(..., description="id наших объектов через запятую"),
+    radius_km: float = Query(DEFAULT_RADIUS_KM, ge=0.5, le=50),
+    weeks: int = Query(8, ge=4, le=26),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Подобрать контрольную группу и проверить, что тренды до вмешательства шли рядом.
+
+    Похожесть — по числу живых конкурентов рядом и по объёму сессий. Проверка
+    параллельности обязательна: если до действия группы уже расходились, разность
+    разностей ничего не докажет, и честнее сказать это до эксперимента, а не после.
+    """
+    cid = await _member(company_id, user, db)
+    targets = [x.strip() for x in scope.split(",") if x.strip()]
+    if not targets:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не выбраны объекты действия")
+
+    now = datetime.now(timezone.utc)
+    window = timedelta(weeks=weeks)
+    ours = (await db.execute(
+        select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
+               ServiceLocation.latitude, ServiceLocation.longitude,
+               ServiceLocation.location_class)
+        .where(ServiceLocation.company_id == cid,
+               ServiceLocation.latitude.is_not(None)))).all()
+    sites = (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid, MarketSite.status != "closed",
+        MarketSite.site_class != "home", MarketSite.kind == "ezs",
+        MarketSite.latitude.is_not(None)))).scalars().all()
+    alive_since = now - timedelta(days=ALIVE_DAYS)
+
+    def rivals_near(lat, lon) -> int:
+        return sum(1 for site in sites
+                   if site.last_session_at and site.last_session_at >= alive_since
+                   and _distance_km(float(lat), float(lon),
+                                    float(site.latitude), float(site.longitude)) <= radius_km)
+
+    recent = await _sessions_by_location(
+        db, cid, [str(loc_id) for loc_id, *_ in ours], now - window, now)
+    profile = {str(loc_id): {"name": name, "city": city,
+                             "rivals": rivals_near(lat, lon), "class": cls,
+                             "sessions": recent.get(str(loc_id), {}).get("sessions", 0.0)}
+               for loc_id, name, city, lat, lon, cls in ours}
+
+    target_rivals = _median([float(profile[t]["rivals"]) for t in targets if t in profile]) or 0
+    target_sessions = _median([profile[t]["sessions"] for t in targets if t in profile]) or 0
+    target_class = next((profile[t]["class"] for t in targets
+                         if t in profile and profile[t]["class"]), None)
+
+    candidates = []
+    for loc_id, info in profile.items():
+        if loc_id in targets or not info["sessions"]:
+            continue
+        if target_class and info["class"] and info["class"] != target_class:
+            continue
+        if abs(info["rivals"] - target_rivals) > 1:
+            continue
+        # Объём должен быть сопоставим: объект на 5 сессий в неделю не контроль для
+        # объекта на 500 — у них разная чувствительность к любому шуму.
+        if target_sessions and not (0.5 <= info["sessions"] / target_sessions <= 2.0):
+            continue
+        candidates.append({"locationId": loc_id, "name": info["name"], "city": info["city"],
+                           "rivals": info["rivals"], "sessions": info["sessions"]})
+    candidates.sort(key=lambda r: abs(r["sessions"] - target_sessions))
+    control = [c["locationId"] for c in candidates[:10]]
+
+    # Параллельность трендов: два равных окна ДО, сравниваем динамику групп.
+    prev_from, prev_to = now - window * 2, now - window
+    scope_prev = await _sessions_by_location(db, cid, targets, prev_from, prev_to)
+    scope_now = await _sessions_by_location(db, cid, targets, prev_to, now)
+    ctrl_prev = await _sessions_by_location(db, cid, control, prev_from, prev_to)
+    ctrl_now = await _sessions_by_location(db, cid, control, prev_to, now)
+    scope_trend = _pct(_sum_of(scope_prev, "sessions"), _sum_of(scope_now, "sessions"))
+    ctrl_trend = _pct(_sum_of(ctrl_prev, "sessions"), _sum_of(ctrl_now, "sessions"))
+    gap = (abs(scope_trend - ctrl_trend)
+           if scope_trend is not None and ctrl_trend is not None else None)
+
+    return {
+        "control": control, "candidates": candidates[:20],
+        "targetProfile": {"rivals": target_rivals, "sessions": target_sessions,
+                          "class": target_class},
+        "parallel": {
+            "weeks": weeks,
+            "scopeTrendPct": scope_trend, "controlTrendPct": ctrl_trend,
+            "gapPct": gap,
+            # Расхождение до вмешательства больше 15 пунктов означает, что группы и
+            # так живут по-разному: замер после действия будет неубедителен.
+            "ok": (gap is not None and gap <= 15),
+            "note": ("тренды до вмешательства идут рядом — замер будет читаемым"
+                     if gap is not None and gap <= 15 else
+                     "группы расходятся ещё до действия: подберите контроль иначе, "
+                     "иначе разность разностей ничего не докажет"),
+        },
+    }
+
+
+@router.post("/scenarios/{scenario_id}/measure")
+async def measure_scenario(
+    scenario_id: uuid.UUID, company_id: str = Query(...),
+    weeks: int = Query(8, ge=1, le=52),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Замер: разность разностей по сессиям и выручке.
+
+    Берём равные окна до и после даты действия у объектов сценария и у контрольной
+    группы. Эффект — разница изменений. Если контроль пуст, замер всё равно
+    считается, но вердикт «не ясно»: без контроля отличить действие от сезона нечем.
+    """
+    cid = await _member(company_id, user, db)
+    row = (await db.execute(select(MarketScenario).where(
+        MarketScenario.id == scenario_id,
+        MarketScenario.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Сценарий не найден")
+    if not row.started_on:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "У сценария нет даты действия — замерять нечего")
+
+    started = datetime.fromisoformat(row.started_on).replace(tzinfo=timezone.utc)
+    window = timedelta(weeks=weeks)
+    scope = [str(x) for x in (row.scope_json or [])]
+    control = [str(x) for x in (row.control_json or [])]
+
+    scope_before = await _sessions_by_location(db, cid, scope, started - window, started)
+    scope_after = await _sessions_by_location(db, cid, scope, started, started + window)
+    ctrl_before = await _sessions_by_location(db, cid, control, started - window, started)
+    ctrl_after = await _sessions_by_location(db, cid, control, started, started + window)
+
+    scope_sessions = _pct(_sum_of(scope_before, "sessions"), _sum_of(scope_after, "sessions"))
+    ctrl_sessions = _pct(_sum_of(ctrl_before, "sessions"), _sum_of(ctrl_after, "sessions"))
+    scope_revenue = _pct(_sum_of(scope_before, "revenue"), _sum_of(scope_after, "revenue"))
+    ctrl_revenue = _pct(_sum_of(ctrl_before, "revenue"), _sum_of(ctrl_after, "revenue"))
+
+    did_sessions = (round(scope_sessions - ctrl_sessions, 1)
+                    if scope_sessions is not None and ctrl_sessions is not None else None)
+    did_revenue = (round(scope_revenue - ctrl_revenue, 1)
+                   if scope_revenue is not None and ctrl_revenue is not None else None)
+
+    if not control or did_revenue is None:
+        verdict = "unclear"
+    elif did_revenue >= 5:
+        verdict = "worked"
+    elif did_revenue <= -5:
+        verdict = "backfired"
+    else:
+        verdict = "no_effect"
+
+    fact = {
+        "weeks": weeks, "startedOn": row.started_on,
+        "scope": {"sessionsPct": scope_sessions, "revenuePct": scope_revenue,
+                  "objects": len(scope)},
+        "control": {"sessionsPct": ctrl_sessions, "revenuePct": ctrl_revenue,
+                    "objects": len(control)},
+    }
+    measure = MarketScenarioMeasure(
+        company_id=cid, scenario_id=row.id,
+        measured_on=datetime.now(timezone.utc).date().isoformat(),
+        fact_json=fact, did_sessions=did_sessions, did_revenue=did_revenue,
+        verdict=verdict, author_name=getattr(user, "full_name", None) or user.email,
+        note=("контрольной группы нет — отличить действие от сезона нечем"
+              if not control else None))
+    db.add(measure)
+    row.status = "measured"
+    await db.commit()
+    return {"scenarioId": str(row.id), "verdict": verdict, "fact": fact,
+            "didSessions": did_sessions, "didRevenue": did_revenue}
 
 
 class BulkSiteIn(BaseModel):

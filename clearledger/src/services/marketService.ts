@@ -380,6 +380,62 @@ export const getMarketElasticity = (companyId: string, params?: { weeks?: number
         medianElasticity: number | null; note: string }>(
     '/api/market/elasticity', { company_id: companyId, ...params })
 
+/** Сценарий: гипотеза с ценой, контрольной группой и замером. */
+export interface MarketScenario {
+  id: string
+  title: string
+  actionKind: string
+  description: string | null
+  status: string
+  scope: string[]
+  control: string[]
+  expect: Record<string, unknown>
+  cost: number | null
+  risk: string | null
+  startedOn: string | null
+  checkOn: string | null
+  ownerName: string | null
+  measure: {
+    measuredOn: string
+    didSessions: number | null
+    didRevenue: number | null
+    verdict: string | null
+    note: string | null
+    fact: {
+      weeks?: number; startedOn?: string
+      scope?: { sessionsPct: number | null; revenuePct: number | null; objects: number }
+      control?: { sessionsPct: number | null; revenuePct: number | null; objects: number }
+    }
+  } | null
+}
+
+export const listMarketScenarios = (companyId: string) =>
+  get<{ scenarios: MarketScenario[] }>('/api/market/scenarios', { company_id: companyId })
+
+export const createMarketScenario = (companyId: string, body: Record<string, unknown>) =>
+  post<{ id: string; title: string }>(
+    `/api/market/scenarios?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const patchMarketScenario = (companyId: string, id: string, body: Record<string, unknown>) =>
+  patch<{ id: string; status: string }>(
+    `/api/market/scenarios/${id}?company_id=${encodeURIComponent(companyId)}`, body)
+
+/** Подбор контроля + проверка, шли ли тренды рядом ДО вмешательства. */
+export const suggestScenarioControl = (companyId: string, scope: string[]) =>
+  get<{
+    control: string[]
+    candidates: { locationId: string; name: string; city: string | null
+                  rivals: number; sessions: number }[]
+    targetProfile: { rivals: number | null; sessions: number | null; class: string | null }
+    parallel: { weeks: number; scopeTrendPct: number | null; controlTrendPct: number | null
+                gapPct: number | null; ok: boolean; note: string }
+  }>('/api/market/scenarios/control-suggest',
+     { company_id: companyId, scope: scope.join(',') })
+
+export const measureMarketScenario = (companyId: string, id: string, weeks = 8) =>
+  post<{ scenarioId: string; verdict: string; didSessions: number | null; didRevenue: number | null }>(
+    `/api/market/scenarios/${id}/measure?company_id=${encodeURIComponent(companyId)}&weeks=${weeks}`, {})
+
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(
     `/api/market/sites/bulk?company_id=${encodeURIComponent(companyId)}&source=${source}`, { items })
