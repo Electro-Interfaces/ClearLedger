@@ -462,6 +462,79 @@ export const patchMarketOperator = (companyId: string, id: string, body: Record<
   patch<{ id: string; relation: string }>(
     `/api/market/operators/${id}?company_id=${encodeURIComponent(companyId)}`, body)
 
+/** Регион глазами компании: кто мы здесь и чем тут расти. */
+export interface GrowthPresenceRow {
+  name: string
+  presence: 'monopoly' | 'strong' | 'contested' | 'weak' | 'absent'
+  presenceLabel: string
+  sharePct: number | null
+  suggestedTracks: string[]
+  ourSites: number
+  ourSessions: number
+  ourRevenue: number
+  rivalSites: number
+  rivalAlive: number
+  marketPricePerKwh: number | null
+  ourPricePerKwh: number | null
+}
+
+export interface GrowthGroup {
+  presence: string
+  label: string
+  regions: number
+  ourSites: number
+  rivalSites: number
+  ourSessions: number
+  ourRevenue: number
+  tracks: string[]
+}
+
+export interface GrowthTrack {
+  track: string
+  label: string
+  headline: string
+  metrics: { label: string; value: number }[]
+  leads: Record<string, number>
+}
+
+export interface GrowthLead {
+  id: string
+  track: string
+  trackLabel: string
+  title: string
+  subjectKind: string | null
+  subjectRef: string | null
+  evidence: Record<string, unknown>
+  status: string
+  rejectReason: string | null
+  note: string | null
+  siteId: string | null
+  scenarioId: string | null
+  ownerName: string | null
+  createdAt: string | null
+}
+
+export const getGrowthOverview = (companyId: string, params?: { days?: number }) =>
+  get<{ days: number; tracks: GrowthTrack[]; presence: GrowthGroup[]
+        trackLabels: Record<string, string> }>(
+    '/api/market/growth/overview', { company_id: companyId, ...params })
+
+export const getGrowthPresence = (companyId: string, params?: { days?: number }) =>
+  get<{ days: number; regions: GrowthPresenceRow[]; groups: GrowthGroup[]
+        thresholds: { monopoly: number; weak: number }; note: string }>(
+    '/api/market/growth/presence', { company_id: companyId, ...params })
+
+export const listGrowthLeads = (companyId: string, params?: { track?: string }) =>
+  get<{ leads: GrowthLead[] }>('/api/market/growth/leads', { company_id: companyId, ...params })
+
+export const createGrowthLead = (companyId: string, body: Record<string, unknown>) =>
+  post<{ id: string; track: string; title: string }>(
+    `/api/market/growth/leads?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const patchGrowthLead = (companyId: string, id: string, body: Record<string, unknown>) =>
+  patch<{ id: string; status: string }>(
+    `/api/market/growth/leads/${id}?company_id=${encodeURIComponent(companyId)}`, body)
+
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(
     `/api/market/sites/bulk?company_id=${encodeURIComponent(companyId)}&source=${source}`, { items })

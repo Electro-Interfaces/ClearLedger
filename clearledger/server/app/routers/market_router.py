@@ -20,7 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
-from app.models import (ChargeSession, MarketObservation, MarketOperator, MarketScenario,
+from app.models import (ChargeSession, CorporateClient, EzsSite, MarketGrowthLead,
+                        MarketObservation, MarketOperator, MarketScenario,
                         MarketScenarioMeasure, MarketSite, MarketSiteSnapshot, Region,
                         ServiceLocation, User)
 from app.services import market_ocm
@@ -1737,6 +1738,321 @@ async def patch_operator(
         op.inn = body["inn"]
     await db.commit()
     return {"id": str(op.id), "relation": op.relation}
+
+
+# ── Развитие сети: режим присутствия и направления роста ────────────────────
+# Продукт смотрит на рынок ГЛАЗАМИ НАШЕЙ КОМПАНИИ (решение МАГа 12.09.2026). Сеть
+# растёт не одним способом, и в разных регионах уместны разные:
+#
+#   • где мы почти одни — растить не сеть, а выручку с неё: цена, корпоратив, клуб;
+#   • где делим рынок — держать позицию: цена, качество, точечная стройка;
+#   • где нас нет — входить: своя стройка, роуминг с местной сетью, франшиза.
+#
+# Поэтому «сколько у нас точек» — не ответ. Ответ — режим присутствия по регионам и
+# кандидаты в каждом направлении.
+
+# Доля точек сети в регионе, выше которой положение считается монопольным.
+MONOPOLY_SHARE = 70.0
+# Ниже этой доли мы в регионе присутствуем, но погоду не делаем.
+WEAK_SHARE = 25.0
+
+GROWTH_TRACKS = {
+    "build": "своя стройка",
+    "roaming": "роуминг с чужой сетью",
+    "franchise": "франшиза: чужая сеть на нашем обслуживании",
+    "corporate": "корпоративные продажи",
+    "loyalty": "программа лояльности",
+}
+
+PRESENCE_LABEL = {
+    "monopoly": "мы почти одни",
+    "strong": "мы сильнее рынка",
+    "contested": "делим рынок",
+    "weak": "мы слабее рынка",
+    "absent": "нас нет",
+}
+
+# Что уместно делать при таком положении. Не предписание, а подсказка: решает человек.
+PRESENCE_TRACKS = {
+    "monopoly": ["corporate", "loyalty", "build"],
+    "strong": ["corporate", "loyalty", "build"],
+    "contested": ["build", "roaming", "corporate"],
+    "weak": ["roaming", "franchise", "build"],
+    "absent": ["build", "roaming", "franchise"],
+}
+
+
+def _presence(our_sites: int, rival_sites: int) -> tuple[str, float | None]:
+    """Режим присутствия по доле точек сети в территории."""
+    total = our_sites + rival_sites
+    if our_sites == 0:
+        return "absent", 0.0 if total else None
+    share = our_sites / total * 100 if total else 100.0
+    if share >= MONOPOLY_SHARE:
+        return "monopoly", round(share, 1)
+    if share >= 50:
+        return "strong", round(share, 1)
+    if share >= WEAK_SHARE:
+        return "contested", round(share, 1)
+    return "weak", round(share, 1)
+
+
+@router.get("/growth/presence")
+async def growth_presence(
+    company_id: str = Query(...),
+    days: int = Query(90, ge=30, le=365),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Регионы по нашему положению: где мы одни, где делим рынок, где нас нет.
+
+    Стратегия региона выводится не из его размера, а из нашего положения в нём:
+    там, где мы почти одни, строить вторую станцию рядом с собой бессмысленно —
+    расти надо выручкой; там, где нас нет, любая цена уже не наша.
+    """
+    cid = await _member(company_id, user, db)
+    reply = await market_territories(company_id=company_id, level="region", days=days,
+                                     user=user, db=db)
+    rows = []
+    for row in reply["territories"]:
+        if row["name"] == "территория не определена":
+            continue
+        mode, share = _presence(row["ourSites"], row["rivalSites"])
+        rows.append({
+            **row, "presence": mode, "presenceLabel": PRESENCE_LABEL[mode],
+            "sharePct": share, "suggestedTracks": PRESENCE_TRACKS[mode],
+        })
+    groups: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        g = groups.setdefault(row["presence"], {
+            "presence": row["presence"], "label": PRESENCE_LABEL[row["presence"]],
+            "regions": 0, "ourSites": 0, "rivalSites": 0, "ourSessions": 0,
+            "ourRevenue": 0.0, "tracks": PRESENCE_TRACKS[row["presence"]],
+        })
+        g["regions"] += 1
+        g["ourSites"] += row["ourSites"]
+        g["rivalSites"] += row["rivalSites"]
+        g["ourSessions"] += row["ourSessions"]
+        g["ourRevenue"] += row["ourRevenue"]
+    order = ["monopoly", "strong", "contested", "weak", "absent"]
+    rows.sort(key=lambda r: (order.index(r["presence"]), -r["ourRevenue"], -r["rivalSites"]))
+    return {
+        "days": days, "regions": rows,
+        "groups": [groups[k] for k in order if k in groups],
+        "thresholds": {"monopoly": MONOPOLY_SHARE, "weak": WEAK_SHARE},
+        "note": "доля считается по точкам сети в регионе; домашние розетки не в счёт",
+    }
+
+
+@router.get("/growth/overview")
+async def growth_overview(
+    company_id: str = Query(...),
+    days: int = Query(90, ge=30, le=365),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Пять направлений роста с живыми мерами каждого.
+
+    Мера направления — не план, а ФАКТ сегодняшнего дня: сколько возможностей видно
+    в данных и сколько из них уже взято в работу. Направление без единой меры
+    показывается пустым и говорит, каких данных ему не хватает: пустая строка
+    честнее придуманного показателя.
+    """
+    cid = await _member(company_id, user, db)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+
+    leads = (await db.execute(select(MarketGrowthLead.track, MarketGrowthLead.status,
+                                     func.count())
+                              .where(MarketGrowthLead.company_id == cid)
+                              .group_by(MarketGrowthLead.track, MarketGrowthLead.status))).all()
+    by_track: dict[str, dict[str, int]] = {}
+    for track, lead_status, count in leads:
+        by_track.setdefault(track, {})[lead_status] = int(count)
+
+    # ── стройка: белые пятна и то, что уже в «Проектах» ──
+    spots = await market_whitespots(company_id=company_id, level="city", user=user, db=db)
+    alive_spots = [x for x in spots["spots"] if x["rivalAlive"] > 0]
+    # «Площадок в Проектах» — это те, что В РАБОТЕ. Введённые в эксплуатацию уже стали
+    # объектами сети и считаются в другом месте, архив и заморозка — не работа;
+    # сложив всё вместе, получаем тысячу вместо полусотни и радуемся зря.
+    projects = dict((stage, int(count)) for stage, count in (await db.execute(
+        select(EzsSite.stage, func.count()).where(
+            EzsSite.company_id == cid,
+            EzsSite.stage.notin_(["live", "archive", "on_hold"]))
+        .group_by(EzsSite.stage))).all())
+
+    # ── роуминг и франшиза: чужие сети, дополняющие нас ──
+    partners = await market_partners(company_id=company_id, min_sites=1, user=user, db=db)
+    complements = [p for p in partners["partners"] if p["complementSites"] > 0]
+    # Франшиза — про малые сети: у них нет своего процессинга и обслуживания, и
+    # именно им есть смысл встать на наше. Крупная сеть строит своё.
+    small = [p for p in partners["partners"] if 1 <= p["sites"] <= 10]
+
+    # ── корпоратив: клиенты ЮЛ и их вес в выручке ──
+    corp_total = int((await db.execute(
+        select(func.count()).select_from(CorporateClient)
+        .where(CorporateClient.company_id == cid))).scalar() or 0)
+    corp_rows = (await db.execute(
+        select(ChargeSession.user_type, func.count(),
+               func.coalesce(func.sum(ChargeSession.amount), 0),
+               func.count(func.distinct(ChargeSession.user_id)))
+        .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since)
+        .group_by(ChargeSession.user_type))).all()
+    by_type = {(t or "—"): {"sessions": int(c), "revenue": float(a or 0), "users": int(u)}
+               for t, c, a, u in corp_rows}
+    ul = next((v for k, v in by_type.items() if k.upper().startswith("ЮЛ")), None)
+    fl = next((v for k, v in by_type.items() if k.upper().startswith("ФЛ")), None)
+    all_sessions = sum(v["sessions"] for v in by_type.values()) or 1
+
+    # ── лояльность: возвращаются ли частные клиенты ──
+    visits = (await db.execute(
+        select(func.count(func.distinct(ChargeSession.user_id)))
+        .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
+               ChargeSession.user_id.is_not(None)))).scalar() or 0
+    repeat_subq = (select(ChargeSession.user_id)
+                   .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
+                          ChargeSession.user_id.is_not(None))
+                   .group_by(ChargeSession.user_id)
+                   .having(func.count() > 1)).subquery()
+    repeat_users = (await db.execute(
+        select(func.count()).select_from(repeat_subq))).scalar() or 0
+
+    tracks = [
+        {
+            "track": "build", "label": GROWTH_TRACKS["build"],
+            "headline": (f"{len(alive_spots)} городов с живым рынком, где нас нет"
+                         if alive_spots else "белых пятен с живым рынком не видно"),
+            "metrics": [
+                {"label": "белых пятен", "value": spots["total"]},
+                {"label": "из них с живыми точками", "value": len(alive_spots)},
+                {"label": "площадок в работе у «Проектов»", "value": sum(projects.values())},
+            ],
+            "leads": by_track.get("build", {}),
+        },
+        {
+            "track": "roaming", "label": GROWTH_TRACKS["roaming"],
+            "headline": (f"{len(complements)} сетей дополняют нас точками там, где нас нет"
+                         if complements else "дополняющих сетей пока не видно"),
+            "metrics": [
+                {"label": "сетей-кандидатов", "value": len(complements)},
+                {"label": "их точек в городах без нас",
+                 "value": sum(p["complementSites"] for p in complements)},
+            ],
+            "leads": by_track.get("roaming", {}),
+        },
+        {
+            "track": "franchise", "label": GROWTH_TRACKS["franchise"],
+            "headline": (f"{len(small)} малых сетей — кандидаты на наше обслуживание"
+                         if small else "малых сетей в данных не видно"),
+            "metrics": [
+                {"label": "сетей до 10 точек", "value": len(small)},
+                {"label": "их точек всего", "value": sum(p["sites"] for p in small)},
+            ],
+            "leads": by_track.get("franchise", {}),
+        },
+        {
+            "track": "corporate", "label": GROWTH_TRACKS["corporate"],
+            "headline": (f"{corp_total} корпоративных клиентов, их доля "
+                         f"{round((ul['sessions'] if ul else 0) / all_sessions * 100)} % сессий"),
+            "metrics": [
+                {"label": "клиентов в реестре", "value": corp_total},
+                {"label": "сессий ЮЛ за период", "value": ul["sessions"] if ul else 0},
+                {"label": "плательщиков ЮЛ", "value": ul["users"] if ul else 0},
+            ],
+            "leads": by_track.get("corporate", {}),
+        },
+        {
+            "track": "loyalty", "label": GROWTH_TRACKS["loyalty"],
+            "headline": (f"{round(repeat_users / visits * 100)} % клиентов вернулись "
+                         f"за {days} дней" if visits else "клиентов за период не было"),
+            "metrics": [
+                {"label": "клиентов за период", "value": int(visits)},
+                {"label": "вернулись хотя бы раз", "value": int(repeat_users)},
+                {"label": "сессий ФЛ", "value": fl["sessions"] if fl else 0},
+            ],
+            "leads": by_track.get("loyalty", {}),
+        },
+    ]
+
+    presence = await growth_presence(company_id=company_id, days=days, user=user, db=db)
+    return {"days": days, "tracks": tracks, "presence": presence["groups"],
+            "trackLabels": GROWTH_TRACKS}
+
+
+class GrowthLeadIn(BaseModel):
+    track: str = "build"
+    title: str = Field(min_length=1, max_length=300)
+    subject_kind: str | None = None
+    subject_ref: str | None = None
+    evidence: dict[str, Any] | None = None
+    note: str | None = None
+    status: str = "new"
+
+
+@router.get("/growth/leads")
+async def list_growth_leads(
+    company_id: str = Query(...),
+    track: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Воронка кандидатов развития по направлениям."""
+    cid = await _member(company_id, user, db)
+    query = select(MarketGrowthLead).where(MarketGrowthLead.company_id == cid)
+    if track:
+        query = query.where(MarketGrowthLead.track == track)
+    rows = (await db.execute(query.order_by(MarketGrowthLead.created_at.desc()))).scalars().all()
+    return {"leads": [{
+        "id": str(r.id), "track": r.track, "trackLabel": GROWTH_TRACKS.get(r.track, r.track),
+        "title": r.title, "subjectKind": r.subject_kind, "subjectRef": r.subject_ref,
+        "evidence": r.evidence_json or {}, "status": r.status,
+        "rejectReason": r.reject_reason, "note": r.note,
+        "siteId": str(r.site_id) if r.site_id else None,
+        "scenarioId": str(r.scenario_id) if r.scenario_id else None,
+        "ownerName": r.owner_name,
+        "createdAt": r.created_at.isoformat() if r.created_at else None,
+    } for r in rows]}
+
+
+@router.post("/growth/leads", status_code=status.HTTP_201_CREATED)
+async def create_growth_lead(
+    company_id: str = Query(...), body: GrowthLeadIn = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    cid = await _member(company_id, user, db)
+    if body.track not in GROWTH_TRACKS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Направление должно быть одним из: {', '.join(GROWTH_TRACKS)}")
+    row = MarketGrowthLead(
+        company_id=cid, track=body.track, title=body.title,
+        subject_kind=body.subject_kind, subject_ref=body.subject_ref,
+        evidence_json=body.evidence, note=body.note, status=body.status,
+        owner_user_id=user.id, owner_name=getattr(user, "full_name", None) or user.email)
+    db.add(row)
+    await db.commit()
+    return {"id": str(row.id), "track": row.track, "title": row.title}
+
+
+@router.patch("/growth/leads/{lead_id}")
+async def patch_growth_lead(
+    lead_id: uuid.UUID, company_id: str = Query(...), body: dict = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Движение кандидата по воронке. Отклонение требует причины: список отказов без
+    причин через полгода ничему не учит."""
+    cid = await _member(company_id, user, db)
+    row = (await db.execute(select(MarketGrowthLead).where(
+        MarketGrowthLead.id == lead_id,
+        MarketGrowthLead.company_id == cid))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Кандидат не найден")
+    if body.get("status") == "rejected" and not (body.get("rejectReason") or row.reject_reason):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "У отказа должна быть причина")
+    for key, column in {"title": "title", "status": "status", "note": "note",
+                        "rejectReason": "reject_reason", "track": "track"}.items():
+        if key in body:
+            setattr(row, column, body[key])
+    row.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"id": str(row.id), "status": row.status}
 
 
 class BulkSiteIn(BaseModel):

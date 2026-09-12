@@ -11,7 +11,7 @@
 
 import type { ComponentType } from 'react'
 import { useLocation } from 'react-router-dom'
-import { BarChart3, Map as MapIcon, FlaskConical, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark, Cable, PackageOpen, Shield, Handshake, Banknote, Settings } from 'lucide-react'
+import { BarChart3, Map as MapIcon, Compass, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark, Cable, PackageOpen, Shield, Handshake, Banknote, Settings } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -205,8 +205,8 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     icon: Banknote, items: isEnergy ? MARKET_PRICE_MENU : [], connected: isEnergy }
   // Четвёртый раздел: что делаем и откуда знаем. Сценарии, партнёрство и доверие к
   // данным — про действие и проверку, а не про разглядывание рынка.
-  const marketingDecision: WorkspaceSection = { mode: 'marketing_decision', label: 'Решения',
-    icon: FlaskConical, items: isEnergy ? MARKET_DECISION_MENU : [], connected: isEnergy }
+  const marketingDecision: WorkspaceSection = { mode: 'marketing_decision', label: 'Развитие',
+    icon: Compass, items: isEnergy ? MARKET_DECISION_MENU : [], connected: isEnergy }
   // Разделы «Бухгалтерии» = потоки + сквозное; состав каждого — его компоненты.
   // Раздел без единого включённого компонента в рельсе не показывается: пустая
   // вторая панель читается как поломка.
@@ -295,7 +295,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
        perPicture, perOfficial, perRecords, perCash, perPeople, perSetup, perHelp, normalize,
        connect]
     : isEnergy
-    ? [sales, salesSessions, salesCommerce, corporate, marketing, marketingArea, marketingPrice, marketingDecision,
+    ? [sales, salesSessions, salesCommerce, corporate, marketingDecision, marketing, marketingArea, marketingPrice,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
        storeSections[0], ...accSections, exp, normalize, reconcile, connect]
     : [sales, salesSessions, salesCommerce, salesGoods, salesHelp, ...storeSections, storeHelp, ops,

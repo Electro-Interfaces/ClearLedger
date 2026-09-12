@@ -36,6 +36,8 @@ import { MarketSiteScorePanel } from './MarketSiteScorePanel'
 import { MarketElasticityPanel, MarketPressurePanel, MarketPriceLandscapePanel } from './MarketPricePanel'
 import { MarketScenariosPanel } from './MarketScenariosPanel'
 import { MarketPartnersPanel } from './MarketPartnersPanel'
+import { MarketGrowthPanel } from './MarketGrowthPanel'
+import { MarketLeadsPanel } from './MarketLeadsPanel'
 
 /** Тёмная тема приложения (класс `dark` на <html>) — как в карте продаж. */
 function useIsDark() {
@@ -326,6 +328,8 @@ export function MarketRouter({ tab }: { tab: string }) {
     case 'mk_elasticity': return <MarketElasticityPanel />
     case 'mk_scenarios': return <MarketScenariosPanel />
     case 'mk_partners': return <MarketPartnersPanel />
+    case 'mk_growth': return <MarketGrowthPanel />
+    case 'mk_leads': return <MarketLeadsPanel />
     default: return (
       <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
         <MapPin className="mr-2 size-4" /> Выберите раздел рынка

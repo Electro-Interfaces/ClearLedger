@@ -8319,6 +8319,55 @@ class MarketScenarioMeasure(Base):
     )
 
 
+class MarketGrowthLead(Base):
+    """Кандидат развития сети: возможность, за которую взялись или ещё нет.
+
+    Сеть растёт не одним способом, и продукт обязан показывать все сразу
+    (решение МАГа 12.09.2026): своя стройка, роуминг с чужой сетью, франшиза —
+    подключение чужой сети к нашему обслуживанию, корпоративные продажи,
+    программа лояльности для частных клиентов.
+
+    Кандидат — это НЕ сценарий. Сценарий проверяет действие замером; кандидат —
+    возможность, которую ещё предстоит оценить и либо взять в работу, либо честно
+    отклонить с причиной. Взятый в работу кандидат уходит в исполнительный контур:
+    стройка — в «Проекты» площадкой, тариф и акция — в сценарий с замером.
+    """
+    __tablename__ = "market_growth_leads"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # build | roaming | franchise | corporate | loyalty — направление роста.
+    track: Mapped[str] = mapped_column(String(20), nullable=False, default="build")
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    # На что смотрим: территория, чужая сеть, клиент, площадка.
+    subject_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    subject_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Чем обоснован: снимок чисел на момент заведения. Через полгода рынок другой, и
+    # без снимка непонятно, почему кандидата когда-то взяли в работу.
+    evidence_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # new | working | in_project | rejected | done
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="new")
+    reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Куда ушёл кандидат, когда его взяли: площадка «Проектов» или сценарий с замером.
+    site_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="SET NULL"), nullable=True)
+    scenario_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_scenarios.id", ondelete="SET NULL"), nullable=True)
+    operator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_operators.id", ondelete="SET NULL"), nullable=True)
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    owner_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_market_lead_company", "company_id", "track", "status"),
+    )
+
+
 # ===========================================================================
 # «Эксплуатация» — денежный контур площадок: что мы должны собрать за месяц
 # ===========================================================================

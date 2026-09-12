@@ -59,7 +59,7 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   marketing: 'Маркетинг',
   marketing_area: 'Территории',
   marketing_price: 'Цена и позиция',
-  marketing_decision: 'Решения',
+  marketing_decision: 'Развитие',
   financial: 'Финансовый',
   // Разделы «Бухгалтерии»: потоки + сквозное. `accounting` — первый раздел
   // («Нефтепродукты»), исторический код продукта и ключ доступа.
@@ -171,11 +171,12 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   ops_economy: { procurement: 'Энергозакупка', rent: 'Аренда', ops_payments: 'Оплаты' },
   marketing: {
     mk_position: 'Позиция', mk_map: 'Карта рынка', mk_sites: 'Точки рынка',
-    mk_operators: 'Компании',
+    mk_operators: 'Компании', mk_observations: 'Наблюдения',
+    mk_sources: 'Источники и свежесть',
   },
   marketing_decision: {
-    mk_scenarios: 'Сценарии', mk_partners: 'Партнёры и интеграции',
-    mk_observations: 'Наблюдения', mk_sources: 'Источники и свежесть',
+    mk_growth: 'Направления роста', mk_leads: 'Кандидаты',
+    mk_scenarios: 'Сценарии', mk_partners: 'Партнёрство и франшиза',
   },
   marketing_area: {
     mk_territories: 'Территории', mk_whitespots: 'Белые пятна',

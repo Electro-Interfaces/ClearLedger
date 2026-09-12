@@ -4915,6 +4915,16 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # Развитие сети: кандидаты по направлениям роста. Таблицы заводит create_all,
+        # индексы — здесь; выборка всегда идёт по компании и направлению.
+        for stmt in (
+            "CREATE INDEX IF NOT EXISTS ix_market_lead_company "
+            "ON market_growth_leads (company_id, track, status)",
+            "CREATE INDEX IF NOT EXISTS ix_market_scenario_company "
+            "ON market_scenarios (company_id, status, check_on)",
+        ):
+            await conn.execute(_sa.text(stmt))
+
     await _ensure_active_group_readiness(engine)
 
 

@@ -340,6 +340,8 @@ export const MARKET_MENU: CentralMenuItem[] = [
   { key: 'mk_map',          label: 'Карта рынка' },
   { key: 'mk_sites',        label: 'Точки рынка' },
   { key: 'mk_operators',    label: 'Компании' },
+  { key: 'mk_observations', label: 'Наблюдения' },
+  { key: 'mk_sources',      label: 'Источники и свежесть' },
 ]
 
 // ТЕРРИТОРИИ — где строить. У «Рынка» вопрос «что вокруг нас», здесь — «где нас нет
@@ -357,13 +359,14 @@ export const MARKET_PRICE_MENU: CentralMenuItem[] = [
   { key: 'mk_elasticity', label: 'Эластичность' },
 ]
 
-// РЕШЕНИЯ — что делаем и откуда знаем. Сюда приходят действовать и проверять, чему
-// верить, а не рассматривать рынок: это другой заход, а не ещё один его пункт.
+// РАЗВИТИЕ — как растёт наша сеть. Главный раздел продукта: рынок здесь не предмет
+// разглядывания, а основание для решения, каким из пяти способов расти в каждом
+// регионе (docs/MARKET.md §1а).
 export const MARKET_DECISION_MENU: CentralMenuItem[] = [
+  { key: 'mk_growth',       label: 'Направления роста' },
+  { key: 'mk_leads',        label: 'Кандидаты' },
   { key: 'mk_scenarios',    label: 'Сценарии' },
-  { key: 'mk_partners',     label: 'Партнёры и интеграции' },
-  { key: 'mk_observations', label: 'Наблюдения' },
-  { key: 'mk_sources',      label: 'Источники и свежесть' },
+  { key: 'mk_partners',     label: 'Партнёрство и франшиза' },
 ]
 
 export const MARKET_KEYS = [...MARKET_MENU, ...MARKET_AREA_MENU, ...MARKET_PRICE_MENU,
