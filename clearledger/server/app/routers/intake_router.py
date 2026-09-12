@@ -118,6 +118,11 @@ async def download_file(
     from app.routers.docs_router import authorize_docs_file_download
     await authorize_docs_file_download(db, current_user, uid)
 
+    # Запись конференции: её слышно целиком, поэтому членства компании мало —
+    # доступ у организатора, приглашённых и тех, кто в разговоре был.
+    from app.routers.conf_router import authorize_conf_recording_download
+    await authorize_conf_recording_download(db, current_user, uid)
+
     # Вложение чата принадлежит РАЗГОВОРУ, а не компании: членства мало. Иначе любой
     # сотрудник, которому попался адрес файла (переслали ссылку, увидел в логе), качает
     # снимок из чужой личной переписки. Тем же запросом закрывается и мягкое удаление:

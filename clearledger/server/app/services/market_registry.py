@@ -334,6 +334,7 @@ async def ingest_registry(
     snapshot_date: str | None = None,
     log_id=None,
     source: str = SOURCE_CODE,
+    source_ref: str | None = None,
 ) -> dict[str, Any]:
     """Срез реестра → точки рынка, срезы состояния и наблюдения цены.
 
@@ -452,7 +453,12 @@ async def ingest_registry(
             site.operator_id = operator.id if operator else None
             site.site_class = klass
             site.status = status
-            site.ports = _int(row.get("connector_count")) or _int(row.get("stations_count"))
+            # Порт — это одновременно заряжаемый автомобиль. Два разъёма одной
+            # станции с общей силовой частью обслуживают машину по очереди, и счёт
+            # разъёмов завышает предложение рынка (ревизия 12.09.2026, К12).
+            # Поэтому первым берём число станций, разъёмы храним отдельно.
+            site.ports = _int(row.get("stations_count")) or _int(row.get("connector_count"))
+            site.connectors_total = _int(row.get("connector_count"))
             site.max_power_kw = max_power
             site.connectors = ", ".join(
                 c["type"] for c in connectors if c.get("type"))[:200] or None
@@ -483,7 +489,8 @@ async def ingest_registry(
         snap = snaps.get((site.id, today))
         if snap is None:
             snap = MarketSiteSnapshot(company_id=company_id, site_id=site.id,
-                                      snapshot_date=today, source=source)
+                                      snapshot_date=today, source=source,
+                                      source_ref=source_ref)
             db.add(snap)
             snaps[(site.id, today)] = snap
         snap.is_alive = _bool(row.get("is_alive"))
@@ -528,6 +535,10 @@ async def ingest_registry(
                 power_kw=max_power, channel="import", source_ref=ref,
                 confidence="single" if sane else "conflict",
                 author_name="Реестр ЭЗС РФ",
+                # Исходный фрагмент рядом с выводом: спорную цену нечем защитить,
+                # если из неё не видно, что именно сказал источник (К9).
+                raw={"tariffs": row.get("tariffs"), "paid": row.get("paid"),
+                     "currency_id": row.get("currency_id"), "snapshot": source_ref},
             ))
             priced += 1
 

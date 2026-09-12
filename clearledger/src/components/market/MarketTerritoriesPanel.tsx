@@ -11,13 +11,16 @@
  * но в виде, о котором нельзя спросить человека.
  */
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Map as MapIcon } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCompany } from '@/contexts/CompanyContext'
-import { getMarketTerritories, getMarketWhitespots, type MarketTerritory } from '@/services/marketService'
+import { Button } from '@/components/ui/button'
+import {
+  createGrowthLead, getMarketTerritories, getMarketWhitespots, type MarketTerritory,
+} from '@/services/marketService'
 
 const nf = new Intl.NumberFormat('ru-RU')
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -145,7 +148,29 @@ export function MarketTerritoriesPanel() {
 
 export function MarketWhitespotsPanel() {
   const { companyId } = useCompany()
+  const qc = useQueryClient()
   const [level, setLevel] = useState<'city' | 'region'>('city')
+  const [taken, setTaken] = useState<string[]>([])
+
+  // Найденная возможность должна уходить в работу отсюда же: экран, с которого
+  // нельзя ничего начать, остаётся чтением.
+  const toLead = useMutation({
+    mutationFn: (row: MarketTerritory) => createGrowthLead(companyId, {
+      track: 'build',
+      title: `Войти в ${row.name}: рынок есть, нас нет`,
+      subject_kind: 'territory', subject_ref: row.name,
+      evidence: {
+        city: row.name, rivalSites: row.rivalSites, rivalAlive: row.rivalAlive,
+        rivalPorts: row.rivalPorts, marketPricePerKwh: row.marketPricePerKwh,
+        source: 'белые пятна',
+      },
+    }),
+    onSuccess: (_data, row) => {
+      setTaken((prev) => [...prev, row.name])
+      qc.invalidateQueries({ queryKey: ['market-growth-leads', companyId] })
+      qc.invalidateQueries({ queryKey: ['market-growth-overview', companyId] })
+    },
+  })
 
   const data = useQuery({
     queryKey: ['market-whitespots', companyId, level],
@@ -187,6 +212,7 @@ export function MarketWhitespotsPanel() {
               <th className="p-2 text-right font-medium">Портов</th>
               <th className="p-2 text-right font-medium">Цена рынка</th>
               <th className="p-2 text-right font-medium">Домашних розеток</th>
+              <th className="p-2 text-left font-medium">Действие</th>
             </tr>
           </thead>
           <tbody>
@@ -198,6 +224,16 @@ export function MarketWhitespotsPanel() {
                 <td className="p-2 text-right"><Num v={r.rivalPorts} /></td>
                 <td className="p-2 text-right"><Num v={r.marketPricePerKwh} digits={1} /></td>
                 <td className="p-2 text-right"><Num v={r.homeSockets} /></td>
+                <td className="p-2">
+                  {taken.includes(r.name) ? (
+                    <span className="text-xs text-muted-foreground">в кандидатах</span>
+                  ) : (
+                    <Button size="xs" variant="outline" disabled={toLead.isPending}
+                      onClick={() => toLead.mutate(r)}>
+                      В кандидаты
+                    </Button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

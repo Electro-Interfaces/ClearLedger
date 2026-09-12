@@ -157,6 +157,40 @@ export function PlaceActions({
     '[@media(hover:none)]:opacity-100',
   ))
 
+  /** Ветка меню: под курсором — вложенное подменю, на телефоне — те же пункты
+   *  прямо в списке под заголовком.
+   *
+   *  Вбок на телефоне открывать некуда: само меню шириной w-60 занимает почти всю
+   *  ширину экрана, справа подменю уезжало за край и обрезалось на полуслове, а
+   *  слева места ещё меньше — переворачивать Radix тоже некуда (замечание МАГа
+   *  08.09.2026). Плоский список длиннее, зато читается целиком и прокручивается.
+   *
+   *  Обычная функция, а не локальный компонент: тот пересоздаётся на каждом
+   *  рендере, и открытое меню схлопывалось бы на первом же изменении. */
+  const ветка = ({ label, icon: Icon, disabled, title, children }: {
+    label: React.ReactNode
+    icon: typeof CalendarCheck
+    disabled?: boolean
+    title?: string
+    children: React.ReactNode
+  }) => (mobile ? (
+    <>
+      <DropdownMenuLabel className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />{label}
+      </DropdownMenuLabel>
+      {/* Запрет остаётся объяснением: пункты просто не появляются, а причина
+          стоит в самом заголовке. */}
+      {!disabled && children}
+    </>
+  ) : (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger disabled={disabled} title={title}>
+        <Icon className="mr-2 h-3.5 w-3.5" />{label}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>{children}</DropdownMenuSubContent>
+    </DropdownMenuSub>
+  ))
+
   const кнопкаДня = (
     <Button size="sm" variant="ghost" disabled={act.isPending}
       className={cn('h-8 px-2', тихо(inDay),
@@ -232,39 +266,39 @@ export function PlaceActions({
           {/* Планирование: предмет остаётся на виду и встаёт на выбранный день.
               Стоит выше сокрытия намеренно — это обычный ответ на «когда», а
               прячут реже. */}
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <CalendarCheck className="mr-2 h-3.5 w-3.5" />
-              {planned
-                ? (planned === workService.todayKey() ? 'Займусь сегодня'
-                  : `Займусь ${shortDay(planned)}`)
-                : 'Займусь'}
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuItem
-                onClick={() => act.mutate({ takenFor: workService.todayKey() })}>
-                Сегодня
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => act.mutate({ takenFor: завтра() })}>
-                Завтра
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => act.mutate({ takenFor: nextWeekday(1) })}>
-                В понедельник
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => { setDate(завтра()); setPickingDate('plan') }}>
-                Выбрать день…
-              </DropdownMenuItem>
-              {planned && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => act.mutate({ dropDay: true })}>
-                    Снять план
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          {ветка({
+            icon: CalendarCheck,
+            label: planned
+              ? (planned === workService.todayKey() ? 'Займусь сегодня'
+                : `Займусь ${shortDay(planned)}`)
+              : 'Займусь',
+            children: (
+              <>
+                <DropdownMenuItem
+                  onClick={() => act.mutate({ takenFor: workService.todayKey() })}>
+                  Сегодня
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => act.mutate({ takenFor: завтра() })}>
+                  Завтра
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => act.mutate({ takenFor: nextWeekday(1) })}>
+                  В понедельник
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => { setDate(завтра()); setPickingDate('plan') }}>
+                  Выбрать день…
+                </DropdownMenuItem>
+                {planned && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => act.mutate({ dropDay: true })}>
+                      Снять план
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </>
+            ),
+          })}
           {/* Срок — общий: его видят все и по нему считается просрочка. Поэтому
               отдельным разделом, а не рядом с личными пометками. Только у
               поручений: у документа срок задаёт его вид работы. */}
@@ -274,78 +308,79 @@ export function PlaceActions({
               <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
                 Срок работы — видят все
               </DropdownMenuLabel>
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <CalendarClock className="mr-2 h-3.5 w-3.5" />
-                  {dueAt ? `Срок: ${shortDay(dueAt.slice(0, 10))}` : 'Поставить срок'}
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent>
-                  <DropdownMenuItem onClick={() => срок.mutate(workService.todayKey())}>
-                    Сегодня
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => срок.mutate(завтра())}>
-                    Завтра
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => срок.mutate(nextWeekday(1))}>
-                    В понедельник
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setDate(завтра()); setPickingDate('due') }}>
-                    Выбрать день…
-                  </DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
+              {ветка({
+                icon: CalendarClock,
+                label: dueAt ? `Срок: ${shortDay(dueAt.slice(0, 10))}` : 'Поставить срок',
+                children: (
+                  <>
+                    <DropdownMenuItem onClick={() => срок.mutate(workService.todayKey())}>
+                      Сегодня
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => срок.mutate(завтра())}>
+                      Завтра
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => срок.mutate(nextWeekday(1))}>
+                      В понедельник
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => { setDate(завтра()); setPickingDate('due') }}>
+                      Выбрать день…
+                    </DropdownMenuItem>
+                  </>
+                ),
+              })}
             </>
           )}
 
           {/* Сокрытие: предмет уходит с глаз до даты. Названо тем, что делает, —
               прежнее «Не сегодня» звучало как планирование, а планированием не
               было. */}
-          <DropdownMenuSub>
-            {/* Просроченное не прячется: сервер откажет с объяснением, и
-                предлагать заведомо отклонённое значит учить человека не верить
-                меню. Причина стоит в подсказке — там, где её ищут. */}
-            <DropdownMenuSubTrigger disabled={нельзяПрятать}
-              title={нельзяПрятать
-                ? 'Срок уже наступил: такое не прячется — его закрывают, '
-                  + 'передают или переносят срок'
-                : undefined}>
-              <CalendarClock className="mr-2 h-3.5 w-3.5" />
-              {нельзяПрятать ? 'Со сроком сегодня не прячется'
-                : deferred ? `Скрыто до ${shortDay(deferred)}` : 'Не показывать до'}
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuItem onClick={() => act.mutate({ deferUntil: завтра() })}>
-                Завтра
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => act.mutate({ deferUntil: nextWeekday(1) })}>
-                Понедельника
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => { setDate(завтра()); setPickingDate('defer') }}>
-                Выбрать день…
-              </DropdownMenuItem>
-              {deferred && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => act.mutate({ undefer: true })}>
-                    Вернуть сейчас
-                  </DropdownMenuItem>
-                </>
-              )}
-              {(mark?.defer_count ?? 0) >= 3 && (
-                <>
-                  <DropdownMenuSeparator />
-                  {/* Счётчик меняет предложение, а не текст: повторять ту же
-                      кнопку бессмысленно — отложенное трижды откладывают и
-                      дальше. Наверх этот счётчик не уходит. */}
-                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                    Откладывали {mark?.defer_count} раз. Может, перенести срок
-                    или передать?
-                  </DropdownMenuLabel>
-                </>
-              )}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          {/* Просроченное не прячется: сервер откажет с объяснением, и
+              предлагать заведомо отклонённое значит учить человека не верить
+              меню. Причина стоит в подсказке — там, где её ищут. */}
+          {ветка({
+            icon: CalendarClock,
+            disabled: нельзяПрятать,
+            title: нельзяПрятать
+              ? 'Срок уже наступил: такое не прячется — его закрывают, '
+                + 'передают или переносят срок'
+              : undefined,
+            label: нельзяПрятать ? 'Со сроком сегодня не прячется'
+              : deferred ? `Скрыто до ${shortDay(deferred)}` : 'Не показывать до',
+            children: (
+              <>
+                <DropdownMenuItem onClick={() => act.mutate({ deferUntil: завтра() })}>
+                  Завтра
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => act.mutate({ deferUntil: nextWeekday(1) })}>
+                  Понедельника
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => { setDate(завтра()); setPickingDate('defer') }}>
+                  Выбрать день…
+                </DropdownMenuItem>
+                {deferred && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => act.mutate({ undefer: true })}>
+                      Вернуть сейчас
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {(mark?.defer_count ?? 0) >= 3 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    {/* Счётчик меняет предложение, а не текст: повторять ту же
+                        кнопку бессмысленно — отложенное трижды откладывают и
+                        дальше. Наверх этот счётчик не уходит. */}
+                    <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                      Откладывали {mark?.defer_count} раз. Может, перенести срок
+                      или передать?
+                    </DropdownMenuLabel>
+                  </>
+                )}
+              </>
+            ),
+          })}
           <DropdownMenuSeparator />
           {/* Подборки перечислены сразу: их две-три, и подменю ради них стоило
               лишнего движения на каждое действие. */}

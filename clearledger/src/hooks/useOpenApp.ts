@@ -12,7 +12,6 @@ import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { authorizeApp, type SsoApp } from '@/services/ssoService'
-import { startMeeting } from '@/services/conferenceService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { assignTop } from '@/lib/topNav'
 
@@ -33,15 +32,12 @@ export function useOpenApp() {
     if (busy) return
     setBusy(code)
     try {
-      // «Конференции» — не адрес, а действие: у сервиса нет своей страницы пространства,
-      // и переход на голый meet.dataworker.ru приводил человека к чужой форме «создать
-      // конференцию» — без имени комнаты, без организатора и без ссылки для приглашения.
-      // Поэтому здесь комната создаётся сразу: организатор входит по своей ссылке, а
-      // гостевая ложится в буфер, чтобы было чем позвать участников.
+      // «Конференции» — приложение пространства, а не одно действие: своя
+      // страница с идущими созвонами, назначенными встречами и историей
+      // (`pages/conf/ConfPage`). Раньше плитка сразу заводила комнату, и
+      // человек не мог ни вернуться в свой созвон, ни найти вчерашний.
       if (code === 'conf') {
-        const m = await startMeeting()
-        try { await navigator.clipboard.writeText(m.guest_url) } catch { /* буфер недоступен */ }
-        toast.success('Конференция создана — ссылка для участников скопирована', { description: m.guest_url })
+        assignTop('/conf')
         return
       }
       const url = await authorizeApp(code, companyId)

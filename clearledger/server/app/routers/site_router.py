@@ -502,7 +502,9 @@ async def pull_cabinet(
             ClientSpace.status == "active",
         ))).scalars().first()
         if space_row and space_row.domain:
-            space = {"domain": space_row.domain, "slug": space_row.slug}
+            portal_spaces = {code.strip() for code in os.getenv("ELSY_CLIENT_SPACES", "").split(",") if code.strip()}
+            space = {"domain": space_row.domain, "slug": space_row.slug,
+                     "vendorPortal": space_row.slug in portal_spaces}
     return {
         "email": addr, "level": row.level, "known": True,
         "company": client.short_name or client.name if client else None,

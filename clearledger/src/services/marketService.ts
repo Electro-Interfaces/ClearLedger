@@ -132,8 +132,11 @@ export interface MarketObservation {
   note: string | null
 }
 
-export const listMarketSites = (companyId: string, params?: { kind?: string; city?: string }) =>
-  get<{ sites: MarketSite[]; total: number }>('/api/market/sites', { company_id: companyId, ...params })
+export const listMarketSites = (
+  companyId: string,
+  params?: { kind?: string; city?: string; bbox?: string; limit?: number; offset?: number },
+) => get<{ sites: MarketSite[]; total: number; returned: number; offset: number; limit: number }>(
+  '/api/market/sites', { company_id: companyId, ...params })
 
 export const listMarketOperators = (companyId: string) =>
   get<{ operators: MarketOperator[] }>('/api/market/operators', { company_id: companyId })
@@ -319,6 +322,9 @@ export interface MarketSiteScore {
     /** Разброс похожих объектов: половина лежит между low и high. */
     sessionsLow: number | null; sessionsHigh: number | null
     revenueLow: number | null; revenueHigh: number | null
+    /** Сколько похожих объектов заряжают вовсе и медиана с учётом молчащих. */
+    working: number; zeroDemand: number
+    sessionsAllMedian: number | null; revenueAllMedian: number | null
     sample: { locationId: string; name: string; city: string | null
               rivals: number; rivalsTotal?: number
               locationClass?: string | null; speedClass?: string | null
@@ -534,6 +540,10 @@ export const createGrowthLead = (companyId: string, body: Record<string, unknown
 export const patchGrowthLead = (companyId: string, id: string, body: Record<string, unknown>) =>
   patch<{ id: string; status: string }>(
     `/api/market/growth/leads/${id}?company_id=${encodeURIComponent(companyId)}`, body)
+
+export const leadToProject = (companyId: string, leadId: string) =>
+  post<{ siteId: string; projectNo?: string; created: boolean; message: string }>(
+    `/api/market/growth/leads/${leadId}/to-project?company_id=${encodeURIComponent(companyId)}`, {})
 
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(

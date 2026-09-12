@@ -91,6 +91,9 @@ function MarketMap() {
   const { sites, ours } = useMarketData(kind)
 
   const market = (sites.data?.sites ?? []).filter((s) => s.lat != null && s.lon != null)
+  // Полная выгрузка — 12 240 точек: страница может не вместить всё, и молчать об
+  // этом нельзя (ревизия 12.09.2026, К10).
+  const cut = (sites.data?.total ?? 0) > (sites.data?.returned ?? 0)
   const ourPoints = useMemo(() => (ours.data ?? [])
     .filter((l) => l.latitude != null && l.longitude != null)
     .map((l) => ({ id: l.id, name: l.name, lat: Number(l.latitude), lon: Number(l.longitude) })),
@@ -112,6 +115,11 @@ function MarketMap() {
         </Select>
         <span className="text-xs text-muted-foreground">
           наших объектов: {ourPoints.length} · точек рынка: {market.length}
+          {cut && (
+            <span className="text-warning">
+              {' · '}показана часть: всего {sites.data?.total} — приблизьте карту
+            </span>
+          )}
         </span>
         <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1"><i className="size-2 rounded-full bg-[#3b82f6]" /> наши</span>

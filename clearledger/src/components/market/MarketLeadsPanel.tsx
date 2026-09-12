@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
-  createGrowthLead, listGrowthLeads, patchGrowthLead, type GrowthLead,
+  createGrowthLead, leadToProject, listGrowthLeads, patchGrowthLead, type GrowthLead,
 } from '@/services/marketService'
 
 const TRACKS: Record<string, string> = {
@@ -37,8 +37,11 @@ const STATUSES: Record<string, string> = {
   done: 'сделано',
 }
 
-function LeadRow({ lead, onMove }: {
-  lead: GrowthLead; onMove: (id: string, status: string, reason?: string) => void
+function LeadRow({ lead, onMove, onToProject, sending }: {
+  lead: GrowthLead
+  onMove: (id: string, status: string, reason?: string) => void
+  onToProject: (id: string) => void
+  sending: boolean
 }) {
   const [reason, setReason] = useState('')
   const [asking, setAsking] = useState(false)
@@ -67,6 +70,18 @@ function LeadRow({ lead, onMove }: {
               ))}
             </SelectContent>
           </Select>
+          {/* Граница двух продуктов: маркетинг обосновал, «Проекты» строят. */}
+          {lead.track === 'build' && !lead.siteId && (
+            <Button size="sm" variant="outline" disabled={sending}
+              onClick={() => onToProject(lead.id)}>
+              Завести площадку в «Проектах»
+            </Button>
+          )}
+          {lead.siteId && (
+            <span className="text-xs text-muted-foreground">
+              площадка заведена — дальше работа идёт в «Проектах»
+            </span>
+          )}
           {asking && (
             <>
               <Input value={reason} onChange={(e) => setReason(e.target.value)}
@@ -101,6 +116,13 @@ export function MarketLeadsPanel() {
     onSuccess: () => {
       setTitle('')
       qc.invalidateQueries({ queryKey: ['market-growth-leads', companyId] })
+    },
+  })
+  const toProject = useMutation({
+    mutationFn: (id: string) => leadToProject(companyId, id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['market-growth-leads', companyId] })
+      qc.invalidateQueries({ queryKey: ['market-growth-overview', companyId] })
     },
   })
   const move = useMutation({
@@ -167,6 +189,8 @@ export function MarketLeadsPanel() {
               </div>
               {(group as GrowthLead[]).map((lead) => (
                 <LeadRow key={lead.id} lead={lead}
+                  sending={toProject.isPending && toProject.variables === lead.id}
+                  onToProject={(id) => toProject.mutate(id)}
                   onMove={(id, status, reason) => move.mutate({ id, status, reason })} />
               ))}
             </div>

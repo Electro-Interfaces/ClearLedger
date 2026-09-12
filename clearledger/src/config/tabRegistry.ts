@@ -6,7 +6,7 @@
  * скролла страницы (как раньше решала `MainLayout.isWorkspace`).
  */
 import { matchPath } from 'react-router-dom'
-import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone, Activity, ListChecks } from 'lucide-react'
+import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone, Activity, ListChecks, Handshake, Video } from 'lucide-react'
 import { SPACE_PRODUCTS, SPACE_PAGES, productLabel } from './spaceProducts'
 import type { ComponentType } from 'react'
 import {
@@ -36,8 +36,12 @@ const WORKSPACE_PATHS = new Set<string>([
   // раскладки второй паддинг и второй `overflow-y-auto`.
   '/tasks', '/tasks/company', '/tasks/overview', '/tasks/setup',
   '/docs', '/docs/work', '/docs/company', '/docs/overview', '/docs/regulation', '/docs/setup',
+  // «Конференции» — своя вторая колонка и свой скролл, как у «Трека»: без этого
+  // раскладка получает второй паддинг и второй `overflow-y-auto` поверх своих.
+  '/conf', '/conf/history', '/conf/records', '/conf/stats',
   // «Аудитор» — две колонки со своим скроллом внутри: разговор и каталог навыков.
   '/auditor',
+  '/elsy',
   ...SPACE_PRODUCTS.map((p) => p.route),
   // Та же страница под адресом продукта (`/finance/files`) — и раскладка та же.
   ...SPACE_PRODUCTS.map((p) => `${p.route}/files`),
@@ -48,6 +52,7 @@ const FUEL_ONLY = new Set<string>(oneCItems.map((i) => i.to))
 
 // Плоская карта статических путей → пункт меню.
 const STATIC: Record<string, NavItemDef> = {}
+STATIC['/elsy'] = { to: '/elsy', icon: Handshake, label: 'Элси+' }
 for (const it of [...mainNavItems, ...dataItems, ...oneCItems, ...settingsItems]) {
   STATIC[it.to] = it
 }
@@ -64,6 +69,13 @@ for (const [to, label] of [['/pulse', 'Пульс'], ['/pulse/business', 'Биз
 for (const [to, label] of [['/docs', 'Трек'], ['/docs/company', 'Компания'],
   ['/docs/work', 'На мне'], ['/docs/setup', 'Настройка «Трека»']] as const) {
   STATIC[to] = { to, icon: ListChecks, label }
+}
+
+// «Конференции» — приложение пространства: разделы табуются как обычные экраны,
+// иначе открытый из шапки созвон не попадёт ни в ленту экранов, ни в закладки.
+for (const [to, label] of [['/conf', 'Конференции'], ['/conf/history', 'История конференций'],
+  ['/conf/records', 'Записи конференций'], ['/conf/stats', 'Статистика конференций']] as const) {
+  STATIC[to] = { to, icon: Video, label }
 }
 
 // Продукты пространства: в меню Учёта их нет (открываются плиткой со стола), но вкладка

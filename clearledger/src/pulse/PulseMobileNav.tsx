@@ -18,6 +18,8 @@ export function PulseMobileNav({ onMenu }: {
   // Пять равных долей и подпись в одну строку по центру (замечание МАГа 07.09.2026:
   // «какая-то как-то всё сжато»). Раньше пункт растягивался по своей подписи, поэтому
   // «Приложения» отъедало место у соседей и всё равно упиралось в край экрана.
+  // На телефоне подпись — «Модули»: «Приложения» не влезало в пятую долю даже так и
+  // обрезалось многоточием (замечание МАГа 08.09.2026).
   const cls = (active: boolean) => cn(
     'flex min-h-14 min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-1 px-0.5 py-1.5',
     'rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
@@ -41,7 +43,7 @@ export function PulseMobileNav({ onMenu }: {
       {/* «Приложения» открывают меню пространства — там каталог с избранным, разделы
         и функции Ядра (решение МАГа 06.09.2026). Прежний отдельный экран каталога
         и панель плашек поверх работы убраны: три двери в одно и то же. */}
-    <button type="button" onClick={() => { closeInteraction(); onMenu?.() }} className={cls(apps)}><LayoutGrid className="size-5" /><span className={label}>Приложения</span></button>
+    <button type="button" onClick={() => { closeInteraction(); onMenu?.() }} className={cls(apps)}><LayoutGrid className="size-5" /><span className={label}>Модули</span></button>
     </div>
   </nav>
 }

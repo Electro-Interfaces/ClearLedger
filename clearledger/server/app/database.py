@@ -4910,6 +4910,9 @@ async def create_all() -> None:
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS closed_confirmations "
             "INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS connectors_total INTEGER",
+            "ALTER TABLE IF EXISTS market_site_snapshots "
+            "ADD COLUMN IF NOT EXISTS source_ref VARCHAR(200)",
             "CREATE INDEX IF NOT EXISTS ix_market_site_external "
             "ON market_sites (company_id, source, external_id) WHERE external_id IS NOT NULL",
         ):

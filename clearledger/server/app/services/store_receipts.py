@@ -374,37 +374,82 @@ def movement_item_key(line: dict, index: int) -> str:
     )[:200]
 
 
+# Виды движений, из которых складывается ПРИХОД по строке. `central_distribution`
+# сюда не входит: это выдача принятого со склада, отдельная сущность.
+ВИДЫ_ПРИХОДА = ("receipt_acceptance", "receipt_correction", "receipt_reversal")
+
+
+def _дельта_пуста(количество: float, сумма: float) -> bool:
+    return abs(количество) < 0.0005 and abs(сумма) < 0.005
+
+
 async def record_acceptance(db, row, user_id=None) -> None:
+    """Привести движения склада в соответствие с текущей редакцией документа.
+
+    Движения append-only на уровне базы («store receipt stock movements are
+    append-only»), поэтому исправленная накладная не переписывает прежнее
+    движение, а дописывает корректировку на разницу. Повтор того же пакета
+    разницы не даёт и не пишет ничего — приём остаётся идемпотентным.
+    """
     from app.models import StoreReceiptStockMovement
 
-    movements = (await db.execute(select(StoreReceiptStockMovement).where(
+    movements = [item for item in (await db.execute(select(StoreReceiptStockMovement).where(
         StoreReceiptStockMovement.company_id == row.company_id,
         StoreReceiptStockMovement.receipt_id == row.id,
-    ))).scalars().all()
-    existing_keys = {
-        item if isinstance(item, str) else item.idempotency_key for item in movements
-    }
-    existing_lines = {
-        str(item.line_id) for item in movements
-        if not isinstance(item, str) and item.kind == "receipt_acceptance" and item.line_id
-    }
-    legacy_indexes = {
-        item.line_index for item in movements
-        if not isinstance(item, str) and item.kind == "receipt_acceptance"
-    }
+    ))).scalars().all() if not isinstance(item, str)]
+    приход = [item for item in movements if item.kind in ВИДЫ_ПРИХОДА]
+    роздано = {str(item.line_id) for item in movements
+               if item.kind == "central_distribution"}
     station_id = row.station_id if row.delivery_scheme == "supplier_to_station" else None
     warehouse = str(
         row.receiving_warehouse
         or (row.evidence or {}).get("warehouse_id")
         or (f"station:{station_id}" if station_id is not None else "central")
     )[:200]
-    accepted_lines = [(index, line) for index, line in enumerate(row.lines or [])
+    строки = list(row.lines or [])
+    accepted_lines = [(index, line) for index, line in enumerate(строки)
                       if float(line.get("qty_fact") or 0) > 0]
     goods_total = sum(float(line.get("qty_fact") or 0) * float(line.get("price") or 0)
                       for _, line in accepted_lines)
     into_cost_total = sum(float(service.get("amount") or 0)
                           for service in getattr(row, "services", None) or []
                           if service.get("into_cost"))
+
+    # Сопоставление движения со строкой: по line_id, а движения старых
+    # документов (заведённых до line_id, им проставлен служебный md5) — по
+    # номеру позиции. Без второго прохода такой документ выглядел бы как «все
+    # строки новые, все движения лишние» и получил бы задвоенный приход.
+    индекс_строки = {}
+    for index, line in enumerate(строки):
+        ключ = str(line.get("line_id") or deterministic_line_id(row.id, "goods", line))
+        индекс_строки[ключ] = index
+    по_строке: dict[str, list] = {}
+    осиротевшие: list = []
+    for item in приход:
+        ключ = str(item.line_id)
+        if ключ not in индекс_строки:
+            ключ = next((k for k, index in индекс_строки.items()
+                         if index == item.line_index), "")
+        if ключ:
+            по_строке.setdefault(ключ, []).append(item)
+        else:
+            осиротевшие.append(item)
+
+    def дописать(line_id, index, line, quantity, amount, kind, суффикс):
+        db.add(StoreReceiptStockMovement(
+            company_id=row.company_id, receipt_id=row.id, line_id=line_id,
+            line_index=index, station_id=station_id,
+            warehouse_id=getattr(row, "warehouse_id", None), warehouse=warehouse,
+            item_key=movement_item_key(line, index),
+            item_uuid=str(line.get("nomenclature_ref") or "") or None,
+            barcode=str(line.get("barcode") or "") or None,
+            quantity=quantity,
+            unit_cost=round(amount / quantity, 4) if quantity
+            else round(float(line.get("price") or 0), 4),
+            amount=amount, kind=kind, created_by=user_id,
+            idempotency_key=f"receipt:{row.id}:{суффикс}",
+        ))
+
     allocated = 0.0
     for position, (index, line) in enumerate(accepted_lines):
         line_id = uuid.UUID(str(line.get("line_id") or deterministic_line_id(
@@ -421,19 +466,46 @@ async def record_acceptance(db, row, user_id=None) -> None:
         else:
             service_share = 0.0
         movement_amount = round(base_amount + service_share, 2)
-        key = f"receipt:{row.id}:accept:{line_id}"
-        legacy_key = f"receipt:{row.id}:accept:{index}"
-        if (key in existing_keys or legacy_key in existing_keys
-                or str(line_id) in existing_lines or index in legacy_indexes):
+        записано = по_строке.pop(str(line_id), [])
+        if not записано:
+            дописать(line_id, index, line, quantity, movement_amount,
+                     "receipt_acceptance", f"accept:{line_id}")
             continue
+        if str(line_id) in роздано:
+            # Принятое уже роздано по станциям: правка прихода разъедется с
+            # распределением, и распутывает это человек («Отменить
+            # распределение»), а не молчаливая корректировка.
+            continue
+        дельта_кол = round(quantity - sum(float(item.quantity) for item in записано), 3)
+        дельта_сумма = round(movement_amount - sum(float(item.amount) for item in записано), 2)
+        if _дельта_пуста(дельта_кол, дельта_сумма):
+            continue
+        дописать(line_id, index, line, дельта_кол, дельта_сумма,
+                 "receipt_correction", f"fix:{line_id}:{len(записано)}")
+
+    # Строка исчезла из документа или обнулена по факту — приход по ней снимаем
+    # тем же способом: новым движением на минус.
+    for items in по_строке.values():
+        осиротевшие.extend(items)
+    снято: dict[str, list] = {}
+    for item in осиротевшие:
+        снято.setdefault(str(item.line_id), []).append(item)
+    for ключ, items in снято.items():
+        if ключ in роздано:
+            continue
+        кол = round(sum(float(item.quantity) for item in items), 3)
+        сумма = round(sum(float(item.amount) for item in items), 2)
+        if _дельта_пуста(кол, сумма):
+            continue
+        образец = items[0]
         db.add(StoreReceiptStockMovement(
-            company_id=row.company_id, receipt_id=row.id, line_id=line_id,
-            line_index=index, station_id=station_id,
-            warehouse_id=getattr(row, "warehouse_id", None), warehouse=warehouse,
-            item_key=movement_item_key(line, index),
-            item_uuid=str(line.get("nomenclature_ref") or "") or None,
-            barcode=str(line.get("barcode") or "") or None,
-            quantity=quantity, unit_cost=round(movement_amount / quantity, 4),
-            amount=movement_amount,
-            kind="receipt_acceptance", idempotency_key=key, created_by=user_id,
+            company_id=row.company_id, receipt_id=row.id,
+            reversal_of_id=образец.id, line_id=образец.line_id,
+            line_index=образец.line_index, station_id=образец.station_id,
+            warehouse_id=образец.warehouse_id, warehouse=образец.warehouse,
+            item_key=образец.item_key, item_uuid=образец.item_uuid,
+            barcode=образец.barcode, quantity=-кол,
+            unit_cost=float(образец.unit_cost), amount=-сумма,
+            kind="receipt_reversal", created_by=user_id,
+            idempotency_key=f"receipt:{row.id}:fix:{образец.line_id}:{len(items)}",
         ))

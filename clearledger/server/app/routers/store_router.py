@@ -5975,22 +5975,31 @@ async def _reverse_receipt_acceptance(
     ).with_for_update())).scalars().all()
     if any(m.kind == "central_distribution" for m in movements):
         raise HTTPException(409, "Сначала отмените распределение по станциям")
-    existing = {m.idempotency_key for m in movements}
+    # Снимаем НЕТТО по каждой строке, а не первичное движение: у исправленной
+    # после проведения накладной приход состоит из движения приёмки плюс
+    # корректировок на разницу. Сторнируй мы только первое — корректировки
+    # остались бы в остатке. Нетто заодно даёт идемпотентность: после полной
+    # обратной проводки сумма по строке равна нулю, и второй раз не пишется
+    # ничего.
+    по_строке: dict[str, list] = {}
     for movement in movements:
-        if movement.kind != "receipt_acceptance":
+        if movement.kind in receipt_rules.ВИДЫ_ПРИХОДА:
+            по_строке.setdefault(str(movement.line_id), []).append(movement)
+    for items in по_строке.values():
+        количество = round(sum(float(m.quantity) for m in items), 3)
+        сумма = round(sum(float(m.amount) for m in items), 2)
+        if abs(количество) < 0.0005 and abs(сумма) < 0.005:
             continue
-        key = f"receipt:{row.id}:reverse:{movement.id}"
-        if key in existing:
-            continue
+        образец = items[0]
         db.add(StoreReceiptStockMovement(
-            company_id=row.company_id, receipt_id=row.id, reversal_of_id=movement.id,
-            line_id=movement.line_id, line_index=movement.line_index,
-            station_id=movement.station_id, warehouse_id=movement.warehouse_id,
-            warehouse=movement.warehouse, item_key=movement.item_key,
-            item_uuid=movement.item_uuid, barcode=movement.barcode,
-            quantity=-float(movement.quantity), unit_cost=float(movement.unit_cost),
-            amount=-float(movement.amount), kind="receipt_reversal",
-            idempotency_key=key, created_by=user_id,
+            company_id=row.company_id, receipt_id=row.id, reversal_of_id=образец.id,
+            line_id=образец.line_id, line_index=образец.line_index,
+            station_id=образец.station_id, warehouse_id=образец.warehouse_id,
+            warehouse=образец.warehouse, item_key=образец.item_key,
+            item_uuid=образец.item_uuid, barcode=образец.barcode,
+            quantity=-количество, unit_cost=float(образец.unit_cost),
+            amount=-сумма, kind="receipt_reversal", created_by=user_id,
+            idempotency_key=f"receipt:{row.id}:reverse:{образец.line_id}:{len(items)}",
         ))
 
 
@@ -9542,10 +9551,18 @@ async def store_partner_create(
                  type, kind, currency, raw)
             VALUES (:id, :cid, :number, :date, :title, :cp, :org,
                     'поставка', 'СПоставщиком', 'RUB',
-                    jsonb_build_object('source', 'center_manual', 'name', :title))
+                    -- Имя договора идёт ОТДЕЛЬНЫМ параметром, хотя значение то же:
+                    -- один плейсхолдер в колонке varchar и внутри jsonb asyncpg
+                    -- вывести не может — сначала «could not determine data type
+                    -- of parameter», после приведения «inconsistent types
+                    -- deduced: text versus character varying». Поймано 10.09.2026
+                    -- на заведении поставщика МАРР для АЗС 8: ручка с договором
+                    -- до того ни разу не отрабатывала.
+                    jsonb_build_object('source', 'center_manual',
+                                       'name', CAST(:title_json AS text)))
         """), {"id": contract_id, "cid": cid, "number": номер or имя,
                "date": str(договор.get("signed_on") or договор.get("date") or "")[:10],
-               "title": имя, "cp": канон.id, "org": organization_id})
+               "title": имя, "title_json": имя, "cp": канон.id, "org": organization_id})
     await db.commit()
     return {"id": partner_id, "supplier_id": str(канон.id), "name": name,
             "created": True, "contract_id": contract_id}

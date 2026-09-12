@@ -373,10 +373,14 @@ export function TasksQuickPanel({ compact: compactProp }: {
    * «Ждут от меня · Веду сам · Слежу», как в рельсе на большом экране.
    */
   const compactBar = (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5">
+    // Переносится по строкам: на 350 px фильтр типов, просрочка и выход
+    // выдавливали кнопку разреза до одной иконки — человек не видел, в каком
+    // разрезе стоит, и не понимал, почему в списке одна строка вместо десяти
+    // (замечание МАГа 08.09.2026).
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/60 px-3 py-1.5">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="h-8 min-w-0 flex-1 justify-between gap-1.5 px-2.5 text-xs">
+          <Button variant="outline" size="sm" className="h-8 min-w-36 flex-1 justify-between gap-1.5 px-2.5 text-xs">
             <span className="flex min-w-0 items-center gap-1.5">
               <current.icon className="size-3.5 shrink-0" />
               <span className="truncate">{current.label}</span>

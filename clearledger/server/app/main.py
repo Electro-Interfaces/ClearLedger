@@ -105,7 +105,9 @@ from app.routers import (
     docs_archive_router,
     docs_router,
     site_router,
+    vendor_router,
     space_bridge_router,
+    conf_router,
     work_router,
     tasks_router,
     tickets_router,
@@ -399,7 +401,9 @@ app.include_router(tasks_router.router, prefix=API_PREFIX)  # «Задачи»: 
 app.include_router(docs_archive_router.router, prefix=API_PREFIX)
 app.include_router(docs_router.router, prefix=API_PREFIX)  # «Трек»: документооборот и работа
 app.include_router(work_router.router, prefix=API_PREFIX)  # единый список работы
+app.include_router(conf_router.router, prefix=API_PREFIX)  # «Конференции»: журнал созвонов
 app.include_router(site_router.router, prefix=API_PREFIX)  # «Сайт»: витрина и кабинет клиента
+app.include_router(vendor_router.router, prefix=API_PREFIX)
 # Мост между пространствами: обращение клиента приходит в наш контур, ответ уходит в его.
 app.include_router(space_bridge_router.router, prefix=API_PREFIX)
 # Показ документа контрагенту по ссылке: без авторизации, намеренно скупо.

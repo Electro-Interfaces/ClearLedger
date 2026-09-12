@@ -9,11 +9,15 @@
  */
 import { useState } from 'react'
 import {
-  Bot, CalendarDays, HelpCircle, LifeBuoy, ListChecks, MessageCircle, Video,
+  Bot, CalendarDays, HelpCircle, LifeBuoy, ListChecks, ListVideo, MessageCircle, Video,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { startMeeting } from '@/services/conferenceService'
+import { createMeeting, joinMeeting } from '@/services/confService'
+import { useNavigate } from 'react-router-dom'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { isDemoMode } from '@/services/apiClient'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useDocsApp } from '@/hooks/useDocsApp'
@@ -42,7 +46,8 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
   // пространство (без них человек нем и слеп). Конференция и поддержка поставщика -
   // обычные продукты реестра и показываются только при праве на них: раньше кнопки
   // стояли у всех, и человек с одним выданным приложением видел в шапке четыре чужих.
-  const { canApp, appName } = useCompany()
+  const { canApp, appName, companyId } = useCompany()
+  const navigate = useNavigate()
   // Как продукт назван в ЭТОМ пространстве: «Аудитор» у аудиторской практики,
   // «Агенты» там, где их несколько и их учат. Надпись живёт в реестре компании,
   // а не в коде кнопки.
@@ -51,13 +56,18 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
   const [confBusy, setConfBusy] = useState(false)
   const tasksOn = useDocsApp()
 
+  // Быстрый созвон заводится тем же путём, что и назначенный: встреча в
+  // календаре плюс строка в журнале «Конференций». Иначе созвон «на ходу»
+  // нигде не остаётся, и через день доказать, что он был, нечем.
   async function startConference() {
     if (confBusy) return
     setConfBusy(true)
     try {
-      const m = await startMeeting()
-      try { await navigator.clipboard.writeText(m.guest_url) } catch { /* буфер недоступен */ }
-      toast.success('Конференция создана — гостевая ссылка скопирована', { description: m.guest_url })
+      const m = await createMeeting(companyId, { title: '', notify: false })
+      await joinMeeting(companyId, m.id)
+      try { await navigator.clipboard.writeText(m.guest_url || '') } catch { /* буфер недоступен */ }
+      toast.success('Конференция создана — ссылка для участников скопирована',
+        { description: m.guest_url || undefined })
     } catch (e) {
       const msg = (e as Error).message || ''
       toast.error(/503|не настроен/i.test(msg) ? 'Видеоконференции не настроены' : 'Не удалось создать конференцию')
@@ -77,11 +87,27 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
           кроме стола: шестая кнопка наезжала на бургер и выдавливала профиль за край
           (проверка МАГа 06.09.2026) — там вход остаётся на пульте и в меню профиля. */}
       {canApp('conf') && (
-        <Button variant="outline" size="sm" onClick={startConference} disabled={confBusy}
-          className={cn(btnCls(false), !conference && 'hidden md:inline-flex')} title="Видеоконференция">
-          <Video className="h-4 w-4" />
-          <span className="hidden lg:inline">Конференция</span>
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" disabled={confBusy}
+              className={cn(btnCls(false), !conference && 'hidden md:inline-flex')}
+              title="Конференции">
+              <Video className="h-4 w-4" />
+              <span className="hidden lg:inline">Конференция</span>
+            </Button>
+          </DropdownMenuTrigger>
+          {/* Два действия, а не одно: созвониться сейчас и посмотреть, что идёт,
+              что назначено и что было. Раньше кнопка умела только заводить новую
+              комнату, и вернуться во вчерашний разговор было некуда. */}
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={startConference}>
+              <Video className="mr-2 h-4 w-4" />Созвониться сейчас
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate('/conf')}>
+              <ListVideo className="mr-2 h-4 w-4" />Все конференции
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
       {/* Полный календарь: месяц, участники, согласия — работа В календаре, и ей
           нужно окно. Контекстный приёмник «положить дело на день» живёт в правой

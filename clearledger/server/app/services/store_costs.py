@@ -23,6 +23,8 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import store_receipts as receipt_rules
+
 
 async def ориентиры(db: AsyncSession, cid, stations: list[int] | None = None,
                     на_дату=None) -> dict[str, dict]:
@@ -79,13 +81,24 @@ async def ориентиры(db: AsyncSession, cid, stations: list[int] | None =
 
     # Неизменяемый ledger хранит фактическую себестоимость, включая услуги,
     # которые поставщик включил в стоимость партии.
+    #
+    # Цена берётся по СТРОКЕ целиком, а не по первому движению: исправленная
+    # после проведения накладная догоняется корректировкой (движения
+    # append-only, переписать прежнее нельзя). Взяли бы `unit_cost` первичного
+    # движения — исправленная цена не дошла бы до себестоимости, и в отчёты
+    # пошла бы прежняя цифра.
+    виды_прихода = "', '".join(receipt_rules.ВИДЫ_ПРИХОДА)
     for r in (await db.execute(text(f"""
-        SELECT m.item_uuid AS uuid, m.unit_cost AS cost, r.doc_date AS at
+        SELECT m.item_uuid AS uuid,
+               sum(m.amount) / nullif(sum(m.quantity), 0) AS cost,
+               max(r.doc_date) AS at
           FROM store_receipt_stock_movements m
           JOIN store_receipts r ON r.id = m.receipt_id
          WHERE r.company_id = :cid{ф.replace('station_id', 'r.station_id')}
-           AND r.status = 'accepted' AND m.kind = 'receipt_acceptance'
+           AND r.status = 'accepted' AND m.kind IN ('{виды_прихода}')
            {"AND r.doc_date <= :on" if на_дату is not None else ""}
+         GROUP BY m.item_uuid, m.receipt_id, m.line_id
+        HAVING sum(m.quantity) > 0
     """), p)).mappings().all():
         предложить(str(r["uuid"] or ""), float(r["cost"] or 0), r["at"], "ledger приёмки")
 

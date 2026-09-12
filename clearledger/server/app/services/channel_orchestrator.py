@@ -613,8 +613,11 @@ async def _run_market_registry(db: AsyncSession, channel: Channel, src: Source,
     # после обхода, описывает рынок на день обхода, и сравнение срезов поедет.
     snapshot_date = (cfg.get("snapshotDate")
                      or (sf.created_at.date().isoformat() if sf.created_at else None))
+    # Отпечаток файла едет в срез: «медиана на 12.09» должна воспроизводиться на
+    # том же наборе данных, а не на том, что лежит в базе сегодня.
     return await ingest_registry(db, channel.company_id, rows,
-                                 snapshot_date=snapshot_date, log_id=log_id)
+                                 snapshot_date=snapshot_date, log_id=log_id,
+                                 source_ref=(sf.fingerprint or str(sf.id))[:200])
 
 
 # ---------------------------------------------------------------------------

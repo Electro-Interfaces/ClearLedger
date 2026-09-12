@@ -31,6 +31,12 @@ const ProductStub = lazy(() => import('@/components/workspace/WorkspaceLayout').
 
 const IntakePage = lazy(() => import('@/pages/IntakePage').then((m) => ({ default: m.IntakePage })))
 const FilesPage = lazy(() => import('@/pages/FilesPage').then((m) => ({ default: m.FilesPage })))
+// «Конференции» — приложение пространства: журнал созвонов поверх календаря.
+const ConfLayout = lazy(() => import('@/pages/conf/ConfLayout').then((m) => ({ default: m.ConfLayout })))
+const ConfTalksPage = lazy(() => import('@/pages/conf/ConfTalksPage'))
+const ConfHistoryPage = lazy(() => import('@/pages/conf/ConfHistoryPage'))
+const ConfRecordsPage = lazy(() => import('@/pages/conf/ConfRecordsPage'))
+const ConfStatsPage = lazy(() => import('@/pages/conf/ConfStatsPage'))
 const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ default: m.ChannelsPage })))
 const ChannelDetailPage = lazy(() => import('@/pages/ChannelDetailPage').then((m) => ({ default: m.ChannelDetailPage })))
 const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ default: m.SourcesPage })))
@@ -151,8 +157,12 @@ function RequireFuel({ children }: { children: React.ReactNode }) {
  * пространства. Реестр молчит (офлайн/старый бэкенд) — пускаем: это состав, а не защита.
  */
 function RequireApp({ code, children }: { code: string; children: React.ReactNode }) {
-  const { companyId, canApp } = useCompany()
+  const { companyId, canApp, companies } = useCompany()
   const enabled = useAppEnabled(companyId, code)
+  // Пока состав компании ещё не приехал, решать нечего: первый переход в продукт
+  // выбрасывал человека на рабочий стол, и открыть его удавалось лишь со второго
+  // раза — продукт выглядел сломанным (CONF-02, приёмка 10.09.2026).
+  if (!companies.length) return null
   if (!canApp(code) || enabled === false) return <Navigate to="/" replace />
   return <>{children}</>
 }
@@ -221,6 +231,15 @@ function CompanyScopedProviders() {
       </FilterProvider>
     </TabsProvider>
   )
+}
+
+/** Короткая ссылка на работу: `/t/TF-42` открывает карточку поручения.
+ *
+ * Ключ разбирает сервер (`_task_or_404`), поэтому здесь нечего резолвить — ссылку
+ * можно написать рукой в письме или в коммите, не зная внутреннего UUID. */
+function TaskShortLink() {
+  const { key = '' } = useParams()
+  return <Navigate to={`/docs/company?view=errands&task=${encodeURIComponent(key)}`} replace />
 }
 
 /** Редирект старого маршрута канала на коннектор с сохранением id. */
@@ -297,7 +316,11 @@ const router = createBrowserRouter([
           // в роли, своё левое меню. Маршруты строятся из той же карты, что и меню.
           ...SPACE_PRODUCTS.filter((p) => p.modes.length).map((p) => ({
             path: p.route,
-            element: <RequireApp code={p.code}><WorkspaceLayout modes={p.modes} /></RequireApp>,
+            element: (
+              <RequireApp code={p.code}>
+                <WorkspaceLayout modes={p.modes} defaultMode={p.defaultMode} />
+              </RequireApp>
+            ),
           })),
           // Функции Ядра открыты из КАЖДОГО рабочего места — под его адресом
           // (`/finance/objects`): экран один, но видно, откуда смотрят, и от этого
@@ -321,6 +344,18 @@ const router = createBrowserRouter([
           { path: '/services', element: <Navigate to="/revenue?mode=rev_catalog&sub=rev_svc" replace /> },
           { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
           { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
+          // «Конференции»: что идёт сейчас, что назначено и что было. Сама
+          // встреча живёт в календаре — второго списка встреч в пространстве нет.
+          {
+            path: '/conf',
+            element: <RequireApp code="conf"><LazyPage><ConfLayout /></LazyPage></RequireApp>,
+            children: [
+              { index: true, element: <LazyPage><ConfTalksPage /></LazyPage> },
+              { path: 'history', element: <LazyPage><ConfHistoryPage /></LazyPage> },
+              { path: 'records', element: <LazyPage><ConfRecordsPage /></LazyPage> },
+              { path: 'stats', element: <LazyPage><ConfStatsPage /></LazyPage> },
+            ],
+          },
           { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },
           // «Заявки» — витрина Поддержки (docs/TICKETS.md). Продуктом пространства
           // больше не числится: её открывают из «Пульса», Центра управления и
@@ -340,6 +375,7 @@ const router = createBrowserRouter([
           // «Треке» — реестр поручений и доска в «Компании», разрезы в «Обзоре»,
           // типы и маршруты в «Настройке». Пока он оставался, у продукта было
           // два лица, и настройку правили то там, то там.
+          { path: '/t/:key', element: <TaskShortLink /> },
           { path: '/tasks-legacy', element: <LegacyTasksRedirect /> },
           { path: '/tasks-legacy/*', element: <LegacyTasksRedirect /> },
           // «Дело» — документооборот пространства: реестры корреспонденции и

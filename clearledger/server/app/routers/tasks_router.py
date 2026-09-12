@@ -598,8 +598,34 @@ async def _is_admin(db: AsyncSession, cid: uuid.UUID, user: User) -> bool:
     return m is not None and m.role == "admin"
 
 
+# Ключ работы, как её называют вслух и шлют ссылкой: `TF-42`.
+_TASK_KEY_RE = re.compile(r"^([A-Za-z0-9_]{1,10})-(\d{1,9})$")
+
+
 async def _task_or_404(db: AsyncSession, cid: uuid.UUID, task_id: str) -> Task:
-    t = await db.get(Task, _uuid_or_400(task_id, "task_id"))
+    """Задача по ссылке: UUID, ключ проекта (`TF-42`) или сквозной номер.
+
+    Резолв ключа стоит здесь, а не в одной ручке карточки: по присланной ссылке
+    работу сначала открывают, а потом по ней же двигают этап и пишут реплику —
+    значит понимать ключ обязаны все ручки, а не первая из них.
+    """
+    ref = (task_id or "").strip()
+    try:
+        t = await db.get(Task, uuid.UUID(ref))
+    except ValueError:
+        key = _TASK_KEY_RE.match(ref)
+        if key:
+            t = (await db.execute(
+                select(Task)
+                .join(TaskProject, TaskProject.id == Task.project_id)
+                .where(Task.company_id == cid,
+                       func.upper(TaskProject.code) == key.group(1).upper(),
+                       Task.project_number == int(key.group(2))))).scalars().first()
+        elif ref.isdigit():
+            t = (await db.execute(select(Task).where(
+                Task.company_id == cid, Task.number == int(ref)))).scalars().first()
+        else:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный task_id")
     if t is None or t.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
     return t

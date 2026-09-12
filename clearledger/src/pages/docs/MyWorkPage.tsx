@@ -10,6 +10,7 @@
  * работу. Открывать карточку ради одного нажатия — то, из-за чего почтовые
  * ящики разрастаются до тысяч непрочитанных.
  */
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -67,6 +68,11 @@ export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
   const { company } = useCompany()
   const qc = useQueryClient()
   const navigate = useNavigate()
+  /** Показывать ли то, что не попало в корзины разреза. Раскрывается ЗДЕСЬ, а не
+   *  переходом на другой экран: человек спрашивает «а где остальные поручения»,
+   *  стоя в этом списке, и уносить его из окна «Трека» ради ответа незачем
+   *  (замечание МАГа 08.09.2026). */
+  const [showRest, setShowRest] = useState(false)
 
   const q = useQuery({
     queryKey: ['work-mine', company.id],
@@ -97,12 +103,25 @@ export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
 
   const all = (q.data?.mine ?? []).filter(
     (r) => (!hideDeferred || !r.hidden) && (!hideTaken || !r.in_day))
-  const byBucket = only?.length ? all.filter((r) => only.includes(r.bucket)) : all
   const byReason = reasons?.length
-    ? byBucket.filter((r) => reasons.includes(r.reason)) : byBucket
-  const rows = kinds?.length
+    ? all.filter((r) => reasons.includes(r.reason)) : all
+  // Разрез по вопросу («что ждёт визы») и по типу предмета считается ДО деления
+  // по сроку: иначе «ещё N» приписывало к остатку отфильтрованное — при выборе
+  // «Поручения» в него попадали документы, которых человек и не просил.
+  const scoped = kinds?.length
     ? byReason.filter((r) => kinds.includes(r.kind)) : byReason
-  const buckets = (q.data?.buckets ?? []).filter((b) => !only?.length || only.includes(b.code))
+  const rows = only?.length && !showRest
+    ? scoped.filter((r) => only.includes(r.bucket)) : scoped
+  const rest = scoped.length - rows.length
+  const buckets = (q.data?.buckets ?? []).filter(
+    (b) => !only?.length || showRest || only.includes(b.code))
+  /** Чем именно остальное отличается от показанного — словами самих корзин
+   *  («на неделе», «без срока»), а не общим «в очереди»: вопрос «что это
+   *  значит» задают ровно потому, что очередь — это и есть весь список. */
+  const restNames = (q.data?.buckets ?? [])
+    .filter((b) => !only?.includes(b.code) && scoped.some((r) => r.bucket === b.code))
+    .map((b) => b.name.toLowerCase())
+    .join(', ')
 
   return (
     <div className={cn('space-y-4', heading && 'p-4')}>
@@ -130,15 +149,6 @@ export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
         </div>
       ) : null}
 
-      {/* Экран «Сегодня» берёт две корзины. Всё остальное не исчезает молча:
-          иначе человек, поставивший поручение без срока, ищет его и не находит. */}
-      {!q.isLoading && !q.isError && only?.length && all.length > rows.length ? (
-        <button type="button" onClick={() => navigate('/docs/work?view=mine-all')}
-          className="text-xs text-muted-foreground hover:text-foreground">
-          Ещё {all.length - rows.length} в очереди — без срока или позже
-        </button>
-      ) : null}
-
       {!q.isLoading && !q.isError && rows.length > 0 && buckets.map((b) => {
         const group = rows.filter((r) => r.bucket === b.code)
         if (group.length === 0) return null
@@ -160,6 +170,19 @@ export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
           </section>
         )
       })}
+
+      {/* Экран «Сегодня» берёт две корзины. Всё остальное не исчезает молча:
+          иначе человек, поставивший поручение без срока, ищет его и не находит.
+          Стоит ПОД списком — там, где взгляд упирается в конец и спрашивает
+          «а это всё?», — и раскрывает остальное прямо здесь. */}
+      {!q.isLoading && !q.isError && only?.length && (rest > 0 || showRest) ? (
+        <button type="button" onClick={() => setShowRest((v) => !v)}
+          className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+          {showRest
+            ? 'Свернуть — оставить только срочное'
+            : `Показать остальные ${rest}${restNames ? `: ${restNames}` : ''}`}
+        </button>
+      ) : null}
     </div>
   )
 }

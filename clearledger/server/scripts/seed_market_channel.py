@@ -9,6 +9,7 @@
 Прогон:  ~/.claude/skills/elsy-deploy/scripts/exec-py.sh rushydro seed_market_channel.py
 """
 import asyncio
+import os
 import pathlib
 
 from sqlalchemy import select
@@ -21,7 +22,8 @@ from app.services.channel_orchestrator import run_channel
 
 SRC_TYPE = "market_registry_file"
 TEMPLATE = "market_registry"
-FILE = pathlib.Path("/tmp/market-ru.csv")
+# Путь можно переопределить: приёмка частичного среза грузит обрезанный файл.
+FILE = pathlib.Path(os.getenv("MARKET_FILE", "/tmp/market-ru.csv"))
 
 
 async def main() -> None:

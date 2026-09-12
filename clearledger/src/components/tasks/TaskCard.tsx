@@ -625,6 +625,12 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
 
 /* ── Шапка: номер, тип, заголовок правится на месте ──────────────────── */
 
+/** Чем работа названа в ссылке: ключ проекта (`TF-42`) или сквозной номер.
+ *  Оба варианта сервер понимает; `№` из подписи в адрес не годится. */
+function taskLinkRef(task: { key?: string; number: number }): string {
+  return tasksService.taskKey(task).replace(/^№/, '')
+}
+
 function Header({ task, companyId, onRename, onBack, live, busy, onStage, onDone, onCancel }: {
   task: LoadedTask; companyId: string; onRename: (title: string) => void
   onBack?: () => void
@@ -727,7 +733,20 @@ function Header({ task, companyId, onRename, onBack, live, busy, onStage, onDone
         ))}
         {/* Работа встала из-за программы — вопрос уходит поставщику отсюда, с
             номером задачи предметом обращения (docs/BRIDGE.md §4.2). */}
-        <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-1">
+          {/* Ссылку на работу пересылают в письме и в чате, а искать её глазами
+              в списке из двухсот строк — то же самое, что не иметь ссылки.
+              Короткий адрес `/t/TF-42` читается человеком и живёт дольше UUID. */}
+          <Button size="icon" variant="ghost" className="size-8"
+            title="Скопировать ссылку на работу"
+            onClick={() => {
+              const link = `${window.location.origin}/t/${taskLinkRef(task)}`
+              navigator.clipboard?.writeText(link)
+                .then(() => toast.success('Ссылка скопирована', { description: link }))
+                .catch(() => toast.error('Не удалось скопировать', { description: link }))
+            }}>
+            <Link2 className="h-4 w-4" />
+          </Button>
           <AskSupportButton variant="ghost" subject={{
             kind: 'task', ref: String(task.id),
             label: `${tasksService.taskKey(task)} · ${task.title}`,

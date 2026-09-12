@@ -271,6 +271,58 @@ async def desired_version(db: AsyncSession, company: Company | None) -> str:
     return max(живые, key=_номер_версии)
 
 
+def _редакция_проведённой_приёмки(existing, lines: list, services: list,
+                                  шапка: dict | None = None) -> str:
+    """Чем новая редакция отличается от принятой: ничем, дописана, изменена.
+
+    Строку опознаём по `line_id` — он детерминирован от содержимого строки и
+    переживает пересборку пакета на станции. Дописанная позиция приходит со
+    своим `line_id`, прежние остаются на месте: движение по ним уже записано и
+    трогать его не надо. Изменение или пропажа прежней строки означает, что
+    расходятся уже сделанные движения, а их правит человек.
+    """
+    def срез(строки: list, поля: tuple) -> dict:
+        out = {}
+        for строка in строки or []:
+            ключ = str(строка.get("line_id") or "")
+            if not ключ:
+                # Строка без line_id несравнима — считаем документ изменённым и
+                # зовём человека, а не гадаем по номеру позиции.
+                return {}
+            out[ключ] = tuple(
+                round(float(строка.get(поле) or 0), 4)
+                if поле in ("qty_fact", "price", "amount") else str(строка.get(поле) or "")
+                for поле in поля
+            )
+        return out
+
+    поля_строк = ("qty_fact", "price", "amount", "barcode", "nomenclature_ref")
+    поля_услуг = ("amount", "name")
+    было_строк = срез(existing.lines, поля_строк)
+    стало_строк = срез(lines, поля_строк)
+    было_услуг = срез(getattr(existing, "services", None), поля_услуг)
+    стало_услуг = срез(services, поля_услуг)
+    if not было_строк and (existing.lines or []):
+        return "изменено"
+    if not стало_строк and (lines or []):
+        return "изменено"
+    for было, стало in ((было_строк, стало_строк), (было_услуг, стало_услуг)):
+        for ключ, значение in было.items():
+            if ключ not in стало or стало[ключ] != значение:
+                return "изменено"
+    # Шапку станция тоже правит — на 208 так меняли договор, и центр об этом
+    # молчал: строки те же, а основание документа другое. Применить её здесь
+    # нечем (это уже принятое основание), но промолчать нельзя.
+    for поле in ("supplier_id", "contract_id", "incoming_number", "number"):
+        было_значение = getattr(existing, поле, None)
+        стало_значение = (шапка or {}).get(поле, было_значение)
+        if str(было_значение or "") != str(стало_значение or ""):
+            return "изменено"
+
+    дописано = (set(стало_строк) - set(было_строк)) or (set(стало_услуг) - set(было_услуг))
+    return "дописано" if дописано else "совпадает"
+
+
 async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
                            payload: dict, docs: list) -> None:
     """Развернуть документы `purchase` пакета в документы приёмки центра.
@@ -532,17 +584,44 @@ async def _ingest_receipts(db: AsyncSession, company_id, station_id: int,
             db.add(row)
         else:
             if existing.status == "accepted":
-                # Проведённый документ неизменяем — и это защита уровня базы
-                # («accepted store receipt evidence is immutable»), а не
-                # соглашение приёмника. Исправление со станции сюда не
-                # применяется: сначала документ распроводят, и только потом он
-                # принимает новую редакцию. Здесь остаётся отметить, что
-                # редакция разошлась с принятой.
-                if canonical_errors and existing.accounting_status != "ready":
-                    store_receipt_accounting.mark_needs_review(existing, canonical_errors)
-                if not _manual_receipt_candidate_pending(existing):
-                    await receipt_rules.record_acceptance(db, existing)
-                continue
+                # Администратор правит уже проведённую накладную — обычная
+                # работа станции: провела, потом увидела ошибку в количестве
+                # или забытую позицию. Пока документ не уехал в бухгалтерию,
+                # центр принимает исправленную редакцию целиком, а движения
+                # склада приводит к ней корректировкой на разницу
+                # (`record_acceptance`, движения append-only).
+                #
+                # Уехавший в бухгалтерию (`ready`) документ так править нельзя:
+                # там он уже проведён человеком. Такая редакция только
+                # отмечается — в журнале и в причине разбора.
+                правка = _редакция_проведённой_приёмки(existing, lines, services, values)
+                if правка in ("дописано", "изменено") and existing.accounting_status != "ready":
+                    # Триггер смотрит на СТАРЫЙ статус строки, поэтому снимаем
+                    # его отдельным оператором: перезапись идёт уже по
+                    # документу в правке, и защита проведённого не нарушена.
+                    existing.status = "draft"
+                    await db.flush()
+                else:
+                    ошибки = list(canonical_errors)
+                    if правка != "совпадает":
+                        # Документ, уехавший в бухгалтерию, не помечается ничем
+                        # (статус ready не сбрасывают) — тогда единственный след
+                        # редакции остаётся в журнале, и он обязан быть.
+                        log.warning(
+                            "станция прислала редакцию проведённой приёмки: %s (АЗС %s, %s), "
+                            "строк было %d, стало %d, бухгалтерия: %s",
+                            existing.number, station_id, правка,
+                            len(existing.lines or []), len(lines), existing.accounting_status)
+                    if правка == "изменено":
+                        ошибки.append(
+                            f"Станция прислала исправленную редакцию документа, уже "
+                            f"уехавшего в бухгалтерию ({len(lines)} строк против "
+                            f"{len(existing.lines or [])}); исправьте документ в 1С")
+                    if ошибки and existing.accounting_status != "ready":
+                        store_receipt_accounting.mark_needs_review(existing, ошибки)
+                    if not _manual_receipt_candidate_pending(existing):
+                        await receipt_rules.record_acceptance(db, existing)
+                    continue
             if existing.source_uuid is None:
                 existing.source_uuid = str(source_uuid)[:64]
             # Происхождение читается ДО перезаписи полей: цикл ниже ставит

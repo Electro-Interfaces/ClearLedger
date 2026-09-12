@@ -138,16 +138,18 @@ async def list_operators(
             .group_by(MarketSite.operator_id))).all()}
 
     # Цена по оператору — медиана последних сравнимых наблюдений его точек.
-    price_rows = (await db.execute(
-        select(MarketSite.operator_id, MarketObservation.price_per_kwh)
-        .join(MarketObservation, MarketObservation.site_id == MarketSite.id)
-        .where(MarketSite.company_id == cid, MarketSite.operator_id.is_not(None),
-               MarketObservation.kind == "price",
-               MarketObservation.price_per_kwh.is_not(None))
-        .order_by(MarketObservation.observed_on.desc()))).all()
+    # Одна точка — одна цена, иначе станция, которую чаще импортировали, весит
+    # больше соседней (ревизия 12.09.2026, К4).
+    last_price = await _last_prices(db, cid)
+    site_operator = dict((str(sid), str(oid)) for sid, oid in (await db.execute(
+        select(MarketSite.id, MarketSite.operator_id)
+        .where(MarketSite.company_id == cid,
+               MarketSite.operator_id.is_not(None)))).all())
     prices: dict[str, list[float]] = {}
-    for oid, price in price_rows:
-        prices.setdefault(str(oid), []).append(float(price))
+    for site_id, obs in last_price.items():
+        oid = site_operator.get(site_id)
+        if oid:
+            prices.setdefault(oid, []).append(obs["price"])
 
     rows = (await db.execute(
         select(MarketOperator).where(MarketOperator.company_id == cid)
@@ -206,13 +208,8 @@ async def operator_card(
         if when:
             by_month[when[:7]] = by_month.get(when[:7], 0) + 1
 
-    prices = [float(o.price_per_kwh) for (o,) in (await db.execute(
-        select(MarketObservation)
-        .join(MarketSite, MarketObservation.site_id == MarketSite.id)
-        .where(MarketSite.operator_id == operator_id,
-               MarketObservation.company_id == cid,
-               MarketObservation.kind == "price",
-               MarketObservation.price_per_kwh.is_not(None)))).all()]
+    last_price = await _last_prices(db, cid)
+    prices = [last_price[str(s.id)]["price"] for s in network if str(s.id) in last_price]
 
     def _avg(values: list[float]) -> float | None:
         clean = [v for v in values if v is not None]
@@ -269,18 +266,32 @@ async def create_operator(
     return {"id": str(op.id), "name": op.name}
 
 
+# Полная выгрузка — 12 240 точек, и «отдать все» перестало быть ответом: карта и
+# реестр берут страницами, а общее число считается запросом, а не длиной страницы
+# (ревизия 12.09.2026, К10).
+SITES_PAGE_DEFAULT = 2000
+SITES_PAGE_MAX = 5000
+
+
 @router.get("/sites")
 async def list_sites(
     company_id: str = Query(...),
     kind: str | None = Query(None, description="ezs|mall|parking|fuel|…"),
     city: str | None = Query(None),
-    limit: int = Query(2000, le=5000),
+    bbox: str | None = Query(None, description="юг,запад,север,восток — область карты"),
+    limit: int = Query(SITES_PAGE_DEFAULT, le=SITES_PAGE_MAX),
+    offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Точки рынка для карты и списка — с последней ценой и её возрастом.
 
     Возраст показываем всегда: цена конкурента без даты выглядит достоверной, а решение
     по ней ошибочно (принцип 2 docs/MARKET.md).
+
+    Выдача страничная и честная о своём размере: `total` — сколько точек отвечает
+    фильтру, `returned` — сколько уместилось на странице. Прежде `total` считался по
+    длине уже урезанного списка, и карта с 12 240 точками показывала «5 000 точек»,
+    не сообщая, что остальное не доехало (ревизия 12.09.2026, К10).
     """
     cid = await _member(company_id, user, db)
     q = select(MarketSite).where(MarketSite.company_id == cid)
@@ -288,7 +299,18 @@ async def list_sites(
         q = q.where(MarketSite.kind == kind)
     if city:
         q = q.where(MarketSite.city == city)
-    sites = (await db.execute(q.order_by(MarketSite.name).limit(limit))).scalars().all()
+    if bbox:
+        try:
+            south, west, north, east = (float(x) for x in bbox.split(","))
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Область карты задаётся как «юг,запад,север,восток»")
+        q = q.where(MarketSite.latitude.between(south, north),
+                    MarketSite.longitude.between(west, east))
+    total = int((await db.execute(
+        select(func.count()).select_from(q.subquery()))).scalar() or 0)
+    sites = (await db.execute(
+        q.order_by(MarketSite.name).offset(offset).limit(limit))).scalars().all()
 
     # Последнее ценовое наблюдение на точку — одним запросом, а не N+1.
     last_price: dict[str, dict[str, Any]] = {}
@@ -302,8 +324,11 @@ async def list_sites(
         for o in rows:
             key = str(o.site_id)
             if key not in last_price:
+                # Ноль — это цена (бесплатно), а не отсутствие цены: прежде `or None`
+                # превращал бесплатную станцию в «цена неизвестна» (К2).
+                value = o.price_per_kwh if o.price_per_kwh is not None else o.price_value
                 last_price[key] = {
-                    "value": float(o.price_per_kwh or o.price_value or 0) or None,
+                    "value": float(value) if value is not None else None,
                     "unit": o.price_unit, "basis": o.basis,
                     "observedOn": o.observed_on, "channel": o.channel,
                     "confidence": o.confidence,
@@ -328,7 +353,8 @@ async def list_sites(
         "verifiedAt": s.verified_at.isoformat() if s.verified_at else None,
         "price": last_price.get(str(s.id)),
         "notes": s.notes,
-    } for s in sites], "total": len(sites)}
+    } for s in sites], "total": total, "returned": len(sites),
+        "offset": offset, "limit": limit}
 
 
 @router.post("/sites", status_code=status.HTTP_201_CREATED)
@@ -475,6 +501,36 @@ async def market_summary(
     }
 
 
+# Срок годности ценового наблюдения. Цена конкурента живёт днями: полугодовалая
+# «медиана рынка» выглядит достоверно, а решение по ней уже ошибочно (принцип 2
+# MARKET.md). Наблюдения старше в сравнение не идут нигде — это одно основание цены
+# на весь продукт (ревизия 12.09.2026, К4).
+PRICE_TTL_DAYS = 180
+
+
+async def _last_prices(db: AsyncSession, cid: uuid.UUID) -> dict[str, dict[str, Any]]:
+    """Последнее сравнимое ценовое наблюдение по каждой точке: одно на весь продукт.
+
+    Прежде каждый экран отбирал цену по-своему: список операторов брал всю историю
+    наблюдений (и точка с частым импортом весила больше), позиция — последнее
+    наблюдение без срока годности. Одна функция — один ответ на вопрос «почём здесь
+    заряжают», у всех экранов сразу.
+    """
+    fresh_from = (datetime.now(timezone.utc) - timedelta(days=PRICE_TTL_DAYS)).date().isoformat()
+    out: dict[str, dict[str, Any]] = {}
+    for obs in (await db.execute(
+        select(MarketObservation)
+        .where(MarketObservation.company_id == cid, MarketObservation.kind == "price",
+               MarketObservation.price_per_kwh.is_not(None),
+               MarketObservation.observed_on >= fresh_from)
+        .order_by(MarketObservation.site_id, MarketObservation.observed_on.desc()))).scalars():
+        out.setdefault(str(obs.site_id), {
+            "price": float(obs.price_per_kwh), "observedOn": obs.observed_on,
+            "basis": obs.basis, "channel": obs.channel,
+        })
+    return out
+
+
 # ── Позиция: наш объект в своём окружении ───────────────────────────────────
 # Главный экран пилота (docs/MARKET.md §5). Здесь внешние данные встречаются с
 # нашими: слева наша выручка и цена, справа — кто стоит рядом и почём заряжает.
@@ -566,15 +622,7 @@ async def market_position(
             MarketSite.company_id == cid, MarketSite.status != "closed",
             MarketSite.latitude.is_not(None), MarketSite.longitude.is_not(None))
     )).scalars().all()
-    price_rows = (await db.execute(
-        select(MarketObservation)
-        .where(MarketObservation.company_id == cid, MarketObservation.kind == "price",
-               MarketObservation.price_per_kwh.is_not(None))
-        .order_by(MarketObservation.site_id, MarketObservation.observed_on.desc())
-    )).scalars().all()
-    last_price: dict[str, MarketObservation] = {}
-    for o in price_rows:
-        last_price.setdefault(str(o.site_id), o)
+    last_price = await _last_prices(db, cid)
     # Кто чей: имя оператора в строке соседа отвечает на «с кем мы тут спорим»,
     # а `relation` отделяет чужую сеть от нашей собственной.
     ops = {o.id: o for o in (await db.execute(select(MarketOperator).where(
@@ -605,8 +653,8 @@ async def market_position(
                     "distanceKm": round(d, 1),
                     "ports": m.ports,
                     "maxPowerKw": float(m.max_power_kw) if m.max_power_kw else None,
-                    "pricePerKwh": float(obs.price_per_kwh) if obs and obs.price_per_kwh is not None else None,
-                    "observedOn": obs.observed_on if obs else None,
+                    "pricePerKwh": obs["price"] if obs else None,
+                    "observedOn": obs["observedOn"] if obs else None,
                     "lastSessionAt": last_session.isoformat() if last_session else None,
                     "alive": bool(last_session and last_session >= alive_since),
                 })
@@ -905,13 +953,7 @@ async def market_territories(
         MarketSite.company_id == cid, MarketSite.status == "active",
         MarketSite.kind == "ezs",
         MarketSite.location_id.is_(None)))).scalars().all()
-    prices: dict[str, float] = {}
-    for obs in (await db.execute(
-        select(MarketObservation)
-        .where(MarketObservation.company_id == cid, MarketObservation.kind == "price",
-               MarketObservation.price_per_kwh.is_not(None))
-        .order_by(MarketObservation.site_id, MarketObservation.observed_on.desc()))).scalars():
-        prices.setdefault(str(obs.site_id), float(obs.price_per_kwh))
+    prices = {k: v["price"] for k, v in (await _last_prices(db, cid)).items()}
 
     rows = _territory_rows(sites, ours, sales, prices, alive_since, level)
     rows.sort(key=lambda r: (-(r["ourSessions"]), -r["rivalSites"]))
@@ -952,6 +994,8 @@ async def market_site_score(
     days: int = Query(90, ge=30, le=365),
     place: str = Query("auto", pattern="^(auto|city|highway)$",
                        description="тип размещения: город, трасса или определить самим"),
+    speed_class: str = Query("auto", pattern="^(auto|fast|slow)$",
+                             description="класс будущей станции: быстрая или медленная"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Паспорт места под новую станцию: кто рядом, что мы там потеряем и сколько
@@ -984,13 +1028,7 @@ async def market_site_score(
         .group_by(ChargeSession.location_id))).all()
     sales = {str(loc): {"sessions": int(cnt), "revenue": float(amount or 0)}
              for loc, cnt, amount in sales_rows}
-    prices: dict[str, float] = {}
-    for obs in (await db.execute(
-        select(MarketObservation)
-        .where(MarketObservation.company_id == cid, MarketObservation.kind == "price",
-               MarketObservation.price_per_kwh.is_not(None))
-        .order_by(MarketObservation.site_id, MarketObservation.observed_on.desc()))).scalars():
-        prices.setdefault(str(obs.site_id), float(obs.price_per_kwh))
+    prices = {k: v["price"] for k, v in (await _last_prices(db, cid)).items()}
     ops = {o.id: o.name for o in (await db.execute(select(MarketOperator).where(
         MarketOperator.company_id == cid))).scalars().all()}
 
@@ -1047,20 +1085,34 @@ async def market_site_score(
                              lat, lon, float(site.latitude), float(site.longitude)) <= radius_km)
         want_class = "city" if near_named else "highway"
         place_guessed = True
+    # Класс скорости будущей станции: быстрая рядом с медленной — не аналог. Если
+    # человек не задал, берём преобладающий у соседей, а где и того нет — не
+    # фильтруем, но говорим об этом в подписи метода (ревизия 12.09.2026, К8).
+    want_speed = speed_class if speed_class != "auto" else None
+
     analogues = []
+    zero_demand = 0
     for loc_id, name, city, olat, olon, loc_class, speed in ours:
         sale = sales.get(str(loc_id))
-        if not sale or not sale["sessions"]:
-            continue
         if want_class and loc_class and loc_class != want_class:
+            continue
+        if want_speed and speed and speed != want_speed:
             continue
         near = rivals_around(float(olat), float(olon), str(loc_id))
         rivals_alive = sum(1 for r in near if r["alive"])
         if abs(rivals_alive - alive_rivals) > 1 or abs(len(near) - len(around)) > 2:
             continue
+        # Объект без единой сессии — это НЕ отсутствие данных, а настоящий ноль
+        # спроса, и выкидывать его значит обещать прогноз только по удачным местам.
+        # Считаем его в выборку и отдельно показываем, сколько таких.
+        sessions = float(sale["sessions"]) if sale else 0.0
+        revenue = float(sale["revenue"]) if sale else 0.0
+        if sessions == 0:
+            zero_demand += 1
         analogues.append({"locationId": str(loc_id), "name": name, "city": city,
                           "rivals": rivals_alive, "rivalsTotal": len(near),
-                          "locationClass": loc_class, "speedClass": speed, **sale})
+                          "locationClass": loc_class, "speedClass": speed,
+                          "sessions": sessions, "revenue": revenue})
     analogues.sort(key=lambda r: -r["sessions"])
 
     def _quartile(values: list[float], share: float) -> float | None:
@@ -1069,10 +1121,17 @@ async def market_site_score(
         ordered = sorted(values)
         return ordered[min(len(ordered) - 1, int(len(ordered) * share))]
 
+    # Два числа вместо одного. Ревизия справедливо запретила выкидывать нулевой
+    # спрос — прогноз по одним удачным местам обещает больше, чем сеть даёт. Но и
+    # медиана по выборке, где большинство молчит, показывает ноль и не помогает
+    # решать. Поэтому: медиана РАБОТАЮЩИХ аналогов как ожидание, медиана по всем —
+    # как трезвая поправка, и доля молчащих рядом.
     sessions = [float(a["sessions"]) for a in analogues]
     revenues = [float(a["revenue"]) for a in analogues]
-    sessions_forecast = _median(sessions)
-    revenue_forecast = _median(revenues)
+    working_sessions = [x for x in sessions if x > 0]
+    working_revenues = [float(a["revenue"]) for a in analogues if a["sessions"] > 0]
+    sessions_forecast = _median(working_sessions)
+    revenue_forecast = _median(working_revenues)
 
     return {
         "point": {"lat": lat, "lon": lon}, "radiusKm": radius_km, "days": days,
@@ -1083,18 +1142,27 @@ async def market_site_score(
         "placeClass": want_class,
         "placeGuessed": place_guessed,
         "forecast": {
-            "method": ("аналоги: наши работающие объекты с тем же окружением, "
+            "method": ("аналоги: наши объекты с тем же окружением, "
                        + ("город" if want_class == "city" else "трасса")
-                       + (" (определено автоматически)" if place_guessed else " (задано вами)")),
+                       + (" (определено автоматически)" if place_guessed else " (задано вами)")
+                       + (f", {'быстрые' if want_speed == 'fast' else 'медленные'}"
+                          if want_speed else ", любой скорости")),
+            # Сколько аналогов не заряжают вовсе: прогноз по одним удачным местам
+            # обещает больше, чем сеть даёт в среднем.
+            "zeroDemand": zero_demand,
             "analogues": len(analogues),
             "sessionsPerPeriod": sessions_forecast,
             "revenuePerPeriod": revenue_forecast,
             # Разброс важнее одной цифры: половина похожих объектов лежит между
             # этими значениями, и решение принимается по диапазону, а не по точке.
-            "sessionsLow": _quartile(sessions, 0.25),
-            "sessionsHigh": _quartile(sessions, 0.75),
-            "revenueLow": _quartile(revenues, 0.25),
-            "revenueHigh": _quartile(revenues, 0.75),
+            "sessionsLow": _quartile(working_sessions, 0.25),
+            "sessionsHigh": _quartile(working_sessions, 0.75),
+            "revenueLow": _quartile(working_revenues, 0.25),
+            "revenueHigh": _quartile(working_revenues, 0.75),
+            # Поправка на реальность: столько же, но с учётом молчащих объектов.
+            "sessionsAllMedian": _median(sessions),
+            "revenueAllMedian": _median(revenues),
+            "working": len(working_sessions),
             "days": days,
             "sample": analogues[:8],
         },
@@ -1133,13 +1201,10 @@ async def market_price_landscape(
     sites = {str(s.id): s for s in (await db.execute(select(MarketSite).where(
         MarketSite.company_id == cid, MarketSite.status != "closed",
         MarketSite.site_class != "home"))).scalars().all()}
-    last_price: dict[str, float] = {}
-    for obs in (await db.execute(
-        select(MarketObservation)
-        .where(MarketObservation.company_id == cid, MarketObservation.kind == "price",
-               MarketObservation.price_per_kwh.is_not(None))
-        .order_by(MarketObservation.site_id, MarketObservation.observed_on.desc()))).scalars():
-        last_price.setdefault(str(obs.site_id), float(obs.price_per_kwh))
+    # Только точки из отобранного списка: прежде общая медиана считалась по более
+    # широкому набору наблюдений, чем разложенные по классам мощности (К4).
+    last_price = {k: v["price"] for k, v in (await _last_prices(db, cid)).items()
+                  if k in sites}
 
     buckets = []
     for label, low, high in POWER_BUCKETS:
@@ -2109,6 +2174,73 @@ async def patch_growth_lead(
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return {"id": str(row.id), "status": row.status}
+
+
+@router.post("/growth/leads/{lead_id}/to-project", status_code=status.HTTP_201_CREATED)
+async def lead_to_project(
+    lead_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Взять кандидата в работу: завести площадку в «Проектах» с обоснованием.
+
+    Маркетинг не строит станции — он находит и обосновывает возможность. Переход
+    сюда и есть граница двух продуктов: дальше площадка живёт по регламенту стройки
+    со своими стадиями и гейтами, а маркетинг хранит ссылку и видит, чем это
+    кончилось.
+
+    Снимок обоснования переносится целиком: через полгода вопрос «почему мы сюда
+    пошли» задают именно площадке, а не кандидату.
+    """
+    cid = await _member(company_id, user, db)
+    lead = (await db.execute(select(MarketGrowthLead).where(
+        MarketGrowthLead.id == lead_id,
+        MarketGrowthLead.company_id == cid))).scalar_one_or_none()
+    if lead is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Кандидат не найден")
+    if lead.track != "build":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Площадка заводится только из кандидата на стройку: "
+                            "роуминг, франшиза и клиенты идут своим путём")
+    if lead.site_id:
+        return {"siteId": str(lead.site_id), "created": False,
+                "message": "площадка по этому кандидату уже заведена"}
+
+    from app.services import ezs_sites
+
+    prefix = ezs_sites.project_no_prefix()
+    last = (await db.execute(
+        select(func.max(EzsSite.project_no)).where(
+            EzsSite.company_id == cid,
+            EzsSite.project_no.like(f"{prefix}%")))).scalar()
+    seq = ezs_sites.parse_project_seq(last) + 1
+
+    evidence = lead.evidence_json or {}
+    today = datetime.now(timezone.utc).date().isoformat()
+    site = EzsSite(
+        company_id=cid, stage="lead", stage_since=today,
+        project_no=ezs_sites.format_project_no(prefix, seq),
+        title=lead.title,
+        city=(evidence.get("city") or lead.subject_ref),
+        region=evidence.get("region"),
+        lat=evidence.get("lat"), lon=evidence.get("lon"),
+        # Обоснование маркетинга целиком: окружение, прогноз, из чего он собран.
+        raw={"marketLead": {
+            "leadId": str(lead.id), "track": lead.track, "title": lead.title,
+            "evidence": evidence, "note": lead.note,
+            "takenOn": today, "takenBy": lead.owner_name,
+        }},
+        first_seen_at=datetime.now(timezone.utc),
+        last_seen_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc))
+    db.add(site)
+    await db.flush()
+
+    lead.site_id = site.id
+    lead.status = "in_project"
+    lead.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"siteId": str(site.id), "projectNo": site.project_no, "created": True,
+            "message": f"площадка {site.project_no} заведена в «Проектах», стадия «Лид»"}
 
 
 class BulkSiteIn(BaseModel):

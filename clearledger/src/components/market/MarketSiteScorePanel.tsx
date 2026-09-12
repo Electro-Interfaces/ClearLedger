@@ -220,9 +220,17 @@ export function MarketSiteScorePanel() {
               ) : (
                 <>
                   <p className="mb-2 text-xs text-muted-foreground">
-                    {f.method}; объектов в выборке {f.analogues}. Показана медиана и
-                    разброс: решение принимают по диапазону, а не по одной цифре.
+                    {f.method}; объектов в выборке {f.analogues}, из них заряжают{' '}
+                    {f.working}. Показана медиана работающих и разброс: решение
+                    принимают по диапазону, а не по одной цифре.
                   </p>
+                  {f.zeroDemand > 0 && (
+                    <p className="mb-2 text-xs text-warning">
+                      {f.zeroDemand} похожих объектов не заряжают вовсе. С их учётом
+                      медиана — {nf.format(f.sessionsAllMedian ?? 0)} сессий: столько
+                      даёт место такого типа в среднем по сети, а не в удачном случае.
+                    </p>
+                  )}
                   <ul className="space-y-1">
                     {f.sample.map((a) => (
                       <li key={a.locationId} className="flex items-baseline justify-between gap-2 text-xs">

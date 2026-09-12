@@ -8092,6 +8092,10 @@ class MarketSite(Base):
     # Разобранный состав коннекторов: [{"type": "CCS Combo 2", "power_kw": 60}, ...].
     # Строка `connectors` остаётся для показа, список — для отбора «есть ли здесь DC 60+».
     connectors_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Разъёмов всего — отдельно от `ports`. Порт = одновременно заряжаемый автомобиль;
+    # два разъёма одной станции обслуживают машину по очереди, и путать их значит
+    # завышать предложение рынка (ревизия 12.09.2026, К12).
+    connectors_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     current_type: Mapped[str | None] = mapped_column(String(8), nullable=True)   # DC | AC | LV
     vendor: Mapped[str | None] = mapped_column(String(120), nullable=True)      # производитель
     # Класс точки: сеть оператора или домашняя розетка частника. Половина записей
@@ -8217,6 +8221,10 @@ class MarketSiteSnapshot(Base):
         UUID(as_uuid=True), ForeignKey("market_sites.id", ondelete="CASCADE"), nullable=False, index=True)
     snapshot_date: Mapped[str] = mapped_column(String(10), nullable=False)   # ISO-дата среза
     source: Mapped[str] = mapped_column(String(40), nullable=False, default="registry")
+    # Отпечаток файла, из которого получен срез. Без него «медиана на 12.09» не
+    # воспроизводится: тот же день мог быть загружен дважды разными выгрузками
+    # (ревизия 12.09.2026, К9).
+    source_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # ── техническое состояние ──
     is_alive: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     under_repair: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

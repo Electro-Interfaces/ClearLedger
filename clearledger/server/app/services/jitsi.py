@@ -68,9 +68,15 @@ def sign_token(room: str, display_name: str, *, moderator: bool = True, hours: i
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.jitsi_kid})
 
 
-def meeting_urls(room: str, display_name: str, hours: int = 4) -> dict:
-    """Модераторская (с токеном) + гостевая (без токена) ссылки на комнату."""
-    token = sign_token(room, display_name, moderator=True, hours=hours)
+def meeting_urls(room: str, display_name: str, hours: int = 4,
+                 moderator: bool = True) -> dict:
+    """Ссылка входа (с токеном) + гостевая (без токена) на ту же комнату.
+
+    `moderator=False` — вход обычным участником: в чужой конференции
+    распоряжается тот, кто её собрал, и раздавать права ведущего каждому
+    вошедшему нельзя (решение МАГа 10.09.2026).
+    """
+    token = sign_token(room, display_name, moderator=moderator, hours=hours)
     base = f"https://{settings.jitsi_domain}/{quote(room)}"
     return {
         "room": room,

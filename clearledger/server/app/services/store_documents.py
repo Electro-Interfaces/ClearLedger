@@ -430,6 +430,21 @@ def cheque_lines_with_legacy_provenance(
     ]
 
 
+# Префикс отделяет ключи-имена от ключей-идентификаторов в одном словаре: имя
+# «3bb05cc0-…» теоретически возможно, и путать их нельзя.
+ИМЯ_ПРЕФИКС = "имя:"
+
+
+def _ключ_имени(значение: object) -> str:
+    """Имя товара как ключ справочника: первые сорок знаков без регистра.
+
+    Сорок — потому что столько оставляет касса: в чеке «Напиток Coca-Cola
+    Vanilla 0,33 л (Герман», в каталоге «…(Германия)».
+    """
+    имя = " ".join(str(значение or "").split())
+    return имя[:40].casefold().replace("ё", "е") if имя else ""
+
+
 async def load_item_catalog(db: AsyncSession) -> dict[str, dict]:
     """Контур и ставка НДС из карточки станции.
 
@@ -446,7 +461,8 @@ async def load_item_catalog(db: AsyncSession) -> dict[str, dict]:
     """
     try:
         rows = (await db.execute(text(
-            "SELECT external_uuid::text, vat_rate, sku_class, is_dish, purpose"
+            "SELECT external_uuid::text, vat_rate, sku_class, is_dish, purpose,"
+            " name, deleted"
             " FROM edge.item WHERE external_uuid IS NOT NULL"
             " ORDER BY deleted DESC"  # живая карточка перезаписывает удалённый дубль
         ))).all()
@@ -456,7 +472,12 @@ async def load_item_catalog(db: AsyncSession) -> dict[str, dict]:
         # ровно как раньше, а не теряет сумму.
         return {}
     out: dict[str, dict] = {}
-    for uid, vat_rate, sku_class, is_dish, purpose in rows:
+    # Ключ по имени — второй вход в тот же справочник, для строк, чью карточку по
+    # идентификатору не найти: имя касса режет по сорока знакам, поэтому и ключ
+    # берём от сорока. Имя, за которым стоит больше одной живой карточки, из
+    # ключей выбывает: обогащать по тёзке нельзя.
+    по_имени: dict[str, dict | None] = {}
+    for uid, vat_rate, sku_class, is_dish, purpose, name, deleted in rows:
         scope = _sku_scope(sku_class)
         if scope is None and is_dish:
             scope = "food"
@@ -469,6 +490,33 @@ async def load_item_catalog(db: AsyncSession) -> dict[str, dict]:
             карточка["scope"] = scope
         if карточка:
             out[str(uid)] = карточка
+            # Удалённая карточка остаётся ключом по идентификатору — чек, что на
+            # неё ссылается, обязан посчитаться. Но в ключи имён она не идёт:
+            # там она была бы тёзкой живой и отняла бы у неё имя.
+            ключ = "" if deleted else _ключ_имени(name)
+            if ключ:
+                по_имени[ключ] = None if ключ in по_имени else карточка
+
+    out.update({ИМЯ_ПРЕФИКС + ключ: карточка
+                for ключ, карточка in по_имени.items() if карточка})
+
+    # Слитая карточка уносит с собой свой идентификатор, а чек, пробитый ДО
+    # слияния, хранит старый: на 208 так встали 19 чеков и 6 смен за 26.08–03.09
+    # — двенадцать позиций (три вида «Любимого аромата», Coca-Cola, PEPSI,
+    # четыре черновика станции) искались по идентификаторам, которых больше нет
+    # ни в каталоге, ни на станции. Псевдонимы для того и заведены: старый ключ
+    # ведёт к живой карточке. Без них прошлое не поднять — перевыгрузка со
+    # станции вернёт те же исчезнувшие идентификаторы.
+    try:
+        псевдонимы = (await db.execute(text(
+            "SELECT alias_uuid::text, canonical_uuid::text FROM store_item_aliases"
+        ))).all()
+    except Exception:
+        return out
+    for alias, canonical in псевдонимы:
+        карточка = out.get(str(canonical))
+        if карточка and str(alias) not in out:
+            out[str(alias)] = карточка
     return out
 
 
@@ -484,6 +532,13 @@ def cheque_lines_from_catalog(
     out: list[dict] = []
     for line in lines:
         карточка = catalog.get(str(line.get("item_uuid") or "").strip())
+        if not карточка:
+            # Идентификатора может не быть вовсе (строка без карточки) или он
+            # может указывать на карточку, которой больше нет: слияние дублей и
+            # перезаливка НСИ уносят прежний ключ, а чек, пробитый до этого,
+            # хранит его навсегда. Имя переживает и слияние, и перезаливку.
+            ключ = _ключ_имени(line.get("name") or line.get("Номенклатура"))
+            карточка = catalog.get(ИМЯ_ПРЕФИКС + ключ) if ключ else None
         if not карточка:
             out.append(line)
             continue
@@ -733,7 +788,15 @@ def sanitize_edge_document(document: dict, *, trusted_station_packet: bool) -> d
 # отсеивался областью видимости. Так терялись переоценки, перемещения и списания
 # СКЛАДА (не торгового зала) — за 01.07–19.08.2026 это 2 переоценки и одно
 # перемещение на 9 280 ₽, за всю историю ЦБ — 960 движений и 288 пересчётов.
-PROJECTION_RULES_VERSION = 23
+# v24 (07.09.2026): ставка НДС строки чека берётся из справочника и по ИМЕНИ
+# товара, когда идентификатор карточки устарел. Слияние дублей и перезаливка НСИ
+# уносят прежний ключ, а чек, пробитый до этого, хранит его навсегда: на 208 так
+# встали 19 чеков и 6 смен за 26.08–03.09 — двенадцать позиций (три «Любимых
+# аромата», Coca-Cola, PEPSI, зажигалка без карточки, четыре черновика станции)
+# искались по ключам, которых больше нет ни в каталоге, ни на станции. Учтены и
+# псевдонимы слитых карточек. Содержимое документов от этого меняется — значит
+# версия правил обязана вырасти, иначе пересборка упрётся в защиту хеша.
+PROJECTION_RULES_VERSION = 24
 
 
 def _candidate_hash(candidate: ProjectionCandidate) -> str:

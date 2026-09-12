@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import select, text
+from sqlalchemy import select, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -37,6 +37,10 @@ SNAPSHOT_KIND = "onec_document_snapshot"
 # собственные документы, они и так лежат в её базе; касса ведёт свой архив.
 ONEC_PROJECTION_SOURCES = ("onec_legacy", "bp", "store")
 MONEY_RE = re.compile(r"^-?\d+\.\d{2}$")
+# Ключ номенклатуры годится для запроса к edge.item, только если это UUID:
+# черновики станции («draft-…») туда попадать не должны.
+_ПОХОЖ_НА_UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                            r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -258,6 +262,14 @@ async def _document_lines(
               for _, состав in строки if isinstance(состав, list)
               for позиция in состав if isinstance(позиция, dict)}
     ссылки.discard("")
+    # ⚠ Ключом строки бывает не UUID, а черновик станции («draft-1787761…»):
+    # карточку завели у кассы и ещё не признали в сети. Postgres на таком
+    # ключе валит ВЕСЬ запрос (`invalid UUID … length must be 32..36`), а с ним
+    # и сборку снимка — станция месяцами не получала ни одного документа.
+    # Имя такой строке не подберём, но остальные из-за неё страдать не должны.
+    ссылки = {ref for ref in ссылки if _ПОХОЖ_НА_UUID.fullmatch(ref)}
+    if not ссылки:
+        return из_цб
     имена: dict[str, str] = {}
     if ссылки:
         # справочник edge.item — общий на пространство, своей колонки компании
@@ -285,10 +297,18 @@ async def queue_onec_document_snapshot(
     if agent is None:
         raise ValueError("Станция не зарегистрирована в контуре Edge")
 
+    # ⚠ Документ 1С везём и НЕГЛАВНОЙ проекцией. Главной её делает наш
+    # собственный документ — но у станции его может не быть вовсе: на 208 учёт
+    # начат 18.08.2026, а витрина «1С до перехода» должна показывать июнь и
+    # июль. Так неглавными помечены все 57 отчётов о продажах, 18 поступлений,
+    # 9 пересчётов, 8 перемещений и 7 списаний — то есть ровно история, ради
+    # которой раздел и существует. Свои документы станции (`edge`) сюда
+    # по-прежнему не идут: они и так лежат в её базе.
     projections = list((await db.execute(select(StoreDocumentProjection).where(
         StoreDocumentProjection.company_id == company_id,
         StoreDocumentProjection.station_id == station_id,
-        StoreDocumentProjection.is_primary.is_(True),
+        or_(StoreDocumentProjection.is_primary.is_(True),
+            StoreDocumentProjection.projection_source == "onec_legacy"),
         StoreDocumentProjection.projection_source.in_(ONEC_PROJECTION_SOURCES),
         StoreDocumentProjection.document_kind.in_(SNAPSHOT_DOCUMENT_KINDS),
     ))).scalars().all())

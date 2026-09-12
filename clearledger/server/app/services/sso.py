@@ -134,6 +134,20 @@ def sign_visit_token(*, user, space_code: str, self_code: str,
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})
 
 
+def sign_vendor_token(*, user, company_id: str, self_code: str, vendor_code: str,
+                      operation: str, demo_id: str | None = None) -> str | None:
+    key = _private_key()
+    if not key:
+        return None
+    now = int(time.time())
+    return jwt.encode({
+        "iss": settings.sso_issuer, "aud": f"vendor:{vendor_code}",
+        "sub": str(user.id), "email": user.email, "company_id": company_id,
+        "space": self_code, "operation": operation, "demo_id": demo_id,
+        "iat": now, "nbf": now - 10, "exp": now + 120,
+    }, key, algorithm="RS256", headers={"kid": settings.sso_kid})
+
+
 def sign_service_token(*, aud: str, scope: str, ttl_seconds: int = 120,
                        company_id: str | None = None, actor_id: str | None = None) -> str | None:
     """Служебный (машинный) токен Ядра для приложения `aud`.
