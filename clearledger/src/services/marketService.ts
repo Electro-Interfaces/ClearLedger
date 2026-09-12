@@ -465,7 +465,7 @@ export const patchMarketOperator = (companyId: string, id: string, body: Record<
 /** Регион глазами компании: кто мы здесь и чем тут расти. */
 export interface GrowthPresenceRow {
   name: string
-  presence: 'monopoly' | 'strong' | 'contested' | 'weak' | 'absent'
+  presence: 'monopoly' | 'strong' | 'contested' | 'weak' | 'absent' | 'unknown'
   presenceLabel: string
   sharePct: number | null
   suggestedTracks: string[]

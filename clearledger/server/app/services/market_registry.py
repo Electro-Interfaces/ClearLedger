@@ -81,6 +81,11 @@ CURRENCY_BY_ID = {"1": "RUB", "2": "BYN", "3": "KZT"}
 # Одна пропажа бывает сбоем обхода, три подряд — закрытием.
 CLOSE_AFTER_MISSES = 3
 
+# Какую долю ранее известных точек источника должен покрывать срез, чтобы его
+# молчание о точке считалось свидетельством её исчезновения. Ниже порога срез
+# признаётся частичным: он говорит только о том, что в нём есть.
+COVERAGE_MIN = 0.8
+
 # Часовые пояса России. Единственный надёжный признак страны в этой выгрузке:
 # `country` пуст у всех строк, а по координатам Финляндия и Прибалтика лежат внутри
 # того же прямоугольника широт и долгот, что и Россия. Треть первой выгрузки (508
@@ -199,21 +204,27 @@ def parse_tariffs(raw: str | None) -> list[dict[str, Any]]:
     return out
 
 
-def comparable_price(unit: str, price: float, *, paid: bool, currency: str | None) -> float | None:
+def comparable_price(unit: str, price: float, *, paid: bool | None,
+                     currency: str | None) -> float | None:
     """Цена, которую МОЖНО сравнивать с нашей ₽/кВт·ч, либо None.
 
-    Три причины, по которым цена из реестра в сравнение не идёт:
+    Причины, по которым цена из реестра в сравнение не идёт:
       • не за киловатт-час (за минуту, за сессию, подписка) — принцип 3 MARKET.md;
       • не в рублях (в выгрузке есть Беларусь и Казахстан);
-      • ноль на ПЛАТНОЙ станции — это «цена не указана», а не «бесплатно»;
+      • отрицательная — такой цены не бывает, это порча данных;
+      • ноль без ЯВНОГО подтверждения бесплатности — «цена не указана»;
       • выше разумного потолка — почти наверняка цена за сессию в поле киловатт-часа.
 
-    Ноль на бесплатной станции — настоящий факт и возвращается как ноль: у нашей сети
-    сегодня бесплатны все точки, и сравнение с рынком строится именно на этом.
+    Ноль засчитывается бесплатностью только при `paid is False`. Пустое поле `paid`
+    («неизвестно») бесплатностью не считается: иначе каждая точка без признака
+    оплаты тянула бы медиану рынка к нулю, и «мы дороже рынка» получалось бы само
+    собой (ревизия 12.09.2026, К2).
     """
     if unit != "kwh" or currency != "RUB":
         return None
-    if price == 0 and paid:
+    if price < 0:
+        return None
+    if price == 0 and paid is not False:
         return None
     if price > PRICE_SANE_MAX:
         return None
@@ -302,6 +313,19 @@ def _dedup_key(kind: str, lat: float | None, lon: float | None, name: str) -> st
     return f"{kind}:{name.strip().lower()[:80]}"
 
 
+def snapshot_coverage(seen: set[str], known: set[str]) -> tuple[float, bool]:
+    """Какую долю ранее известных точек накрыл срез и считать ли его частичным.
+
+    Отдельной функцией, потому что это и есть та развилка, на которой прежняя логика
+    закрывала живые точки: частичная выгрузка молчала о них, а молчание засчитывалось
+    как исчезновение. Порог проверяется тестом, а не глазами.
+    """
+    if not known:
+        return 1.0, False
+    coverage = len(seen & known) / len(known)
+    return coverage, coverage < COVERAGE_MIN
+
+
 async def ingest_registry(
     db: AsyncSession,
     company_id: _uuid.UUID,
@@ -388,7 +412,8 @@ async def ingest_registry(
         max_power = _num(row.get("max_power")) or (max(powers) if powers else None)
         currency = CURRENCY_BY_ID.get(_s(row.get("currency_id")) or "", None)
         tariffs = parse_tariffs(row.get("tariffs"))
-        paid = bool(_bool(row.get("paid")))
+        # Трёхзначно: True — платная, False — бесплатная, None — источник промолчал.
+        paid = _bool(row.get("paid"))
         per_kwh = next((p for p in (comparable_price(t["unit"], t["price"], paid=paid,
                                                      currency=currency)
                                     for t in tariffs) if p is not None), None)
@@ -486,7 +511,7 @@ async def ingest_registry(
                 continue
             price = tariff["price"]
             sane_price = comparable_price(tariff["unit"], price, paid=paid, currency=currency)
-            if price == 0 and paid:
+            if price == 0 and paid is not False:
                 continue
             sane = sane_price is not None
             ref = f"{source}:{ext}:{tariff.get('window') or 'all'}"
@@ -511,12 +536,24 @@ async def ingest_registry(
 
     # Точка, которой в срезе не оказалось. Не удаляем и не закрываем сразу: обход
     # публичной карты бывает неполным, и «исчезла один раз» значит только это.
+    #
+    # Но сначала спрашиваем, ПОЛНЫЙ ЛИ СРЕЗ. Частичная выгрузка (обход прервался,
+    # файл по одному региону, пробный кусок) не свидетельствует об исчезновении
+    # остальных точек — а прежняя логика засчитывала им пропуск, и три таких файла
+    # подряд закрывали живую сеть (ревизия 12.09.2026, К1). Порог: срез должен
+    # покрывать хотя бы COVERAGE_MIN ранее известных точек источника.
+    known = {s.external_id for s in by_ext.values()
+             if s.source == source and s.status != "closed" and s.external_id}
+    coverage, partial = snapshot_coverage(seen_ext, known)
     closed = missing = 0
     for site in list(by_ext.values()):
         if site.source != source or (site.external_id in seen_ext):
             continue
-        site.closed_confirmations = (site.closed_confirmations or 0) + 1
         missing += 1
+        if partial:
+            # Неполный срез — молчание, а не отсутствие: счётчик не трогаем.
+            continue
+        site.closed_confirmations = (site.closed_confirmations or 0) + 1
         if site.closed_confirmations >= CLOSE_AFTER_MISSES and site.status != "closed":
             site.status = "closed"
             site.closed_on = today
@@ -528,8 +565,11 @@ async def ingest_registry(
     return {"status": "success", "snapshotDate": today, "rows": total,
             "created": created, "updated": updated, "prices": priced,
             "skipped": skipped, "foreign": foreign, "missing": missing, "closed": closed,
+            "coverage": round(coverage * 100, 1), "partial": partial,
             "message": (f"срез {today}: точек {created + updated} "
                         f"(новых {created}), цен {priced}, "
                         f"вне России {foreign}, "
                         f"без координат или ключа {skipped}, "
-                        f"не найдено в срезе {missing}")}
+                        f"не найдено в срезе {missing}"
+                        + (f" (срез покрывает {round(coverage * 100)} % известных точек — "
+                           "считаем его частичным, пропуски не засчитаны)" if partial else ""))}

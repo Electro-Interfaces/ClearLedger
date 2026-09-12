@@ -150,6 +150,7 @@ export function MarketGrowthPanel() {
                 <SelectItem value="contested">Делим рынок</SelectItem>
                 <SelectItem value="weak">Мы слабее рынка</SelectItem>
                 <SelectItem value="absent">Нас нет</SelectItem>
+              <SelectItem value="unknown">Рынок не наблюдали</SelectItem>
               </SelectContent>
             </Select>
             {(presence.data?.groups ?? []).map((g) => (

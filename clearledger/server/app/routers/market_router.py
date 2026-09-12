@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
@@ -196,7 +196,7 @@ async def operator_card(
         city = s.city or s.region or "город не указан"
         by_city[city] = by_city.get(city, 0) + 1
         power = float(s.max_power_kw) if s.max_power_kw else None
-        bucket = ("нет данных" if power is None else "до 22 кВт" if power <= 22
+        bucket = ("нет данных" if power is None else "22 кВт и ниже" if power <= 22
                   else "22–60 кВт" if power <= 60 else "60–150 кВт" if power <= 150
                   else "от 150 кВт")
         by_power[bucket] = by_power.get(bucket, 0) + 1
@@ -488,6 +488,9 @@ EARTH_KM = 6371.0
 # последней сессии, а не статус «Работает»: в публичном реестре полно станций со
 # связью 100 % и последней зарядкой год назад (docs/MARKET-ROADMAP.md §3.7).
 ALIVE_DAYS = 90
+# Меньше этого числа сессий в окне замер ничего не доказывает: процент от десятка
+# поездок меняется от одной компании друзей, поехавшей на дачу.
+MEASURE_MIN_SESSIONS = 30
 
 
 def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -539,7 +542,8 @@ async def market_position(
     sales_rows = (await db.execute(
         select(ChargeSession.location_id,
                func.count(), func.coalesce(func.sum(ChargeSession.energy_kwh), 0),
-               func.coalesce(func.sum(ChargeSession.amount), 0),
+               func.coalesce(func.sum(func.coalesce(
+                   ChargeSession.client_amount, ChargeSession.amount)), 0),
                func.coalesce(func.sum(
                    case((ChargeSession.amount > 0, ChargeSession.energy_kwh), else_=0)), 0))
         .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
@@ -893,8 +897,13 @@ async def market_territories(
                         "revenue": float(amount or 0)}
              for loc, cnt, energy, amount in sales_rows}
 
+    # Предложение территории — только действующие чужие ЗАРЯДКИ. Торговый центр и
+    # парковка объясняют спрос, но конкуренции не создают; планируемая точка ещё не
+    # работает. Прежде считались все не-домашние точки, и доля рынка падала там, где
+    # рядом просто много мест притяжения (ревизия 12.09.2026, К3).
     sites = (await db.execute(select(MarketSite).where(
-        MarketSite.company_id == cid, MarketSite.status != "closed",
+        MarketSite.company_id == cid, MarketSite.status == "active",
+        MarketSite.kind == "ezs",
         MarketSite.location_id.is_(None)))).scalars().all()
     prices: dict[str, float] = {}
     for obs in (await db.execute(
@@ -1099,7 +1108,7 @@ async def market_site_score(
 # объясняется сезоном (docs/MARKET-ROADMAP.md §3.3).
 
 POWER_BUCKETS = (
-    ("до 22 кВт", 0.0, 22.0),
+    ("менее 22 кВт", 0.0, 22.0),
     ("22–60 кВт", 22.0, 60.0),
     ("60–150 кВт", 60.0, 150.0),
     ("от 150 кВт", 150.0, 1e6),
@@ -1152,7 +1161,8 @@ async def market_price_landscape(
     # Наша цена — по оплаченным сессиям: у ЮЛ постоплата и `amount` = 0, и включение
     # их в делимое занижало бы тариф вдвое.
     our = (await db.execute(
-        select(func.coalesce(func.sum(ChargeSession.amount), 0),
+        select(func.coalesce(func.sum(func.coalesce(
+                   ChargeSession.client_amount, ChargeSession.amount)), 0),
                func.coalesce(func.sum(
                    case((ChargeSession.amount > 0, ChargeSession.energy_kwh), else_=0)), 0))
         .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since))).one()
@@ -1279,7 +1289,8 @@ async def market_elasticity(
     week = func.date_trunc("week", ChargeSession.started_at)
     rows = (await db.execute(
         select(ChargeSession.location_id, week.label("week"), func.count(),
-               func.coalesce(func.sum(ChargeSession.amount), 0),
+               func.coalesce(func.sum(func.coalesce(
+                   ChargeSession.client_amount, ChargeSession.amount)), 0),
                func.coalesce(func.sum(
                    case((ChargeSession.amount > 0, ChargeSession.energy_kwh), else_=0)), 0))
         .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
@@ -1604,7 +1615,26 @@ async def measure_scenario(
     did_revenue = (round(scope_revenue - ctrl_revenue, 1)
                    if scope_revenue is not None and ctrl_revenue is not None else None)
 
-    if not control or did_revenue is None:
+    # Вердикт выдаётся только тогда, когда его есть на чём основать. Прежде хватало
+    # разницы в 5 п.п. — при незавершённом окне, пересечении групп или десятке сессий
+    # это был вердикт по шуму (ревизия 12.09.2026, К7).
+    reasons: list[str] = []
+    if not control:
+        reasons.append("нет контрольной группы — отличить действие от сезона нечем")
+    if set(scope) & set(control):
+        reasons.append("объекты действия и контроль пересекаются")
+    if started + window > datetime.now(timezone.utc):
+        reasons.append(f"окно после действия ещё не закрылось: нужно {weeks} нед "
+                       f"после {row.started_on}")
+    before_n = _sum_of(scope_before, "sessions")
+    after_n = _sum_of(scope_after, "sessions")
+    if min(before_n, after_n) < MEASURE_MIN_SESSIONS:
+        reasons.append(f"мало наблюдений: {int(before_n)} сессий до и {int(after_n)} после "
+                       f"при пороге {MEASURE_MIN_SESSIONS}")
+    if did_revenue is None:
+        reasons.append("не с чем сравнивать: в одном из окон нет выручки")
+
+    if reasons:
         verdict = "unclear"
     elif did_revenue >= 5:
         verdict = "worked"
@@ -1625,13 +1655,13 @@ async def measure_scenario(
         measured_on=datetime.now(timezone.utc).date().isoformat(),
         fact_json=fact, did_sessions=did_sessions, did_revenue=did_revenue,
         verdict=verdict, author_name=getattr(user, "full_name", None) or user.email,
-        note=("контрольной группы нет — отличить действие от сезона нечем"
-              if not control else None))
+        note=("; ".join(reasons) if reasons else None))
     db.add(measure)
     row.status = "measured"
     await db.commit()
     return {"scenarioId": str(row.id), "verdict": verdict, "fact": fact,
-            "didSessions": did_sessions, "didRevenue": did_revenue}
+            "didSessions": did_sessions, "didRevenue": did_revenue,
+            "reasons": reasons}
 
 
 # ── Партнёрство и интеграции ────────────────────────────────────────────────
@@ -1765,6 +1795,7 @@ GROWTH_TRACKS = {
 }
 
 PRESENCE_LABEL = {
+    "unknown": "рынок здесь не наблюдали",
     "monopoly": "мы почти одни",
     "strong": "мы сильнее рынка",
     "contested": "делим рынок",
@@ -1774,6 +1805,8 @@ PRESENCE_LABEL = {
 
 # Что уместно делать при таком положении. Не предписание, а подсказка: решает человек.
 PRESENCE_TRACKS = {
+    # Пока рынок не наблюдали, единственное разумное действие — посмотреть.
+    "unknown": [],
     "monopoly": ["corporate", "loyalty", "build"],
     "strong": ["corporate", "loyalty", "build"],
     "contested": ["build", "roaming", "corporate"],
@@ -1782,11 +1815,20 @@ PRESENCE_TRACKS = {
 }
 
 
-def _presence(our_sites: int, rival_sites: int) -> tuple[str, float | None]:
-    """Режим присутствия по доле точек сети в территории."""
+def _presence(our_sites: int, rival_sites: int,
+              observed: bool = True) -> tuple[str, float | None]:
+    """Режим присутствия по доле точек сети в территории.
+
+    Отсутствие конкурентов в БАЗЕ — не то же самое, что их отсутствие на местности:
+    регион, где рынок ни разу не наблюдали, выглядел монополией со стопроцентной
+    долей, и подсказка «растите выручку, не стройте» опиралась на пустоту
+    (ревизия 12.09.2026, К3). Такой регион честнее назвать неизвестным.
+    """
     total = our_sites + rival_sites
     if our_sites == 0:
         return "absent", 0.0 if total else None
+    if not observed:
+        return "unknown", None
     share = our_sites / total * 100 if total else 100.0
     if share >= MONOPOLY_SHARE:
         return "monopoly", round(share, 1)
@@ -1816,7 +1858,9 @@ async def growth_presence(
     for row in reply["territories"]:
         if row["name"] == "территория не определена":
             continue
-        mode, share = _presence(row["ourSites"], row["rivalSites"])
+        # Наблюдали ли мы здесь рынок вообще: чужие точки или домашние розетки в базе.
+        observed = bool(row["rivalSites"] or row["homeSockets"])
+        mode, share = _presence(row["ourSites"], row["rivalSites"], observed=observed)
         rows.append({
             **row, "presence": mode, "presenceLabel": PRESENCE_LABEL[mode],
             "sharePct": share, "suggestedTracks": PRESENCE_TRACKS[mode],
@@ -1833,7 +1877,7 @@ async def growth_presence(
         g["rivalSites"] += row["rivalSites"]
         g["ourSessions"] += row["ourSessions"]
         g["ourRevenue"] += row["ourRevenue"]
-    order = ["monopoly", "strong", "contested", "weak", "absent"]
+    order = ["monopoly", "strong", "contested", "weak", "absent", "unknown"]
     rows.sort(key=lambda r: (order.index(r["presence"]), -r["ourRevenue"], -r["rivalSites"]))
     return {
         "days": days, "regions": rows,
@@ -1892,7 +1936,8 @@ async def growth_overview(
         .where(CorporateClient.company_id == cid))).scalar() or 0)
     corp_rows = (await db.execute(
         select(ChargeSession.user_type, func.count(),
-               func.coalesce(func.sum(ChargeSession.amount), 0),
+               func.coalesce(func.sum(func.coalesce(
+                   ChargeSession.client_amount, ChargeSession.amount)), 0),
                func.count(func.distinct(ChargeSession.user_id)))
         .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since)
         .group_by(ChargeSession.user_type))).all()
@@ -1903,15 +1948,25 @@ async def growth_overview(
     all_sessions = sum(v["sessions"] for v in by_type.values()) or 1
 
     # ── лояльность: возвращаются ли частные клиенты ──
+    # Удержание — про ЧАСТНОГО клиента, который ВЕРНУЛСЯ. Прежде считались любые
+    # строки сессий любого типа клиента: две неудачные попытки подряд в одном визите
+    # делали человека «вернувшимся», а корпоративный автопарк с ежедневными
+    # зарядками поднимал показатель сам собой (ревизия 12.09.2026, К6).
+    #
+    # Теперь: только ФЛ, только состоявшиеся зарядки (энергия отпущена) и возврат
+    # считается по РАЗНЫМ ДНЯМ — повтор попытки в тот же день возвратом не является.
+    retail = and_(ChargeSession.company_id == cid,
+                  ChargeSession.started_at >= since,
+                  ChargeSession.user_id.is_not(None),
+                  ChargeSession.energy_kwh > 0,
+                  func.upper(func.coalesce(ChargeSession.user_type, "")).like("ФЛ%"))
     visits = (await db.execute(
-        select(func.count(func.distinct(ChargeSession.user_id)))
-        .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
-               ChargeSession.user_id.is_not(None)))).scalar() or 0
+        select(func.count(func.distinct(ChargeSession.user_id))).where(retail))).scalar() or 0
     repeat_subq = (select(ChargeSession.user_id)
-                   .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
-                          ChargeSession.user_id.is_not(None))
+                   .where(retail)
                    .group_by(ChargeSession.user_id)
-                   .having(func.count() > 1)).subquery()
+                   .having(func.count(func.distinct(
+                       func.date(ChargeSession.started_at))) > 1)).subquery()
     repeat_users = (await db.execute(
         select(func.count()).select_from(repeat_subq))).scalar() or 0
 
@@ -1961,11 +2016,12 @@ async def growth_overview(
         },
         {
             "track": "loyalty", "label": GROWTH_TRACKS["loyalty"],
-            "headline": (f"{round(repeat_users / visits * 100)} % клиентов вернулись "
-                         f"за {days} дней" if visits else "клиентов за период не было"),
+            "headline": (f"{round(repeat_users / visits * 100)} % частных клиентов "
+                         f"приезжали в разные дни за {days}" if visits
+                         else "состоявшихся зарядок частных клиентов за период не было"),
             "metrics": [
-                {"label": "клиентов за период", "value": int(visits)},
-                {"label": "вернулись хотя бы раз", "value": int(repeat_users)},
+                {"label": "частных клиентов с зарядкой", "value": int(visits)},
+                {"label": "из них приезжали в разные дни", "value": int(repeat_users)},
                 {"label": "сессий ФЛ", "value": fl["sessions"] if fl else 0},
             ],
             "leads": by_track.get("loyalty", {}),

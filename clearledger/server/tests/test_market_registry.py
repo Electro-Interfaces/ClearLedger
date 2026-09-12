@@ -9,9 +9,10 @@
 """
 from __future__ import annotations
 
-from app.services.market_registry import (CURRENCY_BY_ID, _dedup_key, comparable_price,
-                                          in_russia, parse_connectors, parse_registry_csv,
-                                          parse_tariffs, site_class, split_address)
+from app.services.market_registry import (COVERAGE_MIN, CURRENCY_BY_ID, _dedup_key,
+                                          comparable_price, in_russia, parse_connectors,
+                                          parse_registry_csv, parse_tariffs, site_class,
+                                          snapshot_coverage, split_address)
 
 BOM = "﻿"
 CRLF = "\r\n"
@@ -68,6 +69,37 @@ def test_comparable_price_filters_what_breaks_the_median():
     # Не рубли (Беларусь, Казахстан) и не за киловатт-час.
     assert comparable_price("kwh", 0.54, paid=True, currency="BYN") is None
     assert comparable_price("minute", 7.0, paid=True, currency="RUB") is None
+
+
+def test_unknown_is_not_a_fact():
+    """Ревизия 12.09.2026 (К2): пустое поле — не «бесплатно» и не ноль.
+
+    Если считать молчание источника бесплатностью, каждая точка без признака оплаты
+    тянет медиану рынка к нулю, и вывод «мы дороже рынка» получается сам собой.
+    """
+    # Источник промолчал о платности — ноль не засчитывается.
+    assert comparable_price("kwh", 0.0, paid=None, currency="RUB") is None
+    # Явно бесплатная — засчитывается: у нашей сети это настоящий факт.
+    assert comparable_price("kwh", 0.0, paid=False, currency="RUB") == 0.0
+    # Отрицательной цены не бывает: это порча данных, а не скидка.
+    assert comparable_price("kwh", -5.0, paid=True, currency="RUB") is None
+
+
+def test_partial_snapshot_does_not_close_live_points():
+    """Ревизия 12.09.2026 (К1): неполная выгрузка молчит, а не свидетельствует.
+
+    Прежде каждая загрузка засчитывала пропуск всем отсутствующим точкам, и три
+    частичных файла подряд закрывали живую сеть конкурента.
+    """
+    known = {f"uuid-{i}" for i in range(100)}
+    # Обход прервался на трети — срез частичный, пропуски не засчитываются.
+    coverage, partial = snapshot_coverage({f"uuid-{i}" for i in range(33)}, known)
+    assert partial and coverage < COVERAGE_MIN
+    # Полный срез: молчание о точке — уже свидетельство.
+    coverage, partial = snapshot_coverage({f"uuid-{i}" for i in range(95)}, known)
+    assert not partial and coverage >= COVERAGE_MIN
+    # Первая загрузка (известных точек ещё нет) частичной не считается.
+    assert snapshot_coverage({"uuid-1"}, set()) == (1.0, False)
 
 
 def test_csv_bom_does_not_hide_the_key():
