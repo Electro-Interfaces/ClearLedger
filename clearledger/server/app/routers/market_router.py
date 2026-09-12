@@ -1626,6 +1626,111 @@ async def measure_scenario(
             "didSessions": did_sessions, "didRevenue": did_revenue}
 
 
+# ── Партнёрство и интеграции ────────────────────────────────────────────────
+# Роуминг имеет смысл там, где партнёр нас ДОПОЛНЯЕТ: его точки стоят в городах, где
+# нас нет, и наш клиент получает доступ туда, куда сегодня не доезжает. Партнёр,
+# который стоит ровно там же, где мы, роумингом ничего не добавляет — он просто
+# конкурент, с которым мы поделимся клиентом.
+
+@router.get("/partners")
+async def market_partners(
+    company_id: str = Query(...),
+    min_sites: int = Query(2, ge=1, le=100),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Кандидаты на роуминг: чем каждая сеть дополняет нашу, а чем дублирует."""
+    cid = await _member(company_id, user, db)
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+
+    our_cities = {city for (city,) in (await db.execute(
+        select(ServiceLocation.city).where(
+            ServiceLocation.company_id == cid,
+            ServiceLocation.city.is_not(None)))).all() if city}
+
+    sites = (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid, MarketSite.status != "closed",
+        MarketSite.site_class != "home", MarketSite.kind == "ezs",
+        MarketSite.operator_id.is_not(None)))).scalars().all()
+    operators = {o.id: o for o in (await db.execute(select(MarketOperator).where(
+        MarketOperator.company_id == cid))).scalars().all()}
+
+    by_op: dict[str, dict[str, Any]] = {}
+    for site in sites:
+        op = operators.get(site.operator_id)
+        if op is None or op.relation == "own":
+            continue
+        row = by_op.setdefault(str(op.id), {
+            "id": str(op.id), "name": op.name, "relation": op.relation,
+            "notes": op.notes, "sites": 0, "alive": 0, "ports": 0,
+            "overlapSites": 0, "newCities": set(), "sharedCities": set(),
+        })
+        row["sites"] += 1
+        row["ports"] += site.ports or 0
+        if site.last_session_at and site.last_session_at >= alive_since:
+            row["alive"] += 1
+        if site.city:
+            if site.city in our_cities:
+                row["overlapSites"] += 1
+                row["sharedCities"].add(site.city)
+            else:
+                row["newCities"].add(site.city)
+
+    rows = []
+    for row in by_op.values():
+        if row["sites"] < min_sites:
+            continue
+        new_cities = sorted(row.pop("newCities"))
+        shared_cities = sorted(row.pop("sharedCities"))
+        complement = row["sites"] - row["overlapSites"]
+        rows.append({
+            **row,
+            "complementSites": complement,
+            # Доля дополнения: чем выше, тем больше подключение даёт клиенту. Сеть с
+            # нулевым дополнением — это не партнёр, это конкурент в тех же городах.
+            "complementPct": round(complement / row["sites"] * 100, 1) if row["sites"] else None,
+            "newCities": new_cities[:12], "newCitiesTotal": len(new_cities),
+            "sharedCities": shared_cities[:12], "sharedCitiesTotal": len(shared_cities),
+        })
+    rows.sort(key=lambda r: (-r["complementSites"], -r["sites"]))
+    return {"partners": rows, "total": len(rows), "ourCities": len(our_cities),
+            "note": "дополнение считается по городам: точка партнёра в городе, где "
+                    "нас нет, расширяет доступ клиента; точка в нашем городе делит "
+                    "с нами тот же спрос"}
+
+
+@router.patch("/operators/{operator_id}")
+async def patch_operator(
+    operator_id: uuid.UUID, company_id: str = Query(...), body: dict = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Отношение к компании и заметка переговоров.
+
+    Отношение — это решение человека, а не свойство данных: одна и та же сеть бывает
+    конкурентом в одном регионе и кандидатом на роуминг в другом, и выбор делает тот,
+    кто ведёт переговоры.
+    """
+    cid = await _member(company_id, user, db)
+    op = (await db.execute(select(MarketOperator).where(
+        MarketOperator.id == operator_id,
+        MarketOperator.company_id == cid))).scalar_one_or_none()
+    if op is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Оператор не найден")
+    if "relation" in body:
+        allowed = {"competitor", "partner", "candidate", "integrated", "own", "other"}
+        if body["relation"] not in allowed:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Отношение должно быть одним из: {', '.join(sorted(allowed))}")
+        op.relation = body["relation"]
+    if "notes" in body:
+        op.notes = body["notes"]
+    if "siteUrl" in body:
+        op.site_url = body["siteUrl"]
+    if "inn" in body:
+        op.inn = body["inn"]
+    await db.commit()
+    return {"id": str(op.id), "relation": op.relation}
+
+
 class BulkSiteIn(BaseModel):
     """Строка списка при массовом заведении точек (вставка из таблицы)."""
     name: str

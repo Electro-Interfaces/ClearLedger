@@ -340,33 +340,42 @@ export const MARKET_MENU: CentralMenuItem[] = [
   { key: 'mk_map',          label: 'Карта рынка' },
   { key: 'mk_sites',        label: 'Точки рынка' },
   { key: 'mk_operators',    label: 'Компании' },
-  { key: 'mk_observations', label: 'Наблюдения' },
-  // Откуда мы знаем рынок и можно ли верить этому сегодня. Свежесть и покрытие —
-  // такие же показатели продукта, как цена (docs/MARKET-ROADMAP.md §3.4).
-  { key: 'mk_sources',      label: 'Источники и свежесть' },
-  // Ради чего всё остальное: гипотеза с контрольной группой и замер по итогу.
-  { key: 'mk_scenarios',    label: 'Сценарии' },
 ]
-// ТЕРРИТОРИИ — где строить. Второй раздел продукта: у «Рынка» вопрос «что вокруг
-// нас», здесь — «где нас нет и стоит ли туда идти».
+
+// ТЕРРИТОРИИ — где строить. У «Рынка» вопрос «что вокруг нас», здесь — «где нас нет
+// и стоит ли туда идти».
 export const MARKET_AREA_MENU: CentralMenuItem[] = [
   { key: 'mk_territories', label: 'Территории' },
   { key: 'mk_whitespots',  label: 'Белые пятна' },
   { key: 'mk_score',       label: 'Оценка площадки' },
 ]
+
 // ЦЕНА И ПОЗИЦИЯ — почём мы против рынка, что сделал сосед и что делает наша цена.
 export const MARKET_PRICE_MENU: CentralMenuItem[] = [
   { key: 'mk_landscape',  label: 'Ценовой ландшафт' },
   { key: 'mk_pressure',   label: 'Давление конкурента' },
   { key: 'mk_elasticity', label: 'Эластичность' },
 ]
-export const MARKET_KEYS = [...MARKET_MENU, ...MARKET_AREA_MENU,
-                            ...MARKET_PRICE_MENU].map((m) => m.key)
+
+// РЕШЕНИЯ — что делаем и откуда знаем. Сюда приходят действовать и проверять, чему
+// верить, а не рассматривать рынок: это другой заход, а не ещё один его пункт.
+export const MARKET_DECISION_MENU: CentralMenuItem[] = [
+  { key: 'mk_scenarios',    label: 'Сценарии' },
+  { key: 'mk_partners',     label: 'Партнёры и интеграции' },
+  { key: 'mk_observations', label: 'Наблюдения' },
+  { key: 'mk_sources',      label: 'Источники и свежесть' },
+]
+
+export const MARKET_KEYS = [...MARKET_MENU, ...MARKET_AREA_MENU, ...MARKET_PRICE_MENU,
+                            ...MARKET_DECISION_MENU].map((m) => m.key)
 
 /** Раздел «Маркетинга», которому принадлежит пункт: переход меняет и `mode`. */
-export function marketModeForKey(key: string): 'marketing' | 'marketing_area' | 'marketing_price' {
+export function marketModeForKey(
+  key: string,
+): 'marketing' | 'marketing_area' | 'marketing_price' | 'marketing_decision' {
   if (MARKET_AREA_MENU.some((m) => m.key === key)) return 'marketing_area'
   if (MARKET_PRICE_MENU.some((m) => m.key === key)) return 'marketing_price'
+  if (MARKET_DECISION_MENU.some((m) => m.key === key)) return 'marketing_decision'
   return 'marketing'
 }
 

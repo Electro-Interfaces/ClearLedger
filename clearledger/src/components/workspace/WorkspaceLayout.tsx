@@ -169,6 +169,7 @@ function ModePanel() {
       {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
       {coreMode === 'marketing_area' && <ManagementPanel mode="marketing_area" />}
       {coreMode === 'marketing_price' && <ManagementPanel mode="marketing_price" />}
+      {coreMode === 'marketing_decision' && <ManagementPanel mode="marketing_decision" />}
       {coreMode === 'financial' && <FinancialPanel />}
       {/* Разделы «Бухгалтерии» — потоки и сквозное; панель одна, различаются
           составом пунктов (см. moduleComponents). */}

@@ -436,6 +436,32 @@ export const measureMarketScenario = (companyId: string, id: string, weeks = 8) 
   post<{ scenarioId: string; verdict: string; didSessions: number | null; didRevenue: number | null }>(
     `/api/market/scenarios/${id}/measure?company_id=${encodeURIComponent(companyId)}&weeks=${weeks}`, {})
 
+/** Сеть-кандидат на роуминг: чем дополняет нашу, чем дублирует. */
+export interface MarketPartner {
+  id: string
+  name: string
+  relation: string
+  notes: string | null
+  sites: number
+  alive: number
+  ports: number
+  overlapSites: number
+  complementSites: number
+  complementPct: number | null
+  newCities: string[]
+  newCitiesTotal: number
+  sharedCities: string[]
+  sharedCitiesTotal: number
+}
+
+export const getMarketPartners = (companyId: string, params?: { min_sites?: number }) =>
+  get<{ partners: MarketPartner[]; total: number; ourCities: number; note: string }>(
+    '/api/market/partners', { company_id: companyId, ...params })
+
+export const patchMarketOperator = (companyId: string, id: string, body: Record<string, unknown>) =>
+  patch<{ id: string; relation: string }>(
+    `/api/market/operators/${id}?company_id=${encodeURIComponent(companyId)}`, body)
+
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(
     `/api/market/sites/bulk?company_id=${encodeURIComponent(companyId)}&source=${source}`, { items })
