@@ -1,16 +1,20 @@
 """Разбор выгрузки реестра ЭЗС страны (app/services/market_registry.py).
 
-Проверяем то, на чём приём ломается молча и выводы становятся неверными:
-разбор коннекторов и тарифов с окнами, класс точки, площадка-агрегатор вместо
-оператора, валюта, BOM в первой колонке. База здесь не нужна — это чистый разбор.
+Проверяем то, на чём приём ломается молча и выводы становятся неверными: разбор
+коннекторов и тарифов с окнами, класс точки, сравнимость цены, BOM в первой колонке
+и ключ, по которому два поста в одном месте не склеиваются в одну точку. База здесь
+не нужна — это чистый разбор.
 
 Прогон:  py -m pytest server/tests/test_market_registry.py -q
 """
 from __future__ import annotations
 
-from app.services.market_registry import (CURRENCY_BY_ID, comparable_price,
+from app.services.market_registry import (CURRENCY_BY_ID, _dedup_key, comparable_price,
                                           parse_connectors, parse_registry_csv,
                                           parse_tariffs, site_class)
+
+BOM = "﻿"
+CRLF = "\r\n"
 
 
 def test_connectors_keep_own_power():
@@ -52,7 +56,7 @@ def test_currency_guard():
 
 
 def test_comparable_price_filters_what_breaks_the_median():
-    """Четыре случая из настоящей выгрузки, каждый из которых сдвигает медиану рынка."""
+    """Случаи из настоящей выгрузки, каждый из которых сдвигает медиану рынка."""
     # Обычный рублёвый тариф — сравним.
     assert comparable_price("kwh", 19.0, paid=True, currency="RUB") == 19.0
     # Ноль на БЕСПЛАТНОЙ станции — настоящий факт (вся наша сеть такая).
@@ -69,14 +73,39 @@ def test_comparable_price_filters_what_breaks_the_median():
 def test_csv_bom_does_not_hide_the_key():
     """BOM в первой колонке делает ключ точки невидимым, и весь файл заезжает как
     новые записи при каждом прогоне."""
-    content = ("﻿id;uuid;name;lat;lon;operator;icon_type;connectors;tariffs;currency_id\r\n"
-               "53512;abc-1;Акварель ТЦ;56.00018;37.87966;PUNKT E;public_station_paid_fast;"
-               "CHAdeMO:50;per_kwt:20@08:00-23:00;1\r\n").encode("utf-8")
-    rows = parse_registry_csv(content)
+    lines = [
+        BOM + "id;uuid;name;lat;lon;operator;icon_type;connectors;tariffs;currency_id",
+        "53512;abc-1;Акварель ТЦ;56.00018;37.87966;PUNKT E;public_station_paid_fast;"
+        "CHAdeMO:50;per_kwt:20@08:00-23:00;1",
+    ]
+    rows = parse_registry_csv(CRLF.join(lines).encode("utf-8"))
     assert len(rows) == 1
-    assert rows[0]["id"] == "53512"          # не "﻿id"
+    assert rows[0]["id"] == "53512"          # ключ не спрятан за BOM
     assert rows[0]["uuid"] == "abc-1"
     assert parse_tariffs(rows[0]["tariffs"])[0]["price"] == 20.0
+
+
+def test_two_posts_in_one_place_keep_their_own_keys():
+    """Два поста в одном торговом центре стоят в 50 метрах: по округлённой координате
+    они неразличимы, по `uuid` — разные станции.
+
+    Поэтому внутри одного источника ключом служит `uuid`, а округлённая координата
+    остаётся запасным ключом только между РАЗНЫМИ источниками (OSM и реестр про одну
+    станцию — одна точка). Иначе часть рынка исчезает молча: на первой загрузке так
+    склеились 6 точек из 1 506.
+    """
+    a = _dedup_key("ezs", 55.75001, 37.61001, "Пост 1")
+    b = _dedup_key("ezs", 55.75002, 37.61002, "Пост 2")
+    assert a == b, "округление должно совпасть — иначе проверка бессмысленна"
+
+    lines = [
+        BOM + "id;uuid;name;lat;lon;operator;icon_type",
+        "1;uuid-a;Пост 1;55.75001;37.61001;PUNKT E;public_station_fast",
+        "2;uuid-b;Пост 2;55.75002;37.61002;PUNKT E;public_station_fast",
+    ]
+    rows = parse_registry_csv(CRLF.join(lines).encode("utf-8"))
+    assert len(rows) == 2
+    assert {r["uuid"] for r in rows} == {"uuid-a", "uuid-b"}
 
 
 if __name__ == "__main__":  # прогон без pytest

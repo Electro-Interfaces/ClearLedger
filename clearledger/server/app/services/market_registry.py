@@ -269,7 +269,12 @@ async def ingest_registry(
     sites = (await db.execute(select(MarketSite).where(
         MarketSite.company_id == company_id))).scalars().all()
     by_ext = {s.external_id: s for s in sites if s.external_id}
-    by_key = {s.dedup_key: s for s in sites if s.dedup_key}
+    # Запасной ключ (округлённая координата) склеивает точку только с ЧУЖИМ источником:
+    # OSM и реестр про одну станцию — одна точка. Внутри одного источника он опасен —
+    # два зарядных поста в одном торговом центре стоят в 50 метрах и по координате
+    # неразличимы, а по `uuid` это разные станции, и терять вторую нельзя.
+    by_key = {s.dedup_key: s for s in sites
+              if s.dedup_key and (s.source != source or not s.external_id)}
 
     # Срезы и наблюдения этой даты — чтобы повтор прогона правил строку, а не добавлял.
     snaps = {(s.site_id, s.snapshot_date): s for s in (await db.execute(
@@ -373,7 +378,9 @@ async def ingest_registry(
         await db.flush()
 
         by_ext[ext] = site
-        by_key[key] = site
+        # В запасной ключ только что заведённую точку НЕ кладём: следующая строка того
+        # же файла с тем же округлением — соседний пост, а не повтор.
+        by_key.pop(key, None)
 
         snap = snaps.get((site.id, today))
         if snap is None:
