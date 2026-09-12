@@ -352,11 +352,20 @@ export const MARKET_AREA_MENU: CentralMenuItem[] = [
   { key: 'mk_whitespots',  label: 'Белые пятна' },
   { key: 'mk_score',       label: 'Оценка площадки' },
 ]
-export const MARKET_KEYS = [...MARKET_MENU, ...MARKET_AREA_MENU].map((m) => m.key)
+// ЦЕНА И ПОЗИЦИЯ — почём мы против рынка, что сделал сосед и что делает наша цена.
+export const MARKET_PRICE_MENU: CentralMenuItem[] = [
+  { key: 'mk_landscape',  label: 'Ценовой ландшафт' },
+  { key: 'mk_pressure',   label: 'Давление конкурента' },
+  { key: 'mk_elasticity', label: 'Эластичность' },
+]
+export const MARKET_KEYS = [...MARKET_MENU, ...MARKET_AREA_MENU,
+                            ...MARKET_PRICE_MENU].map((m) => m.key)
 
 /** Раздел «Маркетинга», которому принадлежит пункт: переход меняет и `mode`. */
-export function marketModeForKey(key: string): 'marketing' | 'marketing_area' {
-  return MARKET_AREA_MENU.some((m) => m.key === key) ? 'marketing_area' : 'marketing'
+export function marketModeForKey(key: string): 'marketing' | 'marketing_area' | 'marketing_price' {
+  if (MARKET_AREA_MENU.some((m) => m.key === key)) return 'marketing_area'
+  if (MARKET_PRICE_MENU.some((m) => m.key === key)) return 'marketing_price'
+  return 'marketing'
 }
 
 /**

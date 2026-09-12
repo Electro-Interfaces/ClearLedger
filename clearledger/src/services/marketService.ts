@@ -339,6 +339,47 @@ export const getMarketSiteScore = (
   params: { lat: number; lon: number; radius_km?: number; days?: number; place?: string },
 ) => get<MarketSiteScore>('/api/market/site-score', { company_id: companyId, ...params })
 
+/** Ценовой ландшафт: почём рынок по классам мощности и где в нём мы. */
+export interface MarketPriceLandscape {
+  days: number
+  buckets: { bucket: string; sites: number; median: number | null
+             low: number | null; high: number | null }[]
+  unknownPower: number
+  pricedSites: number
+  ourPricePerKwh: number | null
+  marketMedianPerKwh: number | null
+  gapPct: number | null
+}
+
+/** Давление конкурента: кто появился рядом и что стало с нашими сессиями. */
+export interface MarketPressureRow {
+  locationId: string; name: string; city: string | null
+  rivalName: string; rivalOperator: string | null
+  distanceKm: number; appearedOn: string
+  sessionsBefore: number; sessionsAfter: number
+  changePct: number | null; rivalsNearby: number
+}
+
+/** Случай изменения нашей цены и отклик спроса на него. */
+export interface MarketElasticityCase {
+  locationId: string; name: string; week: string
+  priceWas: number; priceNow: number; pricePct: number
+  sessionsWas: number; sessionsNow: number; sessionsPct: number
+  elasticity: number | null
+}
+
+export const getMarketPriceLandscape = (companyId: string, params?: { days?: number }) =>
+  get<MarketPriceLandscape>('/api/market/price-landscape', { company_id: companyId, ...params })
+
+export const getMarketPressure = (companyId: string, params?: { months?: number; radius_km?: number }) =>
+  get<{ months: number; radiusKm: number; rows: MarketPressureRow[]; total: number; note: string }>(
+    '/api/market/pressure', { company_id: companyId, ...params })
+
+export const getMarketElasticity = (companyId: string, params?: { weeks?: number }) =>
+  get<{ weeks: number; cases: MarketElasticityCase[]; total: number
+        medianElasticity: number | null; note: string }>(
+    '/api/market/elasticity', { company_id: companyId, ...params })
+
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(
     `/api/market/sites/bulk?company_id=${encodeURIComponent(companyId)}&source=${source}`, { items })

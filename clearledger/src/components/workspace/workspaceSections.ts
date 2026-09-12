@@ -31,7 +31,7 @@ import {
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
   FUEL_HELP_MENU,
-  MARKET_MENU, MARKET_AREA_MENU, MARKET_KEYS,
+  MARKET_MENU, MARKET_AREA_MENU, MARKET_PRICE_MENU, MARKET_KEYS,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
@@ -55,7 +55,7 @@ export {
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
-  MARKET_MENU, MARKET_AREA_MENU, MARKET_KEYS,
+  MARKET_MENU, MARKET_AREA_MENU, MARKET_PRICE_MENU, MARKET_KEYS,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
@@ -197,6 +197,10 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // нет и стоит ли туда идти. Это разные заходы, а не два взгляда на один экран.
   const marketingArea: WorkspaceSection = { mode: 'marketing_area', label: 'Территории',
     icon: MapIcon, items: isEnergy ? MARKET_AREA_MENU : [], connected: isEnergy }
+  // Третий раздел: тариф. Отдельно от «Рынка», потому что приходят сюда со своим
+  // вопросом — «поднимать или нет», а не «что вокруг».
+  const marketingPrice: WorkspaceSection = { mode: 'marketing_price', label: 'Цена и позиция',
+    icon: Banknote, items: isEnergy ? MARKET_PRICE_MENU : [], connected: isEnergy }
   // Разделы «Бухгалтерии» = потоки + сквозное; состав каждого — его компоненты.
   // Раздел без единого включённого компонента в рельсе не показывается: пустая
   // вторая панель читается как поломка.
@@ -285,7 +289,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
        perPicture, perOfficial, perRecords, perCash, perPeople, perSetup, perHelp, normalize,
        connect]
     : isEnergy
-    ? [sales, salesSessions, salesCommerce, corporate, marketing, marketingArea,
+    ? [sales, salesSessions, salesCommerce, corporate, marketing, marketingArea, marketingPrice,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
        storeSections[0], ...accSections, exp, normalize, reconcile, connect]
     : [sales, salesSessions, salesCommerce, salesGoods, salesHelp, ...storeSections, storeHelp, ops,

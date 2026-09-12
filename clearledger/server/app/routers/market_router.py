@@ -1084,6 +1084,249 @@ async def market_site_score(
     }
 
 
+# ── Цена и позиция ──────────────────────────────────────────────────────────
+# Три вопроса тарифа: где мы стоим относительно рынка, что с нами сделал сосед и
+# что делает с нами собственная цена. Первые два — про рынок, третий — про нас, но
+# без рынка он не читается: рост сессий после снижения цены с тем же успехом
+# объясняется сезоном (docs/MARKET-ROADMAP.md §3.3).
+
+POWER_BUCKETS = (
+    ("до 22 кВт", 0.0, 22.0),
+    ("22–60 кВт", 22.0, 60.0),
+    ("60–150 кВт", 60.0, 150.0),
+    ("от 150 кВт", 150.0, 1e6),
+)
+
+
+@router.get("/price-landscape")
+async def market_price_landscape(
+    company_id: str = Query(...),
+    days: int = Query(90, ge=30, le=365),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Ценовой ландшафт: почём заряжает рынок по классам мощности и где в нём мы.
+
+    Сравнивать «нашу цену» с «ценой рынка» без класса мощности нельзя: медленная
+    AC-зарядка у торгового центра и быстрая DC на трассе — разный товар, и общая
+    медиана по ним обеим не значит ничего (принцип 3 MARKET.md).
+    """
+    cid = await _member(company_id, user, db)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+
+    sites = {str(s.id): s for s in (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid, MarketSite.status != "closed",
+        MarketSite.site_class != "home"))).scalars().all()}
+    last_price: dict[str, float] = {}
+    for obs in (await db.execute(
+        select(MarketObservation)
+        .where(MarketObservation.company_id == cid, MarketObservation.kind == "price",
+               MarketObservation.price_per_kwh.is_not(None))
+        .order_by(MarketObservation.site_id, MarketObservation.observed_on.desc()))).scalars():
+        last_price.setdefault(str(obs.site_id), float(obs.price_per_kwh))
+
+    buckets = []
+    for label, low, high in POWER_BUCKETS:
+        prices = [price for site_id, price in last_price.items()
+                  if (site := sites.get(site_id)) is not None
+                  and site.max_power_kw is not None
+                  and low <= float(site.max_power_kw) < high]
+        ordered = sorted(prices)
+        buckets.append({
+            "bucket": label, "sites": len(prices),
+            "median": _median(prices),
+            "low": ordered[int(len(ordered) * 0.25)] if ordered else None,
+            "high": ordered[min(len(ordered) - 1, int(len(ordered) * 0.75))] if ordered else None,
+        })
+    unknown_power = sum(1 for site_id in last_price
+                        if (site := sites.get(site_id)) is not None
+                        and site.max_power_kw is None)
+
+    # Наша цена — по оплаченным сессиям: у ЮЛ постоплата и `amount` = 0, и включение
+    # их в делимое занижало бы тариф вдвое.
+    our = (await db.execute(
+        select(func.coalesce(func.sum(ChargeSession.amount), 0),
+               func.coalesce(func.sum(
+                   case((ChargeSession.amount > 0, ChargeSession.energy_kwh), else_=0)), 0))
+        .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since))).one()
+    our_price = round(float(our[0]) / float(our[1]), 2) if our[1] and float(our[1]) > 0 else None
+    market_all = _median(list(last_price.values()))
+
+    return {
+        "days": days, "buckets": buckets,
+        "unknownPower": unknown_power,
+        "pricedSites": len(last_price),
+        "ourPricePerKwh": our_price,
+        "marketMedianPerKwh": market_all,
+        "gapPct": (round((our_price - market_all) / market_all * 100, 1)
+                   if our_price and market_all else None),
+    }
+
+
+@router.get("/pressure")
+async def market_pressure(
+    company_id: str = Query(...),
+    months: int = Query(24, ge=3, le=60),
+    radius_km: float = Query(DEFAULT_RADIUS_KM, ge=0.5, le=50),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Давление конкурента: кто открылся рядом с нашими объектами и что стало с нами.
+
+    Сессии считаются в двух равных окнах — до появления соседа и после. Это ещё не
+    разность разностей (для неё нужна контрольная группа, она приходит со
+    сценариями), но уже не «мне кажется»: видно, на каких объектах падение совпало
+    с appearance соседа, а на каких — нет.
+    """
+    cid = await _member(company_id, user, db)
+    horizon = datetime.now(timezone.utc) - timedelta(days=months * 30)
+
+    ours = (await db.execute(
+        select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
+               ServiceLocation.latitude, ServiceLocation.longitude)
+        .where(ServiceLocation.company_id == cid,
+               ServiceLocation.latitude.is_not(None)))).all()
+    window = timedelta(days=90)
+    # Окно «после» должно целиком уместиться в прошлом: иначе сравниваются 90 дней
+    # до с двумя неделями после, и любой сосед выглядит как обвал на 100 %.
+    latest_ok = datetime.now(timezone.utc) - window
+    newcomers = [s for s in (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid, MarketSite.site_class != "home",
+        MarketSite.kind == "ezs",
+        MarketSite.latitude.is_not(None),
+        MarketSite.first_seen_at.is_not(None),
+        MarketSite.first_seen_at >= horizon,
+        MarketSite.first_seen_at <= latest_ok))).scalars().all()]
+    # День, в который источник завёл десятки точек разом, — это его загрузка, а не
+    # стройка конкурентов. Такие даты из расчёта убираем: иначе весь список
+    # «давления» окажется днём, когда мы впервые скачали выгрузку.
+    by_day: dict[str, int] = {}
+    for site in newcomers:
+        day = site.first_seen_at.date().isoformat()
+        by_day[day] = by_day.get(day, 0) + 1
+    bulk_days = {day for day, count in by_day.items() if count > 15}
+    newcomers = [s for s in newcomers
+                 if s.first_seen_at.date().isoformat() not in bulk_days]
+    ops = {o.id: o.name for o in (await db.execute(select(MarketOperator).where(
+        MarketOperator.company_id == cid))).scalars().all()}
+
+    rows = []
+    for loc_id, name, city, lat, lon in ours:
+        near = [(site, _distance_km(float(lat), float(lon),
+                                    float(site.latitude), float(site.longitude)))
+                for site in newcomers]
+        near = [(site, distance) for site, distance in near if distance <= radius_km]
+        if not near:
+            continue
+        site, distance = min(near, key=lambda pair: pair[0].first_seen_at)
+        appeared = site.first_seen_at
+        before = (await db.execute(
+            select(func.count()).select_from(ChargeSession)
+            .where(ChargeSession.company_id == cid, ChargeSession.location_id == loc_id,
+                   ChargeSession.started_at >= (appeared - window).replace(tzinfo=None),
+                   ChargeSession.started_at < appeared.replace(tzinfo=None)))).scalar() or 0
+        after = (await db.execute(
+            select(func.count()).select_from(ChargeSession)
+            .where(ChargeSession.company_id == cid, ChargeSession.location_id == loc_id,
+                   ChargeSession.started_at >= appeared.replace(tzinfo=None),
+                   ChargeSession.started_at < (appeared + window).replace(tzinfo=None)))).scalar() or 0
+        if not before and not after:
+            continue
+        rows.append({
+            "locationId": str(loc_id), "name": name, "city": city,
+            "rivalName": site.name,
+            "rivalOperator": ops.get(site.operator_id) if site.operator_id else None,
+            "distanceKm": round(distance, 1),
+            "appearedOn": appeared.date().isoformat(),
+            "sessionsBefore": int(before), "sessionsAfter": int(after),
+            "changePct": (round((int(after) - int(before)) / int(before) * 100, 1)
+                          if before else None),
+            "rivalsNearby": len(near),
+        })
+    rows.sort(key=lambda r: (r["changePct"] is None, r["changePct"] or 0))
+    return {"months": months, "radiusKm": radius_km, "rows": rows, "total": len(rows),
+            "bulkDays": sorted(bulk_days),
+            "note": "окна по 90 дней до и после появления соседа, оба целиком в "
+                    "прошлом; дни массовой загрузки источника из расчёта исключены; "
+                    "сезон не снят — для этого нужна контрольная группа сценария"}
+
+
+@router.get("/elasticity")
+async def market_elasticity(
+    company_id: str = Query(...),
+    weeks: int = Query(52, ge=8, le=156),
+    min_change_pct: float = Query(5.0, ge=1.0, le=50.0),
+    min_sessions: int = Query(20, ge=1, le=500,
+                              description="минимум сессий в неделю, иначе это шум"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Отклик спроса на нашу цену: что было с сессиями после её изменения.
+
+    Считаем по фактической цене оплаченных сессий понедельно. Эластичность — не
+    константа продукта: она пересчитывается на каждом замере и отдельно по объектам,
+    поэтому здесь возвращается список случаев, а не одно число «эластичность сети».
+    """
+    cid = await _member(company_id, user, db)
+    since = (datetime.now(timezone.utc) - timedelta(weeks=weeks)).replace(tzinfo=None)
+
+    week = func.date_trunc("week", ChargeSession.started_at)
+    rows = (await db.execute(
+        select(ChargeSession.location_id, week.label("week"), func.count(),
+               func.coalesce(func.sum(ChargeSession.amount), 0),
+               func.coalesce(func.sum(
+                   case((ChargeSession.amount > 0, ChargeSession.energy_kwh), else_=0)), 0))
+        .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
+               ChargeSession.location_id.is_not(None))
+        .group_by(ChargeSession.location_id, week)
+        .order_by(ChargeSession.location_id, week))).all()
+
+    names = {str(loc_id): name for loc_id, name in (await db.execute(
+        select(ServiceLocation.id, ServiceLocation.name)
+        .where(ServiceLocation.company_id == cid))).all()}
+
+    series: dict[str, list[dict[str, Any]]] = {}
+    for loc_id, week_start, sessions, amount, paid_energy in rows:
+        price = (float(amount) / float(paid_energy)) if paid_energy and float(paid_energy) > 0 else None
+        series.setdefault(str(loc_id), []).append({
+            "week": week_start.date().isoformat(), "sessions": int(sessions), "price": price})
+
+    cases = []
+    for loc_id, points in series.items():
+        usable = [p for p in points if p["price"]]
+        for i in range(1, len(usable)):
+            was, now_point = usable[i - 1], usable[i]
+            # На объекте с двумя сессиями в неделю «спрос вырос на 900 %» означает,
+            # что приехало ещё восемнадцать человек, а не что цена сработала.
+            if was["sessions"] < min_sessions or now_point["sessions"] < min_sessions:
+                continue
+            change = (now_point["price"] - was["price"]) / was["price"] * 100
+            if abs(change) < min_change_pct:
+                continue
+            demand = ((now_point["sessions"] - was["sessions"]) / was["sessions"] * 100
+                      if was["sessions"] else None)
+            if demand is None:
+                continue
+            cases.append({
+                "locationId": loc_id, "name": names.get(loc_id, "—"),
+                "week": now_point["week"],
+                "priceWas": round(was["price"], 2), "priceNow": round(now_point["price"], 2),
+                "pricePct": round(change, 1),
+                "sessionsWas": was["sessions"], "sessionsNow": now_point["sessions"],
+                "sessionsPct": round(demand, 1),
+                # Эластичность: на сколько процентов изменился спрос на каждый процент
+                # цены. Отрицательная — нормальный товар: дороже, значит меньше.
+                "elasticity": round(demand / change, 2) if change else None,
+            })
+    cases.sort(key=lambda r: -abs(r["pricePct"]))
+    values = [c["elasticity"] for c in cases if c["elasticity"] is not None]
+    return {
+        "weeks": weeks, "minChangePct": min_change_pct, "minSessions": min_sessions,
+        "cases": cases[:200], "total": len(cases),
+        "medianElasticity": _median(values),
+        "note": (f"по фактической цене оплаченных сессий, недели тоньше {min_sessions} "
+                 "сессий отброшены как шум; сезон и акции не сняты — одиночный случай "
+                 "не доказателен, смотреть на распределение"),
+    }
+
+
 class BulkSiteIn(BaseModel):
     """Строка списка при массовом заведении точек (вставка из таблицы)."""
     name: str
