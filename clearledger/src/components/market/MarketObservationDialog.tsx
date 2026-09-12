@@ -140,7 +140,7 @@ export function MarketObservationDialog({ sites, siteId, trigger }: {
                 <Label className="text-xs">База сравнения</Label>
                 <Input value={form.basis} onChange={(e) => setForm({ ...form, basis: e.target.value })}
                   placeholder="DC 60+ кВт, будни днём, без абонемента" />
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-xs text-muted-foreground">
                   Без базы «дороже на 12 %» ничего не значит: цена зависит от мощности,
                   времени и программы.
                 </p>

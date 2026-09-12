@@ -8089,6 +8089,31 @@ class MarketSite(Base):
     ports: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_power_kw: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
     connectors: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Разобранный состав коннекторов: [{"type": "CCS Combo 2", "power_kw": 60}, ...].
+    # Строка `connectors` остаётся для показа, список — для отбора «есть ли здесь DC 60+».
+    connectors_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    current_type: Mapped[str | None] = mapped_column(String(8), nullable=True)   # DC | AC | LV
+    vendor: Mapped[str | None] = mapped_column(String(120), nullable=True)      # производитель
+    # Класс точки: сеть оператора или домашняя розетка частника. Половина записей
+    # публичных реестров — розетки без оператора; в сравнении сетей их отсекают, а в
+    # покрытии учитывают (docs/MARKET-ROADMAP.md §3.8).
+    site_class: Mapped[str] = mapped_column(String(24), nullable=False, default="unknown")
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    url: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    working_hours: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)      # RUB | BYN | KZT
+    # ── последнее известное состояние (ряд по датам живёт в market_site_snapshots) ──
+    # Дата последней зарядки — единственный честный признак живости: станция бывает
+    # «Работает» со связью 100 %, а заряжали на ней год назад.
+    last_session_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_alive: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    connection_quality_24h: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    success_charge_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    rating: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
+    reviews_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Сколько срезов подряд точки не было в выгрузке. На третьем — `status = closed`:
+    # одна пропажа бывает сбоем обхода, три подряд — закрытием.
+    closed_confirmations: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     opened_on: Mapped[str | None] = mapped_column(String(10), nullable=True)   # ISO-дата открытия
     closed_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # active|planned|closed
@@ -8098,6 +8123,9 @@ class MarketSite(Base):
     # ── происхождение факта (принцип 2 docs/MARKET.md) ──
     source: Mapped[str] = mapped_column(String(40), nullable=False, default="manual")
     source_ref: Mapped[str | None] = mapped_column(String(400), nullable=True)   # ссылка/идентификатор в источнике
+    # Стабильный идентификатор точки в источнике (uuid выгрузки). Ключ дедупа первым
+    # номером: координата у одной и той же станции гуляет между срезами, uuid — нет.
+    external_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     source_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=50)  # 100 партнёр/API … 20 парсинг
     first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -8115,6 +8143,7 @@ class MarketSite(Base):
     __table_args__ = (
         Index("ix_market_site_company_kind", "company_id", "kind", "status"),
         Index("ix_market_site_geo", "company_id", "city"),
+        Index("ix_market_site_external", "company_id", "source", "external_id"),
     )
 
 
@@ -8163,6 +8192,55 @@ class MarketObservation(Base):
     __table_args__ = (
         Index("ix_market_obs_site_date", "site_id", "observed_on"),
         Index("ix_market_obs_company_kind", "company_id", "kind", "observed_on"),
+    )
+
+
+class MarketSiteSnapshot(Base):
+    """Срез точки рынка на дату выгрузки: техсостояние, спрос и репутация.
+
+    Выгрузка публичного реестра повторяемая, и меняется в ней не адрес, а именно
+    это: связь за сутки, доля успешных зарядок, рейтинг, доля единиц, дата последней
+    зарядки, цена. Держать их только в карточке значит хранить «сейчас» и стирать
+    вчера — тогда ни динамики конкурента, ни ответа «что изменилось за месяц» не
+    будет, а восстановить прошлое нечем: чужой реестр истории не отдаёт.
+
+    Карточка (`MarketSite`) несёт последнее известное значение для списков и карты,
+    эта таблица — ряд. Срез идемпотентен по паре «точка + дата»: повторный прогон
+    того же файла обновляет строку, а не плодит вторую.
+    """
+    __tablename__ = "market_site_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+    snapshot_date: Mapped[str] = mapped_column(String(10), nullable=False)   # ISO-дата среза
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="registry")
+    # ── техническое состояние ──
+    is_alive: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    under_repair: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    connection_quality_24h: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    success_charge_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    connectors_charging: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    connectors_broken: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # ── спрос ──
+    last_session_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ── репутация ──
+    rating: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
+    reviews_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stars_1_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    stars_5_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    # ── оснащение и цена на дату среза ──
+    ports: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_power_kw: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    price_per_kwh: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_market_snapshot_site_date", "site_id", "snapshot_date", unique=True),
+        Index("ix_market_snapshot_company_date", "company_id", "snapshot_date"),
     )
 
 
@@ -13006,3 +13084,107 @@ class WorkContextResult(Base):
         Index("ix_work_context_result_pending", "created_at", postgresql_where=text("delivered_at IS NULL AND attempts < 10")),
         Index("ix_work_context_result_work", "company_id", "work_kind", "entity_id"),
     )
+
+
+# ===========================================================================
+# Конференции: журнал проведённых созвонов (docs/CONF.md).
+#
+# Второй системы встреч здесь НЕТ. Плановая конференция — это встреча
+# календаря: у неё уже есть участники, ответы, гости, письма с календарным
+# вложением и напоминания. Дублировать всё это ради видеосозвона значит завести
+# два места, где человек ищет одну и ту же встречу.
+#
+# Журнал отвечает на то, чего у календаря нет: состоялась ли встреча, кто
+# реально пришёл, сколько шла и где запись. Без него «Конференции» остаются
+# кнопкой: нажал — и через неделю не докажешь, что созвон был.
+# ===========================================================================
+class ConfSession(Base):
+    """Проведённый (или идущий) созвон."""
+    __tablename__ = "conf_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Встреча календаря, если созвон плановый. Пусто — созвали на ходу.
+    event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="SET NULL"), nullable=True)
+    # Постоянная комната, если разговор шёл в ней, а не по встрече.
+    conf_room_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("conf_rooms.id", ondelete="SET NULL"), nullable=True)
+    room: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    # Предмет, вокруг которого собрались: `doc:<uuid>`, `task:<uuid>`, `ticket:<id>`.
+    subject_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    started_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+    # Пусто — идёт сейчас. Закрывается, когда комната опустела.
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Кто закрыл: `user` — нажали «Завершить», `auto` — закрылась по сроку.
+    # Разница важна для статистики: у автозакрытой конец поставлен нами по
+    # правилу («через полчаса после встречи»), а не по тому, когда разошлись.
+    # Считать такое время как длительность разговора — врать в разы: первая же
+    # брошенная конференция дала полтора часа вместо трёх минут.
+    close_reason: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Заметка по итогам: о чём договорились. Пишет любой участник.
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Запись созвона. `recording_file_id` — файл в хранилище пространства (сюда
+    # его кладёт сервер записи после конференции); `recording_path` — его имя на
+    # том сервере, по которому запись ищут, если доставка не удалась.
+    recording_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="SET NULL"), nullable=True)
+    recording_path: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    recording_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    __table_args__ = (Index("ix_conf_sessions_company_started", "company_id", "started_at"),)
+
+
+class ConfRoom(Base):
+    """Постоянная комната компании: место для разговора, а не событие.
+
+    «Оперативка», «Переговорная», «Дежурная» — комната стоит всегда, входить
+    можно без приглашения и без назначения встречи: зашёл, поговорили, вышли.
+    Половина разговоров именно такие, и заводить под них встречу в календаре —
+    лишний обряд, из-за которого люди уходят звонить в мессенджер (решение
+    МАГа 10.09.2026).
+
+    Имя комнаты в движке считается от её номера, как у встречи, и не меняется
+    никогда: ссылку можно повесить в закладку и раздать один раз навсегда.
+    """
+    __tablename__ = "conf_rooms"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Для кого она: «дежурная смена», «кто по проекту N» — чтобы человек понимал,
+    # туда ли он заходит, до того как войдёт и увидит незнакомые лица.
+    purpose: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+    # Комнату не удаляют: в журнале остались разговоры, которые в ней прошли.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ConfPresence(Base):
+    """Кто входил в созвон.
+
+    Пишется по нашему входу («Войти» в пространстве), а не по данным Jitsi:
+    вход через пространство — единственный, о котором мы знаем достоверно, и
+    именно он отвечает на вопрос «кого звали и кто пришёл».
+    """
+    __tablename__ = "conf_presence"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("conf_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (Index("uq_conf_presence", "session_id", "user_id", unique=True),)

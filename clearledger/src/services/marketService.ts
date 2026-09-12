@@ -125,15 +125,31 @@ export const patchMarketSite = (companyId: string, siteId: string, body: Record<
   patch<{ id: string; verifiedAt: string }>(
     `/api/market/sites/${siteId}?company_id=${encodeURIComponent(companyId)}`, body)
 
+/** Класс точки: сеть оператора или домашняя розетка частника. */
+export type MarketSiteClass = 'network' | 'home' | 'unknown'
+
+export const SITE_CLASS_LABEL: Record<MarketSiteClass, string> = {
+  network: 'сеть оператора',
+  home: 'домашняя розетка',
+  unknown: 'класс неизвестен',
+}
+
 /** Сосед по окружению объекта: чужая точка в радиусе с её ценой и расстоянием. */
 export interface MarketNeighbour {
   id: string
   name: string
   kind: MarketSiteKind
+  siteClass: MarketSiteClass
+  operatorName: string | null
+  relation: string | null
   distanceKm: number
   ports: number | null
+  maxPowerKw: number | null
   pricePerKwh: number | null
   observedOn: string | null
+  /** Дата последней зарядки в источнике — единственный честный признак спроса. */
+  lastSessionAt: string | null
+  alive: boolean
 }
 
 /** Строка «Позиции»: наш объект + наши продажи + рынок вокруг него. */
@@ -150,7 +166,10 @@ export interface MarketPositionRow {
   revenue: number
   ourPricePerKwh: number | null
   rivals: number
+  /** Из них живые: заряжали за последние 90 дней. */
+  rivalsAlive: number
   rivalPorts: number
+  homeSockets: number
   attractors: number
   marketPricePerKwh: number | null
   priceGapPct: number | null
@@ -160,6 +179,61 @@ export interface MarketPositionRow {
 export const getMarketPosition = (companyId: string, params?: { days?: number; radius_km?: number }) =>
   get<{ days: number; radiusKm: number; objects: MarketPositionRow[]; total: number }>(
     '/api/market/position', { company_id: companyId, ...params })
+
+/** Источник рынка: сколько точек принёс, когда виделся, что в нём заполнено. */
+export interface MarketSource {
+  source: string
+  rank: number
+  sites: number
+  lastSeenAt: string | null
+  closed: number
+  homeSockets: number
+  coverage: { geo: number; power: number; vendor: number; successPct: number; lastSession: number }
+}
+
+export interface MarketSourcesReply {
+  sources: MarketSource[]
+  snapshots: { date: string; sites: number }[]
+  totals: { sites: number; priced: number; conflicts: number; alive: number; aliveDays: number }
+}
+
+export const SOURCE_LABEL: Record<string, string> = {
+  registry_ru: 'Реестр ЭЗС России',
+  api: 'Open Charge Map',
+  partner: 'Партнёрский обмен',
+  manual: 'Заведено вручную',
+  import: 'Импорт списком',
+  parser: 'Парсер',
+  service_visit: 'Выезд сервиса',
+}
+
+/** Точка в списке изменений между срезами. */
+export interface MarketChangeCard {
+  id: string
+  name: string
+  city: string | null
+  siteClass: MarketSiteClass
+  was?: number
+  now?: number
+}
+
+export interface MarketChangesReply {
+  base: string | null
+  current: string | null
+  available: string[]
+  appeared: MarketChangeCard[]
+  gone: MarketChangeCard[]
+  priceMoves: MarketChangeCard[]
+  qualityDrops: MarketChangeCard[]
+  counts: { appeared?: number; gone?: number; priceMoves?: number; qualityDrops?: number }
+  message?: string
+}
+
+export const getMarketSources = (companyId: string) =>
+  get<MarketSourcesReply>('/api/market/sources', { company_id: companyId })
+
+export const getMarketChanges = (companyId: string, params?: { base?: string; current?: string }) =>
+  get<MarketChangesReply>('/api/market/changes', { company_id: companyId, ...params })
 
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(

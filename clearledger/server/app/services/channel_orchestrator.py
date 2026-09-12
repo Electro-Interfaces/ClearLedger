@@ -580,6 +580,43 @@ async def _run_stations(db: AsyncSession, channel: Channel, src: Source,
                                  mode=mode, log_id=log_id)
 
 
+async def _run_market_registry(db: AsyncSession, channel: Channel, src: Source,
+                               log_id=None) -> dict[str, Any]:
+    """Загруженная выгрузка реестра ЭЗС страны → точки рынка, срезы, цены.
+
+    Режима `append`/`replace` у этого источника нет: выгрузка — всегда полный срез,
+    и «дописать половину» значит получить рынок, которого не существует. Повторный
+    прогон того же файла идемпотентен, прогон нового файла добавляет новый срез.
+    """
+    cfg = channel.config or {}
+    file_id = cfg.get("uploadFileId") or cfg.get("upload_file_id")
+    if not file_id:
+        return {"status": "skipped",
+                "message": "не загружена выгрузка реестра: сначала «Загрузить таблицу» (config.uploadFileId пуст)"}
+    try:
+        sf = await db.get(SourceFile, _uuid.UUID(str(file_id)))
+    except (ValueError, TypeError):
+        sf = None
+    if sf is None:
+        return {"status": "error", "message": f"файл {file_id} не найден"}
+    if (sf.file_name or "").lower().endswith(".jsonl"):
+        return {"status": "error", "message": (
+            "JSONL — сырой ответ карты со вложенной структурой; приём читает плоскую "
+            "выгрузку CSV. Загрузите ev-russia-full.csv")}
+    with open(sf.storage_path, "rb") as fh:
+        content = fh.read()
+    from app.services.market_registry import ingest_registry, parse_registry_csv
+    rows = parse_registry_csv(content)
+    if not rows:
+        return {"status": "error", "message": "в файле нет строк: проверьте разделитель «;» и кодировку"}
+    # Дата среза — дата файла, а не дата прогона: файл, загруженный через неделю
+    # после обхода, описывает рынок на день обхода, и сравнение срезов поедет.
+    snapshot_date = (cfg.get("snapshotDate")
+                     or (sf.created_at.date().isoformat() if sf.created_at else None))
+    return await ingest_registry(db, channel.company_id, rows,
+                                 snapshot_date=snapshot_date, log_id=log_id)
+
+
 # ---------------------------------------------------------------------------
 # Диспетчер
 # ---------------------------------------------------------------------------
@@ -678,6 +715,8 @@ async def _dispatch(
         return await _run_charge_sessions(db, channel, src, mode=mode, log_id=log_id)
     if src.source_type == "stations_excel":
         return await _run_stations(db, channel, src, mode=mode, log_id=log_id)
+    if src.source_type == "market_registry_file":
+        return await _run_market_registry(db, channel, src, log_id=log_id)
     if src.source_type == "sts":
         if (channel.template_id or "") == "fuel_delivery":
             return await _run_fuel_delivery(db, channel, src, date_from, date_to, log_id, station_codes, all_period)

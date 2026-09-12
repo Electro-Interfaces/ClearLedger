@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (ChargeSession, MarketObservation, MarketOperator, MarketSite,
-                        ServiceLocation, User)
+                        MarketSiteSnapshot, ServiceLocation, User)
 from app.services import market_ocm
 
 router = APIRouter(prefix="/market", tags=["Маркетинг — рынок"])
@@ -344,6 +344,10 @@ async def market_summary(
 # в ту сторону, где принимается решение (сосед в 5 км конкурент почти всегда).
 DEFAULT_RADIUS_KM = 5.0
 EARTH_KM = 6371.0
+# Сколько дней без единой зарядки делают точку мёртвой. Признак спроса — дата
+# последней сессии, а не статус «Работает»: в публичном реестре полно станций со
+# связью 100 % и последней зарядкой год назад (docs/MARKET-ROADMAP.md §3.7).
+ALIVE_DAYS = 90
 
 
 def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -416,12 +420,18 @@ async def market_position(
     )).scalars().all()
     price_rows = (await db.execute(
         select(MarketObservation)
-        .where(MarketObservation.company_id == cid, MarketObservation.kind == "price")
+        .where(MarketObservation.company_id == cid, MarketObservation.kind == "price",
+               MarketObservation.price_per_kwh.is_not(None))
         .order_by(MarketObservation.site_id, MarketObservation.observed_on.desc())
     )).scalars().all()
     last_price: dict[str, MarketObservation] = {}
     for o in price_rows:
         last_price.setdefault(str(o.site_id), o)
+    # Кто чей: имя оператора в строке соседа отвечает на «с кем мы тут спорим»,
+    # а `relation` отделяет чужую сеть от нашей собственной.
+    ops = {o.id: o for o in (await db.execute(select(MarketOperator).where(
+        MarketOperator.company_id == cid))).scalars().all()}
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
 
     rows: list[dict[str, Any]] = []
     for loc_id, name, code, city, lat, lon in ours:
@@ -437,16 +447,29 @@ async def market_position(
                 if d > radius_km:
                     continue
                 obs = last_price.get(str(m.id))
+                op = ops.get(m.operator_id) if m.operator_id else None
+                last_session = m.last_session_at
                 neighbours.append({
                     "id": str(m.id), "name": m.name, "kind": m.kind,
-                    "operatorName": None, "distanceKm": round(d, 1),
+                    "siteClass": m.site_class or "unknown",
+                    "operatorName": op.name if op else None,
+                    "relation": op.relation if op else None,
+                    "distanceKm": round(d, 1),
                     "ports": m.ports,
-                    "pricePerKwh": float(obs.price_per_kwh) if obs and obs.price_per_kwh else None,
+                    "maxPowerKw": float(m.max_power_kw) if m.max_power_kw else None,
+                    "pricePerKwh": float(obs.price_per_kwh) if obs and obs.price_per_kwh is not None else None,
                     "observedOn": obs.observed_on if obs else None,
+                    "lastSessionAt": last_session.isoformat() if last_session else None,
+                    "alive": bool(last_session and last_session >= alive_since),
                 })
         neighbours.sort(key=lambda n: n["distanceKm"])
-        rivals = [n for n in neighbours if n["kind"] == "ezs"]
-        rival_prices = [n["pricePerKwh"] for n in rivals if n["pricePerKwh"]]
+        # Конкурент — чужая СЕТЕВАЯ зарядка. Домашняя розетка частника рядом с нашей
+        # станцией конкуренции не создаёт, а в реестре их половина: посчитав их, мы
+        # получили бы «плотный рынок» там, где его нет.
+        rivals = [n for n in neighbours
+                  if n["kind"] == "ezs" and n["siteClass"] != "home"
+                  and n["relation"] != "own"]
+        rival_prices = [n["pricePerKwh"] for n in rivals if n["pricePerKwh"] is not None]
         market_price = _median(rival_prices)
         our_price = s["ourPricePerKwh"]
         rows.append({
@@ -456,7 +479,12 @@ async def market_position(
             "hasGeo": lat is not None and lon is not None,
             **s,
             "rivals": len(rivals),
+            # Живой конкурент — тот, на котором заряжали за последние 90 дней.
+            # Разрыв между «рядом пять станций» и «из них работают две» — это и есть
+            # разница между испугом и решением.
+            "rivalsAlive": sum(1 for n in rivals if n["alive"]),
             "rivalPorts": sum(n["ports"] or 0 for n in rivals),
+            "homeSockets": sum(1 for n in neighbours if n["siteClass"] == "home"),
             "attractors": len(neighbours) - len(rivals),
             "marketPricePerKwh": market_price,
             # Ценовой индекс: >0 — мы дороже рынка, <0 — дешевле. Пусто, если сравнивать
@@ -469,6 +497,157 @@ async def market_position(
     # Наверх — там, где есть с чем сравнивать и где больше денег.
     rows.sort(key=lambda r: (r["marketPricePerKwh"] is None, -r["revenue"]))
     return {"days": days, "radiusKm": radius_km, "objects": rows, "total": len(rows)}
+
+
+# ── Источники, свежесть и покрытие ──────────────────────────────────────────
+# «Конкурентная разведка — задача о свежести, а не о дашборде»: платформу оценивают
+# не числом записей, а тем, насколько свежи сигналы и раскладывается ли число до
+# первоисточника (docs/MARKET-ROADMAP.md §3.4). Поэтому покрытие полей — такой же
+# показатель продукта, как цена: средняя по 19 точкам из 60, выданная за картину
+# района, вреднее отсутствия цифры.
+
+@router.get("/sources")
+async def market_sources(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Что мы знаем о рынке, откуда и насколько это свежо."""
+    cid = await _member(company_id, user, db)
+
+    rows = (await db.execute(
+        select(MarketSite.source,
+               func.count(),
+               func.max(MarketSite.last_seen_at),
+               func.count(MarketSite.latitude),
+               func.count(MarketSite.max_power_kw),
+               func.count(MarketSite.vendor),
+               func.count(MarketSite.success_charge_pct),
+               func.count(MarketSite.last_session_at),
+               func.sum(case((MarketSite.status == "closed", 1), else_=0)),
+               func.sum(case((MarketSite.site_class == "home", 1), else_=0)))
+        .where(MarketSite.company_id == cid)
+        .group_by(MarketSite.source))).all()
+
+    sources = [{
+        "source": src or "manual",
+        "rank": SOURCE_RANK.get(src or "manual", 50),
+        "sites": int(total),
+        "lastSeenAt": last_seen.isoformat() if last_seen else None,
+        "closed": int(closed or 0),
+        "homeSockets": int(home or 0),
+        # Покрытие поля: у скольких точек источника оно заполнено. Неравномерность —
+        # свойство источника, а не ошибка загрузки, и прятать её нельзя: по полю с
+        # покрытием 10 % выводов не делают.
+        "coverage": {
+            "geo": round(int(geo) / int(total) * 100) if total else 0,
+            "power": round(int(power) / int(total) * 100) if total else 0,
+            "vendor": round(int(vendor) / int(total) * 100) if total else 0,
+            "successPct": round(int(success) / int(total) * 100) if total else 0,
+            "lastSession": round(int(session) / int(total) * 100) if total else 0,
+        },
+    } for src, total, last_seen, geo, power, vendor, success, session, closed, home in rows]
+    sources.sort(key=lambda r: -r["sites"])
+
+    snapshots = [{"date": d, "sites": int(c)} for d, c in (await db.execute(
+        select(MarketSiteSnapshot.snapshot_date, func.count())
+        .where(MarketSiteSnapshot.company_id == cid)
+        .group_by(MarketSiteSnapshot.snapshot_date)
+        .order_by(MarketSiteSnapshot.snapshot_date.desc()).limit(12))).all()]
+
+    priced = int((await db.execute(
+        select(func.count(func.distinct(MarketObservation.site_id)))
+        .where(MarketObservation.company_id == cid, MarketObservation.kind == "price",
+               MarketObservation.price_per_kwh.is_not(None)))).scalar() or 0)
+    conflicts = int((await db.execute(
+        select(func.count()).select_from(MarketObservation)
+        .where(MarketObservation.company_id == cid,
+               MarketObservation.confidence == "conflict"))).scalar() or 0)
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+    alive = int((await db.execute(
+        select(func.count()).select_from(MarketSite)
+        .where(MarketSite.company_id == cid,
+               MarketSite.last_session_at >= alive_since))).scalar() or 0)
+
+    return {
+        "sources": sources, "snapshots": snapshots,
+        "totals": {
+            "sites": sum(r["sites"] for r in sources), "priced": priced,
+            "conflicts": conflicts, "alive": alive, "aliveDays": ALIVE_DAYS,
+        },
+    }
+
+
+@router.get("/changes")
+async def market_changes(
+    company_id: str = Query(...),
+    base: str | None = Query(None, description="дата среза-основания (ISO)"),
+    current: str | None = Query(None, description="дата свежего среза (ISO)"),
+    limit: int = Query(50, ge=1, le=500),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Что изменилось между двумя срезами реестра.
+
+    Ради этого и хранится ряд: чужой реестр истории не отдаёт, и «кто открылся рядом
+    за месяц» восстановить потом будет неоткуда.
+    """
+    cid = await _member(company_id, user, db)
+    dates = [d for (d,) in (await db.execute(
+        select(MarketSiteSnapshot.snapshot_date)
+        .where(MarketSiteSnapshot.company_id == cid)
+        .group_by(MarketSiteSnapshot.snapshot_date)
+        .order_by(MarketSiteSnapshot.snapshot_date.desc()).limit(24))).all()]
+    if not dates:
+        return {"base": None, "current": None, "available": [], "counts": {},
+                "message": "срезов рынка ещё нет — загрузите выгрузку реестра в «Коннекторах»"}
+    cur_date = current or dates[0]
+    base_date = base or next((d for d in dates if d < cur_date), None)
+    if base_date is None:
+        return {"base": None, "current": cur_date, "available": dates, "counts": {},
+                "message": "срез пока один — сравнивать не с чем, следующая выгрузка даст сравнение"}
+
+    async def _snap(date: str) -> dict[str, Any]:
+        return {str(s.site_id): s for s in (await db.execute(
+            select(MarketSiteSnapshot).where(
+                MarketSiteSnapshot.company_id == cid,
+                MarketSiteSnapshot.snapshot_date == date))).scalars().all()}
+
+    was, fresh_map = await _snap(base_date), await _snap(cur_date)
+    ids = {uuid.UUID(i) for i in (set(was) | set(fresh_map))}
+    sites = {str(s.id): s for s in (await db.execute(
+        select(MarketSite).where(MarketSite.id.in_(ids)))).scalars().all()} if ids else {}
+
+    def _card(site_id: str) -> dict[str, Any]:
+        site = sites.get(site_id)
+        return {"id": site_id, "name": site.name if site else "—",
+                "city": site.city if site else None,
+                "siteClass": (site.site_class if site else None) or "unknown"}
+
+    appeared = [_card(i) for i in fresh_map if i not in was]
+    gone = [_card(i) for i in was if i not in fresh_map]
+    price_moves: list[dict[str, Any]] = []
+    quality_drops: list[dict[str, Any]] = []
+    for site_id, snap in fresh_map.items():
+        old = was.get(site_id)
+        if old is None:
+            continue
+        if (old.price_per_kwh is not None and snap.price_per_kwh is not None
+                and float(old.price_per_kwh) != float(snap.price_per_kwh)):
+            price_moves.append({**_card(site_id), "was": float(old.price_per_kwh),
+                                "now": float(snap.price_per_kwh)})
+        # Падение связи на 20 пунктов и больше — уже не шум измерения, а событие:
+        # рядом стоящая станция конкурента начала отказывать.
+        if (old.connection_quality_24h is not None and snap.connection_quality_24h is not None
+                and float(snap.connection_quality_24h) <= float(old.connection_quality_24h) - 20):
+            quality_drops.append({**_card(site_id), "was": float(old.connection_quality_24h),
+                                  "now": float(snap.connection_quality_24h)})
+    return {
+        "base": base_date, "current": cur_date, "available": dates,
+        "appeared": appeared[:limit], "gone": gone[:limit],
+        "priceMoves": sorted(price_moves, key=lambda r: -abs(r["now"] - r["was"]))[:limit],
+        "qualityDrops": sorted(quality_drops, key=lambda r: r["now"] - r["was"])[:limit],
+        "counts": {"appeared": len(appeared), "gone": len(gone),
+                   "priceMoves": len(price_moves), "qualityDrops": len(quality_drops)},
+    }
 
 
 class BulkSiteIn(BaseModel):

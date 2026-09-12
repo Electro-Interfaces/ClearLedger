@@ -48,6 +48,16 @@ async def database_startup_lock() -> AsyncIterator[None]:
             yield
 
 
+# «Конференции»: таблицы журнала заводятся create_all, но новые колонки в уже
+# созданную таблицу он не добавляет — на стенде, где журнал уже работал, статистика
+# падала с «column conf_sessions.close_reason does not exist».
+CONF_MIGRATION_DDL = (
+    "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS close_reason VARCHAR(10)",
+    "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS recording_file_id UUID",
+    "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS recording_seconds INTEGER",
+    "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS conf_room_id UUID",
+)
+
 STORE_RECEIPT_MIGRATION_DDL = (
     "DROP TRIGGER IF EXISTS store_receipt_stock_movement_immutable_trg "
     "ON store_receipt_stock_movements",
@@ -3372,6 +3382,11 @@ async def create_all() -> None:
         ):
             await conn.execute(_sa.text(stmt))
 
+        # «Конференции»: журнал уже жил на стенде, когда у сессии появились
+        # причина закрытия и запись, — create_all такие колонки не добавляет.
+        for stmt in CONF_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
         # v2.38: единый документ приёмки, идемпотентный downlink и неизменяемые
         # складские проводки центрального склада. Для старой БД одного изменения
         # ORM недостаточно: create_all не добавляет колонки в готовую таблицу.
@@ -4868,6 +4883,35 @@ async def create_all() -> None:
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS scope_ref VARCHAR(120)",
             "CREATE INDEX IF NOT EXISTS ix_chat_rooms_scope_ref "
             "ON chat_rooms (company_id, scope_ref) WHERE scope_ref IS NOT NULL",
+        ):
+            await conn.execute(_sa.text(stmt))
+
+        # Рынок: приём реестра ЭЗС страны (docs/MARKET-ROADMAP.md §5). Таблица
+        # market_sites на стендах уже работает с волны 0, а create_all колонок в неё
+        # не добавляет. Пусто у существующих точек — они и заводились руками, без
+        # реестра; `site_class` по умолчанию «неизвестен», а не «сеть»: приписать
+        # домашней розетке сетевой класс значит испортить сравнение операторов.
+        for stmt in (
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS connectors_json JSONB",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS current_type VARCHAR(8)",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS vendor VARCHAR(120)",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS site_class VARCHAR(24) "
+            "NOT NULL DEFAULT 'unknown'",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS phone VARCHAR(64)",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS url VARCHAR(300)",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS working_hours VARCHAR(120)",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS currency VARCHAR(8)",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS last_session_at TIMESTAMPTZ",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS is_alive BOOLEAN",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS connection_quality_24h NUMERIC(5,2)",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS success_charge_pct NUMERIC(5,2)",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS rating NUMERIC(3,2)",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS reviews_count INTEGER",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS closed_confirmations "
+            "INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
+            "CREATE INDEX IF NOT EXISTS ix_market_site_external "
+            "ON market_sites (company_id, source, external_id) WHERE external_id IS NOT NULL",
         ):
             await conn.execute(_sa.text(stmt))
 

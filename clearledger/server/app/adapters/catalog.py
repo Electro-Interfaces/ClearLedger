@@ -631,6 +631,32 @@ class StationsExcelAdapter(SourceAdapter):
         return RawBatch(source_id="", doc_type=doc_type, fetched_at=datetime.now(), items=[])
 
 
+@register_adapter("market_registry_file")
+class MarketRegistryFileAdapter(SourceAdapter):
+    status = "available"
+    label = "Рынок: реестр ЭЗС страны (CSV)"
+    category = "Электромобильность (ЭЗС)"
+    description = (
+        "Выгрузка публичной карты зарядных станций России (CSV `;`, UTF-8 с BOM, "
+        "52 поля на точку): оператор, координаты, оснащение, тарифы с окнами, "
+        "качество связи, рейтинг, дата последней зарядки. Файл грузится в канал, "
+        "разбор и нормализация в точки рынка — при запуске обработки. Выгрузка "
+        "повторяемая: каждый прогон пишет СРЕЗ на дату, срезы сравнимы между собой."
+    )
+    icon = "Globe"
+    setup_schema = []
+    available_doc_types = [
+        SourceDocType(id="market_sites", name="Реестр ЭЗС страны", category="anchor"),
+    ]
+
+    async def test_connection(self, connection: dict[str, Any]) -> TestResult:
+        return TestResult(ok=True, message=(
+            "Источник рынка: загрузите выгрузку реестра в канал и запустите обработку."))
+
+    async def fetch_delta(self, connection, doc_type, since=None, until=None, filters=None) -> RawBatch:
+        return RawBatch(source_id="", doc_type=doc_type, fetched_at=datetime.now(), items=[])
+
+
 @register_adapter("neftoms")
 class NeftoMsAdapter(PlannedAdapter):
     label = "NeftoMS (POS станции)"

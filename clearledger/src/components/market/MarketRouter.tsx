@@ -29,6 +29,7 @@ import { MarketImportDialog } from './MarketImportDialog'
 import { MarketOcmButton } from './MarketOcmButton'
 import { MarketSiteDialog } from './MarketSiteDialog'
 import { MarketObservationDialog } from './MarketObservationDialog'
+import { MarketSourcesPanel } from './MarketSourcesPanel'
 
 /** Тёмная тема приложения (класс `dark` на <html>) — как в карте продаж. */
 function useIsDark() {
@@ -104,7 +105,7 @@ function MarketMap() {
         <span className="text-xs text-muted-foreground">
           наших объектов: {ourPoints.length} · точек рынка: {market.length}
         </span>
-        <span className="ml-auto flex items-center gap-3 text-[11px] text-muted-foreground">
+        <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1"><i className="size-2 rounded-full bg-[#3b82f6]" /> наши</span>
           <span className="flex items-center gap-1"><i className="size-2 rounded-full bg-[#ef4444]" /> чужие ЭЗС</span>
           <span className="flex items-center gap-1"><i className="size-2 rounded-full bg-[#94a3b8]" /> притяжение</span>
@@ -225,8 +226,8 @@ function MarketSites() {
                   <tr key={s.id} className="border-t border-border/60 hover:bg-accent/30">
                     <td className="p-2">
                       <span className="font-medium text-foreground">{s.name}</span>
-                      {s.isOurs && <span className="ml-2 rounded border border-primary/40 px-1 text-[10px] text-primary">наш</span>}
-                      {s.address && <div className="text-[11px] text-muted-foreground">{s.address}</div>}
+                      {s.isOurs && <span className="ml-2 rounded border border-primary/40 px-1 text-xs text-primary">наш</span>}
+                      {s.address && <div className="text-xs text-muted-foreground">{s.address}</div>}
                     </td>
                     <td className="p-2 text-muted-foreground">{SITE_KIND_LABEL[s.kind as MarketSiteKind]}</td>
                     <td className="p-2 text-muted-foreground">{s.operatorName ?? '—'}</td>
@@ -234,9 +235,9 @@ function MarketSites() {
                     <td className="p-2 text-right tabular-nums">{s.ports ?? '—'}</td>
                     <td className="p-2 text-right tabular-nums">
                       {s.price?.value ? `${s.price.value} ₽` : '—'}
-                      {s.price?.basis && <div className="text-[10px] text-muted-foreground">{s.price.basis}</div>}
+                      {s.price?.basis && <div className="text-xs text-muted-foreground">{s.price.basis}</div>}
                     </td>
-                    <td className={`p-2 ${age.stale ? 'text-amber-500' : 'text-muted-foreground'}`}>{age.text}</td>
+                    <td className={`p-2 ${age.stale ? 'text-warning' : 'text-muted-foreground'}`}>{age.text}</td>
                   </tr>
                 )
               })}
@@ -271,14 +272,14 @@ function MarketOperators() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-medium">{o.name}</div>
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="text-xs text-muted-foreground">
                       {o.relation === 'competitor' ? 'конкурент'
                         : o.relation === 'partner' ? 'партнёр' : o.relation}
                     </div>
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-semibold tabular-nums">{o.sites}</div>
-                    <div className="text-[10px] text-muted-foreground">точек</div>
+                    <div className="text-xs text-muted-foreground">точек</div>
                   </div>
                 </div>
               </CardContent>
@@ -327,7 +328,7 @@ function MarketObservations() {
                   <td className="p-2 text-muted-foreground">
                     {o.kind === 'price' ? 'цена' : o.kind === 'availability' ? 'доступность'
                       : o.kind === 'closed' ? 'закрыта' : o.kind === 'opened' ? 'открылась' : o.kind}
-                    {o.basis && <span className="ml-1 text-[10px]">({o.basis})</span>}
+                    {o.basis && <span className="ml-1 text-muted-foreground">({o.basis})</span>}
                   </td>
                   <td className="p-2 text-right tabular-nums">
                     {o.price != null ? `${o.price} ₽` : '—'}
@@ -352,6 +353,7 @@ export function MarketRouter({ tab }: { tab: string }) {
     case 'mk_sites': return <MarketSites />
     case 'mk_operators': return <MarketOperators />
     case 'mk_observations': return <MarketObservations />
+    case 'mk_sources': return <MarketSourcesPanel />
     default: return (
       <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
         <MapPin className="mr-2 size-4" /> Выберите раздел рынка

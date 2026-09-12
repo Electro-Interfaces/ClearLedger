@@ -28,7 +28,7 @@ _RETAIL_SOURCES = {
     "acquiring_sber", "inkassation", "ofd", "chestny_znak",
 }
 # Сеть зарядных станций: выгрузки сессий и станций.
-_ENERGY_SOURCES = {"charge_sessions_excel", "stations_excel"}
+_ENERGY_SOURCES = {"charge_sessions_excel", "stations_excel", "market_registry_file"}
 
 _SOURCES_BY_PROFILE: dict[str, set[str]] = {
     "fuel": _COMMON_SOURCES | _RETAIL_SOURCES,

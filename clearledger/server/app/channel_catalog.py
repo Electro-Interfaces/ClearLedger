@@ -250,6 +250,29 @@ CHANNEL_TEMPLATES: list[ChannelTemplateDecl] = [
         schedule={"mode": "manual"},
     ),
 
+    ChannelTemplateDecl(
+        id="market_registry",
+        label="Реестр ЭЗС страны (рынок)",
+        category="Электромобильность",
+        description=(
+            "Выгрузка публичной карты зарядных станций России (CSV `;`, UTF-8 с BOM): "
+            "оператор, координаты, оснащение, тарифы с окнами действия, качество связи, "
+            "рейтинг и отзывы, дата последней зарядки. Загрузка файла → L1 RAW → "
+            "нормализация (дедуп по uuid и координате, приведение имён операторов, "
+            "класс точки: сеть или домашняя розетка) → L2 (точки рынка, срезы состояния, "
+            "наблюдения цены) → продукт «Маркетинг». Выгрузка повторяемая: каждый прогон "
+            "пишет срез на дату, и срезы сравнимы во времени."
+        ),
+        icon="Globe",
+        direction="energy",
+        status="available",
+        streams=[
+            StreamDecl("market_registry_file", "market_sites", "anchor", "Реестр ЭЗС страны"),
+        ],
+        stages=_STAGES_INGEST,
+        schedule={"mode": "manual"},
+    ),
+
     # ── Эталон ───────────────────────────────────────────────────────────
     ChannelTemplateDecl(
         id="reference_1c",

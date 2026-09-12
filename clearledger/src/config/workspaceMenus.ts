@@ -341,6 +341,9 @@ export const MARKET_MENU: CentralMenuItem[] = [
   { key: 'mk_sites',        label: 'Точки рынка' },
   { key: 'mk_operators',    label: 'Операторы' },
   { key: 'mk_observations', label: 'Наблюдения' },
+  // Откуда мы знаем рынок и можно ли верить этому сегодня. Свежесть и покрытие —
+  // такие же показатели продукта, как цена (docs/MARKET-ROADMAP.md §3.4).
+  { key: 'mk_sources',      label: 'Источники и свежесть' },
 ]
 export const MARKET_KEYS = MARKET_MENU.map((m) => m.key)
 
