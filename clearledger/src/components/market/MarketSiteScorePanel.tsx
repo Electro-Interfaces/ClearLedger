@@ -211,6 +211,55 @@ export function MarketSiteScorePanel() {
 
           <Card>
             <CardContent className="p-4">
+              <div className="mb-2 font-headline text-sm font-semibold">Чего стоит вход</div>
+              {!score || score.entry.projectsNearby === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Рядом нет наших площадок из «Проектов» — опереться на их опыт
+                  присоединения не на что.
+                </p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <div className="text-muted-foreground">присоединение</div>
+                      <div className="font-medium">{money(score.entry.tpCostMedian)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">срок присоединения</div>
+                      <div className="font-medium">
+                        {score.entry.tpTermMonthsMedian != null
+                          ? `${nf1.format(score.entry.tpTermMonthsMedian)} мес`
+                          : 'нет данных'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">свободная мощность</div>
+                      <div className="font-medium">
+                        {score.entry.freePowerKwtMedian != null
+                          ? `${nf1.format(score.entry.freePowerKwtMedian)} кВт`
+                          : 'нет данных'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">аренда в месяц</div>
+                      <div className="font-medium">{money(score.entry.rentMonthMedian)}</div>
+                    </div>
+                  </div>
+                  {score.entry.paybackPeriods != null && (
+                    <p className="mt-2 text-xs">
+                      Вход обойдётся примерно в {money(score.entry.capexEstimate)} — это
+                      не меньше {nf1.format(score.entry.paybackPeriods)} таких периодов
+                      выручки, без учёта энергии и обслуживания.
+                    </p>
+                  )}
+                  <p className="mt-1 text-xs text-muted-foreground">{score.entry.basis}</p>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4">
               <div className="mb-2 font-headline text-sm font-semibold">Из чего собран прогноз</div>
               {!f || f.analogues === 0 ? (
                 <p className="text-xs text-muted-foreground">

@@ -316,6 +316,19 @@ export interface MarketSiteScore {
     list: { locationId: string; name: string; city: string | null
             distanceKm: number; sessions: number; revenue: number }[]
   }
+  /** Чего стоит вход: мощность и присоединение по опыту соседних площадок. */
+  entry: {
+    projectsNearby: number
+    tpCostMedian: number | null
+    tpTermMonthsMedian: number | null
+    freePowerKwtMedian: number | null
+    rentMonthMedian: number | null
+    smrCostMedian: number | null
+    capexEstimate: number | null
+    samples: { tpCost: number; tpTerm: number; freePower: number; rent: number; smr: number }
+    paybackPeriods: number | null
+    basis: string
+  }
   forecast: {
     method: string; analogues: number; days: number
     sessionsPerPeriod: number | null; revenuePerPeriod: number | null

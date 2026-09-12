@@ -1133,8 +1133,60 @@ async def market_site_score(
     sessions_forecast = _median(working_sessions)
     revenue_forecast = _median(working_revenues)
 
+    # ── чего стоит вход: мощность и присоединение по соседним площадкам ──
+    # Спрос отвечает «сколько дадут», а решение принимается по «сколько стоит войти».
+    # Своих данных о сети в точке у нас нет, но есть опыт соседних площадок в том же
+    # регионе: что там со свободной мощностью, во сколько обошлось присоединение и
+    # сколько оно заняло. Это не смета, а порядок величин — и так и подписано.
+    region_sites = (await db.execute(select(EzsSite).where(
+        EzsSite.company_id == cid,
+        EzsSite.lat.is_not(None), EzsSite.lon.is_not(None)))).scalars().all()
+    nearby_projects = [x for x in region_sites
+                       if _distance_km(lat, lon, float(x.lat), float(x.lon)) <= max(radius_km * 6, 60)]
+    def _values(rows, field: str) -> list[float]:
+        return [float(getattr(x, field)) for x in rows if getattr(x, field)]
+
+    # Поля экономики в «Проектах» заполнены неравномерно: стоимость присоединения
+    # известна у 4 % площадок, свободная мощность — у 27 %. Поэтому если рядом
+    # значений почти нет, берём опыт всей сети и честно говорим, что это уже не
+    # про это место, а про нашу практику вообще.
+    MIN_SAMPLES = 3
+    scope_label = "по соседним площадкам"
+    tp_costs = _values(nearby_projects, "tp_cost")
+    if len(tp_costs) < MIN_SAMPLES:
+        tp_costs = _values(region_sites, "tp_cost")
+        scope_label = "по всем нашим площадкам: рядом таких данных почти нет"
+    tp_terms = _values(nearby_projects, "tp_term_months") or _values(region_sites, "tp_term_months")
+    free_power = _values(nearby_projects, "free_power_num")
+    rents = _values(nearby_projects, "rent_cost_month") or _values(region_sites, "rent_cost_month")
+    smr = _values(nearby_projects, "smr_cost") or _values(region_sites, "smr_cost")
+
+    capex = (_median(tp_costs) or 0) + (_median(smr) or 0)
+    # Простая окупаемость: во сколько периодов прогнозной выручки обойдётся вход.
+    # Без затрат на энергию и обслуживание — поэтому «не раньше чем», а не «через».
+    payback_periods = (round(capex / revenue_forecast, 1)
+                       if capex and revenue_forecast else None)
+
     return {
         "point": {"lat": lat, "lon": lon}, "radiusKm": radius_km, "days": days,
+        "entry": {
+            "projectsNearby": len(nearby_projects),
+            "tpCostMedian": _median(tp_costs),
+            "tpTermMonthsMedian": _median(tp_terms),
+            "freePowerKwtMedian": _median(free_power),
+            "rentMonthMedian": _median(rents),
+            "smrCostMedian": _median(smr),
+            "capexEstimate": capex or None,
+            "paybackPeriods": payback_periods,
+            # Сколько значений стоит за каждой медианой: две цифры и двадцать —
+            # разного веса ответы, и человек должен видеть, какой перед ним.
+            "samples": {"tpCost": len(tp_costs), "tpTerm": len(tp_terms),
+                        "freePower": len(free_power), "rent": len(rents),
+                        "smr": len(smr)},
+            "basis": (f"порядок величин {scope_label}, не смета; "
+                      f"присоединение посчитано по {len(tp_costs)} значениям, "
+                      f"свободная мощность по {len(free_power)}"),
+        },
         "rivals": {"total": len(around), "alive": alive_rivals,
                    "ports": sum(r["ports"] or 0 for r in around),
                    "marketPricePerKwh": market_price, "list": around[:20]},
