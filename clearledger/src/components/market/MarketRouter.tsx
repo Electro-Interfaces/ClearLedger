@@ -21,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useCompany } from '@/contexts/CompanyContext'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import {
-  listMarketSites, listMarketOperators, listMarketObservations,
+  listMarketSites, listMarketObservations,
   SITE_KIND_LABEL, CHANNEL_LABEL, type MarketSite, type MarketSiteKind,
 } from '@/services/marketService'
 import { MarketPositionPanel } from './MarketPositionPanel'
@@ -30,6 +30,7 @@ import { MarketOcmButton } from './MarketOcmButton'
 import { MarketSiteDialog } from './MarketSiteDialog'
 import { MarketObservationDialog } from './MarketObservationDialog'
 import { MarketSourcesPanel } from './MarketSourcesPanel'
+import { MarketCompaniesPanel } from './MarketCompaniesPanel'
 
 /** Тёмная тема приложения (класс `dark` на <html>) — как в карте продаж. */
 function useIsDark() {
@@ -249,48 +250,6 @@ function MarketSites() {
   )
 }
 
-/** Операторы рынка — «что делает конкурент» начинается со списка его точек. */
-function MarketOperators() {
-  const { companyId } = useCompany()
-  const q = useQuery({
-    queryKey: ['market-operators', companyId],
-    queryFn: () => listMarketOperators(companyId),
-    enabled: !!companyId,
-  })
-  const rows = q.data?.operators ?? []
-  return (
-    <div className="h-full overflow-auto p-4">
-      {rows.length === 0 ? (
-        <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-          Операторов пока нет. Они заводятся вместе с первой точкой конкурента.
-        </CardContent></Card>
-      ) : (
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {rows.map((o) => (
-            <Card key={o.id}>
-              <CardContent className="p-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">{o.name}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {o.relation === 'competitor' ? 'конкурент'
-                        : o.relation === 'partner' ? 'партнёр' : o.relation}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-semibold tabular-nums">{o.sites}</div>
-                    <div className="text-xs text-muted-foreground">точек</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 /** Лента наблюдений — откуда мы знаем то, что показываем. */
 function MarketObservations() {
   const { companyId } = useCompany()
@@ -351,7 +310,7 @@ export function MarketRouter({ tab }: { tab: string }) {
     case 'mk_position': return <MarketPositionPanel />
     case 'mk_map': return <MarketMap />
     case 'mk_sites': return <MarketSites />
-    case 'mk_operators': return <MarketOperators />
+    case 'mk_operators': return <MarketCompaniesPanel />
     case 'mk_observations': return <MarketObservations />
     case 'mk_sources': return <MarketSourcesPanel />
     default: return (

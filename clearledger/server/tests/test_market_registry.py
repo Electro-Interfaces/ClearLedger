@@ -10,8 +10,8 @@
 from __future__ import annotations
 
 from app.services.market_registry import (CURRENCY_BY_ID, _dedup_key, comparable_price,
-                                          parse_connectors, parse_registry_csv,
-                                          parse_tariffs, site_class)
+                                          in_russia, parse_connectors, parse_registry_csv,
+                                          parse_tariffs, site_class, split_address)
 
 BOM = "﻿"
 CRLF = "\r\n"
@@ -106,6 +106,32 @@ def test_two_posts_in_one_place_keep_their_own_keys():
     rows = parse_registry_csv(CRLF.join(lines).encode("utf-8"))
     assert len(rows) == 2
     assert {r["uuid"] for r in rows} == {"uuid-a", "uuid-b"}
+
+
+def test_address_gives_region_and_city():
+    """Отдельных полей города и региона в выгрузке нет — только строка адреса.
+    Без разбора разрез «где стоит» показывает «город не указан» у всех точек."""
+    assert split_address("Московская обл, Дуброво, домовладение 17") == (
+        "Московская область", "Дуброво")
+    assert split_address("Александров, ул Речная дом 14") == (None, "Александров")
+    # Вторая часть бывает куском адреса, а не городом: лучше пусто, чем ложный пункт.
+    assert split_address("Московская обл, 33-й км автодороги М8")[1] is None
+    # Страна в начале — ни регион, ни город.
+    assert split_address("Россия, Иркутск, ул Ленина 1")[1] == "Иркутск"
+    assert split_address("") == (None, None)
+
+
+def test_foreign_points_are_cut_by_timezone():
+    """Треть выгрузки стоит за границей, а `country` пуст. Координаты не спасают:
+    Финляндия лежит внутри того же прямоугольника широт и долгот, что Россия.
+    Признак — часовой пояс."""
+    assert in_russia({"time_zone": "Europe/Moscow"})
+    assert in_russia({"time_zone": "Asia/Irkutsk"})
+    assert not in_russia({"time_zone": "Europe/Helsinki"})
+    assert not in_russia({"time_zone": "Europe/Riga"})
+    # Пустой пояс не повод выбрасывать точку: судим только по явному признаку.
+    assert in_russia({"time_zone": ""})
+    assert in_russia({})
 
 
 if __name__ == "__main__":  # прогон без pytest

@@ -99,22 +99,160 @@ async def list_operators(
     company_id: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Операторы рынка со счётчиком точек — «что делает конкурент» начинается отсюда."""
+    """Компании рынка: у кого сколько точек, почём и какого качества.
+
+    Реестр отвечает на вопрос «кто здесь вообще есть» — и сразу в той рамке, в
+    которой сети сравнивают: развёрнутые точки и порты, живые из них, цена, связь,
+    репутация. Одно число «точек» без остального сравнивать не позволяет: сеть из
+    сорока мёртвых розеток и сеть из десяти работающих DC — не одно и то же.
+    """
     cid = await _member(company_id, user, db)
-    counts = dict((str(oid), int(cnt)) for oid, cnt in (await db.execute(
-        select(MarketSite.operator_id, func.count())
-        .where(MarketSite.company_id == cid, MarketSite.operator_id.is_not(None))
-        .group_by(MarketSite.operator_id)
-    )).all())
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+
+    # Считаем ТОЛЬКО по сетевым точкам: домашняя розетка частника не часть сети
+    # оператора, даже если источник приписал её той же строкой.
+    agg = {str(oid): {
+        "sites": int(sites), "ports": int(ports or 0),
+        "alive": int(alive or 0),
+        "maxPowerKw": float(power) if power else None,
+        "quality": round(float(quality), 1) if quality is not None else None,
+        "success": round(float(success), 1) if success is not None else None,
+        "rating": round(float(rating), 2) if rating is not None else None,
+        "reviews": int(reviews or 0),
+    } for oid, sites, ports, alive, power, quality, success, rating, reviews in (
+        await db.execute(
+            select(MarketSite.operator_id, func.count(),
+                   func.sum(MarketSite.ports),
+                   func.sum(case((MarketSite.last_session_at >= alive_since, 1), else_=0)),
+                   func.max(MarketSite.max_power_kw),
+                   func.avg(MarketSite.connection_quality_24h),
+                   func.avg(MarketSite.success_charge_pct),
+                   func.avg(MarketSite.rating),
+                   func.sum(MarketSite.reviews_count))
+            .where(MarketSite.company_id == cid,
+                   MarketSite.operator_id.is_not(None),
+                   MarketSite.site_class != "home",
+                   MarketSite.status != "closed")
+            .group_by(MarketSite.operator_id))).all()}
+
+    # Цена по оператору — медиана последних сравнимых наблюдений его точек.
+    price_rows = (await db.execute(
+        select(MarketSite.operator_id, MarketObservation.price_per_kwh)
+        .join(MarketObservation, MarketObservation.site_id == MarketSite.id)
+        .where(MarketSite.company_id == cid, MarketSite.operator_id.is_not(None),
+               MarketObservation.kind == "price",
+               MarketObservation.price_per_kwh.is_not(None))
+        .order_by(MarketObservation.observed_on.desc()))).all()
+    prices: dict[str, list[float]] = {}
+    for oid, price in price_rows:
+        prices.setdefault(str(oid), []).append(float(price))
+
     rows = (await db.execute(
         select(MarketOperator).where(MarketOperator.company_id == cid)
-        .order_by(MarketOperator.name)
-    )).scalars().all()
-    return {"operators": [{
+        .order_by(MarketOperator.name))).scalars().all()
+    operators = [{
         "id": str(o.id), "name": o.name, "shortName": o.short_name,
         "relation": o.relation, "siteUrl": o.site_url, "inn": o.inn, "notes": o.notes,
-        "sites": counts.get(str(o.id), 0),
-    } for o in rows]}
+        "medianPricePerKwh": _median(prices.get(str(o.id), [])),
+        "pricedSites": len(prices.get(str(o.id), [])),
+        **({"sites": 0, "ports": 0, "alive": 0, "maxPowerKw": None, "quality": None,
+            "success": None, "rating": None, "reviews": 0} | agg.get(str(o.id), {})),
+    } for o in rows]
+    operators.sort(key=lambda r: (-r["sites"], r["name"]))
+    return {"operators": operators}
+
+
+@router.get("/operators/{operator_id}")
+async def operator_card(
+    operator_id: uuid.UUID,
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Карточка компании: где стоит, чем оснащена, почём заряжает и как её оценивают.
+
+    Вопрос карточки — «что делает конкурент»: где он растёт, где уходит, держит ли
+    цену и не сыплется ли качество. Поэтому здесь регионы, динамика появления точек
+    по месяцам и распределение мощностей, а не просто список станций.
+    """
+    cid = await _member(company_id, user, db)
+    op = (await db.execute(select(MarketOperator).where(
+        MarketOperator.id == operator_id,
+        MarketOperator.company_id == cid))).scalar_one_or_none()
+    if op is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Оператор не найден")
+
+    sites = (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid,
+        MarketSite.operator_id == operator_id))).scalars().all()
+    network = [s for s in sites if (s.site_class or "") != "home"]
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+
+    by_city: dict[str, int] = {}
+    by_power: dict[str, int] = {}
+    by_month: dict[str, int] = {}
+    for s in network:
+        city = s.city or s.region or "город не указан"
+        by_city[city] = by_city.get(city, 0) + 1
+        power = float(s.max_power_kw) if s.max_power_kw else None
+        bucket = ("нет данных" if power is None else "до 22 кВт" if power <= 22
+                  else "22–60 кВт" if power <= 60 else "60–150 кВт" if power <= 150
+                  else "от 150 кВт")
+        by_power[bucket] = by_power.get(bucket, 0) + 1
+        # Когда точка появилась: дата открытия источника, иначе — когда мы её впервые
+        # увидели. Второе слабее, и это честно помечается в подписи экрана.
+        when = s.opened_on or (s.first_seen_at.date().isoformat() if s.first_seen_at else None)
+        if when:
+            by_month[when[:7]] = by_month.get(when[:7], 0) + 1
+
+    prices = [float(o.price_per_kwh) for (o,) in (await db.execute(
+        select(MarketObservation)
+        .join(MarketSite, MarketObservation.site_id == MarketSite.id)
+        .where(MarketSite.operator_id == operator_id,
+               MarketObservation.company_id == cid,
+               MarketObservation.kind == "price",
+               MarketObservation.price_per_kwh.is_not(None)))).all()]
+
+    def _avg(values: list[float]) -> float | None:
+        clean = [v for v in values if v is not None]
+        return round(sum(clean) / len(clean), 1) if clean else None
+
+    return {
+        "id": str(op.id), "name": op.name, "relation": op.relation,
+        "siteUrl": op.site_url, "inn": op.inn, "notes": op.notes,
+        "totals": {
+            "sites": len(network),
+            "homeSockets": len(sites) - len(network),
+            "ports": sum(s.ports or 0 for s in network),
+            "alive": sum(1 for s in network if s.last_session_at and s.last_session_at >= alive_since),
+            "closed": sum(1 for s in network if s.status == "closed"),
+            "planned": sum(1 for s in network if s.status == "planned"),
+            "medianPricePerKwh": _median(prices),
+            "pricedSites": len(prices),
+            "quality": _avg([float(s.connection_quality_24h) for s in network
+                             if s.connection_quality_24h is not None]),
+            "success": _avg([float(s.success_charge_pct) for s in network
+                             if s.success_charge_pct is not None]),
+            "rating": (round(sum(float(s.rating) for s in network if s.rating is not None)
+                             / max(1, sum(1 for s in network if s.rating is not None)), 2)
+                       if any(s.rating is not None for s in network) else None),
+            "reviews": sum(s.reviews_count or 0 for s in network),
+        },
+        "cities": sorted(({"name": k, "sites": v} for k, v in by_city.items()),
+                         key=lambda r: -r["sites"])[:12],
+        "power": sorted(({"bucket": k, "sites": v} for k, v in by_power.items()),
+                        key=lambda r: -r["sites"]),
+        "months": sorted(({"month": k, "sites": v} for k, v in by_month.items()),
+                         key=lambda r: r["month"])[-18:],
+        "sites": sorted(({
+            "id": str(s.id), "name": s.name, "city": s.city,
+            "ports": s.ports, "maxPowerKw": float(s.max_power_kw) if s.max_power_kw else None,
+            "currentType": s.current_type, "status": s.status,
+            "rating": float(s.rating) if s.rating is not None else None,
+            "quality": float(s.connection_quality_24h) if s.connection_quality_24h is not None else None,
+            "lastSessionAt": s.last_session_at.isoformat() if s.last_session_at else None,
+            "alive": bool(s.last_session_at and s.last_session_at >= alive_since),
+        } for s in network), key=lambda r: (r["city"] or "", r["name"]))[:300],
+    }
 
 
 @router.post("/operators", status_code=status.HTTP_201_CREATED)

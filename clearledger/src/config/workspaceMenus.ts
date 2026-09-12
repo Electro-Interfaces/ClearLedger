@@ -339,7 +339,7 @@ export const MARKET_MENU: CentralMenuItem[] = [
   { key: 'mk_position',     label: 'Позиция' },
   { key: 'mk_map',          label: 'Карта рынка' },
   { key: 'mk_sites',        label: 'Точки рынка' },
-  { key: 'mk_operators',    label: 'Операторы' },
+  { key: 'mk_operators',    label: 'Компании' },
   { key: 'mk_observations', label: 'Наблюдения' },
   // Откуда мы знаем рынок и можно ли верить этому сегодня. Свежесть и покрытие —
   // такие же показатели продукта, как цена (docs/MARKET-ROADMAP.md §3.4).

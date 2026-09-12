@@ -72,7 +72,44 @@ export interface MarketOperator {
   siteUrl: string | null
   inn: string | null
   notes: string | null
+  /** Точки СЕТИ: домашние розетки под тем же именем в счёт не идут. */
   sites: number
+  /** Из них заряжали за 90 дней — сорок мёртвых розеток не равны десяти живым DC. */
+  alive: number
+  ports: number
+  maxPowerKw: number | null
+  medianPricePerKwh: number | null
+  pricedSites: number
+  quality: number | null
+  success: number | null
+  rating: number | null
+  reviews: number
+}
+
+/** Карточка компании: где стоит, чем оснащена, почём заряжает, как её оценивают. */
+export interface MarketOperatorCard {
+  id: string
+  name: string
+  relation: string
+  siteUrl: string | null
+  inn: string | null
+  notes: string | null
+  totals: {
+    sites: number; homeSockets: number; ports: number; alive: number
+    closed: number; planned: number
+    medianPricePerKwh: number | null; pricedSites: number
+    quality: number | null; success: number | null
+    rating: number | null; reviews: number
+  }
+  cities: { name: string; sites: number }[]
+  power: { bucket: string; sites: number }[]
+  months: { month: string; sites: number }[]
+  sites: {
+    id: string; name: string; city: string | null
+    ports: number | null; maxPowerKw: number | null; currentType: string | null
+    status: string; rating: number | null; quality: number | null
+    lastSessionAt: string | null; alive: boolean
+  }[]
 }
 
 export interface MarketObservation {
@@ -100,6 +137,9 @@ export const listMarketSites = (companyId: string, params?: { kind?: string; cit
 
 export const listMarketOperators = (companyId: string) =>
   get<{ operators: MarketOperator[] }>('/api/market/operators', { company_id: companyId })
+
+export const getMarketOperatorCard = (companyId: string, operatorId: string) =>
+  get<MarketOperatorCard>(`/api/market/operators/${operatorId}`, { company_id: companyId })
 
 export const listMarketObservations = (companyId: string, siteId?: string) =>
   get<{ observations: MarketObservation[]; total: number }>('/api/market/observations',

@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (ChannelSyncLog, MarketObservation, MarketOperator,
                         MarketSite, MarketSiteSnapshot)
+from app.services.mapping import canon_city, canon_region
 from app.services.market_ocm import _canon_operator
 
 logger = logging.getLogger("clearledger.market")
@@ -79,6 +80,29 @@ CURRENCY_BY_ID = {"1": "RUB", "2": "BYN", "3": "KZT"}
 # Сколько срезов подряд точка может отсутствовать, прежде чем считается закрытой.
 # Одна пропажа бывает сбоем обхода, три подряд — закрытием.
 CLOSE_AFTER_MISSES = 3
+
+# Часовые пояса России. Единственный надёжный признак страны в этой выгрузке:
+# `country` пуст у всех строк, а по координатам Финляндия и Прибалтика лежат внутри
+# того же прямоугольника широт и долгот, что и Россия. Треть первой выгрузки (508
+# точек из 1 506) стоит за границей — приняв их, мы получили бы «рынок России», где
+# каждая третья станция чужая, и плотность, доля и медиана цены врали бы везде.
+RU_TIMEZONES = {
+    "Europe/Kaliningrad", "Europe/Moscow", "Europe/Simferopol", "Europe/Kirov",
+    "Europe/Volgograd", "Europe/Astrakhan", "Europe/Saratov", "Europe/Ulyanovsk",
+    "Europe/Samara", "Asia/Yekaterinburg", "Asia/Omsk", "Asia/Novosibirsk",
+    "Asia/Barnaul", "Asia/Tomsk", "Asia/Novokuznetsk", "Asia/Krasnoyarsk",
+    "Asia/Irkutsk", "Asia/Chita", "Asia/Yakutsk", "Asia/Khandyga",
+    "Asia/Vladivostok", "Asia/Ust-Nera", "Asia/Magadan", "Asia/Sakhalin",
+    "Asia/Srednekolymsk", "Asia/Kamchatka", "Asia/Anadyr",
+}
+
+
+def in_russia(row: dict) -> bool:
+    """Российская ли точка. Пустой пояс — не повод выбрасывать: судим только по
+    явному признаку, иначе потеряем то, что источник просто не заполнил."""
+    tz = (row.get("time_zone") or "").strip()
+    return not tz or tz in RU_TIMEZONES
+
 
 # Верх разумного тарифа за киловатт-час в рублях. Выше — почти наверняка цена за
 # сессию, записанная в поле киловатт-часа: в выгрузке есть точка с `per_kwt:600`.
@@ -205,6 +229,45 @@ def site_class(icon_type: str | None, operator: str | None) -> str:
     return "network" if operator else "unknown"
 
 
+# Приставки субъекта в адресе источника: «Московская обл, 33-й км …», «Респ Крым, …».
+_REGION_MARKS = ("обл", "область", "край", "респ", "республика", "ао", "округ")
+
+
+def split_address(address: str | None) -> tuple[str | None, str | None]:
+    """Адрес источника → (регион, город). Отдельных полей в выгрузке нет.
+
+    Адрес приходит одной строкой двух видов: «Московская обл, 33-й км автодороги М8»
+    и «Александров, ул Речная дом 14». В первом случае первая часть — субъект, во
+    втором — сразу населённый пункт. Без этого разбора разрез «где стоит» показывает
+    «город не указан» у всех точек, то есть не показывает ничего.
+
+    Чужие коды (`federal_district_id`, `city_id`) сознательно не используем: они из
+    справочника источника, и привязываться к нему значит зависеть от чужой нумерации.
+    """
+    text = " ".join(str(address or "").split())
+    if not text:
+        return None, None
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    # Адрес иногда начинается со страны — тогда это ни регион, ни город.
+    if parts and parts[0].lower() in ("россия", "russia", "рф"):
+        parts = parts[1:]
+    if not parts:
+        return None, None
+    head = parts[0]
+    low = head.lower().replace(".", " ")
+    is_region = any(f" {mark}" in f" {low} " or low.endswith(f" {mark}")
+                    for mark in _REGION_MARKS)
+    if is_region:
+        region = canon_region(head)
+        city = canon_city(parts[1]) if len(parts) > 1 else None
+        # Вторая часть бывает не городом, а куском адреса («33-й км автодороги»):
+        # такое в город не пишем — лучше пусто, чем ложный населённый пункт.
+        if city and any(ch.isdigit() for ch in city):
+            city = None
+        return region, city
+    return None, canon_city(head)
+
+
 def parse_registry_csv(content: bytes) -> list[dict[str, str]]:
     """Выгрузка реестра (CSV `;`, UTF-8 с BOM) → список строк как есть.
 
@@ -287,7 +350,7 @@ async def ingest_registry(
             MarketObservation.observed_on == today,
             MarketObservation.channel == "import"))).scalars().all()}
 
-    created = updated = priced = skipped = 0
+    created = updated = priced = skipped = foreign = 0
     seen_ext: set[str] = set()
 
     for done, row in enumerate(rows, start=1):
@@ -295,6 +358,9 @@ async def ingest_registry(
         ext = _s(row.get("uuid"), 80) or _s(row.get("id"), 80)
         if lat is None or lon is None or not ext:
             skipped += 1
+            continue
+        if not in_russia(row):
+            foreign += 1
             continue
         seen_ext.add(ext)
 
@@ -316,6 +382,7 @@ async def ingest_registry(
                 operators[key] = operator
 
         name = _s(row.get("name"), 290) or (f"ЭЗС {operator_name}" if operator_name else "ЭЗС")
+        region, city = split_address(row.get("address"))
         connectors = parse_connectors(row.get("connectors"))
         powers = [c["power_kw"] for c in connectors if c.get("power_kw")]
         max_power = _num(row.get("max_power")) or (max(powers) if powers else None)
@@ -331,10 +398,14 @@ async def ingest_registry(
 
         site = by_ext.get(ext) or by_key.get(key)
         if site is None:
+            # Когда точка появилась, знает источник (`created_at` его записи), а не мы.
+            # Поставить сюда дату нашей загрузки — значит получить «как рос конкурент»
+            # в виде одного столбика в месяце первой выгрузки.
             site = MarketSite(
                 company_id=company_id, kind="ezs", name=name, dedup_key=key,
                 external_id=ext, source=source, source_rank=SOURCE_RANK,
-                source_ref=f"{source}:{ext}", first_seen_at=now,
+                source_ref=f"{source}:{ext}",
+                first_seen_at=_dt(row.get("created_at")) or now,
             )
             db.add(site)
             created += 1
@@ -350,6 +421,8 @@ async def ingest_registry(
         if not verified:
             site.name = name
             site.address = _s(row.get("address"), 400)
+            site.region = region
+            site.city = city
             site.latitude, site.longitude = lat, lon
             site.operator_id = operator.id if operator else None
             site.site_class = klass
@@ -454,8 +527,9 @@ async def ingest_registry(
                 total, created, updated, priced, skipped)
     return {"status": "success", "snapshotDate": today, "rows": total,
             "created": created, "updated": updated, "prices": priced,
-            "skipped": skipped, "missing": missing, "closed": closed,
+            "skipped": skipped, "foreign": foreign, "missing": missing, "closed": closed,
             "message": (f"срез {today}: точек {created + updated} "
                         f"(новых {created}), цен {priced}, "
+                        f"вне России {foreign}, "
                         f"без координат или ключа {skipped}, "
                         f"не найдено в срезе {missing}")}
