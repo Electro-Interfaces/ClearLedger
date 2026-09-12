@@ -40,7 +40,8 @@ async def main() -> None:
         # Сходимость: сумма наших объектов по территориям = объектам в реестре.
         ours_total = int((await db.execute(
             select(func.count()).select_from(ServiceLocation)
-            .where(ServiceLocation.company_id == company.id))).scalar() or 0)
+            .where(ServiceLocation.company_id == company.id,
+                   ServiceLocation.is_test.is_(False)))).scalar() or 0)
         by_terr = sum(r["ourSites"] for r in rows)
         print(f"\n   сходимость: объектов в реестре {ours_total}, "
               f"разложено по территориям {by_terr}"

@@ -522,10 +522,14 @@ async def market_position(
     since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
 
     # ── наши объекты ──
+    # Тестовые стенды заказчика («БЦ Гидропроект (Тест)» и подобные) в рыночный
+    # анализ не идут: они ничего не продают, но занимают строки и портят покрытие —
+    # «посчитано по 7 из 641» становится «из 638», и это честнее.
     ours = (await db.execute(
         select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.code,
                ServiceLocation.city, ServiceLocation.latitude, ServiceLocation.longitude)
-        .where(ServiceLocation.company_id == cid)
+        .where(ServiceLocation.company_id == cid,
+               ServiceLocation.is_test.is_(False))
     )).all()
 
     # ── наши продажи за окно: сессии, энергия, выручка ──
@@ -869,7 +873,8 @@ async def market_territories(
     ours = (await db.execute(
         select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
                ServiceLocation.region_id)
-        .where(ServiceLocation.company_id == cid))).all()
+        .where(ServiceLocation.company_id == cid,
+               ServiceLocation.is_test.is_(False)))).all()
     # Регион объекта берём строкой из паспорта: справочник регионов у нас по id, а
     # рынок несёт название. Сводить их по id пришлось бы обеим сторонам.
     regions = dict((rid, name) for rid, name in (await db.execute(
@@ -959,6 +964,7 @@ async def market_site_score(
                ServiceLocation.latitude, ServiceLocation.longitude,
                ServiceLocation.location_class, ServiceLocation.speed_class)
         .where(ServiceLocation.company_id == cid,
+               ServiceLocation.is_test.is_(False),
                ServiceLocation.latitude.is_not(None)))).all()
     sales_rows = (await db.execute(
         select(ChargeSession.location_id, func.count(),
@@ -1184,6 +1190,7 @@ async def market_pressure(
         select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
                ServiceLocation.latitude, ServiceLocation.longitude)
         .where(ServiceLocation.company_id == cid,
+               ServiceLocation.is_test.is_(False),
                ServiceLocation.latitude.is_not(None)))).all()
     window = timedelta(days=90)
     # Окно «после» должно целиком уместиться в прошлом: иначе сравниваются 90 дней
@@ -1645,6 +1652,7 @@ async def market_partners(
     our_cities = {city for (city,) in (await db.execute(
         select(ServiceLocation.city).where(
             ServiceLocation.company_id == cid,
+            ServiceLocation.is_test.is_(False),
             ServiceLocation.city.is_not(None)))).all() if city}
 
     sites = (await db.execute(select(MarketSite).where(
