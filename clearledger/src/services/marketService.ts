@@ -275,6 +275,70 @@ export const getMarketSources = (companyId: string) =>
 export const getMarketChanges = (companyId: string, params?: { base?: string; current?: string }) =>
   get<MarketChangesReply>('/api/market/changes', { company_id: companyId, ...params })
 
+/** Строка территории: наше и чужое в одной рамке. */
+export interface MarketTerritory {
+  name: string
+  ourSites: number
+  ourSessions: number
+  ourRevenue: number
+  ourEnergyKwh: number
+  rivalSites: number
+  rivalAlive: number
+  rivalPorts: number
+  homeSockets: number
+  marketPricePerKwh: number | null
+  ourPricePerKwh: number | null
+  sharePct: number | null
+  priceGapPct: number | null
+}
+
+/** Паспорт места под новую станцию: окружение, каннибализация, прогноз по аналогам. */
+export interface MarketSiteScore {
+  point: { lat: number; lon: number }
+  radiusKm: number
+  days: number
+  /** Город или трасса: от этого зависит, с какими нашими объектами сравнивать. */
+  placeClass: 'city' | 'highway'
+  placeGuessed: boolean
+  rivals: {
+    total: number; alive: number; ports: number; marketPricePerKwh: number | null
+    list: {
+      id: string; name: string; operatorName: string | null; distanceKm: number
+      ports: number | null; maxPowerKw: number | null; pricePerKwh: number | null
+      alive: boolean
+    }[]
+  }
+  cannibalization: {
+    ourNearby: number
+    list: { locationId: string; name: string; city: string | null
+            distanceKm: number; sessions: number; revenue: number }[]
+  }
+  forecast: {
+    method: string; analogues: number; days: number
+    sessionsPerPeriod: number | null; revenuePerPeriod: number | null
+    /** Разброс похожих объектов: половина лежит между low и high. */
+    sessionsLow: number | null; sessionsHigh: number | null
+    revenueLow: number | null; revenueHigh: number | null
+    sample: { locationId: string; name: string; city: string | null
+              rivals: number; rivalsTotal?: number
+              locationClass?: string | null; speedClass?: string | null
+              sessions: number; revenue: number }[]
+  }
+}
+
+export const getMarketTerritories = (companyId: string, params?: { level?: string; days?: number }) =>
+  get<{ level: string; days: number; territories: MarketTerritory[]; total: number }>(
+    '/api/market/territories', { company_id: companyId, ...params })
+
+export const getMarketWhitespots = (companyId: string, params?: { level?: string }) =>
+  get<{ level: string; spots: MarketTerritory[]; total: number; basis: string }>(
+    '/api/market/whitespots', { company_id: companyId, ...params })
+
+export const getMarketSiteScore = (
+  companyId: string,
+  params: { lat: number; lon: number; radius_km?: number; days?: number; place?: string },
+) => get<MarketSiteScore>('/api/market/site-score', { company_id: companyId, ...params })
+
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(
     `/api/market/sites/bulk?company_id=${encodeURIComponent(companyId)}&source=${source}`, { items })

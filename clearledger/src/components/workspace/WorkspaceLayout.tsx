@@ -167,6 +167,7 @@ function ModePanel() {
           разделы вернулись в «Продажи» (решение МАГа 28.07.2026). */}
       {coreMode === 'corporate' && <ProductStub code="corp" />}
       {coreMode === 'marketing' && <ManagementPanel mode="marketing" />}
+      {coreMode === 'marketing_area' && <ManagementPanel mode="marketing_area" />}
       {coreMode === 'financial' && <FinancialPanel />}
       {/* Разделы «Бухгалтерии» — потоки и сквозное; панель одна, различаются
           составом пунктов (см. moduleComponents). */}
@@ -332,9 +333,11 @@ function MobileWorkspace() {
  * пространства на своём маршруте («Проекты», «Эксплуатация», «Сеть», «Финансы», «Данные»),
  * где доступны только его разделы.
  */
-export function WorkspaceLayout({ modes }: { modes?: CoreMode[] } = {}) {
+export function WorkspaceLayout(
+  { modes, defaultMode }: { modes?: CoreMode[]; defaultMode?: CoreMode } = {},
+) {
   return (
-    <WorkspaceProvider lockModes={modes}>
+    <WorkspaceProvider lockModes={modes} defaultMode={defaultMode}>
       <ModeBeacon />
       <WorkspaceContent />
     </WorkspaceProvider>

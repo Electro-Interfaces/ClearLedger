@@ -345,7 +345,19 @@ export const MARKET_MENU: CentralMenuItem[] = [
   // такие же показатели продукта, как цена (docs/MARKET-ROADMAP.md §3.4).
   { key: 'mk_sources',      label: 'Источники и свежесть' },
 ]
-export const MARKET_KEYS = MARKET_MENU.map((m) => m.key)
+// ТЕРРИТОРИИ — где строить. Второй раздел продукта: у «Рынка» вопрос «что вокруг
+// нас», здесь — «где нас нет и стоит ли туда идти».
+export const MARKET_AREA_MENU: CentralMenuItem[] = [
+  { key: 'mk_territories', label: 'Территории' },
+  { key: 'mk_whitespots',  label: 'Белые пятна' },
+  { key: 'mk_score',       label: 'Оценка площадки' },
+]
+export const MARKET_KEYS = [...MARKET_MENU, ...MARKET_AREA_MENU].map((m) => m.key)
+
+/** Раздел «Маркетинга», которому принадлежит пункт: переход меняет и `mode`. */
+export function marketModeForKey(key: string): 'marketing' | 'marketing_area' {
+  return MARKET_AREA_MENU.some((m) => m.key === key) ? 'marketing_area' : 'marketing'
+}
 
 /**
  * Компания без объектов (профиль `office`) — «Реализация» и «Бухгалтерия».

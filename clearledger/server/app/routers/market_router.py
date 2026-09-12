@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (ChargeSession, MarketObservation, MarketOperator, MarketSite,
-                        MarketSiteSnapshot, ServiceLocation, User)
+                        MarketSiteSnapshot, Region, ServiceLocation, User)
 from app.services import market_ocm
 
 router = APIRouter(prefix="/market", tags=["Маркетинг — рынок"])
@@ -785,6 +785,302 @@ async def market_changes(
         "qualityDrops": sorted(quality_drops, key=lambda r: r["now"] - r["was"])[:limit],
         "counts": {"appeared": len(appeared), "gone": len(gone),
                    "priceMoves": len(price_moves), "qualityDrops": len(quality_drops)},
+    }
+
+
+# ── Территория как единица анализа ──────────────────────────────────────────
+# Клиент не выбирает нашу станцию против нашей же — он выбирает в радиусе
+# (docs/MARKET.md §2). Значит и считать надо по территории: сколько там предложения,
+# сколько нашего, какая цена держится.
+#
+# Единица — ГОРОД (и регион сверху), а не гексагон H3, как предполагал план. Причина
+# простая: гексагон нужен, чтобы сравнивать плотность спроса по площади, а данных о
+# спросе территории (население, парк ЭМ, трафик) у нас пока нет ни одного. Без них
+# гексагон даёт ту же информацию, что город, но в виде, о котором нельзя спросить
+# человека. H3 вернётся вместе со статистикой — поле `hex_id` в модели уже есть.
+
+def _territory_rows(sites, ours, sales, prices, alive_since, level: str) -> list[dict]:
+    """Свод по территории: наше и чужое в одной строке."""
+    buckets: dict[str, dict] = {}
+
+    def bucket(key: str | None) -> dict:
+        name = key or "территория не определена"
+        if name not in buckets:
+            buckets[name] = {"name": name, "ourSites": 0, "ourSessions": 0,
+                             "ourRevenue": 0.0, "ourEnergyKwh": 0.0,
+                             "rivalSites": 0, "rivalAlive": 0, "rivalPorts": 0,
+                             "homeSockets": 0, "prices": []}
+        return buckets[name]
+
+    for loc_id, name, city, region in ours:
+        row = bucket(region if level == "region" else city)
+        row["ourSites"] += 1
+        sale = sales.get(str(loc_id))
+        if sale:
+            row["ourSessions"] += sale["sessions"]
+            row["ourRevenue"] += sale["revenue"]
+            row["ourEnergyKwh"] += sale["energyKwh"]
+
+    for site in sites:
+        row = bucket(site.region if level == "region" else site.city)
+        if (site.site_class or "") == "home":
+            row["homeSockets"] += 1
+            continue
+        row["rivalSites"] += 1
+        row["rivalPorts"] += site.ports or 0
+        if site.last_session_at and site.last_session_at >= alive_since:
+            row["rivalAlive"] += 1
+        price = prices.get(str(site.id))
+        if price is not None:
+            row["prices"].append(price)
+
+    rows = []
+    for row in buckets.values():
+        market_price = _median(row.pop("prices"))
+        our_price = (round(row["ourRevenue"] / row["ourEnergyKwh"], 2)
+                     if row["ourEnergyKwh"] else None)
+        total_sites = row["ourSites"] + row["rivalSites"]
+        rows.append({
+            **row,
+            "marketPricePerKwh": market_price,
+            "ourPricePerKwh": our_price,
+            # Доля считается по ТОЧКАМ сети, а не по портам: порты у чужих известны
+            # не везде, и доля по ним прыгала бы от заполненности поля.
+            "sharePct": round(row["ourSites"] / total_sites * 100, 1) if total_sites else None,
+            "priceGapPct": (round((our_price - market_price) / market_price * 100, 1)
+                            if our_price and market_price else None),
+        })
+    return rows
+
+
+@router.get("/territories")
+async def market_territories(
+    company_id: str = Query(...),
+    level: str = Query("city", pattern="^(city|region)$"),
+    days: int = Query(90, ge=1, le=365),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Территории: где мы стоим, кто рядом, чья доля и какая цена держится."""
+    cid = await _member(company_id, user, db)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+
+    ours = (await db.execute(
+        select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
+               ServiceLocation.region_id)
+        .where(ServiceLocation.company_id == cid))).all()
+    # Регион объекта берём строкой из паспорта: справочник регионов у нас по id, а
+    # рынок несёт название. Сводить их по id пришлось бы обеим сторонам.
+    regions = dict((rid, name) for rid, name in (await db.execute(
+        select(Region.id, Region.name).where(Region.company_id == cid))).all())
+    ours = [(loc_id, name, city, regions.get(rid)) for loc_id, name, city, rid in ours]
+
+    sales_rows = (await db.execute(
+        select(ChargeSession.location_id, func.count(),
+               func.coalesce(func.sum(ChargeSession.energy_kwh), 0),
+               func.coalesce(func.sum(ChargeSession.amount), 0))
+        .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
+               ChargeSession.location_id.is_not(None))
+        .group_by(ChargeSession.location_id))).all()
+    sales = {str(loc): {"sessions": int(cnt), "energyKwh": float(energy or 0),
+                        "revenue": float(amount or 0)}
+             for loc, cnt, energy, amount in sales_rows}
+
+    sites = (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid, MarketSite.status != "closed",
+        MarketSite.location_id.is_(None)))).scalars().all()
+    prices: dict[str, float] = {}
+    for obs in (await db.execute(
+        select(MarketObservation)
+        .where(MarketObservation.company_id == cid, MarketObservation.kind == "price",
+               MarketObservation.price_per_kwh.is_not(None))
+        .order_by(MarketObservation.site_id, MarketObservation.observed_on.desc()))).scalars():
+        prices.setdefault(str(obs.site_id), float(obs.price_per_kwh))
+
+    rows = _territory_rows(sites, ours, sales, prices, alive_since, level)
+    rows.sort(key=lambda r: (-(r["ourSessions"]), -r["rivalSites"]))
+    return {"level": level, "days": days, "territories": rows, "total": len(rows)}
+
+
+@router.get("/whitespots")
+async def market_whitespots(
+    company_id: str = Query(...),
+    level: str = Query("city", pattern="^(city|region)$"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Белые пятна: рынок есть, нас нет.
+
+    Спрос территории считаем не по населению (его у нас нет), а по наблюдаемой
+    активности рынка: сколько там точек и на скольких заряжали за 90 дней. Это
+    слабее демографической модели и честно об этом говорит, но отвечает на вопрос
+    «где вообще ездят на электромобилях» по факту, а не по гипотезе.
+    """
+    cid = await _member(company_id, user, db)
+    reply = await market_territories(company_id=company_id, level=level, days=90,
+                                     user=user, db=db)
+    spots = [r for r in reply["territories"]
+             if r["ourSites"] == 0 and r["rivalSites"] > 0
+             and r["name"] != "территория не определена"]
+    # Наверх — где рынок живой: мёртвые точки не доказывают спрос, они его отрицают.
+    spots.sort(key=lambda r: (-r["rivalAlive"], -r["rivalSites"]))
+    return {"level": level, "spots": spots, "total": len(spots),
+            "basis": "спрос оценён по активности рынка (живые точки за 90 дней), "
+                     "без данных о населении и парке электромобилей"}
+
+
+@router.get("/site-score")
+async def market_site_score(
+    company_id: str = Query(...),
+    lat: float = Query(...), lon: float = Query(...),
+    radius_km: float = Query(DEFAULT_RADIUS_KM, ge=0.5, le=50),
+    days: int = Query(90, ge=30, le=365),
+    place: str = Query("auto", pattern="^(auto|city|highway)$",
+                       description="тип размещения: город, трасса или определить самим"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Паспорт места под новую станцию: кто рядом, что мы там потеряем и сколько
+    похожие наши объекты зарабатывают.
+
+    Прогноз — методом аналогов: берём НАШИ объекты, у которых похожее окружение
+    (столько же живых конкурентов в радиусе), и показываем их медиану. Он объясним
+    и его можно оспорить на совещании — в отличие от регрессии на 619 объектах
+    (docs/MARKET-ROADMAP.md §3.2).
+    """
+    cid = await _member(company_id, user, db)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+
+    sites = (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid, MarketSite.status != "closed",
+        MarketSite.latitude.is_not(None), MarketSite.longitude.is_not(None)))).scalars().all()
+    ours = (await db.execute(
+        select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
+               ServiceLocation.latitude, ServiceLocation.longitude,
+               ServiceLocation.location_class, ServiceLocation.speed_class)
+        .where(ServiceLocation.company_id == cid,
+               ServiceLocation.latitude.is_not(None)))).all()
+    sales_rows = (await db.execute(
+        select(ChargeSession.location_id, func.count(),
+               func.coalesce(func.sum(ChargeSession.amount), 0))
+        .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
+               ChargeSession.location_id.is_not(None))
+        .group_by(ChargeSession.location_id))).all()
+    sales = {str(loc): {"sessions": int(cnt), "revenue": float(amount or 0)}
+             for loc, cnt, amount in sales_rows}
+    prices: dict[str, float] = {}
+    for obs in (await db.execute(
+        select(MarketObservation)
+        .where(MarketObservation.company_id == cid, MarketObservation.kind == "price",
+               MarketObservation.price_per_kwh.is_not(None))
+        .order_by(MarketObservation.site_id, MarketObservation.observed_on.desc()))).scalars():
+        prices.setdefault(str(obs.site_id), float(obs.price_per_kwh))
+    ops = {o.id: o.name for o in (await db.execute(select(MarketOperator).where(
+        MarketOperator.company_id == cid))).scalars().all()}
+
+    def rivals_around(plat: float, plon: float, skip_location: str | None = None) -> list[dict]:
+        out = []
+        for site in sites:
+            if skip_location and site.location_id == skip_location:
+                continue
+            if (site.site_class or "") == "home" or site.kind != "ezs":
+                continue
+            distance = _distance_km(plat, plon, float(site.latitude), float(site.longitude))
+            if distance > radius_km:
+                continue
+            out.append({
+                "id": str(site.id), "name": site.name,
+                "operatorName": ops.get(site.operator_id) if site.operator_id else None,
+                "distanceKm": round(distance, 1), "ports": site.ports,
+                "maxPowerKw": float(site.max_power_kw) if site.max_power_kw else None,
+                "pricePerKwh": prices.get(str(site.id)),
+                "alive": bool(site.last_session_at and site.last_session_at >= alive_since),
+            })
+        return sorted(out, key=lambda r: r["distanceKm"])
+
+    around = rivals_around(lat, lon)
+    alive_rivals = sum(1 for r in around if r["alive"])
+    market_price = _median([r["pricePerKwh"] for r in around if r["pricePerKwh"] is not None])
+
+    # Каннибализация: чей кусок мы съедим, если встанем здесь.
+    near_ours = sorted(({
+        "locationId": str(loc_id), "name": name, "city": city,
+        "distanceKm": round(_distance_km(lat, lon, float(olat), float(olon)), 1),
+        **sales.get(str(loc_id), {"sessions": 0, "revenue": 0.0}),
+    } for loc_id, name, city, olat, olon, _cls, _spd in ours
+        if _distance_km(lat, lon, float(olat), float(olon)) <= radius_km),
+        key=lambda r: r["distanceKm"])
+
+    # Аналоги: наши объекты с похожим окружением. Похожесть — по числу живых
+    # конкурентов рядом: это и есть главный внешний фактор, который мы умеем мерить.
+    # Похожесть места: столько же конкурентов рядом И тот же тип размещения (город
+    # против трассы) И тот же класс скорости. Одного числа соседей мало: у 408 наших
+    # объектов из 641 живых конкурентов ноль, и «аналогом» становилась вся сеть.
+    # Тип и скорость известны не у всех — где пусто, признак не применяем, но пишем,
+    # по какому набору признаков собрана выборка.
+    if place in ("city", "highway"):
+        want_class = place
+        place_guessed = False
+    else:
+        # Догадка по окружению: место, вокруг которого у точек рынка есть название
+        # населённого пункта, — город; голое окружение — трасса. Грубо, поэтому
+        # рядом с числом всегда написано, что тип определён автоматически, и человек
+        # может поправить одним селектором.
+        near_named = sum(1 for site in sites
+                         if site.city and _distance_km(
+                             lat, lon, float(site.latitude), float(site.longitude)) <= radius_km)
+        want_class = "city" if near_named else "highway"
+        place_guessed = True
+    analogues = []
+    for loc_id, name, city, olat, olon, loc_class, speed in ours:
+        sale = sales.get(str(loc_id))
+        if not sale or not sale["sessions"]:
+            continue
+        if want_class and loc_class and loc_class != want_class:
+            continue
+        near = rivals_around(float(olat), float(olon), str(loc_id))
+        rivals_alive = sum(1 for r in near if r["alive"])
+        if abs(rivals_alive - alive_rivals) > 1 or abs(len(near) - len(around)) > 2:
+            continue
+        analogues.append({"locationId": str(loc_id), "name": name, "city": city,
+                          "rivals": rivals_alive, "rivalsTotal": len(near),
+                          "locationClass": loc_class, "speedClass": speed, **sale})
+    analogues.sort(key=lambda r: -r["sessions"])
+
+    def _quartile(values: list[float], share: float) -> float | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        return ordered[min(len(ordered) - 1, int(len(ordered) * share))]
+
+    sessions = [float(a["sessions"]) for a in analogues]
+    revenues = [float(a["revenue"]) for a in analogues]
+    sessions_forecast = _median(sessions)
+    revenue_forecast = _median(revenues)
+
+    return {
+        "point": {"lat": lat, "lon": lon}, "radiusKm": radius_km, "days": days,
+        "rivals": {"total": len(around), "alive": alive_rivals,
+                   "ports": sum(r["ports"] or 0 for r in around),
+                   "marketPricePerKwh": market_price, "list": around[:20]},
+        "cannibalization": {"ourNearby": len(near_ours), "list": near_ours[:10]},
+        "placeClass": want_class,
+        "placeGuessed": place_guessed,
+        "forecast": {
+            "method": ("аналоги: наши работающие объекты с тем же окружением, "
+                       + ("город" if want_class == "city" else "трасса")
+                       + (" (определено автоматически)" if place_guessed else " (задано вами)")),
+            "analogues": len(analogues),
+            "sessionsPerPeriod": sessions_forecast,
+            "revenuePerPeriod": revenue_forecast,
+            # Разброс важнее одной цифры: половина похожих объектов лежит между
+            # этими значениями, и решение принимается по диапазону, а не по точке.
+            "sessionsLow": _quartile(sessions, 0.25),
+            "sessionsHigh": _quartile(sessions, 0.75),
+            "revenueLow": _quartile(revenues, 0.25),
+            "revenueHigh": _quartile(revenues, 0.75),
+            "days": days,
+            "sample": analogues[:8],
+        },
     }
 
 

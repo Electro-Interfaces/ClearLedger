@@ -31,6 +31,8 @@ import { MarketSiteDialog } from './MarketSiteDialog'
 import { MarketObservationDialog } from './MarketObservationDialog'
 import { MarketSourcesPanel } from './MarketSourcesPanel'
 import { MarketCompaniesPanel } from './MarketCompaniesPanel'
+import { MarketTerritoriesPanel, MarketWhitespotsPanel } from './MarketTerritoriesPanel'
+import { MarketSiteScorePanel } from './MarketSiteScorePanel'
 
 /** Тёмная тема приложения (класс `dark` на <html>) — как в карте продаж. */
 function useIsDark() {
@@ -313,6 +315,9 @@ export function MarketRouter({ tab }: { tab: string }) {
     case 'mk_operators': return <MarketCompaniesPanel />
     case 'mk_observations': return <MarketObservations />
     case 'mk_sources': return <MarketSourcesPanel />
+    case 'mk_territories': return <MarketTerritoriesPanel />
+    case 'mk_whitespots': return <MarketWhitespotsPanel />
+    case 'mk_score': return <MarketSiteScorePanel />
     default: return (
       <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
         <MapPin className="mr-2 size-4" /> Выберите раздел рынка

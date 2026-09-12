@@ -11,7 +11,7 @@
 
 import type { ComponentType } from 'react'
 import { useLocation } from 'react-router-dom'
-import { BarChart3, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark, Cable, PackageOpen, Shield, Handshake, Banknote, Settings } from 'lucide-react'
+import { BarChart3, Map as MapIcon, Gauge, BookOpen, FileOutput, HardHat, Building2, Megaphone, Sparkles, GitCompare, Activity, Wallet, Boxes, Receipt, Truck, Scale, FileText, Users, Package, TrendingUp, Landmark, Cable, PackageOpen, Shield, Handshake, Banknote, Settings } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { modeAllowed } from '@/config/accessModules'
@@ -31,7 +31,7 @@ import {
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
   FUEL_HELP_MENU,
-  MARKET_MENU, MARKET_KEYS,
+  MARKET_MENU, MARKET_AREA_MENU, MARKET_KEYS,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
@@ -55,7 +55,7 @@ export {
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
-  MARKET_MENU, MARKET_KEYS,
+  MARKET_MENU, MARKET_AREA_MENU, MARKET_KEYS,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
   ECON_RESULT_MENU, ECON_COSTS_MENU, ECON_TAXES_MENU, ECON_HELP_MENU,
@@ -193,6 +193,10 @@ export function useWorkspaceSections(): WorkspaceSection[] {
   // «Маркетинг» получил первый рабочий раздел — рынок вокруг сети (docs/MARKET.md).
   const marketing: WorkspaceSection = { mode: 'marketing', label: 'Рынок',
     icon: Megaphone, items: isEnergy ? MARKET_MENU : [], connected: isEnergy }
+  // Второй раздел продукта: «Рынок» отвечает, что вокруг нас, «Территории» — где нас
+  // нет и стоит ли туда идти. Это разные заходы, а не два взгляда на один экран.
+  const marketingArea: WorkspaceSection = { mode: 'marketing_area', label: 'Территории',
+    icon: MapIcon, items: isEnergy ? MARKET_AREA_MENU : [], connected: isEnergy }
   // Разделы «Бухгалтерии» = потоки + сквозное; состав каждого — его компоненты.
   // Раздел без единого включённого компонента в рельсе не показывается: пустая
   // вторая панель читается как поломка.
@@ -281,7 +285,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
        perPicture, perOfficial, perRecords, perCash, perPeople, perSetup, perHelp, normalize,
        connect]
     : isEnergy
-    ? [sales, salesSessions, salesCommerce, corporate, marketing,
+    ? [sales, salesSessions, salesCommerce, corporate, marketing, marketingArea,
        projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
        storeSections[0], ...accSections, exp, normalize, reconcile, connect]
     : [sales, salesSessions, salesCommerce, salesGoods, salesHelp, ...storeSections, storeHelp, ops,

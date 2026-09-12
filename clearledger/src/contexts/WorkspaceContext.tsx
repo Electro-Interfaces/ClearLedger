@@ -31,22 +31,22 @@ import { useSearchParams } from 'react-router-dom'
 // разрез внутри экрана: раньше это были два раздела с одинаковыми пунктами, и общей
 // выручки компании не показывал ни один (13.08.2026).
 // `books_*` — разделы «Бухгалтерии» того же профиля: эталон учёта от сводки к первичке.
-export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' | 'sales_help' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'store' | 'store_receipt' | 'store_documents' | 'store_catering' | 'store_stock' | 'store_cash' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_1c' | 'store_reports' | 'store_help' | 'corporate' | 'marketing' | 'financial' | 'accounting' | 'acc_period' | 'acc_store' | 'acc_food' | 'acc_recon' | 'acc_docs' | 'acc_results' | 'tax' | 'export' | 'rev_sales' | 'rev_buyers' | 'rev_catalog' | 'rev_papers' | 'rev_money' | 'rev_stock' | 'rev_help' | 'econ_result' | 'econ_costs' | 'econ_taxes' | 'econ_help' | 'books_ledger' | 'books_primary' | 'books_offbal' | 'per_picture' | 'per_official' | 'per_records' | 'per_cash' | 'per_people' | 'per_setup' | 'per_help'
+export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' | 'sales_help' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'store' | 'store_receipt' | 'store_documents' | 'store_catering' | 'store_stock' | 'store_cash' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_1c' | 'store_reports' | 'store_help' | 'corporate' | 'marketing' | 'marketing_area' | 'financial' | 'accounting' | 'acc_period' | 'acc_store' | 'acc_food' | 'acc_recon' | 'acc_docs' | 'acc_results' | 'tax' | 'export' | 'rev_sales' | 'rev_buyers' | 'rev_catalog' | 'rev_papers' | 'rev_money' | 'rev_stock' | 'rev_help' | 'econ_result' | 'econ_costs' | 'econ_taxes' | 'econ_help' | 'books_ledger' | 'books_primary' | 'books_offbal' | 'per_picture' | 'per_official' | 'per_records' | 'per_cash' | 'per_people' | 'per_setup' | 'per_help'
   // «Данные» компании без объектов: источник один — бухгалтерия клиента, и разделы
   // идут от неё, а не от каналов приёма файлов.
   | 'data_sources' | 'data_model' | 'data_quality'
   // «Подключения»: один раздел, его пункты — во второй колонке.
   | 'connect'
 
-const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'sales_help', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'store', 'store_receipt', 'store_documents', 'store_catering', 'store_stock', 'store_cash', 'store_catalog', 'store_marking', 'store_network', 'store_1c', 'store_reports', 'store_help', 'corporate', 'marketing', 'financial', 'accounting', 'acc_period', 'acc_store', 'acc_food', 'acc_recon', 'acc_docs', 'acc_results', 'tax', 'export', 'data_sources', 'data_model', 'data_quality', 'connect',
+const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'sales_help', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'store', 'store_receipt', 'store_documents', 'store_catering', 'store_stock', 'store_cash', 'store_catalog', 'store_marking', 'store_network', 'store_1c', 'store_reports', 'store_help', 'corporate', 'marketing', 'marketing_area', 'financial', 'accounting', 'acc_period', 'acc_store', 'acc_food', 'acc_recon', 'acc_docs', 'acc_results', 'tax', 'export', 'data_sources', 'data_model', 'data_quality', 'connect',
   'rev_sales', 'rev_buyers', 'rev_catalog', 'rev_papers', 'rev_money', 'rev_stock',
   'rev_help', 'econ_result', 'econ_costs', 'econ_taxes', 'econ_help',
   'books_ledger', 'books_primary', 'books_offbal',
   'per_picture', 'per_official', 'per_records', 'per_cash', 'per_people',
   'per_setup', 'per_help']
-function readMode(sp: URLSearchParams): CoreMode {
+function readMode(sp: URLSearchParams): CoreMode | null {
   const m = sp.get('mode')
-  return m && (VALID_MODES as string[]).includes(m) ? (m as CoreMode) : 'management'
+  return m && (VALID_MODES as string[]).includes(m) ? (m as CoreMode) : null
 }
 
 /**
@@ -123,16 +123,23 @@ const WorkspaceContext = createContext<WorkspaceContextType | null>(null)
  * переключение обычное (`?mode=`), выйти за него нельзя — чужой режим из URL откатывается
  * к первому разделу продукта.
  */
-export function WorkspaceProvider({ children, lockModes }: { children: ReactNode; lockModes?: CoreMode[] }) {
+export function WorkspaceProvider(
+  { children, lockModes, defaultMode }:
+  { children: ReactNode; lockModes?: CoreMode[]; defaultMode?: CoreMode },
+) {
   const [selectedStationId, setSelectedStationId] = useState<number | null>(null)
   const [selectedShiftNumber, setSelectedShiftNumber] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<'raw' | 'core' | 'export'>('raw')
   // Режим центральной панели живёт в URL (?mode=) — чтобы под-вид можно было закрепить закладкой.
   const [searchParams, setSearchParams] = useSearchParams()
   const urlMode = readMode(searchParams)
-  const coreMode = lockModes
-    ? (lockModes.includes(urlMode) ? urlMode : lockModes[0])
-    : urlMode
+  // Без `?mode=` продукт открывается со своего рабочего раздела, а не с первого в
+  // рельсе: в «Продажах» работу начинают с «Сессий», «Сеть» — это витрина владения
+  // (решение МАГа 10.09.2026). Порядок разделов в рельсе от этого не меняется.
+  const fallbackMode: CoreMode = defaultMode && (!lockModes || lockModes.includes(defaultMode))
+    ? defaultMode
+    : (lockModes?.[0] ?? 'management')
+  const coreMode = urlMode && (!lockModes || lockModes.includes(urlMode)) ? urlMode : fallbackMode
   // `sub` необязателен: без него раздел открывается со своего первого пункта, с ним —
   // на нужном. Второе понадобилось, когда пункт живёт в чужом разделе: старая ссылка
   // `?mode=store&sub=inventory` должна привести в «Склад» НА «Инвентаризацию», а не

@@ -22,6 +22,7 @@ import { navByPath } from './navigation'
 import {
   ENERGY_MGMT, EQUIPMENT_MENU, OPS_MONITOR_MENU, SITES_MENU,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU, MARKET_MENU,
+  MARKET_AREA_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU, FUEL_HELP_MENU,
   REV_SALES_MENU, REV_CLIENTS_MENU, REV_ITEMS_MENU, REV_DOCS_MENU, REV_MONEY_MENU,
   REV_STOCK_MENU, REV_HELP_MENU,
@@ -111,7 +112,8 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
     ...items(storeMenu('store_1c'), '1С до перехода'),
     ...items(STORE_HELP_MENU, 'Помощь'),
   ],
-  marketing: items(MARKET_MENU, 'Рынок'),
+  marketing: [...items(MARKET_MENU, 'Рынок'),
+              ...items(MARKET_AREA_MENU, 'Территории')],
   finance: [
     // «Финансовый» и «Налоговый» сняты с витрины (workspaceSections) — прав на них нет:
     // роль не должна раздавать доступ к разделу, которого в интерфейсе не существует.

@@ -57,6 +57,7 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   store_reports: 'Магазин · Отчёты',
   corporate: 'Процессинг',
   marketing: 'Маркетинг',
+  marketing_area: 'Территории',
   financial: 'Финансовый',
   // Разделы «Бухгалтерии»: потоки + сквозное. `accounting` — первый раздел
   // («Нефтепродукты»), исторический код продукта и ключ доступа.
@@ -168,7 +169,12 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   ops_economy: { procurement: 'Энергозакупка', rent: 'Аренда', ops_payments: 'Оплаты' },
   marketing: {
     mk_position: 'Позиция', mk_map: 'Карта рынка', mk_sites: 'Точки рынка',
-    mk_operators: 'Операторы', mk_observations: 'Наблюдения',
+    mk_operators: 'Компании', mk_observations: 'Наблюдения',
+    mk_sources: 'Источники и свежесть',
+  },
+  marketing_area: {
+    mk_territories: 'Территории', mk_whitespots: 'Белые пятна',
+    mk_score: 'Оценка площадки',
   },
   store: Object.fromEntries(STORE_MENU.map((m) => [m.key, m.label])),
   store_documents: Object.fromEntries(storeMenu('store_documents').map((m) => [m.key, m.label])),
