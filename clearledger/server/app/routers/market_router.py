@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import uuid
+import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -691,6 +692,48 @@ async def _projects_in_work(db: AsyncSession, cid: uuid.UUID,
     return out
 
 
+def _geo_index(points: list[Any], cell_km: float) -> dict[tuple[int, int], list[Any]]:
+    """Разложить точки по клеткам широты и долготы размером примерно `cell_km`.
+
+    Экран «Наши объекты» считался 24 секунды: для каждого из 619 объектов
+    перебирались все 9 118 точек рынка — 5,6 млн вычислений расстояния по формуле
+    гаверсинуса. Человек в это время смотрел на серые полосы и считал, что
+    приложение зависло (замечание МАГа 13.09.2026).
+
+    Клетка — примерно радиус поиска, поэтому достаточно просмотреть соседние: всё,
+    что дальше, в радиус не попадёт по построению.
+    """
+    step = max(cell_km, 0.1) / 111.0        # 1° широты ≈ 111 км
+    index: dict[tuple[int, int], list[Any]] = {}
+    for p in points:
+        if p.latitude is None or p.longitude is None:
+            continue
+        key = (int(float(p.latitude) // step), int(float(p.longitude) // step))
+        index.setdefault(key, []).append(p)
+    return index
+
+
+def _geo_around(index: dict[tuple[int, int], list[Any]], lat: float, lon: float,
+                cell_km: float) -> list[Any]:
+    """Точки из клеток вокруг координаты — кандидаты, которые ещё надо померить.
+
+    По долготе клетки физически уже, чем по широте, и тем сильнее, чем севернее:
+    на широте Мурманска градус долготы вдвое короче градуса широты. Поэтому окно
+    по долготе расширяется на косинус широты, иначе у северных объектов часть
+    соседей осталась бы за краем просмотра.
+    """
+    step = max(cell_km, 0.1) / 111.0
+    lat_cell, lon_cell = int(lat // step), int(lon // step)
+    span = max(1, int(math.ceil(1.0 / max(math.cos(math.radians(lat)), 0.2))))
+    out: list[Any] = []
+    for dy in (-1, 0, 1):
+        for dx in range(-span, span + 1):
+            found = index.get((lat_cell + dy, lon_cell + dx))
+            if found:
+                out.extend(found)
+    return out
+
+
 async def _own_operator_ids(db: AsyncSession, cid: uuid.UUID) -> set[uuid.UUID]:
     """Операторы, которые есть мы сами.
 
@@ -780,6 +823,7 @@ async def market_position(
     ops = {o.id: o for o in (await db.execute(select(MarketOperator).where(
         MarketOperator.company_id == cid))).scalars().all()}
     alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+    market_index = _geo_index(market, radius_km)
 
     rows: list[dict[str, Any]] = []
     for loc_id, name, code, city, lat, lon in ours:
@@ -787,7 +831,7 @@ async def market_position(
                                     "ourPricePerKwh": None})
         neighbours: list[dict[str, Any]] = []
         if lat is not None and lon is not None:
-            for m in market:
+            for m in _geo_around(market_index, float(lat), float(lon), radius_km):
                 # Свои же точки в окружение не считаем: конкурент — это чужой.
                 if m.location_id == loc_id:
                     continue

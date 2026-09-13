@@ -10,7 +10,7 @@
  */
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Loader2, ChevronDown, ChevronRight } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -150,7 +150,13 @@ function MarketPositionTable() {
     // видит, ЧТО именно сейчас появится.
     return (
       <div className="space-y-2 p-4" aria-busy="true">
-        <span className="sr-only">Считаем окружение объектов</span>
+        {/* Скелетон молчит, и на долгом счёте это читается как «зависло». Поэтому
+            рядом сказано, что именно считается: экран сводит наши продажи с
+            окружением каждого объекта, и это работа, а не ожидание сети. */}
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          Считаем окружение каждого объекта: кто стоит рядом и почём заряжает.
+        </div>
         {[0, 1, 2, 3, 4].map((i) => (
           <div key={i} className="h-12 animate-pulse rounded-lg border border-border bg-muted/40" />
         ))}

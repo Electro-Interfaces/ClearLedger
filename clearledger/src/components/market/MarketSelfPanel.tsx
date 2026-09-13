@@ -10,7 +10,7 @@
  * которой у нас идут сессии, а рынок показывает её молчащей.
  */
 import { useQuery } from '@tanstack/react-query'
-import { Eye } from 'lucide-react'
+import { Loader2, Eye } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getMarketSelfView } from '@/services/marketService'
@@ -36,7 +36,10 @@ export function MarketSelfPanel() {
   if (q.isLoading) {
     return (
       <div className="space-y-2 p-4" aria-busy="true">
-        <span className="sr-only">Смотрим на себя глазами рынка</span>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          Сверяем наш реестр с тем, что о наших станциях знает рынок.
+        </div>
         {[0, 1, 2].map((i) => (
           <div key={i} className="h-16 animate-pulse rounded-lg border border-border bg-muted/40" />
         ))}
