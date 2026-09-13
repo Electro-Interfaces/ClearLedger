@@ -451,8 +451,153 @@ async def list_sites(
         "verifiedAt": s.verified_at.isoformat() if s.verified_at else None,
         "price": last_price.get(str(s.id)),
         "notes": s.notes,
+        # Паспорт станции: всё, что приехало парсером и до сих пор лежало без дела.
+        # Разъёмы с их мощностями, качество связи, успешность зарядок, оценка и
+        # отзывы — по этому и выбирают, с кем сравнивать свою станцию.
+        "connectorsJson": s.connectors_json, "connectorsTotal": s.connectors_total,
+        "quality24h": (float(s.connection_quality_24h)
+                       if s.connection_quality_24h is not None else None),
+        "successPct": (float(s.success_charge_pct)
+                       if s.success_charge_pct is not None else None),
+        "rating": float(s.rating) if s.rating is not None else None,
+        "reviews": s.reviews_count,
+        "closedConfirmations": s.closed_confirmations,
+        "isAlive": s.is_alive, "currency": s.currency,
+        "externalId": s.external_id, "vendor": s.vendor,
+        "firstSeenAt": s.first_seen_at.isoformat() if s.first_seen_at else None,
+        # Ссылки на снимки внешние: файлы лежат у источника. Число снимков
+        # сохранено отдельно — по нему видно, что фото были, даже если ссылка
+        # перестала открываться.
+        "photos": s.photos, "photoCount": s.photo_count,
+        "photoAuthors": s.photo_authors,
     } for s in sites], "total": total, "returned": len(sites),
         "offset": offset, "limit": limit}
+
+
+@router.get("/sites/breakdown")
+async def sites_breakdown(
+    company_id: str = Query(...),
+    city: str | None = Query(None),
+    region: str | None = Query(None),
+    operator_id: str | None = Query(None),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Разрезы рынка по точкам: чем оснащены, живы ли, кто владеет.
+
+    Считается по ВСЕЙ базе, а не по загруженной странице списка: девять тысяч точек
+    не помещаются в браузер, и разрез по пятистам строкам — это разрез по первым
+    пятистам строкам, а не по рынку.
+
+    Домашние розетки из разрезов исключены: они не предложение рынка. Их число
+    возвращается отдельно, чтобы это не выглядело умолчанием.
+    """
+    cid = await _member(company_id, user, db)
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+    own_ids = await _own_operator_ids(db, cid)
+
+    q = select(MarketSite).where(MarketSite.company_id == cid,
+                                 MarketSite.kind == "ezs")
+    if city:
+        q = q.where(MarketSite.city == city)
+    if region:
+        q = q.where(MarketSite.region == region)
+    if operator_id:
+        q = q.where(MarketSite.operator_id == uuid.UUID(operator_id))
+    rows = (await db.execute(q)).scalars().all()
+
+    home = [x for x in rows if (x.site_class or "") == "home"]
+    sites = [x for x in rows if (x.site_class or "") != "home"]
+    if not sites:
+        return {"total": 0, "homeSockets": len(home),
+                "message": "точек рынка по этим условиям нет"}
+
+    ops = {o.id: o.name for o in (await db.execute(select(MarketOperator).where(
+        MarketOperator.company_id == cid))).scalars().all()}
+    last_price = await _last_prices(db, cid)
+
+    def bucket(items: list[Any], key) -> list[dict[str, Any]]:
+        out: dict[str, dict[str, Any]] = {}
+        for it in items:
+            name = key(it)
+            row = out.setdefault(name, {"name": name, "sites": 0, "alive": 0,
+                                        "ports": 0, "prices": []})
+            row["sites"] += 1
+            row["ports"] += it.ports or 0
+            if it.last_session_at and it.last_session_at >= alive_since:
+                row["alive"] += 1
+            price = last_price.get(str(it.id))
+            if price:
+                row["prices"].append(price["price"])
+        result = []
+        for row in out.values():
+            prices = row.pop("prices")
+            result.append({**row, "medianPrice": _median(prices),
+                           "pricedSites": len(prices)})
+        return sorted(result, key=lambda r: -r["sites"])
+
+    def power_bucket(x: Any) -> str:
+        v = x.max_power_kw
+        if v is None:
+            return "мощность не указана"
+        v = float(v)
+        return ("до 22 кВт" if v < 22 else "22–50 кВт" if v < 50
+                else "50–150 кВт" if v < 150 else "от 150 кВт")
+
+    # ── разъёмы: тип и мощность лежат в JSON каждой точки ──
+    # Это то, по чему водитель вообще может к станции подъехать: машина с CCS не
+    # заряжается от GB/T, сколько бы киловатт там ни было.
+    connectors: dict[str, dict[str, Any]] = {}
+    for x in sites:
+        for c in (x.connectors_json or []):
+            name = (c.get("type") or "не указан").strip() or "не указан"
+            row = connectors.setdefault(name, {"name": name, "count": 0, "sites": 0,
+                                               "powers": []})
+            row["count"] += 1
+            row["sites"] += 1
+            if c.get("power_kw"):
+                row["powers"].append(float(c["power_kw"]))
+    connector_rows = []
+    for row in connectors.values():
+        powers = row.pop("powers")
+        connector_rows.append({**row, "medianPowerKw": _median(powers),
+                               "withPower": len(powers)})
+    connector_rows.sort(key=lambda r: -r["count"])
+
+    # ── качество: заполнено не везде, и покрытие идёт рядом с числом ──
+    quality = [float(x.connection_quality_24h) for x in sites
+               if x.connection_quality_24h is not None]
+    success = [float(x.success_charge_pct) for x in sites
+               if x.success_charge_pct is not None]
+    ratings = [float(x.rating) for x in sites if x.rating is not None]
+    alive = [x for x in sites if x.last_session_at and x.last_session_at >= alive_since]
+    silent = [x for x in sites if x.last_session_at is None]
+
+    return {
+        "total": len(sites), "homeSockets": len(home),
+        "byPower": bucket(sites, power_bucket),
+        "byCurrent": bucket(sites, lambda x: x.current_type or "тип тока не указан"),
+        "byClass": bucket(sites, lambda x: {
+            "network": "сети", "independent": "независимые",
+        }.get(x.site_class or "", "класс не определён")),
+        "byOperator": bucket([x for x in sites if x.operator_id],
+                             lambda x: ops.get(x.operator_id) or "оператор не назван")[:30],
+        "byRegion": bucket(sites, lambda x: x.region or "регион не определён")[:30],
+        "byConnector": connector_rows,
+        "quality": {
+            "alive": len(alive), "aliveDays": ALIVE_DAYS,
+            "neverSeenCharging": len(silent),
+            "withoutOperator": sum(1 for x in sites if not x.operator_id),
+            "ourSites": sum(1 for x in sites if x.operator_id in own_ids),
+            "medianQuality": _median(quality), "qualityCoverage": len(quality),
+            "medianSuccess": _median(success), "successCoverage": len(success),
+            "medianRating": _median(ratings), "ratingCoverage": len(ratings),
+            "closedConfirmed": sum(1 for x in sites if (x.closed_confirmations or 0) > 0),
+        },
+        "note": ("разрезы посчитаны по всей базе точек, а не по видимой странице; "
+                 "домашние розетки в них не входят и показаны отдельно. Мощность "
+                 "известна не у всех точек, качество связи и успешность зарядок — "
+                 "тем более: покрытие показано рядом с каждым числом"),
+    }
 
 
 @router.post("/sites", status_code=status.HTTP_201_CREATED)

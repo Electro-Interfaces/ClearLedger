@@ -4893,6 +4893,9 @@ async def create_all() -> None:
         # домашней розетке сетевой класс значит испортить сравнение операторов.
         for stmt in (
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS connectors_json JSONB",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS photos JSONB",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS photo_count INTEGER",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS photo_authors TEXT",
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS current_type VARCHAR(8)",
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS vendor VARCHAR(120)",
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS site_class VARCHAR(24) "

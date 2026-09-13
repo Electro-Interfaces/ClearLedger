@@ -8183,6 +8183,13 @@ class MarketSite(Base):
     # Сколько срезов подряд точки не было в выгрузке. На третьем — `status = closed`:
     # одна пропажа бывает сбоем обхода, три подряд — закрытием.
     closed_confirmations: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Фотографии станции из источника: снимки площадки, разъёмов и подъезда. Для
+    # площадки это единственный способ увидеть её до выезда — какой заезд, где
+    # стоят посты, есть ли навес. Ссылки внешние: файлы лежат у источника и могут
+    # пропасть, поэтому рядом хранится число снимков на момент выгрузки.
+    photos: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    photo_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    photo_authors: Mapped[str | None] = mapped_column(Text, nullable=True)
     opened_on: Mapped[str | None] = mapped_column(String(10), nullable=True)   # ISO-дата открытия
     closed_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # active|planned|closed

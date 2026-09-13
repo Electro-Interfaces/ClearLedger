@@ -60,6 +60,23 @@ export interface MarketSite {
   openedOn: string | null
   isOurs: boolean
   locationId: string | null
+  /** Разъёмы с их мощностями: по ним видно, какая машина сюда вообще подъедет. */
+  connectorsJson: { type?: string; power_kw?: number }[] | null
+  connectorsTotal: number | null
+  quality24h: number | null
+  successPct: number | null
+  rating: number | null
+  reviews: number | null
+  closedConfirmations: number | null
+  isAlive: boolean | null
+  currency: string | null
+  externalId: string | null
+  vendor: string | null
+  firstSeenAt: string | null
+  /** Снимки площадки: ссылки внешние, файлы лежат у источника. */
+  photos: string[] | null
+  photoCount: number | null
+  photoAuthors: string | null
   source: string
   sourceRank: number
   lastSeenAt: string | null
@@ -197,6 +214,32 @@ export const listMarketSites = (
   },
 ) => get<{ sites: MarketSite[]; total: number; returned: number; offset: number; limit: number }>(
   '/api/market/sites', { company_id: companyId, ...params })
+
+/** Разрез рынка по точкам: строка группы с покрытием цены рядом. */
+export type BreakdownRow = {
+  name: string; sites: number; alive: number; ports: number
+  medianPrice: number | null; pricedSites: number
+}
+
+export const getSitesBreakdown = (
+  companyId: string,
+  params?: { city?: string; region?: string; operator_id?: string },
+) => get<{
+  total: number; homeSockets: number; message?: string
+  byPower: BreakdownRow[]; byCurrent: BreakdownRow[]; byClass: BreakdownRow[]
+  byOperator: BreakdownRow[]; byRegion: BreakdownRow[]
+  byConnector: { name: string; count: number; sites: number
+                 medianPowerKw: number | null; withPower: number }[]
+  quality: {
+    alive: number; aliveDays: number; neverSeenCharging: number
+    withoutOperator: number; ourSites: number
+    medianQuality: number | null; qualityCoverage: number
+    medianSuccess: number | null; successCoverage: number
+    medianRating: number | null; ratingCoverage: number
+    closedConfirmed: number
+  }
+  note: string
+}>('/api/market/sites/breakdown', { company_id: companyId, ...params })
 
 export const listMarketOperators = (companyId: string) =>
   get<{ operators: MarketOperator[] }>('/api/market/operators', { company_id: companyId })

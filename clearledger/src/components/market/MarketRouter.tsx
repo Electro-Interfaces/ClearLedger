@@ -16,13 +16,16 @@ import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import { clusterPoints, clusterRadiusForZoom } from '@/components/map/clusterPoints'
 import 'leaflet/dist/leaflet.css'
-import { MapPin, Plus } from 'lucide-react'
+import { Loader2, MapPin, Plus } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { MarketSiteCard } from './MarketSiteCard'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   listMarketSites, listMarketObservations, listMarketOperators, getOurMapPoints,
+  getSitesBreakdown,
   SITE_KIND_LABEL, CHANNEL_LABEL, type MarketSite, type MarketSiteKind,
   type OurMapPoint,
 } from '@/services/marketService'
@@ -441,9 +444,77 @@ function MarketMap() {
   )
 }
 
+/** Разрезы «Точек рынка»: список и три способа посмотреть на рынок целиком. */
+const ВИДЫ_ТОЧЕК = [
+  { k: 'list', label: 'Список' },
+  { k: 'gear', label: 'Чем оснащены' },
+  { k: 'live', label: 'Живы ли' },
+  { k: 'who', label: 'Кто владеет' },
+] as const
+
+/** Строка разреза: доля считается от всех точек выборки, а не от видимой страницы. */
+function РазрезСтрока({ row, total }: {
+  row: { name: string; sites: number; alive: number; medianPrice: number | null
+         pricedSites: number }
+  total: number
+}) {
+  const share = total ? (row.sites / total) * 100 : 0
+  return (
+    <tr className="border-t border-border/50">
+      <td className="p-2">{row.name}</td>
+      <td className="p-2 text-right tabular-nums">{nfm.format(row.sites)}</td>
+      <td className="p-2 text-right tabular-nums text-muted-foreground">
+        {nf1m.format(share)} %
+      </td>
+      <td className="p-2 text-right tabular-nums">{nfm.format(row.alive)}</td>
+      <td className="p-2 text-right">
+        {row.medianPrice != null ? (
+          <span className="tabular-nums">
+            {nf1m.format(row.medianPrice)}
+            <span className="ml-1 text-muted-foreground">по {row.pricedSites}</span>
+          </span>
+        ) : <span className="text-muted-foreground">нет цен</span>}
+      </td>
+    </tr>
+  )
+}
+
+function ТаблицаРазреза({ rows, total, first }: {
+  rows: { name: string; sites: number; alive: number; medianPrice: number | null
+          pricedSites: number }[]
+  total: number
+  first: string
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-border">
+      <table className="w-full text-xs">
+        <thead className="bg-muted/50 text-muted-foreground">
+          <tr>
+            <th className="p-2 text-left font-medium">{first}</th>
+            <th className="p-2 text-right font-medium">Точек</th>
+            <th className="p-2 text-right font-medium">Доля</th>
+            <th className="p-2 text-right font-medium">Живых</th>
+            <th className="p-2 text-right font-medium">Медиана цены</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => <РазрезСтрока key={r.name} row={r} total={total} />)}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+const nfm = new Intl.NumberFormat('ru-RU')
+const nf1m = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
+
 /** Реестр точек рынка: что известно и насколько это свежо. */
 function MarketSites() {
   const { companyId, company } = useCompany()
+  const [вид, setВид] = useState<string>('list')
+  // Карточка станции: полсотни полей парсера в списке не помещаются, а решение
+  // «сравнивать ли с этой точкой» принимается именно по ним.
+  const [открыта, setОткрыта] = useState<MarketSite | null>(null)
   const мы = company.shortName || company.name || 'наш'
   const [kind, setKind] = useState('all')
   const [q, setQ] = useState('')
@@ -467,6 +538,12 @@ function MarketSites() {
     setСтраниц(1)
   }
 
+  const разрез = useQuery({
+    queryKey: ['market-breakdown', companyId],
+    queryFn: () => getSitesBreakdown(companyId),
+    enabled: !!companyId && вид !== 'list',
+  })
+
   const sites = useQuery({
     queryKey: ['market-sites-list', companyId, kind, запрос, страниц],
     queryFn: () => listMarketSites(companyId, {
@@ -480,6 +557,10 @@ function MarketSites() {
   const rows = sites.data?.sites ?? []
   const всего = sites.data?.total ?? 0
   const ещё = Math.max(0, всего - rows.length)
+
+  if (открыта) {
+    return <MarketSiteCard site={открыта} onBack={() => setОткрыта(null)} />
+  }
 
   if (sites.isLoading) {
     return (
@@ -532,7 +613,170 @@ function MarketSites() {
         </div>
       </div>
 
-      {rows.length === 0 ? (
+      <PanelViewTabs tabs={ВИДЫ_ТОЧЕК} value={вид} onChange={setВид} />
+
+      {вид !== 'list' && (
+        разрез.isLoading ? (
+          <div className="space-y-2" aria-busy="true">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              Считаем разрез по всем точкам рынка, а не по видимой странице.
+            </div>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-16 animate-pulse rounded-lg border border-border bg-muted/40" />
+            ))}
+          </div>
+        ) : !разрез.data || разрез.data.total === 0 ? (
+          <Card><CardContent className="p-6 text-sm text-muted-foreground">
+            {разрез.data?.message ?? 'Разрез посчитать не на чем.'}
+          </CardContent></Card>
+        ) : (
+          <div className="min-h-0 flex-1 space-y-3 overflow-auto">
+            <Card>
+              <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3 text-sm">
+                <span className="font-medium">
+                  {nfm.format(разрез.data.total)} точек рынка в разрезе
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  домашних розеток {nfm.format(разрез.data.homeSockets)} — в рынок не
+                  входят; живых за {разрез.data.quality.aliveDays} дней{' '}
+                  {nfm.format(разрез.data.quality.alive)}
+                </span>
+              </CardContent>
+            </Card>
+
+            {вид === 'gear' && (
+              <>
+                <ТаблицаРазреза rows={разрез.data.byPower} total={разрез.data.total}
+                  first="Мощность" />
+                <ТаблицаРазреза rows={разрез.data.byCurrent} total={разрез.data.total}
+                  first="Тип тока" />
+                <div className="overflow-hidden rounded-lg border border-border">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50 text-muted-foreground">
+                      <tr>
+                        <th className="p-2 text-left font-medium">Разъём</th>
+                        <th className="p-2 text-right font-medium">Сколько их</th>
+                        <th className="p-2 text-right font-medium">Медиана мощности</th>
+                        <th className="p-2 text-right font-medium">Известна у</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {разрез.data.byConnector.map((c) => (
+                        <tr key={c.name} className="border-t border-border/50">
+                          <td className="p-2">{c.name}</td>
+                          <td className="p-2 text-right tabular-nums">{nfm.format(c.count)}</td>
+                          <td className="p-2 text-right tabular-nums">
+                            {c.medianPowerKw != null
+                              ? `${nf1m.format(c.medianPowerKw)} кВт`
+                              : <span className="text-muted-foreground">нет данных</span>}
+                          </td>
+                          <td className="p-2 text-right tabular-nums text-muted-foreground">
+                            {nfm.format(c.withPower)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="p-2 text-xs text-muted-foreground">
+                    Тип разъёма решает, подъедет ли сюда машина вообще: с CCS не
+                    зарядиться от GB/T, сколько бы киловатт там ни было.
+                  </p>
+                </div>
+              </>
+            )}
+
+            {вид === 'live' && (
+              <Card>
+                <CardContent className="space-y-3 p-4">
+                  <div className="grid gap-x-6 gap-y-3 md:grid-cols-3 xl:grid-cols-4">
+                    <div>
+                      <div className="text-xs text-muted-foreground">
+                        заряжали за {разрез.data.quality.aliveDays} дней
+                      </div>
+                      <div className="font-headline text-lg tabular-nums">
+                        {nfm.format(разрез.data.quality.alive)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">зарядок не видели ни разу</div>
+                      <div className="font-headline text-lg tabular-nums text-warning">
+                        {nfm.format(разрез.data.quality.neverSeenCharging)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">закрытие подтверждали</div>
+                      <div className="font-headline text-lg tabular-nums">
+                        {nfm.format(разрез.data.quality.closedConfirmed)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">владелец не назван</div>
+                      <div className="font-headline text-lg tabular-nums">
+                        {nfm.format(разрез.data.quality.withoutOperator)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid gap-x-6 gap-y-3 border-t border-border/60 pt-3 md:grid-cols-3">
+                    {/* Медиана без покрытия — это медиана неизвестно чего: у трети
+                        точек этих полей нет вовсе. */}
+                    <div>
+                      <div className="text-xs text-muted-foreground">связь за сутки, медиана</div>
+                      <div className="text-sm">
+                        {разрез.data.quality.medianQuality != null
+                          ? <>{nf1m.format(разрез.data.quality.medianQuality)} %
+                              <span className="text-muted-foreground">
+                                {' '}по {nfm.format(разрез.data.quality.qualityCoverage)} точкам
+                              </span></>
+                          : <span className="text-muted-foreground">нет данных</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">успешных зарядок, медиана</div>
+                      <div className="text-sm">
+                        {разрез.data.quality.medianSuccess != null
+                          ? <>{nf1m.format(разрез.data.quality.medianSuccess)} %
+                              <span className="text-muted-foreground">
+                                {' '}по {nfm.format(разрез.data.quality.successCoverage)} точкам
+                              </span></>
+                          : <span className="text-muted-foreground">нет данных</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">оценка, медиана</div>
+                      <div className="text-sm">
+                        {разрез.data.quality.medianRating != null
+                          ? <>{nf1m.format(разрез.data.quality.medianRating)}
+                              <span className="text-muted-foreground">
+                                {' '}по {nfm.format(разрез.data.quality.ratingCoverage)} точкам
+                              </span></>
+                          : <span className="text-muted-foreground">нет данных</span>}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {вид === 'who' && (
+              <>
+                <ТаблицаРазреза rows={разрез.data.byClass} total={разрез.data.total}
+                  first="Класс точки" />
+                <ТаблицаРазреза rows={разрез.data.byOperator} total={разрез.data.total}
+                  first="Оператор" />
+                <ТаблицаРазреза rows={разрез.data.byRegion} total={разрез.data.total}
+                  first="Регион" />
+              </>
+            )}
+
+            <Card><CardContent className="p-3 text-xs text-muted-foreground">
+              {разрез.data.note}
+            </CardContent></Card>
+          </div>
+        )
+      )}
+
+      {вид === 'list' && (rows.length === 0 ? (
         <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
           {запрос || kind !== 'all' ? (
             <>
@@ -569,9 +813,14 @@ function MarketSites() {
               {rows.map((s) => {
                 const age = ageLabel(s.price?.observedOn ?? s.lastSeenAt)
                 return (
-                  <tr key={s.id} className="border-t border-border/60 hover:bg-accent/30">
+                  <tr key={s.id}
+                    className="cursor-pointer border-t border-border/60 hover:bg-accent/30"
+                    onClick={() => setОткрыта(s)} tabIndex={0} role="button"
+                    onKeyDown={(e) => e.key === 'Enter' && setОткрыта(s)}>
                     <td className="p-2">
-                      <span className="font-medium text-foreground">{s.name}</span>
+                      <span className="font-medium text-foreground underline decoration-dotted underline-offset-2">
+                        {s.name}
+                      </span>
                       {/* Имя компании, а не слово «наш»: в соседней колонке у той
                           же строки стоит оператор «РусГидро», и две подписи об
                           одном объекте сбивают. */}
@@ -581,6 +830,11 @@ function MarketSites() {
                         </span>
                       )}
                       {s.address && <div className="text-xs text-muted-foreground">{s.address}</div>}
+                      {(s.photoCount ?? 0) > 0 && (
+                        <div className="text-xs text-muted-foreground">
+                          снимков {s.photoCount}
+                        </div>
+                      )}
                     </td>
                     <td className="p-2 text-muted-foreground">{SITE_KIND_LABEL[s.kind as MarketSiteKind]}</td>
                     <td className="p-2 text-muted-foreground">{s.operatorName ?? '—'}</td>
@@ -606,7 +860,7 @@ function MarketSites() {
             </div>
           )}
         </div>
-      )}
+      ))}
     </div>
   )
 }

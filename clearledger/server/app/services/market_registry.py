@@ -485,6 +485,13 @@ async def ingest_registry(
             site.region = region
             site.city = city
             site.latitude, site.longitude = lat, lon
+            # Фотографии площадки: источник отдаёт ссылки через пробел. Для
+            # решения о площадке снимок отвечает на то, чего нет ни в одном поле:
+            # какой заезд, где стоят посты, есть ли навес и освещение.
+            photos = [u for u in (_s(row.get("photos")) or "").split() if u.startswith("http")]
+            site.photos = photos or None
+            site.photo_count = _int(row.get("photo_count")) or (len(photos) or None)
+            site.photo_authors = _s(row.get("photo_authors"), 400)
             site.operator_id = operator.id if operator else None
             site.site_class = klass
             site.status = status
