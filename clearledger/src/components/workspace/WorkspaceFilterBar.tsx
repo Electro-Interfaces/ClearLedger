@@ -367,7 +367,12 @@ export function WorkspaceFilterBar() {
   const [open, setOpen] = useState(false)
   // С какого раздела открыть расширенный фильтр: из быстрого выбора области
   // человек хочет попасть сразу в подбор по условиям, а не искать его заново.
-  const [section, setSection] = useState<'period' | 'scope'>('period')
+  // С какого раздела открывается расширенный фильтр. У энергетического профиля
+  // это отбор станций: период и так виден кнопкой в строке, а работа идёт с
+  // отбором — «открывать нужно фильтр не первый (даты), а сразу отбор станций
+  // по условиям» (Чурилов, 12.09.2026).
+  const [section, setSection] = useState<'period' | 'scope'>(
+    company.profileId === 'energy' ? 'scope' : 'period')
 
   const { isFetching } = useShifts(stationCode === 'all' ? undefined : Number(stationCode))
   const count = activeFilterCount(filters.state)
@@ -480,7 +485,10 @@ export function WorkspaceFilterBar() {
 
       <WorkspaceFilterModal key={open ? `open-${section}` : 'closed'} open={open}
         initialSection={section}
-        onOpenChange={(next) => { setOpen(next); if (!next) setSection('period') }} />
+        onOpenChange={(next) => {
+          setOpen(next)
+          if (!next) setSection(company.profileId === 'energy' ? 'scope' : 'period')
+        }} />
       </div>
       <ActiveFilterChips />
     </div>

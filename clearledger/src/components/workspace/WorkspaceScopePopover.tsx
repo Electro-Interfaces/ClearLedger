@@ -142,13 +142,29 @@ export function WorkspaceScopeControl({ onAdvanced }: {
     return q ? regions.filter((r) => r.name.toLowerCase().includes(q)) : regions
   }, [regions, regionQuery])
 
-  // Станции ЭЗС (energy) — по алфавиту; поиск по имени/коду.
+  // Станции ЭЗС (energy) — по алфавиту; поиск по имени/коду. Отмеченные регионы
+  // сужают список: раньше он оставался полным, и после выбора Красноярского края
+  // человек видел посреди окна все 616 станций сети — «зачем опять все ЭЗС»
+  // (Чурилов, 12.09.2026). У точек топливного профиля это работало с самого начала.
   const energyStations = useMemo(() => {
     const q = stationQuery.trim().toLowerCase()
     return [...(dimensions?.stations ?? [])]
+      .filter((s) => draftRegions.length === 0 || regionSet.has(s.region ?? ''))
       .filter((s) => !q || `${s.name} ${s.code}`.toLowerCase().includes(q))
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
-  }, [dimensions?.stations, stationQuery])
+  }, [dimensions?.stations, draftRegions.length, regionSet, stationQuery])
+
+  // Регион и станции сужают контур ВМЕСТЕ, через «и». Поэтому «Красноярский край»
+  // плюс восемь станций Приморья дают пустоту: под такой контур не подпадает ни
+  // одна зарядка, а экран показывает нули и читается как потеря данных — именно
+  // так и вышло 12.09.2026. Считаем пересечение заранее и говорим об этом прямо.
+  const станцийВнеРегионов = useMemo(() => {
+    if (!isEnergy || draftRegions.length === 0 || draftStations.length === 0) return 0
+    const поРегиону = new Set((dimensions?.stations ?? [])
+      .filter((s) => regionSet.has(s.region ?? '')).map((s) => s.code))
+    return draftStations.filter((c) => !поРегиону.has(c)).length
+  }, [dimensions?.stations, draftRegions.length, draftStations, isEnergy, regionSet])
+  const контурПуст = станцийВнеРегионов > 0 && станцийВнеРегионов === draftStations.length
 
   const stationNameByCode = useMemo(
     () => new Map((dimensions?.stations ?? []).map((s) => [s.code, s.name])),
@@ -390,6 +406,29 @@ export function WorkspaceScopeControl({ onAdvanced }: {
               </ScrollArea>
             </div>
           </div>
+
+          {станцийВнеРегионов > 0 && (
+            <div className="shrink-0 border-t border-amber-500/40 bg-amber-500/[0.08] px-5 py-2.5">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+                <span className="font-medium">
+                  {контурПуст
+                    ? 'Под такой контур не подпадает ни одна станция'
+                    : `${станцийВнеРегионов} из выбранных станций не в отмеченных регионах`}
+                </span>
+                <span className="text-muted-foreground">
+                  Регион и станции сужают выборку вместе: считается их пересечение.
+                </span>
+                <Button variant="outline" size="xs" className="h-7"
+                  onClick={() => setDraftStations([])}>
+                  Оставить только регионы
+                </Button>
+                <Button variant="ghost" size="xs" className="h-7 text-muted-foreground"
+                  onClick={() => setDraftRegions([])}>
+                  Оставить только станции
+                </Button>
+              </div>
+            </div>
+          )}
 
           <DialogFooter className="shrink-0 flex-row items-center justify-between border-t border-border px-5 py-3">
             <div className="flex items-center gap-1">

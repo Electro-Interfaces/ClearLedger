@@ -2461,6 +2461,24 @@ export function ChatPanel({ compact, scopeProduct }: {
     }
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [pageMessages.length, typingUsers, selectedRoom])
+
+  // Лента «скачет» сразу после входа: картинки, карточки ссылок и превью
+  // догружаются и раздвигают содержимое уже после прокрутки в конец, и низ
+  // уезжает под окно (Чурилов, 12.09.2026). Держим конец на месте, пока человек
+  // сам не ушёл вверх: наблюдаем за высотой ленты и подтягиваем её обратно.
+  useEffect(() => {
+    const el = feedRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const уНиза = () => el.scrollHeight - el.scrollTop - el.clientHeight < 120
+    let держим = true
+    const наПрокрутку = () => { держим = уНиза() }
+    el.addEventListener('scroll', наПрокрутку, { passive: true })
+    const ob = new ResizeObserver(() => { if (держим) el.scrollTop = el.scrollHeight })
+    // Следим за самим содержимым: у контейнера с прокруткой размер не меняется,
+    // меняется высота того, что внутри.
+    for (const child of Array.from(el.children)) ob.observe(child)
+    return () => { el.removeEventListener('scroll', наПрокрутку); ob.disconnect() }
+  }, [selectedRoom, pageMessages.length])
   // Тихая переподписка Web Push: разрешение уже дано — восстановить подписку после
   // чистки браузера или пересоздания SW. Один раз на открытие чата.
   useEffect(() => { ensurePushSubscription().catch(() => {}) }, [])

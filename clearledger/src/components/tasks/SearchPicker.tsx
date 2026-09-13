@@ -19,6 +19,7 @@ import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from '@/components/ui/command'
 import { cn } from '@/lib/utils'
+import { pickerScore } from '@/lib/pickerScore'
 
 export interface PickItem {
   id: string
@@ -89,9 +90,10 @@ export function SearchPicker({
       </PopoverTrigger>
       <PopoverContent className={cn('p-0', width)} align="start">
         {/* Ищем и по названию, и по подсказке: АЗС находят по адресу не реже,
-            чем по номеру. */}
-        <Command filter={(v, search) =>
-          v.toLowerCase().includes(search.toLowerCase()) ? 1 : 0}>
+            чем по номеру. Вес — по месту совпадения (`pickerScore`): простое
+            «содержит» на одной букве показывало весь справочник людей, потому что
+            «м» есть в каждом втором отчестве. */}
+        <Command filter={(v, search) => pickerScore(v, search)}>
           <CommandInput className="text-xs"
             placeholder={searchPlaceholder ?? 'Поиск…'} />
           <CommandList>

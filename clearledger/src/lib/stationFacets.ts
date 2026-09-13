@@ -69,11 +69,20 @@ export interface FacetGroupDef {
   head?: number
   /** Порядок значений; по умолчанию — по числу станций. */
   order?: string[]
+  /**
+   * Длинный справочник: значения идут по алфавиту и ищутся строкой поиска.
+   *
+   * Сортировка по числу станций хороша для короткого списка («быстрые / медленные»),
+   * но регионов сорок два, а городов двести двадцать два: в списке, где порядок
+   * задан количеством, нужный пункт ищут прокруткой и глазами. «Регионы не по
+   * алфавиту и без поиска… прокрутка и выбор занимает время» — Чурилов, 12.09.2026.
+   */
+  alpha?: boolean
 }
 
 export const FACET_GROUPS: FacetGroupDef[] = [
   {
-    key: 'region', label: 'Регион', head: 8,
+    key: 'region', label: 'Регион', head: 8, alpha: true,
     // Записи без букв («12» и подобные) — мусор справочника, а не регион: тот же
     // отбор стоит в общем селекторе области, и «12» висел первой строкой списка.
     valuesOf: (s) => {
@@ -83,7 +92,7 @@ export const FACET_GROUPS: FacetGroupDef[] = [
     labelOf: (v) => (v === UNSET ? 'Регион не указан' : v),
   },
   {
-    key: 'city', label: 'Город', head: 6,
+    key: 'city', label: 'Город', head: 6, alpha: true,
     valuesOf: (s) => [s.city?.trim() || UNSET],
     labelOf: (v) => (v === UNSET ? 'Город не указан' : v),
   },
@@ -98,7 +107,7 @@ export const FACET_GROUPS: FacetGroupDef[] = [
     labelOf: (v) => PLACEMENT_LABELS[v] ?? 'Размещение не размечено',
   },
   {
-    key: 'brand', label: 'Производитель', head: 6,
+    key: 'brand', label: 'Производитель', head: 6, alpha: true,
     valuesOf: (s) => [s.brand?.trim() || UNSET],
     labelOf: (v) => (v === UNSET ? 'Производитель не указан' : v),
   },
@@ -176,6 +185,12 @@ export function facetValues(stations: FacetStation[], facets: Facets): Map<Group
         const ia = group.order.indexOf(a.value)
         const ib = group.order.indexOf(b.value)
         if (ia !== ib) return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
+      }
+      // Длинный справочник — по алфавиту; «не указан» уходит в конец: это не
+      // значение, а его отсутствие.
+      if (group.alpha) {
+        if ((a.value === UNSET) !== (b.value === UNSET)) return a.value === UNSET ? 1 : -1
+        return a.value.localeCompare(b.value, 'ru')
       }
       if (b.count !== a.count) return b.count - a.count
       return a.value.localeCompare(b.value, 'ru')

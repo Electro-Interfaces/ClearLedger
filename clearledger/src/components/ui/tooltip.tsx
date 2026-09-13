@@ -3,8 +3,19 @@ import { Tooltip as TooltipPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Задержка перед показом подсказки.
+ *
+ * С нулём подсказки выскакивали от любого движения мыши: провёл курсором через
+ * панель — и следом всплыло полдюжины чёрных плашек. «Не стоит так их выводить.
+ * Или правой кнопкой, или с задержкой при наведении» (Чурилов, 12.09.2026).
+ * Полсекунды — общепринятая пауза: намеренное наведение её переживает,
+ * случайный проезд курсором — нет.
+ */
+const ЗАДЕРЖКА_МС = 500
+
 function TooltipProvider({
-  delayDuration = 0,
+  delayDuration = ЗАДЕРЖКА_МС,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
   return (

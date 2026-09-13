@@ -263,6 +263,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   const col = controls ? (GROUP_LABELS[gb] ?? firstCol) : firstCol
   const { data, isLoading, error } = useCS(companyId, period.from, period.to, gb, undefined, withKpis)
   const n = useNarrow()
+  const { stationCodes } = useFilters()
   const physical = PHYSICAL_GROUPS.includes(gb)
   const showStations = physical && gb !== 'station'   // число станций в группе; для разреза «станция» = 1, скрываем
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'amount', dir: 'desc' })
@@ -316,6 +317,16 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
         </ViewParamsBar>
       )}
       {withKpis && <SessionKpis t={t} series={data.series} />}
+      {/* Станции без единой зарядки в разрез не попадают — их просто нет в данных.
+          Человек выбирает девять станций, видит в таблице одну и читает это как
+          потерю: «после применения статистика показалась только по одной ЭЗС»
+          (Чурилов, 12.09.2026). Сказать словами дешевле, чем дорисовывать нули. */}
+      {gb === 'station' && stationCodes.length > data.lines.length && (
+        <p className="text-xs text-muted-foreground">
+          В выборке {stationCodes.length} станций, в таблице {data.lines.length}
+          {': '}у остальных за этот период нет ни одной зарядки.
+        </p>
+      )}
       {data.lines.length >= 3 && (
         <div className="space-y-1.5">
           <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Распределение по разрезу: {CHARGE_METRIC_LABELS[distMetric]}</div>

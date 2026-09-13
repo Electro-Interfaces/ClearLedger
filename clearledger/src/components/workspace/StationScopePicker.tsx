@@ -16,7 +16,7 @@
  * Отбор и счётчики — в `@/lib/stationFacets` (там же их проверка).
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Check, ChevronDown, ListFilter, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -47,13 +47,23 @@ function FacetGroup({
   onToggle: (value: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [query, setQuery] = useState('')
   const head = group.head ?? values.length
+  // Поиск — только у длинных справочников и только когда искать есть в чём:
+  // над списком из пяти значений строка поиска лишняя.
+  const ищем = Boolean(group.alpha) && values.length > 8
+  const q = query.trim().toLowerCase()
+  const найденные = q
+    ? values.filter((v) => group.labelOf(v.value).toLowerCase().includes(q))
+    : values
   // Выбранное показываем всегда: значение, которое человек отметил, не должно
   // уезжать под «ещё N» — иначе снять его можно только раскрыв список.
-  const shown = expanded
-    ? values
-    : values.filter((v, index) => index < head || picked.includes(v.value))
-  const hidden = values.length - shown.length
+  // При поиске показываем всё найденное: прятать половину ответа под «ещё N» —
+  // значит заставлять искать дважды.
+  const shown = expanded || q
+    ? найденные
+    : найденные.filter((v, index) => index < head || picked.includes(v.value))
+  const hidden = найденные.length - shown.length
 
   if (values.length === 0) return null
 
@@ -67,6 +77,18 @@ function FacetGroup({
           </span>
         ) : null}
       </legend>
+      {ищем ? (
+        <div className="relative mb-1">
+          <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input value={query} onChange={(e) => setQuery(e.target.value)}
+            placeholder={`${group.label.toLocaleLowerCase('ru')} — поиск`}
+            aria-label={`Поиск: ${group.label}`}
+            className="h-7 pl-7 text-xs" />
+        </div>
+      ) : null}
+      {ищем && q && найденные.length === 0 ? (
+        <p className="px-1.5 py-2 text-xs text-muted-foreground">Ничего не нашлось</p>
+      ) : null}
       <div className="flex flex-col">
         {shown.map(({ value, count }) => {
           const active = picked.includes(value)
@@ -102,18 +124,35 @@ function FacetGroup({
 }
 
 export function StationScopePicker({
-  stations, selected, onChange, regionIds, onRegionsChange,
+  stations, selected, onChange, regionIds, onRegionsChange, companyId,
 }: {
   stations: ChargeDimensionStation[]
   selected: string[]
   onChange: (codes: string[]) => void
   regionIds: string[]
   onRegionsChange: (regions: string[]) => void
+  /** Чей контур: условия отбора запоминаются по компании. */
+  companyId?: string | null
 }) {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<StationSort>('sessions')
-  const [onlyPicked, setOnlyPicked] = useState(false)
-  const [localFacets, setLocalFacets] = useState<Facets>({})
+  // Вернулся к фильтру — видишь свою выборку, а не всю сеть. «Если возвращаешься
+  // к фильтру, то снова в нём все ЭЗС, а не ранее отобранные. Приходится вспоминать,
+  // в каком фильтре ты был» (Чурилов, 12.09.2026). Режим снимается одной кнопкой,
+  // когда к выборке надо что-то добавить.
+  const [onlyPicked, setOnlyPicked] = useState(() => selected.length > 0)
+  // Условия отбора переживают закрытие окна: человек возвращается к той же работе,
+  // а не набирает фасеты заново. Хранится по компании — контуры у них разные.
+  const ключФасетов = `cl-station-facets-${companyId ?? 'all'}`
+  const [localFacets, setLocalFacets] = useState<Facets>(() => {
+    try {
+      const saved = localStorage.getItem(ключФасетов)
+      return saved ? (JSON.parse(saved) as Facets) : {}
+    } catch { return {} }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(ключФасетов, JSON.stringify(localFacets)) } catch { /* приватный режим */ }
+  }, [ключФасетов, localFacets])
 
   const selectedSet = useMemo(() => new Set(selected), [selected])
   // Регион живёт в общем фильтре, остальные фасеты — здесь. Для расчётов это

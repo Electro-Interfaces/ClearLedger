@@ -31,7 +31,7 @@ import { PRIORITY_LABEL, fileSize } from './taskWords'
 import { SearchPicker } from './SearchPicker'
 import { useAuth } from '@/contexts/AuthContext'
 
-export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSignal }: {
+export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSignal, draft }: {
   companyId: string
   onCreated: (taskId: string) => void
   defaultObjectId?: string
@@ -39,6 +39,15 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
    *  диалог из родителя приходится счётчиком, а не флагом, — иначе повторное
    *  нажатие после закрытия ничего не сделает. */
   openSignal?: number
+  /**
+   * Заготовка из быстрой панели: что человек уже успел написать и кому назначил.
+   *
+   * Постановка начинается в панели «Трека» одной строкой, а за сроком и описанием
+   * человек идёт в приложение — и раньше приходил туда к пустой форме. «Приходится
+   * дважды проходить постановку задачи» (Чурилов, 12.09.2026): набранное и
+   * выбранный исполнитель терялись на переходе.
+   */
+  draft?: { title?: string; assigneeId?: string }
 }) {
   const qc = useQueryClient()
   const { user } = useAuth()
@@ -58,6 +67,17 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
   const [labels, setLabels] = useState<string[]>([])
   const [files, setFiles] = useState<File[]>([])
   const [dragOver, setDragOver] = useState(false)
+  // Заготовку подставляем один раз, при появлении: дальше человек правит форму,
+  // и перезапись затирала бы его работу.
+  const заготовкаПодставлена = useRef(false)
+  useEffect(() => {
+    if (!draft || заготовкаПодставлена.current) return
+    if (!draft.title && !draft.assigneeId) return
+    заготовкаПодставлена.current = true
+    if (draft.title) setTitle(draft.title)
+    if (draft.assigneeId) setAssigneeId(draft.assigneeId)
+    setOpen(true)
+  }, [draft])
   const fileRef = useRef<HTMLInputElement>(null)
 
   /* Черновик постановки.

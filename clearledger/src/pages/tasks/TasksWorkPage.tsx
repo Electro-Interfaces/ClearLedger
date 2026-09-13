@@ -84,6 +84,24 @@ export function TasksWorkPage({ embeddedView }: {
     return n
   }, { replace: true })
 
+  // Заготовка из быстрой панели: строка и исполнитель, набранные до перехода.
+  // Читаем один раз и сразу убираем из адреса — обновление страницы не должно
+  // открывать форму заново.
+  const [заготовка] = useState(() => ({
+    title: params.get('draft') ?? undefined,
+    assigneeId: params.get('assignee') ?? undefined,
+  }))
+  useEffect(() => {
+    if (!params.get('draft') && !params.get('assignee')) return
+    setParams((p) => {
+      const n = new URLSearchParams(p)
+      n.delete('draft'); n.delete('assignee')
+      return n
+    }, { replace: true })
+    // Один раз при заходе: дальше адрес чистый, и эффект не повторяется.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const objectId = params.get('object') ?? ''
   const projectId = params.get('project') ?? ''
   const versionId = params.get('version') ?? ''
@@ -310,7 +328,7 @@ export function TasksWorkPage({ embeddedView }: {
         <div className="flex items-center gap-2">
           <QuickCreate companyId={company.id} onCreated={refresh} />
           <NewTaskDialog companyId={company.id} defaultObjectId={objectId || undefined}
-            openSignal={newTaskSignal}
+            openSignal={newTaskSignal} draft={заготовка}
             onCreated={(id) => { refresh(); set({ task: id }) }} />
         </div>
       )}

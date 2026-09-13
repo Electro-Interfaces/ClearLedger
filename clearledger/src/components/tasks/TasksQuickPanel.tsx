@@ -310,6 +310,16 @@ export function TasksQuickPanel({ compact: compactProp }: {
   })
 
   const go = (href: string) => { closeInteraction(); navigate(href) }
+  // Переход в приложение уносит начатое: набранную строку и выбранного человека.
+  // Иначе постановка проходится дважды — один раз здесь, второй раз там
+  // (Чурилов, 12.09.2026).
+  const goWithDraft = (href: string) => {
+    const q = new URLSearchParams()
+    if (draft.trim()) q.set('draft', draft.trim())
+    if (assigneeId) q.set('assignee', assigneeId)
+    const хвост = q.toString()
+    go(хвост ? `${href}${href.includes('?') ? '&' : '?'}${хвост}` : href)
+  }
   // Карточку поручения открывает реестр «Компании» — только он читает `?task=`.
   // Раздел «Моё» показывает работу НА МНЕ строками, и поручение, отданное
   // другому, там не появится вовсе: переход из окна вёл на список, в котором
@@ -434,7 +444,7 @@ export function TasksQuickPanel({ compact: compactProp }: {
         </span>
       )}
       <Button size="icon" variant="ghost" className="size-8 shrink-0"
-        aria-label="Открыть «Трек»" title="Открыть «Трек»" onClick={() => go(current.href)}>
+        aria-label="Открыть «Трек»" title="Открыть «Трек»" onClick={() => goWithDraft(current.href)}>
         <ArrowUpRight className="h-4 w-4" />
       </Button>
     </div>
@@ -531,7 +541,7 @@ export function TasksQuickPanel({ compact: compactProp }: {
                 </span>
               )}
               <Button size="sm" variant="outline" className="h-8 gap-1.5"
-                onClick={() => go(current.href)}>
+                onClick={() => goWithDraft(current.href)}>
                 Открыть «Трек»
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </Button>

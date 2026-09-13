@@ -39,7 +39,7 @@ export function AuthImage({ path, alt, className, onClick }: {
   if (!видно) {
     // Место под картинку занято сразу: иначе лента прыгает, когда снимки доезжают.
     return (
-      <div ref={ref} className={`flex items-center justify-center rounded bg-muted ${className ?? ''}`} style={{ minHeight: 80 }}>
+      <div ref={ref} className={`flex items-center justify-center rounded bg-muted ${className ?? ''}`} style={{ minHeight: 140 }}>
         <ImageIcon className="size-5 text-muted-foreground/60" />
       </div>
     )

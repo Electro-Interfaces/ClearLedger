@@ -661,6 +661,7 @@ export function WorkspaceFilterModal({ open, onOpenChange, initialSection = 'per
                 onChange={(codes) => setDraft((current) => ({ ...current, stationCodes: codes }))}
                 regionIds={draft.regionIds}
                 onRegionsChange={(regionIds) => setDraft((current) => ({ ...current, regionIds }))}
+                companyId={company.id}
               />
             </div>
           ) : null}
@@ -701,9 +702,14 @@ export function WorkspaceFilterModal({ open, onOpenChange, initialSection = 'per
             <Button variant="outline" size="sm" className="h-9 rounded-lg" onClick={() => onOpenChange(false)}>
               Отмена
             </Button>
-            <Button size="sm" className="h-9 rounded-lg" onClick={handleApply} disabled={!dirty}>
+            {/* Пока ничего не изменено, кнопка не гаснет, а меняет смысл на «Готово».
+                Серая «Применить» читалась как поломка: человек отбирал фасетом те же
+                станции, что уже применены, видел неактивную кнопку и снимал галку с
+                последней станции только ради того, чтобы она ожила (Чурилов, 12.09.2026). */}
+            <Button size="sm" className="h-9 rounded-lg"
+              onClick={dirty ? handleApply : () => onOpenChange(false)}>
               <Check data-icon="inline-start" />
-              Применить
+              {dirty ? 'Применить' : 'Готово'}
             </Button>
           </div>
         </DialogFooter>
