@@ -10,11 +10,12 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { MapContainer, CircleMarker, Popup, AttributionControl, useMap,
+import { MapContainer, AttributionControl, useMap,
   useMapEvents } from 'react-leaflet'
 import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
-import { clusterPoints, clusterRadiusForZoom } from '@/components/map/clusterPoints'
+import { MarketMapPoints } from './MarketMapPoints'
+import { ageLabel } from './marketMapPresentation'
 import 'leaflet/dist/leaflet.css'
 import { MapPin, Plus } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -23,8 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   listMarketSites, listMarketObservations, listMarketOperators, getOurMapPoints,
-  SITE_KIND_LABEL, CHANNEL_LABEL, type MarketSite, type MarketSiteKind,
-  type OurMapPoint,
+  SITE_KIND_LABEL, CHANNEL_LABEL, type MarketSiteKind,
 } from '@/services/marketService'
 import {
   EMPTY_MARKET_FILTERS, EMPTY_OUR_FILTERS, MarketMapFilters,
@@ -59,48 +59,22 @@ function useIsDark() {
   return dark
 }
 
-/** Цвет нашей станции — по выбранному показателю: состояние, загрузка, срывы, деньги.
- *  Один слой отвечает на разные вопросы, не превращаясь в четыре карты. */
-function ourColor(p: OurMapPoint, by: OurFilters['colorBy']): string {
-  if (by === 'status') {
-    if (p.status === 'working') return '#3b82f6'
-    if (p.status === 'no_link') return '#f59e0b'
-    if (p.status === 'decommissioned' || p.status === 'disabled') return '#64748b'
-    if (p.status === 'not_working') return '#ef4444'
-    return '#3b82f6'
+async function loadMapSites(companyId: string, params: Parameters<typeof listMarketSites>[1], signal: AbortSignal) {
+  const first = await listMarketSites(companyId, params)
+  signal.throwIfAborted()
+  const points = new Map(first.sites.map((site) => [site.id, site]))
+  let offset = first.sites.length
+  while (offset < first.total) {
+    signal.throwIfAborted()
+    const page = await listMarketSites(companyId, { ...params, offset })
+    signal.throwIfAborted()
+    if (!page.sites.length) break
+    const previous = points.size
+    for (const site of page.sites) points.set(site.id, site)
+    offset += page.sites.length
+    if (points.size === previous) break
   }
-  if (by === 'load') {
-    const v = p.sessionsPerPortDay
-    if (v == null) return '#64748b'
-    return v >= 2 ? '#0ea5e9' : v >= 1 ? '#3b82f6' : v >= 0.3 ? '#a5b4fc' : '#cbd5e1'
-  }
-  if (by === 'errors') {
-    const v = p.errorPct
-    if (v == null) return '#64748b'
-    return v >= 30 ? '#ef4444' : v >= 10 ? '#f59e0b' : '#22c55e'
-  }
-  const v = p.revenue
-  return v >= 1_000_000 ? '#1d4ed8' : v >= 200_000 ? '#3b82f6' : v > 0 ? '#93c5fd' : '#cbd5e1'
-}
-
-/** Цвет точки на карте: наши — фирменный, конкуренты — красный, притяжение — серый. */
-function siteColor(s: MarketSite): string {
-  if (s.isOurs) return '#3b82f6'
-  if (s.kind !== 'ezs') return '#94a3b8'
-  // Независимая точка — не сеть: другой цвет, чтобы плотность рынка не выглядела
-  // плотностью сетей (полная выгрузка 13.09.2026).
-  if (s.siteClass === 'independent') return '#f59e0b'
-  if (s.siteClass === 'home') return '#a78bfa'
-  return '#ef4444'
-}
-
-/** Возраст факта словами: «сегодня» важнее даты — по нему видно, можно ли доверять. */
-function ageLabel(iso: string | null | undefined): { text: string; stale: boolean } {
-  if (!iso) return { text: 'не проверялось', stale: true }
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
-  if (days <= 0) return { text: 'сегодня', stale: false }
-  if (days === 1) return { text: 'вчера', stale: false }
-  return { text: `${days} дн назад`, stale: days > 30 }
+  return { ...first, sites: [...points.values()], returned: points.size }
 }
 
 function useMarketData(filters: MarketFilters, bbox?: string) {
@@ -110,7 +84,7 @@ function useMarketData(filters: MarketFilters, bbox?: string) {
     // девять тысяч, и одна страница выдачи их не вмещает (ревизия 12.09.2026, К10).
     queryKey: ['market-sites', companyId, bbox ?? 'all', filters.kind,
                filters.operatorId, filters.currentType, filters.minPower, filters.alive],
-    queryFn: () => listMarketSites(companyId, {
+    queryFn: ({ signal }) => loadMapSites(companyId, {
       ...(filters.kind === 'all' ? {} : { kind: filters.kind }),
       ...(filters.operatorId === 'all' ? {} : { operator_id: filters.operatorId }),
       ...(filters.currentType === 'all' ? {} : { current_type: filters.currentType }),
@@ -118,9 +92,9 @@ function useMarketData(filters: MarketFilters, bbox?: string) {
       ...(filters.alive === 'all' ? {} : { alive: filters.alive }),
       ...(bbox ? { bbox } : {}),
       limit: 5000,
-    }),
-    enabled: !!companyId,
-    placeholderData: (prev) => prev,
+    }, signal),
+    enabled: !!companyId && !!bbox,
+    placeholderData: (prev, query) => query?.queryKey[1] === companyId ? prev : undefined,
   })
   // Наши объекты — из реестра пространства, но с НАШИМИ показателями: слой своих
   // станций фильтруют по работе, а не по названию (решение МАГа 13.09.2026).
@@ -145,80 +119,12 @@ function ViewportWatch({ onChange }: { onChange: (bbox: string, zoom: number) =>
   }
   useMapEvents({ moveend: report, zoomend: report })
   useEffect(report, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const observer = new ResizeObserver(() => map.invalidateSize({ pan: false }))
+    observer.observe(map.getContainer())
+    return () => observer.disconnect()
+  }, [map])
   return null
-}
-
-/** Слой точек: склеивает соседние в один маркер, пока масштаб не позволит развести. */
-function MarketPoints({ market, ourPoints, zoom, colorBy }: {
-  market: MarketSite[]
-  ourPoints: OurMapPoint[]
-  zoom: number
-  colorBy: OurFilters['colorBy']
-}) {
-  const map = useMap()
-  const radius = clusterRadiusForZoom(zoom)
-  const ourClusters = useMemo(
-    () => clusterPoints(map, ourPoints, radius, (p) => [p.lat, p.lon], (p) => `our-${p.id}`),
-    [map, ourPoints, radius])  // eslint-disable-line react-hooks/exhaustive-deps
-  const marketClusters = useMemo(
-    () => clusterPoints(map, market, radius,
-      (p) => [p.lat as number, p.lon as number], (p) => p.id),
-    [map, market, radius])
-
-  return (
-    <>
-      {ourClusters.map((c) => {
-        const one = c.items.length === 1 ? c.items[0] : null
-        const color = one ? ourColor(one, colorBy) : '#3b82f6'
-        return (
-          <CircleMarker key={c.key} center={[c.lat, c.lon]}
-            radius={one ? 6 : Math.min(16, 6 + Math.log2(c.items.length) * 2.5)}
-            pathOptions={{ color, fillColor: color, fillOpacity: 0.9, weight: 1.5 }}>
-            <Popup>
-              {one ? (
-                <>
-                  <b>{one.name}</b> · наш объект<br />
-                  {one.city ?? ''}{one.brand ? ` · ${one.brand}` : ''}
-                  {one.powerKwt ? ` · ${one.powerKwt} кВт` : ''}
-                  {one.ports ? ` · ${one.ports} портов` : ''}<br />
-                  сессий за 90 дней: {one.sessions}
-                  {one.sessionsPerPortDay != null && ` · ${one.sessionsPerPortDay} на порт в сутки`}<br />
-                  {one.errorPct != null ? `срывов ${one.errorPct} %` : 'срывы не считаны'}
-                  {one.status ? ` · ${one.status}` : ''}
-                </>
-              ) : (
-                <><b>{c.items.length} наших объектов</b><br />приблизьте, чтобы разделить</>
-              )}
-            </Popup>
-          </CircleMarker>
-        )
-      })}
-      {marketClusters.map((c) => {
-        const one = c.items.length === 1 ? c.items[0] : null
-        const color = one ? siteColor(one) : '#ef4444'
-        const age = one ? ageLabel(one.price?.observedOn ?? one.lastSeenAt) : null
-        return (
-          <CircleMarker key={c.key} center={[c.lat, c.lon]}
-            radius={one ? 5 : Math.min(18, 6 + Math.log2(c.items.length) * 2.5)}
-            pathOptions={{ color, fillColor: color, fillOpacity: 0.8, weight: 1 }}>
-            <Popup>
-              {one ? (
-                <>
-                  <b>{one.name}</b><br />
-                  {SITE_KIND_LABEL[one.kind]}{one.operatorName ? ` · ${one.operatorName}` : ''}<br />
-                  {one.price?.value != null
-                    ? <>цена {one.price.value} ₽{one.price.unit === 'kwh' ? '/кВтч' : ''} · {age?.text}</>
-                    : <>цена не наблюдалась</>}
-                </>
-              ) : (
-                <><b>{c.items.length} точек рынка</b><br />приблизьте, чтобы разделить</>
-              )}
-            </Popup>
-          </CircleMarker>
-        )
-      })}
-    </>
-  )
 }
 
 /** Карта рынка: наши объекты и чужие точки на одном полотне. */
@@ -235,15 +141,15 @@ function MarketMap() {
     enabled: !!companyId,
   })
 
-  const allMarket = (sites.data?.sites ?? []).filter((s) => s.lat != null && s.lon != null)
+  const allMarket = useMemo(() => (sites.data?.sites ?? []).filter((s) => s.lat != null && s.lon != null), [sites.data])
   // Слои включаются флажками, а вид точки уже отобран на сервере: здесь остаётся
   // только скрыть выключенные слои.
-  const market = allMarket.filter((s) => {
+  const market = useMemo(() => allMarket.filter((s) => {
     if (s.kind !== 'ezs') return filters.showAttractors
     if (s.siteClass === 'home') return filters.showHome
     if (s.siteClass === 'independent') return filters.showIndependent
     return filters.showRivals
-  })
+  }), [allMarket, filters.showAttractors, filters.showHome, filters.showIndependent, filters.showRivals])
   // Даже с отбором по области страница может не вместить всё: тогда об этом надо
   // сказать, а не молча показать половину (ревизия 12.09.2026, К10).
   const cut = (sites.data?.total ?? 0) > (sites.data?.returned ?? 0)
@@ -275,7 +181,14 @@ function MarketMap() {
   const mapLayers = useMapLayers()
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div className="market-map-surface flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4">
+      <details className="market-map-filters">
+        <summary>Слои и фильтры карты
+          <span className="text-muted-foreground"> · слоёв: {[filters.showOurs, filters.showRivals,
+            filters.showIndependent, filters.showHome, filters.showAttractors].filter(Boolean).length}
+            {' · '}отборов: {[filters.kind, filters.operatorId, filters.currentType, filters.minPower,
+              filters.alive, our.status, our.speedClass, our.brand, our.load, our.errors].filter((v) => v !== 'all').length}</span>
+        </summary>
       <MarketMapFilters
         filters={filters} onFilters={setFilters}
         our={our} onOur={setOur}
@@ -289,11 +202,12 @@ function MarketMap() {
           home: allMarket.filter((s) => s.siteClass === 'home').length,
           attractors: allMarket.filter((s) => s.kind !== 'ezs').length,
         }} />
+      </details>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground">
-          наших объектов: {ourPoints.length} · точек рынка в кадре: {market.length}
-          {sites.isFetching && ' · обновляем…'}
+          наших объектов в сети: {ourPoints.length} · точек рынка в кадре: {market.length}
+          <span className="inline-block min-w-[100px]" aria-live="polite">{(sites.isFetching || ours.isFetching) ? ' · обновляем…' : ' '}</span>
           {cut && (
             <span className="text-warning">
               {' · '}в кадре {sites.data?.total}, показано {sites.data?.returned} —
@@ -302,10 +216,10 @@ function MarketMap() {
           )}
         </span>
         <span className="ml-auto text-xs text-muted-foreground">
-          {our.colorBy === 'status' ? 'наши по состоянию'
-            : our.colorBy === 'load' ? 'наши по загрузке порта'
-            : our.colorBy === 'errors' ? 'наши по доле срывов'
-            : 'наши по выручке'}
+          {our.colorBy === 'status' ? 'цвет наших точек: состояние'
+            : our.colorBy === 'load' ? 'цвет наших точек: загрузка порта'
+            : our.colorBy === 'errors' ? 'цвет наших точек: доля срывов'
+            : 'цвет наших точек: выручка'}
         </span>
         <MarketSiteDialog trigger={
           <button type="button" className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent">
@@ -314,16 +228,28 @@ function MarketMap() {
         } />
       </div>
 
-      <div className="relative isolate min-h-0 flex-1 overflow-hidden rounded-lg border border-border">
-        <MapLayerSwitch {...mapLayers} />
+      <div className="market-map-legend" aria-label="Обозначения карты">
+        <span><i className="market-point-symbol market-point-symbol-ours" aria-hidden="true" /> Наш объект</span>
+        <span><i className="market-point-symbol" aria-hidden="true" /> Точка рынка</span>
+        <span>Число — точек в группе; синий счётчик — наших</span>
+      </div>
+      <MapLayerSwitch {...mapLayers} className="market-map-layer-switch" />
+      <div className="market-map-canvas relative isolate flex-1 overflow-hidden rounded-lg border border-border">
         <MapContainer crs={MAP_CRS} attributionControl={false} center={[55.75, 37.6]} zoom={5} scrollWheelZoom preferCanvas
           style={{ height: '100%', width: '100%', background: 'hsl(var(--muted))' }}>
           <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} regions={mapLayers.regions} dark={dark} />
           <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
-          <ViewportWatch onChange={(bbox, zoom) => setView({ bbox, zoom })} />
-          <MarketPoints market={market} ourPoints={ourPoints} zoom={view.zoom}
+          <ViewportWatch onChange={(bbox, zoom) => setView((previous) => previous.bbox === bbox && previous.zoom === zoom ? previous : { bbox, zoom })} />
+          <MarketMapPoints key={companyId} market={market} ourPoints={ourPoints} zoom={view.zoom}
             colorBy={our.colorBy} />
         </MapContainer>
+      {(sites.isError || ours.isError) && <div role="alert" className="market-map-message flex flex-wrap items-center gap-2 text-destructive">
+        {sites.isError ? 'Не удалось загрузить точки рынка. ' : ''}
+        {ours.isError ? 'Не удалось загрузить наши объекты. ' : ''}
+        <button type="button" className="market-map-action" onClick={() => { void sites.refetch(); void ours.refetch() }}>Повторить загрузку</button>
+      </div>}
+      {!sites.isPending && !ours.isPending && !sites.isError && !ours.isError && !market.length && !ourPoints.length &&
+        <p role="status" className="market-map-message text-muted-foreground">По выбранным фильтрам точек нет. Измените фильтры или область карты.</p>}
       </div>
     </div>
   )

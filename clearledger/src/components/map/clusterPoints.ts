@@ -1,14 +1,3 @@
-/**
- * Склейка точек карты по расстоянию В ПИКСЕЛЯХ — по тому, что видит глаз.
- *
- * Обобщение приёма из карты «Топлива» (`FuelMapPanel`): на обзорном плане точки,
- * стоящие в паре километров, физически не могут не пересечься — сколько ни уменьшай
- * маркер, разводить нечего. Поэтому на дальних масштабах они складываются в один
- * маркер с числом точек, а при приближении расходятся сами.
- *
- * Здесь это нужно ещё и по другой причине: точек рынка девять тысяч, и рисовать их
- * по одной — не карта, а каша, в которую вдобавок не попасть мышью.
- */
 import type { Map as LeafletMap } from 'leaflet'
 
 export interface ClusterOf<T> {
@@ -18,66 +7,61 @@ export interface ClusterOf<T> {
   items: T[]
 }
 
-/**
- * `radiusPx = 0` отключает склейку: на близком масштабе точки должны стоять каждая
- * на своём месте, иначе пропадает то, ради чего карту и открыли.
- */
+/** Экранная сетка хранит центры групп: поиск только в девяти соседних ячейках. */
 export function clusterPoints<T>(
-  map: LeafletMap,
+  map: Pick<LeafletMap, 'project' | 'getZoom'>,
   points: T[],
   radiusPx: number,
   getLatLon: (item: T) => [number, number],
   getKey: (item: T) => string,
+  zoom = map.getZoom(),
 ): ClusterOf<T>[] {
-  if (radiusPx <= 0) {
-    return points.map((item) => {
-      const [lat, lon] = getLatLon(item)
-      return { key: getKey(item), lat, lon, items: [item] }
-    })
-  }
   const out: ClusterOf<T>[] = []
+  const cells = new Map<string, { cluster: ClusterOf<T>; x: number; y: number }[]>()
   const used = new Set<string>()
-  for (const point of points) {
-    const key = getKey(point)
-    if (used.has(key)) continue
+  const ordered = points.map((item) => ({ item, key: getKey(item) }))
+    .sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+
+  for (const { item, key } of ordered) {
+    const [lat, lon] = getLatLon(item)
+    if (used.has(key) || !Number.isFinite(lat) || !Number.isFinite(lon)
+      || Math.abs(lat) >= 90 || Math.abs(lon) > 180) continue
     used.add(key)
-    const [lat, lon] = getLatLon(point)
-    const base = map.latLngToLayerPoint([lat, lon])
-    const group: T[] = [point]
-    for (const other of points) {
-      const otherKey = getKey(other)
-      if (used.has(otherKey)) continue
-      const [oLat, oLon] = getLatLon(other)
-      if (base.distanceTo(map.latLngToLayerPoint([oLat, oLon])) <= radiusPx) {
-        used.add(otherKey)
-        group.push(other)
+    if (radiusPx <= 0) {
+      out.push({ key, lat, lon, items: [item] })
+      continue
+    }
+    const { x, y } = map.project([lat, lon], zoom)
+    const col = Math.floor(x / radiusPx)
+    const row = Math.floor(y / radiusPx)
+    let nearest: ClusterOf<T> | undefined
+    let distance = radiusPx * radiusPx
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const candidate of cells.get(`${col + dx}:${row + dy}`) ?? []) {
+          const d = (candidate.x - x) ** 2 + (candidate.y - y) ** 2
+          if (d < distance) {
+            nearest = candidate.cluster
+            distance = d
+          }
+        }
       }
     }
-    // Центр группы — среднее её точек: так маркер стоит там, где скопление, а не
-    // на случайной первой станции.
-    const sum = group.reduce(
-      (acc, item) => {
-        const [gLat, gLon] = getLatLon(item)
-        return [acc[0] + gLat, acc[1] + gLon] as [number, number]
-      },
-      [0, 0] as [number, number],
-    )
-    out.push({
-      key: `c:${key}`,
-      lat: sum[0] / group.length,
-      lon: sum[1] / group.length,
-      items: group,
-    })
+    if (nearest) {
+      nearest.items.push(item)
+    } else {
+      // Якорь остаётся на реальной точке: сдвиг к среднему снова наложил бы группы.
+      const cluster = { key: `c:${key}`, lat, lon, items: [item] }
+      out.push(cluster)
+      const cell = `${col}:${row}`
+      const bucket = cells.get(cell) ?? []
+      bucket.push({ cluster, x, y })
+      cells.set(cell, bucket)
+    }
   }
   return out
 }
 
-/**
- * Радиус склейки от масштаба: чем дальше, тем крупнее «пятачок». Ниже 30 px не
- * опускаемся — столько занимает сам маркер с обводкой; с 12-го масштаба склейки
- * нет вовсе.
- */
 export function clusterRadiusForZoom(zoom: number): number {
-  if (zoom >= 12) return 0
-  return Math.max(30, 70 - (zoom - 4) * 7)
+  return Math.max(64, 80 - (zoom - 4) * 4)
 }

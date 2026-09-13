@@ -1,0 +1,214 @@
+.market-map-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  font-family: inherit;
+}
+.market-map-marker:focus-visible {
+  outline: 3px solid hsl(var(--ring));
+  outline-offset: 3px;
+}
+.market-point-symbol {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid hsl(var(--card));
+  border-radius: 50%;
+  box-shadow: 0 1px 3px hsl(var(--foreground) / .3);
+}
+.market-point-symbol-ours {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+}
+.market-cluster-count {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  box-sizing: border-box;
+  border: 2px solid hsl(var(--muted-foreground));
+  border-radius: 50%;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.market-cluster-ours,
+.market-cluster-own-count {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--card));
+}
+.market-cluster-own-count {
+  position: absolute;
+  right: -5px;
+  bottom: -3px;
+  min-width: 18px;
+  padding: 1px 3px;
+  border-radius: 4px;
+  border: 1px solid hsl(var(--card));
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+.market-map-marker:hover .market-cluster-count {
+  border-color: hsl(var(--primary));
+}
+.market-map-popup .leaflet-popup-content {
+  max-width: calc(100vw - 72px);
+  padding: 18px 16px 14px;
+  box-sizing: border-box;
+  font-size: 13px;
+}
+.market-map-popup a.leaflet-popup-close-button {
+  width: 44px;
+  height: 44px;
+  top: 0;
+  right: 0;
+  line-height: 44px;
+}
+.market-point-details,
+.market-point-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+.market-point-details > strong,
+.market-point-list > strong { padding-right: 24px; }
+.market-point-details dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  margin: 8px 0;
+}
+.market-point-details dd { margin: 0; font-variant-numeric: tabular-nums; }
+.market-point-meta {
+  display: block;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+.market-point-list input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font: inherit;
+}
+.market-point-list input::placeholder { color: hsl(var(--muted-foreground)); }
+.market-point-rows {
+  max-height: min(280px, 32dvh, max(80px, calc(var(--market-map-height) - 200px)));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.market-point-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 4px;
+  border: 0;
+  border-bottom: 1px solid hsl(var(--border));
+  background: transparent;
+  color: hsl(var(--foreground));
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.market-point-name { display: block; font-weight: 600; }
+.market-point-row:hover,
+.market-map-action:hover { background: hsl(var(--accent)); }
+.market-map-action {
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--card));
+  color: hsl(var(--foreground));
+  font: inherit;
+  cursor: pointer;
+}
+.market-map-popup :is(input, button):focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
+}
+.market-map-tip { max-width: 260px; font-size: 12px; }
+.market-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+}
+.market-map-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.market-map-legend .market-point-symbol { background: hsl(var(--muted-foreground)); box-shadow: none; }
+.market-map-legend .market-point-symbol-ours { background: hsl(var(--primary)); }
+.market-map-filters { flex-shrink: 0; }
+.market-map-filters summary {
+  min-height: 44px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--card));
+  font-size: 13px;
+  cursor: pointer;
+}
+.market-map-filters[open] > div { max-height: 40dvh; overflow-y: auto; }
+.market-map-filters summary:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -2px;
+}
+.market-map-canvas { min-height: 280px; }
+@media (pointer: coarse) {
+  .market-map-surface .leaflet-control-zoom a {
+    width: 44px;
+    height: 44px;
+    line-height: 44px;
+  }
+  .market-map-filters label,
+  .market-map-filters [role="combobox"] { min-height: 44px; }
+}
+
+.market-map-surface .market-map-layer-switch {
+  position: static;
+  align-self: flex-end;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  max-width: 100%;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.market-map-layer-switch button { font-size: 12px; }
+@media (pointer: coarse) {
+  .market-map-layer-switch button { min-height: 44px; }
+}
+
+.market-map-message {
+  position: absolute;
+  right: 12px;
+  bottom: 32px;
+  left: 12px;
+  z-index: 1000;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--card));
+  font-size: 14px;
+}
