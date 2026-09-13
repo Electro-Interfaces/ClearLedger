@@ -188,8 +188,15 @@ function CompanySpaceConnectors() {
             )}
           </TableCell>
           <TableCell>
-            {(c.settings_route || c.settings_app) && canManage && (
-              <Button variant="ghost" size="icon" title={c.management ? 'Настроить подключение' : 'Настроить у владельца'} aria-label={`Настроить ${c.label}`}
+            {/* Карточку файлового канала открывает КТО УГОДНО, у кого есть раздел:
+                там человек грузит очередную выгрузку, а не настраивает подключение.
+                Раньше кнопка стояла за `canManage`, и сотрудник, которому положено
+                вести данные, видел строку канала, но открыть её не мог. Редактор
+                самого подключения (`c.management`) остался админским. */}
+            {((c.settings_route || c.settings_app) && (canManage || !c.management)) && (
+              <Button variant="ghost" size="icon"
+                title={c.management ? 'Настроить подключение' : 'Открыть'}
+                aria-label={`Открыть ${c.label}`}
                 disabled={!!c.management && !catalog.data?.providers.some((item) => item.app === c.app && item.provider === c.provider)}
                 onClick={() => openSettings(c)}>
                 <Settings2 className="h-4 w-4" />
