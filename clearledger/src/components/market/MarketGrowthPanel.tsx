@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
-  getGrowthOverview, getGrowthPresence, type GrowthPresenceRow,
+  getGrowthOverview, getGrowthPipeline, getGrowthPresence, type GrowthPresenceRow,
 } from '@/services/marketService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -28,12 +28,22 @@ const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 const ВИДЫ = [
   { k: 'tracks', label: 'Направления роста' },
   { k: 'presence', label: 'Наше положение по регионам' },
+  { k: 'pipeline', label: 'Стройка в работе' },
 ] as const
+
+/** Стадии воронки словами и в том порядке, в каком проект их проходит. */
+const СТАДИИ = ['lead', 'screening', 'negotiation', 'dd', 'decision',
+                'contracting', 'construction'] as const
 
 function money(v: number): string {
   if (v >= 1_000_000) return `${nf1.format(v / 1_000_000)} млн ₽`
   if (v >= 1_000) return `${nf.format(Math.round(v / 1_000))} тыс ₽`
   return `${nf.format(Math.round(v))} ₽`
+}
+
+const СТАДИЯ_ИМЯ: Record<string, string> = {
+  lead: 'заявка', screening: 'отбор', negotiation: 'переговоры', dd: 'проверка',
+  decision: 'решение', contracting: 'договор', construction: 'стройка',
 }
 
 /** Положение цветом и словом: цвет один не носитель состояния. */
@@ -46,6 +56,19 @@ function Presence({ row }: { row: GrowthPresenceRow }) {
       {row.sharePct != null && row.presence !== 'absent' && (
         <span className="ml-1 tabular-nums text-muted-foreground">
           {nf1.format(row.sharePct)} %
+        </span>
+      )}
+      {/* «Нас нет» и «мы туда уже идём» — разные положения, и второе видно только
+          из «Проектов». Решение о территории там принято, и предлагать его заново
+          нечего: вопрос уже другой — хватит ли того, что строим. */}
+      {row.entering && (
+        <span className="ml-1 text-success">
+          · входим: {nf.format(row.projectsInWork)} площадок в работе
+        </span>
+      )}
+      {!row.entering && row.projectsInWork > 0 && (
+        <span className="ml-1 text-muted-foreground">
+          · строим ещё {nf.format(row.projectsInWork)}
         </span>
       )}
     </span>
@@ -77,6 +100,14 @@ export function MarketGrowthPanel() {
     queryKey: ['market-growth-presence', companyId],
     queryFn: () => getGrowthPresence(companyId, { days: 90 }),
     enabled: !!companyId && вид === 'presence',
+  })
+  // Воронка «Проектов» — это уже принятые решения о территориях. Без неё раздел
+  // отвечал на «куда идти», не зная, куда мы уже идём, и предлагал как находку
+  // город, в котором ведутся переговоры по участку.
+  const pipeline = useQuery({
+    queryKey: ['market-growth-pipeline', companyId],
+    queryFn: () => getGrowthPipeline(companyId),
+    enabled: !!companyId && вид === 'pipeline',
   })
 
   if (overview.isLoading) return <Skeleton />
@@ -136,6 +167,117 @@ export function MarketGrowthPanel() {
             говорит — придуманный показатель хуже пустого.
           </p>
         </div>
+      )}
+
+      {вид === 'pipeline' && (
+        pipeline.isLoading ? <Skeleton /> : !pipeline.data || pipeline.data.projects === 0 ? (
+          <Card><CardContent className="p-6 text-sm text-muted-foreground">
+            {pipeline.data?.message ?? 'Воронка «Проектов» пока пуста.'}
+          </CardContent></Card>
+        ) : (
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto">
+          <Card>
+            <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
+              <span className="text-sm font-medium">
+                В работе {nf.format(pipeline.data.projects)} площадок; в{' '}
+                {nf.format(pipeline.data.enteringTotal)} городах из{' '}
+                {nf.format(pipeline.data.citiesTotal)} действующей сети у нас ещё нет —
+                это вход, а не белое пятно.
+              </span>
+              <span className="text-xs text-muted-foreground">
+                план по станциям заполнен у {pipeline.data.plan.coverage ?? 0}% проектов
+                {pipeline.data.plan.points > 0 &&
+                  ` (${nf.format(pipeline.data.plan.points)} станций, ${nf.format(pipeline.data.plan.powerKwt)} кВт)`}
+              </span>
+            </CardContent>
+          </Card>
+
+          <div className="rounded-lg border border-border">
+            <div className="border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium">
+              Воронка: где стоят площадки
+            </div>
+            <div className="grid grid-cols-2 gap-px bg-border md:grid-cols-4 xl:grid-cols-7">
+              {СТАДИИ.map((код) => {
+                const st = pipeline.data!.stages.find((x) => x.stage === код)
+                return (
+                  <div key={код} className="bg-card p-3">
+                    <div className="text-xs text-muted-foreground">
+                      {st?.label ?? код}
+                    </div>
+                    <div className="font-headline text-lg tabular-nums">
+                      {st ? nf.format(st.projects) : <span className="text-muted-foreground">—</span>}
+                    </div>
+                    {st && st.withCity < st.projects && (
+                      <div className="text-xs text-warning">
+                        без города {nf.format(st.projects - st.withCity)}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            <p className="p-2 text-xs text-muted-foreground">
+              Площадка без города не ложится на рынок: где она стоит, экран не знает,
+              и в разрезы территорий она не попадает.
+            </p>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border border-border">
+            <div className="border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium">
+              Города, где идёт работа, и рынок вокруг
+            </div>
+            <table className="w-full text-xs">
+              <thead className="bg-muted/30 text-muted-foreground">
+                <tr>
+                  <th className="p-2 text-left font-medium">Город</th>
+                  <th className="p-2 text-left font-medium">Регион</th>
+                  <th className="p-2 text-right font-medium">Площадок</th>
+                  <th className="p-2 text-left font-medium">Стадии</th>
+                  <th className="p-2 text-left font-medium">Мы там</th>
+                  <th className="p-2 text-right font-medium">Рынок</th>
+                  <th className="p-2 text-right font-medium">Живых</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pipeline.data.cities.map((c) => (
+                  <tr key={`${c.city}-${c.region ?? ''}`} className="border-t border-border/50">
+                    <td className="p-2 font-medium">{c.city}</td>
+                    <td className="p-2 text-muted-foreground">{c.region ?? 'нет данных'}</td>
+                    <td className="p-2 text-right tabular-nums">{nf.format(c.projects)}</td>
+                    <td className="p-2 text-muted-foreground">
+                      {Object.entries(c.stages)
+                        .map(([k, v]) => `${СТАДИЯ_ИМЯ[k] ?? k} ${v}`).join(', ')}
+                    </td>
+                    <td className="p-2">
+                      {c.weAreThere
+                        ? <span className="text-muted-foreground">сеть есть</span>
+                        : <span className="text-success">входим</span>}
+                    </td>
+                    <td className="p-2 text-right tabular-nums">
+                      {c.marketKnown ? nf.format(c.marketSites)
+                        : <span className="text-warning">не наблюдали</span>}
+                    </td>
+                    <td className="p-2 text-right tabular-nums">
+                      {c.marketKnown ? nf.format(c.marketAlive) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {pipeline.data.unseenTotal > 0 && (
+              <p className="p-2 text-xs text-muted-foreground">
+                В {nf.format(pipeline.data.unseenTotal)} городах работа идёт, а рынка мы
+                там не наблюдали. Это либо чистый вход — и тогда мы там первые, — либо
+                дыра в данных: проверять надо источник, а не строить вывод.
+              </p>
+            )}
+          </div>
+
+          <Card><CardContent className="p-3 text-xs text-muted-foreground">
+            {pipeline.data.note}
+          </CardContent></Card>
+        </div>
+        )
       )}
 
       {вид === 'presence' && (

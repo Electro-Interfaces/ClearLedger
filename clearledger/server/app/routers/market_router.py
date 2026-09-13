@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
+from app.services.mapping import canon_city, canon_region
 from app.models import (ChargeSession, CorporateClient, EzsSite, MarketGrowthLead,
                         MarketPlayer, MarketRegionStat, MarketShop,
                         MarketObservation, MarketOperator, MarketScenario,
@@ -599,6 +600,32 @@ def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * EARTH_KM * asin(sqrt(a))
 
 
+async def _projects_in_work(db: AsyncSession, cid: uuid.UUID,
+                           level: str = "city") -> dict[str, dict[str, Any]]:
+    """Территории, где «Проекты» уже ведут площадку: ключ — город или регион.
+
+    Нужен там, где продукт предлагает территорию как возможность. Белое пятно, в
+    котором идут переговоры по участку, — это не находка, а работа, о которой экран
+    не знал: предлагать её заново значит отправлять человека делать сделанное.
+    """
+    rows = (await db.execute(select(EzsSite).where(
+        EzsSite.company_id == cid,
+        EzsSite.stage.notin_(["live", "archive", "on_hold"])))).scalars().all()
+    out: dict[str, dict[str, Any]] = {}
+    for p in rows:
+        raw = (p.city if level == "city" else (p.region_norm or p.region)) or ""
+        name = (canon_city(raw) if level == "city" else canon_region(raw)) or raw
+        key = name.strip().lower()
+        if not key:
+            continue
+        row = out.setdefault(key, {"projects": 0, "stages": {}, "numbers": []})
+        row["projects"] += 1
+        row["stages"][p.stage] = row["stages"].get(p.stage, 0) + 1
+        if p.project_no and len(row["numbers"]) < 5:
+            row["numbers"].append(p.project_no)
+    return out
+
+
 async def _own_operator_ids(db: AsyncSession, cid: uuid.UUID) -> set[uuid.UUID]:
     """Операторы, которые есть мы сами.
 
@@ -1051,11 +1078,25 @@ async def market_whitespots(
     spots = [r for r in reply["territories"]
              if r["ourSites"] == 0 and r["rivalSites"] > 0
              and r["name"] != "территория не определена"]
-    # Наверх — где рынок живой: мёртвые точки не доказывают спрос, они его отрицают.
-    spots.sort(key=lambda r: (-r["rivalAlive"], -r["rivalSites"]))
+    # Пятно, по которому уже идёт работа, перестаёт быть пятном: это не новая
+    # возможность, а площадка в воронке. Убирать её из списка нельзя — рынок вокруг
+    # по-прежнему нужен тому, кто ведёт проект, — но и предлагать как находку тоже.
+    in_work = await _projects_in_work(db, cid, level=level)
+    for row in spots:
+        side = canon_city(row["name"]) if level == "city" else canon_region(row["name"])
+        work = in_work.get((side or row["name"]).strip().lower())
+        row["projectsInWork"] = work["projects"] if work else 0
+        row["projectStages"] = work["stages"] if work else {}
+        row["projectNumbers"] = work["numbers"] if work else []
+    # Наверх — где рынок живой и работа ещё не начата: мёртвые точки не доказывают
+    # спрос, а начатое не нуждается в повторной находке.
+    spots.sort(key=lambda r: (r["projectsInWork"] > 0, -r["rivalAlive"], -r["rivalSites"]))
+    taken = sum(1 for r in spots if r["projectsInWork"])
     return {"level": level, "spots": spots, "total": len(spots),
+            "withProject": taken,
             "basis": "спрос оценён по активности рынка (живые точки за 90 дней), "
-                     "без данных о населении и парке электромобилей"}
+                     "без данных о населении и парке электромобилей; территории, где "
+                     "«Проекты» уже ведут площадку, помечены и уходят вниз списка"}
 
 
 @router.get("/site-score")
@@ -2084,6 +2125,10 @@ async def growth_presence(
     cid = await _member(company_id, user, db)
     reply = await market_territories(company_id=company_id, level="region", days=days,
                                      user=user, db=db)
+    # Регион, где нас нет, но идут пятнадцать площадок, — это не «нас нет», это
+    # «входим». Решение о территории там уже принято, и предлагать его заново
+    # незачем; вопрос другой — что вокруг и хватит ли того, что строим.
+    in_work = await _projects_in_work(db, cid, level="region")
     rows = []
     for row in reply["territories"]:
         if row["name"] == "территория не определена":
@@ -2091,9 +2136,15 @@ async def growth_presence(
         # Наблюдали ли мы здесь рынок вообще: чужие точки или домашние розетки в базе.
         observed = bool(row["rivalSites"] or row["homeSockets"])
         mode, share = _presence(row["ourSites"], row["rivalSites"], observed=observed)
+        work = in_work.get((canon_region(row["name"]) or row["name"]).strip().lower())
         rows.append({
             **row, "presence": mode, "presenceLabel": PRESENCE_LABEL[mode],
             "sharePct": share, "suggestedTracks": PRESENCE_TRACKS[mode],
+            "projectsInWork": work["projects"] if work else 0,
+            "projectStages": work["stages"] if work else {},
+            # Классификацию не подменяем: положение считается по точкам, а вход —
+            # это факт о работе. Два разных утверждения, и оба нужны словами.
+            "entering": bool(work) and row["ourSites"] == 0,
         })
     # Регион точки известен не всегда: у части выгрузки в адресе нет субъекта, а
     # города нет в справочнике. Такие точки лежат в «территории не определена» и в
@@ -2127,6 +2178,8 @@ async def growth_presence(
         "thresholds": {"monopoly": MONOPOLY_SHARE, "weak": WEAK_SHARE},
         "geoCoverage": geo_coverage, "sitesWithoutRegion": unplaced,
         "shareBound": "upper",
+        "enteringRegions": sum(1 for r in rows if r["entering"]),
+        "projectsInWork": sum(r["projectsInWork"] for r in rows),
         "note": ("доля считается по точкам сети в регионе; домашние розетки не в "
                  "счёт. Это верхняя оценка нашей доли: "
                  + (f"у {unplaced} точек рынка регион неизвестен, они не вошли ни в "
@@ -2227,6 +2280,11 @@ async def growth_overview(
                 {"label": "белых пятен", "value": spots["total"]},
                 {"label": "из них с живыми точками", "value": len(alive_spots)},
                 {"label": "площадок в работе у «Проектов»", "value": sum(projects.values())},
+                # Где стройка уже началась — это ответ на «куда идти», данный
+                # раньше вопроса: считать его неизвестным и предлагать те же
+                # территории заново значит терять работу, которая уже идёт.
+                {"label": "пятен, где площадка уже заведена",
+                 "value": spots.get("withProject", 0)},
             ],
             "leads": by_track.get("build", {}),
         },
@@ -2279,6 +2337,159 @@ async def growth_overview(
     presence = await growth_presence(company_id=company_id, days=days, user=user, db=db)
     return {"days": days, "tracks": tracks, "presence": presence["groups"],
             "trackLabels": GROWTH_TRACKS}
+
+
+# ── Стройка: что уже в работе у «Проектов» ──────────────────────────────────
+# Раздел «Развитие» отвечает на вопрос «куда идти», и без этого экрана он отвечал на
+# него, не зная, куда мы уже идём: 219 площадок в работе были одним числом в метрике.
+# Отсюда две ошибки сразу. Белое пятно предлагалось как возможность там, где проект
+# уже заведён, а регион с пятнадцатью проектами в стадии переговоров назывался «нас
+# нет» — хотя это ровно «входим». Проект — это уже принятое решение о территории, и
+# рынок вокруг него надо показывать рядом с ним, а не искать заново.
+
+# Стадии воронки подбора площадки, от первой к последней (docs SITES_LAND_BANK).
+# `live` — уже объект сети, `archive` и `on_hold` — не работа.
+PIPELINE_STAGES = ["lead", "screening", "negotiation", "dd", "decision",
+                   "contracting", "construction"]
+STAGE_LABEL = {
+    "lead": "заявка", "screening": "первичный отбор", "negotiation": "переговоры",
+    "dd": "проверка", "decision": "решение", "contracting": "договор",
+    "construction": "стройка",
+}
+
+
+@router.get("/growth/pipeline")
+async def growth_pipeline(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Перспективные проекты рядом с рынком: где мы уже идём и что там вокруг."""
+    cid = await _member(company_id, user, db)
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+
+    projects = (await db.execute(select(EzsSite).where(
+        EzsSite.company_id == cid,
+        EzsSite.stage.notin_(["live", "archive", "on_hold"])))).scalars().all()
+    if not projects:
+        return {"projects": 0, "message": "площадок в работе нет — воронка «Проектов» пуста"}
+
+    own_ids = await _own_operator_ids(db, cid)
+    market = [x for x in (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid, MarketSite.status == "active",
+        MarketSite.kind == "ezs"))).scalars().all()
+        if _is_external(x, own_ids) and (x.site_class or "") != "home"]
+    ours = (await db.execute(
+        select(ServiceLocation.city, ServiceLocation.region_id)
+        .where(ServiceLocation.company_id == cid,
+               ServiceLocation.is_test.is_(False)))).all()
+    regions = dict((rid, name) for rid, name in (await db.execute(
+        select(Region.id, Region.name).where(Region.company_id == cid))).all())
+
+    def key(value: str | None) -> str:
+        # «г. Псков», «Псков» и «городской округ Химки» — один и тот же город, и
+        # без приведения проект в нём не находил ни рынка, ни нашей сети: экран
+        # говорил «рынок здесь не наблюдали» о городе с десятью станциями.
+        return (canon_city(value) or "").strip().lower()
+
+    our_cities = {key(c) for c, _ in ours if c}
+    our_by_region: dict[str, int] = {}
+    for _, rid in ours:
+        name = regions.get(rid)
+        if name:
+            our_by_region[name] = our_by_region.get(name, 0) + 1
+
+    # Рынок по городу: сколько точек и сколько из них заряжали за 90 дней.
+    market_city: dict[str, dict[str, int]] = {}
+    for site in market:
+        bucket = market_city.setdefault(key(site.city), {"sites": 0, "alive": 0})
+        bucket["sites"] += 1
+        if site.last_session_at and site.last_session_at >= alive_since:
+            bucket["alive"] += 1
+
+    # ── воронка ──
+    by_stage: dict[str, dict[str, Any]] = {}
+    for p in projects:
+        row = by_stage.setdefault(p.stage, {
+            "stage": p.stage, "label": STAGE_LABEL.get(p.stage, p.stage),
+            "projects": 0, "withCity": 0, "withCoords": 0,
+            "plannedPoints": 0, "plannedPowerKwt": 0.0, "withPlan": 0,
+        })
+        row["projects"] += 1
+        if p.city:
+            row["withCity"] += 1
+        if p.lat is not None and p.lon is not None:
+            row["withCoords"] += 1
+        if p.planned_ezs_count:
+            row["plannedPoints"] += int(p.planned_ezs_count)
+            row["withPlan"] += 1
+        if p.planned_power_kwt:
+            row["plannedPowerKwt"] += float(p.planned_power_kwt)
+    stages = [by_stage[st] for st in PIPELINE_STAGES if st in by_stage]
+
+    # ── города: проект и рынок рядом ──
+    cities: dict[str, dict[str, Any]] = {}
+    for p in projects:
+        if not p.city:
+            continue
+        k = key(p.city)
+        row = cities.setdefault(k, {
+            "city": canon_city(p.city) or p.city.strip(),
+            "region": canon_region(p.region_norm or p.region),
+            "projects": 0, "stages": {}, "weAreThere": k in our_cities,
+            "marketSites": market_city.get(k, {}).get("sites", 0),
+            "marketAlive": market_city.get(k, {}).get("alive", 0),
+            "marketKnown": k in market_city,
+        })
+        row["projects"] += 1
+        row["stages"][p.stage] = row["stages"].get(p.stage, 0) + 1
+    city_rows = sorted(cities.values(),
+                       key=lambda r: (-r["projects"], -r["marketAlive"]))
+
+    # Вход в новую территорию: проект есть, действующей сети нет.
+    entering = [r for r in city_rows if not r["weAreThere"]]
+    # Строим там, где рынок не наблюдали: либо мы первые, либо у данных дыра.
+    # Ни то ни другое не должно молчать — это вопрос к источнику, а не вывод.
+    unseen = [r for r in city_rows if not r["marketKnown"]]
+
+    # ── регионы: где мы уже входим ──
+    by_region: dict[str, dict[str, Any]] = {}
+    for p in projects:
+        name = canon_region(p.region_norm or p.region)
+        if not name:
+            continue
+        row = by_region.setdefault(name, {
+            "region": name, "projects": 0, "cities": set(),
+            "ourSites": our_by_region.get(name, 0),
+        })
+        row["projects"] += 1
+        if p.city:
+            row["cities"].add(canon_city(p.city) or p.city.strip())
+    region_rows = sorted(
+        ({**r, "cities": len(r["cities"]),
+          "entering": r["ourSites"] == 0} for r in by_region.values()),
+        key=lambda r: -r["projects"])
+
+    planned_points = sum(r["plannedPoints"] for r in stages)
+    with_plan = sum(r["withPlan"] for r in stages)
+
+    return {
+        "projects": len(projects), "stages": stages,
+        "cities": city_rows[:60], "citiesTotal": len(city_rows),
+        "entering": entering[:40], "enteringTotal": len(entering),
+        "unseenByMarket": unseen[:20], "unseenTotal": len(unseen),
+        "regions": region_rows[:40],
+        "enteringRegions": sum(1 for r in region_rows if r["entering"]),
+        "plan": {
+            "points": planned_points, "withPlan": with_plan,
+            "coverage": round(with_plan / len(projects) * 100, 1) if projects else None,
+            "powerKwt": round(sum(r["plannedPowerKwt"] for r in stages), 1),
+        },
+        "note": ("воронка «Проектов» без введённых в эксплуатацию, архива и заморозки. "
+                 "Рынок рядом взят по городу: это грубее радиуса, но город — та "
+                 "единица, в которой проект и заводится. Сколько станций добавит "
+                 "проект, известно не везде, и доля заполненности показана рядом: "
+                 "складывать план по трети проектов и называть это программой нельзя"),
+    }
 
 
 class GrowthLeadIn(BaseModel):

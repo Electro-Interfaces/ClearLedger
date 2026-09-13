@@ -200,7 +200,10 @@ export function MarketWhitespotsPanel() {
           <span className="text-sm font-medium">
             {spots.length === 0
               ? 'Белых пятен не найдено: рынок наблюдается только там, где стоим мы.'
-              : `Рынок есть, а нас нет в ${spots.length} территориях; в ${alive.length} из них за 90 дней заряжали.`}
+              : `Рынок есть, а нас нет в ${spots.length} территориях; в ${alive.length} из них за 90 дней заряжали`
+                + ((data.data?.withProject ?? 0) > 0
+                   ? `, а в ${data.data?.withProject} площадка уже заведена в «Проектах».`
+                   : '.')}
           </span>
           <Select value={level} onValueChange={(v) => setLevel(v as 'city' | 'region')}>
             <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
@@ -235,7 +238,19 @@ export function MarketWhitespotsPanel() {
                 <td className="p-2 text-right"><Num v={r.marketPricePerKwh} digits={1} /></td>
                 <td className="p-2 text-right"><Num v={r.homeSockets} /></td>
                 <td className="p-2">
-                  {taken.includes(r.name) ? (
+                  {/* Территория, по которой уже идёт площадка, — не находка: решение
+                      о ней принято, и заводить кандидата значит удваивать работу.
+                      Номера проектов рядом, чтобы человек открыл существующий. */}
+                  {(r.projectsInWork ?? 0) > 0 ? (
+                    <span className="text-xs">
+                      <span className="text-success">уже в работе</span>
+                      <span className="text-muted-foreground">
+                        {' '}· {r.projectsInWork} площадок
+                        {r.projectNumbers?.length
+                          ? `: ${r.projectNumbers.slice(0, 3).join(', ')}` : ''}
+                      </span>
+                    </span>
+                  ) : taken.includes(r.name) ? (
                     <span className="text-xs text-muted-foreground">в кандидатах</span>
                   ) : (
                     <Button size="xs" variant="outline" disabled={toLead.isPending}

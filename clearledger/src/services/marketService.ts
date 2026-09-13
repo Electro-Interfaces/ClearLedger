@@ -302,6 +302,10 @@ export interface MarketTerritory {
   ourPricePerKwh: number | null
   sharePct: number | null
   priceGapPct: number | null
+  /** Площадки «Проектов» в работе на этой территории: работа уже идёт. */
+  projectsInWork?: number
+  projectStages?: Record<string, number>
+  projectNumbers?: string[]
 }
 
 /** Паспорт места под новую станцию: окружение, каннибализация, прогноз по аналогам. */
@@ -359,7 +363,8 @@ export const getMarketTerritories = (companyId: string, params?: { level?: strin
     '/api/market/territories', { company_id: companyId, ...params })
 
 export const getMarketWhitespots = (companyId: string, params?: { level?: string }) =>
-  get<{ level: string; spots: MarketTerritory[]; total: number; basis: string }>(
+  get<{ level: string; spots: MarketTerritory[]; total: number; basis: string
+        withProject: number }>(
     '/api/market/whitespots', { company_id: companyId, ...params })
 
 export const getMarketSiteScore = (
@@ -504,6 +509,11 @@ export interface GrowthPresenceRow {
   rivalAlive: number
   marketPricePerKwh: number | null
   ourPricePerKwh: number | null
+  /** Сколько площадок «Проектов» уже в работе на этой территории. */
+  projectsInWork: number
+  projectStages: Record<string, number>
+  /** Нас здесь нет, но мы уже входим: работа идёт. */
+  entering: boolean
 }
 
 export interface GrowthGroup {
@@ -549,8 +559,37 @@ export const getGrowthOverview = (companyId: string, params?: { days?: number })
 
 export const getGrowthPresence = (companyId: string, params?: { days?: number }) =>
   get<{ days: number; regions: GrowthPresenceRow[]; groups: GrowthGroup[]
-        thresholds: { monopoly: number; weak: number }; note: string }>(
+        thresholds: { monopoly: number; weak: number }; note: string
+        geoCoverage: number | null; sitesWithoutRegion: number
+        enteringRegions: number; projectsInWork: number }>(
     '/api/market/growth/presence', { company_id: companyId, ...params })
+
+/** Город воронки: наша работа и рынок вокруг неё в одной строке. */
+export type PipelineCity = {
+  city: string; region: string | null; projects: number
+  stages: Record<string, number>; weAreThere: boolean
+  marketSites: number; marketAlive: number; marketKnown: boolean
+}
+
+export type PipelineStage = {
+  stage: string; label: string; projects: number
+  withCity: number; withCoords: number
+  plannedPoints: number; plannedPowerKwt: number; withPlan: number
+}
+
+export const getGrowthPipeline = (companyId: string) =>
+  get<{
+    projects: number; message?: string
+    stages: PipelineStage[]
+    cities: PipelineCity[]; citiesTotal: number
+    entering: PipelineCity[]; enteringTotal: number
+    unseenByMarket: PipelineCity[]; unseenTotal: number
+    regions: { region: string; projects: number; cities: number
+               ourSites: number; entering: boolean }[]
+    enteringRegions: number
+    plan: { points: number; withPlan: number; coverage: number | null; powerKwt: number }
+    note: string
+  }>('/api/market/growth/pipeline', { company_id: companyId })
 
 export const listGrowthLeads = (companyId: string, params?: { track?: string }) =>
   get<{ leads: GrowthLead[] }>('/api/market/growth/leads', { company_id: companyId, ...params })
