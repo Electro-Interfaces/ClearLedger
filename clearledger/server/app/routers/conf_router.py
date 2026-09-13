@@ -595,6 +595,70 @@ async def meeting_join(
     return {**urls, "session_id": str(сессия.id), "moderator": ведущий}
 
 
+# Сколько молчит вкладка, прежде чем мы считаем, что человек вышел. Браузер о
+# закрытии сообщает ненадёжно: `sendBeacon` теряется при обрыве связи, убитом
+# процессе и спящем ноутбуке. Поэтому присутствие держится на сигнале «я здесь»
+# раз в полминуты, а порог берётся с запасом на пропущенный сигнал.
+PRESENCE_TTL_SEC = 90
+
+
+def _в_комнате(p: "ConfPresence", now: datetime) -> bool:
+    """Человек считается присутствующим, пока не вышел и подаёт сигнал.
+
+    Старые записи (до появления сигнала) считаются присутствующими, только если
+    сессия ещё идёт: иначе история созвонов задним числом опустела бы.
+    """
+    if p.left_at is not None:
+        return False
+    if p.last_seen_at is None:
+        return True
+    return (now - p.last_seen_at).total_seconds() <= PRESENCE_TTL_SEC
+
+
+@router.post("/sessions/{session_id}/ping")
+async def session_ping(
+    session_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """«Я ещё здесь»: вкладка подаёт сигнал, пока человек в комнате."""
+    cid = await _company(company_id, current_user, db)
+    s = await db.get(ConfSession, _uuid(session_id, "session_id"))
+    if s is None or s.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Конференция не найдена")
+    p = (await db.execute(select(ConfPresence).where(
+        ConfPresence.session_id == s.id,
+        ConfPresence.user_id == current_user.id))).scalar_one_or_none()
+    if p is not None:
+        p.last_seen_at = datetime.now(timezone.utc)
+        # Вернулся в ту же комнату после выхода — отметка о выходе снимается.
+        p.left_at = None
+        await db.commit()
+    return {"ok": True}
+
+
+@router.post("/sessions/{session_id}/leave")
+async def session_leave(
+    session_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Человек вышел из комнаты — сам, не закрывая конференцию для остальных."""
+    cid = await _company(company_id, current_user, db)
+    s = await db.get(ConfSession, _uuid(session_id, "session_id"))
+    if s is None or s.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Конференция не найдена")
+    p = (await db.execute(select(ConfPresence).where(
+        ConfPresence.session_id == s.id,
+        ConfPresence.user_id == current_user.id))).scalar_one_or_none()
+    if p is not None and p.left_at is None:
+        p.left_at = datetime.now(timezone.utc)
+        await db.commit()
+    return {"ok": True}
+
+
 @router.post("/sessions/{session_id}/end")
 async def session_end(
     session_id: str,
@@ -615,6 +679,13 @@ async def session_end(
     if s.ended_at is None:
         s.ended_at = datetime.now(timezone.utc)
         s.close_reason = "user"
+        # Конференция закрыта — в ней никого не осталось по определению. Прежде
+        # записи присутствия жили дальше, и комната показывала участников уже
+        # после того, как её погасили (замечание Маркова 11.09.2026).
+        for p in (await db.execute(select(ConfPresence).where(
+                ConfPresence.session_id == s.id,
+                ConfPresence.left_at.is_(None)))).scalars().all():
+            p.left_at = s.ended_at
         await db.commit()
         # Разговор кончился для всех: комнату уничтожаем, оставшиеся вкладки
         # отключаются. Иначе конференция «завершена» только на нашей стороне.
@@ -852,16 +923,21 @@ async def rooms_list(
             ConfPresence.session_id.in_([s.id for s in сессии])))).scalars().all()
     люди = await _people(db, {p.user_id for p in присутствие})
     по_комнате = {s.conf_room_id: s for s in сессии}
+    сейчас = datetime.now(timezone.utc)
     return {"rooms": [{
         "id": str(к.id),
         "name": к.name,
         "purpose": к.purpose,
         "guest_url": f"https://{settings.jitsi_domain}/{jitsi.room_for(f'room:{к.id}')}",
         "live": к.id in по_комнате,
+        # Только те, кто сейчас в комнате: вышедшие и замолчавшие вкладки не в
+        # счёт. «Кто входил» — это история созвона, а не список присутствующих.
         "inside": [{
             "user_id": str(p.user_id),
             "name": (люди.get(p.user_id).name if люди.get(p.user_id) else "—"),
-        } for p in присутствие if по_комнате.get(к.id) and p.session_id == по_комнате[к.id].id],
+        } for p in присутствие
+            if по_комнате.get(к.id) and p.session_id == по_комнате[к.id].id
+            and _в_комнате(p, сейчас)],
         "since": (по_комнате[к.id].started_at if к.id in по_комнате else None),
     } for к in комнаты], "can_manage": await _админ(db, cid, current_user)}
 

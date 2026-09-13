@@ -110,6 +110,44 @@ export async function createMeeting(companyId: string, data: NewMeeting) {
  * Войти ведущим. Вкладку открываем СИНХРОННО по клику: после `await` браузер
  * считает её попапом и молча блокирует — кнопка выглядит нерабочей.
  */
+/**
+ * Присутствие в конференции: пока открыта вкладка с комнатой, пространство раз в
+ * полминуты говорит серверу «человек ещё здесь», а когда вкладку закрыли —
+ * отмечает выход.
+ *
+ * Почему так, а не по событию закрытия самой вкладки: конференция открывается
+ * отдельным окном Jitsi, нашего кода там нет, а `beforeunload` в чужом домене нам
+ * недоступен. Зато `window.open` возвращает ссылку на окно, и его закрытие видно
+ * отсюда. Если закроют и вкладку пространства, сигнал просто перестанет идти — и
+ * сервер через полторы минуты сам поймёт, что человек вышел.
+ *
+ * Прежде записи присутствия были только о входе: комната показывала «разговаривают
+ * · Марков Антон» и после закрытия вкладки, и после кнопки «Завершить»
+ * (замечание Маркова 11.09.2026).
+ */
+function следитьЗаВкладкой(companyId: string, sessionId: string, вкладка: Window | null) {
+  const адрес = (действие: string) =>
+    `/api/conf/sessions/${sessionId}/${действие}?company_id=${encodeURIComponent(companyId)}`
+
+  const таймер = window.setInterval(() => {
+    if (!вкладка || вкладка.closed) {
+      window.clearInterval(таймер)
+      // `sendBeacon` доживает до отправки, даже если наша вкладка закрывается
+      // следом; обычный запрос в этот момент браузер отменяет.
+      if (!navigator.sendBeacon?.(адрес('leave'))) void post(адрес('leave')).catch(() => {})
+      return
+    }
+    void post(адрес('ping')).catch(() => {})
+  }, 30_000)
+
+  // Закрыли вкладку пространства, не выходя из конференции: сигнал уходит сразу,
+  // иначе человек числился бы в комнате ещё полторы минуты.
+  window.addEventListener('pagehide', () => {
+    window.clearInterval(таймер)
+    navigator.sendBeacon?.(адрес('leave'))
+  }, { once: true })
+}
+
 export async function joinMeeting(companyId: string, eventId: string): Promise<MeetingUrls> {
   const вкладка = window.open('about:blank', '_blank')
   if (вкладка) вкладка.opener = null
@@ -118,6 +156,7 @@ export async function joinMeeting(companyId: string, eventId: string): Promise<M
       `/api/conf/meetings/${eventId}/join?company_id=${encodeURIComponent(companyId)}`)
     if (вкладка) вкладка.location.href = m.moderator_url
     else window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+    следитьЗаВкладкой(companyId, m.session_id, вкладка)
     return m
   } catch (e) {
     вкладка?.close()
@@ -239,6 +278,7 @@ export async function joinRoom(companyId: string, roomId: string): Promise<Meeti
       `/api/conf/rooms/${roomId}/join?company_id=${encodeURIComponent(companyId)}`)
     if (вкладка) вкладка.location.href = m.moderator_url
     else window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+    следитьЗаВкладкой(companyId, m.session_id, вкладка)
     return m
   } catch (e) {
     вкладка?.close()

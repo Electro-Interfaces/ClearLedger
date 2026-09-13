@@ -13525,5 +13525,17 @@ class ConfPresence(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now())
+    # Когда человек вышел. Прежде записи были только о входе, и «разговаривают ·
+    # Марков Антон» висело после закрытия вкладки и после кнопки «Завершить»:
+    # система знала, кто входил, и выдавала это за «кто сейчас здесь»
+    # (замечание Маркова 11.09.2026).
+    left_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # Последний сигнал «я ещё здесь». Закрытие вкладки браузер сообщает
+    # ненадёжно — `sendBeacon` теряется при обрыве связи и убитом процессе, —
+    # поэтому присутствие держится на сигнале с таймаутом: молчит дольше
+    # PRESENCE_TTL — считаем, что вышел.
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("uq_conf_presence", "session_id", "user_id", unique=True),)

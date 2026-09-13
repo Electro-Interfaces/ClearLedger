@@ -4967,6 +4967,8 @@ async def create_all() -> None:
         # в счёт станций: иначе одна сеть попадает в разрезы дважды.
         for stmt in (
             "ALTER TABLE market_players ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE conf_presence ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ",
+            "ALTER TABLE conf_presence ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
             "ALTER TABLE market_players ADD COLUMN IF NOT EXISTS status_note TEXT",
         ):
             await conn.execute(_sa.text(stmt))
