@@ -18,6 +18,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { useCompany } from '@/contexts/CompanyContext'
+import { MarketCompaniesPanel } from './MarketCompaniesPanel'
 import { getMarketLandscape, type MarketNetworkRow } from '@/services/marketService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -46,6 +47,10 @@ function rowClass(r: MarketNetworkRow): string {
 export function MarketLandscapePanel() {
   const { companyId } = useCompany()
   const [вид, setВид] = useState<string>('power')
+  // Расклад отвечает «кто сильнее», карточка — «что он делает». Второй вопрос
+  // возникает сразу после первого, поэтому строка сети ведёт в карточку, а не
+  // заставляет искать компанию в другом разделе.
+  const [карточка, setКарточка] = useState<string | null>(null)
   const [q, setQ] = useState('')
 
   const data = useQuery({
@@ -70,6 +75,10 @@ export function MarketLandscapePanel() {
   const rows = all.filter((r) => !q || r.name.toLowerCase().includes(q.toLowerCase()))
   const ours = all.find((r) => r.isOurs)
   const platforms = data.data?.platforms ?? []
+
+  if (карточка) {
+    return <MarketCompaniesPanel initialOpen={карточка} onBack={() => setКарточка(null)} />
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-4">
@@ -109,8 +118,12 @@ export function MarketLandscapePanel() {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id} className={rowClass(r)}>
-                  <td className="p-2">{r.name}{r.isOurs && ' · мы'}</td>
+                <tr key={r.id} className={`${rowClass(r)} cursor-pointer hover:bg-muted/40`}
+                  onClick={() => setКарточка(r.id)} tabIndex={0} role="button"
+                  onKeyDown={(e) => e.key === 'Enter' && setКарточка(r.id)}>
+                  <td className="p-2 underline decoration-dotted underline-offset-2">
+                    {r.name}{r.isOurs && ' · мы'}
+                  </td>
                   <td className="p-2 text-right"><Num v={r.sites} /></td>
                   <td className="p-2 text-right"><Num v={r.sharePct} unit="%" digits={1} /></td>
                   <td className="p-2 text-right"><Num v={r.cities} /></td>

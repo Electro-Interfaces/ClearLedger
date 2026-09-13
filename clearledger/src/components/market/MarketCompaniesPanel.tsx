@@ -188,10 +188,18 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
   )
 }
 
-export function MarketCompaniesPanel() {
+/**
+ * `initialOpen` и `onBack` нужны, когда экран открыт не сам по себе, а из расклада
+ * сил: там уже выбрана сеть, и возврат должен вести обратно в расклад, а не в
+ * список компаний, которого человек в этом пути не видел.
+ */
+export function MarketCompaniesPanel({ initialOpen = null, onBack }: {
+  initialOpen?: string | null
+  onBack?: () => void
+} = {}) {
   const { companyId } = useCompany()
   const [q, setQ] = useState('')
-  const [open, setOpen] = useState<string | null>(null)
+  const [open, setOpen] = useState<string | null>(initialOpen)
 
   const list = useQuery({
     queryKey: ['market-operators', companyId],
@@ -218,7 +226,7 @@ export function MarketCompaniesPanel() {
   if (open && card.data) {
     return (
       <div className="h-full overflow-auto p-4">
-        <CompanyCard card={card.data} onBack={() => setOpen(null)} />
+        <CompanyCard card={card.data} onBack={() => (onBack ? onBack() : setOpen(null))} />
       </div>
     )
   }
