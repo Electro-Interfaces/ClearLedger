@@ -8047,10 +8047,43 @@ class MarketOperator(Base):
     site_url: Mapped[str | None] = mapped_column(String(300), nullable=True)
     inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── охват сети (профиль оператора, 13.09.2026) ──
+    base_city: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    cities: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    districts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    alive_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    paid_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    avg_power_kw: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    # ── технологический расклад: чья система обслуживает станции ──
+    # Этого нет в открытых источниках, а решает многое: сеть на чужой платформе —
+    # клиент своего поставщика, и разговор с ней идёт иначе, чем с владельцем системы.
+    platform_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    platform_owner: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    own_platform: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Роуминг: можно ли зарядиться на станции через приложение другого оператора.
+    # Отсутствие роуминга — факт о технологии, а не о качестве сети.
+    ocpi_roaming: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    ocpi_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    # ── приложение: точка контакта с водителем ──
+    app_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    app_package: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    app_developer: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    app_rating: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
+    app_reviews: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    app_installs: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # ── реквизиты: ссылаться можно только при подтверждённой достоверности ──
+    legal_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    ogrn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    legal_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    director: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    legal_confidence: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    contacts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_market_operator_company", "company_id", "relation"),
+        Index("ix_market_operator_platform", "company_id", "platform_owner"),
     )
 
 

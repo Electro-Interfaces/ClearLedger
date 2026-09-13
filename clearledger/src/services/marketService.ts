@@ -660,6 +660,68 @@ export const getOurMapPoints = (companyId: string, params?: { days?: number }) =
         brands: string[]; statuses: string[]; regions: string[] }>(
     '/api/market/our-map', { company_id: companyId, ...params })
 
+/** Сеть в раскладе сил: размер, охват, платформа, роуминг, сервис, реквизиты. */
+export interface MarketNetworkRow {
+  id: string
+  name: string
+  relation: string
+  isOurs: boolean
+  sites: number
+  ports: number
+  alive: number
+  silentHalfYear: number
+  sharePct: number
+  quality: number | null
+  success: number | null
+  medianPricePerKwh: number | null
+  baseCity: string | null
+  cities: number | null
+  districts: number | null
+  avgPowerKw: number | null
+  paidPct: number | null
+  platformOwner: string | null
+  platformCode: string | null
+  ownPlatform: boolean | null
+  roaming: boolean | null
+  roamingPct: number | null
+  appName: string | null
+  appRating: number | null
+  appReviews: number | null
+  appInstalls: string | null
+  appDeveloper: string | null
+  siteUrl: string | null
+  legalName: string | null
+  inn: string | null
+  ogrn: string | null
+  director: string | null
+  legalAddress: string | null
+  legalConfidence: string | null
+  legalTrusted: boolean
+}
+
+export interface MarketPlatform {
+  owner: string
+  networks: number
+  sites: number
+  ownSites: number
+  clientSites: number
+  ownerIsNetwork: boolean
+  clients: { name: string; sites: number }[]
+}
+
+export const getMarketLandscape = (companyId: string) =>
+  get<{
+    operators: MarketNetworkRow[]
+    networks: MarketNetworkRow[]
+    platforms: MarketPlatform[]
+    totals: {
+      networks: number; networkSites: number; withProfile: number; ownPlatform: number
+      platformKnownSites: number; roamingNetworks: number; roamingSites: number
+      closedNetworks: number; closedSites: number; withApp: number; legalTrusted: number
+    }
+    note: string
+  }>('/api/market/landscape', { company_id: companyId })
+
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(
     `/api/market/sites/bulk?company_id=${encodeURIComponent(companyId)}&source=${source}`, { items })

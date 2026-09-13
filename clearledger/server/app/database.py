@@ -4913,6 +4913,33 @@ async def create_all() -> None:
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS connectors_total INTEGER",
             "ALTER TABLE IF EXISTS market_site_snapshots "
             "ADD COLUMN IF NOT EXISTS source_ref VARCHAR(200)",
+            # Профиль оператора: охват, платформа, роуминг, приложение, реквизиты.
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS base_city VARCHAR(160)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS cities INTEGER",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS districts INTEGER",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS alive_pct NUMERIC(5,2)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS paid_pct NUMERIC(5,2)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS avg_power_kw NUMERIC(8,2)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS platform_code VARCHAR(40)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS platform_owner VARCHAR(160)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS own_platform BOOLEAN",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS ocpi_roaming BOOLEAN",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS ocpi_pct NUMERIC(5,2)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS app_name VARCHAR(160)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS app_package VARCHAR(160)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS app_developer VARCHAR(200)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS app_rating NUMERIC(3,2)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS app_reviews INTEGER",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS app_installs VARCHAR(40)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS legal_name VARCHAR(300)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS ogrn VARCHAR(20)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS legal_address TEXT",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS director VARCHAR(200)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS legal_confidence VARCHAR(40)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS contacts JSONB",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+            "CREATE INDEX IF NOT EXISTS ix_market_operator_platform "
+            "ON market_operators (company_id, platform_owner) WHERE platform_owner IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS ix_market_site_external "
             "ON market_sites (company_id, source, external_id) WHERE external_id IS NOT NULL",
         ):

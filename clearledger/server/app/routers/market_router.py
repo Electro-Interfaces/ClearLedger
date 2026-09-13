@@ -2699,6 +2699,144 @@ async def our_map_points(
     }
 
 
+# ── Расклад сил, платформы и роуминг ────────────────────────────────────────
+# Раздел «Рынок» перестаёт быть списком точек: появляются два слоя, которых в
+# открытых источниках нет, — кто на чьей ИТ-платформе работает и кто участвует в
+# роуминге. Первое говорит, с кем на самом деле идёт разговор о технологии; второе —
+# может ли водитель зарядиться у сети чужим приложением.
+
+@router.get("/landscape")
+async def market_landscape(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Кто есть кто на рынке: размер, охват, платформа, роуминг, сервис."""
+    cid = await _member(company_id, user, db)
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+
+    # Считаем ТОЛЬКО сетевые точки: домашние розетки и независимые в доли не идут —
+    # иначе «рынок» окажется наполовину частными розетками (§3.8).
+    counts = {str(oid): {"sites": int(sites), "ports": int(ports or 0),
+                         "alive": int(alive or 0),
+                         "quality": round(float(q), 1) if q is not None else None,
+                         "success": round(float(sc), 1) if sc is not None else None,
+                         "silent": int(silent or 0)}
+              for oid, sites, ports, alive, q, sc, silent in (await db.execute(
+                  select(MarketSite.operator_id, func.count(),
+                         func.sum(MarketSite.ports),
+                         func.sum(case((MarketSite.last_session_at >= alive_since, 1), else_=0)),
+                         func.avg(MarketSite.connection_quality_24h),
+                         func.avg(MarketSite.success_charge_pct),
+                         func.sum(case(
+                             (and_(MarketSite.last_session_at.is_not(None),
+                                   MarketSite.last_session_at < datetime.now(timezone.utc)
+                                   - timedelta(days=180)), 1), else_=0)))
+                  .where(MarketSite.company_id == cid,
+                         MarketSite.operator_id.is_not(None),
+                         MarketSite.site_class == "network",
+                         MarketSite.status != "closed")
+                  .group_by(MarketSite.operator_id))).all()}
+
+    operators = (await db.execute(select(MarketOperator).where(
+        MarketOperator.company_id == cid))).scalars().all()
+    last_price = await _last_prices(db, cid)
+    site_operator = dict((str(sid), str(oid)) for sid, oid in (await db.execute(
+        select(MarketSite.id, MarketSite.operator_id)
+        .where(MarketSite.company_id == cid,
+               MarketSite.operator_id.is_not(None)))).all())
+    prices: dict[str, list[float]] = {}
+    for site_id, obs in last_price.items():
+        oid = site_operator.get(site_id)
+        if oid:
+            prices.setdefault(oid, []).append(obs["price"])
+
+    rows = []
+    for op in operators:
+        c = counts.get(str(op.id), {})
+        sites = c.get("sites", 0)
+        rows.append({
+            "id": str(op.id), "name": op.name, "relation": op.relation,
+            "isOurs": op.relation == "own",
+            "sites": sites, "ports": c.get("ports", 0), "alive": c.get("alive", 0),
+            "silentHalfYear": c.get("silent", 0),
+            "quality": c.get("quality"), "success": c.get("success"),
+            "medianPricePerKwh": _median(prices.get(str(op.id), [])),
+            # Охват и технологии — из профиля оператора
+            "baseCity": op.base_city, "cities": op.cities, "districts": op.districts,
+            "avgPowerKw": float(op.avg_power_kw) if op.avg_power_kw is not None else None,
+            "paidPct": float(op.paid_pct) if op.paid_pct is not None else None,
+            "platformOwner": op.platform_owner, "platformCode": op.platform_code,
+            "ownPlatform": op.own_platform,
+            "roaming": op.ocpi_roaming,
+            "roamingPct": float(op.ocpi_pct) if op.ocpi_pct is not None else None,
+            "appName": op.app_name,
+            "appRating": float(op.app_rating) if op.app_rating is not None else None,
+            "appReviews": op.app_reviews, "appInstalls": op.app_installs,
+            "appDeveloper": op.app_developer,
+            "siteUrl": op.site_url,
+            # Реквизиты показываем всегда, но помечаем достоверность: ссылаться
+            # можно только на подтверждённые.
+            "legalName": op.legal_name, "inn": op.inn, "ogrn": op.ogrn,
+            "director": op.director, "legalAddress": op.legal_address,
+            "legalConfidence": op.legal_confidence,
+            "legalTrusted": (op.legal_confidence or "") == "подтверждено",
+        })
+
+    networks = [r for r in rows if r["sites"] > 0]
+    total_sites = sum(r["sites"] for r in networks) or 1
+    for r in networks:
+        r["sharePct"] = round(r["sites"] / total_sites * 100, 1)
+    networks.sort(key=lambda r: -r["sites"])
+
+    # ── платформы: кто кого обслуживает ──
+    platforms: dict[str, dict[str, Any]] = {}
+    for r in networks:
+        owner = r["platformOwner"]
+        if not owner:
+            continue
+        p = platforms.setdefault(owner, {
+            "owner": owner, "networks": 0, "sites": 0, "ownSites": 0,
+            "clients": [], "ownerIsNetwork": False,
+        })
+        p["networks"] += 1
+        p["sites"] += r["sites"]
+        if r["name"] == owner:
+            p["ownSites"] = r["sites"]
+            p["ownerIsNetwork"] = True
+        else:
+            p["clients"].append({"name": r["name"], "sites": r["sites"]})
+    for p in platforms.values():
+        p["clients"].sort(key=lambda c: -c["sites"])
+        # Точки клиентов — то, что платформа обслуживает СВЕРХ собственной сети:
+        # именно этот объём делает её инфраструктурой рынка, а не просто сетью.
+        p["clientSites"] = p["sites"] - p["ownSites"]
+    platform_rows = sorted(platforms.values(), key=lambda p: -p["clientSites"])
+
+    known_platform = sum(r["sites"] for r in networks if r["platformOwner"])
+    roaming_yes = [r for r in networks if r["roaming"]]
+    roaming_no = [r for r in networks if r["roaming"] is False]
+
+    return {
+        "operators": rows, "networks": networks,
+        "platforms": platform_rows,
+        "totals": {
+            "networks": len(networks),
+            "networkSites": total_sites,
+            "withProfile": sum(1 for r in networks if r["platformOwner"] or r["cities"]),
+            "ownPlatform": sum(1 for r in networks if r["ownPlatform"]),
+            "platformKnownSites": known_platform,
+            "roamingNetworks": len(roaming_yes),
+            "roamingSites": sum(r["sites"] for r in roaming_yes),
+            "closedNetworks": len(roaming_no),
+            "closedSites": sum(r["sites"] for r in roaming_no),
+            "withApp": sum(1 for r in networks if r["appRating"] is not None),
+            "legalTrusted": sum(1 for r in networks if r["legalTrusted"]),
+        },
+        "note": ("доли считаются по сетевым точкам: домашние розетки и независимые "
+                 "точки без оператора в расклад сил не входят"),
+    }
+
+
 class BulkSiteIn(BaseModel):
     """Строка списка при массовом заведении точек (вставка из таблицы)."""
     name: str

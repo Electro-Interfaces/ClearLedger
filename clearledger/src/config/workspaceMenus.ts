@@ -340,6 +340,7 @@ export const MARKET_MENU: CentralMenuItem[] = [
   { key: 'mk_map',          label: 'Карта рынка' },
   { key: 'mk_sites',        label: 'Точки рынка' },
   { key: 'mk_operators',    label: 'Компании' },
+  { key: 'mk_landscape2',   label: 'Расклад сил' },
   { key: 'mk_observations', label: 'Наблюдения' },
   { key: 'mk_sources',      label: 'Источники и свежесть' },
 ]
