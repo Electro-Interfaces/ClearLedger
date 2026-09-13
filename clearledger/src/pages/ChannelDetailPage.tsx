@@ -402,7 +402,6 @@ const REESTR_SLOTS: { key: string; label: string }[] = [
 ]
 
 function ManualTableCard({ channel }: { channel: Channel }) {
-  const { companyId } = useCompany()
   const qc = useQueryClient()
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)

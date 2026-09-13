@@ -1038,8 +1038,16 @@ async def ingest_asuim_book(
     ok = sum(1 for r in report if r.get("status") == "success")
     bad = sum(1 for r in report if r.get("status") == "error")
     created = sum(int(r.get("created") or 0) for r in report)
-    parts = [f"{r['label']} +{r.get('created') or 0}" for r in report
-             if r.get("status") == "success" and "created" in r]
+    # В строке протокола виден и день, с которого взят хвост: менеджер грузит
+    # книгу ради недостающих дней, и «добавлено 908» без даты не отвечает на
+    # вопрос «а те дни, которых не хватало, доехали?».
+    parts = []
+    for r in report:
+        if r.get("status") != "success" or "created" not in r:
+            continue
+        с_дня = r.get("since")
+        когда = f" с {с_дня[8:10]}.{с_дня[5:7]}" if isinstance(с_дня, str) and len(с_дня) == 10 else ""
+        parts.append(f"{r['label']} +{r.get('created') or 0}{когда}")
     return {
         "status": "error" if bad and not ok else ("partial" if bad else "success"),
         "kind": "asuim_book", "created": created,

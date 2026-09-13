@@ -711,6 +711,13 @@ async def ingest_stations(
                     skipped += 1
                     continue
             if loc is not None:
+                # Серийник уникален по компании, а витрина отдаёт AC-станцию пары
+                # под общим серийником «DC / AC» — он уже стоит у соседней карточки.
+                # Записать его значит уронить прогон на уникальном индексе, и тогда
+                # у станции не обновится ВЕСЬ паспорт. Чужой серийник не трогаем.
+                чужой = by_serial.get(str(typed.get("serial_number") or "").strip())
+                if чужой is not None and чужой is not loc:
+                    typed.pop("serial_number", None)
                 # ОБОГАЩАЕМ существующий объект: заполняем типизированные колонки +
                 # мержим паспорт; id / code / source_bindings НЕ трогаем.
                 for k, v in typed.items():

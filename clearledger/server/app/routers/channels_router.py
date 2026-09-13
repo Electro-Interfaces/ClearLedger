@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -425,6 +425,7 @@ async def _run_channel_background(
 async def upload_to_channel(
     channel_id: uuid.UUID,
     file: UploadFile,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -440,7 +441,8 @@ async def upload_to_channel(
     from app.routers.intake_router import upload_file
 
     ch = await get_owned(Channel, channel_id, current_user, db)
-    res = await upload_file(file=file, company_id=str(ch.company_id), purpose="data",
+    res = await upload_file(file=file, background=background,
+                            company_id=str(ch.company_id), purpose="data",
                             db=db, current_user=current_user)
     src_id = res["source_id"] if isinstance(res, dict) else getattr(res, "source_id", None)
     ch.config = {**(ch.config or {}),

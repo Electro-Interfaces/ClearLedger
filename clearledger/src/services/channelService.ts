@@ -10,7 +10,7 @@
 
 import { getItem, setItem } from './storage'
 import { getSource } from './sourceService'
-import { get, post, patch, del, isApiEnabled } from './apiClient'
+import { get, post, patch, del, upload, isApiEnabled } from './apiClient'
 import type {
   Channel, ChannelStream, ChannelStage, SyncLogEntry, ScheduleConfig,
 } from '@/types/channel'
