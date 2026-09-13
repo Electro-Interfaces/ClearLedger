@@ -8360,6 +8360,57 @@ class MarketScenarioMeasure(Base):
     )
 
 
+class MarketPlayer(Base):
+    """Игрок рынка: кто ещё борется за того же водителя.
+
+    Это не про станции, а про компании. Владельца инфраструктуры видно на карте
+    зарядок; агрегатора, работающего на ЧУЖОЙ инфраструктуре, там нет вовсе — его
+    находят через магазин приложений. У 2Chargers на карте 4 853 чужих публичных
+    точки и почти ни одной своей: это готовая модель, и она конкурирует с нами за
+    интерфейс, а не за железо.
+
+    Водораздел бизнес-моделей — `asset_light`: работает ли игрок без собственной
+    инфраструктуры. Из 113 найденных без станций 92.
+
+    Класс проставлен автоматически по названию и пакету, поэтому рядом живёт
+    `class_checked`: пока человек не подтвердил, конкретное имя в отчёт не идёт.
+    Наличие приложения не означает работы на рынке зарядок — сети АЗС и мойки
+    попали в выборку как соседи по аудитории, и называются они «смежными».
+    """
+    __tablename__ = "market_players"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    app: Mapped[str] = mapped_column(String(200), nullable=False)
+    package: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    player_class: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    class_checked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    own_stations: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    asset_light: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Связь с оператором рынка, если игрок — владелец сети из нашего реестра.
+    operator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_operators.id", ondelete="SET NULL"), nullable=True)
+    matched_operator: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # ── автопроизводители и приложения ──
+    brand: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    developer: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    developer_inn: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    rating: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
+    reviews: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    model_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("uq_market_player", "company_id", "app", "package", unique=True),
+        Index("ix_market_player_class", "company_id", "player_class"),
+    )
+
+
 class MarketRegionStat(Base):
     """Парк электромобилей и обеспеченность региона зарядками.
 

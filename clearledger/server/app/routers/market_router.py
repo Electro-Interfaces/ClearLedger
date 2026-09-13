@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (ChargeSession, CorporateClient, EzsSite, MarketGrowthLead,
-                        MarketRegionStat,
+                        MarketPlayer, MarketRegionStat,
                         MarketObservation, MarketOperator, MarketScenario,
                         MarketScenarioMeasure, MarketSite, MarketSiteSnapshot, Region,
                         ServiceLocation, User)
@@ -2928,6 +2928,153 @@ async def market_coverage(
         "note": ("парк — электромобили без гибридов (их вдвое больше, региональной "
                  "разбивки по ним нет); таблица покрывает только регионы с известным "
                  "парком, для остальных данных о машинах у нас нет"),
+    }
+
+
+# ── Игроки: кто ещё борется за того же водителя ─────────────────────────────
+# Карта зарядок показывает владельцев железа. Но за водителя конкурируют и те, у
+# кого станций нет вовсе: агрегаторы на чужой инфраструктуре, топливный процессинг
+# с готовой базой корпоративных клиентов, мойки, банки, автопроизводители. Их видно
+# только через магазин приложений — и это отдельный слой рынка.
+
+# Классы, которые пришли в зарядку с соседнего рынка: у них своя аудитория и
+# платёжный слой, а инфраструктуры нет. Это «смежные игроки», а не конкуренты
+# по станциям, и называть их надо именно так.
+ADJACENT_CLASSES = {"топливный процессинг", "мойки и мультисервис", "банк / финтех",
+                    "сеть АЗС (своё приложение)", "поиск АЗС"}
+
+
+@router.get("/players")
+async def market_players(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Игроки рынка: модели бизнеса, классы и качество приложений."""
+    cid = await _member(company_id, user, db)
+    rows = (await db.execute(select(MarketPlayer).where(
+        MarketPlayer.company_id == cid))).scalars().all()
+    if not rows:
+        return {"players": [], "total": 0,
+                "message": "карта игроков не загружена — нужен ev-market-players.csv"}
+
+    operators = {o.id: o for o in (await db.execute(select(MarketOperator).where(
+        MarketOperator.company_id == cid))).scalars().all()}
+
+    players = []
+    for r in rows:
+        op = operators.get(r.operator_id) if r.operator_id else None
+        stations = r.own_stations if r.own_stations is not None else (
+            None if op is None else None)
+        players.append({
+            "id": str(r.id), "app": r.app, "package": r.package,
+            "class": r.player_class or "прочее",
+            "classChecked": r.class_checked,
+            "adjacent": (r.player_class or "") in ADJACENT_CLASSES,
+            "ownStations": stations,
+            "assetLight": r.asset_light,
+            "operatorId": str(r.operator_id) if r.operator_id else None,
+            "operatorName": op.name if op else r.matched_operator,
+            "brand": r.brand, "developer": r.developer, "developerInn": r.developer_inn,
+            "rating": float(r.rating) if r.rating is not None else (
+                float(op.app_rating) if op is not None and op.app_rating is not None else None),
+            "reviews": r.reviews if r.reviews is not None else (
+                op.app_reviews if op is not None else None),
+            "modelNote": r.model_note, "note": r.note, "source": r.source,
+        })
+
+    # ── четыре квадранта: своя инфраструктура против своего приложения ──
+    # Приложение есть у всех в этой выборке — их так и нашли. Поэтому вторая ось —
+    # ЕСТЬ ЛИ СТАНЦИИ, и она делит рынок на тех, кто владеет железом, и тех, кто
+    # борется за интерфейс к чужому.
+    with_assets = [p for p in players if (p["ownStations"] or 0) > 0]
+    light = [p for p in players if (p["ownStations"] or 0) == 0]
+
+    def unique_stations(group: list[dict[str, Any]]) -> int:
+        """Станции по УНИКАЛЬНЫМ сетям, а не по приложениям.
+
+        У одной сети бывает два приложения в магазине — у нас самих их два
+        (`com.rucharge.rusgidro` и `ru.rushydro.car`), — и суммирование по строкам
+        удваивает её станции (проверка 13.09.2026).
+        """
+        seen: set[str] = set()
+        total = 0
+        for p in group:
+            key = p["operatorName"] or p["app"]
+            if key in seen:
+                continue
+            seen.add(key)
+            total += p["ownStations"] or 0
+        return total
+    quadrants = [
+        {"key": "full", "label": "свои станции и своё приложение",
+         "hint": "полный стек: владеют железом и говорят с водителем сами",
+         "players": sorted(with_assets, key=lambda p: -(p["ownStations"] or 0))[:40],
+         "count": len(with_assets),
+         "networks": len({p["operatorName"] or p["app"] for p in with_assets}),
+         "stations": unique_stations(with_assets)},
+        {"key": "light", "label": "приложение без своих станций",
+         "hint": "конкуренция за интерфейс: агрегаторы, процессинг, банки, автопроизводители",
+         "players": sorted(light, key=lambda p: (p["class"], p["app"]))[:60],
+         "count": len(light), "stations": 0},
+    ]
+
+    # ── классы и откуда приходят ──
+    by_class: dict[str, dict[str, Any]] = {}
+    for p in players:
+        c = by_class.setdefault(p["class"], {
+            "class": p["class"], "players": 0, "assetLight": 0, "stations": 0,
+            "adjacent": p["adjacent"], "rated": [], "examples": [], "_seen": set(),
+        })
+        c["players"] += 1
+        if (p["ownStations"] or 0) == 0:
+            c["assetLight"] += 1
+        # Сеть с двумя приложениями не должна удваивать станции класса.
+        key = p["operatorName"] or p["app"]
+        if key not in c["_seen"]:
+            c["_seen"].add(key)
+            c["stations"] += p["ownStations"] or 0
+        if p["rating"] is not None:
+            c["rated"].append(p["rating"])
+        if len(c["examples"]) < 6:
+            c["examples"].append(p["app"])
+    class_rows = []
+    for c in by_class.values():
+        rated = c.pop("rated")
+        c.pop("_seen", None)
+        median = _median(rated)
+        class_rows.append({**c, "medianRating": round(median, 2) if median is not None else None,
+                           "withRating": len(rated)})
+    class_rows.sort(key=lambda c: -c["players"])
+
+    # ── качество против размера: рейтинг рядом с числом станций ──
+    # Сравнивать рейтинги между классами напрямую нельзя: у приложения с пятью
+    # оценками и с тремястами разная достоверность, поэтому число отзывов рядом.
+    quality = sorted((p for p in players if p["rating"] is not None),
+                     key=lambda p: -(p["reviews"] or 0))[:40]
+    ratings = [p["rating"] for p in players if p["rating"] is not None]
+
+    return {
+        "players": players, "total": len(players),
+        "quadrants": quadrants, "classes": class_rows, "quality": quality,
+        "totals": {
+            "withStations": len(with_assets), "assetLight": len(light),
+            "adjacent": sum(1 for p in players if p["adjacent"]),
+            "medianRating": (round(_median(ratings), 2)
+                             if _median(ratings) is not None else None),
+            "withRating": len(ratings),
+            # Сети, у которых больше одного приложения: раздвоенная точка контакта
+            # с водителем — сама по себе находка.
+            "multiApp": sorted({p["operatorName"] or p["app"] for p in players
+                                if sum(1 for o in players
+                                       if (o["operatorName"] or o["app"])
+                                       == (p["operatorName"] or p["app"])) > 1}),
+            "unchecked": sum(1 for p in players if not p["classChecked"]),
+        },
+        "note": ("класс проставлен автоматически по названию и пакету — перед тем как "
+                 "называть конкретное имя, его надо подтвердить; наличие приложения "
+                 "не означает работы на рынке зарядок: сети АЗС и мойки здесь как "
+                 "смежные игроки; выборка сделана по RuStore и не видит App Store "
+                 "и Google Play"),
     }
 
 

@@ -339,10 +339,11 @@ export const MARKET_MENU: CentralMenuItem[] = [
   { key: 'mk_position',     label: 'Позиция' },
   { key: 'mk_map',          label: 'Карта рынка' },
   { key: 'mk_sites',        label: 'Точки рынка' },
-  { key: 'mk_operators',    label: 'Компании' },
-  { key: 'mk_landscape2',   label: 'Расклад сил' },
+  { key: 'mk_landscape2',   label: 'Компании и расклад сил' },
+  // Кто ещё борется за того же водителя: агрегаторы, процессинг, банки,
+  // автопроизводители. На карте зарядок их нет — у них нет станций.
+  { key: 'mk_players',      label: 'Игроки рынка' },
   { key: 'mk_observations', label: 'Наблюдения' },
-  { key: 'mk_sources',      label: 'Источники и свежесть' },
 ]
 
 // ТЕРРИТОРИИ — где строить. У «Рынка» вопрос «что вокруг нас», здесь — «где нас нет
@@ -369,6 +370,9 @@ export const MARKET_DECISION_MENU: CentralMenuItem[] = [
   { key: 'mk_leads',        label: 'Кандидаты' },
   { key: 'mk_scenarios',    label: 'Сценарии' },
   { key: 'mk_partners',     label: 'Партнёрство и франшиза' },
+  // Чему верить: свежесть источников и покрытие полей — часть решения, а не
+  // служебный экран.
+  { key: 'mk_sources',      label: 'Источники и свежесть' },
 ]
 
 export const MARKET_KEYS = [...MARKET_MENU, ...MARKET_AREA_MENU, ...MARKET_PRICE_MENU,

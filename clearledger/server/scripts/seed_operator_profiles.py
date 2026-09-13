@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from app.database import async_session_factory
 from app.models import Company
-from app.services.market_operators import (ingest_operator_profiles,
+from app.services.market_operators import (ingest_operator_profiles, ingest_players,
                                            ingest_region_stats, parse_csv)
 
 
@@ -22,6 +22,8 @@ async def main() -> None:
         "apps": pathlib.Path("/tmp/ev-apps.csv"),
         "legal": pathlib.Path("/tmp/ev-operators-legal.csv"),
         "regions": pathlib.Path("/tmp/ev-market-regions.csv"),
+        "players": pathlib.Path("/tmp/ev-market-players.csv"),
+        "oem": pathlib.Path("/tmp/ev-oem-players.csv"),
     }
     data: dict[str, list] = {}
     for key, path in files.items():
@@ -47,6 +49,13 @@ async def main() -> None:
                 db, company.id, data["regions"],
                 source="АВТОСТАТ «Парк ТС в РФ» + наш обход", as_of="2026-01-01")
             print(stats["message"])
+
+        if data["players"] or data["oem"]:
+            # Игроки ищутся через магазин приложений: агрегатора без своих станций
+            # на карте зарядок не существует, хотя за водителя он борется наравне.
+            found = await ingest_players(db, company.id, players=data["players"],
+                                         oem=data["oem"])
+            print(found["message"])
 
 
 asyncio.run(main())

@@ -171,13 +171,13 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   ops_economy: { procurement: 'Энергозакупка', rent: 'Аренда', ops_payments: 'Оплаты' },
   marketing: {
     mk_position: 'Позиция', mk_map: 'Карта рынка', mk_sites: 'Точки рынка',
-    mk_operators: 'Компании', mk_landscape2: 'Расклад сил',
-    mk_observations: 'Наблюдения',
-    mk_sources: 'Источники и свежесть',
+    mk_landscape2: 'Компании и расклад сил', mk_players: 'Игроки рынка',
+    mk_observations: 'Наблюдения', mk_operators: 'Компании',
   },
   marketing_decision: {
     mk_growth: 'Направления роста', mk_leads: 'Кандидаты',
     mk_scenarios: 'Сценарии', mk_partners: 'Партнёрство и франшиза',
+    mk_sources: 'Источники и свежесть',
   },
   marketing_area: {
     mk_coverage: 'Обеспеченность',

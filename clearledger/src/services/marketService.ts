@@ -748,6 +748,45 @@ export const getMarketCoverage = (companyId: string) =>
   get<{ regions: MarketCoverageRow[]; total: number; note?: string; message?: string }>(
     '/api/market/coverage', { company_id: companyId })
 
+/** Игрок рынка: тот, кто борется за водителя — со станциями или без. */
+export interface MarketPlayer {
+  id: string
+  app: string
+  package: string | null
+  class: string
+  classChecked: boolean
+  adjacent: boolean
+  ownStations: number | null
+  assetLight: boolean | null
+  operatorId: string | null
+  operatorName: string | null
+  brand: string | null
+  developer: string | null
+  developerInn: string | null
+  rating: number | null
+  reviews: number | null
+  modelNote: string | null
+  note: string | null
+  source: string | null
+}
+
+export const getMarketPlayers = (companyId: string) =>
+  get<{
+    players: MarketPlayer[]
+    total: number
+    quadrants: { key: string; label: string; hint: string; count: number
+                 networks?: number; stations: number; players: MarketPlayer[] }[]
+    classes: { class: string; players: number; assetLight: number; stations: number
+               adjacent: boolean; medianRating: number | null; withRating: number
+               examples: string[] }[]
+    quality: MarketPlayer[]
+    totals: { withStations: number; assetLight: number; adjacent: number
+              medianRating: number | null; withRating: number; unchecked: number
+              multiApp: string[] }
+    note?: string
+    message?: string
+  }>('/api/market/players', { company_id: companyId })
+
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(
     `/api/market/sites/bulk?company_id=${encodeURIComponent(companyId)}&source=${source}`, { items })

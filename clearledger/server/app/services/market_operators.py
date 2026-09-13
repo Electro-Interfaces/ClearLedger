@@ -257,3 +257,81 @@ async def ingest_region_stats(
     await db.commit()
     return {"status": "success", "regions": touched,
             "message": f"регионов с парком машин: {touched}"}
+
+
+async def ingest_players(
+    db: AsyncSession, company_id: _uuid.UUID,
+    players: list[dict[str, str]] | None = None,
+    oem: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Игроки рынка из магазина приложений и автопроизводители.
+
+    Ищут их через магазин потому, что на карте зарядок видно только владельцев
+    инфраструктуры: агрегатор, работающий на чужих станциях, там не существует, хотя
+    за того же водителя борется наравне.
+
+    Класс приходит проставленным автоматически — по названию и пакету, — и остаётся
+    непроверенным, пока человек не подтвердит. Десять записей заведомо осели в
+    «прочее»; называть конкретное имя в отчёте до проверки нельзя.
+    """
+    from app.models import MarketPlayer
+
+    known = {(p.app, p.package or ""): p for p in (await db.execute(
+        select(MarketPlayer).where(MarketPlayer.company_id == company_id))).scalars().all()}
+    operators = {(o.name or "").strip().lower(): o for o in (await db.execute(
+        select(MarketOperator).where(
+            MarketOperator.company_id == company_id))).scalars().all()}
+    now = datetime.now(timezone.utc)
+    touched = 0
+
+    def upsert(app: str, package: str | None) -> Any:
+        key = (app, package or "")
+        row = known.get(key)
+        if row is None:
+            row = MarketPlayer(company_id=company_id, app=app, package=package)
+            db.add(row)
+            known[key] = row
+        return row
+
+    for raw in players or []:
+        app = _s(raw.get("app"), 200)
+        if not app:
+            continue
+        row = upsert(app, _s(raw.get("package"), 200))
+        row.player_class = _s(raw.get("class"), 80)
+        row.own_stations = _int(raw.get("own_stations"))
+        row.asset_light = _flag(raw.get("asset_light"))
+        matched = _s(raw.get("matched_operator"), 200)
+        row.matched_operator = matched
+        if matched:
+            op = operators.get((_canon_operator(matched) or matched).strip().lower())
+            if op is not None:
+                row.operator_id = op.id
+        row.source = "RuStore"
+        row.updated_at = now
+        touched += 1
+
+    for raw in oem or []:
+        app = _s(raw.get("app"), 200) or _s(raw.get("brand"), 200)
+        if not app:
+            continue
+        row = upsert(app, _s(raw.get("package"), 200))
+        row.player_class = "автопроизводитель"
+        row.brand = _s(raw.get("brand"), 160)
+        row.developer = _s(raw.get("developer"), 200)
+        row.developer_inn = _s(raw.get("developer_inn"), 60)
+        row.email = _s(raw.get("email"), 200)
+        row.rating = _num(raw.get("rating"))
+        row.reviews = _int(raw.get("reviews"))
+        row.own_stations = _int(raw.get("own_stations"))
+        row.asset_light = (row.own_stations or 0) == 0
+        row.model_note = _s(raw.get("model"))
+        row.note = _s(raw.get("note"))
+        row.source = "RuStore"
+        row.updated_at = now
+        touched += 1
+
+    await db.commit()
+    return {"status": "success", "players": touched,
+            "message": (f"игроков {len(players or [])}, автопроизводителей "
+                        f"{len(oem or [])}; записано {touched}")}
