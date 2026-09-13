@@ -10,9 +10,8 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { MapContainer, CircleMarker, Marker, Popup, AttributionControl, useMap,
+import { MapContainer, CircleMarker, Popup, AttributionControl, useMap,
   useMapEvents } from 'react-leaflet'
-import { divIcon, type DivIcon } from 'leaflet'
 import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import { clusterPoints, clusterRadiusForZoom } from '@/components/map/clusterPoints'
@@ -114,38 +113,7 @@ function siteColor(s: MarketSite): string {
 }
 
 /**
- * С какого приближения наша станция рисуется знаком, а не кружком.
- * Ниже этого масштаба точки склеиваются в кластеры, и значок превращается в
- * пятно: на обзоре страны работает только цвет.
- */
-const ZOOM_ЗНАК = 13
-
-/**
- * Знак нашей станции: синяя капля с молнией. Логотипа компании в пространстве нет
- * (ни файла, ни поля у организации), поэтому знак собран из фирменного цвета и
- * символа зарядки — он не выдаёт себя за чужой бренд и читается на карте.
- *
- * Кольцо разреза сохранено обводкой капли: принадлежность и состояние остаются
- * двумя разными утверждениями, как и на кружке.
- */
-function ourPinIcon(ring: string): DivIcon {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
-    <path d="M14 35C14 35 26 21.5 26 13.5A12 12 0 1 0 2 13.5C2 21.5 14 35 14 35Z"
-          fill="${НАШ_ЦВЕТ}" stroke="${ring}" stroke-width="2.5"/>
-    <path d="M15.4 6.5 9.2 15.2h4.1l-1.1 6.3 6.4-8.9h-4.2z"
-          fill="#fff"/>
-  </svg>`
-  return divIcon({
-    html: svg,
-    className: '',           // без рамки Leaflet по умолчанию
-    iconSize: [28, 36],
-    iconAnchor: [14, 35],    // остриё капли — в координате станции
-    popupAnchor: [0, -30],
-  })
-}
-
-/**
- * Подсказка нашего объекта: одна на оба вида маркера — знак и кружок.
+ * Подсказка нашего объекта.
  *
  * Подписываем именем компании, а не словом «наш объект»: на одной карте рядом
  * стоят наши станции из своего реестра и они же из выгрузки рынка, где оператор
@@ -234,7 +202,7 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
   const radius = clusterRadiusForZoom(zoom)
   const ourClusters = useMemo(
     () => clusterPoints(map, ourPoints, radius, (p) => [p.lat, p.lon], (p) => `our-${p.id}`),
-    [map, ourPoints, radius])  // eslint-disable-line react-hooks/exhaustive-deps
+    [map, ourPoints, radius])   
   const marketClusters = useMemo(
     () => clusterPoints(map, market, radius,
       (p) => [p.lat as number, p.lon as number], (p) => p.id),
@@ -247,15 +215,9 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
         // Заливка — принадлежность, кольцо — выбранный разрез. Цвет при этом не
         // единственный носитель: то же состояние написано словами в подсказке.
         const ring = one ? ourColor(one, colorBy) : НАШ_ЦВЕТ
-        // На крупном приближении одиночная станция получает знак: там хватает
-        // места, и вопрос «наша ли это точка» решается без сверки с легендой.
-        if (one && zoom >= ZOOM_ЗНАК) {
-          return (
-            <Marker key={c.key} position={[c.lat, c.lon]} icon={ourPinIcon(ring)}>
-              <Popup><OurPopupBody p={one} /></Popup>
-            </Marker>
-          )
-        }
+        // Точка, а не значок-капля: на крупном приближении станции стоят вплотную,
+        // и значки перекрывают карту и друг друга — в городе от них не видно ни
+        // улиц, ни чужих точек (замечание МАГа 13.09.2026).
         return (
           <CircleMarker key={c.key} center={[c.lat, c.lon]}
             radius={ТОЧКА_НАША}
@@ -442,7 +404,15 @@ function MarketSites() {
   }, [q])
   const [страниц, setСтраниц] = useState(1)
   const PAGE = 500
-  useEffect(() => { setСтраниц(1) }, [запрос, kind])
+  // Сброс на первую страницу при смене условий делается ПРИ ОТРИСОВКЕ, а не в
+  // эффекте: эффект вызывал вторую отрисовку следом за первой, и список успевал
+  // мигнуть старой выдачей.
+  const условия = `${запрос}|${kind}`
+  const [прежние, setПрежние] = useState(условия)
+  if (условия !== прежние) {
+    setПрежние(условия)
+    setСтраниц(1)
+  }
 
   const sites = useQuery({
     queryKey: ['market-sites-list', companyId, kind, запрос, страниц],
