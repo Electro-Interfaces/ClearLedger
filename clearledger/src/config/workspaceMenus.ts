@@ -336,8 +336,10 @@ export function workspaceModeForKey(key: string): string | null {
  * пункт не служебный: без него цифры на карте — чужие слухи с неизвестным возрастом.
  */
 export const MARKET_MENU: CentralMenuItem[] = [
-  { key: 'mk_position',     label: 'Позиция' },
+  // Карта первой: раздел открывают, чтобы посмотреть, что вокруг, а не свои
+  // показатели — их смотрят в «Продажах» (решение МАГа 13.09.2026).
   { key: 'mk_map',          label: 'Карта рынка' },
+  { key: 'mk_position',     label: 'Позиция' },
   { key: 'mk_sites',        label: 'Точки рынка' },
   { key: 'mk_landscape2',   label: 'Компании и расклад сил' },
   // Кто ещё борется за того же водителя: агрегаторы, процессинг, банки,
