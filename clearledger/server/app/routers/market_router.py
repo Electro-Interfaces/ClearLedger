@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
@@ -285,6 +285,7 @@ async def list_sites(
     operator_id: str | None = Query(None),
     min_power: float | None = Query(None, ge=0),
     alive: bool | None = Query(None, description="заряжали за 90 дней"),
+    search: str | None = Query(None, description="имя, город или адрес"),
     limit: int = Query(SITES_PAGE_DEFAULT, le=SITES_PAGE_MAX),
     offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
@@ -301,6 +302,14 @@ async def list_sites(
     """
     cid = await _member(company_id, user, db)
     q = select(MarketSite).where(MarketSite.company_id == cid)
+    if search and search.strip():
+        # Искать надо по всей выдаче, а не по первой странице: список показывал
+        # 5 000 из 9 118 и отвечал «ничего не найдено» о точке, которая есть в
+        # базе, но не доехала до браузера (аудит А10).
+        pattern = f"%{search.strip()}%"
+        q = q.where(sa_or(MarketSite.name.ilike(pattern),
+                          MarketSite.city.ilike(pattern),
+                          MarketSite.address.ilike(pattern)))
     if kind:
         q = q.where(MarketSite.kind == kind)
     if city:
@@ -545,11 +554,22 @@ async def _last_prices(db: AsyncSession, cid: uuid.UUID) -> dict[str, dict[str, 
         .where(MarketObservation.company_id == cid, MarketObservation.kind == "price",
                MarketObservation.price_per_kwh.is_not(None),
                MarketObservation.observed_on >= fresh_from)
-        .order_by(MarketObservation.site_id, MarketObservation.observed_on.desc()))).scalars():
-        out.setdefault(str(obs.site_id), {
+        .order_by(MarketObservation.site_id, MarketObservation.observed_on.desc(),
+                  MarketObservation.created_at.desc(),
+                  MarketObservation.id))).scalars():
+        # На одну дату у точки бывает несколько наблюдений с разными основаниями
+        # (дневной тариф, ночной, клубный) — у 385 точек из 5 792. Прежде брался
+        # произвольный порядок строк: от прогона к прогону медиана рынка гуляла
+        # между 19,50 и 20,00 без единого нового наблюдения (аудит А09). Выбор
+        # закреплён — самое свежее наблюдение, при равенстве дат последнее
+        # записанное, — а число конкурирующих вариантов отдаётся рядом, чтобы
+        # экран мог сказать «здесь несколько тарифов», а не делать вид, что он один.
+        row = out.setdefault(str(obs.site_id), {
             "price": float(obs.price_per_kwh), "observedOn": obs.observed_on,
-            "basis": obs.basis, "channel": obs.channel,
+            "basis": obs.basis, "channel": obs.channel, "variants": 0,
         })
+        if obs.observed_on == row["observedOn"]:
+            row["variants"] += 1
     return out
 
 
@@ -577,6 +597,24 @@ def _distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlat, dlon = radians(lat2 - lat1), radians(lon2 - lon1)
     a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
     return 2 * EARTH_KM * asin(sqrt(a))
+
+
+async def _own_operator_ids(db: AsyncSession, cid: uuid.UUID) -> set[uuid.UUID]:
+    """Операторы, которые есть мы сами.
+
+    Внешний реестр знает нас наравне с остальными: 429 точек РусГидро приехали
+    выгрузкой вместе с чужими. Пока их не отделить, мы попадаем в собственные
+    конкуренты — считаем свою долю против себя, ищем белые пятна там, где уже
+    стоим, и берём свои же точки в признак похожести окружения (аудит 13.09.2026,
+    А02–А04, А08).
+    """
+    return set((await db.execute(select(MarketOperator.id).where(
+        MarketOperator.company_id == cid, MarketOperator.relation == "own"))).scalars().all())
+
+
+def _is_external(site: Any, own_ids: set[uuid.UUID]) -> bool:
+    """Точка принадлежит рынку, а не нам."""
+    return site.operator_id not in own_ids
 
 
 def _median(values: list[float]) -> float | None:
@@ -860,6 +898,10 @@ async def market_changes(
                                   "now": float(snap.connection_quality_24h)})
     return {
         "base": base_date, "current": cur_date, "available": dates,
+        # Переход от частичной выгрузки к полной даёт 8 126 «появлений»,
+        # которые никто не открывал: точки просто впервые попали в наблюдение.
+        # Пока охват срезов не сопоставим, это счёт наблюдений, а не стройки
+        # (аудит А16).
         "appeared": appeared[:limit], "gone": gone[:limit],
         "priceMoves": sorted(price_moves, key=lambda r: -abs(r["now"] - r["was"]))[:limit],
         "qualityDrops": sorted(quality_drops, key=lambda r: r["now"] - r["was"])[:limit],
@@ -956,10 +998,14 @@ async def market_territories(
         select(Region.id, Region.name).where(Region.company_id == cid))).all())
     ours = [(loc_id, name, city, regions.get(rid)) for loc_id, name, city, rid in ours]
 
+    # `amount` — списание с карты; у юрлица оно нулевое, а реализация лежит в
+    # `client_amount`. Карта и «Позиция» перешли на общее правило раньше, а
+    # территории остались на `amount` и теряли 533 тыс. ₽ за 90 дней (аудит А05).
     sales_rows = (await db.execute(
         select(ChargeSession.location_id, func.count(),
                func.coalesce(func.sum(ChargeSession.energy_kwh), 0),
-               func.coalesce(func.sum(ChargeSession.amount), 0))
+               func.coalesce(func.sum(func.coalesce(
+                   ChargeSession.client_amount, ChargeSession.amount)), 0))
         .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
                ChargeSession.location_id.is_not(None))
         .group_by(ChargeSession.location_id))).all()
@@ -971,10 +1017,14 @@ async def market_territories(
     # парковка объясняют спрос, но конкуренции не создают; планируемая точка ещё не
     # работает. Прежде считались все не-домашние точки, и доля рынка падала там, где
     # рядом просто много мест притяжения (ревизия 12.09.2026, К3).
-    sites = (await db.execute(select(MarketSite).where(
+    # `location_id` для отсева своих не годится: у внешних точек он пуст всегда,
+    # включая наши собственные 429 записей. Отделяет только оператор.
+    own_ids = await _own_operator_ids(db, cid)
+    sites = [x for x in (await db.execute(select(MarketSite).where(
         MarketSite.company_id == cid, MarketSite.status == "active",
         MarketSite.kind == "ezs",
         MarketSite.location_id.is_(None)))).scalars().all()
+        if _is_external(x, own_ids)]
     prices = {k: v["price"] for k, v in (await _last_prices(db, cid)).items()}
 
     rows = _territory_rows(sites, ours, sales, prices, alive_since, level)
@@ -1032,9 +1082,15 @@ async def market_site_score(
     since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
     alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
 
-    sites = (await db.execute(select(MarketSite).where(
+    own_ids = await _own_operator_ids(db, cid)
+    # Свой объект рядом — это каннибализация, её считает отдельный блок ниже. В
+    # признаке «сколько живых конкурентов в радиусе», по которому подбираются
+    # аналоги, наши точки давали ложное сходство: из 24 «конкурентов» в примере
+    # Владивостока 14 оказались нашими (аудит А08).
+    sites = [x for x in (await db.execute(select(MarketSite).where(
         MarketSite.company_id == cid, MarketSite.status != "closed",
         MarketSite.latitude.is_not(None), MarketSite.longitude.is_not(None)))).scalars().all()
+        if _is_external(x, own_ids)]
     ours = (await db.execute(
         select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
                ServiceLocation.latitude, ServiceLocation.longitude,
@@ -1044,7 +1100,8 @@ async def market_site_score(
                ServiceLocation.latitude.is_not(None)))).all()
     sales_rows = (await db.execute(
         select(ChargeSession.location_id, func.count(),
-               func.coalesce(func.sum(ChargeSession.amount), 0))
+               func.coalesce(func.sum(func.coalesce(
+                   ChargeSession.client_amount, ChargeSession.amount)), 0))
         .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
                ChargeSession.location_id.is_not(None))
         .group_by(ChargeSession.location_id))).all()
@@ -1297,15 +1354,27 @@ async def market_price_landscape(
                         if (site := sites.get(site_id)) is not None
                         and site.max_power_kw is None)
 
-    # Наша цена — по оплаченным сессиям: у ЮЛ постоплата и `amount` = 0, и включение
-    # их в делимое занижало бы тариф вдвое.
+    # Наша цена — по РОЗНИЧНЫМ сессиям: у юрлица постоплата и `amount` = 0, его
+    # энергия в тариф не входит. Прежде знаменатель брал энергию только таких
+    # строк, а числитель — выручку всех, включая юрлиц: получалось 19,65 ₽/кВт·ч,
+    # не равное ни одному честному разрезу (аудит А06). Теперь обе части считаются
+    # по одной выборке, а учётная реализация на всю энергию идёт рядом отдельным
+    # числом — это разные величины, и подписаны они по-разному.
+    retail = case((ChargeSession.amount > 0, 1), else_=0)
     our = (await db.execute(
-        select(func.coalesce(func.sum(func.coalesce(
-                   ChargeSession.client_amount, ChargeSession.amount)), 0),
+        select(func.coalesce(func.sum(case(
+                   (ChargeSession.amount > 0, func.coalesce(
+                       ChargeSession.client_amount, ChargeSession.amount)), else_=0)), 0),
                func.coalesce(func.sum(
-                   case((ChargeSession.amount > 0, ChargeSession.energy_kwh), else_=0)), 0))
+                   case((ChargeSession.amount > 0, ChargeSession.energy_kwh), else_=0)), 0),
+               func.coalesce(func.sum(func.coalesce(
+                   ChargeSession.client_amount, ChargeSession.amount)), 0),
+               func.coalesce(func.sum(ChargeSession.energy_kwh), 0),
+               func.coalesce(func.sum(retail), 0), func.count())
         .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since))).one()
     our_price = round(float(our[0]) / float(our[1]), 2) if our[1] and float(our[1]) > 0 else None
+    our_realization = (round(float(our[2]) / float(our[3]), 2)
+                       if our[3] and float(our[3]) > 0 else None)
     market_all = _median(list(last_price.values()))
 
     return {
@@ -1313,6 +1382,8 @@ async def market_price_landscape(
         "unknownPower": unknown_power,
         "pricedSites": len(last_price),
         "ourPricePerKwh": our_price,
+        "ourRealizationPerKwh": our_realization,
+        "retailSessions": int(our[4]), "allSessions": int(our[5]),
         "marketMedianPerKwh": market_all,
         "gapPct": (round((our_price - market_all) / market_all * 100, 1)
                    if our_price and market_all else None),
@@ -1425,11 +1496,16 @@ async def market_elasticity(
     cid = await _member(company_id, user, db)
     since = (datetime.now(timezone.utc) - timedelta(weeks=weeks)).replace(tzinfo=None)
 
+    # Цена недели — по розничным сессиям целиком: и деньги, и энергия берутся из
+    # одних и тех же строк. Когда числитель считал всю выручку, а знаменатель —
+    # энергию только оплаченных строк, неделя с почти полностью корпоративным
+    # потреблением давала 2 081 ₽/кВт·ч и «рост цены на 12 216 %» (аудит А07).
     week = func.date_trunc("week", ChargeSession.started_at)
     rows = (await db.execute(
         select(ChargeSession.location_id, week.label("week"), func.count(),
-               func.coalesce(func.sum(func.coalesce(
-                   ChargeSession.client_amount, ChargeSession.amount)), 0),
+               func.coalesce(func.sum(case(
+                   (ChargeSession.amount > 0, func.coalesce(
+                       ChargeSession.client_amount, ChargeSession.amount)), else_=0)), 0),
                func.coalesce(func.sum(
                    case((ChargeSession.amount > 0, ChargeSession.energy_kwh), else_=0)), 0))
         .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
@@ -1452,6 +1528,12 @@ async def market_elasticity(
         usable = [p for p in points if p["price"]]
         for i in range(1, len(usable)):
             was, now_point = usable[i - 1], usable[i]
+            # Недели без розничной цены выброшены, и соседями в списке оказывались
+            # недели через месяц друг от друга. Такую пару сравнивать нельзя: между
+            # ними менялась не только цена (аудит А07).
+            if (date.fromisoformat(now_point["week"])
+                    - date.fromisoformat(was["week"])).days != 7:
+                continue
             # На объекте с двумя сессиями в неделю «спрос вырос на 900 %» означает,
             # что приехало ещё восемнадцать человек, а не что цена сработала.
             if was["sessions"] < min_sessions or now_point["sessions"] < min_sessions:
@@ -1840,7 +1922,8 @@ async def market_partners(
         row = by_op.setdefault(str(op.id), {
             "id": str(op.id), "name": op.name, "relation": op.relation,
             "notes": op.notes, "sites": 0, "alive": 0, "ports": 0,
-            "overlapSites": 0, "newCities": set(), "sharedCities": set(),
+            "overlapSites": 0, "unknownCity": 0,
+            "newCities": set(), "sharedCities": set(),
         })
         row["sites"] += 1
         row["ports"] += site.ports or 0
@@ -1852,6 +1935,11 @@ async def market_partners(
                 row["sharedCities"].add(site.city)
             else:
                 row["newCities"].add(site.city)
+        else:
+            # Точка без города не расширяет охват: мы не знаем, где она. Прежде
+            # такие попадали в дополнение вычитанием и обещали доступ в городах,
+            # которых никто не называл (аудит А12).
+            row["unknownCity"] += 1
 
     rows = []
     for row in by_op.values():
@@ -1859,21 +1947,24 @@ async def market_partners(
             continue
         new_cities = sorted(row.pop("newCities"))
         shared_cities = sorted(row.pop("sharedCities"))
-        complement = row["sites"] - row["overlapSites"]
+        complement = row["sites"] - row["overlapSites"] - row["unknownCity"]
+        known = row["sites"] - row["unknownCity"]
         rows.append({
             **row,
             "complementSites": complement,
             # Доля дополнения: чем выше, тем больше подключение даёт клиенту. Сеть с
             # нулевым дополнением — это не партнёр, это конкурент в тех же городах.
-            "complementPct": round(complement / row["sites"] * 100, 1) if row["sites"] else None,
+            # Считается от точек с известным городом, а не от всех.
+            "complementPct": round(complement / known * 100, 1) if known else None,
             "newCities": new_cities[:12], "newCitiesTotal": len(new_cities),
             "sharedCities": shared_cities[:12], "sharedCitiesTotal": len(shared_cities),
         })
     rows.sort(key=lambda r: (-r["complementSites"], -r["sites"]))
     return {"partners": rows, "total": len(rows), "ourCities": len(our_cities),
+            "unknownCityTotal": sum(r["unknownCity"] for r in rows),
             "note": "дополнение считается по городам: точка партнёра в городе, где "
                     "нас нет, расширяет доступ клиента; точка в нашем городе делит "
-                    "с нами тот же спрос"}
+                    "с нами тот же спрос; точки без города в дополнение не идут"}
 
 
 @router.patch("/operators/{operator_id}")
@@ -2004,6 +2095,18 @@ async def growth_presence(
             **row, "presence": mode, "presenceLabel": PRESENCE_LABEL[mode],
             "sharePct": share, "suggestedTracks": PRESENCE_TRACKS[mode],
         })
+    # Регион точки известен не всегда: у части выгрузки в адресе нет субъекта, а
+    # города нет в справочнике. Такие точки лежат в «территории не определена» и в
+    # расклад по регионам не входят вовсе. Значит наша доля в каждом регионе —
+    # ВЕРХНЯЯ оценка: часть чужих точек могла не попасть в знаменатель. Пока это
+    # так, «монополия» — не факт, а предположение, и экран обязан сказать, на каком
+    # покрытии оно сделано (аудит А01).
+    unplaced = next((r["rivalSites"] for r in reply["territories"]
+                     if r["name"] == "территория не определена"), 0)
+    placed = sum(r["rivalSites"] for r in rows)
+    geo_coverage = (round(placed / (placed + unplaced) * 100, 1)
+                    if (placed + unplaced) else None)
+
     groups: dict[str, dict[str, Any]] = {}
     for row in rows:
         g = groups.setdefault(row["presence"], {
@@ -2022,7 +2125,13 @@ async def growth_presence(
         "days": days, "regions": rows,
         "groups": [groups[k] for k in order if k in groups],
         "thresholds": {"monopoly": MONOPOLY_SHARE, "weak": WEAK_SHARE},
-        "note": "доля считается по точкам сети в регионе; домашние розетки не в счёт",
+        "geoCoverage": geo_coverage, "sitesWithoutRegion": unplaced,
+        "shareBound": "upper",
+        "note": ("доля считается по точкам сети в регионе; домашние розетки не в "
+                 "счёт. Это верхняя оценка нашей доли: "
+                 + (f"у {unplaced} точек рынка регион неизвестен, они не вошли ни в "
+                    f"один расклад" if unplaced else "вся выгрузка разложена по "
+                    "регионам")),
     }
 
 
@@ -2428,7 +2537,10 @@ async def market_self_view(
 
     return {
         "days": days, "matchKm": match_km,
-        "sites": sorted(rows, key=lambda r: (r["successPct"] is None, r["successPct"] or 0))[:300],
+        # Все 429 точек, а не первые 300: экран сверяет наш реестр с публичным
+        # отражением, и обрезанный список молча прячет часть расхождений — ровно
+        # то, ради чего экран и открывают (аудит А13).
+        "sites": sorted(rows, key=lambda r: (r["successPct"] is None, r["successPct"] or 0)),
         "totals": {
             "inMarket": len(rows), "matchedToRegistry": matched,
             "quality": quality, "success": success, "rating": rating,
@@ -2571,10 +2683,14 @@ async def territory_profile(
     } for loc in mine), key=lambda r: -r["sessions"])
 
     # ── рынок рядом: то же, что в территориях, но для этой одной ──
+    own_ids = await _own_operator_ids(db, cid)
     market = [x for x in (await db.execute(select(MarketSite).where(
         MarketSite.company_id == cid, MarketSite.status == "active",
         MarketSite.kind == "ezs", MarketSite.location_id.is_(None)))).scalars().all()
-        if ((x.region if level == "region" else x.city) or "") == name]
+        if ((x.region if level == "region" else x.city) or "") == name
+        and _is_external(x, own_ids)]
+    ours_working = sum(1 for loc in mine
+                       if (loc.operational_status or "") == "working")
     rivals = [x for x in market if (x.site_class or "") == "network"]
     independent = [x for x in market if (x.site_class or "") == "independent"]
     home = [x for x in market if (x.site_class or "") == "home"]
@@ -2615,7 +2731,10 @@ async def territory_profile(
                 "sessionsPct": _pct(float(prev_sessions or 0), float(sessions or 0)),
                 "revenuePct": _pct(float(prev_revenue or 0), float(revenue or 0)),
             },
-            "objectsList": objects[:60],
+            # Полный список, а не первые шестьдесят: 46 объектов Приморья
+            # просто не доезжали до экрана, и человек не мог их увидеть никак
+            # (аудит А14). Прокрутка — забота таблицы, не сервера.
+            "objectsList": objects,
         },
         "market": {
             "rivalSites": len(rivals), "independentSites": len(independent),
@@ -2625,8 +2744,20 @@ async def territory_profile(
                                if x.last_session_at and x.last_session_at >= alive_since),
             "marketPricePerKwh": _median(rival_prices),
             "pricedSites": len(rival_prices),
-            "sharePct": (round(len(mine) / (len(mine) + len(rivals)) * 100, 1)
-                         if (len(mine) + len(rivals)) else None),
+            # Знаменатель — все внешние зарядки территории, и сетевые, и
+            # независимые: водитель выбирает из того, что работает, а не из того,
+            # у кого есть сеть. Профиль считал только сетевые и показывал в
+            # Приморье 98,1% там, где на общем правиле территорий выходит 83,5%
+            # (аудит А04). Домашние розетки в знаменатель не входят нигде.
+            # С нашей стороны в долю идут ДЕЙСТВУЮЩИЕ объекты, а не весь реестр:
+            # в Приморье из 106 записей 24 выведены из эксплуатации, и включать их
+            # в предложение территории — то же самое, что считать конкурентом
+            # закрытую чужую станцию (аудит А14). Рынок с другой стороны тоже
+            # берётся активный — правило симметрично.
+            "sharePct": (round(ours_working / (ours_working + len(rivals)
+                                               + len(independent)) * 100, 1)
+                         if (ours_working + len(rivals) + len(independent)) else None),
+            "oursWorking": ours_working, "oursTotal": len(mine),
         },
     }
 
@@ -2830,7 +2961,11 @@ async def market_landscape(
             "roamingSites": sum(r["sites"] for r in roaming_yes),
             "closedNetworks": len(roaming_no),
             "closedSites": sum(r["sites"] for r in roaming_no),
-            "withApp": sum(1 for r in networks if r["appRating"] is not None),
+            # Наличие приложения — это `appName`, а не рейтинг: у восьми сетей
+            # приложение есть, а оценок в магазине нет, и они выпадали из счёта
+            # как будто приложения у них нет вовсе (аудит А11).
+            "withApp": sum(1 for r in networks if r["appName"]),
+            "withAppRating": sum(1 for r in networks if r["appRating"] is not None),
             "legalTrusted": sum(1 for r in networks if r["legalTrusted"]),
         },
         "note": ("доли считаются по сетевым точкам: домашние розетки и независимые "

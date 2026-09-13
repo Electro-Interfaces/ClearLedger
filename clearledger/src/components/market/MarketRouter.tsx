@@ -16,7 +16,7 @@ import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import { clusterPoints, clusterRadiusForZoom } from '@/components/map/clusterPoints'
 import 'leaflet/dist/leaflet.css'
-import { Loader2, MapPin, Plus } from 'lucide-react'
+import { MapPin, Plus } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -331,17 +331,44 @@ function MarketMap() {
 
 /** Реестр точек рынка: что известно и насколько это свежо. */
 function MarketSites() {
+  const { companyId } = useCompany()
   const [kind, setKind] = useState('all')
   const [q, setQ] = useState('')
-  const { sites } = useMarketData({ ...EMPTY_MARKET_FILTERS, kind })
-  const rows = (sites.data?.sites ?? []).filter((s) =>
-    !q || s.name.toLowerCase().includes(q.toLowerCase())
-    || (s.city ?? '').toLowerCase().includes(q.toLowerCase()))
+  // Ищет сервер, а не браузер. Прежде список брал первую страницу в 5 000 строк и
+  // фильтровал её у себя: из 9 118 точек 4 118 не существовали для поиска, и на
+  // запрос о реальной точке экран отвечал «ничего не найдено» (аудит А10).
+  const [запрос, setЗапрос] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setЗапрос(q.trim()), 300)
+    return () => clearTimeout(t)
+  }, [q])
+  const [страниц, setСтраниц] = useState(1)
+  const PAGE = 500
+  useEffect(() => { setСтраниц(1) }, [запрос, kind])
+
+  const sites = useQuery({
+    queryKey: ['market-sites-list', companyId, kind, запрос, страниц],
+    queryFn: () => listMarketSites(companyId, {
+      ...(kind === 'all' ? {} : { kind }),
+      ...(запрос ? { search: запрос } : {}),
+      limit: PAGE * страниц,
+    }),
+    enabled: !!companyId,
+    placeholderData: (prev) => prev,
+  })
+  const rows = sites.data?.sites ?? []
+  const всего = sites.data?.total ?? 0
+  const ещё = Math.max(0, всего - rows.length)
 
   if (sites.isLoading) {
-    return <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
-      <Loader2 className="size-4 animate-spin" /> Загрузка…
-    </div>
+    return (
+      <div className="space-y-2 p-4" aria-busy="true">
+        <span className="sr-only">Загружаем точки рынка</span>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-9 animate-pulse rounded-lg border border-border bg-muted/40" />
+        ))}
+      </div>
+    )
   }
 
   return (
@@ -358,7 +385,12 @@ function MarketSites() {
             ))}
           </SelectContent>
         </Select>
-        <span className="text-xs text-muted-foreground">{rows.length} точек</span>
+        <span className="text-xs text-muted-foreground">
+          {rows.length === всего
+            ? `${всего.toLocaleString('ru-RU')} точек`
+            : `${rows.length.toLocaleString('ru-RU')} из ${всего.toLocaleString('ru-RU')}`}
+          {запрос && ` по запросу «${запрос}»`}
+        </span>
         <div className="ml-auto flex items-center gap-2">
           <MarketObservationDialog sites={sites.data?.sites ?? []} trigger={
             <button type="button" className="rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent">
@@ -381,8 +413,22 @@ function MarketSites() {
 
       {rows.length === 0 ? (
         <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-          Точек рынка пока нет. Добавьте первую — чужую станцию рядом с нашей, торговый
-          центр или парковку: карта «наши против чужих» начинается с одной записи.
+          {запрос || kind !== 'all' ? (
+            <>
+              По этим условиям ничего не нашлось. Это ответ о запросе, а не о
+              рынке: в базе точки есть — измените запрос или вид.
+              <div className="mt-3">
+                <button type="button" onClick={() => { setQ(''); setKind('all') }}
+                  className="rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent">
+                  Сбросить условия
+                </button>
+              </div>
+            </>
+          ) : (
+            <>Точек рынка пока нет. Добавьте первую — чужую станцию рядом с нашей,
+            торговый центр или парковку: карта «наши против чужих» начинается с одной
+            записи.</>
+          )}
         </CardContent></Card>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
@@ -422,6 +468,15 @@ function MarketSites() {
               })}
             </tbody>
           </table>
+          {ещё > 0 && (
+            <div className="border-t border-border p-2 text-center">
+              <button type="button" onClick={() => setСтраниц((n) => n + 1)}
+                disabled={sites.isFetching}
+                className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-60">
+                {sites.isFetching ? 'Загружаем…' : `Показать ещё (осталось ${ещё.toLocaleString('ru-RU')})`}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

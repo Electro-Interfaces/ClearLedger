@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (ChannelSyncLog, MarketObservation, MarketOperator,
                         MarketSite, MarketSiteSnapshot)
 from app.services.mapping import canon_city, canon_region
+from app.services import ru_geo
 from app.services.market_ocm import _canon_operator
 
 logger = logging.getLogger("clearledger.market")
@@ -437,6 +438,11 @@ async def ingest_registry(
 
         name = _s(row.get("name"), 290) or (f"ЭЗС {operator_name}" if operator_name else "ЭЗС")
         region, city = split_address(row.get("address"))
+        # Источник пишет «г Тюмень, ул Советская» — субъекта в адресе нет вовсе, и
+        # так у 79% точек. Город известен почти всегда, и регион достаётся из него
+        # справочником: без этого территории считаются по обрывку рынка, а регион с
+        # двумя наблюдёнными точками объявляется нашей монополией (аудит А01).
+        region, _ = ru_geo.resolve(region, city)
         connectors = parse_connectors(row.get("connectors"))
         powers = [c["power_kw"] for c in connectors if c.get("power_kw")]
         max_power = _num(row.get("max_power")) or (max(powers) if powers else None)

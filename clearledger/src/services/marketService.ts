@@ -141,7 +141,7 @@ export const listMarketSites = (
   params?: {
     kind?: string; city?: string; bbox?: string; limit?: number; offset?: number
     site_class?: string; current_type?: string; operator_id?: string
-    min_power?: number; alive?: string
+    min_power?: number; alive?: string; search?: string
   },
 ) => get<{ sites: MarketSite[]; total: number; returned: number; offset: number; limit: number }>(
   '/api/market/sites', { company_id: companyId, ...params })

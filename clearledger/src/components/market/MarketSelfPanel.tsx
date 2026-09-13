@@ -150,7 +150,7 @@ export function MarketSelfPanel() {
                 </tr>
               </thead>
               <tbody>
-                {sites.slice(0, 40).map((r) => (
+                {sites.map((r) => (
                   <tr key={r.siteId} className="border-t border-border/40">
                     <td className="py-1">{r.ourName ?? r.marketName}</td>
                     <td className="py-1 text-muted-foreground">{r.city ?? '—'}</td>
