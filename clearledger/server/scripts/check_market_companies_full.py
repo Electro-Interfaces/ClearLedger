@@ -25,6 +25,7 @@ async def main() -> None:
 
         print("\nчто известно и о скольких:")
         for field, label in (
+            ("dataLevel", "уровень достоверности"),
             ("class", "модель бизнеса"), ("baseCity", "город базирования"),
             ("platformCode", "платформа"), ("roaming", "роуминг известен"),
             ("appName", "приложение"), ("publicRating", "публичная оценка"),
@@ -34,6 +35,17 @@ async def main() -> None:
             ("pointsOsm", "точки из OSM"), ("cardsYandex", "карточки справочника"),
         ):
             print(f"   {label:<24}{have(field):>4} из {len(ops)}")
+
+        # Уровень — не украшение строки, а граница допустимого утверждения:
+        # по первому можно говорить вслух, третий — повод проверить (data-quality.md).
+        print("\nуровни достоверности:")
+        by_level: dict[str, int] = {}
+        for o in ops:
+            key = {1: "1 — можно ссылаться", 2: "2 — внутренняя оценка",
+                   3: "3 — сигнал, требует проверки"}.get(o.get("dataLevel"), "— не задан")
+            by_level[key] = by_level.get(key, 0) + 1
+        for k in sorted(by_level):
+            print(f"   {k:<34}{by_level[k]}")
 
         print("\nмодели бизнеса:")
         by_class: dict[str, int] = {}
@@ -65,7 +77,8 @@ async def main() -> None:
             print(f"\nкарточка «{card['name']}»:")
             print(f"   модель: {card.get('class')} "
                   f"({'проверена' if card.get('classChecked') else 'не проверена'})")
-            print(f"   база: {card.get('baseCity')}, городов {card.get('cities')}, "
+            print(f"   уровень достоверности: {card.get('dataLevel')}")
+            print(f"   база: {card.get('baseCity')}, городов {card.get('citiesCount')}, "
                   f"округов {card.get('districts')}")
             print(f"   платформа: {card.get('platformCode')} "
                   f"(владелец {card.get('platformOwner') or 'неизвестен'}), "

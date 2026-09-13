@@ -182,8 +182,15 @@ def _operator_facts(o: MarketOperator) -> dict[str, Any]:
     Компания, найденная тремя источниками, и компания из одного упоминания — разной
     надёжности, и по ним нельзя решать одинаково.
     """
+    # Реквизиты годятся для ссылки только с пометкой «подтверждено»: бренд и
+    # юрлицо часто не совпадают (Electro.Cars — это ООО «ГРИНДИВИЖН»), а
+    # однофамильцы в ЕГРЮЛ встречаются постоянно. «Похоже» и «не найдено» — это
+    # версия для проверки, и выдавать её за реквизиты компании нельзя.
+    trusted = (o.legal_confidence or "").startswith("подтвержд")
     return {
         "class": o.player_class, "classChecked": o.class_checked,
+        # 1 — можно ссылаться; 2 — внутренняя оценка; 3 — только сигнал.
+        "dataLevel": o.data_level,
         # Имя `cities` занято разрезом по городам в карточке: число и список —
         # разные вещи, и одно перекрывало другое.
         "baseCity": o.base_city, "citiesCount": o.cities, "districts": o.districts,
@@ -207,7 +214,7 @@ def _operator_facts(o: MarketOperator) -> dict[str, Any]:
         # «похоже», «сайт не подтверждает бренд», «ИП (не в ЕГРЮЛ)», «не найдено».
         # Ссылаться можно только на подтверждённое, а формулировку показываем как
         # есть — в ней больше смысла, чем в «да/нет».
-        "legalTrusted": (o.legal_confidence or "").startswith("подтвержд"),
+        "legalTrusted": trusted,
         "phone": o.phone, "siteUrl": o.site_url, "contacts": o.contacts,
         # Сколько точек и чем это подтверждено.
         "pointsTotal": o.points_total, "pointsRegistry": o.points_registry,
@@ -3164,6 +3171,14 @@ async def market_landscape(
             "appInstalls": op.app_installs,
         })
 
+    # Публичные точки без имени владельца: они и есть причина, по которой размеры
+    # сетей — нижняя оценка, а не факт.
+    unnamed_sites = int((await db.execute(
+        select(func.count()).select_from(MarketSite).where(
+            MarketSite.company_id == cid, MarketSite.status == "active",
+            MarketSite.kind == "ezs", MarketSite.site_class != "home",
+            MarketSite.operator_id.is_(None)))).scalar() or 0)
+
     networks = [r for r in rows if r["sites"] > 0]
     total_sites = sum(r["sites"] for r in networks) or 1
     for r in networks:
@@ -3217,9 +3232,25 @@ async def market_landscape(
             "withApp": sum(1 for r in networks if r["appName"]),
             "withAppRating": sum(1 for r in networks if r["appRating"] is not None),
             "legalTrusted": sum(1 for r in networks if r["legalTrusted"]),
+            # Уровни достоверности записей о компаниях (data-quality.md): по
+            # первому можно говорить вслух, третий — повод проверить, а не вывод.
+            "level1": sum(1 for r in networks if r.get("dataLevel") == 1),
+            "level2": sum(1 for r in networks if r.get("dataLevel") == 2),
+            "level3": sum(1 for r in networks if r.get("dataLevel") == 3),
+            "unnamedSites": unnamed_sites,
         },
+        # Главная оговорка расклада: размеры сетей ЗАНИЖЕНЫ, и насколько —
+        # неизвестно. Часть публичных точек идёт без имени владельца, и какая-то
+        # их доля принадлежит компаниям из этого же списка. Поэтому доли здесь —
+        # внутренняя оценка (уровень 2), а не измерение рынка: во внешнем
+        # материале их нельзя подавать как точные.
         "note": ("доли считаются по сетевым точкам: домашние розетки и независимые "
-                 "точки без оператора в расклад сил не входят"),
+                 "точки без оператора в расклад сил не входят. Размеры сетей "
+                 f"занижены: у {unnamed_sites} публичных точек владелец не указан, "
+                 "и часть из них принадлежит компаниям этого списка — насколько, "
+                 "неизвестно. Это внутренняя оценка: для внешних материалов "
+                 "говорить «от сотни до девятисот точек у крупнейших сетей», а не "
+                 "называть точное число"),
     }
 
 

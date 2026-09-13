@@ -8101,6 +8101,15 @@ class MarketOperator(Base):
     # Модель бизнеса: владелец инфраструктуры, агрегатор на чужой, смежный игрок.
     player_class: Mapped[str | None] = mapped_column(String(80), nullable=True)
     class_checked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Уровень достоверности записи (Marketing/research/data-quality.md):
+    #   1 — можно ссылаться во внешних материалах: снято поштучно с источника;
+    #   2 — внутренняя оценка: размеры сетей занижены безымянными точками,
+    #       названия сведены автоматически и не проверены построчно;
+    #   3 — только сигнал: волонтёрские данные OSM, выдача поисковика,
+    #       реквизиты с пометкой «похоже».
+    # Смешивать уровни в одном утверждении нельзя: один спорный показатель
+    # ставит под сомнение всю работу.
+    data_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

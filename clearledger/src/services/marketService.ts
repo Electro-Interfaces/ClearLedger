@@ -100,6 +100,13 @@ export interface MarketOperator {
 export interface OperatorFacts {
   class: string | null
   classChecked: boolean
+  /**
+   * Уровень достоверности записи (Marketing/research/data-quality.md):
+   * 1 — можно ссылаться во внешних материалах; 2 — внутренняя оценка;
+   * 3 — только сигнал, требует проверки. Смешивать уровни в одном утверждении
+   * нельзя: один спорный показатель ставит под сомнение всю работу.
+   */
+  dataLevel: 1 | 2 | 3 | null
   baseCity: string | null
   citiesCount: number | null
   districts: number | null

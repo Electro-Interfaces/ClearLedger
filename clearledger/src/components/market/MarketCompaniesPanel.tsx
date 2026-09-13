@@ -23,6 +23,13 @@ import {
 const nf = new Intl.NumberFormat('ru-RU')
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 
+/** Уровни достоверности из Marketing/research/data-quality.md. */
+const УРОВЕНЬ: Record<number, string> = {
+  1: 'данные проверяемы',
+  2: 'внутренняя оценка',
+  3: 'сигнал, требует проверки',
+}
+
 const RELATION_LABEL: Record<string, string> = {
   competitor: 'конкурент',
   partner: 'партнёр',
@@ -98,6 +105,15 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
                 {!card.classChecked && (
                   <span className="text-muted-foreground"> · не проверено</span>
                 )}
+              </span>
+            )}
+            {/* Уровень достоверности всей записи. Компания, известная только по
+                волонтёрской карте, и компания из основного источника — разного
+                веса, и по ним нельзя решать одинаково. */}
+            {card.dataLevel != null && (
+              <span className={card.dataLevel === 1 ? 'text-success'
+                : card.dataLevel === 3 ? 'text-warning' : 'text-muted-foreground'}>
+                {УРОВЕНЬ[card.dataLevel]}
               </span>
             )}
             {card.baseCity && (
@@ -182,9 +198,12 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
             </div>
             <div>
               <span className="text-muted-foreground">ИНН / ОГРН: </span>
-              {card.inn || card.ogrn
-                ? <span className="tabular-nums">{card.inn ?? '—'} / {card.ogrn ?? '—'}</span>
-                : <span className="text-muted-foreground">нет данных</span>}
+              {card.inn || card.ogrn ? (
+                <span className={card.legalTrusted ? 'tabular-nums'
+                  : 'tabular-nums text-muted-foreground line-through decoration-dotted'}>
+                  {card.inn ?? '—'} / {card.ogrn ?? '—'}
+                </span>
+              ) : <span className="text-muted-foreground">нет данных</span>}
               {card.legalStatus && (
                 <span className={card.legalStatus === 'действует'
                   ? 'text-success' : 'text-warning'}> · {card.legalStatus}</span>
@@ -219,6 +238,15 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
             </div>
           </div>
 
+          {!card.legalTrusted && (card.inn || card.legalName) && (
+            <p className="text-xs text-warning">
+              Реквизиты не подтверждены — ссылаться на них в документах и письмах
+              нельзя. Бренд и юрлицо часто не совпадают, а однофамильцы в ЕГРЮЛ
+              встречаются постоянно: это версия для проверки, а не реквизиты
+              компании.
+            </p>
+          )}
+
           {/* Откуда мы вообще знаем эту компанию: одна выгрузка не видит рынок
               целиком, и компания из одного упоминания надёжна иначе, чем найденная
               тремя источниками. */}
@@ -227,8 +255,8 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
               {card.pointsTotal != null && `точек по всем источникам ${nf.format(card.pointsTotal)}`}
               {card.pointsRegistry != null && `, в основной выгрузке ${nf.format(card.pointsRegistry)}`}
               {(card.pointsOsm ?? 0) > 0 && `, только в OpenStreetMap ${nf.format(card.pointsOsm!)}`}
-              {(card.cardsYandex ?? 0) > 0 && `, карточек в справочнике ${nf.format(card.cardsYandex!)}`}
               {card.sources && `. Источники: ${card.sources}`}
+              {(card.cardsYandex ?? 0) > 0 && `. Отдельно: ${nf.format(card.cardsYandex!)} карточек в справочнике организаций — это упоминания, а не точки, и к числу станций их не прибавляют`}
               {card.publicRating != null && `. Публичная оценка сети ${nf1.format(card.publicRating)}`}
               {card.publicReviews != null && ` по ${nf.format(card.publicReviews)} отзывам`}
             </p>

@@ -4927,6 +4927,7 @@ async def create_all() -> None:
             "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS public_reviews INTEGER",
             "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS public_address TEXT",
             "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS player_class VARCHAR(80)",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS data_level INTEGER",
             "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS class_checked BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS cities INTEGER",
             "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS districts INTEGER",

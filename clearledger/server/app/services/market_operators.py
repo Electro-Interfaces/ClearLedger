@@ -402,6 +402,28 @@ def guess_class(op: MarketOperator) -> str | None:
     return None
 
 
+def data_level(op: MarketOperator) -> int:
+    """Уровень достоверности записи о компании (data-quality.md).
+
+    Уровень 1 — факт существования компании, подтверждённый основным источником,
+    где точки сняты поштучно. Уровень 3 — компания, известная только по
+    волонтёрской карте или по выдаче поисковика: подпись «Сбер» там может означать
+    и сеть, и одну зарядку у офиса. Всё остальное — уровень 2: перечень годится,
+    утверждение «у компании ровно N станций» не годится.
+
+    Уровень записи не повышается оттого, что мы её загрузили.
+    """
+    src = (op.sources or "").lower()
+    from_registry = "2chargers" in src or (op.points_registry or 0) > 0
+    if from_registry and (op.source_count or 0) >= 2:
+        return 1
+    if from_registry:
+        return 2
+    # Ни одного упоминания в основном источнике: только карта волонтёров,
+    # поисковая выдача или магазин приложений.
+    return 3
+
+
 async def ingest_operator_registry(
     db: AsyncSession, company_id: _uuid.UUID,
     registry: list[dict[str, str]] | None = None,
@@ -539,15 +561,17 @@ async def ingest_operator_registry(
         put(op, "public_address", agg["address"])
         op.updated_at = now
 
-    # ── модель бизнеса ──
+    # ── модель бизнеса и уровень достоверности ──
     classified = 0
+    levels: dict[int, int] = {}
     for op in known.values():
-        if op.class_checked:
-            continue
-        guessed = guess_class(op)
-        if guessed and guessed != op.player_class:
-            op.player_class = guessed
-            classified += 1
+        if not op.class_checked:
+            guessed = guess_class(op)
+            if guessed and guessed != op.player_class:
+                op.player_class = guessed
+                classified += 1
+        op.data_level = data_level(op)
+        levels[op.data_level] = levels.get(op.data_level, 0) + 1
 
     await db.commit()
     return {
@@ -555,5 +579,7 @@ async def ingest_operator_registry(
         "message": (f"реестр: {len(registry or [])} строк, ЕГРЮЛ {len(egrul or [])}, "
                     f"контакты {len(contacts or [])}, пробелы {len(gap or [])}, "
                     f"карточки {len(cards or [])}; затронуто компаний {len(touched)}, "
-                    f"заведено новых {created}, модель определена у {classified}"),
+                    f"заведено новых {created}, модель определена у {classified}; "
+                    f"уровни достоверности: "
+                    + ", ".join(f"{k} — {levels.get(k, 0)}" for k in (1, 2, 3))),
     }
