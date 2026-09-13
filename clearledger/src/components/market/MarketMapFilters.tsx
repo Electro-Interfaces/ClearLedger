@@ -6,7 +6,8 @@
  * производитель, загрузка порта, доля сорванных зарядок. В этом и смысл отдельного
  * слоя: про свои станции мы знаем то, чего про чужие не знает никто.
  */
-import { Layers } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronDown, ChevronUp, Layers } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { SITE_KIND_LABEL, type MarketOperator } from '@/services/marketService'
 
@@ -99,11 +100,43 @@ export function MarketMapFilters({
   const set = (patch: Partial<MarketFilters>) => onFilters({ ...filters, ...patch })
   const setOur = (patch: Partial<OurFilters>) => onOur({ ...our, ...patch })
 
+  // Блок занимает треть экрана, а нужен не всё время: выбрал разрез — дальше
+  // смотришь карту. Свёрнутый заголовок продолжает отвечать, что включено, иначе
+  // сворачивание превращает настройки в скрытое состояние (МАГ, 13.09.2026).
+  const [открыт, setОткрыт] = useState(true)
+  const применено = [
+    filters.kind !== 'all', filters.operatorId !== 'all', filters.currentType !== 'all',
+    filters.minPower !== 'all', filters.alive !== 'all',
+    our.status !== 'all', our.speedClass !== 'all', our.brand !== 'all',
+    our.load !== 'all', our.errors !== 'all',
+  ].filter(Boolean).length
+
   return (
     <div className="space-y-2 rounded-lg border border-border bg-card p-3">
-      <div className="flex items-center gap-2 text-xs font-semibold">
-        <Layers className="size-3.5 text-primary" aria-hidden /> Слои карты
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <button type="button" onClick={() => setОткрыт((v) => !v)}
+          aria-expanded={открыт}
+          className="flex items-center gap-1.5 font-semibold hover:text-primary">
+          <Layers className="size-3.5 text-primary" aria-hidden />
+          Слои и фильтры карты
+          {открыт ? <ChevronUp className="size-3.5" aria-hidden />
+            : <ChevronDown className="size-3.5" aria-hidden />}
+        </button>
+        {!открыт && (
+          <span className="text-muted-foreground">
+            {[
+              filters.showOurs && `наши ${counts.ours}`,
+              filters.showRivals && `чужие сети ${counts.rivals}`,
+              filters.showIndependent && `одиночные ${counts.independent}`,
+              filters.showOursOnMarket && `наши в реестре ${counts.oursOnMarket}`,
+              filters.showHome && `розетки ${counts.home}`,
+            ].filter(Boolean).join(' · ') || 'все слои выключены'}
+            {применено > 0 && ` · фильтров применено: ${применено}`}
+          </span>
+        )}
       </div>
+      {открыт && (
+      <>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <LayerToggle on={filters.showOurs} onChange={(v) => set({ showOurs: v })}
           color="#3b82f6" label="наши станции" count={counts.ours}
@@ -257,6 +290,8 @@ export function MarketMapFilters({
           </p>
         </div>
       </div>
+      </>
+      )}
     </div>
   )
 }
