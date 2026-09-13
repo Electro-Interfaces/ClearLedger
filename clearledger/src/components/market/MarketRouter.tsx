@@ -16,12 +16,13 @@ import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import { clusterPoints, clusterRadiusForZoom } from '@/components/map/clusterPoints'
 import 'leaflet/dist/leaflet.css'
-import { Loader2, MapPin, Plus } from 'lucide-react'
+import { Loader2, Maximize2, Minimize2, MapPin, Plus } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { MarketSiteCard } from './MarketSiteCard'
+import { useFullscreenPanel } from '@/hooks/useFullscreenPanel'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   listMarketSites, listMarketObservations, listMarketOperators, getOurMapPoints,
@@ -386,9 +387,12 @@ function MarketMap() {
   }, [ours.data, filters.showOurs, our])
 
   const mapLayers = useMapLayers()
+  // Карта страны в половине окна нечитаема: точки сливаются, а фильтры и счётчики
+  // съедают вертикаль. Разворот — на всё окно, выход по Escape.
+  const полный = useFullscreenPanel()
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div className={полный.className}>
       <MarketMapFilters
         filters={filters} onFilters={setFilters}
         our={our} onOur={setOur}
@@ -422,6 +426,13 @@ function MarketMap() {
             : our.colorBy === 'errors' ? 'наши по доле срывов'
             : 'наши по выручке'}
         </span>
+        <button type="button" onClick={полный.toggle}
+          title={полный.on ? 'Вернуть в рабочую область (Escape)' : 'Развернуть карту на весь экран'}
+          className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent">
+          {полный.on
+            ? <><Minimize2 className="size-3.5" aria-hidden /> Свернуть</>
+            : <><Maximize2 className="size-3.5" aria-hidden /> Во весь экран</>}
+        </button>
         <MarketSiteDialog trigger={
           <button type="button" className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent">
             <Plus className="size-3.5" /> Точка рынка

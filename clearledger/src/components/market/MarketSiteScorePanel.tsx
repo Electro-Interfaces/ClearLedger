@@ -31,6 +31,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useFullscreenPanel } from '@/hooks/useFullscreenPanel'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getMarketSiteScore, type MarketSiteScore } from '@/services/marketService'
 
@@ -170,9 +171,8 @@ export function MarketSiteScorePanel() {
   const [показан, setПоказан] = useState<Оценка | null>(null)
   const [сохранённые, setСохранённые] = useState<Оценка[]>([])
   // Разбор места — работа на весь стол: карта, окружение, территория и прогноз
-  // смотрятся вместе. В рабочей области между рельсой и фильтрами на это остаётся
-  // половина экрана (МАГ, 13.09.2026).
-  const [весьЭкран, setВесьЭкран] = useState(false)
+  // смотрятся вместе. Режим общий с картой рынка, выход по Escape.
+  const полный = useFullscreenPanel()
   // Четыре разреза оценки лежали друг под другом, и до прогноза приходилось
   // прокручивать мимо трёх карточек. Теперь это табы одной области: перебор
   // быстрый, а на ярлыке стоит число — видно, где смотреть (МАГ, 13.09.2026).
@@ -254,9 +254,7 @@ export function MarketSiteScorePanel() {
         + `(половина из них — от ${nf.format(f?.sessionsLow ?? 0)} до ${nf.format(f?.sessionsHigh ?? 0)} сессий).`
 
   return (
-    <div className={весьЭкран
-      ? 'fixed inset-0 z-50 flex min-h-0 flex-col gap-3 overflow-auto bg-background p-4'
-      : 'flex h-full min-h-0 flex-col gap-3 p-4'}>
+    <div className={полный.className}>
       {/* ── Условия: что и как оцениваем ───────────────────────────────── */}
       <Card>
         <CardContent className="space-y-3 p-3">
@@ -323,9 +321,9 @@ export function MarketSiteScorePanel() {
                 </Button>
               )}
               <Button size="sm" variant="outline" className="h-8"
-                onClick={() => setВесьЭкран((v) => !v)}
-                title={весьЭкран ? 'Вернуть в рабочую область' : 'Развернуть на весь экран'}>
-                {весьЭкран
+                onClick={полный.toggle}
+                title={полный.on ? 'Вернуть в рабочую область (Escape)' : 'Развернуть на весь экран'}>
+                {полный.on
                   ? <><Minimize2 className="mr-1.5 size-3.5" aria-hidden /> Свернуть</>
                   : <><Maximize2 className="mr-1.5 size-3.5" aria-hidden /> Во весь экран</>}
               </Button>
