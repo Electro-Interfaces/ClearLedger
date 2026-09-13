@@ -1,12 +1,16 @@
 FROM python:3.12-slim
 
-# Системные зависимости: Tesseract OCR + русский язык + curl для healthcheck
+# Системные зависимости: Tesseract OCR + русский язык + curl для healthcheck.
+# ffmpeg — сжатие видео-вложений: запись экрана приходит в разрешении дисплея,
+# двадцать мегабайт за сорок секунд; после пережатия до 1600 точек весит в
+# двадцать с лишним раз меньше, текст интерфейса остаётся читаемым (13.09.2026).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         tesseract-ocr \
         tesseract-ocr-rus \
         poppler-utils \
         libglib2.0-0 \
+        ffmpeg \
         curl \
     && rm -rf /var/lib/apt/lists/*
 

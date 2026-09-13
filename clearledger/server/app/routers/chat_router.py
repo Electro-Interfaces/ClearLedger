@@ -29,7 +29,7 @@ from app.services.service_accounts import not_service
 from app.models import (
     ChatFolder, ChatMessage, ChatMessageReaction, ChatParticipant, ChatPushSubscription,
     ChatPoll, ChatPollVote, ChatRoom, ChatTicketLink, Company, CompanyRole, Counterparty,
-    DocRelation, ServiceLocation, User, UserCompany,
+    DocRelation, ServiceLocation, SourceFile, User, UserCompany,
 )
 from app.services import chat_mail, process_templates, web_push
 from app.services import link_preview as link_preview_service
@@ -1184,11 +1184,23 @@ async def send_message(
                 ChatMessage.id == reply_to))).scalar_one_or_none()
             if src_room != rid:
                 reply_to = None
+    # Размер берём из карточки файла, а не со слов клиента: видео сжимается уже
+    # после загрузки, и присланное число к моменту отправки успевает устареть в
+    # двадцать раз.
+    file_size = body.fileSize if isinstance(body.fileSize, int) else None
+    if body.fileUrl and body.fileUrl.startswith("/api/files/"):
+        try:
+            факт = (await db.execute(select(SourceFile.size).where(
+                SourceFile.id == uuid.UUID(body.fileUrl.rsplit("/", 1)[-1])))).scalar_one_or_none()
+            if факт:
+                file_size = факт
+        except (ValueError, TypeError):
+            pass
     msg = ChatMessage(
         room_id=rid, user_id=current_user.id, user_name=current_user.name,
         type=mtype, content=content, reply_to=reply_to,
         file_url=body.fileUrl or None, file_name=body.fileName or None,
-        file_size=body.fileSize if isinstance(body.fileSize, int) else None,
+        file_size=file_size,
         poster_url=body.posterUrl or None,
     )
     db.add(msg)

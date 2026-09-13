@@ -4,13 +4,14 @@ POST /api/intake — загрузка файла, возвращает source_id
 GET /api/files/{file_id} — скачивание файла по ID.
 """
 
+import asyncio
 import hashlib
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
@@ -33,6 +34,7 @@ def _ensure_upload_dir() -> None:
 @router.post("/intake")
 async def upload_file(
     file: UploadFile,
+    background: BackgroundTasks,
     company_id: str | None = None,
     purpose: str = "data",
     db: AsyncSession = Depends(get_db),
@@ -58,6 +60,27 @@ async def upload_file(
     # SHA-256 fingerprint
     fingerprint = hashlib.sha256(content).hexdigest()
 
+    # Определяем company_id (slug или UUID) с проверкой членства
+    if company_id:
+        cid = await assert_company_member(company_id, current_user, db)
+    else:
+        cid = current_user.company_id
+        if cid is None:
+            raise HTTPException(status_code=400, detail="Укажите company_id")
+
+    # Тот же файл уже лежит в этой компании — второй копии не надо. Одиннадцать
+    # записей из ста восьмидесяти четырёх были повторами и занимали 209 МБ из 640:
+    # человек пересылает ролик в соседний чат или отправляет его дважды, и каждый
+    # раз на диск ложились новые шестьдесят мегабайт (замер 13.09.2026).
+    purpose_value = "attachment" if purpose == "attachment" else "data"
+    двойник = (await db.execute(select(SourceFile).where(
+        SourceFile.company_id == cid,
+        SourceFile.fingerprint == fingerprint,
+        SourceFile.purpose == purpose_value,
+    ).limit(1))).scalar_one_or_none()
+    if двойник is not None and Path(двойник.storage_path).exists():
+        return {"source_id": str(двойник.id)}
+
     # Генерируем UUID, сохраняем файл
     file_id = uuid.uuid4()
     ext = Path(file.filename or "file").suffix
@@ -66,14 +89,6 @@ async def upload_file(
 
     with open(storage_path, "wb") as f:
         f.write(content)
-
-    # Определяем company_id (slug или UUID) с проверкой членства
-    if company_id:
-        cid = await assert_company_member(company_id, current_user, db)
-    else:
-        cid = current_user.company_id
-        if cid is None:
-            raise HTTPException(status_code=400, detail="Укажите company_id")
 
     # Запись в БД
     source = SourceFile(
@@ -84,12 +99,40 @@ async def upload_file(
         size=file_size,
         storage_path=str(storage_path),
         fingerprint=fingerprint,
-        purpose="attachment" if purpose == "attachment" else "data",
+        purpose=purpose_value,
     )
     db.add(source)
     await db.flush()
 
+    # Видео сжимается следом, в фоне: ответ ждать нечего, а запись экрана худеет
+    # в двадцать с лишним раз. `fingerprint` при этом не трогается — по нему
+    # отбрасывается повторная загрузка того же исходника.
+    if (source.mime_type or "").startswith("video/"):
+        background.add_task(сжать_вложение, str(file_id))
+
     return {"source_id": str(file_id)}
+
+
+async def сжать_вложение(file_id: str) -> None:
+    """Фоновое сжатие: пережать файл и поправить размеры там, где они записаны."""
+    from app.database import async_session_factory
+    from app.services.media_shrink import сжать_видео
+
+    async with async_session_factory() as db:
+        src = await db.get(SourceFile, uuid.UUID(file_id))
+        if src is None:
+            return
+        итог = await asyncio.to_thread(сжать_видео, src.storage_path)
+        if not итог:
+            return
+        src.size = int(итог["after"])
+        # Размер лежит и в сообщении — лента показывает его под роликом. Сообщение
+        # могло ещё не появиться (файл грузится раньше отправки): тогда верный
+        # размер подставит сам чат, он берёт его из карточки файла.
+        await db.execute(update(ChatMessage)
+                         .where(ChatMessage.file_url == f"/api/files/{file_id}")
+                         .values(file_size=src.size))
+        await db.commit()
 
 
 @router.get("/files/{file_id}")
