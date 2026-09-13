@@ -15,6 +15,7 @@ import { MapContainer, CircleMarker, Popup, AttributionControl, useMap,
 import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import { clusterPoints, clusterRadiusForZoom } from '@/components/map/clusterPoints'
+import { MapResize } from '@/components/map/MapResize'
 import 'leaflet/dist/leaflet.css'
 import { Loader2, Maximize2, Minimize2, MapPin, Plus } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -389,7 +390,7 @@ function MarketMap() {
   const mapLayers = useMapLayers()
   // Карта страны в половине окна нечитаема: точки сливаются, а фильтры и счётчики
   // съедают вертикаль. Разворот — на всё окно, выход по Escape.
-  const полный = useFullscreenPanel()
+  const полный = useFullscreenPanel(undefined, { scroll: false })
 
   return (
     <div className={полный.className}>
@@ -445,6 +446,7 @@ function MarketMap() {
         <MapContainer crs={MAP_CRS} attributionControl={false} center={[55.75, 37.6]} zoom={5} scrollWheelZoom preferCanvas
           style={{ height: '100%', width: '100%', background: 'hsl(var(--muted))' }}>
           <MapTiles base={mapLayers.base} traffic={mapLayers.traffic} regions={mapLayers.regions} dark={dark} />
+          <MapResize trigger={полный.on} />
           <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
           <ViewportWatch onChange={(bbox, zoom) => setView({ bbox, zoom })} />
           <MarketPoints market={market} ourPoints={ourPoints} zoom={view.zoom}

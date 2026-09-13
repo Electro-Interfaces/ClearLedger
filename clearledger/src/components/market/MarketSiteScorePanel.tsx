@@ -24,6 +24,7 @@ import { MapContainer, Circle, Marker, Popup, AttributionControl,
   useMap, useMapEvents } from 'react-leaflet'
 import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
+import { MapResize } from '@/components/map/MapResize'
 import 'leaflet/dist/leaflet.css'
 import { Crosshair, Loader2, Maximize2, Minimize2, RotateCcw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -402,6 +403,7 @@ export function MarketSiteScorePanel() {
               <MapTiles base={mapLayers.base} traffic={mapLayers.traffic}
                 regions={mapLayers.regions} dark={isDark} />
               <AttributionControl position="bottomright" prefix={MAP_ATTRIBUTION_PREFIX} />
+              <MapResize trigger={полный.on} />
               <Picker onPick={выбрать} />
               <FlyTo point={point} />
               {point && (

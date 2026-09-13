@@ -11,7 +11,14 @@
  */
 import { useEffect, useState } from 'react'
 
-export function useFullscreenPanel(base = 'flex h-full min-h-0 flex-col gap-3 p-4') {
+export function useFullscreenPanel(
+  base = 'flex h-full min-h-0 flex-col gap-3 p-4',
+  // Карте нужна вся высота окна, поэтому внешней прокрутки у неё быть не должно:
+  // с `overflow-auto` блок `flex-1` считает высоту по содержимому, и полотно
+  // остаётся прежнего размера. Панелям с длинным разбором прокрутка, наоборот,
+  // нужна — отсюда развилка.
+  { scroll = true }: { scroll?: boolean } = {},
+) {
   const [on, setOn] = useState(false)
 
   // Escape — общий выход из «поверх всего»: так ведут себя диалоги пространства,
@@ -29,7 +36,8 @@ export function useFullscreenPanel(base = 'flex h-full min-h-0 flex-col gap-3 p-
     on,
     toggle: () => setOn((v) => !v),
     className: on
-      ? 'fixed inset-0 z-50 flex min-h-0 flex-col gap-3 overflow-auto bg-background p-4'
+      ? `fixed inset-0 z-50 flex min-h-0 flex-col gap-3 bg-background p-4 ${
+        scroll ? 'overflow-auto' : 'overflow-hidden'}`
       : base,
   }
 }
