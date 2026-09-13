@@ -7,6 +7,8 @@
 from decimal import Decimal
 
 from app.services.store_documents import (
+    ИМЯ_ПРЕФИКС,
+    _ключ_имени,
     cheque_lines_from_catalog,
     goods_only_cheque_totals,
 )
@@ -102,3 +104,65 @@ def test_toplivo_iz_spravochnika_ne_popadaet_v_tovarnuyu_summu():
     assert итоги["quarantined"] is False
     assert итоги["amount"] == Decimal("210.00")
     assert итоги["fuel_lines"] == 1
+
+
+# ─── Карточка сменила идентификатор ──────────────────────────────────
+#
+# Слияние дублей и перезаливка НСИ уносят прежний ключ карточки, а чек,
+# пробитый до этого, хранит его навсегда. На 208 так встали 19 чеков и 6 смен
+# за 26.08–03.09: двенадцать позиций (три «Любимых аромата», Coca-Cola, PEPSI,
+# четыре черновика станции) искались по идентификаторам, которых больше нет ни
+# в каталоге, ни на станции. Имя переживает и слияние, и перезаливку.
+
+ПРОПАВШИЙ = "2cf111ac-1036-4281-9dcd-e8791c48b069"
+
+
+def test_kartochka_nahoditsya_po_imeni_kogda_uuid_ustarel():
+    строка_чека = строка(ПРОПАВШИЙ, "110")
+    # Касса режет имя по сорока знакам, в каталоге оно полное.
+    строка_чека["name"] = "Напиток Coca-Cola Вишня газ 0,33 л ж/б"
+    справочник = {
+        ИМЯ_ПРЕФИКС + _ключ_имени("Напиток Coca-Cola Вишня газ 0,33 л ж/б"):
+            {"vat_rate": "НДС22", "scope": "store"},
+    }
+    строки = cheque_lines_from_catalog([строка_чека], справочник)
+    итоги = goods_only_cheque_totals(строки, had_fuel=False)
+    assert итоги["quarantined"] is False
+    assert итоги["vat_amount"] == Decimal("19.84")  # 110 × 22/122
+    assert строки[0]["enriched_from"] == "catalog"
+
+
+def test_obrezannoe_kassoy_imya_nahodit_polnuyu_kartochku():
+    строка_чека = строка("00000000-0000-0000-0000-000000000000", "65")
+    строка_чека["name"] = "Напиток Coca-Cola Vanilla 0,33 л (Герман"
+    справочник = {
+        ИМЯ_ПРЕФИКС + _ключ_имени("Напиток Coca-Cola Vanilla 0,33 л (Германия)"):
+            {"vat_rate": "НДС22", "scope": "store"},
+    }
+    строки = cheque_lines_from_catalog([строка_чека], справочник)
+    assert goods_only_cheque_totals(строки, had_fuel=False)["quarantined"] is False
+
+
+def test_svoy_uuid_glavnee_imeni():
+    """Совпадение по идентификатору не должно уступать совпадению по имени."""
+    строка_чека = строка(СИГАРЕТЫ, "210")
+    строка_чека["name"] = "позиция"
+    справочник = {
+        СИГАРЕТЫ: {"vat_rate": "НДС22"},
+        ИМЯ_ПРЕФИКС + _ключ_имени("позиция"): {"vat_rate": "НДС10"},
+    }
+    строки = cheque_lines_from_catalog([строка_чека], справочник)
+    assert goods_only_cheque_totals(строки, had_fuel=False)["vat_amount"] == Decimal("37.87")
+
+
+def test_tyozka_v_spravochnik_imen_ne_popadaet():
+    """Имя, за которым стоят две живые карточки, обогащать не вправе.
+
+    Ключ выбывает при сборке справочника (load_item_catalog), здесь проверяем
+    договор: в справочнике его нет — строка остаётся в карантине, а не берёт
+    ставку первой попавшейся карточки.
+    """
+    строка_чека = строка("11111111-1111-1111-1111-111111111111", "100")
+    строка_чека["name"] = "Вода питьевая 0,5 л"
+    строки = cheque_lines_from_catalog([строка_чека], {СИГАРЕТЫ: {"vat_rate": "НДС22"}})
+    assert goods_only_cheque_totals(строки, had_fuel=False)["quarantined"] is True

@@ -20,7 +20,8 @@ from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import EzsSite, EzsSiteParticipant, User
 from app.services import (
-    ezs_changes, ezs_checklist, ezs_lifecycle, ezs_park_plan, ezs_project,
+    ezs_changes, ezs_checklist, ezs_checklist_integration, ezs_lifecycle,
+    ezs_park_plan, ezs_project,
     ezs_site_analysis, ezs_site_work, ezs_sites, process_documents,
     projects_process,
 )
@@ -118,12 +119,21 @@ async def list_members(
 
 
 @router.get("/meta/gates")
-async def list_gates(user: User = Depends(get_current_user)):
-    """Чек-листы гейтов по стадиям — чтобы UI показывал требования до перехода."""
+async def list_gates(
+    kind: str | None = Query(None, description="вид работ: у интеграции свой регламент"),
+    user: User = Depends(get_current_user),
+):
+    """Чек-листы гейтов по стадиям — чтобы UI показывал требования до перехода.
+
+    Регламент зависит от вида работ: у стройки это согласование земельного
+    участка, у интеграции с партнёром — протокол, доступы и договор. Без `kind`
+    отдаётся чек-лист стройки: он общий для всех работ по объектам.
+    """
     return {
-        "stages": [{"stage": s, "label": ezs_sites.STAGE_LABELS[s],
-                    "hint": ezs_sites.STAGE_HINTS[s],
-                    "items": ezs_site_work.GATES.get(s, [])}
+        "kind": kind,
+        "stages": [{"stage": s, "label": ezs_sites.stage_label(s, kind),
+                    "hint": ezs_sites.stage_hint(s, kind),
+                    "items": ezs_site_work.gates_for(kind, s)}
                    for s in ezs_sites.ALL_STAGES],
     }
 
@@ -315,12 +325,20 @@ async def reopen_from_operation(
 
 
 @router.get("/meta/checklist")
-async def checklist_meta(user: User = Depends(get_current_user)):
-    """Регламент согласования ЗУ целиком: 8 этапов, задачи, ответственные.
+async def checklist_meta(
+    kind: str | None = Query(None, description="вид работ: у интеграции свой регламент"),
+    user: User = Depends(get_current_user),
+):
+    """Регламент целиком: этапы, задачи, ответственные.
 
     Гейты стадий — тот же чек-лист, разложенный по воронке; здесь он в порядке
-    документа, чтобы сверять работу с бумагой отдела развития.
+    документа, чтобы сверять работу с бумагой. Для стройки это согласование
+    земельного участка (8 этапов отдела развития), для интеграции с партнёром —
+    свой регламент: сценарий, протокол, пилотное соглашение, тестирование,
+    договор и запуск.
     """
+    if kind == "integration":
+        return ezs_checklist_integration.checklist_meta()
     return ezs_checklist.checklist_meta()
 
 

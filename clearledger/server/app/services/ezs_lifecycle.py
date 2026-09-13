@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsProject, EzsSite, ServiceLocation, User
 from app.services.ezs_sites import (
-    STAGE_LABELS, format_project_no, parse_project_seq, project_no_prefix,
+    STAGE_LABELS, format_project_no, parse_project_seq, project_no_prefix, stage_label,
 )
 
 # Типы проектов. Новое строительство приходит из банка площадок, остальные три —
@@ -51,6 +51,13 @@ PROJECT_KINDS = [
      "hint": "закупка оборудования и материалов", "startStage": "decision"},
     {"key": "corporate_client", "label": "Корпоративный клиент",
      "hint": "работы для корпоративного клиента", "startStage": "decision"},
+    # Интеграция с партнёром: роуминг, взаимный доступ к сетям, показ наших
+    # станций в чужом приложении. Начинается с заявки, как стройка: сценарий и
+    # партнёра ещё предстоит определить, а площадки здесь нет вовсе — работа идёт
+    # по сети целиком (замечание Маркова 11.09.2026).
+    {"key": "integration", "label": "Интеграция",
+     "hint": "роуминг и обмен с партнёром: чужие клиенты у нас, наши станции у него",
+     "startStage": "lead"},
 ]
 KIND_LABELS = {k["key"]: k["label"] for k in PROJECT_KINDS}
 KIND_START_STAGE = {k["key"]: k["startStage"] for k in PROJECT_KINDS}
@@ -182,7 +189,7 @@ def _out(p: EzsProject, *, site: EzsSite | None = None,
         "locationId": p.location_id,
         "kind": p.kind, "kindLabel": KIND_LABELS.get(p.kind, p.kind),
         "projectNo": p.project_no, "title": p.title,
-        "stage": p.stage, "stageLabel": STAGE_LABELS.get(p.stage, p.stage),
+        "stage": p.stage, "stageLabel": stage_label(p.stage, p.kind),
         "stageSince": p.stage_since, "prevStage": p.prev_stage,
         "closedReason": p.closed_reason, "closedOn": p.closed_on,
         "ownerUserId": str(p.owner_user_id) if p.owner_user_id else None,

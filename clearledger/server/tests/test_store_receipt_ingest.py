@@ -117,11 +117,106 @@ async def test_edge_ingest_updates_document_id_in_place_and_ledgers_once(db):
         StoreReceiptStockMovement.receipt_id == document_id,
     ))).scalar_one() == 1
 
+    # Администратор исправила количество в уже проведённой накладной: пока
+    # документ не уехал в бухгалтерию, центр принимает редакцию, а движение
+    # склада догоняет её корректировкой на разницу.
     doc["Товары"][0]["Количество"] = 99
     await _ingest_receipts(db, company.id, 208, payload, [doc])
     await db.commit()
     await db.refresh(updated)
-    assert updated.lines[0]["qty_fact"] == 2
+    assert updated.lines[0]["qty_fact"] == 99
+    assert updated.accounting_status == "pending"
+    assert (await db.execute(select(func.sum(StoreReceiptStockMovement.quantity)).where(
+        StoreReceiptStockMovement.receipt_id == document_id,
+    ))).scalar_one() == 99
     assert (await db.execute(select(func.count(StoreReceiptStockMovement.id)).where(
         StoreReceiptStockMovement.receipt_id == document_id,
-    ))).scalar_one() == 1
+    ))).scalar_one() == 2
+
+    # Повтор того же пакета разницы не даёт и движений не добавляет.
+    await _ingest_receipts(db, company.id, 208, payload, [doc])
+    await db.commit()
+    assert (await db.execute(select(func.count(StoreReceiptStockMovement.id)).where(
+        StoreReceiptStockMovement.receipt_id == document_id,
+    ))).scalar_one() == 2
+
+    # Забытая позиция дописывается в проведённый документ: прежние строки целы,
+    # движение по ним верно, и новая строка получает своё.
+    doc["Товары"][0]["Количество"] = 2
+    doc["Товары"][0]["Сумма"] = 100
+    doc["Товары"].append({
+        "Номенклатура": str(uuid.uuid4()), "Наименование": "Изолента",
+        "ШтрихКод": "4600000000014", "КоличествоЗаявлено": 3, "Количество": 3,
+        "Цена": 20, "Сумма": 60, "СтавкаНДС": "БезНДС", "СуммаНДС": 0,
+        "Единица": "шт", "МестоОприходования": "Магазин",
+    })
+    await _ingest_receipts(db, company.id, 208, payload, [doc])
+    await db.commit()
+    await db.refresh(updated)
+    assert updated.status == "accepted"
+    assert len(updated.lines) == 2
+    assert updated.lines[1]["name"] == "Изолента"
+    assert (await db.execute(select(func.sum(StoreReceiptStockMovement.quantity)).where(
+        StoreReceiptStockMovement.receipt_id == document_id,
+    ))).scalar_one() == 5
+
+    # Документ уехал в бухгалтерию — редакция со станции больше не применяется:
+    # там его уже провёл человек, и правит он же.
+    updated.accounting_status = "ready"
+    await db.commit()
+    doc["Товары"][0]["Количество"] = 7
+    await _ingest_receipts(db, company.id, 208, payload, [doc])
+    await db.commit()
+    await db.refresh(updated)
+    assert updated.lines[0]["qty_fact"] == 2
+    assert (await db.execute(select(func.sum(StoreReceiptStockMovement.quantity)).where(
+        StoreReceiptStockMovement.receipt_id == document_id,
+    ))).scalar_one() == 5
+
+
+def test_редакция_проведённой_приёмки_отличает_дописанное_от_изменённого():
+    """Дописанная позиция — не то же самое, что исправленная.
+
+    Администратор провела накладную и вспомнила про забытые позиции: прежние
+    строки при этом не меняются, движения по ним верны, и такую редакцию центр
+    вправе принять сам. Исправленное количество трогает уже сделанное движение —
+    там нужен человек.
+    """
+    from app.routers.edge_router import _редакция_проведённой_приёмки
+
+    class Док:
+        def __init__(self, lines, services=None):
+            self.lines = lines
+            self.services = services or []
+
+    было = [{"line_id": "l1", "qty_fact": 2, "price": 50, "amount": 100,
+             "barcode": "460", "nomenclature_ref": "n1"}]
+    дописано = было + [{"line_id": "l2", "qty_fact": 1, "price": 30, "amount": 30,
+                        "barcode": "461", "nomenclature_ref": "n2"}]
+
+    assert _редакция_проведённой_приёмки(Док(было), было, []) == "совпадает"
+    assert _редакция_проведённой_приёмки(Док(было), дописано, []) == "дописано"
+
+    изменено = [dict(было[0], qty_fact=99)]
+    assert _редакция_проведённой_приёмки(Док(было), изменено, []) == "изменено"
+    assert _редакция_проведённой_приёмки(Док(было), [], []) == "изменено"
+
+    # Правка шапки при тех же строках (на 208 так меняли договор) — тоже к человеку.
+    class Шапка(Док):
+        supplier_id = "s1"
+        contract_id = "c1"
+        incoming_number = "УПД-1"
+        number = "П-8-1"
+
+    шапка = {"supplier_id": "s1", "contract_id": "c1",
+             "incoming_number": "УПД-1", "number": "П-8-1"}
+    assert _редакция_проведённой_приёмки(Шапка(было), было, [], шапка) == "совпадает"
+    assert _редакция_проведённой_приёмки(
+        Шапка(было), было, [], dict(шапка, contract_id="c2")) == "изменено"
+    assert _редакция_проведённой_приёмки(
+        Шапка(было), дописано, [], шапка) == "дописано"
+
+    # Строка без line_id несравнима — зовём человека, а не гадаем по позиции.
+    безымянная = [{"qty_fact": 2, "price": 50, "amount": 100}]
+    assert _редакция_проведённой_приёмки(Док(было), безымянная, []) == "изменено"
+    assert _редакция_проведённой_приёмки(Док(безымянная), было, []) == "изменено"

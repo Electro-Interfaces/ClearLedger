@@ -116,6 +116,7 @@ export function ProjectTabContent({ tab, site, companyId, onDone }: {
 const PROJECT_KIND_WORDS: Record<string, string> = {
   new_build: 'Новое строительство', relocation: 'Перенос',
   retrofit: 'Модернизация', decommission: 'Демонтаж',
+  integration: 'Интеграция',
 }
 function humanReason(reason: string | null | undefined): string {
   let out = reason ?? 'недоступно'

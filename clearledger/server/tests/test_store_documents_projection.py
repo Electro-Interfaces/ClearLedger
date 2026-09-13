@@ -334,7 +334,10 @@ def test_file_migration_is_additive_and_checksum_unique():
 def test_adapter_registry_covers_required_sources_without_fuel():
     names = tuple(name for name, _ in store_documents.ADAPTER_REGISTRY)
     assert names == (
-        "onec_headers", "edge_documents", "canonical_entries",
+        # «onec_entries» — свод записей канала ЦБ: они сводятся со станционными
+        # на общей пересборке, а не внутри адаптера, иначе результат зависел бы
+        # от того, что осталось от прошлого прогона.
+        "onec_headers", "onec_entries", "edge_documents", "canonical_entries",
         "accounting_outbox", "store_receipts", "store_cheques",
     )
     assert "fuel" not in " ".join(names)
@@ -1581,7 +1584,11 @@ async def test_every_station_document_kind_keeps_its_identity_fields():
             "Тип": kind, "Номер": f"№{kind}", "Дата": "2026-08-08T10:00:00+03:00",
             "Автор": "Жукова", "Контрагент": "ООО «Поставщик»",
             "ИННКонтрагента": "7701234567", "Склад": "Зал",
-            "Товары": goods,
+            # Строки выпуска зовутся «ВыпускБлюд», а не «Товары» (правило v19 от
+            # 02.09.2026): выпуск без них адаптер отбрасывает как след старой
+            # сборки. Класть в оба поля нельзя — сумма документа удвоится.
+            **({"ВыпускБлюд": goods} if kind == "production_release"
+               else {"Товары": goods}),
         }]},
     ) for kind in kinds]
     result = await store_documents._edge_adapter(

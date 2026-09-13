@@ -29,7 +29,15 @@ export const PHASES: PhaseStripItem[] = [
   { key: 'operate', label: 'Эксплуатация', hint: 'станция работает в сети' },
 ]
 
-const PHASE_ORDER = PHASES.map((p) => p.key)
+/** Путь интеграции с партнёром — тот же список стадий, другие крупные блоки:
+ *  земли и монтажа здесь нет, зато есть пилот до боевого запуска. Повторяет
+ *  `PHASES` в `ezs_checklist_integration.py`. */
+export const INTEGRATION_PHASES: PhaseStripItem[] = [
+  { key: 'scenario', label: 'Сценарий', hint: 'партнёр, направление интеграции, охват станций' },
+  { key: 'terms', label: 'Условия', hint: 'переговоры и техническое согласование' },
+  { key: 'pilot', label: 'Пилот', hint: 'соглашение, настройка, тестовый обмен' },
+  { key: 'launch', label: 'Запуск', hint: 'договор и боевые сессии' },
+]
 
 export function ProjectPhaseStrip({ current, counts, onPick, note, kind }: {
   /** Этап текущего проекта — подсвечивается как «сейчас». */
@@ -41,16 +49,18 @@ export function ProjectPhaseStrip({ current, counts, onPick, note, kind }: {
   /** Вид работы: у модернизации, переноса и демонтажа подбора площадки не было. */
   kind?: string | null
 }) {
-  const curIdx = current ? PHASE_ORDER.indexOf(current) : -1
+  const этапы = kind === 'integration' ? INTEGRATION_PHASES : PHASES
+  const curIdx = current ? этапы.findIndex((p) => p.key === current) : -1
   // Работа с действующим объектом начинается с решения: место известно из прошлой
   // жизни станции. Показывать ей «Подбор площадки» как пройденный этап — врать:
   // его не проходили. Помечаем как неприменимый.
-  const skipSelect = !!kind && kind !== 'new_build'
+  // У интеграции свой путь целиком, там «подбора площадки» нет в принципе.
+  const skipSelect = !!kind && kind !== 'new_build' && kind !== 'integration'
 
   return (
     <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
       <div className="flex items-center gap-1 overflow-x-auto">
-        {PHASES.map((p, i) => {
+        {этапы.map((p, i) => {
           const na = skipSelect && p.key === 'select'
           const state = na ? 'na'
             : curIdx < 0 ? 'plain' : i < curIdx ? 'done' : i === curIdx ? 'current' : 'future'

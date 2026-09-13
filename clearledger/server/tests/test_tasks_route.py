@@ -1087,3 +1087,74 @@ async def test_ссылки_на_код_привязываются_к_задач
     listed = (await auth_client.get(f"/api/tasks/{task['id']}/code",
                                     params={"company_id": cid})).json()["code"]
     assert len(listed) == 3
+
+
+async def test_работа_открывается_по_ключу_и_номеру(auth_client: AsyncClient,
+                                                   client: AsyncClient):
+    """Ссылка на работу: `TF-42` и сквозной номер работают наравне с UUID.
+
+    Ссылку шлют в письме, в чате и в коммите, и пишут её рукой. Если адрес
+    принимает только UUID, человек либо ищет работу глазами в списке, либо
+    ссылку не даёт вовсе — так и было до 12.09.2026.
+
+    Ключ разбирают все ручки задачи, а не только карточка: по присланному
+    адресу работу открывают, а потом по нему же двигают этап.
+    """
+    me = await _me(auth_client)
+    cid = seed_company_id(me)
+
+    r = await auth_client.post("/api/tasks/projects", json={
+        "company_id": cid, "code": "LNK", "name": "Проверка ссылок"})
+    assert r.status_code == 201, r.text
+    prj = r.json()
+
+    r = await auth_client.post("/api/tasks", json={
+        "company_id": cid, "title": "Работа со ссылкой", "project_id": prj["id"]})
+    assert r.status_code == 201, r.text
+    task = r.json()
+    key = task["key"]
+    assert key == f"LNK-{task['project_number']}", task
+
+    # Карточка по ключу — та же работа, что по UUID.
+    by_key = await auth_client.get(f"/api/tasks/{key}", params={"company_id": cid})
+    assert by_key.status_code == 200, by_key.text
+    assert by_key.json()["id"] == task["id"]
+
+    # Регистр кода в адресе значения не имеет: ссылку пишут как придётся.
+    lower = await auth_client.get(f"/api/tasks/{key.lower()}", params={"company_id": cid})
+    assert lower.status_code == 200, lower.text
+    assert lower.json()["id"] == task["id"]
+
+    # Сквозной номер — второй человеческий адрес, на него ссылаются интеграции.
+    by_number = await auth_client.get(f"/api/tasks/{task['number']}", params={"company_id": cid})
+    assert by_number.status_code == 200, by_number.text
+    assert by_number.json()["id"] == task["id"]
+
+    # Действие по ключу: открыли по ссылке — по ней же и двигаем.
+    r = await auth_client.post(f"/api/tasks/{key}/action", json={
+        "company_id": cid, "status": "done"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "done"
+
+    # Чужого проекта с таким номером нет — 404, а не чужая работа.
+    missing = await auth_client.get(f"/api/tasks/NOPE-{task['project_number']}",
+                                    params={"company_id": cid})
+    assert missing.status_code == 404, missing.text
+
+    # Мусор в адресе — ошибка запроса, а не поиск по всей базе.
+    bad = await auth_client.get("/api/tasks/не-ссылка-вовсе", params={"company_id": cid})
+    assert bad.status_code == 400, bad.text
+
+    # Читаемый адрес не делает работу публичной. Ключ угадывается (`TF-1`,
+    # `TF-2`), поэтому проверки прав обязаны стоять там же, где стояли для UUID:
+    # без сессии — не пускаем вовсе, с чужой компанией — не ищем.
+    token = auth_client.headers.pop("Authorization")
+    try:
+        anon = await client.get(f"/api/tasks/{key}", params={"company_id": cid})
+        assert anon.status_code == 401, anon.text
+    finally:
+        auth_client.headers["Authorization"] = token
+
+    alien = await auth_client.get(f"/api/tasks/{key}", params={
+        "company_id": "00000000-0000-0000-0000-000000000001"})
+    assert alien.status_code in (400, 403, 404), alien.text

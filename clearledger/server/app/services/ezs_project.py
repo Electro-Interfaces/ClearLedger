@@ -32,7 +32,8 @@ from app.services.ezs_changes import make_change
 from app.services.ezs_site_work import log_event
 from app.services.ezs_checklist import norm_days
 from app.services.ezs_sites import (
-    PHASE_LABELS, PHASES, STAGE_LABELS, STAGE_ORDER, STAGE_PHASE, next_step_overdue_sql, project_reporting_stage,
+    PHASE_LABELS, PHASES, STAGE_LABELS, STAGE_ORDER, STAGE_PHASE, next_step_overdue_sql, phases_for,
+    project_reporting_stage, stage_label, stage_phase,
 )
 
 # Норматив стадии прямо в SQL: параметр перед `::` (`:norms::jsonb`) SQLAlchemy
@@ -1479,11 +1480,13 @@ async def awaiting_accounting(db: AsyncSession, company_id) -> dict[str, Any]:
                         S.contract_start.is_not(None)))).scalars().all()
     no_location = (await db.execute(
         select(S).where(S.company_id == company_id, S.location_id.is_(None),
+                        S.kind != "integration",
                         S.stage.in_(["commissioning", "live"])))).scalars().all()
     no_supply = (await db.execute(text("""
         select s.id, s.project_no, s.city, s.address
         from ezs_sites s
         where s.company_id = :cid and s.stage in ('construction','commissioning','live')
+          and s.kind <> 'integration'
           -- Поставка ищется у ЭТОГО проекта, а не у компании: подзапрос без связи
           -- по site_id отвечал «поставки есть» на весь список, стоило появиться
           -- одному документу в компании, и раздел молча пустел.
@@ -1583,6 +1586,7 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
     """
     from app.services.ezs_site_work import GATES, gate_state, site_doc_kinds
 
+    этапы = {p["key"]: p["label"] for p in phases_for(site.kind)}
     doc_kinds = await site_doc_kinds(db, site.id)
     tc = await get_tech_connection(db, company_id, site.id)
     eq = await list_equipment(db, company_id, site.id)
@@ -1618,8 +1622,9 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
         # Что именно держит текущий шаг — самое ценное на схеме.
         blocking = g["blocking"] if st == "current" else []
         steps.append({
-            "key": stage, "kind": "stage", "label": STAGE_LABELS[stage],
-            "phase": STAGE_PHASE.get(stage), "phaseLabel": PHASE_LABELS.get(STAGE_PHASE.get(stage, ""), ""),
+            "key": stage, "kind": "stage", "label": stage_label(stage, site.kind),
+            "phase": stage_phase(stage, site.kind),
+            "phaseLabel": этапы.get(stage_phase(stage, site.kind) or "", ""),
             "state": st,
             "date": site.stage_since if st == "current" else None,
             "gateDone": g["done"], "gateTotal": g["total"], "blocking": blocking,
@@ -1704,13 +1709,14 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
     })
 
     return {
-        "stage": site.stage, "stageLabel": STAGE_LABELS.get(site.stage, site.stage),
-        "phase": STAGE_PHASE.get(site.stage),
+        "stage": site.stage, "stageLabel": stage_label(site.stage, site.kind),
+        "phase": stage_phase(site.stage, site.kind),
         "offPath": off_path, "unknownProgress": unknown_progress,
-        "stoppedAt": STAGE_LABELS.get(site.prev_stage or "", None) if off_path else None,
-        "phases": [{"key": p["key"], "label": p["label"], "hint": p["hint"]} for p in PHASES],
+        "stoppedAt": (stage_label(site.prev_stage, site.kind) if off_path and site.prev_stage else None),
+        "phases": [{"key": p["key"], "label": p["label"], "hint": p["hint"]}
+                   for p in phases_for(site.kind)],
         "steps": steps,
-        "tracks": tracks,
+        "tracks": [] if site.kind == "integration" else tracks,
         "docs": {"count": len(docs), "kinds": sorted({d["kindLabel"] for d in docs})},
         "subsidy": subsidy_check(site),
         "progress": None if unknown_progress

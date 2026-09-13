@@ -34,7 +34,13 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
   const [busy, setBusy] = useState(false)
   // Место должно быть опознаваемо: без адреса или названия объекта проект
   // невозможно ни найти, ни отличить от соседнего.
-  const canSave = Boolean(form.address.trim() || form.install_place.trim())
+  // У интеграции с партнёром площадки нет вовсе: работа идёт по сети целиком, и
+  // требовать адрес означало бы просить выдумать его. Там достаточно названия —
+  // это имя партнёра и цель проекта (замечание Маркова 11.09.2026).
+  const безМеста = kind === 'integration'
+  const canSave = безМеста
+    ? Boolean(form.title.trim())
+    : Boolean(form.address.trim() || form.install_place.trim())
 
   // Подсказка о дубле. Место занимается один раз, а проектов по нему заводят
   // несколько: отказ уезжает в архив, через полгода адрес приходит снова и
@@ -100,7 +106,11 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-lg w-[92vw] max-h-[90dvh] overflow-y-auto">
         <DialogHeader><DialogTitle className="text-base">Новый проект</DialogTitle>
-          <DialogDescription>Укажите вид работ и место. Остальные данные можно заполнить позже.</DialogDescription>
+          <DialogDescription>
+            {безМеста
+              ? 'Укажите вид работ и назовите партнёра. Остальное заполняется по ходу проекта.'
+              : 'Укажите вид работ и место. Остальные данные можно заполнить позже.'}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
@@ -125,7 +135,9 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
               </p>
             )}
           </div>
-          {suggestField('title', 'Название проекта', 'ЭЗС на парковке ТЦ «Гринвич»')}
+          {suggestField('title', безМеста ? 'Партнёр и цель' : 'Название проекта',
+            безМеста ? 'Роуминг с PUNKT E: наши станции в их приложении'
+              : 'ЭЗС на парковке ТЦ «Гринвич»')}
           <div className="grid grid-cols-2 gap-2">
             {suggestField('region', 'Регион', 'Свердловская область')}
             {suggestField('city', 'Город', 'Екатеринбург')}
@@ -145,7 +157,9 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
           {field('owner', 'Собственник', 'если известен')}
           {!canSave && (
             <p className="text-xs text-muted-foreground">
-              Нужен адрес или место установки — иначе проект не отличить от соседнего.
+              {безМеста
+                ? 'Назовите партнёра и цель — иначе проект не отличить от соседнего.'
+                : 'Нужен адрес или место установки — иначе проект не отличить от соседнего.'}
             </p>
           )}
           {duplicates.length > 0 && (

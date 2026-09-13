@@ -662,6 +662,12 @@ export const PHASE_META: Record<string, { label: string; cls: string; dot: strin
   build: { label: 'Реализация', cls: 'border-amber-400/50 text-amber-600 dark:text-amber-300/80', dot: 'bg-amber-500' },
   operate: { label: 'Эксплуатация', cls: 'bg-emerald-600/80 text-white border-transparent', dot: 'bg-emerald-500' },
   closed: { label: 'Не в работе', cls: 'border-zinc-600 text-zinc-500', dot: 'bg-zinc-500' },
+  // Этапы интеграции с партнёром — свой путь, те же цвета по смыслу: начало
+  // синим, работа янтарным, рабочее состояние зелёным.
+  scenario: { label: 'Сценарий', cls: 'border-blue-400/50 text-blue-600 dark:text-blue-300/80', dot: 'bg-blue-500' },
+  terms: { label: 'Условия', cls: 'border-violet-400/50 text-violet-600 dark:text-violet-300/80', dot: 'bg-violet-500' },
+  pilot: { label: 'Пилот', cls: 'border-amber-400/50 text-amber-600 dark:text-amber-300/80', dot: 'bg-amber-500' },
+  launch: { label: 'Запуск', cls: 'bg-emerald-600/80 text-white border-transparent', dot: 'bg-emerald-500' },
 }
 
 export interface SiteDoc {

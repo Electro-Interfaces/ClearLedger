@@ -35,6 +35,7 @@ const KIND_LABELS: Record<string, string> = {
   retrofit: 'Модернизация',
   relocation: 'Перенос',
   decommission: 'Демонтаж',
+  integration: 'Интеграция',
 }
 // Куда ведёт строка «Требует внимания». Ключ вкладки — ИЗ МЕНЮ (`SITES_MENU`):
 // пункт называется `pr_project`, и опечатка `pr_projects` молча возвращала

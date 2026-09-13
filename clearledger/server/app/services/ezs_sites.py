@@ -32,6 +32,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsSite, Region
 from app.services.ezs_changes import make_change
+from app.services.ezs_checklist_integration import (
+    PHASES as INTEGRATION_PHASES,
+    STAGE_HINTS as INTEGRATION_STAGE_HINTS,
+    STAGE_LABELS as INTEGRATION_STAGE_LABELS,
+)
 
 # ── Воронка ────────────────────────────────────────────────────────────────
 # Порядок = порядок гейтов. Импорт может двигать площадку только ВПЕРЁД по
@@ -87,6 +92,36 @@ PHASES = [
 ]
 STAGE_PHASE = {s: p["key"] for p in PHASES for s in p["stages"]}
 PHASE_LABELS = {p["key"]: p["label"] for p in PHASES}
+
+# Вид работ со своими подписями. Стадии, порядок и переходы общие для всех
+# проектов — иначе воронку не свести, — а вот названия у интеграции свои:
+# «Оформление земли» и «Пусконаладка» в проекте роуминга читаются как чужой
+# текст (замечание Маркова 11.09.2026).
+_BY_KIND = {
+    "integration": {
+        "labels": INTEGRATION_STAGE_LABELS, "hints": INTEGRATION_STAGE_HINTS,
+        "phases": INTEGRATION_PHASES,
+    },
+}
+
+
+def stage_label(stage: str | None, kind: str | None = None) -> str:
+    """Подпись стадии — своя у вида работ, общая у остальных."""
+    свои = _BY_KIND.get(kind or "", {}).get("labels", {})
+    return свои.get(stage or "") or STAGE_LABELS.get(stage or "", stage or "")
+
+
+def stage_hint(stage: str | None, kind: str | None = None) -> str:
+    свои = _BY_KIND.get(kind or "", {}).get("hints", {})
+    return свои.get(stage or "") or STAGE_HINTS.get(stage or "", "")
+
+
+def phases_for(kind: str | None = None) -> list[dict[str, Any]]:
+    return _BY_KIND.get(kind or "", {}).get("phases") or PHASES
+
+
+def stage_phase(stage: str | None, kind: str | None = None) -> str | None:
+    return {s: p["key"] for p in phases_for(kind) for s in p["stages"]}.get(stage or "")
 _STAGE_POS = {s: i for i, s in enumerate(STAGE_ORDER)}
 # Сколько дней без касания считаем «площадка забыта».
 STALE_DAYS = 30
@@ -1272,9 +1307,11 @@ def _site_out(s: EzsSite) -> dict[str, Any]:
         "id": str(s.id), "projectNo": s.project_no, "title": s.title,
         # Вид работы: карточка по нему понимает, был ли подбор площадки вообще.
         "kind": s.kind or "new_build",
-        "stage": s.stage, "stageLabel": (current["name"] if current else "Завершено") if flow else STAGE_LABELS.get(s.stage, s.stage),
+        "stage": s.stage, "stageLabel": (current["name"] if current else "Завершено") if flow else stage_label(s.stage, s.kind),
         "scenarioStage": flow["stage"] if flow else None,
-        "phase": STAGE_PHASE.get(s.stage), "phaseLabel": PHASE_LABELS.get(STAGE_PHASE.get(s.stage, "")),
+        "phase": stage_phase(s.stage, s.kind),
+        "phaseLabel": {p["key"]: p["label"] for p in phases_for(s.kind)}.get(
+            stage_phase(s.stage, s.kind) or ""),
         "stageSince": s.stage_since, "prevStage": s.prev_stage,
         "archiveReason": s.archive_reason, "cadastralNo": s.cadastral_no,
         "statusRaw": s.status_raw, "receivedDate": s.received_date,

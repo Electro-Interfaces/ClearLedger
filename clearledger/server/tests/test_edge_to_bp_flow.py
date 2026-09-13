@@ -242,6 +242,9 @@ def _edge_item(item_uuid, name, vat, is_dish=False):
         "unit": "шт", "vat_rate": vat, "kind": "Набор-комплект" if is_dish else "Товар",
         "sku_class": "Общепит" if is_dish else "Сопутка", "is_dish": is_dish,
         "deleted": False, "barcodes": [],
+        # Артикул сети и артикул поставщика: запрос `_edge_nom_map` берёт оба,
+        # и строка без них роняет сборку пакета на KeyError.
+        "sku": "", "article": "",
     }
 
 
@@ -419,6 +422,22 @@ async def test_edge_manual_package_refuses_catering_sale_without_release():
         }},
     )
 
+    # Пакет СОБИРАЕТСЯ: с 04.09.2026 отсутствие выпуска блюда не держит смену.
+    #
+    # Раньше одна чашка кофе на 190 ₽ останавливала смену 7092 вместе со всеми
+    # её приёмками на 209 тыс. Теперь блюдо, проданное без выпуска, уезжает
+    # отдельной строкой «не разложено»: бухгалтерия видит, чего не хватает, а
+    # остальные документы смены доходят. Обязательна здесь только ТТК — без неё
+    # приёмник блюдо не раскроет, и вот это по-прежнему стоп.
+    пакет = await BpPackageEmitter(
+        _emitter_session([recipe]), uuid.uuid4(),
+    )._build_edge_shift_package(target, "retail-42")
+    не_разложено = пакет.get("НеРазложено") or []
+    assert any(d.get("Тип") == "production_release" for d in не_разложено), (
+        "продажа блюда без выпуска обязана попасть в «не разложено»")
+    assert any("dish-coffee" in str(d.get("Причина") or "") for d in не_разложено)
+    return
+
     with pytest.raises(ValueError, match="нет выпуска этой смены"):
         await BpPackageEmitter(
             _emitter_session([recipe]), uuid.uuid4(),
@@ -454,7 +473,14 @@ async def test_edge_manual_package_refuses_unknown_vat():
     package = _edge_package()
     normalized = normalize_shift_package(package, source="edge")
     retail_meta = normalized["entries"][0]["meta"]
-    retail_meta["Документ"]["СтавкаНеизвестна"] = ["dish-coffee"]
+    # Ставка неизвестна И В КАРТОЧКЕ — только тогда это стоп.
+    #
+    # Агент помечает товар «ставка неизвестна» на момент смены, когда карточка
+    # ещё не связана, а справочник с тех пор пополняется. Пометка, ставшая
+    # неактуальной, ронять смену не должна: на 208 из-за неё падали смены 24.04
+    # и 09.06, где все товары давно с НДС22. Поэтому берём товар, которого в
+    # справочнике нет вовсе.
+    retail_meta["Документ"]["СтавкаНеизвестна"] = ["позиция-без-карточки"]
     target = SimpleNamespace(id="retail", source_id="shift:retail", meta=retail_meta)
 
     with pytest.raises(ValueError, match="неизвестна ставка НДС"):

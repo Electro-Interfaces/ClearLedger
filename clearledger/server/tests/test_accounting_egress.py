@@ -57,6 +57,15 @@ class _Result:
     def scalars(self):
         return _Scalars(self.rows)
 
+    # Проверка закрытого периода читает дату запрета одним значением
+    # (`scalar_one_or_none`), а не набором строк. Без этих двух методов
+    # заглушка падала на любом пути, где такая проверка встречается.
+    def scalar_one_or_none(self):
+        return self.rows[0] if self.rows else None
+
+    def scalar(self):
+        return self.rows[0] if self.rows else None
+
 
 class _Session:
     def __init__(
@@ -82,6 +91,14 @@ class _Session:
         if "pg_advisory_xact_lock" in str(statement):
             self.events.append("scope_lock")
             self.lock_scope_keys.append(parameters["scope_key"])
+            return _Result([])
+        # Сырой SQL заглушке нечего отдавать — и это не повод падать.
+        #
+        # `column_descriptions` есть только у ORM-запроса; на `text()` заглушка
+        # ломалась с AttributeError и роняла весь файл (21 тест), хотя проверяет
+        # он совсем другое. Такие запросы просто отдаём пустыми — путь, который
+        # их делает, в этих тестах не проверяется.
+        if not hasattr(statement, "column_descriptions"):
             return _Result([])
         entity = statement.column_descriptions[0].get("entity")
         if entity is AccountingSourcePolicy:

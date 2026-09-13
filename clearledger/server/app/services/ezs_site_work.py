@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsProject, EzsSite, EzsSiteEvent, User
 from app.services.ezs_checklist import PHASE_LABELS_DOC, WAIVE_FORBIDDEN, gates_by_stage
+from app.services.ezs_checklist_integration import gates_by_stage as integration_gates
 from app.services.ezs_sites import (
     STAGE_LABELS, STAGE_ORDER, _site_out, format_project_no, parse_project_seq,
     project_no_prefix,
@@ -37,6 +38,18 @@ from app.services.ezs_changes import make_change
 # `doc` — приложенным документом, `equipment` — поставкой оборудования,
 # `manual` — галочкой. `required` держит переход вперёд (обход — с обоснованием).
 GATES: dict[str, list[dict[str, Any]]] = gates_by_stage()
+
+# У интеграции с партнёром свой регламент: площадки нет, зато есть протокол,
+# доступы, тестовый обмен и договор. Общий чек-лист стройки на неё не ложится —
+# половина пунктов про землю и электросети (замечание Маркова 11.09.2026).
+GATES_BY_KIND: dict[str, dict[str, list[dict[str, Any]]]] = {
+    "integration": integration_gates(),
+}
+
+
+def gates_for(kind: str | None, stage: str) -> list[dict[str, Any]]:
+    """Чек-лист стадии для этого вида работ."""
+    return GATES_BY_KIND.get(kind or "", GATES).get(stage, [])
 
 # Стадии, которыми работа по месту прекращается: отказ и пауза. Обе требуют
 # причины и обе хранят её в одной графе — вопрос к закрытому проекту всегда один
@@ -91,7 +104,7 @@ def gate_state(site: EzsSite, stage: str | None = None,
     отменён и его всё ещё видно. Он просто перестаёт держать переход.
     """
     st = stage or site.stage
-    items = GATES.get(st, [])
+    items = gates_for(site.kind, st)
     marks = (site.gates or {}).get(st, {}) if isinstance(site.gates, dict) else {}
     docs = doc_kinds or set()
     out = []
@@ -551,7 +564,7 @@ def _pos(stage: str) -> int:
 async def set_gate_item(db: AsyncSession, site: EzsSite, key: str, done: bool,
                         user: User | None) -> dict[str, Any]:
     """Отметка пункта гейта, который нельзя вывести из полей (проверка глазами)."""
-    items = {i["key"]: i for i in GATES.get(site.stage, []) if i.get("manual")}
+    items = {i["key"]: i for i in gates_for(site.kind, site.stage) if i.get("manual")}
     if key not in items:
         return {"ok": False, "message": "пункт не относится к текущей стадии"}
     gates = dict(site.gates or {})

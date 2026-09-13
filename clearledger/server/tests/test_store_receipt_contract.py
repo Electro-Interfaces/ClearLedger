@@ -268,9 +268,19 @@ async def test_acceptance_ledger_is_idempotent_for_edge_and_center():
     assert len(db.added) == 1
     assert float(db.added[0].quantity) == 2
     assert db.added[0].station_id == 208
-    db.existing = [db.added[0].idempotency_key]
+    # Повтор: движение по строке уже записано — разницы нет, писать нечего.
+    db.existing = [db.added[0]]
     await store_receipts.record_acceptance(db, receipt)
     assert len(db.added) == 1
+
+    # Строку исправили после проведения — движение догоняет её корректировкой
+    # на разницу, а не переписывает прежнее (движения append-only).
+    receipt.lines[0]["qty_fact"] = 5
+    await store_receipts.record_acceptance(db, receipt)
+    assert len(db.added) == 2
+    assert float(db.added[1].quantity) == 3
+    assert float(db.added[1].amount) == 150
+    assert db.added[1].kind == "receipt_correction"
 
 
 @pytest.mark.asyncio
