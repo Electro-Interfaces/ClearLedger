@@ -8422,6 +8422,13 @@ class MarketPlayer(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     app: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Приложение может лежать в магазине и не работать. У РусГидро таких два: сеть
+    # обслуживает `ru.rushydro.car` (РусГидро ИТ Сервис), а `com.rucharge.rusgidro`
+    # остался от платформы ZEVS, через которую сеть больше не работает. Пока обе
+    # записи считались действующими, одна сеть попадала в разрезы дважды и её 429
+    # станций складывались с самими собой (замечание МАГа 13.09.2026).
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     package: Mapped[str | None] = mapped_column(String(200), nullable=True)
     player_class: Mapped[str | None] = mapped_column(String(80), nullable=True)
     class_checked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

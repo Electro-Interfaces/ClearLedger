@@ -912,6 +912,9 @@ export interface MarketPlayer {
   modelNote: string | null
   note: string | null
   source: string | null
+  /** Приложение работает. Закрытое остаётся в списке, но не считается сетью. */
+  isActive: boolean
+  statusNote: string | null
 }
 
 export const getMarketPlayers = (companyId: string) =>

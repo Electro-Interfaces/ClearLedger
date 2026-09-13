@@ -3598,14 +3598,21 @@ async def market_players(
             "reviews": r.reviews if r.reviews is not None else (
                 op.app_reviews if op is not None else None),
             "modelNote": r.model_note, "note": r.note, "source": r.source,
+            # Приложение в магазине ещё не значит работающий сервис: у сети бывает
+            # старое приложение от прежней платформы. Такие записи не идут в счёт
+            # станций и помечены на экране.
+            "isActive": r.is_active, "statusNote": r.status_note,
         })
 
     # ── четыре квадранта: своя инфраструктура против своего приложения ──
     # Приложение есть у всех в этой выборке — их так и нашли. Поэтому вторая ось —
     # ЕСТЬ ЛИ СТАНЦИИ, и она делит рынок на тех, кто владеет железом, и тех, кто
     # борется за интерфейс к чужому.
-    with_assets = [p for p in players if (p["ownStations"] or 0) > 0]
-    light = [p for p in players if (p["ownStations"] or 0) == 0]
+    # Закрытое приложение не владеет станциями: они у той же сети, и учитывать их
+    # второй раз значит удвоить сеть. Сама запись остаётся — её видно в списке с
+    # пометкой, потому что «приложение было и закрылось» — это факт о рынке.
+    with_assets = [p for p in players if (p["ownStations"] or 0) > 0 and p["isActive"]]
+    light = [p for p in players if (p["ownStations"] or 0) == 0 or not p["isActive"]]
 
     def unique_stations(group: list[dict[str, Any]]) -> int:
         """Станции по УНИКАЛЬНЫМ сетям, а не по приложениям.
@@ -3688,7 +3695,7 @@ async def market_players(
     # ── качество против размера: рейтинг рядом с числом станций ──
     # Сравнивать рейтинги между классами напрямую нельзя: у приложения с пятью
     # оценками и с тремястами разная достоверность, поэтому число отзывов рядом.
-    quality = sorted((p for p in players if p["rating"] is not None),
+    quality = sorted((p for p in players if p["rating"] is not None and p["isActive"]),
                      key=lambda p: -(p["reviews"] or 0))[:40]
     ratings = [p["rating"] for p in players if p["rating"] is not None]
 
@@ -3706,10 +3713,15 @@ async def market_players(
             # с водителем — сама по себе находка.
             "withShop": sum(1 for r in shops if r["hasShop"]),
             "shopsChecked": len(shops),
-            "multiApp": sorted({p["operatorName"] or p["app"] for p in players
+            # Считаются только ДЕЙСТВУЮЩИЕ приложения: у РусГидро их два в
+            # магазине, но одно осталось от прежней платформы и не работает —
+            # точка контакта с водителем не раздвоена, она одна.
+            "multiApp": sorted({p["operatorName"] or p["app"]
+                                for p in players if p["isActive"]
                                 if sum(1 for o in players
-                                       if (o["operatorName"] or o["app"])
+                                       if o["isActive"] and (o["operatorName"] or o["app"])
                                        == (p["operatorName"] or p["app"])) > 1}),
+            "closedApps": sum(1 for p in players if not p["isActive"]),
             "unchecked": sum(1 for p in players if not p["classChecked"]),
         },
         "note": ("класс проставлен автоматически по названию и пакету — перед тем как "

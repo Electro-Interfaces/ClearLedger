@@ -4963,6 +4963,14 @@ async def create_all() -> None:
             await conn.execute(_sa.text(stmt))
 
         # Развитие сети: кандидаты по направлениям роста. Таблицы заводит create_all,
+        # Приложение может лежать в магазине и не работать — тогда оно не идёт
+        # в счёт станций: иначе одна сеть попадает в разрезы дважды.
+        for stmt in (
+            "ALTER TABLE market_players ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE market_players ADD COLUMN IF NOT EXISTS status_note TEXT",
+        ):
+            await conn.execute(_sa.text(stmt))
+
         # индексы — здесь; выборка всегда идёт по компании и направлению.
         for stmt in (
             "CREATE INDEX IF NOT EXISTS ix_market_lead_company "

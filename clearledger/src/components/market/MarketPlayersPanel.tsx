@@ -27,7 +27,7 @@ const ВИДЫ = [
   { k: 'models', label: 'Модели бизнеса' },
   { k: 'classes', label: 'Откуда приходят' },
   { k: 'quality', label: 'Качество против размера' },
-  { k: 'shops', label: 'Вторая выручка' },
+  { k: 'shops', label: 'Интернет-магазин' },
 ] as const
 
 function PlayerLine({ p }: { p: MarketPlayer }) {
@@ -35,6 +35,7 @@ function PlayerLine({ p }: { p: MarketPlayer }) {
     <li className="flex items-baseline justify-between gap-2 text-xs">
       <span className="min-w-0 truncate">
         {p.app}
+        {!p.isActive && <span className="ml-1 text-warning">· не работает</span>}
         {p.operatorName && p.operatorName !== p.app && (
           <span className="text-muted-foreground"> · {p.operatorName}</span>
         )}
@@ -190,7 +191,12 @@ export function MarketPlayersPanel() {
             <tbody>
               {quality.map((p) => (
                 <tr key={p.id} className="border-t border-border/50">
-                  <td className="p-2 font-medium">{p.app}</td>
+                  <td className="p-2 font-medium">
+                    {p.app}
+                    {!p.isActive && (
+                      <span className="ml-2 text-xs text-warning">· не работает</span>
+                    )}
+                  </td>
                   <td className="p-2 text-muted-foreground">{p.class}</td>
                   <td className="p-2 text-right tabular-nums">
                     {p.ownStations ? nf.format(p.ownStations) : '—'}
@@ -222,7 +228,7 @@ export function MarketPlayersPanel() {
             <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
               <tr>
                 <th className="p-2 text-left font-medium">Сеть</th>
-                <th className="p-2 text-left font-medium">Витрина</th>
+                <th className="p-2 text-left font-medium">Магазин</th>
                 <th className="p-2 text-left font-medium">Что продают</th>
                 <th className="p-2 text-right font-medium">Цены от</th>
                 <th className="p-2 text-right font-medium">до</th>
@@ -236,7 +242,7 @@ export function MarketPlayersPanel() {
                   <td className="p-2 font-medium">{sh.brand}</td>
                   <td className="p-2">
                     {sh.hasShop
-                      ? <span className="text-success">есть каталог</span>
+                      ? <span className="text-success">есть</span>
                       : <span className="text-muted-foreground">не нашли</span>}
                     {sh.note && <span className="ml-1 text-warning">· {sh.note}</span>}
                   </td>
@@ -256,12 +262,12 @@ export function MarketPlayersPanel() {
             </tbody>
           </table>
           <p className="p-2 text-xs text-muted-foreground">
-            Витрина оказалась маркером модели: она есть у {t.withShop} из{' '}
-            {t.shopsChecked} проверенных сетей, а у чистых агрегаторов её нет вовсе —
-            они живут на чужой инфраструктуре и железо не продают. Цены сняты
-            автоматически со страниц каталога: это диапазон для ориентира, а не
+            Свой интернет-магазин оказался признаком модели: он есть у {t.withShop}{' '}
+            из {t.shopsChecked} проверенных сетей, а у чистых агрегаторов его нет
+            вовсе — они работают на чужих станциях и оборудование не продают. Цены
+            сняты автоматически со страниц каталога: это диапазон для ориентира, а не
             прайс-лист, и перед публикацией цифру надо сверить с сайтом. «Не нашли»
-            означает, что витрины не было на типовых адресах, а не что её нет.
+            означает, что магазина не было на типовых адресах сайта, а не что его нет.
           </p>
         </div>
       )}
