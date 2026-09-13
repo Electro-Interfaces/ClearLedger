@@ -113,6 +113,35 @@ function siteColor(s: MarketSite): string {
 }
 
 /**
+ * Стоят ли все точки группы в одной координате.
+ *
+ * У 22 наших мест несколько объектов с одинаковыми координатами: в Фокино рядом
+ * «Клубная, 15» и выведенный из эксплуатации «ТЦ Меридиан», в Красноярске на
+ * Перенсона — двенадцать записей. Приближение их не разведёт никогда, и совет
+ * «приблизьте, чтобы увидеть каждый» отправлял человека делать бесполезное.
+ */
+function вОднойТочке(points: { lat: number; lon: number }[]): boolean {
+  const [first] = points
+  return points.every((p) => Math.abs(p.lat - first.lat) < 1e-5
+    && Math.abs(p.lon - first.lon) < 1e-5)
+}
+
+/** Список объектов группы: когда их не развести, надо просто показать, кто это. */
+function СписокОбъектов({ items }: { items: { name: string; note?: string | null }[] }) {
+  return (
+    <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+      {items.slice(0, 8).map((it, i) => (
+        <li key={`${it.name}-${i}`}>
+          {it.name}
+          {it.note && <span style={{ opacity: 0.7 }}> · {it.note}</span>}
+        </li>
+      ))}
+      {items.length > 8 && <li style={{ opacity: 0.7 }}>и ещё {items.length - 8}</li>}
+    </ul>
+  )
+}
+
+/**
  * Подсказка нашего объекта.
  *
  * Подписываем именем компании, а не словом «наш объект»: на одной карте рядом
@@ -226,10 +255,23 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
             <Popup>
               {one ? (
                 <OurPopupBody p={one} />
+              ) : вОднойТочке(c.items) ? (
+                <>
+                  <b>{c.items.length} объектов по одному адресу</b> — приближение их
+                  не разведёт:
+                  <СписокОбъектов items={c.items.map((p) => ({
+                    name: p.name,
+                    note: p.status && p.status !== 'working' ? p.status : null,
+                  }))} />
+                </>
               ) : (
                 <>
-                  <b>{c.items.length} объектов</b> в этом месте<br />
-                  приблизьте, чтобы увидеть каждый
+                  <b>{c.items.length} объектов</b> рядом — приблизьте, чтобы
+                  увидеть каждый:
+                  <СписокОбъектов items={c.items.map((p) => ({
+                    name: p.name,
+                    note: p.status && p.status !== 'working' ? p.status : null,
+                  }))} />
                 </>
               )}
             </Popup>
@@ -259,10 +301,21 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
                     ? <>цена {one.price.value} ₽{one.price.unit === 'kwh' ? '/кВтч' : ''} · {age?.text}</>
                     : <>цена не наблюдалась</>}
                 </>
+              ) : вОднойТочке(c.items as { lat: number; lon: number }[]) ? (
+                <>
+                  <b>{c.items.length} точек по одному адресу</b> — приближение их
+                  не разведёт:
+                  <СписокОбъектов items={c.items.map((p) => ({
+                    name: p.name, note: p.operatorName,
+                  }))} />
+                </>
               ) : (
                 <>
-                  <b>{c.items.length} точек рынка</b> в этом месте<br />
-                  приблизьте, чтобы увидеть каждую
+                  <b>{c.items.length} точек рынка</b> рядом — приблизьте, чтобы
+                  увидеть каждую:
+                  <СписокОбъектов items={c.items.map((p) => ({
+                    name: p.name, note: p.operatorName,
+                  }))} />
                 </>
               )}
             </Popup>
