@@ -68,6 +68,15 @@ function useIsDark() {
  */
 const НАШ_ЦВЕТ = '#3b82f6'
 
+/**
+ * Размер точки на карте постоянный и не зависит от того, сколько станций стоит
+ * рядом. Маркер, растущий по числу соседей, превращает карту в диаграмму пузырей:
+ * круги наезжают друг на друга, и вместо сети человек видит скопления. Густота
+ * читается количеством точек — их становится больше при приближении.
+ */
+const ТОЧКА_РЫНКА = 3.5
+const ТОЧКА_НАША = 4.5
+
 /** Разрез нашей станции — кольцом вокруг синей заливки: состояние, загрузка,
  *  срывы, деньги. Один слой отвечает на разные вопросы, не превращаясь в четыре
  *  карты и не теряя принадлежности. */
@@ -135,11 +144,20 @@ function ourPinIcon(ring: string): DivIcon {
   })
 }
 
-/** Подсказка нашего объекта: одна на оба вида маркера — знак и кружок. */
+/**
+ * Подсказка нашего объекта: одна на оба вида маркера — знак и кружок.
+ *
+ * Подписываем именем компании, а не словом «наш объект»: на одной карте рядом
+ * стоят наши станции из своего реестра и они же из выгрузки рынка, где оператор
+ * назван «РусГидро». Две разные подписи об одном и том же читались как две разные
+ * сети (замечание МАГа 13.09.2026).
+ */
 function OurPopupBody({ p }: { p: OurMapPoint }) {
+  const { company } = useCompany()
+  const мы = company.shortName || company.name || 'наш объект'
   return (
     <>
-      <b>{p.name}</b> · наш объект<br />
+      <b>{p.name}</b> · {мы}<br />
       {p.city ?? ''}{p.brand ? ` · ${p.brand}` : ''}
       {p.powerKwt ? ` · ${p.powerKwt} кВт` : ''}
       {p.ports ? ` · ${p.ports} портов` : ''}<br />
@@ -240,14 +258,17 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
         }
         return (
           <CircleMarker key={c.key} center={[c.lat, c.lon]}
-            radius={one ? 6 : Math.min(16, 6 + Math.log2(c.items.length) * 2.5)}
+            radius={ТОЧКА_НАША}
             pathOptions={{ color: ring, fillColor: НАШ_ЦВЕТ, fillOpacity: 0.95,
-                           weight: ring === НАШ_ЦВЕТ ? 1.5 : 3 }}>
+                           weight: ring === НАШ_ЦВЕТ ? 1 : 2 }}>
             <Popup>
               {one ? (
                 <OurPopupBody p={one} />
               ) : (
-                <><b>{c.items.length} наших объектов</b><br />приблизьте, чтобы разделить</>
+                <>
+                  <b>{c.items.length} объектов</b> в этом месте<br />
+                  приблизьте, чтобы увидеть каждый
+                </>
               )}
             </Popup>
           </CircleMarker>
@@ -259,8 +280,8 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
         const age = one ? ageLabel(one.price?.observedOn ?? one.lastSeenAt) : null
         return (
           <CircleMarker key={c.key} center={[c.lat, c.lon]}
-            radius={one ? 5 : Math.min(18, 6 + Math.log2(c.items.length) * 2.5)}
-            pathOptions={{ color, fillColor: color, fillOpacity: 0.8, weight: 1 }}>
+            radius={ТОЧКА_РЫНКА}
+            pathOptions={{ color, fillColor: color, fillOpacity: 0.85, weight: 0.5 }}>
             <Popup>
               {one ? (
                 <>
@@ -269,7 +290,7 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
                       видит на карте точку с адресом своего объекта и не понимает,
                       чья она: две записи об одном объекте выглядят как две
                       станции. */}
-                  {one.isOurs && <> · <span style={{ color: '#3b82f6' }}>наша станция, так её видит рынок</span></>}
+                  {one.isOurs && <> · <span style={{ color: НАШ_ЦВЕТ }}>наша станция, так её видит рынок</span></>}
                   <br />
                   {SITE_KIND_LABEL[one.kind]}{one.operatorName ? ` · ${one.operatorName}` : ''}<br />
                   {one.price?.value != null
@@ -277,7 +298,10 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
                     : <>цена не наблюдалась</>}
                 </>
               ) : (
-                <><b>{c.items.length} точек рынка</b><br />приблизьте, чтобы разделить</>
+                <>
+                  <b>{c.items.length} точек рынка</b> в этом месте<br />
+                  приблизьте, чтобы увидеть каждую
+                </>
               )}
             </Popup>
           </CircleMarker>
@@ -404,7 +428,8 @@ function MarketMap() {
 
 /** Реестр точек рынка: что известно и насколько это свежо. */
 function MarketSites() {
-  const { companyId } = useCompany()
+  const { companyId, company } = useCompany()
+  const мы = company.shortName || company.name || 'наш'
   const [kind, setKind] = useState('all')
   const [q, setQ] = useState('')
   // Ищет сервер, а не браузер. Прежде список брал первую страницу в 5 000 строк и
@@ -524,7 +549,14 @@ function MarketSites() {
                   <tr key={s.id} className="border-t border-border/60 hover:bg-accent/30">
                     <td className="p-2">
                       <span className="font-medium text-foreground">{s.name}</span>
-                      {s.isOurs && <span className="ml-2 rounded border border-primary/40 px-1 text-xs text-primary">наш</span>}
+                      {/* Имя компании, а не слово «наш»: в соседней колонке у той
+                          же строки стоит оператор «РусГидро», и две подписи об
+                          одном объекте сбивают. */}
+                      {s.isOurs && (
+                        <span className="ml-2 rounded border border-primary/40 px-1 text-xs text-primary">
+                          {мы}
+                        </span>
+                      )}
                       {s.address && <div className="text-xs text-muted-foreground">{s.address}</div>}
                     </td>
                     <td className="p-2 text-muted-foreground">{SITE_KIND_LABEL[s.kind as MarketSiteKind]}</td>

@@ -1,13 +1,19 @@
 /**
- * Склейка точек карты по расстоянию В ПИКСЕЛЯХ — по тому, что видит глаз.
+ * Прореживание точек карты по расстоянию В ПИКСЕЛЯХ — по тому, что видит глаз.
  *
- * Обобщение приёма из карты «Топлива» (`FuelMapPanel`): на обзорном плане точки,
- * стоящие в паре километров, физически не могут не пересечься — сколько ни уменьшай
- * маркер, разводить нечего. Поэтому на дальних масштабах они складываются в один
- * маркер с числом точек, а при приближении расходятся сами.
+ * Точек рынка девять тысяч. Нарисовать их все на обзоре страны нельзя: они лягут
+ * друг на друга, и мышью в них не попасть. Но и раздувать маркер по числу точек
+ * внутри нельзя: круги наезжают один на другой, карта превращается в диаграмму
+ * пузырей, и первое, что видит человек, — не станции, а их скопления (решение
+ * МАГа 13.09.2026).
  *
- * Здесь это нужно ещё и по другой причине: точек рынка девять тысяч, и рисовать их
- * по одной — не карта, а каша, в которую вдобавок не попасть мышью.
+ * Поэтому точка остаётся точкой одного размера, а с масштабом меняется их
+ * КОЛИЧЕСТВО: на каждую клетку пиксельной сетки выводится одна, остальные ждут
+ * приближения. Пропорции плотности сохраняются — где станций гуще, там гуще и
+ * точки.
+ *
+ * Сетка, а не попарный обход: при пяти тысячах точек сравнение каждой с каждой
+ * давало 25 млн операций, и карта замирала на каждом сдвиге.
  */
 import type { Map as LeafletMap } from 'leaflet'
 
@@ -19,8 +25,8 @@ export interface ClusterOf<T> {
 }
 
 /**
- * `radiusPx = 0` отключает склейку: на близком масштабе точки должны стоять каждая
- * на своём месте, иначе пропадает то, ради чего карту и открыли.
+ * `radiusPx = 0` отключает прореживание: на близком масштабе точки должны стоять
+ * каждая на своём месте, иначе пропадает то, ради чего карту и открыли.
  */
 export function clusterPoints<T>(
   map: LeafletMap,
@@ -35,49 +41,32 @@ export function clusterPoints<T>(
       return { key: getKey(item), lat, lon, items: [item] }
     })
   }
-  const out: ClusterOf<T>[] = []
-  const used = new Set<string>()
+  const cell = Math.max(1, radiusPx)
+  const grid = new Map<string, ClusterOf<T>>()
   for (const point of points) {
-    const key = getKey(point)
-    if (used.has(key)) continue
-    used.add(key)
     const [lat, lon] = getLatLon(point)
-    const base = map.latLngToLayerPoint([lat, lon])
-    const group: T[] = [point]
-    for (const other of points) {
-      const otherKey = getKey(other)
-      if (used.has(otherKey)) continue
-      const [oLat, oLon] = getLatLon(other)
-      if (base.distanceTo(map.latLngToLayerPoint([oLat, oLon])) <= radiusPx) {
-        used.add(otherKey)
-        group.push(other)
-      }
+    const pixel = map.latLngToLayerPoint([lat, lon])
+    const cellKey = `${Math.round(pixel.x / cell)}:${Math.round(pixel.y / cell)}`
+    const found = grid.get(cellKey)
+    if (found) {
+      // Соседи по клетке не пропадают: они лежат в `items`, и подсказка говорит,
+      // сколько станций ждёт приближения.
+      found.items.push(point)
+      continue
     }
-    // Центр группы — среднее её точек: так маркер стоит там, где скопление, а не
-    // на случайной первой станции.
-    const sum = group.reduce(
-      (acc, item) => {
-        const [gLat, gLon] = getLatLon(item)
-        return [acc[0] + gLat, acc[1] + gLon] as [number, number]
-      },
-      [0, 0] as [number, number],
-    )
-    out.push({
-      key: `c:${key}`,
-      lat: sum[0] / group.length,
-      lon: sum[1] / group.length,
-      items: group,
-    })
+    // Точка клетки — первая попавшая, а не среднее её соседей: маркер должен
+    // стоять на реальной станции, иначе при приближении он «отъезжает» с места.
+    grid.set(cellKey, { key: getKey(point), lat, lon, items: [point] })
   }
-  return out
+  return [...grid.values()]
 }
 
 /**
- * Радиус склейки от масштаба: чем дальше, тем крупнее «пятачок». Ниже 30 px не
- * опускаемся — столько занимает сам маркер с обводкой; с 12-го масштаба склейки
- * нет вовсе.
+ * Шаг сетки прореживания от масштаба. Он чуть больше самой точки, чтобы соседние
+ * не слипались, но и только: чем мельче шаг, тем больше станций на экране. С
+ * 12-го масштаба прореживания нет вовсе — там видно каждую.
  */
 export function clusterRadiusForZoom(zoom: number): number {
   if (zoom >= 12) return 0
-  return Math.max(30, 70 - (zoom - 4) * 7)
+  return Math.max(10, 20 - (zoom - 4) * 1.2)
 }
