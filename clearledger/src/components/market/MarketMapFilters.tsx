@@ -59,12 +59,21 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 /** Флажок слоя: имя рядом с цветом — цвет один состояние не называет. */
-function LayerToggle({ on, onChange, color, label, count }: {
+/**
+ * Переключатель слоя карты.
+ *
+ * У каждого слоя есть пояснение: названия вроде «независимые точки» и «точки
+ * притяжения» понятны тому, кто знает, как устроен приём выгрузки, и загадочны
+ * всем остальным. Пояснение живёт в подсказке при наведении и в строке под
+ * слоями — вопрос «а что это вообще» не должен требовать похода к разработчику
+ * (замечание МАГа 13.09.2026).
+ */
+function LayerToggle({ on, onChange, color, label, count, hint }: {
   on: boolean; onChange: (v: boolean) => void
-  color: string; label: string; count?: number
+  color: string; label: string; count?: number; hint: string
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+    <label className="flex cursor-pointer items-center gap-1.5 text-xs" title={hint}>
       <input type="checkbox" className="size-4" checked={on}
         onChange={(e) => onChange(e.target.checked)} />
       <i className="size-2 rounded-full" style={{ background: color }} aria-hidden />
@@ -97,19 +106,35 @@ export function MarketMapFilters({
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <LayerToggle on={filters.showOurs} onChange={(v) => set({ showOurs: v })}
-          color="#3b82f6" label="наши станции" count={counts.ours} />
+          color="#3b82f6" label="наши станции" count={counts.ours}
+          hint="Объекты нашей сети из нашего же реестра, с нашими показателями работы" />
         <LayerToggle on={filters.showRivals} onChange={(v) => set({ showRivals: v })}
-          color="#ef4444" label="сети конкурентов" count={counts.rivals} />
+          color="#ef4444" label="чужие сети" count={counts.rivals}
+          hint="Точки, у которых в выгрузке указан оператор — то есть за ними стоит сеть. Наши из этого слоя исключены" />
         <LayerToggle on={filters.showIndependent} onChange={(v) => set({ showIndependent: v })}
-          color="#f59e0b" label="независимые точки" count={counts.independent} />
+          color="#f59e0b" label="одиночные зарядки" count={counts.independent}
+          hint="Публичные зарядки без указанного владельца: кто-то поставил и открыл для всех, сети за ними нет. В предложении территории они есть, в сравнении сетей — нет" />
         <LayerToggle on={filters.showOursOnMarket}
           onChange={(v) => set({ showOursOnMarket: v })}
-          color="#3b82f6" label="наши глазами рынка" count={counts.oursOnMarket} />
+          color="#3b82f6" label="наши в реестре рынка" count={counts.oursOnMarket}
+          hint="Наши же станции, найденные во внешней выгрузке: так нас видит водитель в чужом приложении. Свой слой показывает те же объекты полнее" />
         <LayerToggle on={filters.showHome} onChange={(v) => set({ showHome: v })}
-          color="#a78bfa" label="домашние розетки" count={counts.home} />
+          color="#a78bfa" label="домашние розетки" count={counts.home}
+          hint="Бытовые розетки у домов: рынком не считаются, в доли не входят" />
         <LayerToggle on={filters.showAttractors} onChange={(v) => set({ showAttractors: v })}
-          color="#94a3b8" label="точки притяжения" count={counts.attractors} />
+          color="#94a3b8" label="места притяжения" count={counts.attractors}
+          hint="Торговые центры, парковки, АЗС — места, куда приезжают не заряжаться, но где зарядка была бы кстати. В выгрузке рынка их нет: она содержит только зарядки" />
       </div>
+
+      {/* Одна строка вместо похода к разработчику: что за слои и почему числа
+          такие. Числа — по видимой области карты, а не по всей стране. */}
+      <p className="text-xs text-muted-foreground">
+        Числа — по видимому куску карты. Сеть определяется по тому, указан ли у точки
+        оператор; без него публичная зарядка считается одиночной. Источник ведёт
+        отдельной записью каждый пост, а не площадку: в 79 местах их от двух до
+        одиннадцати в одной координате — это не дубли, а соседние посты.
+        {counts.attractors === 0 && ' Мест притяжения в выгрузке нет — она содержит только зарядки.'}
+      </p>
 
       <div className="grid gap-2 border-t border-border/60 pt-2 md:grid-cols-2">
         <div className="space-y-1">
