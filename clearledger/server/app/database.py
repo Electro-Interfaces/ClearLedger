@@ -2757,6 +2757,7 @@ async def create_all() -> None:
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_source VARCHAR(20)",
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_id TEXT",
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_ref VARCHAR(64)",
+            "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS poster_url TEXT",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_msg_external "
             "ON chat_messages (room_id, external_id) WHERE external_id IS NOT NULL",
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS file_url TEXT",

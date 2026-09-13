@@ -7445,6 +7445,10 @@ class ChatMessage(Base):
     file_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     file_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Кадр из видео (/api/files/<id>): лента показывает его сразу, а сам файл на
+    # десятки мегабайт грузится только по нажатию. Без кадра на месте видео висело
+    # пустое место, пока качались все ролики ленты разом (МАГ, 13.09.2026).
+    poster_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     reply_to: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True
     )

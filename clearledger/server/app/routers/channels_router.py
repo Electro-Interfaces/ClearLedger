@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -419,6 +419,36 @@ async def _run_channel_background(
                 date_from, date_to, (fu.get("shifts") or {}).get("recovered"), fu.get("tx_created"))
         except Exception:  # noqa: BLE001 — доводка не меняет статус прогона
             logging.getLogger("clearledger.channel").exception("Доводка продаж не удалась")
+
+
+@router.post("/{channel_id}/upload")
+async def upload_to_channel(
+    channel_id: uuid.UUID,
+    file: UploadFile,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Положить файл в канал — как вложение, а не как настройку.
+
+    Раньше это делалось двумя шагами фронта: `POST /api/intake` (файл) и
+    `PATCH /api/channels/{id}` (записать `config.uploadFileId`). Второй шаг
+    требует прав администратора компании, потому что тем же запросом меняются
+    расписание, шаблон и правила, — и регулярная загрузка выгрузки превращалась
+    в администраторскую операцию. Сотрудник, который ведёт данные, админом быть
+    не обязан: здесь он меняет ровно одно — какой файл обрабатывать.
+    """
+    from app.routers.intake_router import upload_file
+
+    ch = await get_owned(Channel, channel_id, current_user, db)
+    res = await upload_file(file=file, company_id=str(ch.company_id), purpose="data",
+                            db=db, current_user=current_user)
+    src_id = res["source_id"] if isinstance(res, dict) else getattr(res, "source_id", None)
+    ch.config = {**(ch.config or {}),
+                 "uploadFileId": str(src_id),
+                 "uploadFileName": file.filename or "файл"}
+    await db.flush()
+    await db.commit()
+    return {"source_id": str(src_id), "file_name": ch.config["uploadFileName"]}
 
 
 @router.post("/{channel_id}/run")

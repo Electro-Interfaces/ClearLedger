@@ -245,6 +245,17 @@ export async function createChannel(data: {
   return channel
 }
 
+/** Положить файл в канал: одна операция вместо «загрузить + переписать настройку».
+ *  Настройка канала админская, а регулярная загрузка выгрузки — работа, и человек,
+ *  который её ведёт, администратором быть не обязан. */
+export async function uploadChannelFile(
+  channelId: string, file: File,
+): Promise<{ source_id: string; file_name: string }> {
+  const fd = new FormData()
+  fd.append('file', file)
+  return upload<{ source_id: string; file_name: string }>(`/api/channels/${channelId}/upload`, fd)
+}
+
 export async function updateChannel(id: string, updates: Partial<Channel>): Promise<Channel | undefined> {
   if (isApiEnabled()) {
     const body: Record<string, unknown> = {}

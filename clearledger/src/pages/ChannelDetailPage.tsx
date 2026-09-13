@@ -15,8 +15,8 @@ import { Progress } from '@/components/ui/progress'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
-import { getChannel, loadChannels, updateChannel, addSourceToChannel, removeSourceFromChannel, runChannel, getChannelRunStatus, getChannelRuns, type ChannelRun, type ChannelRunStatus } from '@/services/channelService'
-import { uploadTableFile, getNomenclature, getWarehouses, getCounterparties } from '@/services/referenceService'
+import { getChannel, loadChannels, updateChannel, uploadChannelFile, addSourceToChannel, removeSourceFromChannel, runChannel, getChannelRunStatus, getChannelRuns, type ChannelRun, type ChannelRunStatus } from '@/services/channelService'
+import { getNomenclature, getWarehouses, getCounterparties } from '@/services/referenceService'
 import { enrichChargeSessions, reenrichChargeSessions } from '@/services/chargeSessionsService'
 import { getSources, loadSources } from '@/services/sourceService'
 import { listMappings, createMapping, deleteMapping, type ReconcileMapping, type MappingKind } from '@/services/mappingService'
@@ -422,8 +422,10 @@ function ManualTableCard({ channel }: { channel: Channel }) {
     setBusy(true)
     try {
       if (file && runMode !== 'all') {
-        const r = await uploadTableFile(companyId, file)
-        await updateChannel(channel.id, { config: { ...channel.config, uploadFileId: r.source_id } })
+        // Одной операцией: файл едет в канал и становится тем, что обрабатывается.
+        // Раньше здесь был `updateChannel`, а он требует прав администратора
+        // компании — регулярную загрузку выгрузки это делало админской работой.
+        await uploadChannelFile(channel.id, file)
         toast.success('Таблица загружена (L1)')
       }
       // Прогон идёт В ФОНЕ (эндпоинт сразу возвращает running) — поллим статус до

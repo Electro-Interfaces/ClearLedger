@@ -598,6 +598,8 @@ class MessageOut(BaseModel):
     fileUrl: str | None = None
     fileName: str | None = None
     fileSize: int | None = None
+    # Кадр видео для ленты: показывается до того, как файл вообще начали качать.
+    posterUrl: str | None = None
     replyTo: str | None = None
     replyPreview: str | None = None
     replyAuthor: str | None = None
@@ -638,6 +640,7 @@ class SendMessageBody(BaseModel):
     fileUrl: str | None = None
     fileName: str | None = None
     fileSize: int | None = None
+    posterUrl: str | None = None
     mentions: list[str] = Field(default_factory=list)
 
 
@@ -1028,6 +1031,7 @@ def _msg_out(m: ChatMessage, read_count: int, reply: ChatMessage | None,
         fileUrl=None if deleted else m.file_url,
         fileName=None if deleted else m.file_name,
         fileSize=None if deleted else m.file_size,
+        posterUrl=None if deleted else m.poster_url,
         replyTo=str(m.reply_to) if m.reply_to else None,
         replyPreview=(None if not reply or reply.deleted_at else reply.content[:120]),
         replyAuthor=(None if not reply else reply.user_name),
@@ -1185,6 +1189,7 @@ async def send_message(
         type=mtype, content=content, reply_to=reply_to,
         file_url=body.fileUrl or None, file_name=body.fileName or None,
         file_size=body.fileSize if isinstance(body.fileSize, int) else None,
+        poster_url=body.posterUrl or None,
     )
     db.add(msg)
     room.updated_at = _now()
@@ -2281,6 +2286,7 @@ async def forward_message(
             room_id=rid, user_id=current_user.id, user_name=current_user.name,
             type=src.type, content=src.content, forwarded_from=origin,
             file_url=src.file_url, file_name=src.file_name, file_size=src.file_size,
+            poster_url=src.poster_url,
         )
         db.add(msg)
         room.updated_at = _now()

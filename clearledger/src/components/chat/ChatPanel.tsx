@@ -13,6 +13,7 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { videoHasAudio } from '@/lib/videoAudio'
+import { makeVideoPoster } from '@/lib/videoPoster'
 import {
   MessageCircle, Send, Search, User as UserIcon, Building2, Users, Plus,
   ChevronLeft, ChevronRight, FileText, MoreVertical, Archive, ArchiveRestore,
@@ -1948,7 +1949,8 @@ function ChatBubble({
             </div>
           ) : message.fileUrl ? (
             isVideo ? (
-              <AuthVideo path={message.fileUrl} className="mt-1 max-w-[280px] rounded" />
+              <AuthVideo path={message.fileUrl} poster={message.posterUrl} name={message.fileName}
+                size={message.fileSize} className="mt-1 w-[min(280px,70vw)]" />
             ) : isImage ? (
               <button type="button" className="mt-1 block" onClick={() => onImageClick?.(message.fileUrl!)}>
                 <AuthImage path={message.fileUrl} alt={message.fileName || 'Изображение'} className="max-h-[180px] max-w-[240px] rounded object-cover" />
@@ -2315,11 +2317,21 @@ export function ChatPanel({ compact, scopeProduct }: {
   // ── мутации ──
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
-      let uploaded: { fileUrl: string; fileName: string; fileSize: number }[] = []
+      let uploaded: { fileUrl: string; fileName: string; fileSize: number; posterUrl?: string }[] = []
       if (pendingFiles.length && selectedRoom) {
         setUploading(true)
         try {
-          uploaded = await Promise.all(pendingFiles.map((f) => chat.uploadAttachment(f, user?.default_company_id)))
+          uploaded = await Promise.all(pendingFiles.map(async (f) => {
+            const up = await chat.uploadAttachment(f, user?.default_company_id)
+            // Кадр снимаем здесь, у автора: файл уже в руках браузера, а Ядро видео
+            // не декодирует. Без кадра лента показывает пустое место, пока качается
+            // весь ролик — десятки мегабайт на каждое сообщение.
+            if (!/\.(mp4|webm|mov|m4v)$/i.test(f.name)) return up
+            const кадр = await makeVideoPoster(f)
+            if (!кадр) return up
+            const постер = await chat.uploadAttachment(кадр, user?.default_company_id)
+            return { ...up, posterUrl: постер.fileUrl }
+          }))
         } finally { setUploading(false) }
       }
       const typeOf = (name: string) =>
@@ -2333,6 +2345,7 @@ export function ChatPanel({ compact, scopeProduct }: {
         fileUrl: uploaded[0]?.fileUrl,
         fileName: uploaded[0]?.fileName,
         fileSize: uploaded[0]?.fileSize,
+        posterUrl: uploaded[0]?.posterUrl,
         replyTo: replyTo?.id,
         mentions: mentions.length ? mentions : undefined,
       })
@@ -2342,7 +2355,7 @@ export function ChatPanel({ compact, scopeProduct }: {
       const failed: File[] = []
       for (const [i, f] of uploaded.slice(1).entries()) {
         try {
-          await chat.sendMessage(selectedRoom!, { content: '', type: typeOf(f.fileName), fileUrl: f.fileUrl, fileName: f.fileName, fileSize: f.fileSize })
+          await chat.sendMessage(selectedRoom!, { content: '', type: typeOf(f.fileName), fileUrl: f.fileUrl, fileName: f.fileName, fileSize: f.fileSize, posterUrl: f.posterUrl })
         } catch { failed.push(pendingFiles[i + 1]) }
       }
       return { first, failed }

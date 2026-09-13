@@ -98,6 +98,8 @@ export interface ChatMessage {
   fileUrl: string | null
   fileName: string | null
   fileSize: number | null
+  /** Кадр видео: лента показывает его, пока сам ролик не запросили. */
+  posterUrl: string | null
   replyTo: string | null
   replyPreview: string | null
   replyAuthor: string | null
@@ -166,6 +168,7 @@ export interface SendPayload {
   fileUrl?: string
   fileName?: string
   fileSize?: number
+  posterUrl?: string
   mentions?: string[]
 }
 
