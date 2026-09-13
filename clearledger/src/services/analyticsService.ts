@@ -356,6 +356,13 @@ export interface ChargeDimensionStation {
   connectors: string[]
   /** working | no_link | decommissioned | disabled | not_working | unknown. */
   opStatus: string | null
+  /** Владелец ЭЗС: по нему различают свои станции, партнёрские и арендованные. */
+  owner: string | null
+  /** Версия протокола OCPP и модель оборудования — из паспорта станции. */
+  protocol: string | null
+  model: string | null
+  /** Режим доступа к станции (публичная, по карте, закрытая). */
+  access: string | null
   /** active | closed — жизненный цикл объекта. */
   lifecycle: string | null
   corp: boolean

@@ -1404,6 +1404,13 @@ class AnalyticsService:
                 "opStatus": loc.operational_status,
                 "lifecycle": loc.status,
                 "corp": bool(loc.is_corp),
+                # Владелец, протокол и модель — из паспорта АСУ ЭЗС. Владелец
+                # отвечает на «наши / партнёрские / сданные в аренду», которого
+                # в фильтре не было вовсе (Чурилов, 12.09.2026).
+                "owner": (loc.owner or "").strip() or None,
+                "protocol": (loc.ocpp_protocol or "").strip() or None,
+                "model": (loc.model or "").strip() or None,
+                "access": (loc.access_type or "").strip() or None,
             }
         # Коды, по которым сессии есть, а объекта в реестре нет: показать их
         # обязательно — иначе часть выручки не выбирается никаким фильтром.
@@ -1418,6 +1425,7 @@ class AnalyticsService:
                 "speed": None, "placement": None, "brand": None, "power": None,
                 "ports": None, "connectors": [], "opStatus": None,
                 "lifecycle": None, "corp": False,
+                "owner": None, "protocol": None, "model": None, "access": None,
             }
 
         # Регион — из справочника (единый источник), чтобы список фильтра совпадал

@@ -24,6 +24,11 @@ export interface FacetStation {
   opStatus: string | null
   lifecycle: string | null
   corp: boolean
+  /** Владелец ЭЗС из паспорта: наши, партнёрские, сданные в аренду. */
+  owner?: string | null
+  /** Модель оборудования и версия протокола OCPP — паспорт АСУ ЭЗС. */
+  model?: string | null
+  protocol?: string | null
 }
 
 /** Значения, которого в паспорте нет: отдельная строка фасета, а не «спрятать станцию». */
@@ -58,6 +63,7 @@ export function powerBucket(power: number | null): string {
 export type GroupKey =
   | 'region' | 'city' | 'speed' | 'placement' | 'brand'
   | 'power' | 'connector' | 'opStatus' | 'lifecycle' | 'corp' | 'activity'
+  | 'owner' | 'protocol' | 'model'
 
 export interface FacetGroupDef {
   key: GroupKey
@@ -107,9 +113,27 @@ export const FACET_GROUPS: FacetGroupDef[] = [
     labelOf: (v) => PLACEMENT_LABELS[v] ?? 'Размещение не размечено',
   },
   {
+    // Владелец отвечает на вопрос «наши, партнёрские или сданные в аренду»:
+    // отдельного признака принадлежности в паспорте нет, а владелец есть у
+    // каждой станции (Чурилов, 12.09.2026).
+    key: 'owner', label: 'Владелец', head: 6, alpha: true,
+    valuesOf: (s) => [s.owner?.trim() || UNSET],
+    labelOf: (v) => (v === UNSET ? 'Владелец не указан' : v),
+  },
+  {
     key: 'brand', label: 'Производитель', head: 6, alpha: true,
     valuesOf: (s) => [s.brand?.trim() || UNSET],
     labelOf: (v) => (v === UNSET ? 'Производитель не указан' : v),
+  },
+  {
+    key: 'model', label: 'Модель', head: 5, alpha: true,
+    valuesOf: (s) => [s.model?.trim() || UNSET],
+    labelOf: (v) => (v === UNSET ? 'Модель не указана' : v),
+  },
+  {
+    key: 'protocol', label: 'Протокол', head: 5,
+    valuesOf: (s) => [s.protocol?.trim() || UNSET],
+    labelOf: (v) => (v === UNSET ? 'Протокол не указан' : v),
   },
   {
     key: 'power', label: 'Мощность', order: [...POWER_BUCKETS.map((b) => b.key), UNSET],
