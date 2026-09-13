@@ -21,7 +21,7 @@
  * Разрез включён только у профиля `energy` (сеть ЭЗС). У топливного профиля (ГИГ) состав
  * другой — там «Учёт» остаётся единым продуктом со всеми разделами, как раньше.
  */
-import { Building2, Calculator, Map, Megaphone, Network, Stethoscope, type LucideIcon } from 'lucide-react'
+import { Building2, Calculator, Map, Network, Stethoscope, type LucideIcon } from 'lucide-react'
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import { navByPath, oneCItems, type NavItemDef } from './navigation'
 
@@ -307,12 +307,6 @@ export const PRODUCT_SETUP_NOTE: Record<string, {
     title: 'Диагностика — в подключении',
     description: 'Как работает система: состояние служб и интеграций, очереди и ошибки '
       + 'загрузки, свежесть данных, отчёты для разбора инцидентов.',
-  },
-  marketing: {
-    icon: Megaphone,
-    title: 'Маркетинг — в подключении',
-    description: 'Кампании, акции и сегменты под рассылку. Сегментация сети (ABC-XYZ, '
-      + 'динамика) и Яндекс.Метрика пока живут в «Продажах».',
   },
   netlink: {
     icon: Network,
