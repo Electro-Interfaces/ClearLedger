@@ -1433,6 +1433,63 @@ async def market_site_score(
 
     around = rivals_around(lat, lon)
     alive_rivals = sum(1 for r in around if r["alive"])
+
+    # ── где это вообще ──
+    # Геокодера у нас нет, поэтому регион и город берутся у БЛИЖАЙШЕЙ известной
+    # точки: рынка или нашей. Это не адрес места, а ответ на «в какой мы
+    # территории» — для парка машин и обеспеченности его достаточно, и экран
+    # честно говорит, по какой точке определено.
+    ближайшая = None
+    ближе_км = None
+    for site in sites:
+        d = _distance_km(lat, lon, float(site.latitude), float(site.longitude))
+        if ближе_км is None or d < ближе_км:
+            ближе_км, ближайшая = d, site
+    area_region = canon_region(ближайшая.region) if ближайшая else None
+    area_city = canon_city(ближайшая.city) if ближайшая else None
+
+    area: dict[str, Any] = {
+        "region": area_region, "city": area_city,
+        "byPointKm": round(ближе_км, 1) if ближе_км is not None else None,
+        "byPointName": ближайшая.name if ближайшая else None,
+    }
+
+    if area_region:
+        # Парк машин региона: публикуется не везде, и там, где его нет,
+        # обеспеченность не считается — вместо числа идёт «не публикуется».
+        stat = (await db.execute(select(MarketRegionStat).where(
+            MarketRegionStat.company_id == cid))).scalars().all()
+        свой = next((st for st in stat
+                     if (canon_region(st.region) or st.region) == area_region), None)
+        area["evCars"] = свой.ev_cars if свой else None
+        area["evSource"] = свой.source if свой else None
+        area["evAsOf"] = свой.as_of if свой else None
+
+        # Рынок региона целиком: сколько точек и сколько из них заряжали.
+        region_sites = [x for x in sites
+                        if (canon_region(x.region) or x.region) == area_region]
+        area["marketSites"] = len(region_sites)
+        area["marketAlive"] = sum(
+            1 for x in region_sites
+            if x.last_session_at and x.last_session_at >= alive_since)
+        area["carsPerAlive"] = (round(свой.ev_cars / area["marketAlive"], 1)
+                                if свой and свой.ev_cars and area["marketAlive"] else None)
+
+        # Наша сеть в этом регионе — по паспорту объекта, а не по расстоянию.
+        regions_by_id = dict((rid, name) for rid, name in (await db.execute(
+            select(Region.id, Region.name).where(Region.company_id == cid))).all())
+        наши_региона = [rid for (rid,) in (await db.execute(
+            select(ServiceLocation.region_id).where(
+                ServiceLocation.company_id == cid,
+                ServiceLocation.is_test.is_(False)))).all()
+            if (canon_region(regions_by_id.get(rid)) or '') == area_region]
+        area["ourSites"] = len(наши_региона)
+
+        # Что уже строим здесь: место может быть занято собственной работой.
+        in_work = await _projects_in_work(db, cid, level="region")
+        work = in_work.get(area_region.strip().lower())
+        area["projectsInWork"] = work["projects"] if work else 0
+        area["projectNumbers"] = work["numbers"] if work else []
     market_price = _median([r["pricePerKwh"] for r in around if r["pricePerKwh"] is not None])
 
     # Каннибализация: чей кусок мы съедим, если встанем здесь.
@@ -1566,6 +1623,7 @@ async def market_site_score(
                       f"присоединение посчитано по {len(tp_costs)} значениям, "
                       f"свободная мощность по {len(free_power)}"),
         },
+        "area": area,
         "rivals": {"total": len(around), "alive": alive_rivals,
                    "ports": sum(r["ports"] or 0 for r in around),
                    "marketPricePerKwh": market_price, "list": around[:20]},

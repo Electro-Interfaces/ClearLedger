@@ -25,7 +25,7 @@ import { MapContainer, Circle, Marker, Popup, AttributionControl,
 import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import 'leaflet/dist/leaflet.css'
-import { Crosshair, Loader2, RotateCcw, X } from 'lucide-react'
+import { Crosshair, Loader2, Maximize2, Minimize2, RotateCcw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
@@ -169,10 +169,14 @@ export function MarketSiteScorePanel() {
   // оказывается новое место со старым расчётом.
   const [показан, setПоказан] = useState<Оценка | null>(null)
   const [сохранённые, setСохранённые] = useState<Оценка[]>([])
+  // Разбор места — работа на весь стол: карта, окружение, территория и прогноз
+  // смотрятся вместе. В рабочей области между рельсой и фильтрами на это остаётся
+  // половина экрана (МАГ, 13.09.2026).
+  const [весьЭкран, setВесьЭкран] = useState(false)
   // Четыре разреза оценки лежали друг под другом, и до прогноза приходилось
   // прокручивать мимо трёх карточек. Теперь это табы одной области: перебор
   // быстрый, а на ярлыке стоит число — видно, где смотреть (МАГ, 13.09.2026).
-  const [вид, setВид] = useState<string>('rivals')
+  const [вид, setВид] = useState<string>('area')
   const mapLayers = useMapLayers()
   const isDark = useIsDark()
 
@@ -233,6 +237,7 @@ export function MarketSiteScorePanel() {
 
   // Число на ярлыке отвечает на «есть ли там что смотреть» до переключения.
   const виды = score ? [
+    { k: 'area', label: 'Территория' },
     { k: 'rivals', label: `Кто рядом · ${score.rivals.total}` },
     { k: 'cannibal', label: `Что съедим · ${score.cannibalization.ourNearby}` },
     { k: 'entry', label: `Чего стоит вход · ${score.entry.projectsNearby}` },
@@ -249,7 +254,9 @@ export function MarketSiteScorePanel() {
         + `(половина из них — от ${nf.format(f?.sessionsLow ?? 0)} до ${nf.format(f?.sessionsHigh ?? 0)} сессий).`
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div className={весьЭкран
+      ? 'fixed inset-0 z-50 flex min-h-0 flex-col gap-3 overflow-auto bg-background p-4'
+      : 'flex h-full min-h-0 flex-col gap-3 p-4'}>
       {/* ── Условия: что и как оцениваем ───────────────────────────────── */}
       <Card>
         <CardContent className="space-y-3 p-3">
@@ -315,6 +322,13 @@ export function MarketSiteScorePanel() {
                   <RotateCcw className="mr-1.5 size-3.5" aria-hidden /> Другое место
                 </Button>
               )}
+              <Button size="sm" variant="outline" className="h-8"
+                onClick={() => setВесьЭкран((v) => !v)}
+                title={весьЭкран ? 'Вернуть в рабочую область' : 'Развернуть на весь экран'}>
+                {весьЭкран
+                  ? <><Minimize2 className="mr-1.5 size-3.5" aria-hidden /> Свернуть</>
+                  : <><Maximize2 className="mr-1.5 size-3.5" aria-hidden /> Во весь экран</>}
+              </Button>
             </div>
           </div>
 
@@ -347,10 +361,11 @@ export function MarketSiteScorePanel() {
       </Card>
 
       {/* ── Оценённые места: вернуться и сравнить ──────────────────────── */}
+      {/* Компактной строкой, а не полосой во всю ширину: это навигация между
+          вариантами, а не раздел. */}
       {сохранённые.length > 0 && (
-        <Card>
-          <CardContent className="flex flex-wrap items-center gap-2 p-3">
-            <span className="text-xs text-muted-foreground">Оценено в этой работе:</span>
+        <div className="flex flex-wrap items-center gap-1.5 px-1">
+          <span className="text-xs text-muted-foreground">Оценено:</span>
             {сохранённые.map((о) => {
               const активна = показан?.id === о.id
               const сессии = о.score.forecast?.sessionsPerPeriod
@@ -377,8 +392,7 @@ export function MarketSiteScorePanel() {
                 </span>
               )
             })}
-          </CardContent>
-        </Card>
+        </div>
       )}
 
       <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[3fr_2fr]">
@@ -437,6 +451,86 @@ export function MarketSiteScorePanel() {
 
               <PanelViewTabs tabs={виды} value={вид} onChange={setВид} label={null}
                 ariaLabel="Разрезы оценки площадки" />
+
+              {вид === 'area' && (
+              <Card>
+                <CardContent className="space-y-3 p-4">
+                  {/* Соседние станции отвечают на «кто рядом», территория — на «что
+                      это за место вообще»: сколько там машин, насколько плотен рынок
+                      и не строим ли мы уже тут. Без второго решение принимают,
+                      глядя в радиус пяти километров. */}
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-sm font-medium">
+                      {score.area.city ?? 'город не определён'}
+                      {score.area.region && (
+                        <span className="text-muted-foreground"> · {score.area.region}</span>
+                      )}
+                    </span>
+                    {score.area.byPointName && (
+                      <span className="text-xs text-muted-foreground">
+                        определено по точке «{score.area.byPointName.slice(0, 28)}»
+                        {score.area.byPointKm != null && ` в ${nf1.format(score.area.byPointKm)} км`}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-3">
+                    <div>
+                      <div className="text-xs text-muted-foreground">электромобилей в регионе</div>
+                      <div className="text-sm">
+                        {score.area.evCars != null
+                          ? <span className="tabular-nums">{nf.format(score.area.evCars)}</span>
+                          : <span className="text-muted-foreground">не публикуется</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">зарядок в регионе</div>
+                      <div className="text-sm tabular-nums">
+                        {nf.format(score.area.marketSites ?? 0)}
+                        <span className="text-muted-foreground">
+                          {' '}· живых {nf.format(score.area.marketAlive ?? 0)}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">машин на живую зарядку</div>
+                      <div className="text-sm">
+                        {score.area.carsPerAlive != null
+                          ? <span className="tabular-nums">{nf1.format(score.area.carsPerAlive)}</span>
+                          : <span className="text-muted-foreground">парк неизвестен</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">наших объектов в регионе</div>
+                      <div className="text-sm tabular-nums">{nf.format(score.area.ourSites ?? 0)}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-muted-foreground">площадок в работе</div>
+                      <div className="text-sm tabular-nums">
+                        {nf.format(score.area.projectsInWork ?? 0)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {(score.area.projectsInWork ?? 0) > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      В этом регионе уже идут наши площадки
+                      {score.area.projectNumbers?.length
+                        ? `: ${score.area.projectNumbers.slice(0, 4).join(', ')}`
+                        : ''}. Прежде чем считать место новым, стоит посмотреть, не
+                      про него ли они.
+                    </p>
+                  )}
+
+                  {score.area.evSource && (
+                    <p className="text-xs text-muted-foreground">
+                      парк машин: {score.area.evSource}
+                      {score.area.evAsOf && `, данные на ${score.area.evAsOf}`}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+              )}
 
               {вид === 'rivals' && (
               <Card>

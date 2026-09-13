@@ -405,6 +405,20 @@ export interface MarketTerritory {
 
 /** Паспорт места под новую станцию: окружение, каннибализация, прогноз по аналогам. */
 export interface MarketSiteScore {
+  /**
+   * Где это место: регион и город, определённые по ближайшей известной точке
+   * (геокодера у нас нет), и статистика территории — парк машин, рынок целиком,
+   * наша сеть, площадки в работе. Соседние станции отвечают на «кто рядом», а это
+   * на «что за территория» — без второго решение принимают вслепую.
+   */
+  area: {
+    region: string | null; city: string | null
+    byPointKm: number | null; byPointName: string | null
+    evCars?: number | null; evSource?: string | null; evAsOf?: string | null
+    marketSites?: number; marketAlive?: number; carsPerAlive?: number | null
+    ourSites?: number
+    projectsInWork?: number; projectNumbers?: string[]
+  }
   point: { lat: number; lon: number }
   radiusKm: number
   days: number
