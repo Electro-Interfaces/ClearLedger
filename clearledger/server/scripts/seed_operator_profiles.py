@@ -12,7 +12,8 @@ from sqlalchemy import select
 
 from app.database import async_session_factory
 from app.models import Company
-from app.services.market_operators import (ingest_operator_profiles, ingest_players,
+from app.services.market_operators import (ingest_operator_profiles,
+                                           ingest_operator_registry, ingest_players,
                                            ingest_region_stats, ingest_shops, parse_csv)
 
 
@@ -25,6 +26,14 @@ async def main() -> None:
         "players": pathlib.Path("/tmp/ev-market-players.csv"),
         "oem": pathlib.Path("/tmp/ev-oem-players.csv"),
         "shops": pathlib.Path("/tmp/ev-shops.csv"),
+        # Собрано исследованием, но прежде не доезжало до приложения: сводный
+        # реестр на 182 компании, выписки ЕГРЮЛ, телефоны и сайты, операторы,
+        # которых видит только OpenStreetMap, и публичные карточки организаций.
+        "registry": pathlib.Path("/tmp/ev-operator-registry.csv"),
+        "egrul": pathlib.Path("/tmp/ev-operators-egrul.csv"),
+        "contacts": pathlib.Path("/tmp/ev-operators.csv"),
+        "gap": pathlib.Path("/tmp/ev-operators-gap.csv"),
+        "cards": pathlib.Path("/tmp/ev-yandex-cards.csv"),
     }
     data: dict[str, list] = {}
     for key, path in files.items():
@@ -57,6 +66,12 @@ async def main() -> None:
             found = await ingest_players(db, company.id, players=data["players"],
                                          oem=data["oem"])
             print(found["message"])
+
+        if any(data[k] for k in ("registry", "egrul", "contacts", "gap", "cards")):
+            reg = await ingest_operator_registry(
+                db, company.id, registry=data["registry"], egrul=data["egrul"],
+                contacts=data["contacts"], gap=data["gap"], cards=data["cards"])
+            print(reg["message"])
 
         if data["shops"]:
             # «Нет витрины» — значение, а не пропуск: у чистых агрегаторов её нет,

@@ -91,12 +91,57 @@ export interface MarketOperator {
 }
 
 /** Карточка компании: где стоит, чем оснащена, почём заряжает, как её оценивают. */
-export interface MarketOperatorCard {
+/**
+ * Что известно о компании помимо её точек: чем она является, на чьей платформе
+ * работает, как называется юридически и с кем говорить. Каждое утверждение идёт со
+ * своей достоверностью — реквизиты с формулировкой источника, модель с признаком
+ * ручной проверки, число точек с числом подтвердивших источников.
+ */
+export interface OperatorFacts {
+  class: string | null
+  classChecked: boolean
+  baseCity: string | null
+  citiesCount: number | null
+  districts: number | null
+  platformCode: string | null
+  platformOwner: string | null
+  ownPlatform: boolean | null
+  roaming: boolean | null
+  roamingPct: number | null
+  appName: string | null
+  appPackage: string | null
+  appDeveloper: string | null
+  appRating: number | null
+  appReviews: number | null
+  publicRating: number | null
+  publicReviews: number | null
+  publicAddress: string | null
+  legalName: string | null
+  inn: string | null
+  ogrn: string | null
+  director: string | null
+  legalAddress: string | null
+  legalStatus: string | null
+  legalConfidence: string | null
+  legalTrusted: boolean
+  phone: string | null
+  siteUrl: string | null
+  contacts: Record<string, unknown> | null
+  pointsTotal: number | null
+  pointsRegistry: number | null
+  pointsOsm: number | null
+  cardsYandex: number | null
+  sources: string | null
+  sourceCount: number | null
+  alivePct: number | null
+  paidPct: number | null
+  avgPowerKw: number | null
+}
+
+export interface MarketOperatorCard extends OperatorFacts {
   id: string
   name: string
   relation: string
-  siteUrl: string | null
-  inn: string | null
   notes: string | null
   totals: {
     sites: number; homeSockets: number; ports: number; alive: number
@@ -736,6 +781,14 @@ export interface MarketNetworkRow {
   legalAddress: string | null
   legalConfidence: string | null
   legalTrusted: boolean
+  /** Чем компания является и чем это подтверждено — см. OperatorFacts. */
+  class: string | null
+  classChecked: boolean
+  sourceCount: number | null
+  sources: string | null
+  pointsTotal: number | null
+  legalStatus: string | null
+  phone: string | null
 }
 
 export interface MarketPlatform {

@@ -77,7 +77,53 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
             <span className="font-headline text-base font-semibold">{card.name}</span>
             <span className="text-xs text-muted-foreground">
               {RELATION_LABEL[card.relation] ?? card.relation}
-              {card.siteUrl ? ` · ${card.siteUrl}` : ''}
+              {card.siteUrl && (
+                <> · <a href={`https://${card.siteUrl.replace(/^https?:\/\//, '')}`}
+                  target="_blank" rel="noreferrer noopener"
+                  className="underline decoration-dotted underline-offset-2">
+                  {card.siteUrl}
+                </a></>
+              )}
+            </span>
+          </div>
+
+          {/* Чем компания является: разговор с агрегатором на чужой платформе и с
+              владельцем сети — это два разных разговора. Пометка «не проверено»
+              обязательна: класс проставлен разбором, а не человеком. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            {card.class && (
+              <span>
+                <span className="text-muted-foreground">модель: </span>
+                <span className="font-medium">{card.class}</span>
+                {!card.classChecked && (
+                  <span className="text-muted-foreground"> · не проверено</span>
+                )}
+              </span>
+            )}
+            {card.baseCity && (
+              <span className="text-muted-foreground">
+                база: <span className="text-foreground">{card.baseCity}</span>
+              </span>
+            )}
+            {card.citiesCount != null && (
+              <span className="text-muted-foreground">
+                городов {nf.format(card.citiesCount)}
+                {card.districts != null && `, округов ${card.districts}`}
+              </span>
+            )}
+            {card.platformCode && (
+              <span className="text-muted-foreground">
+                платформа: <span className="text-foreground">{card.platformCode}</span>
+                {card.platformOwner && card.platformOwner !== card.name
+                  && ` (${card.platformOwner})`}
+                {card.ownPlatform === true && ' · своя'}
+              </span>
+            )}
+            <span className="text-muted-foreground">
+              роуминг:{' '}
+              {card.roaming === true ? <span className="text-success">открыт</span>
+                : card.roaming === false ? 'только своё приложение'
+                : 'нет данных'}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
@@ -114,6 +160,80 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
               <div className="text-xs text-muted-foreground">{nf.format(t.reviews)} отзывов</div>
             </div>
           </div>
+          {/* Реквизиты и контакты. Показываем всегда, ссылаться можно только на
+              подтверждённые: бренд и юрлицо часто не совпадают, и ошибиться здесь
+              дороже, чем промолчать. Формулировку достоверности даём как есть —
+              в ней больше смысла, чем в «да/нет». */}
+          <div className="grid gap-x-6 gap-y-1 border-t border-border/60 pt-3 text-xs md:grid-cols-2">
+            <div>
+              <span className="text-muted-foreground">юрлицо: </span>
+              {card.legalName ? (
+                <>
+                  <span className={card.legalTrusted ? '' : 'text-muted-foreground'}>
+                    {card.legalName}
+                  </span>
+                  {card.legalConfidence && (
+                    <span className={card.legalTrusted ? 'text-success' : 'text-warning'}>
+                      {' '}· {card.legalConfidence}
+                    </span>
+                  )}
+                </>
+              ) : <span className="text-muted-foreground">не найдено</span>}
+            </div>
+            <div>
+              <span className="text-muted-foreground">ИНН / ОГРН: </span>
+              {card.inn || card.ogrn
+                ? <span className="tabular-nums">{card.inn ?? '—'} / {card.ogrn ?? '—'}</span>
+                : <span className="text-muted-foreground">нет данных</span>}
+              {card.legalStatus && (
+                <span className={card.legalStatus === 'действует'
+                  ? 'text-success' : 'text-warning'}> · {card.legalStatus}</span>
+              )}
+            </div>
+            <div>
+              <span className="text-muted-foreground">руководитель: </span>
+              {card.director ?? <span className="text-muted-foreground">нет данных</span>}
+            </div>
+            <div>
+              <span className="text-muted-foreground">адрес: </span>
+              {card.legalAddress ?? card.publicAddress
+                ?? <span className="text-muted-foreground">нет данных</span>}
+            </div>
+            <div>
+              <span className="text-muted-foreground">телефон: </span>
+              {card.phone ?? <span className="text-muted-foreground">нет данных</span>}
+            </div>
+            <div>
+              <span className="text-muted-foreground">приложение: </span>
+              {card.appName ? (
+                <>
+                  {card.appName}
+                  {card.appRating != null && (
+                    <span className="text-muted-foreground">
+                      {' '}· {nf1.format(card.appRating)}
+                      {card.appReviews != null && ` по ${nf.format(card.appReviews)} отзывам`}
+                    </span>
+                  )}
+                </>
+              ) : <span className="text-muted-foreground">не нашли</span>}
+            </div>
+          </div>
+
+          {/* Откуда мы вообще знаем эту компанию: одна выгрузка не видит рынок
+              целиком, и компания из одного упоминания надёжна иначе, чем найденная
+              тремя источниками. */}
+          {(card.sourceCount || card.pointsTotal) && (
+            <p className="text-xs text-muted-foreground">
+              {card.pointsTotal != null && `точек по всем источникам ${nf.format(card.pointsTotal)}`}
+              {card.pointsRegistry != null && `, в основной выгрузке ${nf.format(card.pointsRegistry)}`}
+              {(card.pointsOsm ?? 0) > 0 && `, только в OpenStreetMap ${nf.format(card.pointsOsm!)}`}
+              {(card.cardsYandex ?? 0) > 0 && `, карточек в справочнике ${nf.format(card.cardsYandex!)}`}
+              {card.sources && `. Источники: ${card.sources}`}
+              {card.publicRating != null && `. Публичная оценка сети ${nf1.format(card.publicRating)}`}
+              {card.publicReviews != null && ` по ${nf.format(card.publicReviews)} отзывам`}
+            </p>
+          )}
+
           {(t.planned > 0 || t.closed > 0 || t.homeSockets > 0) && (
             <p className="text-xs text-muted-foreground">
               {t.planned > 0 && `в планах ${t.planned}. `}

@@ -381,3 +381,179 @@ async def ingest_shops(
     await db.commit()
     return {"status": "success", "shops": touched,
             "message": f"витрин проверено: {touched}"}
+
+
+# Модель бизнеса по составу признаков. Проставляется разбором и остаётся
+# непроверенной, пока человек не подтвердил: наличие приложения не делает компанию
+# агрегатором, а отсутствие своей платформы — не приговор.
+def guess_class(op: MarketOperator) -> str | None:
+    """Владелец инфраструктуры, агрегатор или неизвестно."""
+    points = op.points_total or op.points_registry or 0
+    if points >= 5 and op.own_platform:
+        return "владелец сети, своя платформа"
+    if points >= 5 and op.own_platform is False:
+        return "владелец сети на чужой платформе"
+    if points >= 5:
+        return "владелец сети"
+    if points == 0 and op.app_package:
+        return "агрегатор без своих станций"
+    if 0 < points < 5:
+        return "малая сеть"
+    return None
+
+
+async def ingest_operator_registry(
+    db: AsyncSession, company_id: _uuid.UUID,
+    registry: list[dict[str, str]] | None = None,
+    egrul: list[dict[str, str]] | None = None,
+    contacts: list[dict[str, str]] | None = None,
+    gap: list[dict[str, str]] | None = None,
+    cards: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Сводный реестр компаний рынка из всех собранных источников.
+
+    Исследование собрало больше, чем доезжало до экрана: реестр на 182 оператора с
+    числом точек по трём источникам, выписки ЕГРЮЛ, телефоны и сайты, публичные
+    карточки организаций, а также 111 операторов, которых видит OpenStreetMap и не
+    видит основная выгрузка. В приложении оставались 83 компании с семью ИНН.
+
+    Число источников идёт в карточку рядом с числом точек: компания, найденная тремя
+    источниками, и компания из одного упоминания — разной надёжности, и решать по
+    ним одинаково нельзя.
+    """
+    known = {(o.name or "").strip().lower(): o for o in (await db.execute(
+        select(MarketOperator).where(
+            MarketOperator.company_id == company_id))).scalars().all()}
+    now = datetime.now(timezone.utc)
+    created = 0
+    touched: set[str] = set()
+
+    def find(raw_name: str | None, *, create: bool = True) -> MarketOperator | None:
+        nonlocal created
+        name = _canon_operator(raw_name)
+        if not name or name.strip().lower() in PLATFORM_NAMES:
+            return None
+        key = name.strip().lower()
+        op = known.get(key)
+        if op is None:
+            if not create:
+                return None
+            op = MarketOperator(company_id=company_id, name=name, relation="competitor")
+            db.add(op)
+            known[key] = op
+            created += 1
+        touched.add(key)
+        return op
+
+    def put(op: MarketOperator, field: str, value) -> None:
+        """Пустое не затирает заполненное."""
+        if value is None or value == "":
+            return
+        setattr(op, field, value)
+
+    # ── сводный реестр: сколько точек и сколькими источниками подтверждено ──
+    for row in registry or []:
+        op = find(row.get("operator"))
+        if op is None:
+            continue
+        put(op, "points_total", _int(row.get("points_total")))
+        put(op, "points_registry", _int(row.get("points_2chargers")))
+        put(op, "points_osm", _int(row.get("points_osm_new")))
+        put(op, "cards_yandex", _int(row.get("cards_yandex")))
+        put(op, "sources", _s(row.get("sources"), 200))
+        put(op, "source_count", _int(row.get("source_count")))
+        put(op, "app_package", _s(row.get("app_package"), 160))
+        op.updated_at = now
+
+    # ── ЕГРЮЛ: кто это юридически ──
+    # Достоверность приходит из самого файла («подтверждено», «похоже», «не
+    # найдено») и не повышается оттого, что запись доехала до базы.
+    for row in egrul or []:
+        op = find(row.get("operator"))
+        if op is None:
+            continue
+        put(op, "legal_name", _s(row.get("legal_name"), 300))
+        put(op, "inn", _s(row.get("inn"), 20))
+        put(op, "ogrn", _s(row.get("ogrn"), 20))
+        put(op, "legal_address", _s(row.get("legal_address")))
+        put(op, "director", _s(row.get("director"), 200))
+        put(op, "legal_status", _s(row.get("status"), 40))
+        put(op, "legal_confidence", _s(row.get("confidence"), 40))
+        put(op, "base_city", _s(row.get("base"), 160))
+        op.updated_at = now
+
+    # ── контакты: телефон и сайт ──
+    for row in contacts or []:
+        op = find(row.get("operator"))
+        if op is None:
+            continue
+        put(op, "phone", _s(row.get("phones"), 120))
+        put(op, "site_url", _s(row.get("sites"), 300))
+        put(op, "base_city", _s(row.get("base"), 160))
+        put(op, "cities", _int(row.get("cities")))
+        put(op, "districts", _int(row.get("districts")))
+        op.updated_at = now
+
+    # ── операторы, которых видит только сторонний источник ──
+    # Их нет в основной выгрузке. Это не «мелкие» компании, а пробел покрытия: пока
+    # точки не сопоставлены, у такой записи известно только имя и число точек.
+    for row in gap or []:
+        op = find(row.get("operator"))
+        if op is None:
+            continue
+        src = _s(row.get("source"), 60) or "внешний источник"
+        if not op.sources:
+            op.sources = src
+        elif src not in (op.sources or ""):
+            op.sources = f"{op.sources}, {src}"[:200]
+        if op.points_osm is None and src.lower().startswith("openstreet"):
+            op.points_osm = _int(row.get("points"))
+        if op.points_total is None:
+            op.points_total = _int(row.get("points"))
+        op.updated_at = now
+
+    # ── публичные карточки: как сеть выглядит для водителя ──
+    # Рейтинг карточки организации — это НЕ рейтинг приложения: у сети может быть
+    # 4,2 в справочнике и 1,8 в магазине приложений, и это разные утверждения.
+    by_card: dict[str, dict[str, Any]] = {}
+    for row in cards or []:
+        name = _canon_operator(row.get("name"))
+        if not name:
+            continue
+        key = name.strip().lower()
+        agg = by_card.setdefault(key, {"rating": [], "reviews": 0, "address": None})
+        rating = _num(row.get("rating"))
+        if rating is not None:
+            agg["rating"].append(rating)
+        agg["reviews"] += _int(row.get("reviews")) or 0
+        if agg["address"] is None:
+            agg["address"] = _s(row.get("address"))
+    for key, agg in by_card.items():
+        op = find(key, create=False)
+        if op is None:
+            continue
+        if agg["rating"]:
+            op.public_rating = round(sum(agg["rating"]) / len(agg["rating"]), 2)
+        if agg["reviews"]:
+            op.public_reviews = agg["reviews"]
+        put(op, "public_address", agg["address"])
+        op.updated_at = now
+
+    # ── модель бизнеса ──
+    classified = 0
+    for op in known.values():
+        if op.class_checked:
+            continue
+        guessed = guess_class(op)
+        if guessed and guessed != op.player_class:
+            op.player_class = guessed
+            classified += 1
+
+    await db.commit()
+    return {
+        "status": "success", "operators": len(touched), "created": created,
+        "message": (f"реестр: {len(registry or [])} строк, ЕГРЮЛ {len(egrul or [])}, "
+                    f"контакты {len(contacts or [])}, пробелы {len(gap or [])}, "
+                    f"карточки {len(cards or [])}; затронуто компаний {len(touched)}, "
+                    f"заведено новых {created}, модель определена у {classified}"),
+    }

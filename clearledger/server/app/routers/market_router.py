@@ -158,7 +158,8 @@ async def list_operators(
         .order_by(MarketOperator.name))).scalars().all()
     operators = [{
         "id": str(o.id), "name": o.name, "shortName": o.short_name,
-        "relation": o.relation, "siteUrl": o.site_url, "inn": o.inn, "notes": o.notes,
+        "relation": o.relation, "notes": o.notes,
+        **_operator_facts(o),
         "medianPricePerKwh": _median(prices.get(str(o.id), [])),
         "pricedSites": len(prices.get(str(o.id), [])),
         **({"sites": 0, "ports": 0, "alive": 0, "maxPowerKw": None, "quality": None,
@@ -166,6 +167,56 @@ async def list_operators(
     } for o in rows]
     operators.sort(key=lambda r: (-r["sites"], r["name"]))
     return {"operators": operators}
+
+
+def _operator_facts(o: MarketOperator) -> dict[str, Any]:
+    """Что мы знаем о компании помимо её точек.
+
+    Собрано исследованием и прежде не доезжало до экрана: чем компания является
+    (владелец сети, агрегатор без своих станций, малая сеть), на чьей платформе
+    работает, открыта ли роумингом, как называется юридически и с кем говорить.
+
+    Каждое утверждение идёт со своей достоверностью: реквизиты — с пометкой
+    источника («подтверждено», «похоже», «не найдено»), модель — с признаком
+    ручной проверки, число точек — с числом источников, которые его подтвердили.
+    Компания, найденная тремя источниками, и компания из одного упоминания — разной
+    надёжности, и по ним нельзя решать одинаково.
+    """
+    return {
+        "class": o.player_class, "classChecked": o.class_checked,
+        # Имя `cities` занято разрезом по городам в карточке: число и список —
+        # разные вещи, и одно перекрывало другое.
+        "baseCity": o.base_city, "citiesCount": o.cities, "districts": o.districts,
+        # Платформа и роуминг — про технологию, а не про качество сети.
+        "platformCode": o.platform_code, "platformOwner": o.platform_owner,
+        "ownPlatform": o.own_platform,
+        "roaming": o.ocpi_roaming,
+        "roamingPct": float(o.ocpi_pct) if o.ocpi_pct is not None else None,
+        # Приложение и публичная карточка — два разных отражения компании.
+        "appName": o.app_name, "appPackage": o.app_package,
+        "appDeveloper": o.app_developer,
+        "appRating": float(o.app_rating) if o.app_rating is not None else None,
+        "appReviews": o.app_reviews,
+        "publicRating": float(o.public_rating) if o.public_rating is not None else None,
+        "publicReviews": o.public_reviews, "publicAddress": o.public_address,
+        # Реквизиты: показываем всегда, ссылаться можно только на подтверждённые.
+        "legalName": o.legal_name, "inn": o.inn, "ogrn": o.ogrn,
+        "director": o.director, "legalAddress": o.legal_address,
+        "legalStatus": o.legal_status, "legalConfidence": o.legal_confidence,
+        # Достоверность приходит формулировкой, а не флагом: «подтверждено сайтом»,
+        # «похоже», «сайт не подтверждает бренд», «ИП (не в ЕГРЮЛ)», «не найдено».
+        # Ссылаться можно только на подтверждённое, а формулировку показываем как
+        # есть — в ней больше смысла, чем в «да/нет».
+        "legalTrusted": (o.legal_confidence or "").startswith("подтвержд"),
+        "phone": o.phone, "siteUrl": o.site_url, "contacts": o.contacts,
+        # Сколько точек и чем это подтверждено.
+        "pointsTotal": o.points_total, "pointsRegistry": o.points_registry,
+        "pointsOsm": o.points_osm, "cardsYandex": o.cards_yandex,
+        "sources": o.sources, "sourceCount": o.source_count,
+        "alivePct": float(o.alive_pct) if o.alive_pct is not None else None,
+        "paidPct": float(o.paid_pct) if o.paid_pct is not None else None,
+        "avgPowerKw": float(o.avg_power_kw) if o.avg_power_kw is not None else None,
+    }
 
 
 @router.get("/operators/{operator_id}")
@@ -219,7 +270,8 @@ async def operator_card(
 
     return {
         "id": str(op.id), "name": op.name, "relation": op.relation,
-        "siteUrl": op.site_url, "inn": op.inn, "notes": op.notes,
+        "notes": op.notes,
+        **_operator_facts(op),
         "totals": {
             "sites": len(network),
             "homeSockets": len(sites) - len(network),
@@ -3100,29 +3152,16 @@ async def market_landscape(
         rows.append({
             "id": str(op.id), "name": op.name, "relation": op.relation,
             "isOurs": op.relation == "own",
+            # Всё, что о компании собрано: модель, реквизиты, контакты, источники.
+            # Расклад сил без этого отвечал только «сколько у него точек», хотя
+            # разговор с агрегатором на чужой платформе и с владельцем сети — это
+            # два разных разговора.
+            **_operator_facts(op),
             "sites": sites, "ports": c.get("ports", 0), "alive": c.get("alive", 0),
             "silentHalfYear": c.get("silent", 0),
             "quality": c.get("quality"), "success": c.get("success"),
             "medianPricePerKwh": _median(prices.get(str(op.id), [])),
-            # Охват и технологии — из профиля оператора
-            "baseCity": op.base_city, "cities": op.cities, "districts": op.districts,
-            "avgPowerKw": float(op.avg_power_kw) if op.avg_power_kw is not None else None,
-            "paidPct": float(op.paid_pct) if op.paid_pct is not None else None,
-            "platformOwner": op.platform_owner, "platformCode": op.platform_code,
-            "ownPlatform": op.own_platform,
-            "roaming": op.ocpi_roaming,
-            "roamingPct": float(op.ocpi_pct) if op.ocpi_pct is not None else None,
-            "appName": op.app_name,
-            "appRating": float(op.app_rating) if op.app_rating is not None else None,
-            "appReviews": op.app_reviews, "appInstalls": op.app_installs,
-            "appDeveloper": op.app_developer,
-            "siteUrl": op.site_url,
-            # Реквизиты показываем всегда, но помечаем достоверность: ссылаться
-            # можно только на подтверждённые.
-            "legalName": op.legal_name, "inn": op.inn, "ogrn": op.ogrn,
-            "director": op.director, "legalAddress": op.legal_address,
-            "legalConfidence": op.legal_confidence,
-            "legalTrusted": (op.legal_confidence or "") == "подтверждено",
+            "appInstalls": op.app_installs,
         })
 
     networks = [r for r in rows if r["sites"] > 0]

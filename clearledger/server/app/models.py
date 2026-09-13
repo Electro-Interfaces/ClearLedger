@@ -8077,7 +8077,30 @@ class MarketOperator(Base):
     legal_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     director: Mapped[str | None] = mapped_column(String(200), nullable=True)
     legal_confidence: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Состояние юрлица: «действует», «ликвидировано». Оператор с прекращённой
+    # регистрацией — не конкурент, а строка в реестре: разговор о роуминге с ним
+    # начинать не с кем.
+    legal_status: Mapped[str | None] = mapped_column(String(40), nullable=True)
     contacts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # ── сколько точек и откуда мы это знаем ──
+    # Одна выгрузка не видит рынок целиком: 2Chargers знает свои, OSM — чужие,
+    # карточки Яндекса — публичные. Оператор, найденный тремя источниками, и
+    # оператор из одного упоминания — разная надёжность, и она должна быть видна.
+    points_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    points_registry: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    points_osm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cards_yandex: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sources: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    source_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Публичная оценка САМОЙ СЕТИ (карточка организации), а не её приложения:
+    # это разные вещи, и смешивать их нельзя.
+    public_rating: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
+    public_reviews: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    public_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Модель бизнеса: владелец инфраструктуры, агрегатор на чужой, смежный игрок.
+    player_class: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    class_checked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

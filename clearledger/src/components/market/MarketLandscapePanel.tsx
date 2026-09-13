@@ -111,6 +111,7 @@ export function MarketLandscapePanel() {
                 <th className="p-2 text-right font-medium">Доля</th>
                 <th className="p-2 text-right font-medium">Городов</th>
                 <th className="p-2 text-right font-medium">Округов</th>
+                <th className="p-2 text-left font-medium">Модель</th>
                 <th className="p-2 text-left font-medium">База</th>
                 <th className="p-2 text-right font-medium">Средняя мощность</th>
                 <th className="p-2 text-right font-medium">Медиана цены</th>
@@ -128,6 +129,12 @@ export function MarketLandscapePanel() {
                   <td className="p-2 text-right"><Num v={r.sharePct} unit="%" digits={1} /></td>
                   <td className="p-2 text-right"><Num v={r.cities} /></td>
                   <td className="p-2 text-right"><Num v={r.districts} /></td>
+                  <td className="p-2 text-muted-foreground">
+                    {r.class ?? 'не определена'}
+                    {r.class && !r.classChecked && (
+                      <span className="ml-1 text-xs">· не проверено</span>
+                    )}
+                  </td>
                   <td className="p-2 text-muted-foreground">{r.baseCity ?? '—'}</td>
                   <td className="p-2 text-right"><Num v={r.avgPowerKw} unit="кВт" digits={1} /></td>
                   <td className="p-2 text-right"><Num v={r.medianPricePerKwh} digits={1} /></td>
