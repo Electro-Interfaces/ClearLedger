@@ -809,7 +809,9 @@ export interface MarketNetworkRow {
   success: number | null
   medianPricePerKwh: number | null
   baseCity: string | null
-  cities: number | null
+  /** Городов у сети. Имя с суффиксом: в карточке компании `cities` — это список
+   *  городов, и одно имя на два разных смысла уже ломало экран. */
+  citiesCount: number | null
   districts: number | null
   avgPowerKw: number | null
   paidPct: number | null

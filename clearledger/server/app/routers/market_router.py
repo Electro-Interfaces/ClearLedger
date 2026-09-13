@@ -1406,9 +1406,14 @@ async def market_site_score(
     ops = {o.id: o.name for o in (await db.execute(select(MarketOperator).where(
         MarketOperator.company_id == cid))).scalars().all()}
 
+    # Тот же индекс, что и в «Наших объектах»: подбор аналогов вызывает окружение
+    # для каждого нашего объекта, и полный перебор рынка на каждый вызов давал
+    # двадцать секунд на открытие экрана.
+    site_index = _geo_index(sites, radius_km)
+
     def rivals_around(plat: float, plon: float, skip_location: str | None = None) -> list[dict]:
         out = []
-        for site in sites:
+        for site in _geo_around(site_index, plat, plon, radius_km):
             if skip_location and site.location_id == skip_location:
                 continue
             if (site.site_class or "") == "home" or site.kind != "ezs":
@@ -2024,8 +2029,10 @@ async def suggest_control(
         MarketSite.latitude.is_not(None)))).scalars().all()
     alive_since = now - timedelta(days=ALIVE_DAYS)
 
+    pressure_index = _geo_index(sites, radius_km)
+
     def rivals_near(lat, lon) -> int:
-        return sum(1 for site in sites
+        return sum(1 for site in _geo_around(pressure_index, float(lat), float(lon), radius_km)
                    if site.last_session_at and site.last_session_at >= alive_since
                    and _distance_km(float(lat), float(lon),
                                     float(site.latitude), float(site.longitude)) <= radius_km)
@@ -3414,7 +3421,7 @@ async def market_landscape(
         "totals": {
             "networks": len(networks),
             "networkSites": total_sites,
-            "withProfile": sum(1 for r in networks if r["platformOwner"] or r["cities"]),
+            "withProfile": sum(1 for r in networks if r["platformOwner"] or r["citiesCount"]),
             "ownPlatform": sum(1 for r in networks if r["ownPlatform"]),
             "platformKnownSites": known_platform,
             "roamingNetworks": len(roaming_yes),

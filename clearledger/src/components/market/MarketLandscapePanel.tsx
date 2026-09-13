@@ -87,7 +87,7 @@ export function MarketLandscapePanel() {
           <span className="flex items-center gap-2 text-sm font-medium">
             <Swords className="size-4 text-primary" aria-hidden />
             {ours
-              ? `Мы ${ours.sharePct} % рынка: ${nf.format(ours.sites)} точек в ${nf.format(ours.cities ?? 0)} городах.`
+              ? `Мы ${ours.sharePct} % рынка: ${nf.format(ours.sites)} точек в ${nf.format(ours.citiesCount ?? 0)} городах.`
               : `На рынке ${t?.networks ?? 0} сетей.`}
           </span>
           <span className="text-xs text-muted-foreground">
@@ -127,7 +127,7 @@ export function MarketLandscapePanel() {
                   </td>
                   <td className="p-2 text-right"><Num v={r.sites} /></td>
                   <td className="p-2 text-right"><Num v={r.sharePct} unit="%" digits={1} /></td>
-                  <td className="p-2 text-right"><Num v={r.cities} /></td>
+                  <td className="p-2 text-right"><Num v={r.citiesCount} /></td>
                   <td className="p-2 text-right"><Num v={r.districts} /></td>
                   <td className="p-2 text-muted-foreground">
                     {r.class ?? 'не определена'}
