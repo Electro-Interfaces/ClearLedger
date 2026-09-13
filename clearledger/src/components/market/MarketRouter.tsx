@@ -10,8 +10,9 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { MapContainer, CircleMarker, Popup, AttributionControl, useMap,
+import { MapContainer, CircleMarker, Marker, Popup, AttributionControl, useMap,
   useMapEvents } from 'react-leaflet'
+import { divIcon, type DivIcon } from 'leaflet'
 import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import { clusterPoints, clusterRadiusForZoom } from '@/components/map/clusterPoints'
@@ -103,6 +104,53 @@ function siteColor(s: MarketSite): string {
   return '#ef4444'
 }
 
+/**
+ * С какого приближения наша станция рисуется знаком, а не кружком.
+ * Ниже этого масштаба точки склеиваются в кластеры, и значок превращается в
+ * пятно: на обзоре страны работает только цвет.
+ */
+const ZOOM_ЗНАК = 13
+
+/**
+ * Знак нашей станции: синяя капля с молнией. Логотипа компании в пространстве нет
+ * (ни файла, ни поля у организации), поэтому знак собран из фирменного цвета и
+ * символа зарядки — он не выдаёт себя за чужой бренд и читается на карте.
+ *
+ * Кольцо разреза сохранено обводкой капли: принадлежность и состояние остаются
+ * двумя разными утверждениями, как и на кружке.
+ */
+function ourPinIcon(ring: string): DivIcon {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
+    <path d="M14 35C14 35 26 21.5 26 13.5A12 12 0 1 0 2 13.5C2 21.5 14 35 14 35Z"
+          fill="${НАШ_ЦВЕТ}" stroke="${ring}" stroke-width="2.5"/>
+    <path d="M15.4 6.5 9.2 15.2h4.1l-1.1 6.3 6.4-8.9h-4.2z"
+          fill="#fff"/>
+  </svg>`
+  return divIcon({
+    html: svg,
+    className: '',           // без рамки Leaflet по умолчанию
+    iconSize: [28, 36],
+    iconAnchor: [14, 35],    // остриё капли — в координате станции
+    popupAnchor: [0, -30],
+  })
+}
+
+/** Подсказка нашего объекта: одна на оба вида маркера — знак и кружок. */
+function OurPopupBody({ p }: { p: OurMapPoint }) {
+  return (
+    <>
+      <b>{p.name}</b> · наш объект<br />
+      {p.city ?? ''}{p.brand ? ` · ${p.brand}` : ''}
+      {p.powerKwt ? ` · ${p.powerKwt} кВт` : ''}
+      {p.ports ? ` · ${p.ports} портов` : ''}<br />
+      сессий за 90 дней: {p.sessions}
+      {p.sessionsPerPortDay != null && ` · ${p.sessionsPerPortDay} на порт в сутки`}<br />
+      {p.errorPct != null ? `срывов ${p.errorPct} %` : 'срывы не считаны'}
+      {p.status ? ` · ${p.status}` : ''}
+    </>
+  )
+}
+
 /** Возраст факта словами: «сегодня» важнее даты — по нему видно, можно ли доверять. */
 function ageLabel(iso: string | null | undefined): { text: string; stale: boolean } {
   if (!iso) return { text: 'не проверялось', stale: true }
@@ -181,6 +229,15 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
         // Заливка — принадлежность, кольцо — выбранный разрез. Цвет при этом не
         // единственный носитель: то же состояние написано словами в подсказке.
         const ring = one ? ourColor(one, colorBy) : НАШ_ЦВЕТ
+        // На крупном приближении одиночная станция получает знак: там хватает
+        // места, и вопрос «наша ли это точка» решается без сверки с легендой.
+        if (one && zoom >= ZOOM_ЗНАК) {
+          return (
+            <Marker key={c.key} position={[c.lat, c.lon]} icon={ourPinIcon(ring)}>
+              <Popup><OurPopupBody p={one} /></Popup>
+            </Marker>
+          )
+        }
         return (
           <CircleMarker key={c.key} center={[c.lat, c.lon]}
             radius={one ? 6 : Math.min(16, 6 + Math.log2(c.items.length) * 2.5)}
@@ -188,16 +245,7 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
                            weight: ring === НАШ_ЦВЕТ ? 1.5 : 3 }}>
             <Popup>
               {one ? (
-                <>
-                  <b>{one.name}</b> · наш объект<br />
-                  {one.city ?? ''}{one.brand ? ` · ${one.brand}` : ''}
-                  {one.powerKwt ? ` · ${one.powerKwt} кВт` : ''}
-                  {one.ports ? ` · ${one.ports} портов` : ''}<br />
-                  сессий за 90 дней: {one.sessions}
-                  {one.sessionsPerPortDay != null && ` · ${one.sessionsPerPortDay} на порт в сутки`}<br />
-                  {one.errorPct != null ? `срывов ${one.errorPct} %` : 'срывы не считаны'}
-                  {one.status ? ` · ${one.status}` : ''}
-                </>
+                <OurPopupBody p={one} />
               ) : (
                 <><b>{c.items.length} наших объектов</b><br />приблизьте, чтобы разделить</>
               )}
