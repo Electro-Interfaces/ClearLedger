@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
+import { MarketTerritoryProfile } from './MarketTerritoryProfile'
 import {
   createGrowthLead, getMarketTerritories, getMarketWhitespots, type MarketTerritory,
 } from '@/services/marketService'
@@ -63,8 +64,11 @@ function Share({ row }: { row: MarketTerritory }) {
 
 export function MarketTerritoriesPanel() {
   const { companyId } = useCompany()
-  const [level, setLevel] = useState<'city' | 'region'>('city')
+  const [level, setLevel] = useState<'city' | 'region'>('region')
   const [q, setQ] = useState('')
+  // Территория раскрывается в профиль: рынок отвечает «кто вокруг», наша сеть —
+  // «почему у нас здесь так». Второе мы знаем точно, и прятать это незачем.
+  const [open, setOpen] = useState<string | null>(null)
 
   const data = useQuery({
     queryKey: ['market-territories', companyId, level],
@@ -72,6 +76,9 @@ export function MarketTerritoriesPanel() {
     enabled: !!companyId,
   })
 
+  if (open) {
+    return <MarketTerritoryProfile name={open} level={level} onBack={() => setOpen(null)} />
+  }
   if (data.isLoading) return <Skeleton />
 
   const all = data.data?.territories ?? []
@@ -121,7 +128,8 @@ export function MarketTerritoriesPanel() {
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.name} className="border-t border-border/60">
+              <tr key={r.name} onClick={() => r.ourSites > 0 && setOpen(r.name)}
+                className={`border-t border-border/60 ${r.ourSites > 0 ? 'cursor-pointer hover:bg-accent/40' : ''}`}>
                 <td className="p-2 font-medium">{r.name}</td>
                 <td className="p-2 text-right"><Num v={r.ourSites} /></td>
                 <td className="p-2 text-right"><Num v={r.ourSessions} /></td>
@@ -139,6 +147,8 @@ export function MarketTerritoriesPanel() {
         </table>
       </div>
       <p className="text-xs text-muted-foreground">
+        Строка с нашими объектами раскрывается в профиль территории: оснащение,
+        загрузка портов, клиенты, чем и когда заряжают, чем кончаются сессии.
         Доля считается по точкам сети: порты у чужих известны не везде, и доля по ним
         прыгала бы от заполненности поля, а не от рынка. Домашние розетки в счёт не идут.
       </p>

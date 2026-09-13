@@ -2295,6 +2295,320 @@ async def lead_to_project(
             "message": f"площадка {site.project_no} заведена в «Проектах», стадия «Лид»"}
 
 
+# ── Мы глазами рынка ────────────────────────────────────────────────────────
+# Наша сеть есть и в публичном реестре: 429 точек РусГидро в полной выгрузке.
+# Это редкая возможность — увидеть себя так, как видит клиент, выбирающий станцию
+# в приложении: связь, доля успешных зарядок, оценка, отзывы, цена. И сравнить с
+# тем, что мы знаем о себе сами.
+#
+# Расхождение здесь — не повод спорить с источником. Клиент видит именно эту
+# картинку и по ней принимает решение ехать или не ехать.
+
+@router.get("/self")
+async def market_self_view(
+    company_id: str = Query(...),
+    match_km: float = Query(0.3, ge=0.05, le=2.0,
+                            description="радиус сопоставления с нашим реестром"),
+    days: int = Query(90, ge=30, le=365),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Наш публичный профиль: что о нас говорит рынок и сходится ли это с нами."""
+    cid = await _member(company_id, user, db)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+
+    own_ops = {o.id for o in (await db.execute(select(MarketOperator).where(
+        MarketOperator.company_id == cid,
+        MarketOperator.relation == "own"))).scalars().all()}
+    mine = [s for s in (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid,
+        MarketSite.latitude.is_not(None)))).scalars().all()
+        if s.operator_id in own_ops]
+
+    ours = (await db.execute(
+        select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
+               ServiceLocation.latitude, ServiceLocation.longitude)
+        .where(ServiceLocation.company_id == cid,
+               ServiceLocation.is_test.is_(False),
+               ServiceLocation.latitude.is_not(None)))).all()
+    sales_rows = (await db.execute(
+        select(ChargeSession.location_id, func.count(),
+               func.coalesce(func.sum(func.coalesce(
+                   ChargeSession.client_amount, ChargeSession.amount)), 0))
+        .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
+               ChargeSession.location_id.is_not(None))
+        .group_by(ChargeSession.location_id))).all()
+    sales = {str(loc): {"sessions": int(cnt), "revenue": float(amount or 0)}
+             for loc, cnt, amount in sales_rows}
+    last_price = await _last_prices(db, cid)
+
+    rows = []
+    matched = 0
+    for site in mine:
+        # Сопоставление по расстоянию: у публичной карты своя координата, и она
+        # редко совпадает с нашей до метра.
+        best, best_km = None, None
+        for loc_id, name, city, lat, lon in ours:
+            distance = _distance_km(float(site.latitude), float(site.longitude),
+                                    float(lat), float(lon))
+            if best_km is None or distance < best_km:
+                best, best_km = (str(loc_id), name, city), distance
+        linked = best if best_km is not None and best_km <= match_km else None
+        if linked:
+            matched += 1
+        sale = sales.get(linked[0]) if linked else None
+        obs = last_price.get(str(site.id))
+        rows.append({
+            "siteId": str(site.id), "marketName": site.name, "city": site.city,
+            "locationId": linked[0] if linked else None,
+            "ourName": linked[1] if linked else None,
+            "matchKm": round(best_km, 2) if best_km is not None else None,
+            # Как нас видит клиент
+            "quality": float(site.connection_quality_24h) if site.connection_quality_24h is not None else None,
+            "successPct": float(site.success_charge_pct) if site.success_charge_pct is not None else None,
+            "rating": float(site.rating) if site.rating is not None else None,
+            "reviews": site.reviews_count,
+            "publicPricePerKwh": obs["price"] if obs else None,
+            "lastSessionAt": site.last_session_at.isoformat() if site.last_session_at else None,
+            "aliveByMarket": bool(site.last_session_at and site.last_session_at >= alive_since),
+            # Что знаем мы
+            "ourSessions": sale["sessions"] if sale else None,
+            "ourRevenue": sale["revenue"] if sale else None,
+        })
+
+    def _avg(values: list[float]) -> float | None:
+        clean = [v for v in values if v is not None]
+        return round(sum(clean) / len(clean), 1) if clean else None
+
+    quality = _avg([r["quality"] for r in rows])
+    success = _avg([r["successPct"] for r in rows])
+    rating = _avg([r["rating"] for r in rows])
+    alive_market = sum(1 for r in rows if r["aliveByMarket"])
+    # Самое неприятное расхождение: рынок говорит «молчит», а у нас сессии идут —
+    # значит клиент в приложении видит станцию мёртвой и мимо неё проезжает.
+    silent_but_working = [r for r in rows
+                          if not r["aliveByMarket"] and (r["ourSessions"] or 0) > 0]
+
+    # Как выглядят на этом фоне лидеры рынка: сравнивать себя не с абсолютом, а с
+    # теми, кто рядом в том же реестре.
+    rivals = (await db.execute(
+        select(MarketOperator.name,
+               func.avg(MarketSite.connection_quality_24h),
+               func.avg(MarketSite.success_charge_pct),
+               func.avg(MarketSite.rating), func.count())
+        .join(MarketSite, MarketSite.operator_id == MarketOperator.id)
+        .where(MarketOperator.company_id == cid,
+               MarketOperator.relation != "own",
+               MarketSite.site_class == "network")
+        .group_by(MarketOperator.name)
+        .having(func.count() >= 30)
+        .order_by(func.count().desc()).limit(10))).all()
+
+    return {
+        "days": days, "matchKm": match_km,
+        "sites": sorted(rows, key=lambda r: (r["successPct"] is None, r["successPct"] or 0))[:300],
+        "totals": {
+            "inMarket": len(rows), "matchedToRegistry": matched,
+            "quality": quality, "success": success, "rating": rating,
+            "reviews": sum(r["reviews"] or 0 for r in rows),
+            "aliveByMarket": alive_market,
+            "silentButWorking": len(silent_but_working),
+        },
+        "peers": [{"name": name, "quality": round(float(q), 1) if q is not None else None,
+                   "success": round(float(sc), 1) if sc is not None else None,
+                   "rating": round(float(rt), 2) if rt is not None else None,
+                   "sites": int(cnt)}
+                  for name, q, sc, rt, cnt in rivals],
+        "note": ("сопоставление с реестром по расстоянию; расхождение «рынок молчит, "
+                 "а сессии идут» означает, что клиент видит станцию мёртвой"),
+    }
+
+
+@router.get("/territory-profile")
+async def territory_profile(
+    company_id: str = Query(...),
+    name: str = Query(..., description="город или регион"),
+    level: str = Query("region", pattern="^(city|region)$"),
+    days: int = Query(90, ge=30, le=365),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Что мы знаем о своей сети в этой территории — и что видим на рынке рядом.
+
+    Рыночная часть отвечает на «кто вокруг», наша — на «почему у нас так». Второе мы
+    знаем точно: своё оснащение, загрузку портов, состав клиентов, время спроса,
+    результаты зарядок и динамику. Без этого разговор о территории сводится к
+    подсчёту чужих точек.
+    """
+    cid = await _member(company_id, user, db)
+    now = datetime.now(timezone.utc)
+    since = (now - timedelta(days=days)).replace(tzinfo=None)
+    prev_since = (now - timedelta(days=days * 2)).replace(tzinfo=None)
+    alive_since = now - timedelta(days=ALIVE_DAYS)
+
+    regions = dict((rid, rname) for rid, rname in (await db.execute(
+        select(Region.id, Region.name).where(Region.company_id == cid))).all())
+    locations = (await db.execute(
+        select(ServiceLocation).where(
+            ServiceLocation.company_id == cid,
+            ServiceLocation.is_test.is_(False)))).scalars().all()
+
+    def belongs(loc) -> bool:
+        where = regions.get(loc.region_id) if level == "region" else loc.city
+        return (where or "") == name
+
+    mine = [loc for loc in locations if belongs(loc)]
+    ids = [loc.id for loc in mine]
+    if not ids:
+        return {"name": name, "level": level, "days": days, "ours": None,
+                "message": "в этой территории наших объектов нет"}
+
+    # ── оснащение: чем мы там стоим ──
+    ports = sum(loc.connectors_count or 0 for loc in mine)
+    powers = [float(loc.power_kwt) for loc in mine if loc.power_kwt]
+    by_speed: dict[str, int] = {}
+    by_brand: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    connector_types: dict[str, int] = {}
+    for loc in mine:
+        by_speed[loc.speed_class or "не указан"] = by_speed.get(loc.speed_class or "не указан", 0) + 1
+        by_brand[loc.brand or "не указан"] = by_brand.get(loc.brand or "не указан", 0) + 1
+        by_status[loc.operational_status or "не указан"] = by_status.get(
+            loc.operational_status or "не указан", 0) + 1
+        for ct in (loc.connector_types or "").split(","):
+            ct = ct.strip()
+            if ct:
+                connector_types[ct] = connector_types.get(ct, 0) + 1
+
+    # ── реализация: что там происходит ──
+    money = func.coalesce(ChargeSession.client_amount, ChargeSession.amount)
+    now_row = (await db.execute(
+        select(func.count(), func.coalesce(func.sum(ChargeSession.energy_kwh), 0),
+               func.coalesce(func.sum(money), 0),
+               func.coalesce(func.avg(ChargeSession.duration_min), 0),
+               func.count(func.distinct(ChargeSession.user_id)),
+               func.coalesce(func.sum(
+                   case((ChargeSession.amount > 0, ChargeSession.energy_kwh), else_=0)), 0),
+               func.coalesce(func.sum(
+                   case((ChargeSession.amount > 0, ChargeSession.amount), else_=0)), 0))
+        .where(ChargeSession.company_id == cid, ChargeSession.location_id.in_(ids),
+               ChargeSession.started_at >= since))).one()
+    sessions, energy, revenue, duration, clients, paid_energy, paid_money = now_row
+    prev_sessions, prev_revenue = (await db.execute(
+        select(func.count(), func.coalesce(func.sum(money), 0))
+        .where(ChargeSession.company_id == cid, ChargeSession.location_id.in_(ids),
+               ChargeSession.started_at >= prev_since,
+               ChargeSession.started_at < since))).one()
+
+    # ── кто заряжается ──
+    by_user_type = {(t or "не указан"): {"sessions": int(c), "revenue": float(a or 0)}
+                    for t, c, a in (await db.execute(
+                        select(ChargeSession.user_type, func.count(),
+                               func.coalesce(func.sum(money), 0))
+                        .where(ChargeSession.company_id == cid,
+                               ChargeSession.location_id.in_(ids),
+                               ChargeSession.started_at >= since)
+                        .group_by(ChargeSession.user_type))).all()}
+
+    # ── чем заряжаются и чем кончается ──
+    by_connector = {(t or "не указан"): int(c) for t, c in (await db.execute(
+        select(ChargeSession.connector_type, func.count())
+        .where(ChargeSession.company_id == cid, ChargeSession.location_id.in_(ids),
+               ChargeSession.started_at >= since)
+        .group_by(ChargeSession.connector_type)
+        .order_by(func.count().desc()).limit(8))).all()}
+    by_result = {(r or "не указан"): int(c) for r, c in (await db.execute(
+        select(ChargeSession.result, func.count())
+        .where(ChargeSession.company_id == cid, ChargeSession.location_id.in_(ids),
+               ChargeSession.started_at >= since)
+        .group_by(ChargeSession.result)
+        .order_by(func.count().desc()).limit(8))).all()}
+
+    # ── когда заряжаются: час пик решает, хватает ли портов ──
+    hours = [{"hour": int(h), "sessions": int(c)} for h, c in (await db.execute(
+        select(func.extract("hour", ChargeSession.started_at), func.count())
+        .where(ChargeSession.company_id == cid, ChargeSession.location_id.in_(ids),
+               ChargeSession.started_at >= since)
+        .group_by(func.extract("hour", ChargeSession.started_at))
+        .order_by(func.extract("hour", ChargeSession.started_at)))).all()]
+
+    # ── наши объекты поимённо: где густо, где пусто ──
+    per_site = {str(loc): {"sessions": int(c), "revenue": float(a or 0)}
+                for loc, c, a in (await db.execute(
+                    select(ChargeSession.location_id, func.count(),
+                           func.coalesce(func.sum(money), 0))
+                    .where(ChargeSession.company_id == cid,
+                           ChargeSession.location_id.in_(ids),
+                           ChargeSession.started_at >= since)
+                    .group_by(ChargeSession.location_id))).all()}
+    objects = sorted(({
+        "locationId": loc.id, "name": loc.name, "city": loc.city,
+        "powerKwt": float(loc.power_kwt) if loc.power_kwt else None,
+        "ports": loc.connectors_count, "speedClass": loc.speed_class,
+        "brand": loc.brand, "status": loc.operational_status,
+        **per_site.get(str(loc.id), {"sessions": 0, "revenue": 0.0}),
+    } for loc in mine), key=lambda r: -r["sessions"])
+
+    # ── рынок рядом: то же, что в территориях, но для этой одной ──
+    market = [x for x in (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid, MarketSite.status == "active",
+        MarketSite.kind == "ezs", MarketSite.location_id.is_(None)))).scalars().all()
+        if ((x.region if level == "region" else x.city) or "") == name]
+    rivals = [x for x in market if (x.site_class or "") == "network"]
+    independent = [x for x in market if (x.site_class or "") == "independent"]
+    home = [x for x in market if (x.site_class or "") == "home"]
+    last_price = await _last_prices(db, cid)
+    rival_prices = [last_price[str(x.id)]["price"] for x in rivals + independent
+                    if str(x.id) in last_price]
+
+    days_in = max(days, 1)
+    return {
+        "name": name, "level": level, "days": days,
+        "ours": {
+            "objects": len(mine), "ports": ports,
+            "powerKwtTotal": round(sum(powers), 1) if powers else None,
+            "powerKwtMax": max(powers) if powers else None,
+            "bySpeed": by_speed, "byBrand": dict(sorted(
+                by_brand.items(), key=lambda kv: -kv[1])[:8]),
+            "byStatus": by_status, "connectorTypes": dict(sorted(
+                connector_types.items(), key=lambda kv: -kv[1])[:8]),
+            "sessions": int(sessions), "energyKwh": float(energy or 0),
+            "revenue": float(revenue or 0),
+            "avgDurationMin": round(float(duration or 0), 1),
+            "clients": int(clients or 0),
+            "avgCheck": round(float(revenue or 0) / int(sessions), 0) if sessions else None,
+            # Наша цена — по оплаченным: у ЮЛ постоплата, и делить на всю энергию нельзя.
+            "pricePerKwh": (round(float(paid_money) / float(paid_energy), 2)
+                            if paid_energy and float(paid_energy) > 0 else None),
+            # Загрузка: сколько сессий и киловатт-часов приходится на порт в сутки —
+            # именно это, а не число станций, говорит, нужна ли ещё одна.
+            "sessionsPerPortDay": (round(int(sessions) / ports / days_in, 2)
+                                   if ports else None),
+            "kwhPerPortDay": (round(float(energy or 0) / ports / days_in, 1)
+                              if ports else None),
+            "byUserType": by_user_type, "byConnector": by_connector,
+            "byResult": by_result, "hours": hours,
+            "trend": {
+                "prevSessions": int(prev_sessions or 0),
+                "prevRevenue": float(prev_revenue or 0),
+                "sessionsPct": _pct(float(prev_sessions or 0), float(sessions or 0)),
+                "revenuePct": _pct(float(prev_revenue or 0), float(revenue or 0)),
+            },
+            "objectsList": objects[:60],
+        },
+        "market": {
+            "rivalSites": len(rivals), "independentSites": len(independent),
+            "homeSockets": len(home),
+            "rivalPorts": sum(x.ports or 0 for x in rivals),
+            "aliveRivals": sum(1 for x in rivals
+                               if x.last_session_at and x.last_session_at >= alive_since),
+            "marketPricePerKwh": _median(rival_prices),
+            "pricedSites": len(rival_prices),
+            "sharePct": (round(len(mine) / (len(mine) + len(rivals)) * 100, 1)
+                         if (len(mine) + len(rivals)) else None),
+        },
+    }
+
+
 class BulkSiteIn(BaseModel):
     """Строка списка при массовом заведении точек (вставка из таблицы)."""
     name: str

@@ -15,6 +15,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCompany } from '@/contexts/CompanyContext'
+import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { MarketSelfPanel } from './MarketSelfPanel'
 import { getMarketPosition, SITE_KIND_LABEL, type MarketPositionRow } from '@/services/marketService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -78,7 +80,9 @@ function Neighbours({ row }: { row: MarketPositionRow }) {
                 )}
               </td>
               <td className="py-1 text-muted-foreground">
-                {n.siteClass === 'home' ? 'домашняя розетка' : SITE_KIND_LABEL[n.kind]}
+                {n.siteClass === 'home' ? 'домашняя розетка'
+                  : n.siteClass === 'independent' ? 'независимая точка'
+                  : SITE_KIND_LABEL[n.kind]}
               </td>
               <td className="py-1 text-muted-foreground">
                 {n.lastSessionAt
@@ -99,7 +103,35 @@ function Neighbours({ row }: { row: MarketPositionRow }) {
   )
 }
 
+/** Два взгляда на одно: наш объект против соседей и наш профиль глазами клиента. */
+const ВИДЫ = [
+  { k: 'objects', label: 'Наши объекты' },
+  { k: 'self', label: 'Мы глазами рынка' },
+] as const
+
 export function MarketPositionPanel() {
+  const [вид, setВид] = useState<string>('objects')
+  if (вид === 'self') {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="px-4 pt-4">
+          <PanelViewTabs tabs={ВИДЫ} value={вид} onChange={setВид} />
+        </div>
+        <div className="min-h-0 flex-1"><MarketSelfPanel /></div>
+      </div>
+    )
+  }
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="px-4 pt-4">
+        <PanelViewTabs tabs={ВИДЫ} value={вид} onChange={setВид} />
+      </div>
+      <div className="min-h-0 flex-1"><MarketPositionTable /></div>
+    </div>
+  )
+}
+
+function MarketPositionTable() {
   const { companyId } = useCompany()
   const [radius, setRadius] = useState('5')
   const [days, setDays] = useState('30')

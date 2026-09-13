@@ -169,10 +169,11 @@ export const patchMarketSite = (companyId: string, siteId: string, body: Record<
     `/api/market/sites/${siteId}?company_id=${encodeURIComponent(companyId)}`, body)
 
 /** Класс точки: сеть оператора или домашняя розетка частника. */
-export type MarketSiteClass = 'network' | 'home' | 'unknown'
+export type MarketSiteClass = 'network' | 'independent' | 'home' | 'unknown'
 
 export const SITE_CLASS_LABEL: Record<MarketSiteClass, string> = {
   network: 'сеть оператора',
+  independent: 'независимая точка',
   home: 'домашняя розетка',
   unknown: 'класс неизвестен',
 }
@@ -557,6 +558,70 @@ export const patchGrowthLead = (companyId: string, id: string, body: Record<stri
 export const leadToProject = (companyId: string, leadId: string) =>
   post<{ siteId: string; projectNo?: string; created: boolean; message: string }>(
     `/api/market/growth/leads/${leadId}/to-project?company_id=${encodeURIComponent(companyId)}`, {})
+
+/** Наш публичный профиль: как нас видит клиент и что видим мы. */
+export interface MarketSelfView {
+  days: number
+  matchKm: number
+  totals: {
+    inMarket: number; matchedToRegistry: number
+    quality: number | null; success: number | null; rating: number | null
+    reviews: number; aliveByMarket: number; silentButWorking: number
+  }
+  peers: { name: string; sites: number; quality: number | null
+           success: number | null; rating: number | null }[]
+  sites: {
+    siteId: string; marketName: string; city: string | null
+    locationId: string | null; ourName: string | null; matchKm: number | null
+    quality: number | null; successPct: number | null; rating: number | null
+    reviews: number | null; publicPricePerKwh: number | null
+    lastSessionAt: string | null; aliveByMarket: boolean
+    ourSessions: number | null; ourRevenue: number | null
+  }[]
+  note: string
+}
+
+export const getMarketSelfView = (companyId: string, params?: { days?: number; match_km?: number }) =>
+  get<MarketSelfView>('/api/market/self', { company_id: companyId, ...params })
+
+/** Профиль территории: наша сеть во всей полноте плюс рынок рядом. */
+export interface TerritoryProfile {
+  name: string
+  level: string
+  days: number
+  message?: string
+  ours: {
+    objects: number; ports: number
+    powerKwtTotal: number | null; powerKwtMax: number | null
+    bySpeed: Record<string, number>; byBrand: Record<string, number>
+    byStatus: Record<string, number>; connectorTypes: Record<string, number>
+    sessions: number; energyKwh: number; revenue: number
+    avgDurationMin: number; clients: number; avgCheck: number | null
+    pricePerKwh: number | null
+    sessionsPerPortDay: number | null; kwhPerPortDay: number | null
+    byUserType: Record<string, { sessions: number; revenue: number }>
+    byConnector: Record<string, number>; byResult: Record<string, number>
+    hours: { hour: number; sessions: number }[]
+    trend: { prevSessions: number; prevRevenue: number
+             sessionsPct: number | null; revenuePct: number | null }
+    objectsList: {
+      locationId: string; name: string; city: string | null
+      powerKwt: number | null; ports: number | null; speedClass: string | null
+      brand: string | null; status: string | null
+      sessions: number; revenue: number
+    }[]
+  } | null
+  market: {
+    rivalSites: number; independentSites: number; homeSockets: number
+    rivalPorts: number; aliveRivals: number
+    marketPricePerKwh: number | null; pricedSites: number; sharePct: number | null
+  }
+}
+
+export const getTerritoryProfile = (
+  companyId: string, params: { name: string; level?: string; days?: number },
+) => get<TerritoryProfile>('/api/market/territory-profile',
+  { company_id: companyId, ...params })
 
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(

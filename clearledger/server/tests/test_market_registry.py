@@ -41,11 +41,19 @@ def test_tariffs_windows_and_units():
     assert parse_tariffs("") == []
 
 
-def test_site_class_separates_home_sockets():
-    """Домашняя розетка не сеть: в сравнении операторов она мусор."""
+def test_site_class_separates_three_kinds():
+    """Три класса, а не два (полная выгрузка 13.09.2026).
+
+    Кроме сетей и домашних розеток есть 2 013 российских точек с публичным видом и
+    без оператора: в предложении территории они есть, в сравнении сетей — нет.
+    """
     assert site_class("home_station", None) == "home"
     assert site_class("public_station_paid_fast", "PUNKT E") == "network"
-    assert site_class("public_station", None) == "network"
+    # Публичная без оператора — независимая, а не сеть неизвестной компании.
+    assert site_class("public_station", None) == "independent"
+    assert site_class("public_station_paid", None) == "independent"
+    # Домашняя розетка остаётся домашней, даже если оператор проставлен площадкой.
+    assert site_class("home_station", "ItCharge") == "home"
     assert site_class(None, None) == "unknown"
 
 
