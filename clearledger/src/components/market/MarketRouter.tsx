@@ -38,6 +38,7 @@ import { MarketObservationDialog } from './MarketObservationDialog'
 import { MarketSourcesPanel } from './MarketSourcesPanel'
 import { MarketCompaniesPanel } from './MarketCompaniesPanel'
 import { MarketLandscapePanel } from './MarketLandscapePanel'
+import { MarketCoveragePanel } from './MarketCoveragePanel'
 import { MarketTerritoriesPanel, MarketWhitespotsPanel } from './MarketTerritoriesPanel'
 import { MarketSiteScorePanel } from './MarketSiteScorePanel'
 import { MarketElasticityPanel, MarketPressurePanel, MarketPriceLandscapePanel } from './MarketPricePanel'
@@ -491,6 +492,7 @@ export function MarketRouter({ tab }: { tab: string }) {
     case 'mk_landscape2': return <MarketLandscapePanel />
     case 'mk_observations': return <MarketObservations />
     case 'mk_sources': return <MarketSourcesPanel />
+    case 'mk_coverage': return <MarketCoveragePanel />
     case 'mk_territories': return <MarketTerritoriesPanel />
     case 'mk_whitespots': return <MarketWhitespotsPanel />
     case 'mk_score': return <MarketSiteScorePanel />

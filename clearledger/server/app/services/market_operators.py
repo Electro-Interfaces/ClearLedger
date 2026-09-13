@@ -214,3 +214,46 @@ async def ingest_operator_profiles(
         "message": (f"профилей {len(profiles or [])}, приложений {len(apps or [])}, "
                     f"реквизитов {len(legal or [])}; затронуто операторов {len(touched)}"),
     }
+
+
+async def ingest_region_stats(
+    db: AsyncSession, company_id: _uuid.UUID, rows: list[dict[str, str]],
+    source: str = "АВТОСТАТ + наш обход", as_of: str | None = None,
+) -> dict[str, Any]:
+    """Парк электромобилей и зарядки по регионам.
+
+    Таблица построена по электромобилям, БЕЗ гибридов: региональной разбивки по
+    гибридам в открытом доступе нет, а их вдвое больше — подмешав, мы завысили бы
+    спрос вдвое. Дата и источник хранятся рядом: парк обновляется вручную
+    несколько раз в год, зарядки — нашим обходом, и возраст у чисел разный.
+    """
+    from app.models import MarketRegionStat
+
+    known = {r.region: r for r in (await db.execute(select(MarketRegionStat).where(
+        MarketRegionStat.company_id == company_id))).scalars().all()}
+    now = datetime.now(timezone.utc)
+    touched = 0
+    for row in rows:
+        region = _s(row.get("region"), 160)
+        if not region:
+            continue
+        stat = known.get(region)
+        if stat is None:
+            stat = MarketRegionStat(company_id=company_id, region=region)
+            db.add(stat)
+            known[region] = stat
+        stat.ev_cars = _int(row.get("ev_cars"))
+        stat.ev_share_pct = _num(row.get("ev_share_pct"))
+        stat.stations = _int(row.get("stations"))
+        stat.stations_dc = _int(row.get("stations_dc"))
+        stat.stations_alive = _int(row.get("stations_alive"))
+        stat.cars_per_station = _num(row.get("cars_per_station"))
+        stat.cars_per_dc = _num(row.get("cars_per_dc"))
+        stat.cars_per_alive = _num(row.get("cars_per_alive"))
+        stat.source = source
+        stat.as_of = as_of
+        stat.updated_at = now
+        touched += 1
+    await db.commit()
+    return {"status": "success", "regions": touched,
+            "message": f"регионов с парком машин: {touched}"}

@@ -180,6 +180,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     mk_scenarios: 'Сценарии', mk_partners: 'Партнёрство и франшиза',
   },
   marketing_area: {
+    mk_coverage: 'Обеспеченность',
     mk_territories: 'Территории', mk_whitespots: 'Белые пятна',
     mk_score: 'Оценка площадки',
   },

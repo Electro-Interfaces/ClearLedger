@@ -348,6 +348,7 @@ export const MARKET_MENU: CentralMenuItem[] = [
 // ТЕРРИТОРИИ — где строить. У «Рынка» вопрос «что вокруг нас», здесь — «где нас нет
 // и стоит ли туда идти».
 export const MARKET_AREA_MENU: CentralMenuItem[] = [
+  { key: 'mk_coverage',    label: 'Обеспеченность' },
   { key: 'mk_territories', label: 'Территории' },
   { key: 'mk_whitespots',  label: 'Белые пятна' },
   { key: 'mk_score',       label: 'Оценка площадки' },

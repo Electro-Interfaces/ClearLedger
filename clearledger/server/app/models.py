@@ -8360,6 +8360,45 @@ class MarketScenarioMeasure(Base):
     )
 
 
+class MarketRegionStat(Base):
+    """Парк электромобилей и обеспеченность региона зарядками.
+
+    Внешняя статистика (АВТОСТАТ) плюс наш обход: сколько в регионе электромобилей,
+    сколько зарядок и сколько из них РАБОТАЮЩИХ. Разница между двумя последними
+    числами и есть главный сюжет: Татарстан по числу станций выглядит благополучно
+    (209 точек, 8 машин на точку), но работают 55 — реальная нагрузка 30 машин на
+    живую зарядку, вчетверо выше.
+
+    Данные хранятся как есть, вместе с датой и источником: парк обновляется
+    несколько раз в год и только вручную, а зарядки — нашим обходом. Смешивать их
+    в один «показатель спроса» нельзя — у них разная природа и разный возраст.
+    """
+    __tablename__ = "market_region_stats"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    region: Mapped[str] = mapped_column(String(160), nullable=False)
+    # Парк электромобилей — без гибридов: региональной разбивки по гибридам в
+    # открытом доступе нет, и подмешивать их значит завысить спрос вдвое.
+    ev_cars: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ev_share_pct: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    stations: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stations_dc: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stations_alive: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cars_per_station: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    cars_per_dc: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    cars_per_alive: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    as_of: Mapped[str | None] = mapped_column(String(10), nullable=True)   # дата данных парка
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("uq_market_region_stat", "company_id", "region", unique=True),
+    )
+
+
 class MarketGrowthLead(Base):
     """Кандидат развития сети: возможность, за которую взялись или ещё нет.
 

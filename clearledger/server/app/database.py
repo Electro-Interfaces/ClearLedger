@@ -4950,6 +4950,8 @@ async def create_all() -> None:
         for stmt in (
             "CREATE INDEX IF NOT EXISTS ix_market_lead_company "
             "ON market_growth_leads (company_id, track, status)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_market_region_stat "
+            "ON market_region_stats (company_id, region)",
             "CREATE INDEX IF NOT EXISTS ix_market_scenario_company "
             "ON market_scenarios (company_id, status, check_on)",
         ):

@@ -722,6 +722,32 @@ export const getMarketLandscape = (companyId: string) =>
     note: string
   }>('/api/market/landscape', { company_id: companyId })
 
+/** Обеспеченность региона: машин на зарядку и на работающую зарядку. */
+export interface MarketCoverageRow {
+  region: string
+  evCars: number | null
+  evSharePct: number | null
+  stations: number | null
+  stationsDc: number | null
+  stationsAlive: number | null
+  carsPerStation: number | null
+  carsPerDc: number | null
+  carsPerAlive: number | null
+  deadGapRatio: number | null
+  deadStations: number | null
+  ourSites: number
+  ourWorking: number
+  ourSharePct: number | null
+  marketSitesNow: number | null
+  marketAliveNow: number | null
+  source: string | null
+  asOf: string | null
+}
+
+export const getMarketCoverage = (companyId: string) =>
+  get<{ regions: MarketCoverageRow[]; total: number; note?: string; message?: string }>(
+    '/api/market/coverage', { company_id: companyId })
+
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(
     `/api/market/sites/bulk?company_id=${encodeURIComponent(companyId)}&source=${source}`, { items })

@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (ChargeSession, CorporateClient, EzsSite, MarketGrowthLead,
+                        MarketRegionStat,
                         MarketObservation, MarketOperator, MarketScenario,
                         MarketScenarioMeasure, MarketSite, MarketSiteSnapshot, Region,
                         ServiceLocation, User)
@@ -2834,6 +2835,99 @@ async def market_landscape(
         },
         "note": ("доли считаются по сетевым точкам: домашние розетки и независимые "
                  "точки без оператора в расклад сил не входят"),
+    }
+
+
+@router.get("/coverage")
+async def market_coverage(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Обеспеченность регионов: машин на зарядку и на РАБОТАЮЩУЮ зарядку.
+
+    Два разных дефицита, которые обычно смешивают. Где станций мало — нужно строить.
+    Где станции есть, но не работают — строить бессмысленно, надо чинить: Татарстан
+    по числу точек выглядит благополучно (8 машин на точку), а по работающим — 30,
+    вчетверо хуже. Иркутская область тяжелее всех: 63 машины на живую зарядку.
+
+    Парк берётся по электромобилям без гибридов: региональной разбивки по гибридам в
+    открытом доступе нет, а их вдвое больше — подмешав, мы завысили бы спрос вдвое.
+    """
+    cid = await _member(company_id, user, db)
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+
+    stats = (await db.execute(select(MarketRegionStat).where(
+        MarketRegionStat.company_id == cid))).scalars().all()
+    if not stats:
+        return {"regions": [], "total": 0,
+                "message": "статистики парка электромобилей нет — загрузите ev-market-regions.csv"}
+
+    # Наша сеть в тех же регионах: сколько наших точек и сколько из них работают.
+    regions = dict((rid, name) for rid, name in (await db.execute(
+        select(Region.id, Region.name).where(Region.company_id == cid))).all())
+    ours: dict[str, dict[str, int]] = {}
+    for loc in (await db.execute(select(ServiceLocation).where(
+            ServiceLocation.company_id == cid,
+            ServiceLocation.is_test.is_(False)))).scalars().all():
+        name = regions.get(loc.region_id)
+        if not name:
+            continue
+        row = ours.setdefault(name, {"sites": 0, "working": 0})
+        row["sites"] += 1
+        if loc.operational_status == "working":
+            row["working"] += 1
+
+    # Что рынок говорит о регионе сегодня — против того, что записано в статистике.
+    market: dict[str, dict[str, int]] = {}
+    for site in (await db.execute(select(MarketSite).where(
+            MarketSite.company_id == cid, MarketSite.kind == "ezs",
+            MarketSite.status != "closed",
+            MarketSite.site_class != "home"))).scalars().all():
+        if not site.region:
+            continue
+        row = market.setdefault(site.region, {"sites": 0, "alive": 0})
+        row["sites"] += 1
+        if site.last_session_at and site.last_session_at >= alive_since:
+            row["alive"] += 1
+
+    def _match(name: str) -> dict[str, int]:
+        """Сопоставление названий: «Калининградская обл.» и «Калининградская область»."""
+        short = name.replace(" обл.", " область").strip()
+        return market.get(name) or market.get(short) or {}
+
+    rows = []
+    for stat in stats:
+        our = ours.get(stat.region) or ours.get(stat.region.replace(" обл.", " область")) or {}
+        live = _match(stat.region)
+        cars = stat.ev_cars or 0
+        alive = stat.stations_alive or 0
+        rows.append({
+            "region": stat.region,
+            "evCars": stat.ev_cars,
+            "evSharePct": float(stat.ev_share_pct) if stat.ev_share_pct is not None else None,
+            "stations": stat.stations, "stationsDc": stat.stations_dc,
+            "stationsAlive": stat.stations_alive,
+            "carsPerStation": float(stat.cars_per_station) if stat.cars_per_station is not None else None,
+            "carsPerDc": float(stat.cars_per_dc) if stat.cars_per_dc is not None else None,
+            "carsPerAlive": float(stat.cars_per_alive) if stat.cars_per_alive is not None else None,
+            # Разрыв между «есть» и «работает»: во сколько раз нагрузка на живую
+            # зарядку выше, чем кажется по числу станций.
+            "deadGapRatio": (round((cars / alive) / (cars / stat.stations), 1)
+                             if cars and alive and stat.stations else None),
+            "deadStations": ((stat.stations or 0) - alive) if stat.stations else None,
+            "ourSites": our.get("sites", 0), "ourWorking": our.get("working", 0),
+            "ourSharePct": (round(our.get("sites", 0) / stat.stations * 100, 1)
+                            if stat.stations else None),
+            "marketSitesNow": live.get("sites"), "marketAliveNow": live.get("alive"),
+            "source": stat.source, "asOf": stat.as_of,
+        })
+    rows.sort(key=lambda r: -(r["carsPerAlive"] or 0))
+
+    return {
+        "regions": rows, "total": len(rows),
+        "note": ("парк — электромобили без гибридов (их вдвое больше, региональной "
+                 "разбивки по ним нет); таблица покрывает только регионы с известным "
+                 "парком, для остальных данных о машинах у нас нет"),
     }
 
 
