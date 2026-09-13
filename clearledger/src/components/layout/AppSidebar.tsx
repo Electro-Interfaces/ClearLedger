@@ -310,7 +310,7 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
   const [spaceOpen, toggleSpaceOpen] = useSectionOpen('space-pages', !phone)
   const [dataOpen, setDataOpen] = useState(true)
   const [oneCOpen, setOneCOpen] = useState(false)   // 1С при запуске свёрнут
-  const { company, companyModules, canApp, canModule, oversees, isCompanyAdmin } = useCompany()
+  const { company, companyModules, canApp, canModule, isCompanyAdmin } = useCompany()
   const { pathname, search } = useLocation()
   // Разделы рабочей области — здесь же, рядом со страницами продукта: рабочий стол
   // теперь уровнем выше (пространство), и внутри продукта верхний уровень навигации
@@ -421,16 +421,15 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
       <>
         <SidebarGroup className="py-0">
           <SidebarMenu>
-            {/* «Компания» — раздел надзора: увидеть, у кого что висит, и
-                дотянуться. У кого нет подчинённых, у того нет и такой работы,
-                поэтому раздел не «скрыт по правам», а не показывается вовсе:
-                окно, через которое видно чужое и ничего нельзя сделать, только
-                сбивает. Признак считает сервер по штатной структуре. */}
-            {/* «Настройка» рядовому отвечает одной карточкой «ведёт администратор»:
-                пункт рельсы, который ничего не открывает, — это ежедневный тупик.
-                Так же скрыта «Компания» тому, кто ни за кем не смотрит. */}
+            {/* «Компания» — работа компании целиком, и её ведут все, кто в
+                компании работает (решение МАГа 13.09.2026). Раньше раздел
+                показывался только тем, у кого есть подчинённые, а ссылки на
+                СВОЁ поручение вели именно сюда — человек упирался в отказ.
+                Надзор остался сужением: у кого есть люди, тот видит свою ветку.
+                «Настройка» рядовому отвечает одной карточкой «ведёт
+                администратор»: пункт рельсы, который ничего не открывает, —
+                это ежедневный тупик. */}
             {DOCS_SECTIONS
-              .filter((s) => s.to !== '/docs/company' || oversees)
               .filter((s) => s.to !== '/docs/setup' || isCompanyAdmin)
               .map((s) => (
               <NavItem key={s.to} to={s.to} icon={s.icon} label={s.label}

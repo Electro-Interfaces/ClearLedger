@@ -178,11 +178,17 @@ async def list_work(
     admin = await _is_admin(db, cid, current_user)
     doc_clause = await _readable_doc_clause(db, cid, current_user)
 
-    # Разрезы компании — надзорные: их открывает тот, кто отвечает за чужую
-    # работу, и видит он свою ветку, а не всё пространство. Личные разрезы
-    # (`mine`, `assigned`) отбираются по участию и этого условия не знают.
-    надзорный = scope in ("open", "done", "all")
-    о_надзоре = await oversight.assert_надзор(db, cid, current_user) if надзорный else None
+    # Работа компании — рабочий разрез, а не привилегия: её ведут все, кто в
+    # компании работает, и видят одно и то же (решение МАГа 13.09.2026). Раньше
+    # разрез отказывал всем, кроме админов и руководителей подразделений, а
+    # ссылки на СВОЁ поручение вели именно сюда — человек упирался в «этот
+    # разрез — для тех, кто отвечает». Сужение по ветке тоже снято: с ним
+    # начальник отдела видел МЕНЬШЕ рядового (свою ветку вместо компании), и
+    # список означал разное у разных людей. Отбор остаётся явным — через
+    # `assignee_id` и прочие фильтры, а не молча по должности.
+    # Видимость по-прежнему даёт `_visible_to` / `_not_personal` / `doc_clause`:
+    # чужие личные записи в ленту не попадают.
+    о_надзоре = None
 
     task_sel = select(
         Task.id.label("id"),
@@ -789,18 +795,20 @@ async def work_summary(
 
     admin = await _is_admin(db, cid, current_user)
     doc_clause = await _readable_doc_clause(db, cid, current_user)
-    # Тот же охват, что у самой ленты: числа над списком обязаны считать то же,
-    # что список показывает. Две ручки, отвечающие на один вопрос разными
-    # числами, — это не оптимизация, а две правды.
-    о = await oversight.assert_надзор(db, cid, current_user)
+    # Числа над списком обязаны считать то же, что список показывает: две
+    # ручки, отвечающие на один вопрос разными числами, — это не оптимизация,
+    # а две правды. Лента компании сужений по должности не знает (см.
+    # `list_work`), поэтому и счётчики их не знают.
+    о = None
     counts: dict[str, dict[str, int]] = {
         c: {"doc": 0, "task": 0} for c in work_state.COLUMNS}
 
     for model, clause, state_expr, key in (
         (Task, and_(_visible_to(current_user, admin), _not_personal(),
-                    oversight.в_охвате(о, Task.assignee_id)),
+                    oversight.в_охвате(о, Task.assignee_id) if о else _sa_true()),
          work_state.task_state_sql(Task), "task"),
-        (DocCard, and_(doc_clause, oversight.в_охвате(о, DocCard.responsible_id)),
+        (DocCard, and_(doc_clause,
+                       oversight.в_охвате(о, DocCard.responsible_id) if о else _sa_true()),
          work_state.doc_state_sql(DocCard), "doc"),
     ):
         for value, count in (await db.execute(

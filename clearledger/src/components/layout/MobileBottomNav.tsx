@@ -50,7 +50,7 @@ export function MobileBottomNav({ onMenu }: {
    *  бургера в шапке больше нет (решение МАГа 06.09.2026). */
   onMenu?: () => void
 } = {}) {
-  const { company, companyId, companyModules, canApp, canModule, oversees } = useCompany()
+  const { company, companyId, companyModules, canApp, canModule } = useCompany()
   const pulseOn = useAppEnabled(companyId, 'pulse')
   const { pathname, search } = useLocation()
   // Разделы рабочей области: без фильтра lockedModes (он живёт в контексте самой
@@ -90,12 +90,10 @@ export function MobileBottomNav({ onMenu }: {
     items = [
       { label: 'Документы', path: '/docs?view=incoming', icon: FileText },
       { label: 'Моё', path: '/docs/work?view=today', icon: ListChecks },
-      // «Компания» — раздел надзора: у кого нет подчинённых, у того нет и
-      // такой работы. На телефоне это ещё важнее: полоса узкая, и лишний
-      // пункт отнимает место у тех, которыми пользуются.
-      ...(oversees
-        ? [{ label: 'Компания', path: '/docs/company?view=docs', icon: Building2 }]
-        : []),
+      // «Компания» — работа компании целиком, и её ведут все (решение МАГа
+      // 13.09.2026): на телефоне тоже, иначе ссылка на своё поручение ведёт
+      // в раздел, которого в полосе нет.
+      { label: 'Компания', path: '/docs/company?view=docs', icon: Building2 },
       { label: 'Обзор', path: '/docs/overview?view=docs', icon: Activity },
       { label: 'Настройка', path: '/docs/setup?view=templates', icon: CalendarDays },
     ].map((item) => ({ ...item, path: withGlobalFilter(item.path, search) }))
