@@ -12,6 +12,7 @@ import { getRoomWork, workHref } from '@/services/workContextService'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { videoHasAudio } from '@/lib/videoAudio'
 import {
   MessageCircle, Send, Search, User as UserIcon, Building2, Users, Plus,
   ChevronLeft, ChevronRight, FileText, MoreVertical, Archive, ArchiveRestore,
@@ -2051,6 +2052,30 @@ export function ChatPanel({ compact, scopeProduct }: {
   const [listSearch, setListSearch] = useState('')
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
+  // Видео без звука — предупредить автора ДО отправки. Запись экрана macOS по
+  // умолчанию идёт без микрофона: человек наговаривает замечание, а получатель
+  // видит немое кино. Проверка стоит здесь, а не у каждой кнопки выбора файла:
+  // файлы приходят пятью путями (кнопка, вставка, перетаскивание, захват области,
+  // пересылка), и предупреждать надо на всех.
+  const проверенные = useRef(new Set<string>())
+  useEffect(() => {
+    const видео = pendingFiles.filter((f) =>
+      /\.(mp4|mov|m4v)$/i.test(f.name) && !проверенные.current.has(`${f.name}:${f.size}`))
+    if (!видео.length) return
+    for (const f of видео) {
+      проверенные.current.add(`${f.name}:${f.size}`)
+      videoHasAudio(f).then((есть) => {
+        if (есть === false) {
+          toast.warning('В видео нет звука', {
+            description: `«${f.name}» записано без звуковой дорожки. Если вы наговаривали `
+              + 'комментарий, он не сохранился: включите микрофон в параметрах записи '
+              + '(Cmd+Shift+5 → Параметры → Микрофон) или опишите текстом.',
+            duration: 12000,
+          })
+        }
+      })
+    }
+  }, [pendingFiles])
   const [capturing, setCapturing] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
