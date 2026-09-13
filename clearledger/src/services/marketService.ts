@@ -780,9 +780,16 @@ export const getMarketPlayers = (companyId: string) =>
                adjacent: boolean; medianRating: number | null; withRating: number
                examples: string[] }[]
     quality: MarketPlayer[]
+    shops: {
+      brand: string; host: string | null; url: string | null
+      hasShop: boolean | null; goods: string | null
+      priceMin: number | null; priceMax: number | null
+      pricesFound: number | null; note: string | null
+      checkedOn: string | null; sites: number | null
+    }[]
     totals: { withStations: number; assetLight: number; adjacent: number
               medianRating: number | null; withRating: number; unchecked: number
-              multiApp: string[] }
+              withShop: number; shopsChecked: number; multiApp: string[] }
     note?: string
     message?: string
   }>('/api/market/players', { company_id: companyId })

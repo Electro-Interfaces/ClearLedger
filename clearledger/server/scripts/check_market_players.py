@@ -32,6 +32,17 @@ async def main() -> None:
                   f"{c['assetLight']:>4}, станций {c['stations']:>5}, оценка "
                   f"{c['medianRating']}{mark}")
 
+        print(f"\nвитрины: есть у {t['withShop']} из {t['shopsChecked']} проверенных")
+        for sh in data.get("shops", [])[:12]:
+            price = ("—" if sh["priceMin"] is None
+                     else f"{int(sh['priceMin'])}–{int(sh['priceMax'])} ₽ "
+                          f"({sh['pricesFound']} поз.)")
+            mark = f"  ⚠ {sh['note']}" if sh["note"] else ""
+            print(f"   {sh['brand'][:18]:<20}{'есть' if sh['hasShop'] else 'не нашли':<10}"
+                  f"{price:<34}{(sh['goods'] or '')[:32]}{mark}")
+        if t.get("multiApp"):
+            print("\nсети с двумя приложениями:", ", ".join(t["multiApp"]))
+
         print("\nкачество против размера (по числу отзывов):")
         for p in data["quality"][:8]:
             print(f"   {p['app'][:24]:<26} станций {(p['ownStations'] or 0):>5}, "

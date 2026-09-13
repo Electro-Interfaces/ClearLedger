@@ -27,6 +27,7 @@ const ВИДЫ = [
   { k: 'models', label: 'Модели бизнеса' },
   { k: 'classes', label: 'Откуда приходят' },
   { k: 'quality', label: 'Качество против размера' },
+  { k: 'shops', label: 'Вторая выручка' },
 ] as const
 
 function PlayerLine({ p }: { p: MarketPlayer }) {
@@ -211,6 +212,56 @@ export function MarketPlayersPanel() {
           <p className="p-2 text-xs text-muted-foreground">
             Отсортировано по числу отзывов: у приложения с пятью оценками и с тремястами
             разная достоверность, и сравнивать их между собой напрямую нельзя.
+          </p>
+        </div>
+      )}
+
+      {вид === 'shops' && (
+        <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+              <tr>
+                <th className="p-2 text-left font-medium">Сеть</th>
+                <th className="p-2 text-left font-medium">Витрина</th>
+                <th className="p-2 text-left font-medium">Что продают</th>
+                <th className="p-2 text-right font-medium">Цены от</th>
+                <th className="p-2 text-right font-medium">до</th>
+                <th className="p-2 text-right font-medium">Позиций с ценой</th>
+                <th className="p-2 text-left font-medium">Адрес</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(q.data?.shops ?? []).map((sh) => (
+                <tr key={sh.brand} className="border-t border-border/50">
+                  <td className="p-2 font-medium">{sh.brand}</td>
+                  <td className="p-2">
+                    {sh.hasShop
+                      ? <span className="text-success">есть каталог</span>
+                      : <span className="text-muted-foreground">не нашли</span>}
+                    {sh.note && <span className="ml-1 text-warning">· {sh.note}</span>}
+                  </td>
+                  <td className="p-2 text-muted-foreground">{sh.goods ?? '—'}</td>
+                  <td className="p-2 text-right tabular-nums">
+                    {sh.priceMin != null ? `${nf.format(sh.priceMin)} ₽` : '—'}
+                  </td>
+                  <td className="p-2 text-right tabular-nums">
+                    {sh.priceMax != null ? `${nf.format(sh.priceMax)} ₽` : '—'}
+                  </td>
+                  <td className="p-2 text-right tabular-nums">
+                    {sh.pricesFound ? nf.format(sh.pricesFound) : '—'}
+                  </td>
+                  <td className="p-2 text-muted-foreground">{sh.host ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="p-2 text-xs text-muted-foreground">
+            Витрина оказалась маркером модели: она есть у {t.withShop} из{' '}
+            {t.shopsChecked} проверенных сетей, а у чистых агрегаторов её нет вовсе —
+            они живут на чужой инфраструктуре и железо не продают. Цены сняты
+            автоматически со страниц каталога: это диапазон для ориентира, а не
+            прайс-лист, и перед публикацией цифру надо сверить с сайтом. «Не нашли»
+            означает, что витрины не было на типовых адресах, а не что её нет.
           </p>
         </div>
       )}

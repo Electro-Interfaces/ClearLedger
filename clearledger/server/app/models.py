@@ -8411,6 +8411,44 @@ class MarketPlayer(Base):
     )
 
 
+class MarketShop(Base):
+    """Витрина оборудования сети: чем игрок торгует кроме киловатт.
+
+    Вторая выручка и одновременно маркер модели: витрина есть у девяти из двенадцати
+    проверенных сетей, а у чистых агрегаторов (ItCharge, 2Chargers, Яндекс.Заправки)
+    её нет вовсе. То есть наличие каталога отличает владельца инфраструктуры от того,
+    кто живёт на чужой.
+
+    Цены сняты автоматически со страниц каталога: это ориентир диапазона, а не
+    прайс-лист, и перед публикацией конкретной цифры её надо сверить с сайтом.
+    «Витрины нет» означает «не нашли на типовых адресах», а не «точно не продаёт» —
+    процессинги, мойки и банки на витрины вообще не проверялись.
+    """
+    __tablename__ = "market_shops"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    brand: Mapped[str] = mapped_column(String(160), nullable=False)
+    operator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_operators.id", ondelete="SET NULL"), nullable=True)
+    host: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    url: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    has_shop: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    goods: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    price_min: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    price_max: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    prices_found: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checked_on: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("uq_market_shop", "company_id", "brand", unique=True),
+    )
+
+
 class MarketRegionStat(Base):
     """Парк электромобилей и обеспеченность региона зарядками.
 

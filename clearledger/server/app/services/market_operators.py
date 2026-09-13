@@ -335,3 +335,49 @@ async def ingest_players(
     return {"status": "success", "players": touched,
             "message": (f"игроков {len(players or [])}, автопроизводителей "
                         f"{len(oem or [])}; записано {touched}")}
+
+
+async def ingest_shops(
+    db: AsyncSession, company_id: _uuid.UUID, rows: list[dict[str, str]],
+    checked_on: str | None = None,
+) -> dict[str, Any]:
+    """Витрины оборудования: чем сеть торгует кроме киловатт.
+
+    Заодно это маркер модели — у чистых агрегаторов витрины нет. Поэтому «нет
+    витрины» здесь значение, а не пропуск: его тоже записываем.
+    """
+    from app.models import MarketShop
+
+    known = {r.brand: r for r in (await db.execute(select(MarketShop).where(
+        MarketShop.company_id == company_id))).scalars().all()}
+    operators = {(o.name or "").strip().lower(): o for o in (await db.execute(
+        select(MarketOperator).where(
+            MarketOperator.company_id == company_id))).scalars().all()}
+    now = datetime.now(timezone.utc)
+    touched = 0
+    for raw in rows:
+        brand = _s(raw.get("brand"), 160)
+        if not brand:
+            continue
+        shop = known.get(brand)
+        if shop is None:
+            shop = MarketShop(company_id=company_id, brand=brand)
+            db.add(shop)
+            known[brand] = shop
+        shop.host = _s(raw.get("host"), 200)
+        shop.url = _s(raw.get("url"), 400)
+        shop.has_shop = _flag(raw.get("shop"))
+        shop.goods = _s(raw.get("goods"), 400)
+        shop.price_min = _num(raw.get("price_min"))
+        shop.price_max = _num(raw.get("price_max"))
+        shop.prices_found = _int(raw.get("prices_found"))
+        shop.note = _s(raw.get("note"))
+        shop.checked_on = checked_on
+        op = operators.get((_canon_operator(brand) or brand).strip().lower())
+        if op is not None:
+            shop.operator_id = op.id
+        shop.updated_at = now
+        touched += 1
+    await db.commit()
+    return {"status": "success", "shops": touched,
+            "message": f"витрин проверено: {touched}"}

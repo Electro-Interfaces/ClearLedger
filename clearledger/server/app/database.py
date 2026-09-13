@@ -4956,6 +4956,8 @@ async def create_all() -> None:
             "ON market_players (company_id, app, coalesce(package, ''))",
             "CREATE INDEX IF NOT EXISTS ix_market_player_class "
             "ON market_players (company_id, player_class)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_market_shop "
+            "ON market_shops (company_id, brand)",
             "CREATE INDEX IF NOT EXISTS ix_market_scenario_company "
             "ON market_scenarios (company_id, status, check_on)",
         ):

@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.database import async_session_factory
 from app.models import Company
 from app.services.market_operators import (ingest_operator_profiles, ingest_players,
-                                           ingest_region_stats, parse_csv)
+                                           ingest_region_stats, ingest_shops, parse_csv)
 
 
 async def main() -> None:
@@ -24,6 +24,7 @@ async def main() -> None:
         "regions": pathlib.Path("/tmp/ev-market-regions.csv"),
         "players": pathlib.Path("/tmp/ev-market-players.csv"),
         "oem": pathlib.Path("/tmp/ev-oem-players.csv"),
+        "shops": pathlib.Path("/tmp/ev-shops.csv"),
     }
     data: dict[str, list] = {}
     for key, path in files.items():
@@ -56,6 +57,13 @@ async def main() -> None:
             found = await ingest_players(db, company.id, players=data["players"],
                                          oem=data["oem"])
             print(found["message"])
+
+        if data["shops"]:
+            # «Нет витрины» — значение, а не пропуск: у чистых агрегаторов её нет,
+            # и это отличает их от владельцев инфраструктуры.
+            shops = await ingest_shops(db, company.id, data["shops"],
+                                       checked_on="2026-09-13")
+            print(shops["message"])
 
 
 asyncio.run(main())

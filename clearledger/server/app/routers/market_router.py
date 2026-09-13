@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (ChargeSession, CorporateClient, EzsSite, MarketGrowthLead,
-                        MarketPlayer, MarketRegionStat,
+                        MarketPlayer, MarketRegionStat, MarketShop,
                         MarketObservation, MarketOperator, MarketScenario,
                         MarketScenarioMeasure, MarketSite, MarketSiteSnapshot, Region,
                         ServiceLocation, User)
@@ -3046,6 +3046,27 @@ async def market_players(
                            "withRating": len(rated)})
     class_rows.sort(key=lambda c: -c["players"])
 
+    # ── витрины: чем игрок торгует кроме киловатт ──
+    # Вторая выручка и одновременно маркер модели: у чистых агрегаторов витрины нет
+    # вовсе, а у владельцев инфраструктуры она норма. Поэтому «нет витрины» — тоже
+    # значение, и оно показывается наравне с «есть».
+    shops = []
+    for shop in (await db.execute(select(MarketShop).where(
+            MarketShop.company_id == cid))).scalars().all():
+        op = operators.get(shop.operator_id) if shop.operator_id else None
+        shops.append({
+            "brand": shop.brand, "host": shop.host, "url": shop.url,
+            "hasShop": shop.has_shop, "goods": shop.goods,
+            "priceMin": float(shop.price_min) if shop.price_min is not None else None,
+            "priceMax": float(shop.price_max) if shop.price_max is not None else None,
+            "pricesFound": shop.prices_found, "note": shop.note,
+            "checkedOn": shop.checked_on,
+            "sites": None if op is None else next(
+                (p["ownStations"] for p in players
+                 if p["operatorName"] == op.name and p["ownStations"]), None),
+        })
+    shops.sort(key=lambda r: (not r["hasShop"], -(r["pricesFound"] or 0)))
+
     # ── качество против размера: рейтинг рядом с числом станций ──
     # Сравнивать рейтинги между классами напрямую нельзя: у приложения с пятью
     # оценками и с тремястами разная достоверность, поэтому число отзывов рядом.
@@ -3056,6 +3077,7 @@ async def market_players(
     return {
         "players": players, "total": len(players),
         "quadrants": quadrants, "classes": class_rows, "quality": quality,
+        "shops": shops,
         "totals": {
             "withStations": len(with_assets), "assetLight": len(light),
             "adjacent": sum(1 for p in players if p["adjacent"]),
@@ -3064,6 +3086,8 @@ async def market_players(
             "withRating": len(ratings),
             # Сети, у которых больше одного приложения: раздвоенная точка контакта
             # с водителем — сама по себе находка.
+            "withShop": sum(1 for r in shops if r["hasShop"]),
+            "shopsChecked": len(shops),
             "multiApp": sorted({p["operatorName"] or p["app"] for p in players
                                 if sum(1 for o in players
                                        if (o["operatorName"] or o["app"])
@@ -3074,7 +3098,9 @@ async def market_players(
                  "называть конкретное имя, его надо подтвердить; наличие приложения "
                  "не означает работы на рынке зарядок: сети АЗС и мойки здесь как "
                  "смежные игроки; выборка сделана по RuStore и не видит App Store "
-                 "и Google Play"),
+                 "и Google Play; витрины проверены только у сетей с подтверждённым "
+                 "доменом, «нет витрины» значит «не нашли на типовых адресах», а цены "
+                 "сняты автоматически и годятся как диапазон, не как прайс-лист"),
     }
 
 
