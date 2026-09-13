@@ -41,6 +41,10 @@ export interface MarketPrice {
 export interface MarketSite {
   id: string
   kind: MarketSiteKind
+  /** Сеть, независимая точка или домашняя розетка — слой карты выбирают по нему. */
+  siteClass: MarketSiteClass
+  currentType: string | null
+  lastSessionAt: string | null
   name: string
   operatorId: string | null
   operatorName: string | null
@@ -134,7 +138,11 @@ export interface MarketObservation {
 
 export const listMarketSites = (
   companyId: string,
-  params?: { kind?: string; city?: string; bbox?: string; limit?: number; offset?: number },
+  params?: {
+    kind?: string; city?: string; bbox?: string; limit?: number; offset?: number
+    site_class?: string; current_type?: string; operator_id?: string
+    min_power?: number; alive?: string
+  },
 ) => get<{ sites: MarketSite[]; total: number; returned: number; offset: number; limit: number }>(
   '/api/market/sites', { company_id: companyId, ...params })
 
@@ -622,6 +630,35 @@ export const getTerritoryProfile = (
   companyId: string, params: { name: string; level?: string; days?: number },
 ) => get<TerritoryProfile>('/api/market/territory-profile',
   { company_id: companyId, ...params })
+
+/** Наша станция на карте — со всем, по чему её отбирают на нашем слое. */
+export interface OurMapPoint {
+  id: string
+  name: string
+  code: string
+  city: string | null
+  region: string | null
+  lat: number
+  lon: number
+  powerKwt: number | null
+  ports: number | null
+  speedClass: string | null
+  locationClass: string | null
+  brand: string | null
+  status: string | null
+  commissionedOn: string | null
+  sessions: number
+  energyKwh: number
+  revenue: number
+  clients: number
+  errorPct: number | null
+  sessionsPerPortDay: number | null
+}
+
+export const getOurMapPoints = (companyId: string, params?: { days?: number }) =>
+  get<{ days: number; points: OurMapPoint[]; total: number
+        brands: string[]; statuses: string[]; regions: string[] }>(
+    '/api/market/our-map', { company_id: companyId, ...params })
 
 export const bulkMarketSites = (companyId: string, items: Record<string, unknown>[], source = 'import') =>
   post<{ created: number; updated: number; observations: number }>(

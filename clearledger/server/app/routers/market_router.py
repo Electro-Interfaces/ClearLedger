@@ -15,7 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, or_ as sa_or, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
@@ -279,6 +279,11 @@ async def list_sites(
     kind: str | None = Query(None, description="ezs|mall|parking|fuel|…"),
     city: str | None = Query(None),
     bbox: str | None = Query(None, description="юг,запад,север,восток — область карты"),
+    site_class: str | None = Query(None, description="network|independent|home"),
+    current_type: str | None = Query(None, description="DC|AC|LV"),
+    operator_id: str | None = Query(None),
+    min_power: float | None = Query(None, ge=0),
+    alive: bool | None = Query(None, description="заряжали за 90 дней"),
     limit: int = Query(SITES_PAGE_DEFAULT, le=SITES_PAGE_MAX),
     offset: int = Query(0, ge=0),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
@@ -299,6 +304,19 @@ async def list_sites(
         q = q.where(MarketSite.kind == kind)
     if city:
         q = q.where(MarketSite.city == city)
+    if site_class:
+        q = q.where(MarketSite.site_class == site_class)
+    if current_type:
+        q = q.where(MarketSite.current_type == current_type)
+    if operator_id:
+        q = q.where(MarketSite.operator_id == operator_id)
+    if min_power is not None:
+        q = q.where(MarketSite.max_power_kw >= min_power)
+    if alive is not None:
+        edge = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+        q = (q.where(MarketSite.last_session_at >= edge) if alive
+             else q.where(sa_or(MarketSite.last_session_at.is_(None),
+                                MarketSite.last_session_at < edge)))
     if bbox:
         try:
             south, west, north, east = (float(x) for x in bbox.split(","))
@@ -341,6 +359,9 @@ async def list_sites(
         "id": str(s.id), "kind": s.kind, "name": s.name,
         "operatorId": str(s.operator_id) if s.operator_id else None,
         "operatorName": operators.get(str(s.operator_id)) if s.operator_id else None,
+        "siteClass": s.site_class or "unknown",
+        "currentType": s.current_type,
+        "lastSessionAt": s.last_session_at.isoformat() if s.last_session_at else None,
         "address": s.address, "city": s.city, "region": s.region,
         "lat": float(s.latitude) if s.latitude is not None else None,
         "lon": float(s.longitude) if s.longitude is not None else None,
@@ -2606,6 +2627,75 @@ async def territory_profile(
             "sharePct": (round(len(mine) / (len(mine) + len(rivals)) * 100, 1)
                          if (len(mine) + len(rivals)) else None),
         },
+    }
+
+
+@router.get("/our-map")
+async def our_map_points(
+    company_id: str = Query(...),
+    days: int = Query(90, ge=7, le=365),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Наши станции для карты — со всем, что мы о них знаем.
+
+    Свой слой карты фильтруется по СВОИМ данным: состояние и связь, класс скорости,
+    производитель, мощность, загрузка порта, выручка, доля сорванных зарядок. Рынок
+    такого о нас не знает, и в этом весь смысл отдельного слоя — чужие точки можно
+    отобрать только по тому, что видно снаружи, свои — по тому, как они работают.
+    """
+    cid = await _member(company_id, user, db)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+    money = func.coalesce(ChargeSession.client_amount, ChargeSession.amount)
+
+    rows = (await db.execute(
+        select(ChargeSession.location_id, func.count(),
+               func.coalesce(func.sum(ChargeSession.energy_kwh), 0),
+               func.coalesce(func.sum(money), 0),
+               func.sum(case((ChargeSession.result.ilike("%error%"), 1), else_=0)),
+               func.count(func.distinct(ChargeSession.user_id)))
+        .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
+               ChargeSession.location_id.is_not(None))
+        .group_by(ChargeSession.location_id))).all()
+    stats = {str(loc): {"sessions": int(c), "energy": float(e or 0), "revenue": float(a or 0),
+                        "errors": int(err or 0), "clients": int(u or 0)}
+             for loc, c, e, a, err, u in rows}
+
+    regions = dict((rid, name) for rid, name in (await db.execute(
+        select(Region.id, Region.name).where(Region.company_id == cid))).all())
+    locations = (await db.execute(select(ServiceLocation).where(
+        ServiceLocation.company_id == cid,
+        ServiceLocation.is_test.is_(False),
+        ServiceLocation.latitude.is_not(None)))).scalars().all()
+
+    points = []
+    for loc in locations:
+        st = stats.get(str(loc.id), {"sessions": 0, "energy": 0.0, "revenue": 0.0,
+                                     "errors": 0, "clients": 0})
+        ports = loc.connectors_count or 0
+        points.append({
+            "id": loc.id, "name": loc.name, "code": loc.code,
+            "city": loc.city, "region": regions.get(loc.region_id),
+            "lat": float(loc.latitude), "lon": float(loc.longitude),
+            # Паспорт: по нему отбирают «быстрые DC от 100 кВт» или «всё, что Fora»
+            "powerKwt": float(loc.power_kwt) if loc.power_kwt else None,
+            "ports": ports or None,
+            "speedClass": loc.speed_class, "locationClass": loc.location_class,
+            "brand": loc.brand, "status": loc.operational_status,
+            "commissionedOn": loc.installed_on,
+            # Работа: по ней отбирают «где пусто» и «где срывается»
+            "sessions": st["sessions"], "energyKwh": round(st["energy"], 1),
+            "revenue": round(st["revenue"], 2), "clients": st["clients"],
+            "errorPct": (round(st["errors"] / st["sessions"] * 100, 1)
+                         if st["sessions"] else None),
+            "sessionsPerPortDay": (round(st["sessions"] / ports / days, 2)
+                                   if ports else None),
+        })
+
+    return {
+        "days": days, "points": points, "total": len(points),
+        "brands": sorted({p["brand"] for p in points if p["brand"]}),
+        "statuses": sorted({p["status"] for p in points if p["status"]}),
+        "regions": sorted({p["region"] for p in points if p["region"]}),
     }
 
 
