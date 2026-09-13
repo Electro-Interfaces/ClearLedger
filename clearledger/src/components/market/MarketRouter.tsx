@@ -59,8 +59,17 @@ function useIsDark() {
   return dark
 }
 
-/** Цвет нашей станции — по выбранному показателю: состояние, загрузка, срывы, деньги.
- *  Один слой отвечает на разные вопросы, не превращаясь в четыре карты. */
+/**
+ * Фирменный синий: им залита КАЖДАЯ наша станция, в любом состоянии и при любом
+ * разрезе. Принадлежность важнее показателя: выключенный объект, закрашенный серым
+ * «по состоянию», на общем полотне читался как чужая точка, и человек не мог
+ * ответить на первый вопрос к карте — где тут мы (решение МАГа 13.09.2026).
+ */
+const НАШ_ЦВЕТ = '#3b82f6'
+
+/** Разрез нашей станции — кольцом вокруг синей заливки: состояние, загрузка,
+ *  срывы, деньги. Один слой отвечает на разные вопросы, не превращаясь в четыре
+ *  карты и не теряя принадлежности. */
 function ourColor(p: OurMapPoint, by: OurFilters['colorBy']): string {
   if (by === 'status') {
     if (p.status === 'working') return '#3b82f6'
@@ -85,7 +94,7 @@ function ourColor(p: OurMapPoint, by: OurFilters['colorBy']): string {
 
 /** Цвет точки на карте: наши — фирменный, конкуренты — красный, притяжение — серый. */
 function siteColor(s: MarketSite): string {
-  if (s.isOurs) return '#3b82f6'
+  if (s.isOurs) return НАШ_ЦВЕТ
   if (s.kind !== 'ezs') return '#94a3b8'
   // Независимая точка — не сеть: другой цвет, чтобы плотность рынка не выглядела
   // плотностью сетей (полная выгрузка 13.09.2026).
@@ -169,11 +178,14 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
     <>
       {ourClusters.map((c) => {
         const one = c.items.length === 1 ? c.items[0] : null
-        const color = one ? ourColor(one, colorBy) : '#3b82f6'
+        // Заливка — принадлежность, кольцо — выбранный разрез. Цвет при этом не
+        // единственный носитель: то же состояние написано словами в подсказке.
+        const ring = one ? ourColor(one, colorBy) : НАШ_ЦВЕТ
         return (
           <CircleMarker key={c.key} center={[c.lat, c.lon]}
             radius={one ? 6 : Math.min(16, 6 + Math.log2(c.items.length) * 2.5)}
-            pathOptions={{ color, fillColor: color, fillOpacity: 0.9, weight: 1.5 }}>
+            pathOptions={{ color: ring, fillColor: НАШ_ЦВЕТ, fillOpacity: 0.95,
+                           weight: ring === НАШ_ЦВЕТ ? 1.5 : 3 }}>
             <Popup>
               {one ? (
                 <>
@@ -204,7 +216,13 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
             <Popup>
               {one ? (
                 <>
-                  <b>{one.name}</b><br />
+                  <b>{one.name}</b>
+                  {/* Наша же станция, увиденная снаружи. Без этой строки человек
+                      видит на карте точку с адресом своего объекта и не понимает,
+                      чья она: две записи об одном объекте выглядят как две
+                      станции. */}
+                  {one.isOurs && <> · <span style={{ color: '#3b82f6' }}>наша станция, так её видит рынок</span></>}
+                  <br />
                   {SITE_KIND_LABEL[one.kind]}{one.operatorName ? ` · ${one.operatorName}` : ''}<br />
                   {one.price?.value != null
                     ? <>цена {one.price.value} ₽{one.price.unit === 'kwh' ? '/кВтч' : ''} · {age?.text}</>
@@ -239,6 +257,11 @@ function MarketMap() {
   // Слои включаются флажками, а вид точки уже отобран на сервере: здесь остаётся
   // только скрыть выключенные слои.
   const market = allMarket.filter((s) => {
+    // Наша станция, найденная во внешнем реестре, — это не рынок. Прежде она
+    // попадала в слой сетей и красилась как конкурент: на карте рядом с нашим
+    // объектом стояла «чужая» точка с тем же адресом, и понять, чья она, было
+    // нельзя. Теперь это отдельный слой, выключенный по умолчанию.
+    if (s.isOurs) return filters.showOursOnMarket
     if (s.kind !== 'ezs') return filters.showAttractors
     if (s.siteClass === 'home') return filters.showHome
     if (s.siteClass === 'independent') return filters.showIndependent
@@ -284,8 +307,10 @@ function MarketMap() {
         statuses={ours.data?.statuses ?? []}
         counts={{
           ours: ourPoints.length,
-          rivals: allMarket.filter((s) => s.kind === 'ezs' && s.siteClass === 'network').length,
-          independent: allMarket.filter((s) => s.siteClass === 'independent').length,
+          rivals: allMarket.filter((s) => !s.isOurs && s.kind === 'ezs'
+            && s.siteClass === 'network').length,
+          oursOnMarket: allMarket.filter((s) => s.isOurs).length,
+          independent: allMarket.filter((s) => !s.isOurs && s.siteClass === 'independent').length,
           home: allMarket.filter((s) => s.siteClass === 'home').length,
           attractors: allMarket.filter((s) => s.kind !== 'ezs').length,
         }} />

@@ -361,6 +361,7 @@ async def list_sites(
     не сообщая, что остальное не доехало (ревизия 12.09.2026, К10).
     """
     cid = await _member(company_id, user, db)
+    own_ids = await _own_operator_ids(db, cid)
     q = select(MarketSite).where(MarketSite.company_id == cid)
     if search and search.strip():
         # Искать надо по всей выдаче, а не по первой странице: список показывал
@@ -438,7 +439,12 @@ async def list_sites(
         "ports": s.ports,
         "maxPowerKw": float(s.max_power_kw) if s.max_power_kw is not None else None,
         "connectors": s.connectors, "status": s.status, "openedOn": s.opened_on,
-        "isOurs": bool(s.location_id), "locationId": s.location_id,
+        # Наша станция, увиденная снаружи: во внешнем реестре 429 точек
+        # РусГидро, и `location_id` у них пуст, как у всех внешних записей.
+        # Признак по нему давал «чужая» и красил наши станции красным — на карте
+        # выходило, что рядом с нашим объектом стоит конкурент с тем же адресом.
+        "isOurs": bool(s.location_id) or s.operator_id in own_ids,
+        "locationId": s.location_id,
         "source": s.source, "sourceRank": s.source_rank,
         "lastSeenAt": s.last_seen_at.isoformat() if s.last_seen_at else None,
         "verifiedAt": s.verified_at.isoformat() if s.verified_at else None,

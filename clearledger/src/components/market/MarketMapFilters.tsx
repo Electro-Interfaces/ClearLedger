@@ -13,6 +13,12 @@ import { SITE_KIND_LABEL, type MarketOperator } from '@/services/marketService'
 export interface MarketFilters {
   showOurs: boolean
   showRivals: boolean
+  /**
+   * Наши же станции, как их видит внешний реестр. По умолчанию выключены: свой
+   * слой показывает те же объекты по нашим данным — полнее и точнее, — а две
+   * точки одного объекта разного цвета читаются как две разные станции.
+   */
+  showOursOnMarket: boolean
   showIndependent: boolean
   showHome: boolean
   showAttractors: boolean
@@ -35,7 +41,7 @@ export interface OurFilters {
 
 export const EMPTY_MARKET_FILTERS: MarketFilters = {
   showOurs: true, showRivals: true, showIndependent: true,
-  showHome: false, showAttractors: true,
+  showOursOnMarket: false, showHome: false, showAttractors: true,
   kind: 'all', operatorId: 'all', currentType: 'all', minPower: 'all', alive: 'all',
 }
 
@@ -78,7 +84,8 @@ export function MarketMapFilters({
   operators: MarketOperator[]
   brands: string[]
   statuses: string[]
-  counts: { ours: number; rivals: number; independent: number; home: number; attractors: number }
+  counts: { ours: number; rivals: number; independent: number; home: number
+            attractors: number; oursOnMarket: number }
 }) {
   const set = (patch: Partial<MarketFilters>) => onFilters({ ...filters, ...patch })
   const setOur = (patch: Partial<OurFilters>) => onOur({ ...our, ...patch })
@@ -95,6 +102,9 @@ export function MarketMapFilters({
           color="#ef4444" label="сети конкурентов" count={counts.rivals} />
         <LayerToggle on={filters.showIndependent} onChange={(v) => set({ showIndependent: v })}
           color="#f59e0b" label="независимые точки" count={counts.independent} />
+        <LayerToggle on={filters.showOursOnMarket}
+          onChange={(v) => set({ showOursOnMarket: v })}
+          color="#3b82f6" label="наши глазами рынка" count={counts.oursOnMarket} />
         <LayerToggle on={filters.showHome} onChange={(v) => set({ showHome: v })}
           color="#a78bfa" label="домашние розетки" count={counts.home} />
         <LayerToggle on={filters.showAttractors} onChange={(v) => set({ showAttractors: v })}
@@ -206,13 +216,20 @@ export function MarketMapFilters({
               onValueChange={(v) => setOur({ colorBy: v as OurFilters['colorBy'] })}>
               <SelectTrigger className="h-7 w-[170px] text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="status">Цвет: состояние</SelectItem>
-                <SelectItem value="load">Цвет: загрузка</SelectItem>
-                <SelectItem value="errors">Цвет: срывы зарядок</SelectItem>
-                <SelectItem value="revenue">Цвет: выручка</SelectItem>
+                <SelectItem value="status">Кольцо: состояние</SelectItem>
+                <SelectItem value="load">Кольцо: загрузка</SelectItem>
+                <SelectItem value="errors">Кольцо: срывы зарядок</SelectItem>
+                <SelectItem value="revenue">Кольцо: выручка</SelectItem>
               </SelectContent>
             </Select>
           </div>
+          {/* Разрез ушёл в кольцо, потому что заливка занята принадлежностью:
+              наша станция синяя всегда, иначе выключенный объект серого цвета
+              теряется среди чужих точек. */}
+          <p className="text-xs text-muted-foreground">
+            Наши станции всегда залиты синим — это принадлежность. Выбранный
+            показатель показан кольцом вокруг точки и словами в подсказке.
+          </p>
         </div>
       </div>
     </div>
