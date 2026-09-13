@@ -48,6 +48,11 @@ export function MarketSelfPanel() {
   }
 
   const t = q.data?.totals
+  // Наша сторона: журнал сессий. Пустой объект — чтобы экран пережил старый ответ
+  // сервера, где этого блока ещё нет.
+  const ours = q.data?.ours ?? {
+    sessions: 0, successful: 0, failed: 0, successPct: null, energyKwh: 0, revenue: 0,
+  }
   const peers = q.data?.peers ?? []
   const sites = q.data?.sites ?? []
   const best = peers.reduce<number | null>(
@@ -78,7 +83,21 @@ export function MarketSelfPanel() {
           </div>
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
             <span>оценка <Num v={t.rating} digits={1} /> по {nf.format(t.reviews)} отзывам</span>
-            <span>успешных зарядок <Num v={t.success} unit="%" /></span>
+            {/* Слева — что о нас публикует рынок (по успешности он молчит),
+                справа — наш собственный журнал сессий. Это разные источники, и
+                мешать их в одно число нельзя. */}
+            <span>
+              успешных зарядок: рынок о нас{' '}
+              {t.success != null ? <Num v={t.success} unit="%" /> : 'не публикует'}
+              {ours.successPct != null && (
+                <span className="text-foreground">
+                  {' '}· по нашим данным {nf1.format(ours.successPct)} %
+                  <span className="text-muted-foreground">
+                    {' '}({nf.format(ours.failed)} срывов из {nf.format(ours.sessions)})
+                  </span>
+                </span>
+              )}
+            </span>
             <span>рынок считает живыми {nf.format(t.aliveByMarket)} из {nf.format(t.inMarket)}</span>
             <span>сопоставлено с нашим реестром {nf.format(t.matchedToRegistry)}</span>
           </div>
@@ -112,7 +131,14 @@ export function MarketSelfPanel() {
                 <td className="py-1 font-medium">мы</td>
                 <td className="py-1 text-right tabular-nums">{nf.format(t.inMarket)}</td>
                 <td className="py-1 text-right"><Num v={t.quality} unit="%" /></td>
-                <td className="py-1 text-right"><Num v={t.success} unit="%" /></td>
+                <td className="py-1 text-right">
+                  {ours.successPct != null ? (
+                    <>
+                      <span className="tabular-nums">{nf1.format(ours.successPct)} %</span>
+                      <span className="text-muted-foreground"> по нашим данным</span>
+                    </>
+                  ) : <Num v={t.success} unit="%" />}
+                </td>
                 <td className="py-1 text-right"><Num v={t.rating} digits={1} /></td>
               </tr>
               {peers.map((p) => (

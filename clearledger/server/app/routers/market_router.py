@@ -3007,12 +3007,42 @@ async def market_self_view(
         .having(func.count() >= 30)
         .order_by(func.count().desc()).limit(10))).all()
 
+    # ── что знаем о себе мы сами ──
+    # Рынок про нашу успешность зарядок не публикует ничего: поле пусто у всех 429
+    # наших точек. Но у нас есть собственный журнал сессий с результатом каждой, и
+    # писать «нет данных» там, где данные лежат в соседней таблице, — это про себя
+    # же неправда (замечание МАГа 13.09.2026).
+    #
+    # Успешной считается завершённая зарядка: источник называет их «Complete» и
+    # «Зарядная сессия завершена». Ошибка — «CompleteError». Незакрытые сессии
+    # («Charging») в знаменатель не идут: их исход ещё неизвестен.
+    ok_results = ("Complete", "Зарядная сессия завершена")
+    own = (await db.execute(
+        select(func.count(),
+               func.sum(case((ChargeSession.result.in_(ok_results), 1), else_=0)),
+               func.sum(case((ChargeSession.result.ilike("%error%"), 1), else_=0)),
+               func.coalesce(func.sum(ChargeSession.energy_kwh), 0),
+               func.coalesce(func.sum(func.coalesce(
+                   ChargeSession.client_amount, ChargeSession.amount)), 0))
+        .where(ChargeSession.company_id == cid,
+               ChargeSession.started_at >= since))).one()
+    own_total, own_ok, own_err = int(own[0]), int(own[1] or 0), int(own[2] or 0)
+    own_closed = own_ok + own_err
+    own_success = round(own_ok / own_closed * 100, 1) if own_closed else None
+
     return {
         "days": days, "matchKm": match_km,
         # Все 429 точек, а не первые 300: экран сверяет наш реестр с публичным
         # отражением, и обрезанный список молча прячет часть расхождений — ровно
         # то, ради чего экран и открывают (аудит А13).
         "sites": sorted(rows, key=lambda r: (r["successPct"] is None, r["successPct"] or 0)),
+        # Наша сторона: то, чего рынок о нас не знает, а мы знаем точно.
+        "ours": {
+            "sessions": own_total, "successful": own_ok, "failed": own_err,
+            "successPct": own_success,
+            "energyKwh": round(float(own[3]), 1),
+            "revenue": round(float(own[4]), 2),
+        },
         "totals": {
             "inMarket": len(rows), "matchedToRegistry": matched,
             "quality": quality, "success": success, "rating": rating,
@@ -3026,7 +3056,11 @@ async def market_self_view(
                    "sites": int(cnt)}
                   for name, q, sc, rt, cnt in rivals],
         "note": ("сопоставление с реестром по расстоянию; расхождение «рынок молчит, "
-                 "а сессии идут» означает, что клиент видит станцию мёртвой"),
+                 "а сессии идут» означает, что клиент видит станцию мёртвой. "
+                 "Успешность зарядок рынок про нас не публикует — она посчитана по "
+                 "нашему журналу сессий и потому не вполне сравнима с чужими: у "
+                 "конкурентов это их собственный показатель, опубликованный "
+                 "источником"),
     }
 
 

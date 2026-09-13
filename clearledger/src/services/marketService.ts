@@ -721,6 +721,16 @@ export interface MarketSelfView {
     ourSessions: number | null; ourRevenue: number | null
   }[]
   note: string
+  /**
+   * Что знаем о себе мы сами. Рынок не публикует про нас успешность зарядок ни по
+   * одной из 429 точек, но у нас есть собственный журнал сессий с результатом
+   * каждой — и писать «нет данных» о себе, когда данные лежат рядом, нельзя.
+   */
+  ours: {
+    sessions: number; successful: number; failed: number
+    successPct: number | null
+    energyKwh: number; revenue: number
+  }
 }
 
 export const getMarketSelfView = (companyId: string, params?: { days?: number; match_km?: number }) =>
