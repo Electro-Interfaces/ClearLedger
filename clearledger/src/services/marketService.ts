@@ -894,12 +894,17 @@ export interface MarketCoverageRow {
   ourSharePct: number | null
   marketSitesNow: number | null
   marketAliveNow: number | null
+  /** Парк машин в регионе известен. Без него обеспеченность не считается. */
+  carsKnown: boolean
+  /** Откуда взято число станций: «статистика» или свежий «реестр». */
+  stationsSource: string
   source: string | null
   asOf: string | null
 }
 
 export const getMarketCoverage = (companyId: string) =>
-  get<{ regions: MarketCoverageRow[]; total: number; note?: string; message?: string }>(
+  get<{ regions: MarketCoverageRow[]; total: number; withCars: number
+        note?: string; message?: string }>(
     '/api/market/coverage', { company_id: companyId })
 
 /** Игрок рынка: тот, кто борется за водителя — со станциями или без. */

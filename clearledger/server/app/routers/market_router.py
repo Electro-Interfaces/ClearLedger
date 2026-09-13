@@ -3510,9 +3510,6 @@ async def market_coverage(
 
     stats = (await db.execute(select(MarketRegionStat).where(
         MarketRegionStat.company_id == cid))).scalars().all()
-    if not stats:
-        return {"regions": [], "total": 0,
-                "message": "статистики парка электромобилей нет — загрузите ev-market-regions.csv"}
 
     # Наша сеть в тех же регионах: сколько наших точек и сколько из них работают.
     regions = dict((rid, name) for rid, name in (await db.execute(
@@ -3547,39 +3544,104 @@ async def market_coverage(
         short = name.replace(" обл.", " область").strip()
         return market.get(name) or market.get(short) or {}
 
+    # Строки строятся по ВСЕМ регионам, где есть рынок или наша сеть, а не только
+    # по тем, где известен парк машин. Прежде таблица начиналась со статистики
+    # АВТОСТАТа, и в ней было ровно десять строк: остальные семьдесят регионов, где
+    # стоят зарядки, просто не существовали для экрана (замечание МАГа 13.09.2026).
+    #
+    # Парк по всем субъектам в открытом доступе не публикуется: АВТОСТАТ даёт топ-10
+    # и доли федеральных округов, остальное — в платном отчёте. Поэтому где парка
+    # нет, там не считается обеспеченность — и это написано словом, а не нулём.
+    # Имя субъекта приводится к канону во всех трёх источниках сразу: статистика
+    # пишет «Татарстан» и «Калининградская обл.», реестр рынка — «Республика
+    # Татарстан» и «Калининградская область». Без сведения регион раздваивался и
+    # шёл в таблицу двумя строками с одинаковыми числами.
+    def key(name: str | None) -> str | None:
+        return canon_region(name) or (name.strip() if name else None)
+
+    by_region = {}
+    for st in stats:
+        k = key(st.region)
+        if k:
+            by_region[k] = st
+    market_canon: dict[str, dict[str, int]] = {}
+    for name, row in market.items():
+        k = key(name)
+        if not k:
+            continue
+        dst = market_canon.setdefault(k, {"sites": 0, "alive": 0})
+        dst["sites"] += row["sites"]
+        dst["alive"] += row["alive"]
+    ours_canon: dict[str, dict[str, int]] = {}
+    for name, row in ours.items():
+        k = key(name)
+        if not k:
+            continue
+        dst = ours_canon.setdefault(k, {"sites": 0, "working": 0})
+        dst["sites"] += row["sites"]
+        dst["working"] += row["working"]
+    known = set(by_region) | set(market_canon) | set(ours_canon)
+
     rows = []
-    for stat in stats:
-        our = ours.get(stat.region) or ours.get(stat.region.replace(" обл.", " область")) or {}
-        live = _match(stat.region)
-        cars = stat.ev_cars or 0
-        alive = stat.stations_alive or 0
+    for name in sorted(known):
+        stat = by_region.get(name)
+        our = ours_canon.get(name) or {}
+        live = market_canon.get(name) or {}
+        cars = (stat.ev_cars or 0) if stat else 0
+        # Станции берём из наблюдаемого рынка, если в статистике их нет: статистика
+        # снималась один раз, а реестр обновляется.
+        alive = (stat.stations_alive if stat and stat.stations_alive
+                 else live.get("alive", 0))
+        stations_now = live.get("sites", 0)
+        if stat is None and not stations_now and not our.get("sites"):
+            continue
         rows.append({
-            "region": stat.region,
-            "evCars": stat.ev_cars,
-            "evSharePct": float(stat.ev_share_pct) if stat.ev_share_pct is not None else None,
-            "stations": stat.stations, "stationsDc": stat.stations_dc,
-            "stationsAlive": stat.stations_alive,
-            "carsPerStation": float(stat.cars_per_station) if stat.cars_per_station is not None else None,
-            "carsPerDc": float(stat.cars_per_dc) if stat.cars_per_dc is not None else None,
-            "carsPerAlive": float(stat.cars_per_alive) if stat.cars_per_alive is not None else None,
+            "region": name,
+            "evCars": stat.ev_cars if stat else None,
+            "evSharePct": (float(stat.ev_share_pct)
+                           if stat and stat.ev_share_pct is not None else None),
+            # Станции: из статистики, если она есть, иначе — что видно в реестре
+            # сегодня. Второе свежее, и экран говорит, откуда число.
+            "stations": (stat.stations if stat and stat.stations else stations_now),
+            "stationsSource": "статистика" if stat and stat.stations else "реестр",
+            "stationsDc": stat.stations_dc if stat else None,
+            "stationsAlive": alive,
+            "carsPerStation": (float(stat.cars_per_station)
+                               if stat and stat.cars_per_station is not None else None),
+            "carsPerDc": (float(stat.cars_per_dc)
+                          if stat and stat.cars_per_dc is not None else None),
+            "carsPerAlive": (float(stat.cars_per_alive)
+                             if stat and stat.cars_per_alive is not None else None),
             # Разрыв между «есть» и «работает»: во сколько раз нагрузка на живую
             # зарядку выше, чем кажется по числу станций.
             "deadGapRatio": (round((cars / alive) / (cars / stat.stations), 1)
-                             if cars and alive and stat.stations else None),
-            "deadStations": ((stat.stations or 0) - alive) if stat.stations else None,
+                             if stat and cars and alive and stat.stations else None),
+            "deadStations": (((stat.stations or 0) - alive)
+                             if stat and stat.stations else
+                             (stations_now - alive if stations_now else None)),
+            # Парк известен не везде: без него обеспеченность не считается вовсе.
+            "carsKnown": bool(stat and stat.ev_cars),
             "ourSites": our.get("sites", 0), "ourWorking": our.get("working", 0),
-            "ourSharePct": (round(our.get("sites", 0) / stat.stations * 100, 1)
-                            if stat.stations else None),
+            "ourSharePct": (round(our.get("sites", 0) / stations_now * 100, 1)
+                            if stations_now else None),
             "marketSitesNow": live.get("sites"), "marketAliveNow": live.get("alive"),
-            "source": stat.source, "asOf": stat.as_of,
+            "source": stat.source if stat else None,
+            "asOf": stat.as_of if stat else None,
         })
-    rows.sort(key=lambda r: -(r["carsPerAlive"] or 0))
+    # Наверх — где тяжелее всего; регионы с неизвестным парком идут следом по
+    # числу станций: там нечего сравнивать, но видно, что рынок есть.
+    rows.sort(key=lambda r: (not r["carsKnown"], -(r["carsPerAlive"] or 0),
+                             -(r["stations"] or 0)))
 
+    with_cars = sum(1 for r in rows if r["carsKnown"])
     return {
-        "regions": rows, "total": len(rows),
-        "note": ("парк — электромобили без гибридов (их вдвое больше, региональной "
-                 "разбивки по ним нет); таблица покрывает только регионы с известным "
-                 "парком, для остальных данных о машинах у нас нет"),
+        "regions": rows, "total": len(rows), "withCars": with_cars,
+        "note": ("парк — электромобили без гибридов: их вдвое больше, но региональной "
+                 f"разбивки по ним нет. Парк известен в {with_cars} регионах из "
+                 f"{len(rows)}: АВТОСТАТ публикует десять крупнейших и доли "
+                 "федеральных округов, остальное — в платном отчёте. Где парка нет, "
+                 "обеспеченность не считается: строка показывает рынок и нашу сеть, "
+                 "но не машины на зарядку"),
     }
 
 

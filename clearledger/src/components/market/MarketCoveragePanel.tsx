@@ -66,7 +66,8 @@ export function MarketCoveragePanel() {
     )
   }
 
-  const worst = rows[0]
+  // Худший — среди тех, где парк известен: у остальных нагрузку не с чем считать.
+  const worst = rows.find((r) => r.carsKnown) ?? rows[0]
   const dead = rows.filter((r) => (r.deadGapRatio ?? 1) >= 2)
   const ourRegions = rows.filter((r) => r.ourSites > 0)
 
@@ -84,6 +85,11 @@ export function MarketCoveragePanel() {
           </span>
           <span className="text-xs text-muted-foreground">
             мы стоим в {ourRegions.length} из {rows.length}
+          </span>
+          {/* Полнота таблицы и полнота ДАННЫХ — разные вещи, и вторая скромнее:
+              парк машин публикуется только по десяти крупнейшим регионам. */}
+          <span className="text-xs text-muted-foreground">
+            парк машин известен в {q.data?.withCars ?? 0} регионах из {rows.length}
           </span>
         </CardContent>
       </Card>
@@ -108,7 +114,10 @@ export function MarketCoveragePanel() {
               <tr key={r.region} className={r.ourSites > 0
                 ? 'border-t border-border bg-primary/5' : 'border-t border-border/50'}>
                 <td className="p-2 font-medium">{r.region}</td>
-                <td className="p-2 text-right"><Num v={r.evCars} /></td>
+                <td className="p-2 text-right">
+                  {r.carsKnown ? <Num v={r.evCars} />
+                    : <span className="text-muted-foreground">не публикуется</span>}
+                </td>
                 <td className="p-2 text-right"><Num v={r.evSharePct} digits={1} /></td>
                 <td className="p-2 text-right"><Num v={r.stations} /></td>
                 <td className="p-2 text-right">
