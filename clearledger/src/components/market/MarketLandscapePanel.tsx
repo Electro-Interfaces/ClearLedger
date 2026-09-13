@@ -11,12 +11,14 @@
  * только в своём приложении». А вот оценка приложения — прямой отзыв водителя о
  * сервисе, и её мы показываем рядом со своей.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Swords } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { MarketCompaniesPanel } from './MarketCompaniesPanel'
 import { getMarketLandscape, type MarketNetworkRow } from '@/services/marketService'
@@ -51,6 +53,19 @@ export function MarketLandscapePanel() {
   // возникает сразу после первого, поэтому строка сети ведёт в карточку, а не
   // заставляет искать компанию в другом разделе.
   const [карточка, setКарточка] = useState<string | null>(null)
+  // Сортировка по столбцу: менеджеру нужен то верх по числу точек, то по цене, то
+  // по доле живых — перебирать это глазами в таблице на сотню строк нельзя.
+  const сортировка = useMemo(() => ({
+    name: (r: MarketNetworkRow) => r.name,
+    sites: (r: MarketNetworkRow) => r.sites,
+    share: (r: MarketNetworkRow) => r.sharePct,
+    cities: (r: MarketNetworkRow) => r.citiesCount,
+    districts: (r: MarketNetworkRow) => r.districts,
+    power: (r: MarketNetworkRow) => r.avgPowerKw,
+    price: (r: MarketNetworkRow) => r.medianPricePerKwh,
+    model: (r: MarketNetworkRow) => r.class,
+    base: (r: MarketNetworkRow) => r.baseCity,
+  }), [])
   const [q, setQ] = useState('')
 
   const data = useQuery({
@@ -58,6 +73,13 @@ export function MarketLandscapePanel() {
     queryFn: () => getMarketLandscape(companyId),
     enabled: !!companyId,
   })
+
+  // Списки и сортировка — до ранних возвратов: порядок хуков обязан совпадать на
+  // каждой отрисовке, иначе React путает их между собой.
+  const t = data.data?.totals
+  const all = data.data?.networks ?? []
+  const отобранные = all.filter((r) => !q || r.name.toLowerCase().includes(q.toLowerCase()))
+  const { rows, sort, toggle } = useTableSort(отобранные, сортировка)
 
   if (data.isLoading) {
     return (
@@ -70,9 +92,6 @@ export function MarketLandscapePanel() {
     )
   }
 
-  const t = data.data?.totals
-  const all = data.data?.networks ?? []
-  const rows = all.filter((r) => !q || r.name.toLowerCase().includes(q.toLowerCase()))
   const ours = all.find((r) => r.isOurs)
   const platforms = data.data?.platforms ?? []
 
@@ -106,15 +125,15 @@ export function MarketLandscapePanel() {
           <table className="w-full text-xs">
             <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
               <tr>
-                <th className="p-2 text-left font-medium">Сеть</th>
-                <th className="p-2 text-right font-medium">Точек</th>
-                <th className="p-2 text-right font-medium">Доля</th>
-                <th className="p-2 text-right font-medium">Городов</th>
-                <th className="p-2 text-right font-medium">Округов</th>
-                <th className="p-2 text-left font-medium">Модель</th>
-                <th className="p-2 text-left font-medium">База</th>
-                <th className="p-2 text-right font-medium">Средняя мощность</th>
-                <th className="p-2 text-right font-medium">Медиана цены</th>
+                <SortTh sortKey="name" sort={sort} onSort={toggle}>Сеть</SortTh>
+                <SortTh sortKey="sites" sort={sort} onSort={toggle} align="right">Точек</SortTh>
+                <SortTh sortKey="share" sort={sort} onSort={toggle} align="right">Доля</SortTh>
+                <SortTh sortKey="cities" sort={sort} onSort={toggle} align="right">Городов</SortTh>
+                <SortTh sortKey="districts" sort={sort} onSort={toggle} align="right">Округов</SortTh>
+                <SortTh sortKey="model" sort={sort} onSort={toggle}>Модель</SortTh>
+                <SortTh sortKey="base" sort={sort} onSort={toggle}>База</SortTh>
+                <SortTh sortKey="power" sort={sort} onSort={toggle} align="right">Средняя мощность</SortTh>
+                <SortTh sortKey="price" sort={sort} onSort={toggle} align="right">Медиана цены</SortTh>
               </tr>
             </thead>
             <tbody>

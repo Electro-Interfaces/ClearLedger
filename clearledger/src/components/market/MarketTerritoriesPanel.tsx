@@ -10,12 +10,14 @@
  * трафика — у нас пока нет ни одного. Пока их нет, гексагон даёт то же, что город,
  * но в виде, о котором нельзя спросить человека.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Map as MapIcon } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
 import { MarketTerritoryProfile } from './MarketTerritoryProfile'
@@ -76,13 +78,30 @@ export function MarketTerritoriesPanel() {
     enabled: !!companyId,
   })
 
+  // Списки и сортировка — до ранних возвратов: порядок хуков обязан совпадать на
+  // каждой отрисовке, иначе React путает их между собой.
+  const all = data.data?.territories ?? []
+  const отобранные = all.filter((r) => !q || r.name.toLowerCase().includes(q.toLowerCase()))
+  // Разные вопросы к одной таблице: где больше наша выручка, где гуще чужие точки,
+  // где наша доля мала при живом рынке. Каждый — своя сортировка.
+  const сортировка = useMemo(() => ({
+    name: (r: MarketTerritory) => r.name,
+    ourSites: (r: MarketTerritory) => r.ourSites,
+    sessions: (r: MarketTerritory) => r.ourSessions,
+    revenue: (r: MarketTerritory) => r.ourRevenue,
+    rivals: (r: MarketTerritory) => r.rivalSites,
+    alive: (r: MarketTerritory) => r.rivalAlive,
+    share: (r: MarketTerritory) => r.sharePct,
+    ourPrice: (r: MarketTerritory) => r.ourPricePerKwh,
+    marketPrice: (r: MarketTerritory) => r.marketPricePerKwh,
+  }), [])
+  const { rows, sort, toggle } = useTableSort(отобранные, сортировка)
+
   if (open) {
     return <MarketTerritoryProfile name={open} level={level} onBack={() => setOpen(null)} />
   }
   if (data.isLoading) return <Skeleton />
 
-  const all = data.data?.territories ?? []
-  const rows = all.filter((r) => !q || r.name.toLowerCase().includes(q.toLowerCase()))
   const withUs = all.filter((r) => r.ourSites > 0)
   const weak = withUs.filter((r) => r.sharePct != null && r.sharePct < 30)
 
@@ -115,15 +134,15 @@ export function MarketTerritoriesPanel() {
         <table className="w-full text-xs">
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
-              <th className="p-2 text-left font-medium">Территория</th>
-              <th className="p-2 text-right font-medium">Наши точки</th>
-              <th className="p-2 text-right font-medium">Сессий</th>
-              <th className="p-2 text-right font-medium">Выручка</th>
-              <th className="p-2 text-right font-medium">Чужие точки</th>
-              <th className="p-2 text-right font-medium">Живые</th>
-              <th className="p-2 text-right font-medium">Наша доля</th>
-              <th className="p-2 text-right font-medium">Наша ₽/кВт·ч</th>
-              <th className="p-2 text-right font-medium">Рынок ₽/кВт·ч</th>
+              <SortTh sortKey="name" sort={sort} onSort={toggle}>Территория</SortTh>
+              <SortTh sortKey="ourSites" sort={sort} onSort={toggle} align="right">Наши точки</SortTh>
+              <SortTh sortKey="sessions" sort={sort} onSort={toggle} align="right">Сессий</SortTh>
+              <SortTh sortKey="revenue" sort={sort} onSort={toggle} align="right">Выручка</SortTh>
+              <SortTh sortKey="rivals" sort={sort} onSort={toggle} align="right">Чужие точки</SortTh>
+              <SortTh sortKey="alive" sort={sort} onSort={toggle} align="right">Живые</SortTh>
+              <SortTh sortKey="share" sort={sort} onSort={toggle} align="right">Наша доля</SortTh>
+              <SortTh sortKey="ourPrice" sort={sort} onSort={toggle} align="right">Наша ₽/кВт·ч</SortTh>
+              <SortTh sortKey="marketPrice" sort={sort} onSort={toggle} align="right">Рынок ₽/кВт·ч</SortTh>
             </tr>
           </thead>
           <tbody>

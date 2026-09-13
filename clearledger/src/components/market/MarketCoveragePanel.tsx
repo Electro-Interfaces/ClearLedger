@@ -9,10 +9,13 @@
  * Парк считается по электромобилям без гибридов: их вдвое больше, но региональной
  * разбивки по ним в открытом доступе нет, и подмешать их значило бы завысить спрос.
  */
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { BatteryCharging } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCompany } from '@/contexts/CompanyContext'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { getMarketCoverage, type MarketCoverageRow } from '@/services/marketService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -46,6 +49,25 @@ export function MarketCoveragePanel() {
     enabled: !!companyId,
   })
 
+  // Список берётся до ранних возвратов: хуки должны вызываться в одном порядке на
+  // каждой отрисовке, а во время загрузки данных ещё нет — это просто пустой список.
+  const все = q.data?.regions ?? []
+
+  // Столбцы, по которым менеджер действительно пересортировывает: где тяжелее
+  // всего, где больше мёртвых зарядок, где мы уже стоим.
+  const сортировка = useMemo(() => ({
+    region: (r: MarketCoverageRow) => r.region,
+    cars: (r: MarketCoverageRow) => r.evCars,
+    share: (r: MarketCoverageRow) => r.evSharePct,
+    stations: (r: MarketCoverageRow) => r.stations,
+    alive: (r: MarketCoverageRow) => r.stationsAlive,
+    perStation: (r: MarketCoverageRow) => r.carsPerStation,
+    perAlive: (r: MarketCoverageRow) => r.carsPerAlive,
+    gap: (r: MarketCoverageRow) => r.deadGapRatio,
+    ours: (r: MarketCoverageRow) => r.ourSites,
+  }), [])
+  const { rows, sort, toggle } = useTableSort(все, сортировка)
+
   if (q.isLoading) {
     return (
       <div className="space-y-2 p-4" aria-busy="true">
@@ -57,7 +79,6 @@ export function MarketCoveragePanel() {
     )
   }
 
-  const rows = q.data?.regions ?? []
   if (rows.length === 0) {
     return (
       <Card className="m-4"><CardContent className="p-6 text-sm text-muted-foreground">
@@ -98,15 +119,15 @@ export function MarketCoveragePanel() {
         <table className="w-full text-xs">
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
-              <th className="p-2 text-left font-medium">Регион</th>
-              <th className="p-2 text-right font-medium">Электромобилей</th>
-              <th className="p-2 text-right font-medium">Доля парка</th>
-              <th className="p-2 text-right font-medium">Зарядок</th>
-              <th className="p-2 text-right font-medium">Из них работают</th>
-              <th className="p-2 text-right font-medium">Машин на зарядку</th>
-              <th className="p-2 text-right font-medium">На работающую</th>
-              <th className="p-2 text-right font-medium">Разрыв</th>
-              <th className="p-2 text-right font-medium">Наших точек</th>
+              <SortTh sortKey="region" sort={sort} onSort={toggle}>Регион</SortTh>
+              <SortTh sortKey="cars" sort={sort} onSort={toggle} align="right">Электромобилей</SortTh>
+              <SortTh sortKey="share" sort={sort} onSort={toggle} align="right">Доля парка</SortTh>
+              <SortTh sortKey="stations" sort={sort} onSort={toggle} align="right">Зарядок</SortTh>
+              <SortTh sortKey="alive" sort={sort} onSort={toggle} align="right">Из них работают</SortTh>
+              <SortTh sortKey="perStation" sort={sort} onSort={toggle} align="right">Машин на зарядку</SortTh>
+              <SortTh sortKey="perAlive" sort={sort} onSort={toggle} align="right">На работающую</SortTh>
+              <SortTh sortKey="gap" sort={sort} onSort={toggle} align="right">Разрыв</SortTh>
+              <SortTh sortKey="ours" sort={sort} onSort={toggle} align="right">Наших точек</SortTh>
             </tr>
           </thead>
           <tbody>

@@ -9,13 +9,15 @@
  * Отношение к компании — решение человека, а не свойство данных: одна и та же сеть
  * бывает конкурентом в одном регионе и кандидатом на роуминг в другом.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Handshake } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
-import { getMarketPartners, patchMarketOperator } from '@/services/marketService'
+import { getMarketPartners, patchMarketOperator, type MarketPartner } from '@/services/marketService'
 
 const nf = new Intl.NumberFormat('ru-RU')
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -38,6 +40,21 @@ export function MarketPartnersPanel() {
     queryFn: () => getMarketPartners(companyId),
     enabled: !!companyId,
   })
+
+  // Список берётся до ранних возвратов: порядок хуков обязан совпадать на каждой
+  // отрисовке, а пока данные грузятся — это пустой список.
+  const все = q.data?.partners ?? []
+
+  // Кандидата на роуминг ищут по дополнению, а на франшизу — по размеру: одна
+  // таблица отвечает на оба вопроса, если её можно пересортировать.
+  const сортировка = useMemo(() => ({
+    name: (r: MarketPartner) => r.name,
+    sites: (r: MarketPartner) => r.sites,
+    alive: (r: MarketPartner) => r.alive,
+    complement: (r: MarketPartner) => r.complementSites,
+    overlap: (r: MarketPartner) => r.overlapSites,
+  }), [])
+  const { rows, sort, toggle } = useTableSort(все, сортировка)
   const setRelation = useMutation({
     mutationFn: ({ id, relation }: { id: string; relation: string }) =>
       patchMarketOperator(companyId, id, { relation }),
@@ -60,7 +77,6 @@ export function MarketPartnersPanel() {
     )
   }
 
-  const rows = q.data?.partners ?? []
   const best = rows[0]
 
   return (
@@ -83,11 +99,11 @@ export function MarketPartnersPanel() {
         <table className="w-full text-xs">
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
-              <th className="p-2 text-left font-medium">Сеть</th>
-              <th className="p-2 text-right font-medium">Точек</th>
-              <th className="p-2 text-right font-medium">Живых</th>
-              <th className="p-2 text-right font-medium">Дополняет</th>
-              <th className="p-2 text-right font-medium">Дублирует</th>
+              <SortTh sortKey="name" sort={sort} onSort={toggle}>Сеть</SortTh>
+              <SortTh sortKey="sites" sort={sort} onSort={toggle} align="right">Точек</SortTh>
+              <SortTh sortKey="alive" sort={sort} onSort={toggle} align="right">Живых</SortTh>
+              <SortTh sortKey="complement" sort={sort} onSort={toggle} align="right">Дополняет</SortTh>
+              <SortTh sortKey="overlap" sort={sort} onSort={toggle} align="right">Дублирует</SortTh>
               <th className="p-2 text-left font-medium">Города без нас</th>
               <th className="p-2 text-left font-medium">Отношение</th>
             </tr>

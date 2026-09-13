@@ -12,11 +12,13 @@
  * поэтому смежные игроки названы смежными; рейтинги не сравниваются между классами
  * без числа отзывов рядом.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Users } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getMarketPlayers, type MarketPlayer } from '@/services/marketService'
 
@@ -61,6 +63,22 @@ export function MarketPlayersPanel() {
     enabled: !!companyId,
   })
 
+  // Списки и сортировка — до ранних возвратов: порядок хуков обязан совпадать на
+  // каждой отрисовке, иначе React путает их между собой.
+  const качество = q.data?.quality ?? []
+  // Рейтинг без числа отзывов обманчив, поэтому сортировать нужно и по тому, и по
+  // другому — а ещё по числу станций: это разные вопросы к одной таблице.
+  const сортировкаКачества = useMemo(() => ({
+    app: (p: MarketPlayer) => p.app,
+    class: (p: MarketPlayer) => p.class,
+    stations: (p: MarketPlayer) => p.ownStations,
+    rating: (p: MarketPlayer) => p.rating,
+    reviews: (p: MarketPlayer) => p.reviews,
+    developer: (p: MarketPlayer) => p.developer,
+  }), [])
+  const { rows: quality, sort: сортК, toggle: жмиК } =
+    useTableSort(качество, сортировкаКачества)
+
   if (q.isLoading) {
     return (
       <div className="space-y-2 p-4" aria-busy="true">
@@ -83,7 +101,6 @@ export function MarketPlayersPanel() {
 
   const quadrants = q.data?.quadrants ?? []
   const classes = q.data?.classes ?? []
-  const quality = q.data?.quality ?? []
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-4">
@@ -180,12 +197,12 @@ export function MarketPlayersPanel() {
           <table className="w-full text-xs">
             <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
               <tr>
-                <th className="p-2 text-left font-medium">Приложение</th>
-                <th className="p-2 text-left font-medium">Класс</th>
-                <th className="p-2 text-right font-medium">Своих станций</th>
-                <th className="p-2 text-right font-medium">Оценка</th>
-                <th className="p-2 text-right font-medium">Отзывов</th>
-                <th className="p-2 text-left font-medium">Разработчик</th>
+                <SortTh sortKey="app" sort={сортК} onSort={жмиК}>Приложение</SortTh>
+                <SortTh sortKey="class" sort={сортК} onSort={жмиК}>Класс</SortTh>
+                <SortTh sortKey="stations" sort={сортК} onSort={жмиК} align="right">Своих станций</SortTh>
+                <SortTh sortKey="rating" sort={сортК} onSort={жмиК} align="right">Оценка</SortTh>
+                <SortTh sortKey="reviews" sort={сортК} onSort={жмиК} align="right">Отзывов</SortTh>
+                <SortTh sortKey="developer" sort={сортК} onSort={жмиК}>Разработчик</SortTh>
               </tr>
             </thead>
             <tbody>
