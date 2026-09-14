@@ -11,13 +11,15 @@
  * и человек должен видеть, что «производитель» известен у каждой десятой точки,
  * прежде чем строить на этом поле вывод.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Database, Loader2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import {
   getMarketChanges, getMarketSources, SITE_CLASS_LABEL, SOURCE_LABEL,
   type MarketChangeCard, type MarketSource,
@@ -143,6 +145,7 @@ function Skeleton() {
 
 export function MarketSourcesPanel() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const [вид, setВид] = useState<string>('sources')
   const [base, setBase] = useState<string>('')
   const [current, setCurrent] = useState<string>('')
@@ -168,7 +171,7 @@ export function MarketSourcesPanel() {
   const lastSnapshot = snapshots[0]
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       {/* Вывод экрана словами: с него человек начинает, а таблицы объясняют. */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 p-4">
@@ -188,6 +191,11 @@ export function MarketSourcesPanel() {
             цена известна у <span className="tabular-nums">{nf.format(totals?.priced ?? 0)}</span>
             {totals?.conflicts ? `, спорных наблюдений ${nf.format(totals.conflicts)}` : ''}
           </span>
+          <span className="ml-auto" data-export-ignore>
+            <ExportButton title={`Источники · ${ВИДЫ.find((v) => v.k === вид)?.label}`}
+              subtitle={lastSnapshot ? `срез от ${lastSnapshot.date}` : 'срезов ещё не было'}
+              getEl={() => экран.current} />
+          </span>
         </CardContent>
       </Card>
 
@@ -202,6 +210,14 @@ export function MarketSourcesPanel() {
               импортом списком или наблюдением с места.
             </CardContent></Card>
           )}
+          {/* Источники показаны карточками, а выгрузка работает с таблицами: эта
+              таблица не рисуется, её дело — уложить источники в строки книги. */}
+          <table hidden {...exportRows('Источники', [
+            'Источник', 'Код', 'Ранг', 'Точек', 'Последний контакт', 'Домашних розеток', 'Закрытых',
+          ], (data?.sources ?? []).map((s) => [
+            SOURCE_LABEL[s.source] ?? s.source, s.source, s.rank, s.sites,
+            s.lastSeenAt ?? 'не приходило', s.homeSockets, s.closed,
+          ]))} />
         </div>
       )}
 
@@ -226,6 +242,13 @@ export function MarketSourcesPanel() {
               </CardContent>
             </Card>
           ))}
+          <table hidden {...exportRows('Покрытие полей', [
+            'Источник', 'Точек', 'Координаты, %', 'Мощность, %', 'Производитель, %',
+            'Успешность, %', 'Последняя зарядка, %',
+          ], (data?.sources ?? []).map((s) => [
+            SOURCE_LABEL[s.source] ?? s.source, s.sites, s.coverage.geo, s.coverage.power,
+            s.coverage.vendor, s.coverage.successPct, s.coverage.lastSession,
+          ]))} />
           <p className="text-xs text-muted-foreground">
             Заполненность неравномерна — это свойство источника, а не ошибка загрузки.
             Там, где поля нет, экраны показывают «нет данных», а не ноль: ноль в мощности
@@ -272,6 +295,20 @@ export function MarketSourcesPanel() {
                 unit="₽/кВт·ч" hint="Движение тарифа соседей — повод пересчитать свой." />
               <ChangeList title="Упала связь" rows={changes.data?.qualityDrops ?? []}
                 unit="%" hint="Качество связи просело на 20 пунктов и больше." />
+              {/* На экране в каждом списке видно первую дюжину: длинный список глазами
+                  не читают. В книгу уходят ВСЕ изменения — её как раз и берут, чтобы
+                  разобрать разом. */}
+              <table hidden {...exportRows('Что изменилось', [
+                'Что случилось', 'Точка', 'Город', 'Вид', 'Было', 'Стало',
+              ], [
+                ['Появились', changes.data?.appeared ?? []],
+                ['Исчезли', changes.data?.gone ?? []],
+                ['Сменили цену', changes.data?.priceMoves ?? []],
+                ['Упала связь', changes.data?.qualityDrops ?? []],
+              ].flatMap(([что, список]) => (список as MarketChangeCard[]).map((r) => [
+                что as string, r.name, r.city,
+                r.siteClass === 'home' ? SITE_CLASS_LABEL.home : null, r.was, r.now,
+              ])))} />
             </div>
           )}
         </div>

@@ -9,13 +9,15 @@
  * Карточка отвечает на «что он делает»: где стоит, чем оснащён, почём заряжает, как
  * его оценивают и где он рос последние полтора года.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Building2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import {
   getMarketOperatorCard, listMarketOperators, type MarketOperatorCard,
 } from '@/services/marketService'
@@ -53,30 +55,78 @@ function Value({ v, unit, digits = 0 }: { v: number | null | undefined; unit?: s
 }
 
 /** Горизонтальная полоса ряда — вместо графика там, где рядов мало и важны числа. */
-function Bars({ rows, max }: { rows: { label: string; value: number }[]; max: number }) {
+function Bars({ rows, max, name }: {
+  rows: { label: string; value: number }[]; max: number
+  /** Имя листа в выгрузке: полосы читаются глазами, а в книгу уходят числами. */
+  name: string
+}) {
+  const всего = rows.reduce((acc, r) => acc + r.value, 0)
   return (
-    <ul className="space-y-1">
-      {rows.map((r) => (
-        <li key={r.label} className="flex items-center gap-2 text-xs">
-          <span className="w-40 shrink-0 truncate text-muted-foreground">{r.label}</span>
-          <span className="h-2 min-w-[2px] rounded-sm bg-primary"
-            style={{ width: `${Math.max(2, (r.value / Math.max(1, max)) * 60)}%` }} aria-hidden />
-          <span className="tabular-nums">{nf.format(r.value)}</span>
-        </li>
-      ))}
-    </ul>
+    <>
+      <table hidden {...exportRows(name, [name, 'Точек', 'Доля, %'],
+        rows.map((r) => [r.label, r.value, всего > 0 ? (r.value / всего) * 100 : null]))} />
+      <ul className="space-y-1">
+        {rows.map((r) => (
+          <li key={r.label} className="flex items-center gap-2 text-xs">
+            <span className="w-40 shrink-0 truncate text-muted-foreground">{r.label}</span>
+            <span className="h-2 min-w-[2px] rounded-sm bg-primary"
+              style={{ width: `${Math.max(2, (r.value / Math.max(1, max)) * 60)}%` }} aria-hidden />
+            <span className="tabular-nums">{nf.format(r.value)}</span>
+          </li>
+        ))}
+      </ul>
+    </>
   )
 }
 
 function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () => void }) {
   const [вид, setВид] = useState<string>('cities')
+  const карточка = useRef<HTMLDivElement>(null)
   const t = card.totals
   return (
-    <div className="space-y-3">
-      <button type="button" onClick={onBack}
-        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-3.5" aria-hidden /> ко всем компаниям
-      </button>
+    <div ref={карточка} className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <button type="button" onClick={onBack}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="size-3.5" aria-hidden /> ко всем компаниям
+        </button>
+        <span data-export-ignore>
+          <ExportButton title={`Компания · ${card.name}`}
+            subtitle={`${RELATION_LABEL[card.relation] ?? card.relation} · ${nf.format(t.sites ?? 0)} точек`}
+            getEl={() => карточка.current} />
+        </span>
+      </div>
+      {/* Реквизиты рассыпаны по карточке строками «поле — значение»: в книгу они
+          уходят листом, потому что за ними сюда и приходят — письмо, договор,
+          проверка контрагента. Пометка о достоверности едет вместе с ними: без неё
+          непроверенный ИНН в файле неотличим от подтверждённого. */}
+      <table hidden {...exportRows('Реквизиты', ['Поле', 'Значение'], [
+        ['Компания', card.name],
+        ['Отношение', RELATION_LABEL[card.relation] ?? card.relation],
+        ['Модель', card.class ? `${card.class}${card.classChecked ? '' : ' (не проверено)'}` : null],
+        ['Достоверность записи', card.dataLevel != null ? УРОВЕНЬ[card.dataLevel] : null],
+        ['Сайт', card.siteUrl],
+        ['База', card.baseCity],
+        ['Городов', card.citiesCount],
+        ['Округов', card.districts],
+        ['Платформа', card.platformCode],
+        ['Владелец платформы', card.platformOwner],
+        ['Роуминг', card.roaming === true ? 'открыт'
+          : card.roaming === false ? 'только своё приложение' : 'нет данных'],
+        ['Юрлицо', card.legalName],
+        ['ИНН', card.inn],
+        ['ОГРН', card.ogrn],
+        ['Состояние юрлица', card.legalStatus],
+        ['Достоверность реквизитов', card.legalConfidence],
+        ['Ссылаться можно', card.legalTrusted ? 'да' : 'нет — версия для проверки'],
+        ['Руководитель', card.director],
+        ['Адрес', card.legalAddress ?? card.publicAddress],
+        ['Телефон', card.phone],
+        ['Приложение', card.appName],
+        ['Оценка приложения', card.appRating],
+        ['Отзывов о приложении', card.appReviews],
+        ['Источники', card.sources],
+      ])} />
 
       <Card>
         <CardContent className="space-y-3 p-4">
@@ -143,34 +193,34 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
-            <div>
+            <div data-kpi>
               <div className="text-xs text-muted-foreground">точек сети</div>
               <div className="text-sm font-semibold"><Value v={t.sites} /></div>
             </div>
-            <div>
+            <div data-kpi>
               <div className="text-xs text-muted-foreground">портов</div>
               <div className="text-sm font-semibold"><Value v={t.ports} /></div>
             </div>
-            <div>
+            <div data-kpi>
               <div className="text-xs text-muted-foreground">заряжали за 90 дн</div>
               <div className="text-sm font-semibold"><Value v={t.alive} /></div>
             </div>
-            <div>
+            <div data-kpi>
               <div className="text-xs text-muted-foreground">медиана цены</div>
               <div className="text-sm font-semibold">
                 <Value v={t.medianPricePerKwh} unit="₽/кВт·ч" digits={1} />
               </div>
               <div className="text-xs text-muted-foreground">по {t.pricedSites} наблюдениям</div>
             </div>
-            <div>
+            <div data-kpi>
               <div className="text-xs text-muted-foreground">связь за сутки</div>
               <div className="text-sm font-semibold"><Value v={t.quality} unit="%" digits={1} /></div>
             </div>
-            <div>
+            <div data-kpi>
               <div className="text-xs text-muted-foreground">успешных зарядок</div>
               <div className="text-sm font-semibold"><Value v={t.success} unit="%" digits={1} /></div>
             </div>
-            <div>
+            <div data-kpi>
               <div className="text-xs text-muted-foreground">оценка</div>
               <div className="text-sm font-semibold"><Value v={t.rating} digits={1} /></div>
               <div className="text-xs text-muted-foreground">{nf.format(t.reviews)} отзывов</div>
@@ -277,16 +327,16 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
       <Card>
         <CardContent className="p-4">
           {вид === 'cities' && (
-            <Bars rows={card.cities.map((c) => ({ label: c.name, value: c.sites }))}
+            <Bars name="Где стоит" rows={card.cities.map((c) => ({ label: c.name, value: c.sites }))}
               max={Math.max(...card.cities.map((c) => c.sites), 1)} />
           )}
           {вид === 'power' && (
-            <Bars rows={card.power.map((p) => ({ label: p.bucket, value: p.sites }))}
+            <Bars name="Чем оснащён" rows={card.power.map((p) => ({ label: p.bucket, value: p.sites }))}
               max={Math.max(...card.power.map((p) => p.sites), 1)} />
           )}
           {вид === 'months' && (
             <div className="space-y-2">
-              <Bars rows={card.months.map((m) => ({ label: m.month, value: m.sites }))}
+              <Bars name="Как рос" rows={card.months.map((m) => ({ label: m.month, value: m.sites }))}
                 max={Math.max(...card.months.map((m) => m.sites), 1)} />
               <p className="text-xs text-muted-foreground">
                 Месяц — это когда точка ПОЯВИЛАСЬ В ИСТОЧНИКЕ, а не когда её построили:
@@ -298,7 +348,13 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
           )}
           {вид === 'sites' && (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full text-xs"
+                {...exportRows('Точки', [
+                  'Точка', 'Город', 'Портов', 'кВт', 'Ток', 'Связь, %', 'Оценка', 'Спрос',
+                ], card.sites.map((s) => [
+                  s.name, s.city, s.ports, s.maxPowerKw, s.currentType, s.quality, s.rating,
+                  s.lastSessionAt ? (s.alive ? 'заряжали недавно' : 'молчит') : 'нет данных',
+                ]))}>
                 <thead className="text-muted-foreground">
                   <tr>
                     <th className="py-1 text-left font-medium">Точка</th>
@@ -346,6 +402,7 @@ export function MarketCompaniesPanel({ initialOpen = null, onBack }: {
   onBack?: () => void
 } = {}) {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const [q, setQ] = useState('')
   const [open, setOpen] = useState<string | null>(initialOpen)
 
@@ -385,7 +442,7 @@ export function MarketCompaniesPanel({ initialOpen = null, onBack }: {
   const leader = networks[0]
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm">
@@ -398,11 +455,23 @@ export function MarketCompaniesPanel({ initialOpen = null, onBack }: {
           </span>
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Компания"
             className="h-8 w-[200px] text-xs" />
+          <span className="ml-auto" data-export-ignore>
+            <ExportButton title="Компании"
+              subtitle={`${rows.length} компаний${q ? ` · отбор «${q}»` : ''}`}
+              getEl={() => экран.current} />
+          </span>
         </CardContent>
       </Card>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs"
+          {...exportRows('Компании', [
+            'Компания', 'Отношение', 'Точек', 'Живых', 'Портов', 'Медиана ₽/кВт·ч',
+            'Связь, %', 'Оценка',
+          ], rows.map((o) => [
+            o.name, RELATION_LABEL[o.relation] ?? o.relation, o.sites, o.alive, o.ports,
+            o.medianPricePerKwh, o.quality, o.rating,
+          ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
               <th className="p-2 text-left font-medium">Компания</th>

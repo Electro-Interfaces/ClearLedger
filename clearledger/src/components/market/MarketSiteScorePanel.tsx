@@ -18,7 +18,7 @@
  *    этого экран и открывают (замечание МАГа 13.09.2026).
  * 4. Радиус нарисован на карте: круг показывает, что именно попало в оценку.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { MapContainer, Circle, Marker, Popup, AttributionControl,
   useMap, useMapEvents } from 'react-leaflet'
@@ -34,6 +34,8 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useFullscreenPanel } from '@/hooks/useFullscreenPanel'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { getMarketSiteScore, type MarketSiteScore } from '@/services/marketService'
 
 /** Тёмная тема приложения (класс `dark` на <html>) — как в карте рынка. */
@@ -178,6 +180,7 @@ export function MarketSiteScorePanel() {
   // прокручивать мимо трёх карточек. Теперь это табы одной области: перебор
   // быстрый, а на ярлыке стоит число — видно, где смотреть (МАГ, 13.09.2026).
   const [вид, setВид] = useState<string>('area')
+  const оценка = useRef<HTMLDivElement>(null)
   const mapLayers = useMapLayers()
   const isDark = useIsDark()
 
@@ -421,7 +424,7 @@ export function MarketSiteScorePanel() {
           </CardContent>
         </Card>
 
-        <div className="min-h-0 space-y-3 overflow-auto">
+        <div ref={оценка} className="min-h-0 space-y-3 overflow-auto">
           {!score ? (
             <Card>
               <CardContent className="p-6 text-sm text-muted-foreground">
@@ -444,10 +447,76 @@ export function MarketSiteScorePanel() {
                       {' · '}{score.placeClass === 'city' ? 'город' : 'трасса'}
                       {score.placeGuessed ? ' (определено)' : ''}
                     </span>
+                    <span data-export-ignore>
+                      <ExportButton title="Оценка площадки"
+                        subtitle={`${показан!.условия.point.lat.toFixed(5)}, ${показан!.условия.point.lon.toFixed(5)}`
+                          + ` · радиус ${показан!.условия.radius} км`}
+                        getEl={() => оценка.current} />
+                    </span>
                   </div>
                   <p className="text-sm">{вердикт}</p>
                 </CardContent>
               </Card>
+
+              {/* Книга собирается по ВСЕМ разрезам, а не по открытому: оценку площадки
+                  выгружают как обоснование к решению, и в нём должны быть и окружение,
+                  и каннибализация, и стоимость входа, и выборка, на которой стоит
+                  прогноз. Переключать вкладки ради полного файла человек не обязан. */}
+              <table hidden {...exportRows('Оценка площадки', ['Показатель', 'Значение'], [
+                ['Широта', показан!.условия.point.lat],
+                ['Долгота', показан!.условия.point.lon],
+                ['Радиус, км', показан!.условия.radius],
+                ['Тип места', score.placeClass === 'city' ? 'город' : 'трасса'],
+                ['Тип места определён автоматически', score.placeGuessed ? 'да' : 'нет'],
+                ['Вывод', вердикт],
+                ['Город', score.area.city],
+                ['Регион', score.area.region],
+                ['Электромобилей в регионе', score.area.evCars],
+                ['Зарядок в регионе', score.area.marketSites],
+                ['Из них живых', score.area.marketAlive],
+                ['Машин на живую зарядку', score.area.carsPerAlive],
+                ['Наших объектов в регионе', score.area.ourSites],
+                ['Площадок в работе', score.area.projectsInWork],
+                ['Номера площадок', (score.area.projectNumbers ?? []).join(', ')],
+                ['Источник парка машин', score.area.evSource],
+                ['Чужих точек в радиусе', score.rivals.total],
+                ['Из них живых', score.rivals.alive],
+                ['Портов у чужих', score.rivals.ports],
+                ['Цена рынка, ₽/кВт·ч', score.rivals.marketPricePerKwh],
+                ['Наших объектов в радиусе', score.cannibalization.ourNearby],
+                ['Присоединение, ₽ (медиана)', score.entry.tpCostMedian],
+                ['Срок присоединения, мес', score.entry.tpTermMonthsMedian],
+                ['Свободная мощность, кВт', score.entry.freePowerKwtMedian],
+                ['Аренда в месяц, ₽', score.entry.rentMonthMedian],
+                ['Оценка входа, ₽', score.entry.capexEstimate],
+                ['Окупаемость, периодов выручки', score.entry.paybackPeriods],
+                ['Основание стоимости входа', score.entry.basis],
+                ['Метод прогноза', f?.method],
+                ['Аналогов в выборке', f?.analogues],
+                ['Из них заряжают', f?.working],
+                ['Не заряжают вовсе', f?.zeroDemand],
+                [`Прогноз сессий за ${f?.days ?? 90} дней`, f?.sessionsPerPeriod],
+                ['Половина случаев, от', f?.sessionsLow],
+                ['Половина случаев, до', f?.sessionsHigh],
+                ['Медиана с учётом незаряжающих', f?.sessionsAllMedian],
+                ['Прогноз выручки, ₽', f?.revenuePerPeriod],
+              ])} />
+              <table hidden {...exportRows('Кто рядом', [
+                'Точка', 'Оператор', 'Расстояние, км', 'Цена, ₽/кВт·ч', 'Спрос',
+              ], score.rivals.list.map((r) => [
+                r.name, r.operatorName, r.distanceKm, r.pricePerKwh,
+                r.alive ? 'заряжали недавно' : 'молчит',
+              ]))} />
+              <table hidden {...exportRows('Что съедим', [
+                'Наш объект', 'Город', 'Расстояние, км', 'Сессий',
+              ], score.cannibalization.list.map((o) => [
+                o.name, o.city, o.distanceKm, o.sessions,
+              ]))} />
+              <table hidden {...exportRows('Из чего прогноз', [
+                'Объект', 'Город', 'Соседей', 'Сессий', 'Выручка, ₽',
+              ], (f?.sample ?? []).map((a) => [
+                a.name, a.city, a.rivals, a.sessions, a.revenue,
+              ]))} />
 
               <PanelViewTabs tabs={виды} value={вид} onChange={setВид} label={null}
                 ariaLabel="Разрезы оценки площадки" />

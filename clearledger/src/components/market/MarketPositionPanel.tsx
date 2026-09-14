@@ -8,7 +8,7 @@
  *
  * Разворот строки показывает само окружение — с расстоянием, ценой и её датой.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, ChevronDown, ChevronRight } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -16,6 +16,8 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCompany } from '@/contexts/CompanyContext'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { MarketSelfPanel } from './MarketSelfPanel'
 import { getMarketPosition, SITE_KIND_LABEL, type MarketPositionRow } from '@/services/marketService'
 
@@ -58,7 +60,17 @@ function Neighbours({ row }: { row: MarketPositionRow }) {
   }
   return (
     <div className="px-4 py-2">
-      <table className="w-full text-xs">
+      <table className="w-full text-xs"
+        {...exportRows(`Соседи · ${row.name}`.slice(0, 28), [
+          'Кто рядом', 'Оператор', 'Вид', 'Спрос', 'Расстояние, км', 'Портов',
+          'Цена ₽/кВт·ч', 'Наблюдалась',
+        ], row.neighbours.map((n) => [
+          n.name, n.operatorName ?? null,
+          n.siteClass === 'home' ? 'домашняя розетка'
+            : n.siteClass === 'independent' ? 'независимая точка' : SITE_KIND_LABEL[n.kind],
+          n.lastSessionAt ? (n.alive ? 'заряжали недавно' : 'молчит больше 90 дней') : 'нет данных',
+          n.distanceKm, n.ports, n.pricePerKwh, n.observedOn,
+        ]))}>
         <thead className="text-muted-foreground">
           <tr>
             <th className="py-1 text-left font-medium">Кто рядом</th>
@@ -133,6 +145,7 @@ export function MarketPositionPanel() {
 
 function MarketPositionTable() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const [radius, setRadius] = useState('5')
   const [days, setDays] = useState('30')
   const [q, setQ] = useState('')
@@ -187,7 +200,7 @@ function MarketPositionTable() {
   const rivalsAll = all.reduce((acc, r) => acc + r.rivals, 0)
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Объект или город"
           className="h-8 w-[220px] text-xs" />
@@ -216,6 +229,11 @@ function MarketPositionTable() {
         <span className="ml-auto text-xs text-muted-foreground">
           {rows.length} объектов · с соседями {withRivals} · дороже рынка {pricier}
         </span>
+        <span data-export-ignore>
+          <ExportButton title="Позиция"
+            subtitle={`радиус ${radius} км · продажи ${days} дн · ${rows.length} объектов`}
+            getEl={() => экран.current} />
+        </span>
       </div>
 
       {/* Сначала вывод, потом данные, из которых он собран. */}
@@ -243,7 +261,14 @@ function MarketPositionTable() {
       )}
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs"
+          {...exportRows('Позиция', [
+            'Наш объект', 'Город', 'Сессий', 'кВт·ч', 'Выручка, ₽', 'Наша ₽/кВт·ч',
+            'Рынок ₽/кВт·ч', 'Разрыв, %', 'Соседей ЭЗС', 'Из них живых', 'Точек притяжения',
+          ], rows.map((r) => [
+            r.name, r.city, r.sessions, r.energyKwh, r.revenue, r.ourPricePerKwh,
+            r.marketPricePerKwh, r.priceGapPct, r.rivals, r.rivalsAlive, r.attractors,
+          ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
               <th className="p-2 text-left font-medium">Наш объект</th>

@@ -9,10 +9,13 @@
  * картинку и по ней решает, ехать или не ехать. Самый дорогой случай — станция, по
  * которой у нас идут сессии, а рынок показывает её молчащей.
  */
+import { useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, Eye } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { getMarketSelfView } from '@/services/marketService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -27,6 +30,7 @@ function Num({ v, unit, digits = 1 }: { v: number | null | undefined; unit?: str
 
 export function MarketSelfPanel() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const q = useQuery({
     queryKey: ['market-self', companyId],
     queryFn: () => getMarketSelfView(companyId, { days: 90 }),
@@ -68,9 +72,14 @@ export function MarketSelfPanel() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4">
       <Card>
         <CardContent className="space-y-2 p-4">
+          <div className="float-right" data-export-ignore>
+            <ExportButton title="Мы глазами рынка"
+              subtitle={`${nf.format(t.inMarket)} наших станций в публичном реестре · за 90 дней`}
+              getEl={() => экран.current} />
+          </div>
           <div className="flex items-center gap-2 text-sm font-medium">
             <Eye className="size-4 text-primary" aria-hidden />
             Клиент видит {nf.format(t.inMarket)} наших станций: связь{' '}
@@ -116,7 +125,16 @@ export function MarketSelfPanel() {
           <div className="mb-2 font-headline text-sm font-semibold">
             С кем нас сравнивает клиент
           </div>
-          <table className="w-full text-xs">
+          <table className="w-full text-xs"
+            {...exportRows('С кем нас сравнивают', [
+              'Сеть', 'Точек', 'Связь, %', 'Успешных зарядок, %', 'Источник успешности', 'Оценка',
+            ], [
+              ['мы', t.inMarket, t.quality,
+               ours.successPct ?? t.success,
+               ours.successPct != null ? 'наш журнал сессий' : 'публичный реестр',
+               t.rating],
+              ...peers.map((p) => [p.name, p.sites, p.quality, p.success, 'публичный реестр', p.rating]),
+            ])}>
             <thead className="text-muted-foreground">
               <tr>
                 <th className="py-1 text-left font-medium">Сеть</th>
@@ -166,7 +184,16 @@ export function MarketSelfPanel() {
             Наши станции: где профиль хуже всего
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs"
+              {...exportRows('Наши станции', [
+                'Станция', 'Город', 'Связь, %', 'Успех, %', 'Оценка', 'Рынок видит',
+                'Наших сессий',
+              ], sites.map((r) => [
+                r.ourName ?? r.marketName, r.city, r.quality, r.successPct, r.rating,
+                r.aliveByMarket ? 'заряжают'
+                  : (r.ourSessions ?? 0) > 0 ? 'молчит, хотя работает' : 'молчит',
+                r.ourSessions,
+              ]))}>
               <thead className="text-muted-foreground">
                 <tr>
                   <th className="py-1 text-left font-medium">Станция</th>

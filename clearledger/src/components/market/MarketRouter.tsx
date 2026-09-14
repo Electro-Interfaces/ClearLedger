@@ -8,7 +8,7 @@
  * Порядок пунктов подчинён вопросу менеджера: сначала «что вокруг» (карта), потом
  * «кто это» (точки, конкуренты), и только потом «откуда мы это знаем» (наблюдения).
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { MapContainer, CircleMarker, Popup, AttributionControl, useMap,
   useMapEvents } from 'react-leaflet'
@@ -22,6 +22,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { MarketSiteCard } from './MarketSiteCard'
 import { useFullscreenPanel } from '@/hooks/useFullscreenPanel'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -500,7 +502,13 @@ function ТаблицаРазреза({ rows, total, first }: {
 }) {
   return (
     <div className="overflow-hidden rounded-lg border border-border">
-      <table className="w-full text-xs">
+      <table className="w-full text-xs"
+        {...exportRows(first, [
+          first, 'Точек', 'Доля, %', 'Живых', 'Медиана цены, ₽/кВт·ч', 'Точек с ценой',
+        ], rows.map((r) => [
+          r.name, r.sites, total > 0 ? (r.sites / total) * 100 : null, r.alive,
+          r.medianPrice, r.pricedSites,
+        ]))}>
         <thead className="bg-muted/50 text-muted-foreground">
           <tr>
             <th className="p-2 text-left font-medium">{first}</th>
@@ -524,6 +532,7 @@ const nf1m = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 /** Реестр точек рынка: что известно и насколько это свежо. */
 function MarketSites() {
   const { companyId, company } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const [вид, setВид] = useState<string>('list')
   // Карточка станции: полсотни полей парсера в списке не помещаются, а решение
   // «сравнивать ли с этой точкой» принимается именно по ним.
@@ -587,8 +596,8 @@ function MarketSites() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
-      <div className="flex flex-wrap items-center gap-2">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
+      <div className="flex flex-wrap items-center gap-2" data-export-ignore>
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Название или город"
           className="h-8 w-[240px] text-xs" />
         <Select value={kind} onValueChange={setKind}>
@@ -607,6 +616,12 @@ function MarketSites() {
           {запрос && ` по запросу «${запрос}»`}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          {/* Выгружается загруженная часть списка: постранично докачанное и есть то,
+              что человек видит. Сколько именно — сказано в подписи книги. */}
+          <ExportButton title="Точки рынка"
+            subtitle={`${вид === 'list' ? `${rows.length} из ${всего} точек` : 'разрез по всем точкам'}`
+              + `${запрос ? ` · запрос «${запрос}»` : ''}`}
+            getEl={() => экран.current} />
           <MarketObservationDialog sites={sites.data?.sites ?? []} trigger={
             <button type="button" className="rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent">
               Наблюдение
@@ -665,7 +680,12 @@ function MarketSites() {
                 <ТаблицаРазреза rows={разрез.data.byCurrent} total={разрез.data.total}
                   first="Тип тока" />
                 <div className="overflow-hidden rounded-lg border border-border">
-                  <table className="w-full text-xs">
+                  <table className="w-full text-xs"
+                    {...exportRows('Разъёмы', [
+                      'Разъём', 'Сколько их', 'Медиана мощности, кВт', 'Мощность известна у',
+                    ], разрез.data.byConnector.map((c) => [
+                      c.name, c.count, c.medianPowerKw, c.withPower,
+                    ]))}>
                     <thead className="bg-muted/50 text-muted-foreground">
                       <tr>
                         <th className="p-2 text-left font-medium">Разъём</th>
@@ -702,6 +722,22 @@ function MarketSites() {
             {вид === 'live' && (
               <Card>
                 <CardContent className="space-y-3 p-4">
+                  {/* Показатели живости нарисованы плитками; в книгу они уходят
+                      строками — вместе с покрытием, без которого медиана врёт. */}
+                  <table hidden {...exportRows('Живы ли', [
+                    'Показатель', 'Значение', 'Посчитано по точкам',
+                  ], [
+                    [`заряжали за ${разрез.data.quality.aliveDays} дней`, разрез.data.quality.alive, null],
+                    ['зарядок не видели ни разу', разрез.data.quality.neverSeenCharging, null],
+                    ['закрытие подтверждали', разрез.data.quality.closedConfirmed, null],
+                    ['владелец не назван', разрез.data.quality.withoutOperator, null],
+                    ['связь за сутки, медиана %', разрез.data.quality.medianQuality,
+                     разрез.data.quality.qualityCoverage],
+                    ['успешных зарядок, медиана %', разрез.data.quality.medianSuccess,
+                     разрез.data.quality.successCoverage],
+                    ['оценка, медиана', разрез.data.quality.medianRating,
+                     разрез.data.quality.ratingCoverage],
+                  ])} />
                   <div className="grid gap-x-6 gap-y-3 md:grid-cols-3 xl:grid-cols-4">
                     <div>
                       <div className="text-xs text-muted-foreground">
@@ -810,7 +846,16 @@ function MarketSites() {
         </CardContent></Card>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs"
+            {...exportRows('Точки рынка', [
+              'Точка', 'Наша', 'Вид', 'Оператор', 'Город', 'Адрес', 'Портов', 'Цена, ₽',
+              'Основание цены', 'Проверено', 'Снимков',
+            ], rows.map((s) => [
+              s.name, s.isOurs ? мы : null, SITE_KIND_LABEL[s.kind as MarketSiteKind],
+              s.operatorName, s.city, s.address, s.ports, s.price?.value ?? null,
+              s.price?.basis ?? null, s.price?.observedOn ?? s.lastSeenAt ?? null,
+              s.photoCount ?? 0,
+            ]))}>
             <thead className="sticky top-0 bg-muted/60 text-muted-foreground">
               <tr>
                 <th className="p-2 text-left font-medium">Точка</th>
@@ -881,6 +926,7 @@ function MarketSites() {
 /** Лента наблюдений — откуда мы знаем то, что показываем. */
 function MarketObservations() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const q = useQuery({
     queryKey: ['market-observations', companyId],
     queryFn: () => listMarketObservations(companyId),
@@ -888,7 +934,13 @@ function MarketObservations() {
   })
   const rows = q.data?.observations ?? []
   return (
-    <div className="h-full overflow-auto p-4">
+    <div ref={экран} className="h-full overflow-auto p-4">
+      {rows.length > 0 && (
+        <div className="mb-2 flex justify-end" data-export-ignore>
+          <ExportButton title="Наблюдения" subtitle={`${rows.length} записей`}
+            getEl={() => экран.current} />
+        </div>
+      )}
       {rows.length === 0 ? (
         <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
           Наблюдений пока нет. Наблюдение — это факт с датой и автором: заезд сервиса,
@@ -896,7 +948,15 @@ function MarketObservations() {
         </CardContent></Card>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs"
+            {...exportRows('Наблюдения', [
+              'Дата', 'Точка', 'Что наблюдали', 'Основание', 'Цена, ₽', 'Канал', 'Автор',
+            ], rows.map((o) => [
+              o.observedOn, o.siteName,
+              o.kind === 'price' ? 'цена' : o.kind === 'availability' ? 'доступность'
+                : o.kind === 'closed' ? 'закрыта' : o.kind === 'opened' ? 'открылась' : o.kind,
+              o.basis, o.price, CHANNEL_LABEL[o.channel] ?? o.channel, o.author,
+            ]))}>
             <thead className="bg-muted/60 text-muted-foreground">
               <tr>
                 <th className="p-2 text-left font-medium">Дата</th>

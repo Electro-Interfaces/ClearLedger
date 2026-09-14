@@ -9,12 +9,14 @@
  * Отношение к компании — решение человека, а не свойство данных: одна и та же сеть
  * бывает конкурентом в одном регионе и кандидатом на роуминг в другом.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Handshake } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { SortTh } from '@/components/workspace/SortableTh'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getMarketPartners, patchMarketOperator, type MarketPartner } from '@/services/marketService'
@@ -33,6 +35,7 @@ const RELATIONS: Record<string, string> = {
 export function MarketPartnersPanel() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
+  const экран = useRef<HTMLDivElement>(null)
   const [saving, setSaving] = useState<string | null>(null)
 
   const q = useQuery({
@@ -80,7 +83,7 @@ export function MarketPartnersPanel() {
   const best = rows[0]
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -92,11 +95,23 @@ export function MarketPartnersPanel() {
           <span className="text-xs text-muted-foreground">
             мы стоим в {nf.format(q.data?.ourCities ?? 0)} городах
           </span>
+          <span className="ml-auto" data-export-ignore>
+            <ExportButton title="Партнёрство и франшиза"
+              subtitle={`${rows.length} сетей · мы в ${nf.format(q.data?.ourCities ?? 0)} городах`}
+              getEl={() => экран.current} />
+          </span>
         </CardContent>
       </Card>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs"
+          {...exportRows('Партнёрство', [
+            'Сеть', 'Точек', 'Живых', 'Дополняет', 'Доля дополнения, %', 'Дублирует',
+            'Городов без нас', 'Города без нас', 'Отношение',
+          ], rows.map((r) => [
+            r.name, r.sites, r.alive, r.complementSites, r.complementPct, r.overlapSites,
+            r.newCitiesTotal, r.newCities.join(', '), RELATIONS[r.relation] ?? r.relation,
+          ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
               <SortTh sortKey="name" sort={sort} onSort={toggle}>Сеть</SortTh>

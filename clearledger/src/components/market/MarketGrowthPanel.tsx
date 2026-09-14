@@ -11,13 +11,15 @@
  * собой бессмысленно — расти надо выручкой; там, где нас нет, никакая цена уже не
  * наша, и вход идёт стройкой, роумингом или франшизой.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Compass } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import {
   getGrowthOverview, getGrowthPipeline, getGrowthPresence, type GrowthPresenceRow,
 } from '@/services/marketService'
@@ -88,6 +90,7 @@ function Skeleton() {
 
 export function MarketGrowthPanel() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const [вид, setВид] = useState<string>('tracks')
   const [filter, setFilter] = useState('all')
 
@@ -119,7 +122,7 @@ export function MarketGrowthPanel() {
     (r) => filter === 'all' || r.presence === filter)
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -130,6 +133,10 @@ export function MarketGrowthPanel() {
           </span>
           <span className="text-xs text-muted-foreground">
             положение считается по доле точек сети в регионе, за 90 дней
+          </span>
+          <span className="ml-auto" data-export-ignore>
+            <ExportButton title={`Рост · ${ВИДЫ.find((v) => v.k === вид)?.label}`}
+              subtitle="за 90 дней" getEl={() => экран.current} />
           </span>
         </CardContent>
       </Card>
@@ -166,6 +173,18 @@ export function MarketGrowthPanel() {
             видно в данных и сколько уже взято в работу. Где данных нет, строка это и
             говорит — придуманный показатель хуже пустого.
           </p>
+          {/* Направления показаны карточками, а выгрузка работает с таблицами: эта
+              таблица не рисуется, её дело — уложить меры направлений в строки. */}
+          <table hidden {...exportRows('Направления роста', [
+            'Направление', 'Вывод', 'Показатель', 'Значение', 'Кандидаты',
+          ], (overview.data?.tracks ?? []).flatMap((t) => {
+            const кандидаты = Object.entries(t.leads)
+              .map(([k, v]) => `${LEAD_STATUS[k] ?? k}: ${v}`).join(' · ')
+            const строки: (string | number | null)[][] = t.metrics.length
+              ? t.metrics.map((m) => [t.label, t.headline, m.label, m.value, кандидаты])
+              : [[t.label, t.headline, null, null, кандидаты]]
+            return строки
+          }))} />
         </div>
       )}
 
@@ -220,13 +239,30 @@ export function MarketGrowthPanel() {
               Площадка без города не ложится на рынок: где она стоит, экран не знает,
               и в разрезы территорий она не попадает.
             </p>
+            {/* Воронка нарисована плитками; в книгу она уходит строками. */}
+            <table hidden {...exportRows('Воронка', [
+              'Стадия', 'Площадок', 'Из них с городом', 'Без города',
+            ], СТАДИИ.map((код) => {
+              const st = pipeline.data!.stages.find((x) => x.stage === код)
+              return [st?.label ?? СТАДИЯ_ИМЯ[код] ?? код, st?.projects ?? 0,
+                      st?.withCity ?? 0, st ? st.projects - st.withCity : 0]
+            }))} />
           </div>
 
           <div className="overflow-hidden rounded-lg border border-border">
             <div className="border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium">
               Города, где идёт работа, и рынок вокруг
             </div>
-            <table className="w-full text-xs">
+            <table className="w-full text-xs"
+              {...exportRows('Города стройки', [
+                'Город', 'Регион', 'Площадок', 'Стадии', 'Мы там', 'Рынок, точек', 'Живых',
+              ], pipeline.data.cities.map((c) => [
+                c.city, c.region, c.projects,
+                Object.entries(c.stages).map(([k, v]) => `${СТАДИЯ_ИМЯ[k] ?? k} ${v}`).join(', '),
+                c.weAreThere ? 'сеть есть' : 'входим',
+                c.marketKnown ? c.marketSites : 'не наблюдали',
+                c.marketKnown ? c.marketAlive : null,
+              ]))}>
               <thead className="bg-muted/30 text-muted-foreground">
                 <tr>
                   <th className="p-2 text-left font-medium">Город</th>
@@ -303,7 +339,15 @@ export function MarketGrowthPanel() {
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs"
+              {...exportRows('Положение по регионам', [
+                'Регион', 'Наше положение', 'Наша доля, %', 'Наши точки', 'Чужие',
+                'Живые чужие', 'Сессий', 'Выручка, ₽', 'Чем расти',
+              ], regions.map((r) => [
+                r.name, r.presenceLabel, r.sharePct, r.ourSites, r.rivalSites, r.rivalAlive,
+                r.ourSessions, r.ourRevenue,
+                r.suggestedTracks.map((t) => overview.data?.trackLabels?.[t] ?? t).join(', '),
+              ]))}>
               <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
                 <tr>
                   <th className="p-2 text-left font-medium">Регион</th>

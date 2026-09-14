@@ -11,13 +11,15 @@
  * только в своём приложении». А вот оценка приложения — прямой отзыв водителя о
  * сервисе, и её мы показываем рядом со своей.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Swords } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { SortTh } from '@/components/workspace/SortableTh'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { MarketCompaniesPanel } from './MarketCompaniesPanel'
@@ -48,6 +50,7 @@ function rowClass(r: MarketNetworkRow): string {
 
 export function MarketLandscapePanel() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const [вид, setВид] = useState<string>('power')
   // Расклад отвечает «кто сильнее», карточка — «что он делает». Второй вопрос
   // возникает сразу после первого, поэтому строка сети ведёт в карточку, а не
@@ -100,7 +103,7 @@ export function MarketLandscapePanel() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -115,6 +118,13 @@ export function MarketLandscapePanel() {
           </span>
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Сеть"
             className="h-8 w-[180px] text-xs" />
+          {/* Выгружается открытый вид: в книге ровно то, что человек видит на экране,
+              иначе в файле оказываются столбцы, о которых он не просил. */}
+          <span data-export-ignore>
+            <ExportButton title={`Расклад сил · ${ВИДЫ.find((v) => v.k === вид)?.label}`}
+              subtitle={`${rows.length} сетей${q ? ` · отбор «${q}»` : ''}`}
+              getEl={() => экран.current} />
+          </span>
         </CardContent>
       </Card>
 
@@ -122,7 +132,14 @@ export function MarketLandscapePanel() {
 
       {вид === 'power' && (
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs"
+            {...exportRows('Расклад сил', [
+              'Сеть', 'Мы', 'Точек', 'Доля, %', 'Городов', 'Округов', 'Модель', 'База',
+              'Средняя мощность, кВт', 'Медиана цены, ₽/кВт·ч',
+            ], rows.map((r) => [
+              r.name, r.isOurs ? 'мы' : null, r.sites, r.sharePct, r.citiesCount, r.districts,
+              r.class ?? 'не определена', r.baseCity, r.avgPowerKw, r.medianPricePerKwh,
+            ]))}>
             <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
               <tr>
                 <SortTh sortKey="name" sort={sort} onSort={toggle}>Сеть</SortTh>
@@ -200,6 +217,14 @@ export function MarketLandscapePanel() {
               </CardContent>
             </Card>
           ))}
+          {/* Платформы показаны карточками, а выгрузка работает с таблицами: эта
+              таблица не рисуется, а существует только затем, чтобы связка
+              «платформа — её клиент» уехала в книгу строками. */}
+          <table hidden {...exportRows('Платформы', [
+            'Платформа', 'Своих точек', 'Чужих точек', 'Сетей-клиентов', 'Клиент', 'Точек у клиента',
+          ], platforms.flatMap((p) => (p.clients.length
+            ? p.clients.map((c) => [p.owner, p.ownSites, p.clientSites, p.clients.length, c.name, c.sites])
+            : [[p.owner, p.ownSites, p.clientSites, 0, null, null]])))} />
         </div>
       )}
 
@@ -213,7 +238,15 @@ export function MarketLandscapePanel() {
             Это факт о технологии, а не о качестве сети.
           </CardContent></Card>
           <div className="rounded-lg border border-border">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs"
+              {...exportRows('Роуминг', [
+                'Сеть', 'Мы', 'Точек', 'Доступ', 'Доля точек в роуминге, %', 'Платформа',
+              ], rows.map((r) => [
+                r.name, r.isOurs ? 'мы' : null, r.sites,
+                r.roaming ? 'роуминг с другими сетями'
+                  : r.roaming === false ? 'только своё приложение' : 'нет данных',
+                r.roamingPct, r.platformOwner,
+              ]))}>
               <thead className="bg-muted/60 text-muted-foreground">
                 <tr>
                   <th className="p-2 text-left font-medium">Сеть</th>
@@ -247,7 +280,15 @@ export function MarketLandscapePanel() {
 
       {вид === 'service' && (
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs"
+            {...exportRows('Качество сервиса', [
+              'Сеть', 'Мы', 'Точек', 'Связь, %', 'Успешных зарядок, %', 'Молчат больше полугода',
+              'Доля молчащих, %', 'Оценка приложения', 'Отзывов', 'Приложение',
+            ], rows.map((r) => [
+              r.name, r.isOurs ? 'мы' : null, r.sites, r.quality, r.success, r.silentHalfYear,
+              r.sites > 0 ? (r.silentHalfYear / r.sites) * 100 : null,
+              r.appRating, r.appReviews, r.appName,
+            ]))}>
             <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
               <tr>
                 <th className="p-2 text-left font-medium">Сеть</th>
@@ -305,7 +346,14 @@ export function MarketLandscapePanel() {
             дороже молчания.
           </CardContent></Card>
           <div className="rounded-lg border border-border">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs"
+              {...exportRows('Реквизиты', [
+                'Сеть', 'Мы', 'Юридическое лицо', 'ИНН', 'ОГРН', 'Руководитель',
+                'Достоверность', 'Ссылаться можно',
+              ], rows.filter((r) => r.legalName || r.inn).map((r) => [
+                r.name, r.isOurs ? 'мы' : null, r.legalName, r.inn, r.ogrn, r.director,
+                r.legalConfidence ?? 'не проверено', r.legalTrusted ? 'да' : 'нет',
+              ]))}>
               <thead className="bg-muted/60 text-muted-foreground">
                 <tr>
                   <th className="p-2 text-left font-medium">Сеть</th>

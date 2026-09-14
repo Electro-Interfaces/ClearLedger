@@ -9,7 +9,7 @@
  * Взятый в работу кандидат уходит в исполнительный контур: стройка — площадкой в
  * «Проекты», тариф и акция — сценарием с замером.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Lightbulb } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import {
   createGrowthLead, leadToProject, listGrowthLeads, patchGrowthLead, type GrowthLead,
 } from '@/services/marketService'
@@ -102,6 +104,7 @@ function LeadRow({ lead, onMove, onToProject, sending }: {
 export function MarketLeadsPanel() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
+  const экран = useRef<HTMLDivElement>(null)
   const [track, setTrack] = useState('all')
   const [title, setTitle] = useState('')
   const [newTrack, setNewTrack] = useState('build')
@@ -140,7 +143,7 @@ export function MarketLeadsPanel() {
   const rejected = rows.filter((r) => r.status === 'rejected')
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -158,6 +161,22 @@ export function MarketLeadsPanel() {
               ))}
             </SelectContent>
           </Select>
+          <span className="ml-auto" data-export-ignore>
+            <ExportButton title="Кандидаты"
+              subtitle={`${track === 'all' ? 'все направления' : TRACKS[track] ?? track} · ${rows.length} кандидатов`}
+              getEl={() => экран.current} />
+          </span>
+          {/* Кандидаты показаны карточками, а выгрузка работает с таблицами: эта
+              таблица не рисуется, её дело — уложить реестр кандидатов в строки.
+              Причина отказа в книге обязательна: ради неё реестр и ведут. */}
+          <table hidden {...exportRows('Кандидаты', [
+            'Состояние', 'Возможность', 'Направление', 'Статус', 'Объект', 'Ответственный',
+            'Заметка', 'Причина отказа', 'Площадка заведена',
+          ], [['В работе', open], ['Взяты', taken], ['Отклонены', rejected]]
+            .flatMap(([группа, список]) => (список as GrowthLead[]).map((l) => [
+              группа as string, l.title, l.trackLabel, STATUSES[l.status] ?? l.status,
+              l.subjectRef, l.ownerName, l.note, l.rejectReason, l.siteId ? 'да' : 'нет',
+            ])))} />
         </CardContent>
       </Card>
 

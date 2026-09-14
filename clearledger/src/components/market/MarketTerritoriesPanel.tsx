@@ -10,13 +10,15 @@
  * трафика — у нас пока нет ни одного. Пока их нет, гексагон даёт то же, что город,
  * но в виде, о котором нельзя спросить человека.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Map as MapIcon } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { SortTh } from '@/components/workspace/SortableTh'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
@@ -66,6 +68,7 @@ function Share({ row }: { row: MarketTerritory }) {
 
 export function MarketTerritoriesPanel() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const [level, setLevel] = useState<'city' | 'region'>('region')
   const [q, setQ] = useState('')
   // Территория раскрывается в профиль: рынок отвечает «кто вокруг», наша сеть —
@@ -106,7 +109,7 @@ export function MarketTerritoriesPanel() {
   const weak = withUs.filter((r) => r.sharePct != null && r.sharePct < 30)
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -127,11 +130,23 @@ export function MarketTerritoriesPanel() {
           </Select>
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Территория"
             className="h-8 w-[180px] text-xs" />
+          <span className="ml-auto" data-export-ignore>
+            <ExportButton title="Территории"
+              subtitle={`${level === 'city' ? 'по городам' : 'по регионам'} · продажи 90 дней · ${rows.length} территорий`}
+              getEl={() => экран.current} />
+          </span>
         </CardContent>
       </Card>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs"
+          {...exportRows('Территории', [
+            'Территория', 'Наши точки', 'Сессий', 'Выручка, ₽', 'Чужие точки', 'Живые чужие',
+            'Наша доля, %', 'Наша ₽/кВт·ч', 'Рынок ₽/кВт·ч',
+          ], rows.map((r) => [
+            r.name, r.ourSites, r.ourSessions, r.ourRevenue, r.rivalSites, r.rivalAlive,
+            r.sharePct, r.ourPricePerKwh, r.marketPricePerKwh,
+          ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
               <SortTh sortKey="name" sort={sort} onSort={toggle}>Территория</SortTh>
@@ -178,6 +193,7 @@ export function MarketTerritoriesPanel() {
 export function MarketWhitespotsPanel() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
+  const экран = useRef<HTMLDivElement>(null)
   const [level, setLevel] = useState<'city' | 'region'>('city')
   const [taken, setTaken] = useState<string[]>([])
 
@@ -213,7 +229,7 @@ export function MarketWhitespotsPanel() {
   const alive = spots.filter((s) => s.rivalAlive > 0)
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 p-3">
           <span className="text-sm font-medium">
@@ -231,11 +247,23 @@ export function MarketWhitespotsPanel() {
               <SelectItem value="region">По регионам</SelectItem>
             </SelectContent>
           </Select>
+          <span className="ml-auto" data-export-ignore>
+            <ExportButton title="Белые пятна"
+              subtitle={`${level === 'city' ? 'по городам' : 'по регионам'} · ${spots.length} территорий`}
+              getEl={() => экран.current} />
+          </span>
         </CardContent>
       </Card>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs"
+          {...exportRows('Белые пятна', [
+            'Территория', 'Чужих точек', 'Живых за 90 дн', 'Портов', 'Цена рынка, ₽/кВт·ч',
+            'Домашних розеток', 'Площадок в работе', 'Номера проектов',
+          ], spots.map((r) => [
+            r.name, r.rivalSites, r.rivalAlive, r.rivalPorts, r.marketPricePerKwh,
+            r.homeSockets, r.projectsInWork ?? 0, (r.projectNumbers ?? []).join(', '),
+          ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
               <th className="p-2 text-left font-medium">Территория</th>

@@ -9,12 +9,14 @@
  * Парк считается по электромобилям без гибридов: их вдвое больше, но региональной
  * разбивки по ним в открытом доступе нет, и подмешать их значило бы завысить спрос.
  */
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { BatteryCharging } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCompany } from '@/contexts/CompanyContext'
 import { SortTh } from '@/components/workspace/SortableTh'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { useTableSort } from '@/hooks/useTableSort'
 import { getMarketCoverage, type MarketCoverageRow } from '@/services/marketService'
 
@@ -43,6 +45,7 @@ function Load({ row }: { row: MarketCoverageRow }) {
 
 export function MarketCoveragePanel() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const q = useQuery({
     queryKey: ['market-coverage', companyId],
     queryFn: () => getMarketCoverage(companyId),
@@ -93,7 +96,7 @@ export function MarketCoveragePanel() {
   const ourRegions = rows.filter((r) => r.ourSites > 0)
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -112,11 +115,23 @@ export function MarketCoveragePanel() {
           <span className="text-xs text-muted-foreground">
             парк машин известен в {q.data?.withCars ?? 0} регионах из {rows.length}
           </span>
+          <div className="ml-auto" data-export-ignore>
+            <ExportButton title="Обеспеченность"
+              subtitle={`${rows.length} регионов · парк известен в ${q.data?.withCars ?? 0}`}
+              getEl={() => экран.current} />
+          </div>
         </CardContent>
       </Card>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs"
+          {...exportRows('Обеспеченность', [
+            'Регион', 'Электромобилей', 'Доля парка, %', 'Зарядок', 'Работают', 'Мёртвых',
+            'Машин на зарядку', 'На работающую', 'Разрыв, ×', 'Наших точек', 'Наших работает',
+          ], rows.map((r) => [
+            r.region, r.carsKnown ? r.evCars : null, r.evSharePct, r.stations, r.stationsAlive,
+            r.deadStations, r.carsPerStation, r.carsPerAlive, r.deadGapRatio, r.ourSites, r.ourWorking,
+          ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
               <SortTh sortKey="region" sort={sort} onSort={toggle}>Регион</SortTh>

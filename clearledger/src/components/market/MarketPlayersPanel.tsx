@@ -12,12 +12,14 @@
  * поэтому смежные игроки названы смежными; рейтинги не сравниваются между классами
  * без числа отзывов рядом.
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Users } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { SortTh } from '@/components/workspace/SortableTh'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getMarketPlayers, type MarketPlayer } from '@/services/marketService'
@@ -55,6 +57,7 @@ function PlayerLine({ p }: { p: MarketPlayer }) {
 
 export function MarketPlayersPanel() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const [вид, setВид] = useState<string>('models')
 
   const q = useQuery({
@@ -103,7 +106,7 @@ export function MarketPlayersPanel() {
   const classes = q.data?.classes ?? []
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -114,6 +117,11 @@ export function MarketPlayersPanel() {
           <span className="text-xs text-muted-foreground">
             смежных игроков {nf.format(t.adjacent)} · медиана оценки приложения{' '}
             {t.medianRating != null ? nf1.format(t.medianRating) : 'нет данных'}
+          </span>
+          <span className="ml-auto" data-export-ignore>
+            <ExportButton title={`Игроки рынка · ${ВИДЫ.find((v) => v.k === вид)?.label}`}
+              subtitle={`${nf.format(q.data?.total ?? 0)} игроков`}
+              getEl={() => экран.current} />
           </span>
         </CardContent>
       </Card>
@@ -140,12 +148,28 @@ export function MarketPlayersPanel() {
               </CardContent>
             </Card>
           ))}
+          {/* Квадранты показаны карточками, а выгрузка работает с таблицами: эта
+              таблица не рисуется, её дело — уложить игроков по моделям в строки. */}
+          <table hidden {...exportRows('Модели бизнеса', [
+            'Модель', 'Игрок', 'Оператор', 'Класс', 'Своих станций', 'Оценка', 'Работает',
+            'Класс проверен',
+          ], quadrants.flatMap((qd) => qd.players.map((p) => [
+            qd.label, p.app, p.operatorName, p.class, p.ownStations, p.rating,
+            p.isActive ? 'да' : 'нет', p.classChecked ? 'да' : 'нет',
+          ])))} />
         </div>
       )}
 
       {вид === 'classes' && (
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs"
+            {...exportRows('Откуда приходят', [
+              'Класс', 'Смежные', 'Игроков', 'Без своих станций', 'Станций у класса',
+              'Медиана оценки', 'Оценок в основе', 'Кто это',
+            ], classes.map((c) => [
+              c.class, c.adjacent ? 'да' : 'нет', c.players, c.assetLight, c.stations,
+              c.medianRating, c.withRating, c.examples.join(', '),
+            ]))}>
             <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
               <tr>
                 <th className="p-2 text-left font-medium">Класс</th>
@@ -194,7 +218,13 @@ export function MarketPlayersPanel() {
 
       {вид === 'quality' && (
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs"
+            {...exportRows('Качество против размера', [
+              'Приложение', 'Работает', 'Класс', 'Своих станций', 'Оценка', 'Отзывов', 'Разработчик',
+            ], quality.map((p) => [
+              p.app, p.isActive ? 'да' : 'нет', p.class, p.ownStations, p.rating, p.reviews,
+              p.developer,
+            ]))}>
             <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
               <tr>
                 <SortTh sortKey="app" sort={сортК} onSort={жмиК}>Приложение</SortTh>
@@ -241,7 +271,14 @@ export function MarketPlayersPanel() {
 
       {вид === 'shops' && (
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs"
+            {...exportRows('Интернет-магазин', [
+              'Сеть', 'Магазин', 'Примечание', 'Что продают', 'Цены от, ₽', 'до, ₽',
+              'Позиций с ценой', 'Адрес',
+            ], (q.data?.shops ?? []).map((sh) => [
+              sh.brand, sh.hasShop ? 'есть' : 'не нашли', sh.note, sh.goods, sh.priceMin,
+              sh.priceMax, sh.pricesFound, sh.host,
+            ]))}>
             <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
               <tr>
                 <th className="p-2 text-left font-medium">Сеть</th>

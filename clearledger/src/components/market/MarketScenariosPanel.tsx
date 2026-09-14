@@ -8,7 +8,7 @@
  * Поэтому планировщик подбирает контроль сам и ЗАРАНЕЕ говорит, читаемым ли будет
  * замер: если группы расходятся ещё до вмешательства, честнее узнать это сейчас.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FlaskConical, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,8 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { listSpaceObjects } from '@/services/spaceObjectsService'
 import {
   createMarketScenario, listMarketScenarios, measureMarketScenario,
@@ -114,6 +116,7 @@ function ScenarioCard({ row, onMeasure, measuring }: {
 export function MarketScenariosPanel() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
+  const экран = useRef<HTMLDivElement>(null)
   const [вид, setВид] = useState<string>('plan')
   const [title, setTitle] = useState('')
   const [kind, setKind] = useState('tariff')
@@ -164,7 +167,7 @@ export function MarketScenariosPanel() {
   const ourObjects = (objects.data ?? []).filter((o) => o.latitude != null)
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -174,6 +177,14 @@ export function MarketScenariosPanel() {
               : `Замерено ${done.length} сценариев, сработало ${worked}.`}
           </span>
           <span className="text-xs text-muted-foreground">в работе {running.length}</span>
+          {/* В планировщике выгружать нечего: там форма, а не данные. */}
+          {вид !== 'plan' && (
+            <span className="ml-auto" data-export-ignore>
+              <ExportButton title={`Сценарии · ${ВИДЫ.find((v) => v.k === вид)?.label}`}
+                subtitle={`замерено ${done.length}, сработало ${worked}`}
+                getEl={() => экран.current} />
+            </span>
+          )}
         </CardContent>
       </Card>
 
@@ -258,6 +269,22 @@ export function MarketScenariosPanel() {
               measuring={measure.isPending && measure.variables === row.id}
               onMeasure={(id) => measure.mutate(id)} />
           ))}
+          {/* Сценарии показаны карточками, а выгрузка работает с таблицами: эта
+              таблица не рисуется, её дело — свести гипотезу с замером в строку.
+              Ожидание рядом с фактом: без контроля колонка эффекта ничего не стоит. */}
+          <table hidden {...exportRows('Сценарии', [
+            'Сценарий', 'Действие', 'Дата действия', 'Дата замера', 'Объектов действия',
+            'Контрольная группа', 'Ведёт', 'Вердикт', 'Эффект по выручке, п.п.',
+            'Эффект по сессиям, п.п.', 'Объекты действия, выручка %', 'Контроль, выручка %',
+            'Примечание',
+          ], (вид === 'running' ? running : done).map((r) => [
+            r.title, ACTION_LABEL[r.actionKind] ?? r.actionKind, r.startedOn, r.measure?.measuredOn ?? null,
+            r.scope.length, r.control.length, r.ownerName,
+            r.measure ? (VERDICT_LABEL[r.measure.verdict ?? 'unclear'] ?? r.measure.verdict) : 'не замерен',
+            r.measure?.didRevenue ?? null, r.measure?.didSessions ?? null,
+            r.measure?.fact?.scope?.revenuePct ?? null, r.measure?.fact?.control?.revenuePct ?? null,
+            r.measure?.note ?? null,
+          ]))} />
           {(вид === 'running' ? running : done).length === 0 && (
             <Card><CardContent className="p-6 text-center text-xs text-muted-foreground">
               {вид === 'running'

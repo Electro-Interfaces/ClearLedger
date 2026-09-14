@@ -6,10 +6,13 @@
  * оговорка о том, чего в расчёте нет. Показатель с непроговорённым допущением
  * опаснее отсутствия показателя: по нему принимают решение, не зная поправки.
  */
+import { useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Banknote, Swords, TrendingDown } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import {
   getMarketElasticity, getMarketPressure, getMarketPriceLandscape,
 } from '@/services/marketService'
@@ -38,6 +41,7 @@ function Skeleton() {
 /** Ценовой ландшафт: почём рынок по классам мощности и где в нём мы. */
 export function MarketPriceLandscapePanel() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const q = useQuery({
     queryKey: ['market-price-landscape', companyId],
     queryFn: () => getMarketPriceLandscape(companyId, { days: 90 }),
@@ -57,7 +61,7 @@ export function MarketPriceLandscapePanel() {
           : 'Наша цена держится на уровне рынка.'
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -67,13 +71,21 @@ export function MarketPriceLandscapePanel() {
             цена известна у {nf.format(d?.pricedSites ?? 0)} чужих точек
             {d?.unknownPower ? `, из них без мощности ${nf.format(d.unknownPower)}` : ''}
           </span>
+          <span className="ml-auto" data-export-ignore>
+            <ExportButton title="Ценовой ландшафт"
+              subtitle={`за 90 дней · цена известна у ${nf.format(d?.pricedSites ?? 0)} чужих точек`}
+              getEl={() => экран.current} />
+          </span>
         </CardContent>
       </Card>
 
       <Card>
         <CardContent className="p-4">
           <div className="mb-2 font-headline text-sm font-semibold">По классам мощности</div>
-          <table className="w-full text-xs">
+          <table className="w-full text-xs"
+            {...exportRows('Цена по классам', [
+              'Класс', 'Точек с ценой', 'Нижняя четверть', 'Медиана', 'Верхняя четверть',
+            ], (d?.buckets ?? []).map((b) => [b.bucket, b.sites, b.low, b.median, b.high]))}>
             <thead className="text-muted-foreground">
               <tr>
                 <th className="py-1 text-left font-medium">Класс</th>
@@ -110,6 +122,7 @@ export function MarketPriceLandscapePanel() {
 /** Давление конкурента: кто открылся рядом и что стало с нашими сессиями. */
 export function MarketPressurePanel() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const q = useQuery({
     queryKey: ['market-pressure', companyId],
     queryFn: () => getMarketPressure(companyId, { months: 24 }),
@@ -120,7 +133,7 @@ export function MarketPressurePanel() {
   const dropped = rows.filter((r) => (r.changePct ?? 0) < -10)
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -129,11 +142,23 @@ export function MarketPressurePanel() {
               ? 'Рядом с нашими объектами новых соседей за два года не появилось — или мы их ещё не наблюдали.'
               : `У ${rows.length} наших объектов рядом появился сосед; у ${dropped.length} из них сессии просели больше чем на 10 %.`}
           </span>
+          <span className="ml-auto" data-export-ignore>
+            <ExportButton title="Давление конкурента"
+              subtitle={`за 24 месяца · ${rows.length} объектов, просели ${dropped.length}`}
+              getEl={() => экран.current} />
+          </span>
         </CardContent>
       </Card>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs"
+          {...exportRows('Давление конкурента', [
+            'Наш объект', 'Город', 'Кто появился', 'Оператор', 'Дистанция, км', 'Когда',
+            'Сессий до', 'Сессий после', 'Изменение, %',
+          ], rows.map((r) => [
+            r.name, r.city, r.rivalName, r.rivalOperator, r.distanceKm, r.appearedOn,
+            r.sessionsBefore, r.sessionsAfter, r.changePct,
+          ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
               <th className="p-2 text-left font-medium">Наш объект</th>
@@ -182,6 +207,7 @@ export function MarketPressurePanel() {
 /** Эластичность: что было с сессиями после изменения нашей цены. */
 export function MarketElasticityPanel() {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const q = useQuery({
     queryKey: ['market-elasticity', companyId],
     queryFn: () => getMarketElasticity(companyId, { weeks: 52 }),
@@ -192,7 +218,7 @@ export function MarketElasticityPanel() {
   const median = q.data?.medianElasticity
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -203,11 +229,21 @@ export function MarketElasticityPanel() {
                 ? `Найдено ${q.data?.total} изменений цены, но отклик посчитать не удалось.`
                 : `Найдено ${q.data?.total} изменений цены. Медианный отклик: на каждый процент цены спрос меняется на ${nf2.format(Math.abs(median))} %` }
           </span>
+          <span className="ml-auto" data-export-ignore>
+            <ExportButton title="Эластичность"
+              subtitle={`за 52 недели · ${cases.length} случаев изменения цены`}
+              getEl={() => экран.current} />
+          </span>
         </CardContent>
       </Card>
 
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs"
+          {...exportRows('Эластичность', [
+            'Объект', 'Неделя', 'Цена была', 'Цена стала', 'Цена, %', 'Сессии, %', 'Отклик',
+          ], cases.map((c) => [
+            c.name, c.week, c.priceWas, c.priceNow, c.pricePct, c.sessionsPct, c.elasticity,
+          ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
               <th className="p-2 text-left font-medium">Объект</th>

@@ -6,10 +6,13 @@
  * загрузка портов, состав клиентов, чем и когда заряжают, чем кончаются сессии,
  * динамика к прошлому периоду. Это и объясняет, что делать с территорией.
  */
+import { useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCompany } from '@/contexts/CompanyContext'
+import { ExportButton } from '@/components/workspace/analytics/ExportButton'
+import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { getTerritoryProfile } from '@/services/marketService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -33,8 +36,10 @@ function Num({ v, unit, digits = 0 }: { v: number | null | undefined; unit?: str
 function Stat({ label, children, hint }: {
   label: string; children: React.ReactNode; hint?: string
 }) {
+  // `data-kpi` — метка для выгрузки: показатель, значение и подпись уезжают в
+  // книгу листом «KPI» ровно в том порядке, в каком стоят здесь.
   return (
-    <div>
+    <div data-kpi>
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="text-sm font-semibold">{children}</div>
       {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
@@ -46,12 +51,17 @@ function Stat({ label, children, hint }: {
 function Split({ title, data, total }: {
   title: string; data: Record<string, number>; total?: number
 }) {
-  const rows = Object.entries(data).sort((a, b) => b[1] - a[1]).slice(0, 6)
+  const все = Object.entries(data).sort((a, b) => b[1] - a[1])
+  const rows = все.slice(0, 6)
   const sum = total ?? rows.reduce((acc, [, v]) => acc + v, 0)
   if (rows.length === 0) return null
   return (
     <div>
       <div className="mb-1 text-xs font-medium">{title}</div>
+      {/* На экране шесть первых строк: остальное — хвост, который глазами не читают.
+          В книгу уходит разбивка целиком. */}
+      <table hidden {...exportRows(title, [title, 'Сколько', 'Доля, %'],
+        все.map(([k, v]) => [k, v, sum > 0 ? (v / sum) * 100 : null]))} />
       <ul className="space-y-0.5">
         {rows.map(([k, v]) => (
           <li key={k} className="flex items-baseline justify-between gap-2 text-xs">
@@ -73,6 +83,7 @@ export function MarketTerritoryProfile({ name, level, onBack }: {
   name: string; level: 'city' | 'region'; onBack: () => void
 }) {
   const { companyId } = useCompany()
+  const экран = useRef<HTMLDivElement>(null)
   const q = useQuery({
     queryKey: ['market-territory-profile', companyId, name, level],
     queryFn: () => getTerritoryProfile(companyId, { name, level, days: 90 }),
@@ -99,11 +110,19 @@ export function MarketTerritoryProfile({ name, level, onBack }: {
   const trend = o?.trend
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4">
-      <button type="button" onClick={onBack}
-        className="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-3.5" aria-hidden /> ко всем территориям
-      </button>
+    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 overflow-auto p-4">
+      <div className="flex items-center justify-between gap-2">
+        <button type="button" onClick={onBack}
+          className="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="size-3.5" aria-hidden /> ко всем территориям
+        </button>
+        {o && (
+          <span data-export-ignore>
+            <ExportButton title={`Территория · ${name}`}
+              subtitle={`наша сеть и рынок, ${q.data?.days} дней`} getEl={() => экран.current} />
+          </span>
+        )}
+      </div>
 
       {!o ? (
         <Card><CardContent className="p-6 text-sm text-muted-foreground">
@@ -201,7 +220,13 @@ export function MarketTerritoryProfile({ name, level, onBack }: {
               Наши объекты здесь
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full text-xs"
+                {...exportRows('Наши объекты', [
+                  'Объект', 'Город', 'кВт', 'Портов', 'Производитель', 'Состояние',
+                  'Сессий', 'Выручка, ₽',
+                ], o.objectsList.map((r) => [
+                  r.name, r.city, r.powerKwt, r.ports, r.brand, r.status, r.sessions, r.revenue,
+                ]))}>
                 <thead className="text-muted-foreground">
                   <tr>
                     <th className="py-1 text-left font-medium">Объект</th>
