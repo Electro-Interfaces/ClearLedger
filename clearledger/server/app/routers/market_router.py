@@ -2496,6 +2496,48 @@ async def apply_owner_candidate(
             "created": создан, "sites": len(точки)}
 
 
+def _адрес_ключ(текст: str | None) -> str:
+    """Адрес или название, приведённые к сравнимому виду.
+
+    «Истра, Босова, 8А» и «Истра Босова 8а» — один адрес; кавычки, сокращения улиц
+    и лишние пробелы к делу не относятся.
+    """
+    если = (текст or "").lower()
+    для_замены = ("ул.", "ул ", "улица", "д.", "дом ", "пр-т", "проспект", "г.",
+                  "«", "»", '"', "'", "(", ")", ",", ".", "-", "  ")
+    for к in для_замены:
+        если = если.replace(к, " ")
+    return " ".join(если.split())
+
+
+def _явный_дубль(a: Any, b: Any, метров: float) -> bool:
+    """Две записи — точно одна станция.
+
+    Совпадение по координате до сорока метров ещё ничего не доказывает: у одного
+    входа в торговый центр законно стоят две станции разных сетей. А вот когда при
+    этом сходится ещё и адрес или название — это одна точка, пришедшая двумя
+    выгрузками под разными именами.
+    """
+    if метров > 40:
+        return False
+    ключи_a = {_адрес_ключ(a.address), _адрес_ключ(a.name)} - {""}
+    ключи_b = {_адрес_ключ(b.address), _адрес_ключ(b.name)} - {""}
+    return bool(ключи_a & ключи_b)
+
+
+def _кого_оставить(a: Any, b: Any) -> tuple[Any, Any]:
+    """Из двух записей остаётся та, что ближе к первоисточнику и полнее.
+
+    Ранг источника важнее полноты: выгрузка партнёра с пропусками достовернее
+    подробной записи из парсинга. При равном ранге считаем заполненные поля.
+    """
+    def вес(s: Any) -> tuple[int, int]:
+        полнота = sum(1 for v in (s.ports, s.max_power_kw, s.last_session_at,
+                                  s.connectors, s.city, s.address) if v is not None)
+        return (s.source_rank or 0, полнота)
+    return (a, b) if вес(a) >= вес(b) else (b, a)
+
+
 @router.get("/duplicates")
 async def market_duplicates(
     company_id: str = Query(...),
@@ -2536,9 +2578,14 @@ async def market_duplicates(
             if км > радиус_км:
                 continue
             видели.add(ключ)
+            явный = _явный_дубль(a, b, км * 1000)
+            оставить, убрать = _кого_оставить(a, b)
             пары.append({
                 "distanceM": round(км * 1000),
                 "city": a.city or b.city,
+                # Явный — совпал не только адрес на карте, но и адрес в записи.
+                "obvious": явный,
+                "keepId": str(оставить.id), "dropId": str(убрать.id),
                 "a": {"id": str(a.id), "name": a.name, "operator": имена.get(str(a.operator_id)),
                       "ports": a.ports, "source": a.source, "address": a.address,
                       "isOurs": bool(a.location_id)},
@@ -2546,18 +2593,66 @@ async def market_duplicates(
                       "ports": b.ports, "source": b.source, "address": b.address,
                       "isOurs": bool(b.location_id)},
             })
-    пары.sort(key=lambda п: (п["distanceM"], п["city"] or ""))
+    пары.sort(key=lambda п: (not п["obvious"], п["distanceM"], п["city"] or ""))
     решено = int((await db.execute(
         select(func.count()).select_from(MarketSite).where(
             MarketSite.company_id == cid,
             MarketSite.duplicate_of_id.is_not(None)))).scalar() or 0)
     return {
         "pairs": пары[:300], "total": len(пары), "radiusM": radius_m,
+        "obvious": sum(1 for п in пары if п["obvious"]),
         "merged": решено,
         "note": ("одна станция, пришедшая двумя выгрузками, считается дважды и завышает "
                  "долю обеих компаний. Но рядом бывают и две разные станции — "
                  "поэтому склейка только по решению человека"),
     }
+
+
+@router.post("/duplicates/merge-obvious")
+async def merge_obvious_duplicates(
+    company_id: str = Query(...),
+    radius_m: int = Query(150, ge=20, le=500),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Склеить разом те пары, где совпали и координата, и адрес записи.
+
+    Восемь сотен пар руками не разбирают, и половина из них — «Истра, Босова, 8А»
+    против «Истра, Босова, 8А». Признак жёсткий: сорок метров И совпавший адрес или
+    название. Спорное остаётся человеку, а склейка обратима — запись не удаляется,
+    и «это разные» снимает пометку.
+    """
+    cid = await _member(company_id, user, db)
+    радиус_км = radius_m / 1000.0
+    точки = (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid, MarketSite.kind == "ezs",
+        MarketSite.status != "closed",
+        MarketSite.latitude.is_not(None), MarketSite.longitude.is_not(None),
+        MarketSite.duplicate_of_id.is_(None)))).scalars().all()
+    индекс = _geo_index(точки, радиус_км)
+    убранные: set[uuid.UUID] = set()
+    склеено = 0
+    for a in точки:
+        if a.id in убранные or a.latitude is None:
+            continue
+        for b in _geo_around(индекс, float(a.latitude), float(a.longitude), радиус_км):
+            if b.id == a.id or b.id in убранные or b.operator_id == a.operator_id:
+                continue
+            км = _distance_km(float(a.latitude), float(a.longitude),
+                              float(b.latitude), float(b.longitude))
+            if not _явный_дубль(a, b, км * 1000):
+                continue
+            оставить, убрать = _кого_оставить(a, b)
+            убрать.duplicate_of_id = оставить.id
+            if оставить.ports is None and убрать.ports is not None:
+                оставить.ports = убрать.ports
+            if оставить.owner_id is None and убрать.owner_id is not None:
+                оставить.owner_id = убрать.owner_id
+            убранные.add(убрать.id)
+            склеено += 1
+            if убрать.id == a.id:
+                break
+    await db.commit()
+    return {"merged": склеено}
 
 
 @router.post("/duplicates/resolve")

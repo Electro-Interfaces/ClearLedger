@@ -972,6 +972,11 @@ export const applyOwnerCandidate = (companyId: string, brand: string, siteIds: s
 export interface DuplicatePair {
   distanceM: number
   city: string | null
+  /** Совпала не только точка на карте, но и адрес записи — это одна станция. */
+  obvious: boolean
+  /** Какую запись оставить и какую убрать из счёта, если пара окажется дублем. */
+  keepId: string
+  dropId: string
   a: DuplicateSide
   b: DuplicateSide
 }
@@ -987,8 +992,16 @@ export interface DuplicateSide {
 }
 
 export const getMarketDuplicates = (companyId: string, radiusM = 150) =>
-  get<{ pairs: DuplicatePair[]; total: number; radiusM: number; merged: number; note: string }>(
-    '/api/market/duplicates', { company_id: companyId, radius_m: radiusM })
+  get<{
+    pairs: DuplicatePair[]; total: number; obvious: number
+    radiusM: number; merged: number; note: string
+  }>('/api/market/duplicates', { company_id: companyId, radius_m: radiusM })
+
+/** Склеить разом пары, где совпали и координата, и адрес записи. */
+export const mergeObviousDuplicates = (companyId: string, radiusM = 150) =>
+  post<{ merged: number }>(
+    `/api/market/duplicates/merge-obvious?company_id=${encodeURIComponent(companyId)}`
+    + `&radius_m=${radiusM}`, {})
 
 export const resolveDuplicate = (
   companyId: string, keepId: string, dropId: string, same = true,

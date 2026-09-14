@@ -24,7 +24,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useCompany } from '@/contexts/CompanyContext'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
 import {
-  applyOwnerCandidate, getMarketDuplicates, getOwnerCandidates, resolveDuplicate,
+  applyOwnerCandidate, getMarketDuplicates, getOwnerCandidates, mergeObviousDuplicates,
+  resolveDuplicate,
 } from '@/services/marketService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -146,6 +147,16 @@ export function MarketDuplicatesPanel() {
       qc.invalidateQueries({ queryKey: ['market-sites-list', companyId] })
     },
   })
+  // Явные пары разбирают пачкой: восемь сотен «Истра, Босова, 8А» против
+  // «Истра, Босова, 8А» человек руками не пройдёт, а склейка обратима.
+  const склеить_явные = useMutation({
+    mutationFn: () => mergeObviousDuplicates(companyId, Number(радиус)),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['market-duplicates', companyId] })
+      qc.invalidateQueries({ queryKey: ['market-landscape', companyId] })
+      qc.invalidateQueries({ queryKey: ['market-sites-list', companyId] })
+    },
+  })
 
   if (q.isLoading) return <Skeleton text="Ищем точки, стоящие в одном месте." />
 
@@ -174,15 +185,35 @@ export function MarketDuplicatesPanel() {
             уже склеено {nf.format(q.data!.merged)}
           </span>
         )}
+        {(q.data?.obvious ?? 0) > 0 && (
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              из них {nf.format(q.data!.obvious)} с тем же адресом
+            </span>
+            <Button size="sm" variant="outline" disabled={склеить_явные.isPending}
+              onClick={() => склеить_явные.mutate()}>
+              {склеить_явные.isPending && <Loader2 className="mr-1 size-3.5 animate-spin" />}
+              Склеить явные
+            </Button>
+          </div>
+        )}
       </CardContent></Card>
+
+      {склеить_явные.data && (
+        <Card><CardContent className="p-3 text-xs">
+          Склеено {nf.format(склеить_явные.data.merged)} пар. Записи не удалены: у
+          каждой своя история наблюдений, и «это разные» вернёт её в счёт.
+        </CardContent></Card>
+      )}
 
       {пары.length > 0 && (
         <table hidden {...exportRows('Спорные точки', [
           'Город', 'Расстояние, м', 'Точка 1', 'Компания 1', 'Портов 1', 'Источник 1',
-          'Точка 2', 'Компания 2', 'Портов 2', 'Источник 2',
+          'Точка 2', 'Компания 2', 'Портов 2', 'Источник 2', 'Оценка',
         ], пары.map((п) => [
           п.city, п.distanceM, п.a.name, п.a.operator, п.a.ports, п.a.source,
           п.b.name, п.b.operator, п.b.ports, п.b.source,
+          п.obvious ? 'адрес совпадает — одна станция' : 'проверить',
         ]))} />
       )}
 
@@ -193,6 +224,7 @@ export function MarketDuplicatesPanel() {
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span className="text-sm font-medium text-foreground">{п.city ?? 'город не указан'}</span>
                 <span>расстояние {п.distanceM} м</span>
+                {п.obvious && <span className="text-warning">адрес совпадает</span>}
               </div>
               <div className="grid gap-2 md:grid-cols-2">
                 {[п.a, п.b].map((с, i) => (
