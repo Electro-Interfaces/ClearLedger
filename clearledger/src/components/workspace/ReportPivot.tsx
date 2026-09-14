@@ -17,7 +17,7 @@
  * группировка по ней даёт дерево из одиночных листьев, то есть тот же список.
  */
 import { useMemo, useState } from 'react'
-import { ChevronRight, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 type Строка = Record<string, unknown>
@@ -120,6 +120,15 @@ function собрать(rows: Строка[], уровни: string[], меры: 
   return { узлы, итого }
 }
 
+/** Перестановка уровня на одну позицию — та же, что в серверной сводной. */
+function переставить(уровни: string[], из: number, в: number): string[] {
+  if (в < 0 || в >= уровни.length) return уровни
+  const следующие = уровни.slice()
+  const [перенос] = следующие.splice(из, 1)
+  следующие.splice(в, 0, перенос)
+  return следующие
+}
+
 export function ReportPivot({ fields, columns, rows }: {
   fields: string[]
   columns: string[]
@@ -149,7 +158,7 @@ export function ReportPivot({ fields, columns, rows }: {
     <div className="space-y-3">
       <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
         <div className="text-[11px] text-muted-foreground">
-          Группировка — порядок уровней задаётся порядком нажатия, до {МАКСИМУМ} уровней
+          Группировка — порядок уровней меняется стрелками, до {МАКСИМУМ} уровней
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {уровни.length === 0 && (
@@ -157,14 +166,31 @@ export function ReportPivot({ fields, columns, rows }: {
               ничего не выбрано — добавьте разрез
             </span>
           )}
+          {/* Порядок уровней меняется на месте: пересобирать разрез снятием и
+              добавлением ради перестановки двух уровней — работа на ровном месте. */}
           {уровни.map((поле, i) => (
-            <button key={поле} type="button"
-              onClick={() => поставить(уровни.filter((у) => у !== поле))}
+            <span key={поле}
               className="inline-flex items-center gap-1 rounded border border-primary/40 bg-primary/10 px-2 py-1 text-xs text-primary">
               <b>{i + 1}</b>
               {разрезы.find((р) => р.поле === поле)?.имя ?? поле}
-              <X className="size-3" />
-            </button>
+              <button type="button" disabled={i === 0}
+                onClick={() => поставить(переставить(уровни, i, i - 1))}
+                aria-label="Переместить уровень выше" title="Выше"
+                className="hover:text-foreground disabled:opacity-30">
+                <ChevronLeft className="size-3" />
+              </button>
+              <button type="button" disabled={i === уровни.length - 1}
+                onClick={() => поставить(переставить(уровни, i, i + 1))}
+                aria-label="Переместить уровень ниже" title="Ниже"
+                className="hover:text-foreground disabled:opacity-30">
+                <ChevronRight className="size-3" />
+              </button>
+              <button type="button" onClick={() => поставить(уровни.filter((у) => у !== поле))}
+                aria-label="Убрать уровень" title="Убрать"
+                className="hover:text-destructive">
+                <X className="size-3" />
+              </button>
+            </span>
           ))}
           {свободные.length > 0 && уровни.length < МАКСИМУМ && (
             <span className="ml-2 flex flex-wrap gap-1.5">

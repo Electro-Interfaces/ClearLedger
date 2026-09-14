@@ -20,7 +20,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, Download, GripVertical, Loader2, Plus, X } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Download, GripVertical, Loader2, Plus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -172,22 +172,47 @@ export function PivotView({
               <span
                 key={key}
                 draggable
-                onDragStart={() => setDragFrom(i)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => onDrop(i)}
+                /* Без записи в `dataTransfer` перетаскивание не начинается вовсе:
+                   Firefox игнорирует dragstart без данных, а Chrome ведёт себя
+                   непредсказуемо на элементах без текстового содержимого. Из-за
+                   этого стрелки порядка и не двигались мышью. */
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = 'move'
+                  e.dataTransfer.setData('text/plain', String(i))
+                  setDragFrom(i)
+                }}
+                onDragEnter={(e) => e.preventDefault()}
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+                onDrop={(e) => { e.preventDefault(); onDrop(i) }}
                 onDragEnd={() => setDragFrom(null)}
                 className={cn(
                   'inline-flex cursor-grab items-center gap-1 rounded-md border px-2 py-1 text-xs',
                   dragFrom === i ? 'border-primary bg-primary/10' : 'border-border bg-background',
                 )}
-                title="Перетащите, чтобы изменить порядок"
+                title="Перетащите или переставьте стрелками"
               >
                 <GripVertical className="h-3 w-3 text-muted-foreground" />
                 <span className="font-mono text-[10px] text-muted-foreground">{i + 1}</span>
                 {labelOf(key)}
-                {/* Крестик и клик по палитре — единственная механика на телефоне:
-                    HTML5 drag&drop там не работает. */}
-                <button type="button" onClick={() => removeDim(key)} aria-label={`Убрать ${labelOf(key)}`}
+                {/* Стрелки — не украшение к перетаскиванию, а его замена. HTML5
+                    drag&drop не работает на тач-экранах и капризен на десктопе;
+                    порядок уровней — главная механика сводной, и она обязана
+                    работать всегда. Кнопки не перетаскиваются: `draggable={false}`,
+                    иначе жест начинается с них и срывается. */}
+                <button type="button" draggable={false} disabled={i === 0}
+                  onClick={() => setDims((d) => reorderDims(d, i, i - 1))}
+                  aria-label={`Переместить «${labelOf(key)}» выше`} title="Выше"
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+                  <ChevronLeft className="h-3 w-3" />
+                </button>
+                <button type="button" draggable={false} disabled={i === dims.length - 1}
+                  onClick={() => setDims((d) => reorderDims(d, i, i + 1))}
+                  aria-label={`Переместить «${labelOf(key)}» ниже`} title="Ниже"
+                  className="text-muted-foreground hover:text-foreground disabled:opacity-30">
+                  <ChevronRight className="h-3 w-3" />
+                </button>
+                <button type="button" draggable={false} onClick={() => removeDim(key)}
+                  aria-label={`Убрать ${labelOf(key)}`}
                   className="text-muted-foreground hover:text-destructive">
                   <X className="h-3 w-3" />
                 </button>
