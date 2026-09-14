@@ -4960,6 +4960,39 @@ async def create_all() -> None:
             "ON market_operators (company_id, platform_owner) WHERE platform_owner IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS ix_market_site_external "
             "ON market_sites (company_id, source, external_id) WHERE external_id IS NOT NULL",
+            # Владелец, эксплуатант и платформа — три разные роли (замечание
+            # РусГидро 14.09.2026). До этой правки роль была одна, и точки EvCar27
+            # числились за ItCharge — за поставщиком системы, а не за владельцем.
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS is_owner "
+            "BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS is_operator "
+            "BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS is_platform "
+            "BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE market_operators ADD COLUMN IF NOT EXISTS roles_checked "
+            "BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS owner_id UUID "
+            "REFERENCES market_operators(id) ON DELETE SET NULL",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS owner_checked "
+            "BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS duplicate_of_id UUID "
+            "REFERENCES market_sites(id) ON DELETE SET NULL",
+            "CREATE INDEX IF NOT EXISTS ix_market_site_owner "
+            "ON market_sites (company_id, owner_id) WHERE owner_id IS NOT NULL",
+            "CREATE INDEX IF NOT EXISTS ix_market_site_duplicate "
+            "ON market_sites (company_id, duplicate_of_id) WHERE duplicate_of_id IS NOT NULL",
+            # Платформа — та компания, чьё имя стоит поставщиком системы у ДРУГИХ
+            # сетей. Это факт из данных, а не догадка: своя система, которой никто
+            # больше не пользуется, инфраструктурой рынка компанию не делает.
+            "UPDATE market_operators o SET is_platform = TRUE "
+            "WHERE roles_checked = FALSE AND EXISTS ("
+            "  SELECT 1 FROM market_operators x WHERE x.company_id = o.company_id "
+            "    AND x.id <> o.id AND x.platform_owner = o.name)",
+            # Владелец по умолчанию — тот, под чьим именем точка пришла: другого мы
+            # о ней не знаем. Где это неверно, разбирает человек — экран «Владелец
+            # под вопросом» показывает как раз такие точки.
+            "UPDATE market_sites SET owner_id = operator_id "
+            "WHERE owner_id IS NULL AND operator_id IS NOT NULL",
         ):
             await conn.execute(_sa.text(stmt))
 

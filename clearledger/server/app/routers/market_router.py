@@ -190,6 +190,11 @@ def _operator_facts(o: MarketOperator) -> dict[str, Any]:
     trusted = (o.legal_confidence or "").startswith("подтвержд")
     return {
         "class": o.player_class, "classChecked": o.class_checked,
+        # Три роли, которые рынок смешивает: владеть станцией, эксплуатировать её и
+        # давать для неё ИТ-систему — разные дела. Роли не исключают друг друга:
+        # «Пункт Е» делает всё три, ItCharge для чужих сетей — только платформа.
+        "isOwner": o.is_owner, "isOperator": o.is_operator, "isPlatform": o.is_platform,
+        "rolesChecked": o.roles_checked,
         # 1 — можно ссылаться; 2 — внутренняя оценка; 3 — только сигнал.
         "dataLevel": o.data_level,
         # Имя `cities` занято разрезом по городам в карточке: число и список —
@@ -431,6 +436,13 @@ async def list_sites(
         "id": str(s.id), "kind": s.kind, "name": s.name,
         "operatorId": str(s.operator_id) if s.operator_id else None,
         "operatorName": operators.get(str(s.operator_id)) if s.operator_id else None,
+        # Владелец отдельно от эксплуатанта: под именем платформы в выгрузке
+        # приходят чужие сети, и разговор об интеграции идёт не с ней.
+        "ownerId": str(s.owner_id) if s.owner_id else None,
+        "ownerName": operators.get(str(s.owner_id)) if s.owner_id else None,
+        "ownerChecked": s.owner_checked,
+        # Та же станция, заведённая другой записью: из счёта уходит, из карточки нет.
+        "duplicateOfId": str(s.duplicate_of_id) if s.duplicate_of_id else None,
         "siteClass": s.site_class or "unknown",
         "currentType": s.current_type,
         "lastSessionAt": s.last_session_at.isoformat() if s.last_session_at else None,
@@ -2356,8 +2368,231 @@ async def patch_operator(
         op.site_url = body["siteUrl"]
     if "inn" in body:
         op.inn = body["inn"]
+    # Роли компании: владеет, эксплуатирует, даёт платформу. Проставленные разбором
+    # роли живут до первой правки человеком — после неё запись помечена проверенной
+    # и разбор её больше не трогает.
+    роли = {"isOwner": "is_owner", "isOperator": "is_operator", "isPlatform": "is_platform"}
+    if any(k in body for k in роли):
+        for ключ, поле in роли.items():
+            if ключ in body:
+                setattr(op, поле, bool(body[ключ]))
+        op.roles_checked = True
     await db.commit()
-    return {"id": str(op.id), "relation": op.relation}
+    return {"id": str(op.id), "relation": op.relation,
+            "isOwner": op.is_owner, "isOperator": op.is_operator,
+            "isPlatform": op.is_platform, "rolesChecked": op.roles_checked}
+
+
+# ── Владелец, эксплуатант, платформа: разбор трёх ролей ─────────────────────
+# Публичные выгрузки знают одно имя на точку и ставят его в «оператора». Кто там
+# на самом деле — владелец сети, эксплуатант или поставщик ИТ-системы — источник
+# не различает: станции EvCar27 в Хабаровске приходят под именем платформы
+# ItCharge, а сеть ZEVS эксплуатирует «Пункт Е» (замечание РусГидро 14.09.2026).
+#
+# Разобрать это машинно нельзя — можно только показать человеку, где имя владельца
+# спрятано в названии точки, и дать привязать его одним движением.
+
+@router.get("/owner-candidates")
+async def owner_candidates(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Бренды, которые видны в названиях точек, но не заведены компаниями.
+
+    Смотрим только точки платформ: там, где эксплуатант и владелец совпадают, имя
+    в названии — это название места («ТЦ Атриум»), а не сеть.
+    """
+    from app.services.market_brands import кандидаты_брендов
+
+    cid = await _member(company_id, user, db)
+    operators = (await db.execute(select(MarketOperator).where(
+        MarketOperator.company_id == cid))).scalars().all()
+    by_id = {op.id: op for op in operators}
+    имена = {op.name.lower() for op in operators}
+    платформы = [op for op in operators if op.is_platform]
+
+    группы = []
+    for op in платформы:
+        точки = (await db.execute(
+            select(MarketSite.id, MarketSite.name, MarketSite.city).where(
+                MarketSite.company_id == cid, MarketSite.operator_id == op.id,
+                MarketSite.kind == "ezs", MarketSite.status != "closed",
+                MarketSite.owner_checked.is_(False)))).all()
+        if not точки:
+            continue
+        for к in кандидаты_брендов([(str(i), n or "", c) for i, n, c in точки], op.name):
+            группы.append({
+                **к,
+                "siteIds": к["siteIds"][:500],
+                "operatorId": str(op.id), "operatorName": op.name,
+                # Компания с таким именем уже есть — тогда это не «завести», а
+                # «привязать»: заводить второй раз значит раздвоить сеть в реестре.
+                "existing": к["brand"].lower() in имена,
+            })
+    группы.sort(key=lambda г: -г["sites"])
+
+    всего = int((await db.execute(
+        select(func.count()).select_from(MarketSite).where(
+            MarketSite.company_id == cid, MarketSite.kind == "ezs",
+            MarketSite.status != "closed", MarketSite.owner_checked.is_(False),
+            MarketSite.operator_id.in_([op.id for op in платформы])
+            if платформы else MarketSite.id.is_(None)))).scalar() or 0) if платформы else 0
+
+    return {
+        "candidates": группы[:100],
+        "platforms": [{"id": str(op.id), "name": op.name} for op in платформы],
+        "sitesOnPlatforms": всего,
+        "note": ("повторяющееся слово в названиях — признак бренда, а не доказательство: "
+                 "так же выглядят название торгового центра и фамилия подрядчика. "
+                 "Владелец появляется только после подтверждения человеком"),
+        "ownersKnown": sum(1 for op in by_id.values() if op.is_owner and op.roles_checked),
+    }
+
+
+@router.post("/owner-candidates/apply")
+async def apply_owner_candidate(
+    company_id: str = Query(...), body: dict = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Завести владельца по подтверждённому бренду и привязать к нему точки.
+
+    Эксплуатант у точек остаётся прежним: платформа их и правда обслуживает. Меняется
+    только ответ на вопрос «чей это актив» — тот, ради которого разговор и заводят.
+    """
+    cid = await _member(company_id, user, db)
+    бренд = (body.get("brand") or "").strip()
+    ids = body.get("siteIds") or []
+    if not бренд or not ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нужны бренд и список точек")
+
+    владелец = (await db.execute(select(MarketOperator).where(
+        MarketOperator.company_id == cid,
+        func.lower(MarketOperator.name) == бренд.lower()))).scalar_one_or_none()
+    создан = False
+    if владелец is None:
+        владелец = MarketOperator(
+            company_id=cid, name=бренд[:200], relation="competitor",
+            is_owner=True, is_operator=False, is_platform=False, roles_checked=True,
+            player_class="владелец сети на чужой платформе", class_checked=True,
+            # Уровень 2: имя снято с названий точек, а не с реквизитов компании.
+            data_level=2,
+            notes="заведён из названий точек: сеть работает на чужой платформе",
+        )
+        db.add(владелец)
+        await db.flush()
+        создан = True
+    else:
+        владелец.is_owner = True
+        владелец.roles_checked = True
+
+    точки = (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid,
+        MarketSite.id.in_([uuid.UUID(str(i)) for i in ids])))).scalars().all()
+    for s in точки:
+        s.owner_id = владелец.id
+        s.owner_checked = True
+    await db.commit()
+    return {"ownerId": str(владелец.id), "name": владелец.name,
+            "created": создан, "sites": len(точки)}
+
+
+@router.get("/duplicates")
+async def market_duplicates(
+    company_id: str = Query(...),
+    radius_m: int = Query(150, ge=20, le=500),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Пары точек разных компаний, стоящих почти в одном месте.
+
+    Одна физическая ЭЗС, пришедшая двумя выгрузками под разными именами, считается
+    дважды: она завышает и размер рынка, и долю обеих компаний. Автоматически такие
+    пары не склеиваются — рядом действительно бывают две станции разных сетей, и
+    отличить это по координате нельзя. Поэтому список отдаётся человеку.
+    """
+    cid = await _member(company_id, user, db)
+    радиус_км = radius_m / 1000.0
+    точки = (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid, MarketSite.kind == "ezs",
+        MarketSite.status != "closed",
+        MarketSite.latitude.is_not(None), MarketSite.longitude.is_not(None),
+        MarketSite.duplicate_of_id.is_(None)))).scalars().all()
+    имена = dict((str(o.id), o.name) for o in (await db.execute(
+        select(MarketOperator).where(MarketOperator.company_id == cid))).scalars().all())
+
+    индекс = _geo_index(точки, радиус_км)
+    видели: set[tuple[str, str]] = set()
+    пары = []
+    for a in точки:
+        if a.latitude is None or a.longitude is None:
+            continue
+        for b in _geo_around(индекс, float(a.latitude), float(a.longitude), радиус_км):
+            if b.id == a.id or b.operator_id == a.operator_id:
+                continue
+            ключ = tuple(sorted([str(a.id), str(b.id)]))
+            if ключ in видели:
+                continue
+            км = _distance_km(float(a.latitude), float(a.longitude),
+                              float(b.latitude), float(b.longitude))
+            if км > радиус_км:
+                continue
+            видели.add(ключ)
+            пары.append({
+                "distanceM": round(км * 1000),
+                "city": a.city or b.city,
+                "a": {"id": str(a.id), "name": a.name, "operator": имена.get(str(a.operator_id)),
+                      "ports": a.ports, "source": a.source, "address": a.address,
+                      "isOurs": bool(a.location_id)},
+                "b": {"id": str(b.id), "name": b.name, "operator": имена.get(str(b.operator_id)),
+                      "ports": b.ports, "source": b.source, "address": b.address,
+                      "isOurs": bool(b.location_id)},
+            })
+    пары.sort(key=lambda п: (п["distanceM"], п["city"] or ""))
+    решено = int((await db.execute(
+        select(func.count()).select_from(MarketSite).where(
+            MarketSite.company_id == cid,
+            MarketSite.duplicate_of_id.is_not(None)))).scalar() or 0)
+    return {
+        "pairs": пары[:300], "total": len(пары), "radiusM": radius_m,
+        "merged": решено,
+        "note": ("одна станция, пришедшая двумя выгрузками, считается дважды и завышает "
+                 "долю обеих компаний. Но рядом бывают и две разные станции — "
+                 "поэтому склейка только по решению человека"),
+    }
+
+
+@router.post("/duplicates/resolve")
+async def resolve_duplicate(
+    company_id: str = Query(...), body: dict = Body(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """«Это одна станция» или «это разные».
+
+    Склейка не удаляет запись: у неё своя история наблюдений и свой источник, и
+    завтра он может оказаться точнее. Запись остаётся, но из счёта уходит.
+    """
+    cid = await _member(company_id, user, db)
+    keep_id, drop_id = body.get("keepId"), body.get("dropId")
+    if not keep_id or not drop_id or keep_id == drop_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нужны две разные точки")
+    точки = {str(s.id): s for s in (await db.execute(select(MarketSite).where(
+        MarketSite.company_id == cid,
+        MarketSite.id.in_([uuid.UUID(str(keep_id)), uuid.UUID(str(drop_id))])))).scalars().all()}
+    keep, drop = точки.get(str(keep_id)), точки.get(str(drop_id))
+    if keep is None or drop is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Точка не найдена")
+    if body.get("same") is False:
+        drop.duplicate_of_id = None
+        await db.commit()
+        return {"merged": False}
+    drop.duplicate_of_id = keep.id
+    # Порты и владелец берутся от той записи, где они известны: пропуск в одной
+    # выгрузке не повод потерять факт из другой.
+    if keep.ports is None and drop.ports is not None:
+        keep.ports = drop.ports
+    if keep.owner_id is None and drop.owner_id is not None:
+        keep.owner_id = drop.owner_id
+    await db.commit()
+    return {"merged": True, "keepId": str(keep.id), "dropId": str(drop.id)}
 
 
 # ── Развитие сети: режим присутствия и направления роста ────────────────────
@@ -3430,8 +3665,30 @@ async def market_landscape(
                   .where(MarketSite.company_id == cid,
                          MarketSite.operator_id.is_not(None),
                          MarketSite.site_class == "network",
-                         MarketSite.status != "closed")
+                         MarketSite.status != "closed",
+                         # Запись, признанная той же станцией, в счёт не идёт: две
+                         # выгрузки дают одну ЭЗС под разными именами, и без этого
+                         # условия она увеличивает и рынок, и долю обеих компаний.
+                         MarketSite.duplicate_of_id.is_(None))
                   .group_by(MarketSite.operator_id))).all()}
+
+    # Тот же счёт, но по ВЛАДЕЛЬЦУ: чей актив, а не под чьим именем точка в выгрузке.
+    # Расходятся эти два счёта там, где сеть работает на чужой платформе или её
+    # эксплуатирует другая компания, — и именно этот разрыв нужен для разговора об
+    # интеграции (замечание РусГидро 14.09.2026).
+    owner_counts = {str(oid): {"sites": int(sites), "ports": int(ports or 0),
+                               "alive": int(alive or 0)}
+                    for oid, sites, ports, alive in (await db.execute(
+                        select(MarketSite.owner_id, func.count(),
+                               func.sum(MarketSite.ports),
+                               func.sum(case((MarketSite.last_session_at >= alive_since, 1),
+                                             else_=0)))
+                        .where(MarketSite.company_id == cid,
+                               MarketSite.owner_id.is_not(None),
+                               MarketSite.site_class == "network",
+                               MarketSite.status != "closed",
+                               MarketSite.duplicate_of_id.is_(None))
+                        .group_by(MarketSite.owner_id))).all()}
 
     operators = (await db.execute(select(MarketOperator).where(
         MarketOperator.company_id == cid))).scalars().all()
@@ -3479,6 +3736,46 @@ async def market_landscape(
         r["sharePct"] = round(r["sites"] / total_sites * 100, 1)
     networks.sort(key=lambda r: -r["sites"])
 
+    # ── владельцы: чей актив стоит на земле ──
+    # Компания попадает сюда по точкам, которыми ВЛАДЕЕТ, и рядом показано, сколько
+    # из них эксплуатирует она сама. Разрыв между этими числами — это и есть сети,
+    # отданные в эксплуатацию другим: с их владельцами и говорят об интеграции.
+    owner_total = sum(c["sites"] for c in owner_counts.values()) or 1
+    owners = []
+    for op in operators:
+        c = owner_counts.get(str(op.id))
+        if not c:
+            continue
+        свои = counts.get(str(op.id), {}).get("sites", 0)
+        owners.append({
+            "id": str(op.id), "name": op.name, "isOurs": op.relation == "own",
+            "relation": op.relation,
+            "isOwner": op.is_owner, "isOperator": op.is_operator,
+            "isPlatform": op.is_platform, "rolesChecked": op.roles_checked,
+            "sites": c["sites"], "ports": c["ports"], "alive": c["alive"],
+            "sharePct": round(c["sites"] / owner_total * 100, 1),
+            # Сколько своих точек он же и обслуживает; остальное — под чужим именем.
+            "operatedSelf": min(свои, c["sites"]),
+            "operatedByOthers": max(0, c["sites"] - свои),
+            "platformOwner": op.platform_owner, "platformCode": op.platform_code,
+            "legalName": op.legal_name, "inn": op.inn,
+            "legalTrusted": (op.legal_confidence or "").startswith("подтвержд"),
+            "siteUrl": op.site_url, "phone": op.phone,
+        })
+    owners.sort(key=lambda r: -r["sites"])
+
+    # Точки, у которых владелец унаследован от платформы, а не подтверждён: их и
+    # разбирают в «Источниках» на экране «Владелец под вопросом».
+    platform_ids = [op.id for op in operators if op.is_platform]
+    owner_unclear = int((await db.execute(
+        select(func.count()).select_from(MarketSite).where(
+            MarketSite.company_id == cid, MarketSite.status != "closed",
+            MarketSite.kind == "ezs", MarketSite.site_class == "network",
+            MarketSite.duplicate_of_id.is_(None),
+            MarketSite.owner_checked.is_(False),
+            MarketSite.operator_id.in_(platform_ids) if platform_ids
+            else MarketSite.id.is_(None)))).scalar() or 0) if platform_ids else 0
+
     # ── платформы: кто кого обслуживает ──
     platforms: dict[str, dict[str, Any]] = {}
     for r in networks:
@@ -3509,10 +3806,16 @@ async def market_landscape(
 
     return {
         "operators": rows, "networks": networks,
+        "owners": owners,
         "platforms": platform_rows,
         "totals": {
             "networks": len(networks),
             "networkSites": total_sites,
+            "owners": len(owners),
+            "ownerSites": owner_total,
+            "ownerUnclear": owner_unclear,
+            "ownersConfirmed": sum(1 for r in owners if r["rolesChecked"]),
+            "splitOwnership": sum(1 for r in owners if r["operatedByOthers"] > 0),
             "withProfile": sum(1 for r in networks if r["platformOwner"] or r["citiesCount"]),
             "ownPlatform": sum(1 for r in networks if r["ownPlatform"]),
             "platformKnownSites": known_platform,

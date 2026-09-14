@@ -46,8 +46,15 @@ export interface MarketSite {
   currentType: string | null
   lastSessionAt: string | null
   name: string
+  /** Кто эксплуатирует: под чьим именем точка пришла в выгрузке. */
   operatorId: string | null
   operatorName: string | null
+  /** Чей это актив. Совпадает с эксплуатантом не всегда — см. MarketOwnerRow. */
+  ownerId: string | null
+  ownerName: string | null
+  ownerChecked: boolean
+  /** Та же станция, уже заведённая другой записью: из счёта уходит. */
+  duplicateOfId: string | null
   address: string | null
   city: string | null
   region: string | null
@@ -117,6 +124,15 @@ export interface MarketOperator {
 export interface OperatorFacts {
   class: string | null
   classChecked: boolean
+  /**
+   * Три роли, которые рынок смешивает: владеть станцией, эксплуатировать её и
+   * поставлять для неё ИТ-систему. Не исключают друг друга — «Пункт Е» делает всё
+   * три, ItCharge для чужих сетей только платформа.
+   */
+  isOwner: boolean
+  isOperator: boolean
+  isPlatform: boolean
+  rolesChecked: boolean
   /**
    * Уровень достоверности записи (Marketing/research/data-quality.md):
    * 1 — можно ссылаться во внешних материалах; 2 — внутренняя оценка;
@@ -877,18 +893,108 @@ export interface MarketPlatform {
   clients: { name: string; sites: number }[]
 }
 
+/**
+ * Владелец ЭЗС: чей актив стоит на земле — в отличие от эксплуатанта, под чьим
+ * именем точка приходит в выгрузке. Разговор об интеграции, выкупе и обслуживании
+ * идёт с владельцем (замечание РусГидро 14.09.2026).
+ */
+export interface MarketOwnerRow {
+  id: string
+  name: string
+  isOurs: boolean
+  relation: string
+  isOwner: boolean
+  isOperator: boolean
+  isPlatform: boolean
+  rolesChecked: boolean
+  sites: number
+  ports: number
+  alive: number
+  sharePct: number
+  /** Сколько своих точек он же и обслуживает. */
+  operatedSelf: number
+  /** Сколько его точек работает под чужим именем — это и есть повод для разговора. */
+  operatedByOthers: number
+  platformOwner: string | null
+  platformCode: string | null
+  legalName: string | null
+  inn: string | null
+  legalTrusted: boolean
+  siteUrl: string | null
+  phone: string | null
+}
+
 export const getMarketLandscape = (companyId: string) =>
   get<{
     operators: MarketNetworkRow[]
     networks: MarketNetworkRow[]
+    owners: MarketOwnerRow[]
     platforms: MarketPlatform[]
     totals: {
       networks: number; networkSites: number; withProfile: number; ownPlatform: number
       platformKnownSites: number; roamingNetworks: number; roamingSites: number
       closedNetworks: number; closedSites: number; withApp: number; legalTrusted: number
+      owners: number; ownerSites: number; ownerUnclear: number
+      ownersConfirmed: number; splitOwnership: number
     }
     note: string
   }>('/api/market/landscape', { company_id: companyId })
+
+/** Бренд, видный в названиях точек платформы, но не заведённый компанией. */
+export interface OwnerCandidate {
+  brand: string
+  key: string
+  sites: number
+  cities: string[]
+  citiesTotal: number
+  siteIds: string[]
+  operatorId: string
+  operatorName: string
+  /** Компания с таким именем уже есть — точки надо привязать, а не заводить её заново. */
+  existing: boolean
+}
+
+export const getOwnerCandidates = (companyId: string) =>
+  get<{
+    candidates: OwnerCandidate[]
+    platforms: { id: string; name: string }[]
+    sitesOnPlatforms: number
+    ownersKnown: number
+    note: string
+  }>('/api/market/owner-candidates', { company_id: companyId })
+
+export const applyOwnerCandidate = (companyId: string, brand: string, siteIds: string[]) =>
+  post<{ ownerId: string; name: string; created: boolean; sites: number }>(
+    `/api/market/owner-candidates/apply?company_id=${encodeURIComponent(companyId)}`,
+    { brand, siteIds })
+
+/** Пара точек разных компаний, стоящих почти в одном месте. */
+export interface DuplicatePair {
+  distanceM: number
+  city: string | null
+  a: DuplicateSide
+  b: DuplicateSide
+}
+
+export interface DuplicateSide {
+  id: string
+  name: string
+  operator: string | null
+  ports: number | null
+  source: string
+  address: string | null
+  isOurs: boolean
+}
+
+export const getMarketDuplicates = (companyId: string, radiusM = 150) =>
+  get<{ pairs: DuplicatePair[]; total: number; radiusM: number; merged: number; note: string }>(
+    '/api/market/duplicates', { company_id: companyId, radius_m: radiusM })
+
+export const resolveDuplicate = (
+  companyId: string, keepId: string, dropId: string, same = true,
+) => post<{ merged: boolean }>(
+  `/api/market/duplicates/resolve?company_id=${encodeURIComponent(companyId)}`,
+  { keepId, dropId, same })
 
 /** Обеспеченность региона: машин на зарядку и на работающую зарядку. */
 export interface MarketCoverageRow {

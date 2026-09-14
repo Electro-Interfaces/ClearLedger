@@ -20,6 +20,7 @@ import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { useCompany } from '@/contexts/CompanyContext'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
+import { MarketOwnersPanel, MarketDuplicatesPanel } from './MarketOwnersPanel'
 import {
   getMarketChanges, getMarketSources, SITE_CLASS_LABEL, SOURCE_LABEL,
   type MarketChangeCard, type MarketSource,
@@ -31,6 +32,10 @@ const ВИДЫ = [
   { k: 'sources', label: 'Источники' },
   { k: 'coverage', label: 'Покрытие полей' },
   { k: 'changes', label: 'Что изменилось' },
+  // Два разбора, без которых расклад сил врёт: точка под именем платформы и одна
+  // станция, посчитанная дважды (замечание РусГидро 14.09.2026).
+  { k: 'owners', label: 'Владелец под вопросом' },
+  { k: 'duplicates', label: 'Спорные точки' },
 ] as const
 
 /** Возраст факта словами: по нему видно, можно ли доверять, а не только когда это было. */
@@ -256,6 +261,9 @@ export function MarketSourcesPanel() {
           </p>
         </div>
       )}
+
+      {вид === 'owners' && <MarketOwnersPanel />}
+      {вид === 'duplicates' && <MarketDuplicatesPanel />}
 
       {вид === 'changes' && (
         <div className="space-y-2">

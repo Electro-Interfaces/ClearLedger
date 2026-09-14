@@ -848,19 +848,22 @@ function MarketSites() {
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
           <table className="w-full text-xs"
             {...exportRows('Точки рынка', [
-              'Точка', 'Наша', 'Вид', 'Оператор', 'Город', 'Адрес', 'Портов', 'Цена, ₽',
-              'Основание цены', 'Проверено', 'Снимков',
+              'Точка', 'Наша', 'Вид', 'Владелец', 'Эксплуатирует', 'Город', 'Адрес',
+              'Портов', 'Цена, ₽', 'Основание цены', 'Проверено', 'Снимков', 'Дубль',
             ], rows.map((s) => [
               s.name, s.isOurs ? мы : null, SITE_KIND_LABEL[s.kind as MarketSiteKind],
-              s.operatorName, s.city, s.address, s.ports, s.price?.value ?? null,
+              s.ownerName, s.operatorName, s.city, s.address, s.ports, s.price?.value ?? null,
               s.price?.basis ?? null, s.price?.observedOn ?? s.lastSeenAt ?? null,
-              s.photoCount ?? 0,
+              s.photoCount ?? 0, s.duplicateOfId ? 'та же станция заведена другой записью' : null,
             ]))}>
             <thead className="sticky top-0 bg-muted/60 text-muted-foreground">
               <tr>
                 <th className="p-2 text-left font-medium">Точка</th>
                 <th className="p-2 text-left font-medium">Вид</th>
-                <th className="p-2 text-left font-medium">Оператор</th>
+                {/* Владелец и эксплуатант — разные компании чаще, чем кажется:
+                    станции под именем платформы принадлежат не ей. */}
+                <th className="p-2 text-left font-medium">Владелец</th>
+                <th className="p-2 text-left font-medium">Эксплуатирует</th>
                 <th className="p-2 text-left font-medium">Город</th>
                 <th className="p-2 text-right font-medium">Порты</th>
                 <th className="p-2 text-right font-medium">Цена</th>
@@ -895,6 +898,14 @@ function MarketSites() {
                       )}
                     </td>
                     <td className="p-2 text-muted-foreground">{SITE_KIND_LABEL[s.kind as MarketSiteKind]}</td>
+                    <td className="p-2 text-muted-foreground">
+                      {s.ownerName ?? '—'}
+                      {/* Владелец, унаследованный от эксплуатанта, — предположение,
+                          а не факт: пока его не подтвердили, так и написано. */}
+                      {s.ownerName && !s.ownerChecked && (
+                        <span className="ml-1 text-xs">· не подтверждён</span>
+                      )}
+                    </td>
                     <td className="p-2 text-muted-foreground">{s.operatorName ?? '—'}</td>
                     <td className="p-2 text-muted-foreground">{s.city ?? '—'}</td>
                     <td className="p-2 text-right tabular-nums">{s.ports ?? '—'}</td>

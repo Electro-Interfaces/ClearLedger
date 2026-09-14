@@ -8105,6 +8105,22 @@ class MarketOperator(Base):
     # Модель бизнеса: владелец инфраструктуры, агрегатор на чужой, смежный игрок.
     player_class: Mapped[str | None] = mapped_column(String(80), nullable=True)
     class_checked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # ── три роли, которые рынок постоянно смешивает (замечание РусГидро 14.09.2026) ──
+    # Владеть станцией, эксплуатировать её и поставлять для неё ИТ-систему — три
+    # разных дела, и занимаются ими нередко разные компании: ZEVS владеет, «Пункт Е»
+    # эксплуатирует, ItCharge даёт платформу. Пока роль была одна, точки EvCar27
+    # числились за ItCharge — то есть за поставщиком системы, а самого владельца в
+    # реестре не было вовсе, и говорить об интеграции было не с кем.
+    #
+    # Роли не исключают друг друга: «Пункт Е» — и владелец, и оператор, и платформа.
+    # Поэтому три независимых признака, а не одно поле «кто он».
+    is_owner: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_operator: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_platform: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Роли подтверждены человеком. До подтверждения они расставлены разбором
+    # данных — по тому, чьё имя стоит платформой у других сетей, — и в отчёт
+    # идут с оговоркой.
+    roles_checked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Уровень достоверности записи (Marketing/research/data-quality.md):
     #   1 — можно ссылаться во внешних материалах: снято поштучно с источника;
     #   2 — внутренняя оценка: размеры сетей занижены безымянными точками,
@@ -8140,8 +8156,23 @@ class MarketSite(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Кто точку ЭКСПЛУАТИРУЕТ: под чьим именем она в источнике, кто продаёт заряд.
     operator_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("market_operators.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Кто точкой ВЛАДЕЕТ. Обычно тот же, но не всегда: станции EvCar27 в Хабаровске
+    # работают на платформе ItCharge и в выгрузке идут под её именем; сеть ZEVS
+    # эксплуатирует «Пункт Е». Разговор об интеграции, выкупе и обслуживании идёт с
+    # владельцем, а о тарифе и клиенте — с эксплуатантом, поэтому ссылки две.
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_operators.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Владелец подтверждён человеком, а не унаследован от эксплуатанта при разборе.
+    owner_checked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Та же физическая станция, уже заведённая другой записью. Две выгрузки дают
+    # одну ЭЗС под разными именами и разными операторами — и она считается дважды,
+    # завышая и рынок, и долю обеих компаний. Запись-дубль остаётся (по ней есть
+    # своя история наблюдений), но из счёта уходит.
+    duplicate_of_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_sites.id", ondelete="SET NULL"), nullable=True, index=True)
     # ezs | mall | parking | fuel | hotel | office | other
     kind: Mapped[str] = mapped_column(String(20), nullable=False, default="ezs")
     name: Mapped[str] = mapped_column(String(300), nullable=False)

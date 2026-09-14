@@ -30,6 +30,10 @@ const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 
 const ВИДЫ = [
   { k: 'power', label: 'Расклад сил' },
+  // Владелец и эксплуатант — разные компании чаще, чем кажется: ZEVS владеет,
+  // «Пункт Е» эксплуатирует. Разговор об интеграции идёт с первым, о тарифе —
+  // со вторым (замечание РусГидро 14.09.2026).
+  { k: 'owners', label: 'Владельцы ЭЗС' },
   { k: 'platforms', label: 'Платформы' },
   { k: 'roaming', label: 'Роуминг' },
   { k: 'service', label: 'Качество сервиса' },
@@ -97,6 +101,8 @@ export function MarketLandscapePanel() {
 
   const ours = all.find((r) => r.isOurs)
   const platforms = data.data?.platforms ?? []
+  const owners = (data.data?.owners ?? []).filter(
+    (r) => !q || r.name.toLowerCase().includes(q.toLowerCase()))
 
   if (карточка) {
     return <MarketCompaniesPanel initialOpen={карточка} onBack={() => setКарточка(null)} />
@@ -179,6 +185,82 @@ export function MarketLandscapePanel() {
             </tbody>
           </table>
           <p className="p-2 text-xs text-muted-foreground">{data.data?.note}</p>
+        </div>
+      )}
+
+      {вид === 'owners' && (
+        <div className="min-h-0 flex-1 space-y-2 overflow-auto">
+          <Card><CardContent className="p-3 text-xs text-muted-foreground">
+            Владелец — чей актив стоит на земле; эксплуатант — под чьим именем точка
+            приходит в выгрузке. Совпадают они не всегда: сеть отдают в эксплуатацию
+            другой компании, а в публичном реестре она числится за поставщиком
+            платформы. Колонка «под чужим именем» и показывает такие точки: с их
+            владельцами и говорят об интеграции.
+            {(t?.ownerUnclear ?? 0) > 0 && (
+              <span className="ml-1 text-warning">
+                У {nf.format(t!.ownerUnclear)} точек владелец пока унаследован от
+                платформы и не подтверждён — разбор в «Источниках и свежести».
+              </span>
+            )}
+          </CardContent></Card>
+          <div className="rounded-lg border border-border">
+            <table className="w-full text-xs"
+              {...exportRows('Владельцы ЭЗС', [
+                'Владелец', 'Мы', 'Точек', 'Доля, %', 'Живых', 'Портов',
+                'Обслуживает сам', 'Под чужим именем', 'Роли', 'Юрлицо', 'ИНН',
+              ], owners.map((r) => [
+                r.name, r.isOurs ? 'мы' : null, r.sites, r.sharePct, r.alive, r.ports,
+                r.operatedSelf, r.operatedByOthers,
+                [r.isOwner && 'владелец', r.isOperator && 'оператор', r.isPlatform && 'платформа']
+                  .filter(Boolean).join(', '),
+                r.legalTrusted ? r.legalName : null, r.legalTrusted ? r.inn : null,
+              ]))}>
+              <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+                <tr>
+                  <th className="p-2 text-left font-medium">Владелец</th>
+                  <th className="p-2 text-right font-medium">Точек</th>
+                  <th className="p-2 text-right font-medium">Доля</th>
+                  <th className="p-2 text-right font-medium">Живых</th>
+                  <th className="p-2 text-right font-medium">Обслуживает сам</th>
+                  <th className="p-2 text-right font-medium">Под чужим именем</th>
+                  <th className="p-2 text-left font-medium">Роли</th>
+                </tr>
+              </thead>
+              <tbody>
+                {owners.map((r) => (
+                  <tr key={r.id} className={r.isOurs
+                    ? 'border-t border-border bg-primary/5 font-medium'
+                    : 'border-t border-border/50'}>
+                    <td className="p-2">{r.name}{r.isOurs && ' · мы'}</td>
+                    <td className="p-2 text-right"><Num v={r.sites} /></td>
+                    <td className="p-2 text-right"><Num v={r.sharePct} unit="%" digits={1} /></td>
+                    <td className="p-2 text-right"><Num v={r.alive} /></td>
+                    <td className="p-2 text-right"><Num v={r.operatedSelf} /></td>
+                    <td className="p-2 text-right">
+                      {r.operatedByOthers > 0 ? (
+                        <span className="tabular-nums text-warning">
+                          {nf.format(r.operatedByOthers)}
+                        </span>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="p-2 text-muted-foreground">
+                      {[r.isOwner && 'владелец', r.isOperator && 'оператор',
+                        r.isPlatform && 'платформа'].filter(Boolean).join(' · ')}
+                      {!r.rolesChecked && (
+                        <span className="ml-1 text-xs">· не проверено</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {owners.length === 0 && (
+              <p className="p-6 text-center text-xs text-muted-foreground">
+                Владельцы пока не разобраны: точки числятся за теми, под чьим именем
+                пришли.
+              </p>
+            )}
+          </div>
         </div>
       )}
 
