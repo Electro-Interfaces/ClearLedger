@@ -17,6 +17,7 @@ import { Swords } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { ReportPivot } from '@/components/workspace/ReportPivot'
 import { SortTh } from '@/components/workspace/SortableTh'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
@@ -40,6 +41,7 @@ const ВИДЫ = [
   { k: 'roaming', label: 'Роуминг' },
   { k: 'service', label: 'Качество сервиса' },
   { k: 'legal', label: 'Реквизиты' },
+  { k: 'pivot', label: 'Сводная' },
 ] as const
 
 function Num({ v, unit, digits = 0 }: { v: number | null | undefined; unit?: string; digits?: number }) {
@@ -305,6 +307,33 @@ export function MarketLandscapePanel() {
               </p>
             )}
           </div>
+        </div>
+      )}
+
+      {вид === 'pivot' && (
+        <div className="min-h-0 flex-1 overflow-auto">
+          {/* Сети свёрнутые по модели, платформе и роумингу: «сколько рынка держат
+              сети на чужой платформе» одним разрезом, а не пересчётом глазами. */}
+          <ReportPivot
+            fields={['model', 'platform', 'roaming', 'base', 'ours', 'trusted',
+                     'networks', 'sites', 'ports', 'alive', 'silent']}
+            columns={['Модель', 'Платформа', 'Роуминг', 'База', 'Чья сеть', 'Реквизиты',
+                      'Сетей', 'Точек', 'Портов', 'Живых', 'Молчат полгода']}
+            rows={rows.map((r) => ({
+              model: r.class ?? '— не определена —',
+              platform: r.platformOwner ?? '— неизвестна —',
+              roaming: r.roaming === true ? 'открыт'
+                : r.roaming === false ? 'только своё приложение' : 'нет данных',
+              base: r.baseCity ?? '— не указана —',
+              ours: r.isOurs ? 'мы' : 'рынок',
+              trusted: r.legalTrusted ? 'подтверждены' : 'не подтверждены',
+              networks: 1,
+              sites: r.sites,
+              ports: r.ports,
+              alive: r.alive,
+              silent: r.silentHalfYear,
+            }))}
+          />
         </div>
       )}
 

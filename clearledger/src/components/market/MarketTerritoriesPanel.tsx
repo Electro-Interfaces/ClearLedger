@@ -16,6 +16,8 @@ import { Map as MapIcon } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { ReportPivot } from '@/components/workspace/ReportPivot'
 import { SortTh } from '@/components/workspace/SortableTh'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
@@ -66,9 +68,16 @@ function Share({ row }: { row: MarketTerritory }) {
   )
 }
 
+/** Территории читают таблицей, а сворачивают сводной: по положению и по цене. */
+const ВИДЫ_ТЕРРИТОРИЙ = [
+  { k: 'list', label: 'Таблица' },
+  { k: 'pivot', label: 'Сводная' },
+] as const
+
 export function MarketTerritoriesPanel() {
   const { companyId } = useCompany()
   const экран = useRef<HTMLDivElement>(null)
+  const [подача, setПодача] = useState<string>('list')
   const [level, setLevel] = useState<'city' | 'region'>('region')
   const [q, setQ] = useState('')
   // Территория раскрывается в профиль: рынок отвечает «кто вокруг», наша сеть —
@@ -131,6 +140,9 @@ export function MarketTerritoriesPanel() {
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Территория"
             className="h-8 w-[180px] text-xs" />
           <span className="ml-auto" data-export-ignore>
+            <PanelViewTabs tabs={ВИДЫ_ТЕРРИТОРИЙ} value={подача} onChange={setПодача} />
+          </span>
+          <span data-export-ignore>
             <ExportButton title="Территории"
               subtitle={`${level === 'city' ? 'по городам' : 'по регионам'} · продажи 90 дней · ${rows.length} территорий`}
               getEl={() => экран.current} />
@@ -138,6 +150,43 @@ export function MarketTerritoriesPanel() {
         </CardContent>
       </Card>
 
+      {подача === 'pivot' && (
+        <div className="min-h-0 flex-1 overflow-auto">
+          {/* Цена входит разрезом: складывать её по территориям бессмысленно, а вот
+              «где мы дороже рынка» — это и есть вопрос к свёртке. */}
+          <ReportPivot
+            fields={['presence', 'price', 'rivals', 'territories',
+                     'ourSites', 'rivalSites', 'rivalAlive', 'sessions', 'revenue']}
+            columns={['Наше присутствие', 'Наша цена против рынка', 'Рынок вокруг',
+                      'Территорий', 'Наши точки', 'Чужие точки', 'Живые чужие',
+                      'Сессий', 'Выручка, ₽']}
+            rows={rows.map((r) => {
+              const разрыв = r.ourPricePerKwh != null && r.marketPricePerKwh != null
+                ? ((r.ourPricePerKwh - r.marketPricePerKwh) / r.marketPricePerKwh) * 100
+                : null
+              return {
+                presence: r.ourSites === 0 ? 'нас нет'
+                  : r.sharePct == null ? 'доля неизвестна'
+                  : r.sharePct >= 50 ? 'мы сильнее рынка'
+                  : r.sharePct >= 20 ? 'делим рынок' : 'мы слабее рынка',
+                price: разрыв == null ? 'сравнить не с чем'
+                  : разрыв > 5 ? 'мы дороже рынка'
+                  : разрыв < -5 ? 'мы дешевле рынка' : 'на уровне рынка',
+                rivals: r.rivalSites === 0 ? 'чужих нет'
+                  : r.rivalAlive === 0 ? 'чужие есть, но молчат' : 'чужие живые',
+                territories: 1,
+                ourSites: r.ourSites,
+                rivalSites: r.rivalSites,
+                rivalAlive: r.rivalAlive,
+                sessions: r.ourSessions,
+                revenue: Math.round(r.ourRevenue),
+              }
+            })}
+          />
+        </div>
+      )}
+
+      {подача !== 'pivot' && (
       <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
         <table className="w-full text-xs"
           {...exportRows('Территории', [
@@ -180,6 +229,7 @@ export function MarketTerritoriesPanel() {
           </tbody>
         </table>
       </div>
+      )}
       <p className="text-xs text-muted-foreground">
         Строка с нашими объектами раскрывается в профиль территории: оснащение,
         загрузка портов, клиенты, чем и когда заряжают, чем кончаются сессии.

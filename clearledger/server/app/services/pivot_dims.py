@@ -14,11 +14,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import case, cast, func
+from sqlalchemy.orm import aliased
 from sqlalchemy.types import String
 
 from app.models import FuelReceipt as R
 from app.models import FuelTransaction as T
+from app.models import MarketOperator, MarketSite as MS
 from app.models import StoreCheque as CQ
 from app.models import StoreStockBalance as SB
 
@@ -120,11 +124,77 @@ _CQ_METRICS: dict[str, dict[str, Any]] = {
     "amount": {"label": "Сумма, ₽", "expr": func.coalesce(func.sum(CQ.total), 0), "digits": 2},
 }
 
+# ─── Источник «точки рынка» (внешний реестр ЭЗС) ─────────────────────────────
+# Девять тысяч чужих станций: разрез по одному признаку за раз отвечает на «сколько
+# их», но не на «чьи они, где стоят и чем оснащены» одновременно (замечание
+# РусГидро 14.09.2026). Владелец и эксплуатант — разные компании, поэтому в
+# измерениях они тоже разные: имя владельца приходит через свой алиас, имя
+# эксплуатанта — через свой.
+MARKET_OWNER = aliased(MarketOperator, name="pivot_owner")
+MARKET_OPERATOR = aliased(MarketOperator, name="pivot_operator")
+
+# Живой = заряжали за 90 дней. Тот же срок, что на экранах рынка: два разных
+# определения «живой» в одном продукте — верный способ не сойтись с витриной.
+_MK_ALIVE_DAYS = 90
+
+
+def _mk_alive_since():
+    return datetime.now(timezone.utc) - timedelta(days=_MK_ALIVE_DAYS)
+
+
+_MK_DIMS: dict[str, dict[str, Any]] = {
+    "owner": {"label": "Владелец ЭЗС", "expr": func.coalesce(MARKET_OWNER.name, "— не определён —")},
+    "operator": {"label": "Эксплуатант", "expr": func.coalesce(MARKET_OPERATOR.name, "— не указан —")},
+    "platform": {"label": "Платформа", "expr": func.coalesce(MARKET_OPERATOR.platform_owner, "— неизвестна —")},
+    "region": {"label": "Регион", "expr": func.coalesce(MS.region, "— не указан —")},
+    "city": {"label": "Город", "expr": func.coalesce(MS.city, "— не указан —")},
+    "site_class": {"label": "Класс точки", "expr": case(
+        (MS.site_class == "network", "сеть"),
+        (MS.site_class == "independent", "независимая"),
+        (MS.site_class == "home", "домашняя розетка"),
+        else_="не определён")},
+    "kind": {"label": "Вид точки", "expr": MS.kind},
+    "current": {"label": "Тип тока", "expr": func.coalesce(MS.current_type, "— не указан —")},
+    "power": {"label": "Класс мощности", "expr": case(
+        (MS.max_power_kw.is_(None), "не указана"),
+        (MS.max_power_kw < 22, "до 22 кВт"),
+        (MS.max_power_kw < 50, "22–50 кВт"),
+        (MS.max_power_kw < 150, "50–150 кВт"),
+        else_="150 кВт и выше")},
+    "vendor": {"label": "Производитель", "expr": func.coalesce(MS.vendor, "— не указан —")},
+    "alive": {"label": "Заряжали за 90 дней", "expr": case(
+        (MS.last_session_at.is_(None), "нет данных"),
+        (MS.last_session_at >= _mk_alive_since(), "да"),
+        else_="нет")},
+    "status": {"label": "Состояние", "expr": MS.status},
+    "ours": {"label": "Наша сеть", "expr": case(
+        (MS.location_id.is_not(None), "мы"), else_="рынок")},
+    "source": {"label": "Источник", "expr": MS.source},
+    "owner_checked": {"label": "Владелец подтверждён", "expr": case(
+        (MS.owner_checked, "да"), else_="нет")},
+    "year": {"label": "Год появления в данных",
+             "expr": func.to_char(MS.first_seen_at, "YYYY")},
+}
+
+# Цены здесь нет намеренно: она живёт наблюдениями со своей датой и достоверностью,
+# а не полем точки. Сводить её суммой было бы бессмыслицей — цена не складывается.
+_MK_METRICS: dict[str, dict[str, Any]] = {
+    "sites": {"label": "Точек", "expr": func.count(), "digits": 0},
+    "ports": {"label": "Портов", "expr": func.coalesce(func.sum(MS.ports), 0), "digits": 0},
+    "connectors": {"label": "Разъёмов",
+                   "expr": func.coalesce(func.sum(MS.connectors_total), 0), "digits": 0},
+    "alive": {"label": "Живых (90 дней)", "expr": func.coalesce(func.sum(
+        case((MS.last_session_at >= _mk_alive_since(), 1), else_=0)), 0), "digits": 0},
+    "power_kw": {"label": "Мощность всего, кВт",
+                 "expr": func.coalesce(func.sum(MS.max_power_kw), 0), "digits": 1},
+}
+
 SOURCES: dict[str, dict[str, Any]] = {
     "transactions": {"dims": _TX_DIMS, "metrics": _TX_METRICS, "default_metric": "amount"},
     "receipts": {"dims": _RC_DIMS, "metrics": _RC_METRICS, "default_metric": "doc_mass"},
     "store_stock": {"dims": _ST_DIMS, "metrics": _ST_METRICS, "default_metric": "retail"},
     "store_cheques": {"dims": _CQ_DIMS, "metrics": _CQ_METRICS, "default_metric": "amount"},
+    "market_sites": {"dims": _MK_DIMS, "metrics": _MK_METRICS, "default_metric": "sites"},
 }
 
 
@@ -213,4 +283,15 @@ if __name__ == "__main__":  # самопроверка валидации
         raise AssertionError("неизвестный источник прошёл")
     assert dim_label("station") == "АЗС"
     assert len(metrics_catalog("receipts")) == 6
+    # Рынок: владелец и эксплуатант — РАЗНЫЕ измерения, иначе сводная снова сольёт
+    # сеть с её платформой.
+    assert parse_dims("owner,operator,region", "market_sites") == ["owner", "operator", "region"]
+    assert dim_label("owner", "market_sites") == "Владелец ЭЗС"
+    for чужой in ("station", "fuel", "payment"):
+        try:
+            parse_dims(чужой, "market_sites")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"ключ другого источника прошёл в рынок: {чужой}")
     print("pivot_dims: проверки прошли")

@@ -1101,3 +1101,27 @@ export const ocmImportNetwork = (companyId: string, padding = 0.15) =>
   post<{ areas: number; cities: number; found: number; created: number; updated: number
          prices: number; skippedOurs: number; problems: string[] }>(
     `/api/market/ocm/import-network?company_id=${encodeURIComponent(companyId)}&padding=${padding}`, {})
+
+// ─── сводная по точкам рынка (серверная: группирует база, а не браузер) ───
+// Реестр приезжает на экран страницами, и клиентская сводная считала бы по
+// подгруженной части. Здесь группировка идёт по всему рынку сразу.
+
+export const getMarketPivotCatalog = (companyId: string) => (_source: string) =>
+  get<{ dims: { key: string; label: string }[]
+        metrics: { key: string; label: string; digits: number }[] }>(
+    '/api/market/pivot/dims', { company_id: companyId })
+
+export const getMarketPivot = (p: {
+  companyId: string; dims: string[]; kind?: string; search?: string; includeHome?: boolean
+}) => get<{
+  dims: string[]; labels: string[]
+  metrics: { key: string; label: string; digits: number }[]
+  stationNames: Record<string, string>
+  rows: { keys: (string | null)[]; m: Record<string, number> }[]
+  truncated: boolean
+}>('/api/market/pivot', {
+  company_id: p.companyId, dims: p.dims.join(','),
+  ...(p.kind && p.kind !== 'all' ? { kind: p.kind } : {}),
+  ...(p.search ? { search: p.search } : {}),
+  ...(p.includeHome ? { include_home: 'true' } : {}),
+})

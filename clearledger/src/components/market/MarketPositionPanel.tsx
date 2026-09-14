@@ -20,6 +20,7 @@ import { SortTh } from '@/components/workspace/SortableTh'
 import { useTableSort } from '@/hooks/useTableSort'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
+import { ReportPivot } from '@/components/workspace/ReportPivot'
 import { MarketSelfPanel } from './MarketSelfPanel'
 import { getMarketPosition, SITE_KIND_LABEL, type MarketPositionRow } from '@/services/marketService'
 
@@ -131,11 +132,22 @@ function Neighbours({ row }: { row: MarketPositionRow }) {
 /** Два взгляда на одно: наш объект против соседей и наш профиль глазами клиента. */
 const ВИДЫ = [
   { k: 'objects', label: 'Наши объекты' },
+  { k: 'pivot', label: 'Сводная' },
   { k: 'self', label: 'Мы глазами рынка' },
 ] as const
 
 export function MarketPositionPanel() {
   const [вид, setВид] = useState<string>('objects')
+  if (вид === 'pivot') {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="px-4 pt-4">
+          <PanelViewTabs tabs={ВИДЫ} value={вид} onChange={setВид} />
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto"><MarketPositionPivot /></div>
+      </div>
+    )
+  }
   if (вид === 'self') {
     return (
       <div className="flex h-full min-h-0 flex-col">
@@ -361,6 +373,87 @@ function MarketPositionTable() {
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+
+/**
+ * Сводная «Позиции»: те же объекты, свёрнутые по городу и положению к рынку.
+ *
+ * Вопрос, ради которого экран открывают, звучит не «что с объектом N», а «где мы
+ * дороже рынка» — и ответ на него даёт не список из шестисот строк, а два уровня
+ * группировки (замечание РусГидро 14.09.2026).
+ *
+ * Цена не мера: сводная складывает, а сумма цен по городу не значит ничего.
+ * Поэтому цена входит разрезом — «дороже рынка», «на уровне», «дешевле».
+ */
+function MarketPositionPivot() {
+  const { companyId } = useCompany()
+  const [radius, setRadius] = useState('5')
+  const [days, setDays] = useState('30')
+  const pos = useQuery({
+    queryKey: ['market-position', companyId, radius, days],
+    queryFn: () => getMarketPosition(companyId, { radius_km: Number(radius), days: Number(days) }),
+    enabled: !!companyId,
+  })
+
+  const строки = useMemo(() => (pos.data?.objects ?? []).map((r) => ({
+    city: r.city ?? '— город не указан —',
+    position: r.priceGapPct == null ? 'нет сравнения'
+      : r.priceGapPct > 5 ? 'дороже рынка'
+      : r.priceGapPct < -5 ? 'дешевле рынка' : 'на уровне рынка',
+    rivals: r.rivals > 0 ? 'соседи есть' : 'соседей нет',
+    alive: (r.rivalsAlive ?? 0) > 0 ? 'соседи живые' : 'живых соседей нет',
+    geo: r.hasGeo ? 'с координатами' : 'без координат',
+    objects: 1,
+    sessions: r.sessions,
+    energy: Math.round(r.energyKwh),
+    revenue: Math.round(r.revenue),
+    rivalsCount: r.rivals,
+  })), [pos.data])
+
+  if (pos.isLoading) {
+    return (
+      <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" aria-hidden />
+        Считаем окружение каждого объекта.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={radius} onValueChange={setRadius}>
+          <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="2">Радиус 2 км</SelectItem>
+            <SelectItem value="5">Радиус 5 км</SelectItem>
+            <SelectItem value="10">Радиус 10 км</SelectItem>
+            <SelectItem value="25">Радиус 25 км</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={days} onValueChange={setDays}>
+          <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="30">Продажи 30 дн</SelectItem>
+            <SelectItem value="90">Продажи 90 дн</SelectItem>
+            <SelectItem value="365">Продажи год</SelectItem>
+          </SelectContent>
+        </Select>
+        <span className="text-xs text-muted-foreground">
+          {строки.length} объектов · цена входит разрезом, а не мерой: сумма цен по
+          городу не значит ничего
+        </span>
+      </div>
+      <ReportPivot
+        fields={['city', 'position', 'rivals', 'alive', 'geo',
+                 'objects', 'sessions', 'energy', 'revenue', 'rivalsCount']}
+        columns={['Город', 'Положение к рынку', 'Соседи', 'Живые соседи', 'Координаты',
+                  'Объектов', 'Сессий', 'кВт·ч', 'Выручка, ₽', 'Соседей рядом']}
+        rows={строки}
+      />
     </div>
   )
 }

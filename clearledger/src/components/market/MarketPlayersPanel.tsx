@@ -17,6 +17,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Users } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { ReportPivot } from '@/components/workspace/ReportPivot'
 import { SortTh } from '@/components/workspace/SortableTh'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
@@ -32,6 +33,7 @@ const ВИДЫ = [
   { k: 'classes', label: 'Откуда приходят' },
   { k: 'quality', label: 'Качество против размера' },
   { k: 'shops', label: 'Интернет-магазин' },
+  { k: 'pivot', label: 'Сводная' },
 ] as const
 
 function PlayerLine({ p }: { p: MarketPlayer }) {
@@ -176,6 +178,31 @@ export function MarketPlayersPanel() {
             qd.label, p.app, p.operatorName, p.class, p.ownStations, p.rating,
             p.isActive ? 'да' : 'нет', p.classChecked ? 'да' : 'нет',
           ])))} />
+        </div>
+      )}
+
+      {вид === 'pivot' && (
+        <div className="min-h-0 flex-1 overflow-auto">
+          {/* Оценка приложения мерой не идёт: сумма оценок не значит ничего.
+              Она входит разрезом — «высокая», «средняя», «низкая». */}
+          <ReportPivot
+            fields={['class', 'developer', 'active', 'own', 'rating',
+                     'players', 'stations', 'reviews']}
+            columns={['Класс', 'Разработчик', 'Работает', 'Свои станции', 'Оценка',
+                      'Игроков', 'Станций', 'Отзывов']}
+            rows={quality.map((p) => ({
+              class: p.class,
+              developer: p.developer ?? '— не указан —',
+              active: p.isActive ? 'да' : 'нет',
+              own: (p.ownStations ?? 0) > 0 ? 'есть' : 'нет',
+              rating: p.rating == null ? 'нет оценки'
+                : p.rating >= 4 ? 'высокая (4+)'
+                : p.rating >= 2.5 ? 'средняя (2,5–4)' : 'низкая (до 2,5)',
+              players: 1,
+              stations: p.ownStations ?? 0,
+              reviews: p.reviews ?? 0,
+            }))}
+          />
         </div>
       )}
 

@@ -2538,6 +2538,84 @@ def _кого_оставить(a: Any, b: Any) -> tuple[Any, Any]:
     return (a, b) if вес(a) >= вес(b) else (b, a)
 
 
+@router.get("/pivot/dims")
+async def market_pivot_dims(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Справочник измерений и метрик сводной по точкам рынка."""
+    from app.services.pivot_dims import dims_catalog, metrics_catalog
+    await _member(company_id, user, db)
+    return {"dims": dims_catalog("market_sites"), "metrics": metrics_catalog("market_sites")}
+
+
+@router.get("/pivot")
+async def market_pivot(
+    company_id: str = Query(...),
+    dims: str = Query(..., description="ключи измерений через запятую: owner,region,power"),
+    kind: str | None = Query(None, description="вид точки; пусто — все"),
+    search: str | None = Query(None),
+    include_home: bool = Query(False, description="считать домашние розетки частников"),
+    limit: int = Query(20000, le=50000),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Листья сводной по точкам рынка: GROUP BY по выбранному набору измерений.
+
+    Экран «Точек рынка» показывает реестр страницами по пятьсот строк из девяти
+    тысяч, и разрез по нему считался бы по видимой части — то есть врал бы. Здесь
+    группирует база по всему реестру сразу.
+
+    Домашние розетки частников по умолчанию не в счёте: их половина реестра, и в
+    любом разрезе сетей они забивают картину (тот же порядок, что на витринах).
+    """
+    from app.services.pivot_dims import (
+        MARKET_OPERATOR, MARKET_OWNER, dim_label, dim_select, metric_selects,
+        metrics_catalog, parse_dims,
+    )
+
+    cid = await _member(company_id, user, db)
+    try:
+        keys = parse_dims(dims, "market_sites")
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
+
+    conds = [MarketSite.company_id == cid,
+             # Запись, признанная той же станцией, из счёта уходит — иначе сводная
+             # повторит двойной счёт, который экран «Спорных точек» разбирает.
+             MarketSite.duplicate_of_id.is_(None)]
+    if kind:
+        conds.append(MarketSite.kind == kind)
+    if not include_home:
+        conds.append(MarketSite.site_class != "home")
+    if search:
+        шаблон = f"%{search.strip()}%"
+        conds.append(sa_or(MarketSite.name.ilike(шаблон), MarketSite.city.ilike(шаблон)))
+
+    cols = [dim_select(k, "market_sites").label(f"d{i}") for i, k in enumerate(keys)]
+    metrics = metric_selects("market_sites")
+    mcols = [expr.label(f"m{i}") for i, (_, expr, _) in enumerate(metrics)]
+    запрос = (select(*cols, *mcols)
+              .select_from(MarketSite)
+              .outerjoin(MARKET_OWNER, MARKET_OWNER.id == MarketSite.owner_id)
+              .outerjoin(MARKET_OPERATOR, MARKET_OPERATOR.id == MarketSite.operator_id)
+              .where(*conds).group_by(*cols).limit(limit + 1))
+    res = (await db.execute(запрос)).all()
+    truncated = len(res) > limit
+    rows = res[:limit]
+
+    return {
+        "dims": keys,
+        "labels": [dim_label(k, "market_sites") for k in keys],
+        "metrics": metrics_catalog("market_sites"),
+        "stationNames": {},
+        "rows": [{
+            "keys": [r[i] for i in range(len(keys))],
+            "m": {k: round(float(r[len(keys) + j]), d) for j, (k, _, d) in enumerate(metrics)},
+        } for r in rows],
+        "truncated": truncated,
+    }
+
+
 @router.get("/duplicates")
 async def market_duplicates(
     company_id: str = Query(...),

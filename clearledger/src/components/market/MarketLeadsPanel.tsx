@@ -17,6 +17,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCompany } from '@/contexts/CompanyContext'
+import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { ReportPivot } from '@/components/workspace/ReportPivot'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
 import {
@@ -101,10 +103,17 @@ function LeadRow({ lead, onMove, onToProject, sending }: {
   )
 }
 
+/** Воронку возможностей смотрят карточками, а считают сводной. */
+const ВИДЫ_КАНДИДАТОВ = [
+  { k: 'list', label: 'Карточки' },
+  { k: 'pivot', label: 'Сводная' },
+] as const
+
 export function MarketLeadsPanel() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   const экран = useRef<HTMLDivElement>(null)
+  const [подача, setПодача] = useState<string>('list')
   const [track, setTrack] = useState('all')
   const [title, setTitle] = useState('')
   const [newTrack, setNewTrack] = useState('build')
@@ -162,6 +171,9 @@ export function MarketLeadsPanel() {
             </SelectContent>
           </Select>
           <span className="ml-auto" data-export-ignore>
+            <PanelViewTabs tabs={ВИДЫ_КАНДИДАТОВ} value={подача} onChange={setПодача} />
+          </span>
+          <span data-export-ignore>
             <ExportButton title="Кандидаты"
               subtitle={`${track === 'all' ? 'все направления' : TRACKS[track] ?? track} · ${rows.length} кандидатов`}
               getEl={() => экран.current} />
@@ -199,6 +211,25 @@ export function MarketLeadsPanel() {
         </CardContent>
       </Card>
 
+      {подача === 'pivot' && (
+        <div className="min-h-0 flex-1 overflow-auto">
+          <ReportPivot
+            fields={['track', 'status', 'owner', 'subject', 'toProject', 'leads']}
+            columns={['Направление', 'Статус', 'Ответственный', 'Объект',
+                      'Площадка заведена', 'Кандидатов']}
+            rows={rows.map((l) => ({
+              track: l.trackLabel,
+              status: STATUSES[l.status] ?? l.status,
+              owner: l.ownerName ?? '— не назначен —',
+              subject: l.subjectRef ?? '— не указан —',
+              toProject: l.siteId ? 'да' : 'нет',
+              leads: 1,
+            }))}
+          />
+        </div>
+      )}
+
+      {подача !== 'pivot' && (
       <div className="min-h-0 flex-1 space-y-2 overflow-auto">
         {[['В работе', open], ['Взяты', taken], ['Отклонены', rejected]].map(
           ([label, group]) => (group as GrowthLead[]).length > 0 && (
@@ -215,6 +246,7 @@ export function MarketLeadsPanel() {
             </div>
           ))}
       </div>
+      )}
     </div>
   )
 }

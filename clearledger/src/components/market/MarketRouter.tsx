@@ -24,6 +24,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { SortTh } from '@/components/workspace/SortableTh'
 import { useTableSort } from '@/hooks/useTableSort'
+import { PivotView } from '@/components/workspace/PivotView'
+import { ReportPivot } from '@/components/workspace/ReportPivot'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { MarketSiteCard } from './MarketSiteCard'
@@ -31,7 +33,7 @@ import { useFullscreenPanel } from '@/hooks/useFullscreenPanel'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   listMarketSites, listMarketObservations, listMarketOperators, getOurMapPoints,
-  getSitesBreakdown,
+  getSitesBreakdown, getMarketPivot, getMarketPivotCatalog,
   SITE_KIND_LABEL, CHANNEL_LABEL, type MarketObservation, type MarketSite,
   type MarketSiteKind, type OurMapPoint,
 } from '@/services/marketService'
@@ -467,6 +469,9 @@ const ВИДЫ_ТОЧЕК = [
   { k: 'gear', label: 'Чем оснащены' },
   { k: 'live', label: 'Живы ли' },
   { k: 'who', label: 'Кто владеет' },
+  // Готовые разрезы отвечают на один вопрос каждый; сводная — на любой их
+  // сочетание: «владелец → регион → класс мощности» (замечание РусГидро 14.09.2026).
+  { k: 'pivot', label: 'Сводная' },
 ] as const
 
 /** Строка разреза: доля считается от всех точек выборки, а не от видимой страницы. */
@@ -562,6 +567,8 @@ function MarketSites() {
   }, [q])
   const [страниц, setСтраниц] = useState(1)
   const PAGE = 500
+  // У рынка нет периода: реестр — это срез на сегодня. Дата нужна книге выгрузки.
+  const сегодня = new Date().toISOString().slice(0, 10)
   // Сброс на первую страницу при смене условий делается ПРИ ОТРИСОВКЕ, а не в
   // эффекте: эффект вызывал вторую отрисовку следом за первой, и список успевал
   // мигнуть старой выдачей.
@@ -575,7 +582,7 @@ function MarketSites() {
   const разрез = useQuery({
     queryKey: ['market-breakdown', companyId],
     queryFn: () => getSitesBreakdown(companyId),
-    enabled: !!companyId && вид !== 'list',
+    enabled: !!companyId && вид !== 'list' && вид !== 'pivot',
   })
 
   const sites = useQuery({
@@ -676,7 +683,29 @@ function MarketSites() {
 
       <PanelViewTabs tabs={ВИДЫ_ТОЧЕК} value={вид} onChange={setВид} />
 
-      {вид !== 'list' && (
+      {вид === 'pivot' && (
+        <div className="min-h-0 flex-1 overflow-auto">
+          <PivotView
+            source="market_sites"
+            storageKey="market-sites-pivot"
+            defaultDims={['owner', 'region']}
+            fetchCatalog={getMarketPivotCatalog(companyId)}
+            fetchLeaves={(dims) => getMarketPivot({
+              companyId, dims, kind, search: запрос || undefined,
+            })}
+            queryKey={[kind, запрос]}
+            dateFrom={сегодня}
+            dateTo={сегодня}
+            scopeLabel={kind === 'all' ? 'все виды точек' : SITE_KIND_LABEL[kind as MarketSiteKind]}
+            hint={'Считает база по всему реестру, а не по загруженной странице. '
+              + 'Домашние розетки частников в счёт не идут: их половина реестра, и в '
+              + 'разрезе сетей они забивают картину. Цены здесь нет намеренно — она '
+              + 'живёт наблюдениями со своей датой, и складывать её нельзя.'}
+          />
+        </div>
+      )}
+
+      {вид !== 'list' && вид !== 'pivot' && (
         разрез.isLoading ? (
           <div className="space-y-2" aria-busy="true">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -968,9 +997,16 @@ function MarketSites() {
 }
 
 /** Лента наблюдений — откуда мы знаем то, что показываем. */
+/** Журнал читают лентой, а разбирают сводной: кто наблюдает, что и как часто. */
+const ВИДЫ_НАБЛЮДЕНИЙ = [
+  { k: 'list', label: 'Лента' },
+  { k: 'pivot', label: 'Сводная' },
+] as const
+
 function MarketObservations() {
   const { companyId } = useCompany()
   const экран = useRef<HTMLDivElement>(null)
+  const [подача, setПодача] = useState<string>('list')
   const q = useQuery({
     queryKey: ['market-observations', companyId],
     queryFn: () => listMarketObservations(companyId),
@@ -991,12 +1027,29 @@ function MarketObservations() {
   return (
     <div ref={экран} className="h-full overflow-auto p-4">
       {rows.length > 0 && (
-        <div className="mb-2 flex justify-end" data-export-ignore>
+        <div className="mb-2 flex flex-wrap items-center justify-end gap-2" data-export-ignore>
+          <PanelViewTabs tabs={ВИДЫ_НАБЛЮДЕНИЙ} value={подача} onChange={setПодача} />
           <ExportButton title="Наблюдения" subtitle={`${rows.length} записей`}
             getEl={() => экран.current} />
         </div>
       )}
-      {rows.length === 0 ? (
+      {подача === 'pivot' && rows.length > 0 ? (
+        // Цена мерой не идёт: сумма цен наблюдений не значит ничего. Мера здесь —
+        // само наблюдение, и сводная отвечает на «сколько и от кого».
+        <ReportPivot
+          fields={['month', 'kind', 'channel', 'author', 'site', 'records']}
+          columns={['Месяц', 'Что наблюдали', 'Канал', 'Автор', 'Точка', 'Наблюдений']}
+          rows={rows.map((o) => ({
+            month: (o.observedOn ?? '').slice(0, 7) || '— без даты —',
+            kind: o.kind === 'price' ? 'цена' : o.kind === 'availability' ? 'доступность'
+              : o.kind === 'closed' ? 'закрыта' : o.kind === 'opened' ? 'открылась' : o.kind,
+            channel: CHANNEL_LABEL[o.channel] ?? o.channel,
+            author: o.author ?? '— не указан —',
+            site: o.siteName ?? '— без точки —',
+            records: 1,
+          }))}
+        />
+      ) : rows.length === 0 ? (
         <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
           Наблюдений пока нет. Наблюдение — это факт с датой и автором: заезд сервиса,
           снимок ценника, ответ партнёра. Без него цифра на карте не значит ничего.
