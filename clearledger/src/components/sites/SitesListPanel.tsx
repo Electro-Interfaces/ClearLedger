@@ -5,7 +5,7 @@
  * Столбцы «Ответственный» и «Следующий шаг» — не украшение: без них список
  * отвечает на вопрос «что у нас есть», но не на «что делать и кому».
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
@@ -17,6 +17,8 @@ import {
   getSites, getSitesOverview, getSiteMembers,
   STAGE_META, FUNNEL_STAGES, type SiteStage,
 } from '@/services/sitesService'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { SiteCardDialog } from './SiteCardDialog'
 import { ProjectPhaseStrip } from './ProjectPhaseStrip'
 import { useOpenProject } from './useOpenProject'
@@ -68,6 +70,20 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
 
   const d = q.data
   const total = d?.total ?? 0
+  // Реестр ведут по сроку и ответственному: «что горит» и «что на мне». Перебирать
+  // это глазами в списке на две сотни строк нельзя (замечание РусГидро 14.09.2026).
+  const сортировка = useMemo(() => ({
+    projectNo: (x: NonNullable<typeof d>['items'][number]) => x.projectNo,
+    region: (x: NonNullable<typeof d>['items'][number]) => x.region,
+    address: (x: NonNullable<typeof d>['items'][number]) =>
+      x.address ?? x.installPlace ?? x.fullAddress,
+    stage: (x: NonNullable<typeof d>['items'][number]) => x.stageLabel,
+    owner: (x: NonNullable<typeof d>['items'][number]) => x.ownerName,
+    nextAction: (x: NonNullable<typeof d>['items'][number]) => x.nextAction,
+    due: (x: NonNullable<typeof d>['items'][number]) => x.nextActionDue,
+    landowner: (x: NonNullable<typeof d>['items'][number]) => x.owner,
+  }), [])
+  const { rows: строки, sort, toggle } = useTableSort(d?.items ?? [], сортировка)
   const pages = Math.max(1, Math.ceil(total / PAGE))
 
   return (
@@ -149,18 +165,18 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/20 text-muted-foreground">
-                  <th className="text-left p-2 font-medium">Проект</th>
-                  <th className="text-left p-2 font-medium">Регион</th>
-                  <th className="text-left p-2 font-medium">Адрес / место</th>
-                  <th className="text-left p-2 font-medium">Стадия</th>
-                  <th className="text-left p-2 font-medium">Ответственный</th>
-                  <th className="text-left p-2 font-medium">Следующий шаг</th>
-                  <th className="text-left p-2 font-medium">Срок</th>
-                  <th className="text-left p-2 font-medium">Собственник</th>
+                  <SortTh sortKey="projectNo" sort={sort} onSort={toggle}>Проект</SortTh>
+                  <SortTh sortKey="region" sort={sort} onSort={toggle}>Регион</SortTh>
+                  <SortTh sortKey="address" sort={sort} onSort={toggle}>Адрес / место</SortTh>
+                  <SortTh sortKey="stage" sort={sort} onSort={toggle}>Стадия</SortTh>
+                  <SortTh sortKey="owner" sort={sort} onSort={toggle}>Ответственный</SortTh>
+                  <SortTh sortKey="nextAction" sort={sort} onSort={toggle}>Следующий шаг</SortTh>
+                  <SortTh sortKey="due" sort={sort} onSort={toggle}>Срок</SortTh>
+                  <SortTh sortKey="landowner" sort={sort} onSort={toggle}>Собственник</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {d!.items.map((s) => {
+                {строки.map((s) => {
                   const late = !!s.nextActionDue && s.nextActionDue < today() && s.stage !== 'archive'
                   return (
                     <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer" onClick={(ev) => (ev.altKey ? setDetailId(s.id) : openProject(s.id))}>

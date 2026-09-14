@@ -21,6 +21,8 @@ import {
 } from '@/components/ui/select'
 import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import { ExportButton } from './ExportButton'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import {
   getSites, getRouteNodes, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner, getProjectKinds, projectObjectLabel,
   PHASE_META, STAGE_META, FUNNEL_STAGES, type SiteStage,
@@ -244,11 +246,26 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
     queryFn: () => getSitesOverview(companyId),
   })
 
-  const rows = useMemo(() => {
+  const отобранные = useMemo(() => {
     const items = q.data?.items ?? []
     if (!phase || stagesOfPhase.length <= 1) return items
     return items.filter((i) => (stagesOfPhase as string[]).includes(i.stage))
   }, [q.data, phase, stagesOfPhase])
+
+  // Список ведут по сроку и по ответственному: «что горит» и «что на мне» — два
+  // главных вопроса к нему, и отвечать на них перебором глазами нельзя.
+  const сортировка = useMemo(() => ({
+    projectNo: (s: typeof отобранные[number]) => s.projectNo,
+    title: (s: typeof отобранные[number]) => s.title || s.address || s.fullAddress,
+    kind: (s: typeof отобранные[number]) => s.kind,
+    placeKind: (s: typeof отобранные[number]) => s.placeKind,
+    phase: (s: typeof отобранные[number]) => s.phaseLabel ?? s.phase,
+    stage: (s: typeof отобранные[number]) => s.stageLabel,
+    owner: (s: typeof отобранные[number]) => s.ownerName,
+    nextAction: (s: typeof отобранные[number]) => s.nextAction,
+    due: (s: typeof отобранные[number]) => s.nextActionDue,
+  }), [])
+  const { rows, sort, toggle } = useTableSort(отобранные, сортировка)
 
   const total = q.data?.total ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE))
@@ -554,15 +571,15 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                       checked={picked.size > 0 && picked.size === rows.length}
                       onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())} />
                   </th>
-                  <th className="text-left p-2 font-medium">Проект</th>
-                  <th className="text-left p-2 font-medium">Объект</th>
-                  {columns.includes('kind') && <th className="text-left p-2 font-medium">Вид работ</th>}
-                  {columns.includes('placeKind') && <th className="text-left p-2 font-medium">Тип объекта</th>}
-                  {columns.includes('phase') && <th className="text-left p-2 font-medium">Этап проекта</th>}
-                  {columns.includes('stage') && <th className="text-left p-2 font-medium">Стадия</th>}
-                  {columns.includes('owner') && <th className="text-left p-2 font-medium">Ответственный</th>}
-                  {columns.includes('nextAction') && <th className="text-left p-2 font-medium">Следующий шаг</th>}
-                  {columns.includes('due') && <th className="text-left p-2 font-medium">Срок</th>}
+                  <SortTh sortKey="projectNo" sort={sort} onSort={toggle}>Проект</SortTh>
+                  <SortTh sortKey="title" sort={sort} onSort={toggle}>Объект</SortTh>
+                  {columns.includes('kind') && <SortTh sortKey="kind" sort={sort} onSort={toggle}>Вид работ</SortTh>}
+                  {columns.includes('placeKind') && <SortTh sortKey="placeKind" sort={sort} onSort={toggle}>Тип объекта</SortTh>}
+                  {columns.includes('phase') && <SortTh sortKey="phase" sort={sort} onSort={toggle}>Этап проекта</SortTh>}
+                  {columns.includes('stage') && <SortTh sortKey="stage" sort={sort} onSort={toggle}>Стадия</SortTh>}
+                  {columns.includes('owner') && <SortTh sortKey="owner" sort={sort} onSort={toggle}>Ответственный</SortTh>}
+                  {columns.includes('nextAction') && <SortTh sortKey="nextAction" sort={sort} onSort={toggle}>Следующий шаг</SortTh>}
+                  {columns.includes('due') && <SortTh sortKey="due" sort={sort} onSort={toggle}>Срок</SortTh>}
                 </tr>
               </thead>
               <tbody>

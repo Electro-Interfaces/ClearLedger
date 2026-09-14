@@ -22,6 +22,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { MarketSiteCard } from './MarketSiteCard'
@@ -30,8 +32,8 @@ import { useCompany } from '@/contexts/CompanyContext'
 import {
   listMarketSites, listMarketObservations, listMarketOperators, getOurMapPoints,
   getSitesBreakdown,
-  SITE_KIND_LABEL, CHANNEL_LABEL, type MarketSite, type MarketSiteKind,
-  type OurMapPoint,
+  SITE_KIND_LABEL, CHANNEL_LABEL, type MarketObservation, type MarketSite,
+  type MarketSiteKind, type OurMapPoint,
 } from '@/services/marketService'
 import {
   EMPTY_MARKET_FILTERS, EMPTY_OUR_FILTERS, MarketMapFilters,
@@ -494,32 +496,42 @@ function РазрезСтрока({ row, total }: {
   )
 }
 
-function ТаблицаРазреза({ rows, total, first }: {
+function BreakdownTable({ rows, total, first }: {
   rows: { name: string; sites: number; alive: number; medianPrice: number | null
           pricedSites: number }[]
   total: number
   first: string
 }) {
+  // Разрез читают с двух сторон: «кого больше» и «у кого дороже». Порядок с сервера
+  // отвечает только на первый вопрос.
+  const карта = useMemo(() => ({
+    name: (r: typeof rows[number]) => r.name,
+    sites: (r: typeof rows[number]) => r.sites,
+    alive: (r: typeof rows[number]) => r.alive,
+    price: (r: typeof rows[number]) => r.medianPrice,
+    priced: (r: typeof rows[number]) => r.pricedSites,
+  }), [])
+  const { rows: строки, sort, toggle } = useTableSort(rows, карта)
   return (
     <div className="overflow-hidden rounded-lg border border-border">
       <table className="w-full text-xs"
         {...exportRows(first, [
           first, 'Точек', 'Доля, %', 'Живых', 'Медиана цены, ₽/кВт·ч', 'Точек с ценой',
-        ], rows.map((r) => [
+        ], строки.map((r) => [
           r.name, r.sites, total > 0 ? (r.sites / total) * 100 : null, r.alive,
           r.medianPrice, r.pricedSites,
         ]))}>
         <thead className="bg-muted/50 text-muted-foreground">
           <tr>
-            <th className="p-2 text-left font-medium">{first}</th>
-            <th className="p-2 text-right font-medium">Точек</th>
+            <SortTh sortKey="name" sort={sort} onSort={toggle}>{first}</SortTh>
+            <SortTh sortKey="sites" sort={sort} onSort={toggle} align="right">Точек</SortTh>
             <th className="p-2 text-right font-medium">Доля</th>
-            <th className="p-2 text-right font-medium">Живых</th>
-            <th className="p-2 text-right font-medium">Медиана цены</th>
+            <SortTh sortKey="alive" sort={sort} onSort={toggle} align="right">Живых</SortTh>
+            <SortTh sortKey="price" sort={sort} onSort={toggle} align="right">Медиана цены</SortTh>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => <РазрезСтрока key={r.name} row={r} total={total} />)}
+          {строки.map((r) => <РазрезСтрока key={r.name} row={r} total={total} />)}
         </tbody>
       </table>
     </div>
@@ -576,7 +588,28 @@ function MarketSites() {
     enabled: !!companyId,
     placeholderData: (prev) => prev,
   })
-  const rows = sites.data?.sites ?? []
+  // Реестр в девять тысяч строк без сортировки читать нельзя: вопросы к нему —
+  // «где дороже», «где больше портов», «что давно не проверяли» (замечание
+  // РусГидро 14.09.2026).
+  const сортировка = useMemo(() => ({
+    name: (s: MarketSite) => s.name,
+    owner: (s: MarketSite) => s.ownerName,
+    operator: (s: MarketSite) => s.operatorName,
+    city: (s: MarketSite) => s.city,
+    ports: (s: MarketSite) => s.ports,
+    price: (s: MarketSite) => s.price?.value ?? null,
+    checked: (s: MarketSite) => s.price?.observedOn ?? s.lastSeenAt,
+  }), [])
+  const { rows, sort, toggle } = useTableSort(sites.data?.sites ?? [], сортировка)
+  // Разрез по разъёмам — своя таблица со своим порядком: «каких больше» и «какие
+  // мощнее» это разные вопросы.
+  const карта_разъёмов = useMemo(() => ({
+    name: (c: { name: string }) => c.name,
+    count: (c: { count: number }) => c.count,
+    power: (c: { medianPowerKw: number | null }) => c.medianPowerKw,
+    withPower: (c: { withPower: number }) => c.withPower,
+  }), [])
+  const разъёмы = useTableSort(разрез.data?.byConnector ?? [], карта_разъёмов)
   const всего = sites.data?.total ?? 0
   const ещё = Math.max(0, всего - rows.length)
 
@@ -675,9 +708,9 @@ function MarketSites() {
 
             {вид === 'gear' && (
               <>
-                <ТаблицаРазреза rows={разрез.data.byPower} total={разрез.data.total}
+                <BreakdownTable rows={разрез.data.byPower} total={разрез.data.total}
                   first="Мощность" />
-                <ТаблицаРазреза rows={разрез.data.byCurrent} total={разрез.data.total}
+                <BreakdownTable rows={разрез.data.byCurrent} total={разрез.data.total}
                   first="Тип тока" />
                 <div className="overflow-hidden rounded-lg border border-border">
                   <table className="w-full text-xs"
@@ -688,14 +721,14 @@ function MarketSites() {
                     ]))}>
                     <thead className="bg-muted/50 text-muted-foreground">
                       <tr>
-                        <th className="p-2 text-left font-medium">Разъём</th>
-                        <th className="p-2 text-right font-medium">Сколько их</th>
-                        <th className="p-2 text-right font-medium">Медиана мощности</th>
-                        <th className="p-2 text-right font-medium">Известна у</th>
+                        <SortTh sortKey="name" sort={разъёмы.sort} onSort={разъёмы.toggle}>Разъём</SortTh>
+                        <SortTh sortKey="count" sort={разъёмы.sort} onSort={разъёмы.toggle} align="right">Сколько их</SortTh>
+                        <SortTh sortKey="power" sort={разъёмы.sort} onSort={разъёмы.toggle} align="right">Медиана мощности</SortTh>
+                        <SortTh sortKey="withPower" sort={разъёмы.sort} onSort={разъёмы.toggle} align="right">Известна у</SortTh>
                       </tr>
                     </thead>
                     <tbody>
-                      {разрез.data.byConnector.map((c) => (
+                      {разъёмы.rows.map((c) => (
                         <tr key={c.name} className="border-t border-border/50">
                           <td className="p-2">{c.name}</td>
                           <td className="p-2 text-right tabular-nums">{nfm.format(c.count)}</td>
@@ -809,11 +842,11 @@ function MarketSites() {
 
             {вид === 'who' && (
               <>
-                <ТаблицаРазреза rows={разрез.data.byClass} total={разрез.data.total}
+                <BreakdownTable rows={разрез.data.byClass} total={разрез.data.total}
                   first="Класс точки" />
-                <ТаблицаРазреза rows={разрез.data.byOperator} total={разрез.data.total}
+                <BreakdownTable rows={разрез.data.byOperator} total={разрез.data.total}
                   first="Оператор" />
-                <ТаблицаРазреза rows={разрез.data.byRegion} total={разрез.data.total}
+                <BreakdownTable rows={разрез.data.byRegion} total={разрез.data.total}
                   first="Регион" />
               </>
             )}
@@ -858,16 +891,16 @@ function MarketSites() {
             ]))}>
             <thead className="sticky top-0 bg-muted/60 text-muted-foreground">
               <tr>
-                <th className="p-2 text-left font-medium">Точка</th>
+                <SortTh sortKey="name" sort={sort} onSort={toggle}>Точка</SortTh>
                 <th className="p-2 text-left font-medium">Вид</th>
                 {/* Владелец и эксплуатант — разные компании чаще, чем кажется:
                     станции под именем платформы принадлежат не ей. */}
-                <th className="p-2 text-left font-medium">Владелец</th>
-                <th className="p-2 text-left font-medium">Эксплуатирует</th>
-                <th className="p-2 text-left font-medium">Город</th>
-                <th className="p-2 text-right font-medium">Порты</th>
-                <th className="p-2 text-right font-medium">Цена</th>
-                <th className="p-2 text-left font-medium">Проверено</th>
+                <SortTh sortKey="owner" sort={sort} onSort={toggle}>Владелец</SortTh>
+                <SortTh sortKey="operator" sort={sort} onSort={toggle}>Эксплуатирует</SortTh>
+                <SortTh sortKey="city" sort={sort} onSort={toggle}>Город</SortTh>
+                <SortTh sortKey="ports" sort={sort} onSort={toggle} align="right">Порты</SortTh>
+                <SortTh sortKey="price" sort={sort} onSort={toggle} align="right">Цена</SortTh>
+                <SortTh sortKey="checked" sort={sort} onSort={toggle}>Проверено</SortTh>
               </tr>
             </thead>
             <tbody>
@@ -943,7 +976,18 @@ function MarketObservations() {
     queryFn: () => listMarketObservations(companyId),
     enabled: !!companyId,
   })
-  const rows = q.data?.observations ?? []
+  // Лента наблюдений читается и как журнал (что свежее), и как разрез по точке или
+  // автору: «кто давно не ездил» и «где цену давно не снимали».
+  const карта = useMemo(() => ({
+    date: (o: MarketObservation) => o.observedOn,
+    site: (o: MarketObservation) => o.siteName ?? null,
+    kind: (o: MarketObservation) => o.kind,
+    price: (o: MarketObservation) => o.price,
+    channel: (o: MarketObservation) => o.channel,
+    author: (o: MarketObservation) => o.author ?? null,
+  }), [])
+  const { rows, sort, toggle } = useTableSort(
+    q.data?.observations ?? [], карта, { key: 'date', dir: 'desc' })
   return (
     <div ref={экран} className="h-full overflow-auto p-4">
       {rows.length > 0 && (
@@ -970,12 +1014,12 @@ function MarketObservations() {
             ]))}>
             <thead className="bg-muted/60 text-muted-foreground">
               <tr>
-                <th className="p-2 text-left font-medium">Дата</th>
-                <th className="p-2 text-left font-medium">Точка</th>
-                <th className="p-2 text-left font-medium">Что наблюдали</th>
-                <th className="p-2 text-right font-medium">Цена</th>
-                <th className="p-2 text-left font-medium">Канал</th>
-                <th className="p-2 text-left font-medium">Автор</th>
+                <SortTh sortKey="date" sort={sort} onSort={toggle}>Дата</SortTh>
+                <SortTh sortKey="site" sort={sort} onSort={toggle}>Точка</SortTh>
+                <SortTh sortKey="kind" sort={sort} onSort={toggle}>Что наблюдали</SortTh>
+                <SortTh sortKey="price" sort={sort} onSort={toggle} align="right">Цена</SortTh>
+                <SortTh sortKey="channel" sort={sort} onSort={toggle}>Канал</SortTh>
+                <SortTh sortKey="author" sort={sort} onSort={toggle}>Автор</SortTh>
               </tr>
             </thead>
             <tbody>

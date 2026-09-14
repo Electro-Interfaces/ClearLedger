@@ -8,7 +8,7 @@
  *
  * Разворот строки показывает само окружение — с расстоянием, ценой и её датой.
  */
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, ChevronDown, ChevronRight } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -16,6 +16,8 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCompany } from '@/contexts/CompanyContext'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { MarketSelfPanel } from './MarketSelfPanel'
@@ -50,6 +52,17 @@ function GapCell({ gap }: { gap: number | null }) {
 }
 
 function Neighbours({ row }: { row: MarketPositionRow }) {
+  // Соседи сортируются своим порядком: вопрос к ним не «кто ближе», а «кто дешевле»
+  // и «кто ещё жив», и ответ меняется от объекта к объекту.
+  const карта = useMemo(() => ({
+    name: (n: MarketPositionRow['neighbours'][number]) => n.name,
+    distance: (n: MarketPositionRow['neighbours'][number]) => n.distanceKm,
+    ports: (n: MarketPositionRow['neighbours'][number]) => n.ports,
+    price: (n: MarketPositionRow['neighbours'][number]) => n.pricePerKwh,
+    observed: (n: MarketPositionRow['neighbours'][number]) => n.observedOn,
+  }), [])
+  const { rows: соседи, sort, toggle } = useTableSort(
+    row.neighbours, карта, { key: 'distance', dir: 'asc' })
   if (!row.neighbours.length) {
     return (
       <div className="px-4 py-3 text-xs text-muted-foreground">
@@ -73,17 +86,17 @@ function Neighbours({ row }: { row: MarketPositionRow }) {
         ]))}>
         <thead className="text-muted-foreground">
           <tr>
-            <th className="py-1 text-left font-medium">Кто рядом</th>
+            <SortTh sortKey="name" sort={sort} onSort={toggle}>Кто рядом</SortTh>
             <th className="py-1 text-left font-medium">Вид</th>
             <th className="py-1 text-left font-medium">Спрос</th>
-            <th className="py-1 text-right font-medium">Расст.</th>
-            <th className="py-1 text-right font-medium">Портов</th>
-            <th className="py-1 text-right font-medium">Цена ₽/кВтч</th>
-            <th className="py-1 text-left font-medium">Наблюдалась</th>
+            <SortTh sortKey="distance" sort={sort} onSort={toggle} align="right">Расст.</SortTh>
+            <SortTh sortKey="ports" sort={sort} onSort={toggle} align="right">Портов</SortTh>
+            <SortTh sortKey="price" sort={sort} onSort={toggle} align="right">Цена ₽/кВтч</SortTh>
+            <SortTh sortKey="observed" sort={sort} onSort={toggle}>Наблюдалась</SortTh>
           </tr>
         </thead>
         <tbody>
-          {row.neighbours.map((n) => (
+          {соседи.map((n) => (
             <tr key={n.id} className="border-t border-border/40">
               <td className="py-1">
                 {n.name}
@@ -158,6 +171,31 @@ function MarketPositionTable() {
     enabled: !!companyId,
   })
 
+  // Ради чего экран и открывают: отобрать объекты, где мы дороже или дешевле рынка.
+  // Глазами по шести сотням строк такой отбор не делается (замечание РусГидро
+  // 14.09.2026). Карта до ранних возвратов: порядок хуков обязан совпадать на
+  // каждой отрисовке.
+  const сортировка = useMemo(() => ({
+    name: (r: MarketPositionRow) => r.name,
+    city: (r: MarketPositionRow) => r.city,
+    sessions: (r: MarketPositionRow) => r.sessions,
+    energy: (r: MarketPositionRow) => r.energyKwh,
+    revenue: (r: MarketPositionRow) => r.revenue,
+    ourPrice: (r: MarketPositionRow) => r.ourPricePerKwh,
+    marketPrice: (r: MarketPositionRow) => r.marketPricePerKwh,
+    gap: (r: MarketPositionRow) => r.priceGapPct,
+    rivals: (r: MarketPositionRow) => r.rivals,
+    rivalsAlive: (r: MarketPositionRow) => r.rivalsAlive,
+  }), [])
+
+  // Отбор и сортировка — до скелетона: во время загрузки это пустой список, но
+  // порядок хуков обязан совпадать на каждой отрисовке.
+  const отобранные = (pos.data?.objects ?? []).filter((r) =>
+    (!onlyRivals || r.rivals > 0)
+    && (!q || r.name.toLowerCase().includes(q.toLowerCase())
+        || (r.city ?? '').toLowerCase().includes(q.toLowerCase())))
+  const { rows, sort, toggle } = useTableSort(отобранные, сортировка)
+
   if (pos.isLoading) {
     // Скелетон, а не спиннер по центру: экран грузится в свою же раскладку, и человек
     // видит, ЧТО именно сейчас появится.
@@ -178,10 +216,6 @@ function MarketPositionTable() {
   }
 
   const all = pos.data?.objects ?? []
-  const rows = all.filter((r) =>
-    (!onlyRivals || r.rivals > 0)
-    && (!q || r.name.toLowerCase().includes(q.toLowerCase())
-        || (r.city ?? '').toLowerCase().includes(q.toLowerCase())))
 
   const withRivals = all.filter((r) => r.rivals > 0).length
   const comparable = all.filter((r) => r.priceGapPct != null)
@@ -271,14 +305,14 @@ function MarketPositionTable() {
           ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
-              <th className="p-2 text-left font-medium">Наш объект</th>
-              <th className="p-2 text-right font-medium">Сессий</th>
-              <th className="p-2 text-right font-medium">кВтч</th>
-              <th className="p-2 text-right font-medium">Выручка</th>
-              <th className="p-2 text-right font-medium">Наша ₽/кВтч</th>
-              <th className="p-2 text-right font-medium">Рынок ₽/кВтч</th>
-              <th className="p-2 text-right font-medium">Разрыв</th>
-              <th className="p-2 text-right font-medium">Соседи (живых)</th>
+              <SortTh sortKey="name" sort={sort} onSort={toggle}>Наш объект</SortTh>
+              <SortTh sortKey="sessions" sort={sort} onSort={toggle} align="right">Сессий</SortTh>
+              <SortTh sortKey="energy" sort={sort} onSort={toggle} align="right">кВтч</SortTh>
+              <SortTh sortKey="revenue" sort={sort} onSort={toggle} align="right">Выручка</SortTh>
+              <SortTh sortKey="ourPrice" sort={sort} onSort={toggle} align="right">Наша ₽/кВтч</SortTh>
+              <SortTh sortKey="marketPrice" sort={sort} onSort={toggle} align="right">Рынок ₽/кВтч</SortTh>
+              <SortTh sortKey="gap" sort={sort} onSort={toggle} align="right">Разрыв</SortTh>
+              <SortTh sortKey="rivals" sort={sort} onSort={toggle} align="right">Соседи (живых)</SortTh>
             </tr>
           </thead>
           <tbody>

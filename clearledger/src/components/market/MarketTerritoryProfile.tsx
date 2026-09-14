@@ -6,14 +6,18 @@
  * загрузка портов, состав клиентов, чем и когда заряжают, чем кончаются сессии,
  * динамика к прошлому периоду. Это и объясняет, что делать с территорией.
  */
-import { useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCompany } from '@/contexts/CompanyContext'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
-import { getTerritoryProfile } from '@/services/marketService'
+import { getTerritoryProfile, type TerritoryProfile } from '@/services/marketService'
+
+type ОбъектТерритории = NonNullable<TerritoryProfile['ours']>['objectsList'][number]
 
 const nf = new Intl.NumberFormat('ru-RU')
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -89,6 +93,20 @@ export function MarketTerritoryProfile({ name, level, onBack }: {
     queryFn: () => getTerritoryProfile(companyId, { name, level, days: 90 }),
     enabled: !!companyId && !!name,
   })
+
+  // Внутри территории объекты сравнивают между собой: где выручка, где загрузка
+  // порта ниже. Карта до ранних возвратов — порядок хуков обязан совпадать.
+  const карта = useMemo(() => ({
+    name: (r: ОбъектТерритории) => r.name,
+    city: (r: ОбъектТерритории) => r.city,
+    power: (r: ОбъектТерритории) => r.powerKwt,
+    ports: (r: ОбъектТерритории) => r.ports,
+    brand: (r: ОбъектТерритории) => r.brand,
+    status: (r: ОбъектТерритории) => r.status,
+    sessions: (r: ОбъектТерритории) => r.sessions,
+    revenue: (r: ОбъектТерритории) => r.revenue,
+  }), [])
+  const объекты = useTableSort(q.data?.ours?.objectsList ?? [], карта)
 
   if (q.isLoading) {
     return (
@@ -224,23 +242,23 @@ export function MarketTerritoryProfile({ name, level, onBack }: {
                 {...exportRows('Наши объекты', [
                   'Объект', 'Город', 'кВт', 'Портов', 'Производитель', 'Состояние',
                   'Сессий', 'Выручка, ₽',
-                ], o.objectsList.map((r) => [
+                ], объекты.rows.map((r) => [
                   r.name, r.city, r.powerKwt, r.ports, r.brand, r.status, r.sessions, r.revenue,
                 ]))}>
                 <thead className="text-muted-foreground">
                   <tr>
-                    <th className="py-1 text-left font-medium">Объект</th>
-                    <th className="py-1 text-left font-medium">Город</th>
-                    <th className="py-1 text-right font-medium">кВт</th>
-                    <th className="py-1 text-right font-medium">Портов</th>
-                    <th className="py-1 text-left font-medium">Производитель</th>
-                    <th className="py-1 text-left font-medium">Состояние</th>
-                    <th className="py-1 text-right font-medium">Сессий</th>
-                    <th className="py-1 text-right font-medium">Выручка</th>
+                    <SortTh sortKey="name" sort={объекты.sort} onSort={объекты.toggle}>Объект</SortTh>
+                    <SortTh sortKey="city" sort={объекты.sort} onSort={объекты.toggle}>Город</SortTh>
+                    <SortTh sortKey="power" sort={объекты.sort} onSort={объекты.toggle} align="right">кВт</SortTh>
+                    <SortTh sortKey="ports" sort={объекты.sort} onSort={объекты.toggle} align="right">Портов</SortTh>
+                    <SortTh sortKey="brand" sort={объекты.sort} onSort={объекты.toggle}>Производитель</SortTh>
+                    <SortTh sortKey="status" sort={объекты.sort} onSort={объекты.toggle}>Состояние</SortTh>
+                    <SortTh sortKey="sessions" sort={объекты.sort} onSort={объекты.toggle} align="right">Сессий</SortTh>
+                    <SortTh sortKey="revenue" sort={объекты.sort} onSort={объекты.toggle} align="right">Выручка</SortTh>
                   </tr>
                 </thead>
                 <tbody>
-                  {o.objectsList.map((r) => (
+                  {объекты.rows.map((r) => (
                     <tr key={r.locationId} className="border-t border-border/40">
                       <td className="py-1">{r.name}</td>
                       <td className="py-1 text-muted-foreground">{r.city ?? '—'}</td>

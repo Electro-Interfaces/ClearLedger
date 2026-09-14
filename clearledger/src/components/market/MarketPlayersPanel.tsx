@@ -81,6 +81,26 @@ export function MarketPlayersPanel() {
   }), [])
   const { rows: quality, sort: сортК, toggle: жмиК } =
     useTableSort(качество, сортировкаКачества)
+  // Классы и магазины — свои таблицы со своими вопросами: «где больше игроков без
+  // станций» и «у кого шире прайс».
+  const сортКлассов = useMemo(() => ({
+    class: (c: { class: string }) => c.class,
+    players: (c: { players: number }) => c.players,
+    assetLight: (c: { assetLight: number }) => c.assetLight,
+    stations: (c: { stations: number }) => c.stations,
+    rating: (c: { medianRating: number | null }) => c.medianRating,
+  }), [])
+  const классы = useTableSort(q.data?.classes ?? [], сортКлассов)
+  const сортМагазинов = useMemo(() => ({
+    brand: (sh: { brand: string }) => sh.brand,
+    shop: (sh: { hasShop: boolean | null }) => (sh.hasShop == null ? null : sh.hasShop ? 1 : 0),
+    goods: (sh: { goods: string | null }) => sh.goods,
+    priceMin: (sh: { priceMin: number | null }) => sh.priceMin,
+    priceMax: (sh: { priceMax: number | null }) => sh.priceMax,
+    found: (sh: { pricesFound: number | null }) => sh.pricesFound,
+    host: (sh: { host: string | null }) => sh.host,
+  }), [])
+  const магазины = useTableSort(q.data?.shops ?? [], сортМагазинов)
 
   if (q.isLoading) {
     return (
@@ -103,7 +123,6 @@ export function MarketPlayersPanel() {
   }
 
   const quadrants = q.data?.quadrants ?? []
-  const classes = q.data?.classes ?? []
 
   return (
     <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
@@ -166,22 +185,22 @@ export function MarketPlayersPanel() {
             {...exportRows('Откуда приходят', [
               'Класс', 'Смежные', 'Игроков', 'Без своих станций', 'Станций у класса',
               'Медиана оценки', 'Оценок в основе', 'Кто это',
-            ], classes.map((c) => [
+            ], классы.rows.map((c) => [
               c.class, c.adjacent ? 'да' : 'нет', c.players, c.assetLight, c.stations,
               c.medianRating, c.withRating, c.examples.join(', '),
             ]))}>
             <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
               <tr>
-                <th className="p-2 text-left font-medium">Класс</th>
-                <th className="p-2 text-right font-medium">Игроков</th>
-                <th className="p-2 text-right font-medium">Без своих станций</th>
-                <th className="p-2 text-right font-medium">Станций у класса</th>
-                <th className="p-2 text-right font-medium">Медиана оценки</th>
+                <SortTh sortKey="class" sort={классы.sort} onSort={классы.toggle}>Класс</SortTh>
+                <SortTh sortKey="players" sort={классы.sort} onSort={классы.toggle} align="right">Игроков</SortTh>
+                <SortTh sortKey="assetLight" sort={классы.sort} onSort={классы.toggle} align="right">Без своих станций</SortTh>
+                <SortTh sortKey="stations" sort={классы.sort} onSort={классы.toggle} align="right">Станций у класса</SortTh>
+                <SortTh sortKey="rating" sort={классы.sort} onSort={классы.toggle} align="right">Медиана оценки</SortTh>
                 <th className="p-2 text-left font-medium">Кто это</th>
               </tr>
             </thead>
             <tbody>
-              {classes.map((c) => (
+              {классы.rows.map((c) => (
                 <tr key={c.class} className="border-t border-border/50">
                   <td className="p-2 font-medium">
                     {c.class}
@@ -275,23 +294,23 @@ export function MarketPlayersPanel() {
             {...exportRows('Интернет-магазин', [
               'Сеть', 'Магазин', 'Примечание', 'Что продают', 'Цены от, ₽', 'до, ₽',
               'Позиций с ценой', 'Адрес',
-            ], (q.data?.shops ?? []).map((sh) => [
+            ], магазины.rows.map((sh) => [
               sh.brand, sh.hasShop ? 'есть' : 'не нашли', sh.note, sh.goods, sh.priceMin,
               sh.priceMax, sh.pricesFound, sh.host,
             ]))}>
             <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
               <tr>
-                <th className="p-2 text-left font-medium">Сеть</th>
-                <th className="p-2 text-left font-medium">Магазин</th>
-                <th className="p-2 text-left font-medium">Что продают</th>
-                <th className="p-2 text-right font-medium">Цены от</th>
-                <th className="p-2 text-right font-medium">до</th>
-                <th className="p-2 text-right font-medium">Позиций с ценой</th>
-                <th className="p-2 text-left font-medium">Адрес</th>
+                <SortTh sortKey="brand" sort={магазины.sort} onSort={магазины.toggle}>Сеть</SortTh>
+                <SortTh sortKey="shop" sort={магазины.sort} onSort={магазины.toggle}>Магазин</SortTh>
+                <SortTh sortKey="goods" sort={магазины.sort} onSort={магазины.toggle}>Что продают</SortTh>
+                <SortTh sortKey="priceMin" sort={магазины.sort} onSort={магазины.toggle} align="right">Цены от</SortTh>
+                <SortTh sortKey="priceMax" sort={магазины.sort} onSort={магазины.toggle} align="right">до</SortTh>
+                <SortTh sortKey="found" sort={магазины.sort} onSort={магазины.toggle} align="right">Позиций с ценой</SortTh>
+                <SortTh sortKey="host" sort={магазины.sort} onSort={магазины.toggle}>Адрес</SortTh>
               </tr>
             </thead>
             <tbody>
-              {(q.data?.shops ?? []).map((sh) => (
+              {магазины.rows.map((sh) => (
                 <tr key={sh.brand} className="border-t border-border/50">
                   <td className="p-2 font-medium">{sh.brand}</td>
                   <td className="p-2">

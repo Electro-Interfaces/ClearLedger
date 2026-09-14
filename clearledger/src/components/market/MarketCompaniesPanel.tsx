@@ -9,17 +9,20 @@
  * Карточка отвечает на «что он делает»: где стоит, чем оснащён, почём заряжает, как
  * его оценивают и где он рос последние полтора года.
  */
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Building2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
 import {
-  getMarketOperatorCard, listMarketOperators, type MarketOperatorCard,
+  getMarketOperatorCard, listMarketOperators, type MarketOperator,
+  type MarketOperatorCard,
 } from '@/services/marketService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -83,6 +86,17 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
   const [вид, setВид] = useState<string>('cities')
   const карточка = useRef<HTMLDivElement>(null)
   const t = card.totals
+  const карта_точек = useMemo(() => ({
+    name: (s: MarketOperatorCard['sites'][number]) => s.name,
+    city: (s: MarketOperatorCard['sites'][number]) => s.city,
+    ports: (s: MarketOperatorCard['sites'][number]) => s.ports,
+    power: (s: MarketOperatorCard['sites'][number]) => s.maxPowerKw,
+    current: (s: MarketOperatorCard['sites'][number]) => s.currentType,
+    quality: (s: MarketOperatorCard['sites'][number]) => s.quality,
+    rating: (s: MarketOperatorCard['sites'][number]) => s.rating,
+    demand: (s: MarketOperatorCard['sites'][number]) => s.lastSessionAt,
+  }), [])
+  const точки = useTableSort(card.sites, карта_точек)
   return (
     <div ref={карточка} className="space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -357,18 +371,18 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
                 ]))}>
                 <thead className="text-muted-foreground">
                   <tr>
-                    <th className="py-1 text-left font-medium">Точка</th>
-                    <th className="py-1 text-left font-medium">Город</th>
-                    <th className="py-1 text-right font-medium">Портов</th>
-                    <th className="py-1 text-right font-medium">кВт</th>
-                    <th className="py-1 text-left font-medium">Ток</th>
-                    <th className="py-1 text-right font-medium">Связь</th>
-                    <th className="py-1 text-right font-medium">Оценка</th>
-                    <th className="py-1 text-left font-medium">Спрос</th>
+                    <SortTh sortKey="name" sort={точки.sort} onSort={точки.toggle}>Точка</SortTh>
+                    <SortTh sortKey="city" sort={точки.sort} onSort={точки.toggle}>Город</SortTh>
+                    <SortTh sortKey="ports" sort={точки.sort} onSort={точки.toggle} align="right">Портов</SortTh>
+                    <SortTh sortKey="power" sort={точки.sort} onSort={точки.toggle} align="right">кВт</SortTh>
+                    <SortTh sortKey="current" sort={точки.sort} onSort={точки.toggle}>Ток</SortTh>
+                    <SortTh sortKey="quality" sort={точки.sort} onSort={точки.toggle} align="right">Связь</SortTh>
+                    <SortTh sortKey="rating" sort={точки.sort} onSort={точки.toggle} align="right">Оценка</SortTh>
+                    <SortTh sortKey="demand" sort={точки.sort} onSort={точки.toggle}>Спрос</SortTh>
                   </tr>
                 </thead>
                 <tbody>
-                  {card.sites.map((s) => (
+                  {точки.rows.map((s) => (
                     <tr key={s.id} className="border-t border-border/40">
                       <td className="py-1">{s.name}</td>
                       <td className="py-1 text-muted-foreground">{s.city ?? '—'}</td>
@@ -416,6 +430,25 @@ export function MarketCompaniesPanel({ initialOpen = null, onBack }: {
     queryFn: () => getMarketOperatorCard(companyId, open as string),
     enabled: !!companyId && !!open,
   })
+  // Сети сравнивают то по размеру, то по живым точкам, то по цене и оценке —
+  // каждый вопрос требует своего порядка (замечание РусГидро 14.09.2026).
+  const сортировка = useMemo(() => ({
+    name: (o: MarketOperator) => o.name,
+    relation: (o: MarketOperator) => RELATION_LABEL[o.relation] ?? o.relation,
+    sites: (o: MarketOperator) => o.sites,
+    alive: (o: MarketOperator) => o.alive,
+    ports: (o: MarketOperator) => o.ports,
+    price: (o: MarketOperator) => o.medianPricePerKwh,
+    quality: (o: MarketOperator) => o.quality,
+    rating: (o: MarketOperator) => o.rating,
+  }), [])
+
+  // Отбор и сортировка — до скелетона: порядок хуков обязан совпадать на каждой
+  // отрисовке, а во время загрузки это просто пустой список.
+  const { rows, sort, toggle } = useTableSort(
+    (list.data?.operators ?? []).filter(
+      (o) => !q || o.name.toLowerCase().includes(q.toLowerCase())),
+    сортировка)
 
   if (list.isLoading) {
     return (
@@ -436,8 +469,6 @@ export function MarketCompaniesPanel({ initialOpen = null, onBack }: {
     )
   }
 
-  const rows = (list.data?.operators ?? []).filter(
-    (o) => !q || o.name.toLowerCase().includes(q.toLowerCase()))
   const networks = rows.filter((o) => o.sites > 0)
   const leader = networks[0]
 
@@ -474,14 +505,14 @@ export function MarketCompaniesPanel({ initialOpen = null, onBack }: {
           ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
-              <th className="p-2 text-left font-medium">Компания</th>
-              <th className="p-2 text-left font-medium">Отношение</th>
-              <th className="p-2 text-right font-medium">Точек</th>
-              <th className="p-2 text-right font-medium">Живых</th>
-              <th className="p-2 text-right font-medium">Портов</th>
-              <th className="p-2 text-right font-medium">Медиана ₽/кВт·ч</th>
-              <th className="p-2 text-right font-medium">Связь</th>
-              <th className="p-2 text-right font-medium">Оценка</th>
+              <SortTh sortKey="name" sort={sort} onSort={toggle}>Компания</SortTh>
+              <SortTh sortKey="relation" sort={sort} onSort={toggle}>Отношение</SortTh>
+              <SortTh sortKey="sites" sort={sort} onSort={toggle} align="right">Точек</SortTh>
+              <SortTh sortKey="alive" sort={sort} onSort={toggle} align="right">Живых</SortTh>
+              <SortTh sortKey="ports" sort={sort} onSort={toggle} align="right">Портов</SortTh>
+              <SortTh sortKey="price" sort={sort} onSort={toggle} align="right">Медиана ₽/кВт·ч</SortTh>
+              <SortTh sortKey="quality" sort={sort} onSort={toggle} align="right">Связь</SortTh>
+              <SortTh sortKey="rating" sort={sort} onSort={toggle} align="right">Оценка</SortTh>
             </tr>
           </thead>
           <tbody>

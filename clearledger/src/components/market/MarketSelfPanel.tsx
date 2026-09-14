@@ -9,14 +9,18 @@
  * картинку и по ней решает, ехать или не ехать. Самый дорогой случай — станция, по
  * которой у нас идут сессии, а рынок показывает её молчащей.
  */
-import { useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, Eye } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCompany } from '@/contexts/CompanyContext'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
-import { getMarketSelfView } from '@/services/marketService'
+import { getMarketSelfView, type MarketSelfView } from '@/services/marketService'
+
+type СтанцияСебя = MarketSelfView['sites'][number]
 
 const nf = new Intl.NumberFormat('ru-RU')
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -36,6 +40,19 @@ export function MarketSelfPanel() {
     queryFn: () => getMarketSelfView(companyId, { days: 90 }),
     enabled: !!companyId,
   })
+
+  // Свои станции перебирают по слабому месту: где связь хуже, где рынок считает нас
+  // молчащими при живых сессиях. Карта до ранних возвратов — порядок хуков.
+  const карта = useMemo(() => ({
+    name: (r: СтанцияСебя) => r.ourName ?? r.marketName,
+    city: (r: СтанцияСебя) => r.city,
+    quality: (r: СтанцияСебя) => r.quality,
+    success: (r: СтанцияСебя) => r.successPct,
+    rating: (r: СтанцияСебя) => r.rating,
+    alive: (r: СтанцияСебя) => (r.aliveByMarket ? 1 : 0),
+    sessions: (r: СтанцияСебя) => r.ourSessions,
+  }), [])
+  const станции = useTableSort(q.data?.sites ?? [], карта)
 
   if (q.isLoading) {
     return (
@@ -58,7 +75,7 @@ export function MarketSelfPanel() {
     sessions: 0, successful: 0, failed: 0, successPct: null, energyKwh: 0, revenue: 0,
   }
   const peers = q.data?.peers ?? []
-  const sites = q.data?.sites ?? []
+  const sites = станции.rows
   const best = peers.reduce<number | null>(
     (acc, p) => (p.quality != null && (acc == null || p.quality > acc) ? p.quality : acc), null)
 
@@ -196,13 +213,13 @@ export function MarketSelfPanel() {
               ]))}>
               <thead className="text-muted-foreground">
                 <tr>
-                  <th className="py-1 text-left font-medium">Станция</th>
-                  <th className="py-1 text-left font-medium">Город</th>
-                  <th className="py-1 text-right font-medium">Связь</th>
-                  <th className="py-1 text-right font-medium">Успех</th>
-                  <th className="py-1 text-right font-medium">Оценка</th>
-                  <th className="py-1 text-left font-medium">Рынок видит</th>
-                  <th className="py-1 text-right font-medium">Наших сессий</th>
+                  <SortTh sortKey="name" sort={станции.sort} onSort={станции.toggle}>Станция</SortTh>
+                  <SortTh sortKey="city" sort={станции.sort} onSort={станции.toggle}>Город</SortTh>
+                  <SortTh sortKey="quality" sort={станции.sort} onSort={станции.toggle} align="right">Связь</SortTh>
+                  <SortTh sortKey="success" sort={станции.sort} onSort={станции.toggle} align="right">Успех</SortTh>
+                  <SortTh sortKey="rating" sort={станции.sort} onSort={станции.toggle} align="right">Оценка</SortTh>
+                  <SortTh sortKey="alive" sort={станции.sort} onSort={станции.toggle}>Рынок видит</SortTh>
+                  <SortTh sortKey="sessions" sort={станции.sort} onSort={станции.toggle} align="right">Наших сессий</SortTh>
                 </tr>
               </thead>
               <tbody>

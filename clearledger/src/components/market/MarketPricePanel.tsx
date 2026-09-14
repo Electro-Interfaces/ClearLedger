@@ -6,16 +6,21 @@
  * оговорка о том, чего в расчёте нет. Показатель с непроговорённым допущением
  * опаснее отсутствия показателя: по нему принимают решение, не зная поправки.
  */
-import { useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Banknote, Swords, TrendingDown } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCompany } from '@/contexts/CompanyContext'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import {
   getMarketElasticity, getMarketPressure, getMarketPriceLandscape,
+  type MarketElasticityCase, type MarketPressureRow, type MarketPriceLandscape,
 } from '@/services/marketService'
+
+type Класс = MarketPriceLandscape['buckets'][number]
 
 const nf = new Intl.NumberFormat('ru-RU')
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -47,6 +52,14 @@ export function MarketPriceLandscapePanel() {
     queryFn: () => getMarketPriceLandscape(companyId, { days: 90 }),
     enabled: !!companyId,
   })
+  const карта = useMemo(() => ({
+    bucket: (b: Класс) => b.bucket,
+    sites: (b: Класс) => b.sites,
+    low: (b: Класс) => b.low,
+    median: (b: Класс) => b.median,
+    high: (b: Класс) => b.high,
+  }), [])
+  const { rows: классы, sort, toggle } = useTableSort(q.data?.buckets ?? [], карта)
   if (q.isLoading) return <Skeleton />
   const d = q.data
   const gap = d?.gapPct
@@ -88,15 +101,15 @@ export function MarketPriceLandscapePanel() {
             ], (d?.buckets ?? []).map((b) => [b.bucket, b.sites, b.low, b.median, b.high]))}>
             <thead className="text-muted-foreground">
               <tr>
-                <th className="py-1 text-left font-medium">Класс</th>
-                <th className="py-1 text-right font-medium">Точек с ценой</th>
-                <th className="py-1 text-right font-medium">Нижняя четверть</th>
-                <th className="py-1 text-right font-medium">Медиана</th>
-                <th className="py-1 text-right font-medium">Верхняя четверть</th>
+                <SortTh sortKey="bucket" sort={sort} onSort={toggle}>Класс</SortTh>
+                <SortTh sortKey="sites" sort={sort} onSort={toggle} align="right">Точек с ценой</SortTh>
+                <SortTh sortKey="low" sort={sort} onSort={toggle} align="right">Нижняя четверть</SortTh>
+                <SortTh sortKey="median" sort={sort} onSort={toggle} align="right">Медиана</SortTh>
+                <SortTh sortKey="high" sort={sort} onSort={toggle} align="right">Верхняя четверть</SortTh>
               </tr>
             </thead>
             <tbody>
-              {(d?.buckets ?? []).map((b) => (
+              {классы.map((b) => (
                 <tr key={b.bucket} className="border-t border-border/40">
                   <td className="py-1">{b.bucket}</td>
                   <td className="py-1 text-right"><Num v={b.sites} digits={0} /></td>
@@ -128,8 +141,20 @@ export function MarketPressurePanel() {
     queryFn: () => getMarketPressure(companyId, { months: 24 }),
     enabled: !!companyId,
   })
+  // Вопрос к таблице — «у кого сильнее всего просело»: без сортировки по изменению
+  // это ищут глазами по всему списку.
+  const карта = useMemo(() => ({
+    name: (r: MarketPressureRow) => r.name,
+    city: (r: MarketPressureRow) => r.city,
+    rival: (r: MarketPressureRow) => r.rivalName,
+    distance: (r: MarketPressureRow) => r.distanceKm,
+    appeared: (r: MarketPressureRow) => r.appearedOn,
+    before: (r: MarketPressureRow) => r.sessionsBefore,
+    after: (r: MarketPressureRow) => r.sessionsAfter,
+    change: (r: MarketPressureRow) => r.changePct,
+  }), [])
+  const { rows, sort, toggle } = useTableSort(q.data?.rows ?? [], карта)
   if (q.isLoading) return <Skeleton />
-  const rows = q.data?.rows ?? []
   const dropped = rows.filter((r) => (r.changePct ?? 0) < -10)
 
   return (
@@ -161,13 +186,13 @@ export function MarketPressurePanel() {
           ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
-              <th className="p-2 text-left font-medium">Наш объект</th>
-              <th className="p-2 text-left font-medium">Кто появился</th>
-              <th className="p-2 text-right font-medium">Дистанция</th>
-              <th className="p-2 text-left font-medium">Когда</th>
-              <th className="p-2 text-right font-medium">Сессий до</th>
-              <th className="p-2 text-right font-medium">После</th>
-              <th className="p-2 text-right font-medium">Изменение</th>
+              <SortTh sortKey="name" sort={sort} onSort={toggle}>Наш объект</SortTh>
+              <SortTh sortKey="rival" sort={sort} onSort={toggle}>Кто появился</SortTh>
+              <SortTh sortKey="distance" sort={sort} onSort={toggle} align="right">Дистанция</SortTh>
+              <SortTh sortKey="appeared" sort={sort} onSort={toggle}>Когда</SortTh>
+              <SortTh sortKey="before" sort={sort} onSort={toggle} align="right">Сессий до</SortTh>
+              <SortTh sortKey="after" sort={sort} onSort={toggle} align="right">После</SortTh>
+              <SortTh sortKey="change" sort={sort} onSort={toggle} align="right">Изменение</SortTh>
             </tr>
           </thead>
           <tbody>
@@ -213,8 +238,17 @@ export function MarketElasticityPanel() {
     queryFn: () => getMarketElasticity(companyId, { weeks: 52 }),
     enabled: !!companyId,
   })
+  const карта = useMemo(() => ({
+    name: (c: MarketElasticityCase) => c.name,
+    week: (c: MarketElasticityCase) => c.week,
+    priceWas: (c: MarketElasticityCase) => c.priceWas,
+    priceNow: (c: MarketElasticityCase) => c.priceNow,
+    pricePct: (c: MarketElasticityCase) => c.pricePct,
+    sessionsPct: (c: MarketElasticityCase) => c.sessionsPct,
+    elasticity: (c: MarketElasticityCase) => c.elasticity,
+  }), [])
+  const { rows: cases, sort, toggle } = useTableSort(q.data?.cases ?? [], карта)
   if (q.isLoading) return <Skeleton />
-  const cases = q.data?.cases ?? []
   const median = q.data?.medianElasticity
 
   return (
@@ -246,13 +280,13 @@ export function MarketElasticityPanel() {
           ]))}>
           <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
             <tr>
-              <th className="p-2 text-left font-medium">Объект</th>
-              <th className="p-2 text-left font-medium">Неделя</th>
-              <th className="p-2 text-right font-medium">Цена была</th>
-              <th className="p-2 text-right font-medium">Стала</th>
-              <th className="p-2 text-right font-medium">Цена, %</th>
-              <th className="p-2 text-right font-medium">Сессии, %</th>
-              <th className="p-2 text-right font-medium">Отклик</th>
+              <SortTh sortKey="name" sort={sort} onSort={toggle}>Объект</SortTh>
+              <SortTh sortKey="week" sort={sort} onSort={toggle}>Неделя</SortTh>
+              <SortTh sortKey="priceWas" sort={sort} onSort={toggle} align="right">Цена была</SortTh>
+              <SortTh sortKey="priceNow" sort={sort} onSort={toggle} align="right">Стала</SortTh>
+              <SortTh sortKey="pricePct" sort={sort} onSort={toggle} align="right">Цена, %</SortTh>
+              <SortTh sortKey="sessionsPct" sort={sort} onSort={toggle} align="right">Сессии, %</SortTh>
+              <SortTh sortKey="elasticity" sort={sort} onSort={toggle} align="right">Отклик</SortTh>
             </tr>
           </thead>
           <tbody>

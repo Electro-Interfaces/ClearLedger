@@ -8,6 +8,8 @@
  */
 
 import { useMemo, useState } from 'react'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
@@ -70,7 +72,19 @@ export function EquipmentSuppliesPanel({ companyId }: { companyId: string }) {
     placeholderData: keepPreviousData,
   })
 
-  const items = data?.items ?? []
+  const все = data?.items ?? []
+  // Поставки ведут по дате и по сумме, а разбирают — по статусу: что не принято.
+  const сортировка = useMemo(() => ({
+    no: (d: typeof все[number]) => d.number,
+    date: (d: typeof все[number]) => d.docDate,
+    kind: (d: typeof все[number]) => d.docType,
+    supplier: (d: typeof все[number]) => d.counterpartyName,
+    status: (d: typeof все[number]) => d.status,
+    lines: (d: typeof все[number]) => d.linesCount,
+    qty: (d: typeof все[number]) => d.qtyPlanned,
+    sum: (d: typeof все[number]) => d.amountTotal,
+  }), [])
+  const { rows: items, sort, toggle } = useTableSort(все, сортировка, { key: 'date', dir: 'desc' })
   const total = data?.total ?? 0
   const suppliers = suppliersQ.data?.items ?? []
 
@@ -142,14 +156,14 @@ export function EquipmentSuppliesPanel({ companyId }: { companyId: string }) {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b bg-muted/40 text-muted-foreground">
-                <th className="p-2 text-left font-medium">№</th>
-                <th className="p-2 text-left font-medium">Дата</th>
-                <th className="p-2 text-left font-medium">Тип</th>
-                <th className="p-2 text-left font-medium">Поставщик</th>
-                <th className="p-2 text-left font-medium">Статус</th>
-                <th className="p-2 text-right font-medium">Позиций</th>
-                <th className="p-2 text-right font-medium">План / принято</th>
-                <th className="p-2 text-right font-medium">Сумма</th>
+                <SortTh sortKey="no" sort={sort} onSort={toggle}>№</SortTh>
+                <SortTh sortKey="date" sort={sort} onSort={toggle}>Дата</SortTh>
+                <SortTh sortKey="kind" sort={sort} onSort={toggle}>Тип</SortTh>
+                <SortTh sortKey="supplier" sort={sort} onSort={toggle}>Поставщик</SortTh>
+                <SortTh sortKey="status" sort={sort} onSort={toggle}>Статус</SortTh>
+                <SortTh sortKey="lines" sort={sort} onSort={toggle} align="right">Позиций</SortTh>
+                <SortTh sortKey="qty" sort={sort} onSort={toggle} align="right">План / принято</SortTh>
+                <SortTh sortKey="sum" sort={sort} onSort={toggle} align="right">Сумма</SortTh>
               </tr>
             </thead>
             <tbody>

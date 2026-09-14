@@ -12,6 +12,8 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2, Info } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
@@ -45,6 +47,18 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
     () => (d?.items ?? []).filter((i) => !quadrant || i.quadrant === quadrant),
     [d, quadrant],
   )
+  // Приоритет читают то по привлекательности, то по исполнимости, то по уверенности:
+  // это три разных вопроса к одному списку.
+  const сортировка = useMemo(() => ({
+    projectNo: (it: typeof items[number]) => it.projectNo,
+    address: (it: typeof items[number]) => it.address ?? it.city,
+    stage: (it: typeof items[number]) => it.stageLabel,
+    attract: (it: typeof items[number]) => it.attract,
+    feasible: (it: typeof items[number]) => it.feasible,
+    confidence: (it: typeof items[number]) => it.confidence,
+    distance: (it: typeof items[number]) => it.nearestStationKm,
+  }), [])
+  const приоритет = useTableSort(items, сортировка)
   const bench = d?.benchmark.network
 
   return (
@@ -134,19 +148,19 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/20 text-muted-foreground">
-                    <th className="text-left p-2 font-medium">Проект</th>
-                    <th className="text-left p-2 font-medium">Адрес / место</th>
-                    <th className="text-left p-2 font-medium">Стадия</th>
-                    <th className="text-right p-2 font-medium">Привлек.</th>
-                    <th className="text-right p-2 font-medium">Исполн.</th>
-                    <th className="text-right p-2 font-medium">Увер.</th>
-                    <th className="text-right p-2 font-medium">До сети, км</th>
+                    <SortTh sortKey="projectNo" sort={приоритет.sort} onSort={приоритет.toggle}>Проект</SortTh>
+                    <SortTh sortKey="address" sort={приоритет.sort} onSort={приоритет.toggle}>Адрес / место</SortTh>
+                    <SortTh sortKey="stage" sort={приоритет.sort} onSort={приоритет.toggle}>Стадия</SortTh>
+                    <SortTh sortKey="attract" sort={приоритет.sort} onSort={приоритет.toggle} align="right">Привлек.</SortTh>
+                    <SortTh sortKey="feasible" sort={приоритет.sort} onSort={приоритет.toggle} align="right">Исполн.</SortTh>
+                    <SortTh sortKey="confidence" sort={приоритет.sort} onSort={приоритет.toggle} align="right">Увер.</SortTh>
+                    <SortTh sortKey="distance" sort={приоритет.sort} onSort={приоритет.toggle} align="right">До сети, км</SortTh>
                     <th className="text-left p-2 font-medium">Решение</th>
                     <th className="text-left p-2 font-medium">Чего не хватает</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {items.slice(0, 300).map((it) => (
+                  {приоритет.rows.slice(0, 300).map((it) => (
                     <tr key={it.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
                       onClick={(ev) => (ev.altKey ? setDetailId(it.id) : openProject(it.id))}>
                       <td className="p-2 whitespace-nowrap font-mono">{it.projectNo ?? '—'}</td>

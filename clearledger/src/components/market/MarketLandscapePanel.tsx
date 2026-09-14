@@ -23,7 +23,9 @@ import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { MarketCompaniesPanel } from './MarketCompaniesPanel'
-import { getMarketLandscape, type MarketNetworkRow } from '@/services/marketService'
+import {
+  getMarketLandscape, type MarketNetworkRow, type MarketOwnerRow,
+} from '@/services/marketService'
 
 const nf = new Intl.NumberFormat('ru-RU')
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -74,6 +76,41 @@ export function MarketLandscapePanel() {
     base: (r: MarketNetworkRow) => r.baseCity,
   }), [])
   const [q, setQ] = useState('')
+  // У каждого вида свои столбцы, а значит и своя карта сортировки: в роуминге
+  // сравнивают долю открытых точек, в качестве — успешность, в реквизитах — ИНН.
+  const сорт_роуминга = useMemo(() => ({
+    name: (r: MarketNetworkRow) => r.name,
+    sites: (r: MarketNetworkRow) => r.sites,
+    access: (r: MarketNetworkRow) => (r.roaming === null ? null : r.roaming ? 1 : 0),
+    pct: (r: MarketNetworkRow) => r.roamingPct,
+    platform: (r: MarketNetworkRow) => r.platformOwner,
+  }), [])
+  const сорт_сервиса = useMemo(() => ({
+    name: (r: MarketNetworkRow) => r.name,
+    sites: (r: MarketNetworkRow) => r.sites,
+    quality: (r: MarketNetworkRow) => r.quality,
+    success: (r: MarketNetworkRow) => r.success,
+    silent: (r: MarketNetworkRow) => r.silentHalfYear,
+    rating: (r: MarketNetworkRow) => r.appRating,
+    reviews: (r: MarketNetworkRow) => r.appReviews,
+    app: (r: MarketNetworkRow) => r.appName,
+  }), [])
+  const сорт_реквизитов = useMemo(() => ({
+    name: (r: MarketNetworkRow) => r.name,
+    legal: (r: MarketNetworkRow) => r.legalName,
+    inn: (r: MarketNetworkRow) => r.inn,
+    ogrn: (r: MarketNetworkRow) => r.ogrn,
+    director: (r: MarketNetworkRow) => r.director,
+    trust: (r: MarketNetworkRow) => r.legalConfidence,
+  }), [])
+  const сорт_владельцев = useMemo(() => ({
+    name: (r: MarketOwnerRow) => r.name,
+    sites: (r: MarketOwnerRow) => r.sites,
+    share: (r: MarketOwnerRow) => r.sharePct,
+    alive: (r: MarketOwnerRow) => r.alive,
+    self: (r: MarketOwnerRow) => r.operatedSelf,
+    others: (r: MarketOwnerRow) => r.operatedByOthers,
+  }), [])
 
   const data = useQuery({
     queryKey: ['market-landscape', companyId],
@@ -87,6 +124,14 @@ export function MarketLandscapePanel() {
   const all = data.data?.networks ?? []
   const отобранные = all.filter((r) => !q || r.name.toLowerCase().includes(q.toLowerCase()))
   const { rows, sort, toggle } = useTableSort(отобранные, сортировка)
+  const роуминг = useTableSort(отобранные, сорт_роуминга)
+  const сервис = useTableSort(отобранные, сорт_сервиса)
+  const реквизиты = useTableSort(
+    отобранные.filter((r) => r.legalName || r.inn), сорт_реквизитов)
+  const владельцы = useTableSort(
+    (data.data?.owners ?? []).filter(
+      (r) => !q || r.name.toLowerCase().includes(q.toLowerCase())),
+    сорт_владельцев)
 
   if (data.isLoading) {
     return (
@@ -101,8 +146,7 @@ export function MarketLandscapePanel() {
 
   const ours = all.find((r) => r.isOurs)
   const platforms = data.data?.platforms ?? []
-  const owners = (data.data?.owners ?? []).filter(
-    (r) => !q || r.name.toLowerCase().includes(q.toLowerCase()))
+  const owners = владельцы.rows
 
   if (карточка) {
     return <MarketCompaniesPanel initialOpen={карточка} onBack={() => setКарточка(null)} />
@@ -217,12 +261,12 @@ export function MarketLandscapePanel() {
               ]))}>
               <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
                 <tr>
-                  <th className="p-2 text-left font-medium">Владелец</th>
-                  <th className="p-2 text-right font-medium">Точек</th>
-                  <th className="p-2 text-right font-medium">Доля</th>
-                  <th className="p-2 text-right font-medium">Живых</th>
-                  <th className="p-2 text-right font-medium">Обслуживает сам</th>
-                  <th className="p-2 text-right font-medium">Под чужим именем</th>
+                  <SortTh sortKey="name" sort={владельцы.sort} onSort={владельцы.toggle}>Владелец</SortTh>
+                  <SortTh sortKey="sites" sort={владельцы.sort} onSort={владельцы.toggle} align="right">Точек</SortTh>
+                  <SortTh sortKey="share" sort={владельцы.sort} onSort={владельцы.toggle} align="right">Доля</SortTh>
+                  <SortTh sortKey="alive" sort={владельцы.sort} onSort={владельцы.toggle} align="right">Живых</SortTh>
+                  <SortTh sortKey="self" sort={владельцы.sort} onSort={владельцы.toggle} align="right">Обслуживает сам</SortTh>
+                  <SortTh sortKey="others" sort={владельцы.sort} onSort={владельцы.toggle} align="right">Под чужим именем</SortTh>
                   <th className="p-2 text-left font-medium">Роли</th>
                 </tr>
               </thead>
@@ -323,7 +367,7 @@ export function MarketLandscapePanel() {
             <table className="w-full text-xs"
               {...exportRows('Роуминг', [
                 'Сеть', 'Мы', 'Точек', 'Доступ', 'Доля точек в роуминге, %', 'Платформа',
-              ], rows.map((r) => [
+              ], роуминг.rows.map((r) => [
                 r.name, r.isOurs ? 'мы' : null, r.sites,
                 r.roaming ? 'роуминг с другими сетями'
                   : r.roaming === false ? 'только своё приложение' : 'нет данных',
@@ -331,15 +375,15 @@ export function MarketLandscapePanel() {
               ]))}>
               <thead className="bg-muted/60 text-muted-foreground">
                 <tr>
-                  <th className="p-2 text-left font-medium">Сеть</th>
-                  <th className="p-2 text-right font-medium">Точек</th>
-                  <th className="p-2 text-left font-medium">Доступ</th>
-                  <th className="p-2 text-right font-medium">Доля точек в роуминге</th>
-                  <th className="p-2 text-left font-medium">Платформа</th>
+                  <SortTh sortKey="name" sort={роуминг.sort} onSort={роуминг.toggle}>Сеть</SortTh>
+                  <SortTh sortKey="sites" sort={роуминг.sort} onSort={роуминг.toggle} align="right">Точек</SortTh>
+                  <SortTh sortKey="access" sort={роуминг.sort} onSort={роуминг.toggle}>Доступ</SortTh>
+                  <SortTh sortKey="pct" sort={роуминг.sort} onSort={роуминг.toggle} align="right">Доля точек в роуминге</SortTh>
+                  <SortTh sortKey="platform" sort={роуминг.sort} onSort={роуминг.toggle}>Платформа</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {роуминг.rows.map((r) => (
                   <tr key={r.id} className={rowClass(r)}>
                     <td className="p-2">{r.name}{r.isOurs && ' · мы'}</td>
                     <td className="p-2 text-right"><Num v={r.sites} /></td>
@@ -366,25 +410,25 @@ export function MarketLandscapePanel() {
             {...exportRows('Качество сервиса', [
               'Сеть', 'Мы', 'Точек', 'Связь, %', 'Успешных зарядок, %', 'Молчат больше полугода',
               'Доля молчащих, %', 'Оценка приложения', 'Отзывов', 'Приложение',
-            ], rows.map((r) => [
+            ], сервис.rows.map((r) => [
               r.name, r.isOurs ? 'мы' : null, r.sites, r.quality, r.success, r.silentHalfYear,
               r.sites > 0 ? (r.silentHalfYear / r.sites) * 100 : null,
               r.appRating, r.appReviews, r.appName,
             ]))}>
             <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
               <tr>
-                <th className="p-2 text-left font-medium">Сеть</th>
-                <th className="p-2 text-right font-medium">Точек</th>
-                <th className="p-2 text-right font-medium">Связь</th>
-                <th className="p-2 text-right font-medium">Успешных зарядок</th>
-                <th className="p-2 text-right font-medium">Молчат больше полугода</th>
-                <th className="p-2 text-right font-medium">Оценка приложения</th>
-                <th className="p-2 text-right font-medium">Отзывов</th>
-                <th className="p-2 text-left font-medium">Приложение</th>
+                <SortTh sortKey="name" sort={сервис.sort} onSort={сервис.toggle}>Сеть</SortTh>
+                <SortTh sortKey="sites" sort={сервис.sort} onSort={сервис.toggle} align="right">Точек</SortTh>
+                <SortTh sortKey="quality" sort={сервис.sort} onSort={сервис.toggle} align="right">Связь</SortTh>
+                <SortTh sortKey="success" sort={сервис.sort} onSort={сервис.toggle} align="right">Успешных зарядок</SortTh>
+                <SortTh sortKey="silent" sort={сервис.sort} onSort={сервис.toggle} align="right">Молчат больше полугода</SortTh>
+                <SortTh sortKey="rating" sort={сервис.sort} onSort={сервис.toggle} align="right">Оценка приложения</SortTh>
+                <SortTh sortKey="reviews" sort={сервис.sort} onSort={сервис.toggle} align="right">Отзывов</SortTh>
+                <SortTh sortKey="app" sort={сервис.sort} onSort={сервис.toggle}>Приложение</SortTh>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {сервис.rows.map((r) => (
                 <tr key={r.id} className={rowClass(r)}>
                   <td className="p-2">{r.name}{r.isOurs && ' · мы'}</td>
                   <td className="p-2 text-right"><Num v={r.sites} /></td>
@@ -432,22 +476,22 @@ export function MarketLandscapePanel() {
               {...exportRows('Реквизиты', [
                 'Сеть', 'Мы', 'Юридическое лицо', 'ИНН', 'ОГРН', 'Руководитель',
                 'Достоверность', 'Ссылаться можно',
-              ], rows.filter((r) => r.legalName || r.inn).map((r) => [
+              ], реквизиты.rows.map((r) => [
                 r.name, r.isOurs ? 'мы' : null, r.legalName, r.inn, r.ogrn, r.director,
                 r.legalConfidence ?? 'не проверено', r.legalTrusted ? 'да' : 'нет',
               ]))}>
               <thead className="bg-muted/60 text-muted-foreground">
                 <tr>
-                  <th className="p-2 text-left font-medium">Сеть</th>
-                  <th className="p-2 text-left font-medium">Юридическое лицо</th>
-                  <th className="p-2 text-left font-medium">ИНН</th>
-                  <th className="p-2 text-left font-medium">ОГРН</th>
-                  <th className="p-2 text-left font-medium">Руководитель</th>
-                  <th className="p-2 text-left font-medium">Достоверность</th>
+                  <SortTh sortKey="name" sort={реквизиты.sort} onSort={реквизиты.toggle}>Сеть</SortTh>
+                  <SortTh sortKey="legal" sort={реквизиты.sort} onSort={реквизиты.toggle}>Юридическое лицо</SortTh>
+                  <SortTh sortKey="inn" sort={реквизиты.sort} onSort={реквизиты.toggle}>ИНН</SortTh>
+                  <SortTh sortKey="ogrn" sort={реквизиты.sort} onSort={реквизиты.toggle}>ОГРН</SortTh>
+                  <SortTh sortKey="director" sort={реквизиты.sort} onSort={реквизиты.toggle}>Руководитель</SortTh>
+                  <SortTh sortKey="trust" sort={реквизиты.sort} onSort={реквизиты.toggle}>Достоверность</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {rows.filter((r) => r.legalName || r.inn).map((r) => (
+                {реквизиты.rows.map((r) => (
                   <tr key={r.id} className={rowClass(r)}>
                     <td className="p-2">{r.name}{r.isOurs && ' · мы'}</td>
                     <td className="p-2">{r.legalName ?? '—'}</td>

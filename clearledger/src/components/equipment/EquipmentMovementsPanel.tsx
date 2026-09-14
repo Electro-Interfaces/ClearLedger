@@ -8,6 +8,8 @@
  */
 
 import { useMemo, useState } from 'react'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -87,7 +89,19 @@ export function EquipmentMovementsPanel({ companyId }: { companyId: string }) {
     placeholderData: keepPreviousData,
   })
 
-  const items = data?.items ?? []
+  const все = data?.items ?? []
+  // Журнал движений смотрят и по дате, и по единице, и по площадке: «что уехало
+  // последним» и «куда делась вот эта станция» — разные вопросы.
+  const сортировка = useMemo(() => ({
+    date: (m: typeof все[number]) => m.occurredOn,
+    op: (m: typeof все[number]) => m.opLabel ?? m.op,
+    unit: (m: typeof все[number]) => m.unit?.serialNumber ?? m.unit?.inventoryNumber ?? null,
+    route: (m: typeof все[number]) => m.toLocation?.name ?? m.fromLocation?.name ?? null,
+    state: (m: typeof все[number]) => m.toStateLabel ?? m.toState,
+    basis: (m: typeof все[number]) => m.basis ?? m.supplyNumber,
+    who: (m: typeof все[number]) => m.createdBy,
+  }), [])
+  const { rows: items, sort, toggle } = useTableSort(все, сортировка, { key: 'date', dir: 'desc' })
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -156,14 +170,14 @@ export function EquipmentMovementsPanel({ companyId }: { companyId: string }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b bg-muted/40 text-muted-foreground">
-                  <th className="p-2 text-left font-medium whitespace-nowrap">Дата</th>
-                  <th className="p-2 text-left font-medium">Операция</th>
-                  <th className="p-2 text-left font-medium">Единица</th>
-                  <th className="p-2 text-left font-medium">Откуда → Куда</th>
-                  <th className="p-2 text-left font-medium">Состояние</th>
-                  <th className="p-2 text-left font-medium">Основание</th>
+                  <SortTh sortKey="date" sort={sort} onSort={toggle}>Дата</SortTh>
+                  <SortTh sortKey="op" sort={sort} onSort={toggle}>Операция</SortTh>
+                  <SortTh sortKey="unit" sort={sort} onSort={toggle}>Единица</SortTh>
+                  <SortTh sortKey="route" sort={sort} onSort={toggle}>Откуда → Куда</SortTh>
+                  <SortTh sortKey="state" sort={sort} onSort={toggle}>Состояние</SortTh>
+                  <SortTh sortKey="basis" sort={sort} onSort={toggle}>Основание</SortTh>
                   <th className="p-2 text-left font-medium">Комментарий</th>
-                  <th className="p-2 text-left font-medium">Кто</th>
+                  <SortTh sortKey="who" sort={sort} onSort={toggle}>Кто</SortTh>
                 </tr>
               </thead>
               <tbody>

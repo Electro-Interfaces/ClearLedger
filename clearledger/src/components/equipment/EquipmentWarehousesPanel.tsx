@@ -9,6 +9,8 @@
  */
 
 import { useMemo, useState } from 'react'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2, Plus, Warehouse } from 'lucide-react'
@@ -137,6 +139,15 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
     return [...summary, ...extra]
   }, [data, locationsQ.data])
 
+  // Склады сравнивают по загруженности: где скопились единицы, где пусто.
+  const сортировка = useMemo(() => ({
+    name: (w: WarehouseSummaryRow) => w.location.name,
+    units: (w: WarehouseSummaryRow) => w.unitsTotal,
+    spareLines: (w: WarehouseSummaryRow) => w.sparePositions,
+    spareQty: (w: WarehouseSummaryRow) => w.spareQty,
+  }), [])
+  const склады = useTableSort(rows, сортировка)
+
   const external = data?.external ?? []
   const existingCodes = useMemo(
     () => (locationsQ.data ?? []).map((l) => l.code),
@@ -203,17 +214,17 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b bg-muted/40 text-muted-foreground">
-                  <th className="p-2 text-left font-medium">Склад</th>
+                  <SortTh sortKey="name" sort={склады.sort} onSort={склады.toggle}>Склад</SortTh>
                   {STATE_COLS.map((c) => (
                     <th key={c.state} className="p-2 text-right font-medium whitespace-nowrap">{c.label}</th>
                   ))}
-                  <th className="p-2 text-right font-medium whitespace-nowrap">Всего единиц</th>
-                  <th className="p-2 text-right font-medium whitespace-nowrap">Позиций ЗИП</th>
-                  <th className="p-2 text-right font-medium whitespace-nowrap">Кол-во ЗИП</th>
+                  <SortTh sortKey="units" sort={склады.sort} onSort={склады.toggle} align="right">Всего единиц</SortTh>
+                  <SortTh sortKey="spareLines" sort={склады.sort} onSort={склады.toggle} align="right">Позиций ЗИП</SortTh>
+                  <SortTh sortKey="spareQty" sort={склады.sort} onSort={склады.toggle} align="right">Кол-во ЗИП</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((w) => (
+                {склады.rows.map((w) => (
                   <tr key={w.location.id} className="border-b border-border/30 hover:bg-muted/30">
                     <td className="p-2">
                       <div className="flex items-center gap-1.5 font-medium">

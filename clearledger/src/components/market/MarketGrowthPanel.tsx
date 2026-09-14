@@ -11,12 +11,14 @@
  * собой бессмысленно — расти надо выручкой; там, где нас нет, никакая цена уже не
  * наша, и вход идёт стройкой, роумингом или франшизой.
  */
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Compass } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
@@ -113,13 +115,39 @@ export function MarketGrowthPanel() {
     enabled: !!companyId && вид === 'pipeline',
   })
 
+  // Регионы перебирают по разным вопросам: где выручка, где чужих больше, где наша
+  // доля мала. Карты объявлены до ранних возвратов — порядок хуков обязан совпадать.
+  const карта_регионов = useMemo(() => ({
+    name: (r: GrowthPresenceRow) => r.name,
+    presence: (r: GrowthPresenceRow) => r.presenceLabel,
+    share: (r: GrowthPresenceRow) => r.sharePct,
+    ourSites: (r: GrowthPresenceRow) => r.ourSites,
+    rivals: (r: GrowthPresenceRow) => r.rivalSites,
+    rivalAlive: (r: GrowthPresenceRow) => r.rivalAlive,
+    sessions: (r: GrowthPresenceRow) => r.ourSessions,
+    revenue: (r: GrowthPresenceRow) => r.ourRevenue,
+  }), [])
+  const карта_городов = useMemo(() => ({
+    city: (c: { city: string }) => c.city,
+    region: (c: { region: string | null }) => c.region,
+    projects: (c: { projects: number }) => c.projects,
+    market: (c: { marketSites: number; marketKnown: boolean }) =>
+      (c.marketKnown ? c.marketSites : null),
+    alive: (c: { marketAlive: number; marketKnown: boolean }) =>
+      (c.marketKnown ? c.marketAlive : null),
+  }), [])
+  const города = useTableSort(pipeline.data?.cities ?? [], карта_городов)
+  // Отбор и сортировка — до ранних возвратов: во время загрузки это пустой список,
+  // но порядок хуков обязан совпадать на каждой отрисовке.
+  const регионы = useTableSort(
+    (presence.data?.regions ?? []).filter((r) => filter === 'all' || r.presence === filter),
+    карта_регионов)
+
   if (overview.isLoading) return <Skeleton />
 
   const groups = overview.data?.presence ?? []
   const absent = groups.find((g) => g.presence === 'absent')
   const monopoly = groups.find((g) => g.presence === 'monopoly')
-  const regions = (presence.data?.regions ?? []).filter(
-    (r) => filter === 'all' || r.presence === filter)
 
   return (
     <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
@@ -265,17 +293,17 @@ export function MarketGrowthPanel() {
               ]))}>
               <thead className="bg-muted/30 text-muted-foreground">
                 <tr>
-                  <th className="p-2 text-left font-medium">Город</th>
-                  <th className="p-2 text-left font-medium">Регион</th>
-                  <th className="p-2 text-right font-medium">Площадок</th>
+                  <SortTh sortKey="city" sort={города.sort} onSort={города.toggle}>Город</SortTh>
+                  <SortTh sortKey="region" sort={города.sort} onSort={города.toggle}>Регион</SortTh>
+                  <SortTh sortKey="projects" sort={города.sort} onSort={города.toggle} align="right">Площадок</SortTh>
                   <th className="p-2 text-left font-medium">Стадии</th>
                   <th className="p-2 text-left font-medium">Мы там</th>
-                  <th className="p-2 text-right font-medium">Рынок</th>
-                  <th className="p-2 text-right font-medium">Живых</th>
+                  <SortTh sortKey="market" sort={города.sort} onSort={города.toggle} align="right">Рынок</SortTh>
+                  <SortTh sortKey="alive" sort={города.sort} onSort={города.toggle} align="right">Живых</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {pipeline.data.cities.map((c) => (
+                {города.rows.map((c) => (
                   <tr key={`${c.city}-${c.region ?? ''}`} className="border-t border-border/50">
                     <td className="p-2 font-medium">{c.city}</td>
                     <td className="p-2 text-muted-foreground">{c.region ?? 'нет данных'}</td>
@@ -343,25 +371,25 @@ export function MarketGrowthPanel() {
               {...exportRows('Положение по регионам', [
                 'Регион', 'Наше положение', 'Наша доля, %', 'Наши точки', 'Чужие',
                 'Живые чужие', 'Сессий', 'Выручка, ₽', 'Чем расти',
-              ], regions.map((r) => [
+              ], регионы.rows.map((r) => [
                 r.name, r.presenceLabel, r.sharePct, r.ourSites, r.rivalSites, r.rivalAlive,
                 r.ourSessions, r.ourRevenue,
                 r.suggestedTracks.map((t) => overview.data?.trackLabels?.[t] ?? t).join(', '),
               ]))}>
               <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
                 <tr>
-                  <th className="p-2 text-left font-medium">Регион</th>
-                  <th className="p-2 text-left font-medium">Наше положение</th>
-                  <th className="p-2 text-right font-medium">Наши точки</th>
-                  <th className="p-2 text-right font-medium">Чужие</th>
-                  <th className="p-2 text-right font-medium">Живые чужие</th>
-                  <th className="p-2 text-right font-medium">Сессий</th>
-                  <th className="p-2 text-right font-medium">Выручка</th>
+                  <SortTh sortKey="name" sort={регионы.sort} onSort={регионы.toggle}>Регион</SortTh>
+                  <SortTh sortKey="presence" sort={регионы.sort} onSort={регионы.toggle}>Наше положение</SortTh>
+                  <SortTh sortKey="ourSites" sort={регионы.sort} onSort={регионы.toggle} align="right">Наши точки</SortTh>
+                  <SortTh sortKey="rivals" sort={регионы.sort} onSort={регионы.toggle} align="right">Чужие</SortTh>
+                  <SortTh sortKey="rivalAlive" sort={регионы.sort} onSort={регионы.toggle} align="right">Живые чужие</SortTh>
+                  <SortTh sortKey="sessions" sort={регионы.sort} onSort={регионы.toggle} align="right">Сессий</SortTh>
+                  <SortTh sortKey="revenue" sort={регионы.sort} onSort={регионы.toggle} align="right">Выручка</SortTh>
                   <th className="p-2 text-left font-medium">Чем расти</th>
                 </tr>
               </thead>
               <tbody>
-                {regions.map((r) => (
+                {регионы.rows.map((r) => (
                   <tr key={r.name} className="border-t border-border/60">
                     <td className="p-2 font-medium">{r.name}</td>
                     <td className="p-2"><Presence row={r} /></td>
@@ -381,7 +409,7 @@ export function MarketGrowthPanel() {
                 ))}
               </tbody>
             </table>
-            {regions.length === 0 && (
+            {регионы.rows.length === 0 && (
               <p className="p-6 text-center text-xs text-muted-foreground">
                 Регионов с таким положением нет.
               </p>
