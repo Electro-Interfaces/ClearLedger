@@ -81,8 +81,8 @@ export function AuditorTerminal() {
   // просто аттач к другому сеансу, поэтому отдельного состояния на вкладку не нужно.
   const [tab, setTab] = useState(0)
   const { data: sessions } = useQuery({
-    queryKey: ['auditor-sessions'], queryFn: auditor.getSessions,
-    refetchInterval: 15_000, retry: false,
+    queryKey: ['auditor-sessions', companyId], queryFn: () => auditor.getSessions(companyId),
+    enabled: !!companyId, refetchInterval: 15_000, retry: false,
   })
   const { data: health } = useQuery({
     queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 60_000, retry: false,
@@ -201,10 +201,19 @@ export function AuditorTerminal() {
       ws.onerror = () => setError('Терминал недоступен: сервис аудитора не отвечает')
       ws.onclose = (e) => {
         if (disposed) return
-        // 4001 — сеанс закрыт или отдан другому окну. Возвращаться нельзя: две вкладки
-        // начнут выкидывать друг друга по кругу. Ждём решения человека.
+        // 4001 — сеанс отдан другому окну. Возвращаться нельзя: две вкладки начнут
+        // выкидывать друг друга по кругу. Ждём решения человека.
         if (e.code === 4001) {
           setState('detached')
+          return
+        }
+        // 4002 — сеанс просто закончился: движок вышел, работать не с чем. Раньше это
+        // приходило тем же 4001, и человеку сообщали «открыто в другом окне» — он шёл
+        // искать окно, которого нет. Возвращаться тоже нельзя, но развилка другая:
+        // не «вернуть сюда», а открыть новый.
+        if (e.code === 4002) {
+          setError('Сеанс завершён — «Начать заново» откроет новый')
+          setState('closed')
           return
         }
         // Обрыв связи — другое дело. Сеанс на той стороне живёт в tmux и продолжает
@@ -366,9 +375,12 @@ export function AuditorTerminal() {
       <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-4 py-2 text-xs text-muted-foreground">
         <TerminalSquare className="size-3.5" />
         <span className="shrink-0">Мастерская · <span className="text-foreground">/work</span></span>
-        {/* Вкладка с работающим агентом помечена точкой: он считает и без открытого окна. */}
+        {/* Вкладка с работающим агентом помечена точкой: он считает и без открытого окна.
+            Пустой ответ сервиса — не повод убирать вкладки: без них человек заперт в
+            текущей и даже не знает, что их четыре (так и вышло, когда ручка начала
+            отвечать 401). Поэтому проверяем длину, а не только `undefined`. */}
         <span className="flex shrink-0 items-center gap-0.5">
-          {(sessions ?? [{ tab: 0, live: false }]).map((s) => (
+          {(sessions?.length ? sessions : [{ tab: 0, live: false }]).map((s) => (
             <button key={s.tab} type="button" onClick={() => setTab(s.tab)}
               title={s.live ? 'здесь идёт работа' : 'свободная вкладка'}
               className={cn('flex min-h-6 items-center gap-1 rounded-md px-2 py-0.5 transition-colors',

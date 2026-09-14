@@ -57,6 +57,13 @@ export interface AuditorHealth {
   auth: boolean
   skills: number
   workshop: boolean
+  /**
+   * Мастерская открыта ВСЕМ участникам пространства, а не только администратору
+   * (`AUDITOR_WORKSHOP_ALL` в стеке). Включено у нас, где терминал агента — рабочий
+   * инструмент команды; у заказчика выключено: shell рядом с базой и ключами
+   * остаётся правом администратора.
+   */
+  workshop_all?: boolean
   /** Поднят ли распознаватель речи в стеке (профиль `asr`). */
   dictation?: boolean
   authProblem?: string
@@ -215,9 +222,15 @@ export async function exportWork() {
 /**
  * Занятость вкладок мастерской. Сеанс живёт без соединения, поэтому по открытому
  * терминалу не видно, работает ли агент в соседней вкладке.
+ *
+ * 🔴 Токен обязателен — и его здесь не было. Сервис закрыл ручку членством в
+ * пространстве, ответом стал 401, клиент молча вернул пустой список — и вкладки
+ * пропали из шапки мастерской целиком: переключиться было некуда, а идущая в соседней
+ * вкладке работа не показывалась. Ровно та история, о которой предупреждает
+ * `agentHeaders`: забыл заголовки в новой ручке — раздел выглядит поломанным.
  */
-export async function getSessions(): Promise<{ tab: number; live: boolean; shared?: boolean }[]> {
-  const res = await fetch(`${BASE}/sessions`)
+export async function getSessions(companyId: string): Promise<{ tab: number; live: boolean; shared?: boolean }[]> {
+  const res = await fetch(`${BASE}/sessions`, { headers: agentHeaders(companyId) })
   if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return []
   return res.json()
 }

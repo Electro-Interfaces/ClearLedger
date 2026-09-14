@@ -98,7 +98,11 @@ export function AuditorWorkspace({ view: viewIn, onView }: {
     queryKey: ['auditor-settings', companyId],
     queryFn: () => auditor.getSettings(companyId), enabled: !!companyId, retry: false,
   })
-  const views = VIEWS.filter((v) => !('admin' in v && v.admin) || (health?.workshop && settings?.can_manage))
+  // Мастерскую показываем админу пространства, а там, где стек так настроен
+  // (`AUDITOR_WORKSHOP_ALL`), — любому участнику: у нас терминал агента рабочий
+  // инструмент всей команды. Право всё равно считает сервис, здесь только видимость.
+  const canWorkshop = !!health?.workshop && (!!settings?.can_manage || !!health?.workshop_all)
+  const views = VIEWS.filter((v) => !('admin' in v && v.admin) || canWorkshop)
   const view = views.some((v) => v.key === viewIn) ? viewIn : 'chat'
   const activeMobileTab = useRef<HTMLButtonElement>(null)
   useEffect(() => {
