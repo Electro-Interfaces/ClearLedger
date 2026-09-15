@@ -420,12 +420,21 @@ export const getPresence = () =>
  */
 export async function uploadAttachment(
   file: File, companyId?: string | null,
+  /** Ход отправки, 0..1: у видео он единственный признак, что что-то происходит. */
+  onProgress?: (доля: number) => void,
 ): Promise<{ fileUrl: string; fileName: string; fileSize: number }> {
   const fd = new FormData()
   fd.append('file', file)
   // Вложение переписки — не приём данных: без этой пометки файл из чата
   // засчитывался приёмом в слое L1 наравне с выгрузкой учётной системы.
   const q = `?purpose=attachment${companyId ? `&company_id=${encodeURIComponent(companyId)}` : ''}`
-  const res = await upload<{ source_id: string }>(`/api/intake${q}`, fd)
+  const res = await upload<{ source_id: string }>(`/api/intake${q}`, fd, onProgress)
   return { fileUrl: `/api/files/${res.source_id}`, fileName: file.name, fileSize: file.size }
 }
+
+/**
+ * Предел размера вложения — 100 МБ: столько принимает Ядро и пропускает кромка.
+ * Проверяем у автора, до отправки: минута ожидания и техническая ошибка в конце —
+ * худший способ узнать, что файл велик.
+ */
+export const ПРЕДЕЛ_ВЛОЖЕНИЯ = 100 * 1024 * 1024

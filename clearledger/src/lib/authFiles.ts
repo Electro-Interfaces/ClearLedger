@@ -1,25 +1,24 @@
+/**
+ * Вложения чата, закрытые JWT: `GET /api/files/{id}` требует заголовок, поэтому
+ * прямой адрес в `src` не работает — файл качается через `downloadBlob`, показывается
+ * объектная ссылка, а сама ссылка кешируется по пути файла.
+ *
+ * Политика кеша — в `lib/blobCache.ts`: там правило «пока ссылку показывают, отзывать
+ * её нельзя», из-за нарушения которого видео в ленте переставало открываться.
+ */
 import { useEffect, useState } from 'react'
 import { downloadBlob } from '@/services/apiClient'
+import {
+  взять, найти, отпустить, очистить, положить, состояние,
+} from '@/lib/blobCache'
 
-const blobCache = new Map<string, string>()
-const CACHE_LIMIT = 12
-
-function rememberBlob(path: string, url: string) {
-  const previous = blobCache.get(path)
-  if (previous && previous !== url) URL.revokeObjectURL(previous)
-  blobCache.delete(path)
-  blobCache.set(path, url)
-  while (blobCache.size > CACHE_LIMIT) {
-    const oldest = blobCache.entries().next().value as [string, string] | undefined
-    if (!oldest) break
-    blobCache.delete(oldest[0])
-    URL.revokeObjectURL(oldest[1])
-  }
+export function clearAuthFileCache(): void {
+  очистить()
 }
 
-export function clearAuthFileCache() {
-  blobCache.forEach((url) => URL.revokeObjectURL(url))
-  blobCache.clear()
+/** Состояние кеша — для проверок политики вытеснения. */
+export function authFileCacheState() {
+  return состояние()
 }
 
 export function useAuthBlob(path: string | null): {
@@ -32,23 +31,33 @@ export function useAuthBlob(path: string | null): {
     url: string | null
     error: boolean
   }>({ path: null, url: null, error: false })
-  const cached = path ? blobCache.get(path) ?? null : null
   const current = result.path === path ? result : null
+  // Готовое читаем при отрисовке, а не через состояние: лишний проход по
+  // состоянию здесь ничего не добавляет, зато даёт каскад перерисовок.
+  const cached = path ? найти(path) : null
 
   useEffect(() => {
-    if (!path || blobCache.has(path)) return
+    if (!path) return
     let alive = true
+    // Уже скачано — помечаем, что показываем: иначе следующее вложение ленты
+    // вытеснит эту ссылку прямо из-под плеера.
+    if (взять(path)) return () => { отпустить(path) }
+    let взято = false
     downloadBlob(path)
       .then((blob) => {
         if (!alive) return
-        const objUrl = URL.createObjectURL(blob)
-        rememberBlob(path, objUrl)
-        setResult({ path, url: objUrl, error: false })
+        const запись = положить(path, URL.createObjectURL(blob))
+        запись.держат += 1
+        взято = true
+        setResult({ path, url: запись.url, error: false })
       })
       .catch(() => {
         if (alive) setResult({ path, url: null, error: true })
       })
-    return () => { alive = false }
+    return () => {
+      alive = false
+      if (взято) отпустить(path)
+    }
   }, [path])
 
   return {
@@ -99,9 +108,9 @@ export async function downloadAttachment(
   path: string, name?: string, options: { cache?: boolean } = {},
 ): Promise<void> {
   const useCache = options.cache !== false
-  const cached = useCache ? blobCache.get(path) : undefined
+  const cached = useCache ? найти(path) : null
   const objUrl = cached ?? URL.createObjectURL(await downloadBlob(path))
-  if (!cached && useCache) rememberBlob(path, objUrl)
+  if (!cached && useCache) положить(path, objUrl)
   const anchor = document.createElement('a')
   anchor.href = objUrl
   anchor.download = name || 'файл'
@@ -119,9 +128,9 @@ export async function openAuthAttachment(
   target.opener = null
   try {
     const useCache = options.cache !== false
-    const cached = useCache ? blobCache.get(path) : undefined
+    const cached = useCache ? найти(path) : null
     const objUrl = cached ?? URL.createObjectURL(await downloadBlob(path))
-    if (!cached && useCache) rememberBlob(path, objUrl)
+    if (!cached && useCache) положить(path, objUrl)
     target.location.href = objUrl
     if (!useCache) window.setTimeout(() => URL.revokeObjectURL(objUrl), 60_000)
   } catch (error) {

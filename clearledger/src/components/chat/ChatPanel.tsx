@@ -2016,15 +2016,34 @@ function DateChip({ iso }: { iso: string }) {
 }
 
 /** Превью прикреплённого (ещё не отправленного) файла: миниатюра для картинок. */
-function PendingThumb({ file, onRemove }: { file: File; onRemove: () => void }) {
+function PendingThumb({ file, onRemove, ход }: {
+  file: File; onRemove: () => void
+  /** Доля отправленного, 0..1. Пока не отправляем — undefined. */
+  ход?: number
+}) {
   const isImg = file.type.startsWith('image/')
   const url = useMemo(() => (isImg ? URL.createObjectURL(file) : null), [file, isImg])
   useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
+  const идёт = ход !== undefined && ход < 1
   return (
-    <span className="relative inline-flex items-center gap-1 rounded bg-muted px-1 py-0.5 text-[10px]">
+    <span className="relative inline-flex items-center gap-1 overflow-hidden rounded bg-muted px-1 py-0.5 text-[10px]">
       {url ? <img src={url} alt={file.name} className="size-9 rounded object-cover" /> : <FileText className="mx-1 size-3.5" />}
       <span className="max-w-[90px] truncate pr-0.5">{file.name}</span>
-      <button onClick={onRemove} className="text-muted-foreground hover:text-red-500" title="Убрать"><X className="size-3" /></button>
+      {/* Число процентов, а не безымянный крутящийся круг: у видео на шестьдесят
+          мегабайт это единственный признак, что отправка идёт, а не висит. */}
+      {ход !== undefined && (
+        <span className="shrink-0 tabular-nums text-muted-foreground">
+          {Math.round(ход * 100)} %
+        </span>
+      )}
+      {идёт ? (
+        <span className="absolute inset-x-0 bottom-0 h-0.5 bg-primary/25">
+          <span className="block h-full bg-primary transition-[width]"
+            style={{ width: `${Math.round(ход * 100)}%` }} />
+        </span>
+      ) : (
+        <button onClick={onRemove} className="text-muted-foreground hover:text-red-500" title="Убрать"><X className="size-3" /></button>
+      )}
     </span>
   )
 }
@@ -2054,6 +2073,10 @@ export function ChatPanel({ compact, scopeProduct }: {
   const [listSearch, setListSearch] = useState('')
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
+  // Ход отправки по имени файла, 0..1. Видео на шестьдесят мегабайт едет минутами,
+  // и без этого числа экран выглядит замершим: человек считает, что не работает, и
+  // жмёт «отправить» ещё раз (жалоба РусГидро 14.09.2026).
+  const [ходОтправки, setХодОтправки] = useState<Record<string, number>>({})
   // Видео без звука — предупредить автора ДО отправки. Запись экрана macOS по
   // умолчанию идёт без микрофона: человек наговаривает замечание, а получатель
   // видит немое кино. Проверка стоит здесь, а не у каждой кнопки выбора файла:
@@ -2078,6 +2101,25 @@ export function ChatPanel({ compact, scopeProduct }: {
       })
     }
   }, [pendingFiles])
+  /**
+   * Общий приёмник файлов: пять путей добавления (кнопка, вставка, перетаскивание,
+   * захват области, пересылка) обязаны вести себя одинаково. Слишком большой файл
+   * отсекается здесь, у автора: минута ожидания и техническая ошибка в конце —
+   * худший способ узнать, что видео не пролезает.
+   */
+  const принятьФайлы = useCallback((files: File[]) => {
+    const велики = files.filter((f) => f.size > chat.ПРЕДЕЛ_ВЛОЖЕНИЯ)
+    for (const f of велики) {
+      toast.error(`«${f.name}» — ${Math.round(f.size / 1048576)} МБ`, {
+        description: 'Больше 100 МБ вложение не принимается. Для записи экрана: '
+          + 'снимите окно, а не весь экран, или ужмите ролик перед отправкой.',
+        duration: 12000,
+      })
+    }
+    const годные = files.filter((f) => f.size <= chat.ПРЕДЕЛ_ВЛОЖЕНИЯ)
+    if (годные.length) setPendingFiles((p) => [...p, ...годные].slice(0, 5))
+  }, [])
+
   const [capturing, setCapturing] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
@@ -2320,9 +2362,12 @@ export function ChatPanel({ compact, scopeProduct }: {
       let uploaded: { fileUrl: string; fileName: string; fileSize: number; posterUrl?: string }[] = []
       if (pendingFiles.length && selectedRoom) {
         setUploading(true)
+        setХодОтправки({})
         try {
           uploaded = await Promise.all(pendingFiles.map(async (f) => {
-            const up = await chat.uploadAttachment(f, user?.default_company_id)
+            const up = await chat.uploadAttachment(
+              f, user?.default_company_id,
+              (доля) => setХодОтправки((п) => ({ ...п, [f.name]: доля })))
             // Кадр снимаем здесь, у автора: файл уже в руках браузера, а Ядро видео
             // не декодирует. Без кадра лента показывает пустое место, пока качается
             // весь ролик — десятки мегабайт на каждое сообщение.
@@ -2332,7 +2377,7 @@ export function ChatPanel({ compact, scopeProduct }: {
             const постер = await chat.uploadAttachment(кадр, user?.default_company_id)
             return { ...up, posterUrl: постер.fileUrl }
           }))
-        } finally { setUploading(false) }
+        } finally { setUploading(false); setХодОтправки({}) }
       }
       const typeOf = (name: string) =>
         /\.(jpg|jpeg|png|gif|webp)$/i.test(name) ? 'image'
@@ -2573,14 +2618,14 @@ export function ChatPanel({ compact, scopeProduct }: {
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
     const named = imgs.map((f, i) =>
       new File([f], f.name && !/^image\.\w+$/i.test(f.name) ? f.name : `Скриншот-${stamp}${i ? `-${i}` : ''}.png`, { type: f.type }))
-    setPendingFiles((p) => [...p, ...named].slice(0, 5))
+    принятьФайлы(named)
     toast.success(named.length > 1 ? `Добавлено изображений: ${named.length}` : 'Скриншот добавлен — напишите подпись и отправьте')
   }
   // Перетаскивание файлов/картинок прямо в область чата
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault(); setDragOver(false)
     const files = Array.from(e.dataTransfer?.files || [])
-    if (files.length) setPendingFiles((p) => [...p, ...files].slice(0, 5))
+    if (files.length) принятьФайлы(files)
   }
   const archiveRoom = async (id: string, on: boolean) => {
     try {
@@ -3317,7 +3362,7 @@ export function ChatPanel({ compact, scopeProduct }: {
             onDrop={(e) => {
               if (!e.dataTransfer.files.length) return
               e.preventDefault(); setDragOver(false)
-              setPendingFiles((p) => [...p, ...Array.from(e.dataTransfer.files)].slice(0, 5))
+              принятьФайлы(Array.from(e.dataTransfer.files))
             }}>
             <div className="flex flex-col p-2.5">
               {linkedWork.isError && <div role="alert" className="mb-2 rounded border p-2 text-xs">Не удалось обновить связанную работу. <button className="underline" onClick={() => void linkedWork.refetch()}>Повторить</button></div>}
@@ -3457,13 +3502,14 @@ export function ChatPanel({ compact, scopeProduct }: {
               {pendingFiles.length > 0 && (
                 <div className="mb-1.5 flex flex-wrap gap-1">
                   {pendingFiles.map((f, i) => (
-                    <PendingThumb key={i} file={f} onRemove={() => setPendingFiles((p) => p.filter((_, k) => k !== i))} />
+                    <PendingThumb key={i} file={f} ход={ходОтправки[f.name]}
+                      onRemove={() => setPendingFiles((p) => p.filter((_, k) => k !== i))} />
                   ))}
                 </div>
               )}
               <div className="flex items-end gap-1.5">
                 <input ref={fileInputRef} type="file" multiple hidden
-                  onChange={(e) => { const fs = Array.from(e.target.files || []); setPendingFiles((p) => [...p, ...fs].slice(0, 5)); if (fileInputRef.current) fileInputRef.current.value = '' }} />
+                  onChange={(e) => { принятьФайлы(Array.from(e.target.files || [])); if (fileInputRef.current) fileInputRef.current.value = '' }} />
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploading || sendMutation.isPending}
                   className="inline-flex size-8 max-md:size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50" title="Прикрепить файл">
                   <Paperclip className="size-4" />

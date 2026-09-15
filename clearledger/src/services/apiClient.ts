@@ -297,14 +297,47 @@ export async function del<T = void>(path: string): Promise<T> {
 }
 
 /** POST multipart (файлы) */
-export async function upload<T>(path: string, formData: FormData): Promise<T> {
+export async function upload<T>(
+  path: string, formData: FormData,
+  /**
+   * Ход отправки, 0..1. Нужен файлам, которые едут минутами: видео на 60 МБ по
+   * обычному каналу уходит полторы минуты, и всё это время `fetch` не сообщает
+   * ничего. Человек видит замерший экран и решает, что загрузка не работает
+   * (жалоба РусГидро 14.09.2026). С колбэком используется XHR — другого способа
+   * узнать ход отправки в браузере нет, у `fetch` его не существует.
+   */
+  onProgress?: (доля: number) => void,
+): Promise<T> {
   if (isDemoMode()) return demoWrite<T>()
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method: 'POST',
-    headers: headers(), // НЕ ставим Content-Type — browser сам добавит boundary
-    body: formData,
+  if (!onProgress) {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method: 'POST',
+      headers: headers(), // НЕ ставим Content-Type — browser сам добавит boundary
+      body: formData,
+    })
+    return handleResponse<T>(res)
+  }
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${BASE_URL}${path}`)
+    for (const [k, v] of Object.entries(headers())) xhr.setRequestHeader(k, v)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total)
+    }
+    xhr.onload = () => {
+      // Ответ разбираем тем же путём, что и `fetch`: коды, тексты ошибок и разбор
+      // JSON обязаны совпадать, иначе у загрузки заведётся своя правда.
+      const тело = new Response(xhr.response, {
+        status: xhr.status,
+        statusText: xhr.statusText,
+        headers: { 'Content-Type': xhr.getResponseHeader('Content-Type') || 'application/json' },
+      })
+      handleResponse<T>(тело).then(resolve, reject)
+    }
+    xhr.onerror = () => reject(new ApiError(0, 'Не удалось связаться с сервером'))
+    xhr.ontimeout = () => reject(new ApiError(0, 'Загрузка не уложилась во время ожидания'))
+    xhr.send(formData)
   })
-  return handleResponse<T>(res)
 }
 
 /** Скачать файл (blob) */
