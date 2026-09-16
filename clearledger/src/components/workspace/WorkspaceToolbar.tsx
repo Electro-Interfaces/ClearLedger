@@ -1,26 +1,20 @@
 /**
- * Общий тулбар рабочего стола — над рабочей областью.
- * Ключевой инструмент: слева якорь-метка зоны «Фильтр рабочей области», далее —
- * свёрнутый основной фильтр (`WorkspaceFilterBar`): период · область · данные · источник.
- * Переключатель разрезов учёта — в вертикальном меню слева (`WorkspaceModeSidebar`).
+ * Общий тулбар рабочего стола — над рабочей областью: период · область · данные ·
+ * источник (`WorkspaceFilterBar`). Переключатель разрезов учёта — в вертикальном
+ * меню слева (`WorkspaceModeSidebar`).
+ *
+ * Слева стояла метка-якорь «Фильтр рабочей области» — иконка воронки и подпись в две
+ * строки. Она ничего не открывала, занимала двести точек ширины и заставляла читать
+ * слово «фильтр» трижды подряд: метка, кнопка «Расширенный фильтр», чипы активных
+ * ограничений. Убрана (МАГ, 15.09.2026, поручения №65 и №66): зона обозначена своей
+ * строкой и рамкой, а кнопка названа тем, что открывает.
  */
 
-import { Filter } from 'lucide-react'
 import { WorkspaceFilterBar } from './WorkspaceFilterBar'
 
 export function WorkspaceToolbar() {
   return (
     <div data-zone="Фильтр: что входит в данные" className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-3 py-3">
-      {/* Якорь-метка зоны — фильтр важен для каждой рабочей области, обозначаем явно */}
-      <div className="hidden shrink-0 items-center gap-2 self-stretch border-r border-border/60 pr-3 md:flex">
-        <span className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Filter className="size-4" aria-hidden="true" />
-        </span>
-        <span className="leading-tight">
-          <span className="block text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Фильтр</span>
-          <span className="block text-xs font-semibold text-foreground">рабочей области</span>
-        </span>
-      </div>
       <WorkspaceFilterBar />
     </div>
   )

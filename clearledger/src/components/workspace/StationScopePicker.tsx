@@ -9,6 +9,17 @@
  * станций останется, а выбор всё равно остаётся явным — в контур уезжают
  * отмеченные коды, а не «всё, что сейчас на экране».
  *
+ * **Условия — это отбор, а не подсказка для поиска.** Пока станции не отмечены
+ * руками, в контур уходит всё, что подходит под условия: человек выбирает «wallbox»
+ * и ждёт статистику по wallbox, а не список, в котором ещё надо расставить галки.
+ * Прежде фасет только сужал показ — отметив пару станций для пробы, человек получал
+ * статистику по этой паре и считал это ошибкой счёта (Чурилов, 15.09.2026,
+ * поручения №65 и №66).
+ *
+ * Отметил станцию сам — набор становится поштучным, и условия снова только сужают
+ * показ: ручной выбор сильнее автоматического. «Снять выбор» возвращает к отбору
+ * условиями.
+ *
  * Фасеты живут только здесь: наружу уходит список кодов, который панели уже
  * понимают. Регион — исключение: он часть общего фильтра (`regionIds`) и
  * сужает не только этот список, но и разрезы разделов.
@@ -26,7 +37,8 @@ import {
 } from '@/components/ui/select'
 import type { ChargeDimensionStation } from '@/services/analyticsService'
 import {
-  FACET_GROUPS, facetValues, matchesFacets, sortStations, stationMeta, stationSearchText,
+  FACET_GROUPS, codesByFacets, facetValues, matchesFacets, sortStations, stationMeta,
+  stationSearchText,
   type FacetGroupDef, type FacetValue, type Facets, type GroupKey, type StationSort,
 } from '@/lib/stationFacets'
 import { cn } from '@/lib/utils'
@@ -141,6 +153,9 @@ export function StationScopePicker({
   // в каком фильтре ты был» (Чурилов, 12.09.2026). Режим снимается одной кнопкой,
   // когда к выборке надо что-то добавить.
   const [onlyPicked, setOnlyPicked] = useState(() => selected.length > 0)
+  // Как набран контур: условиями или поштучно. Пришли с готовой выборкой — значит
+  // её набирали руками, и переписывать её условиями нельзя.
+  const [поштучно, setПоштучно] = useState(() => selected.length > 0)
   // Условия отбора переживают закрытие окна: человек возвращается к той же работе,
   // а не набирает фасеты заново. Хранится по компании — контуры у них разные.
   const ключФасетов = `cl-station-facets-${companyId ?? 'all'}`
@@ -162,20 +177,45 @@ export function StationScopePicker({
     [localFacets, regionIds],
   )
 
+  // Правило отбора — в `lib/stationFacets` рядом с его проверкой. Поиск в контур не
+  // входит: он про «где эта станция», а не про «какие станции беру».
+  const контурПоУсловиям = (набор: Facets) => codesByFacets(stations, набор)
+
   const setFacet = (key: GroupKey, value: string) => {
     if (key === 'region') {
-      onRegionsChange(regionIds.includes(value)
+      const регионы = regionIds.includes(value)
         ? regionIds.filter((r) => r !== value)
-        : [...regionIds, value])
+        : [...regionIds, value]
+      onRegionsChange(регионы)
+      if (!поштучно) onChange(контурПоУсловиям({ ...localFacets, region: регионы }))
       return
     }
-    setLocalFacets((current) => {
-      const picked = current[key] ?? []
-      const next = picked.includes(value)
-        ? picked.filter((v) => v !== value)
-        : [...picked, value]
-      return { ...current, [key]: next }
-    })
+    const picked = localFacets[key] ?? []
+    const next: Facets = {
+      ...localFacets,
+      [key]: picked.includes(value) ? picked.filter((v) => v !== value) : [...picked, value],
+    }
+    setLocalFacets(next)
+    if (!поштучно) onChange(контурПоУсловиям({ ...next, region: regionIds }))
+  }
+
+  /** Отметка станции руками: дальше контур набирается поштучно. */
+  const отметить = (codes: string[]) => {
+    setПоштучно(true)
+    onChange(codes)
+  }
+
+  /** Снятие выбора возвращает к отбору условиями — иначе выйти из ручного режима
+   *  можно было бы только закрыв окно. */
+  const снятьВыбор = () => {
+    setПоштучно(false)
+    onChange(контурПоУсловиям({ ...localFacets, region: regionIds }))
+  }
+
+  const снятьУсловия = () => {
+    setLocalFacets({})
+    onRegionsChange([])
+    if (!поштучно) onChange([])
   }
 
   const searched = useMemo(() => {
@@ -193,6 +233,10 @@ export function StationScopePicker({
   ), [facets, onlyPicked, searched, selectedSet, sort])
 
   const shownCodes = useMemo(() => filtered.map((s) => s.code), [filtered])
+  // Сколько станций подходит под условия — без учёта поиска и режима «только
+  // выбранные»: это и есть контур, когда набор идёт условиями.
+  const подУсловиями = useMemo(
+    () => stations.filter((s) => matchesFacets(s, facets)).length, [facets, stations])
   const allShownPicked = shownCodes.length > 0 && shownCodes.every((c) => selectedSet.has(c))
 
   const activeFacets = useMemo(() => {
@@ -277,7 +321,7 @@ export function StationScopePicker({
           ))}
           <Button
             variant="ghost" size="xs" className="h-7"
-            onClick={() => { setLocalFacets({}); onRegionsChange([]) }}
+            onClick={снятьУсловия}
           >
             Снять все условия
           </Button>
@@ -303,7 +347,7 @@ export function StationScopePicker({
               <Checkbox
                 checked={allShownPicked}
                 disabled={shownCodes.length === 0}
-                onCheckedChange={() => onChange(allShownPicked
+                onCheckedChange={() => отметить(allShownPicked
                   ? selected.filter((code) => !shownCodes.includes(code))
                   : [...new Set([...selected, ...shownCodes])])}
               />
@@ -323,7 +367,7 @@ export function StationScopePicker({
                     : 'Под эти условия не подходит ни одна станция сети.'}
                 </p>
                 {activeFacets.length > 0 ? (
-                  <Button variant="outline" size="xs" onClick={() => { setLocalFacets({}); onRegionsChange([]) }}>
+                  <Button variant="outline" size="xs" onClick={снятьУсловия}>
                     Снять условия
                   </Button>
                 ) : null}
@@ -342,7 +386,7 @@ export function StationScopePicker({
                   <Checkbox
                     className="mt-0.5"
                     checked={active}
-                    onCheckedChange={() => onChange(active
+                    onCheckedChange={() => отметить(active
                       ? selected.filter((code) => code !== station.code)
                       : [...selected, station.code])}
                   />
@@ -365,6 +409,12 @@ export function StationScopePicker({
             <span className="text-muted-foreground">
               {selected.length === 0 ? (
                 'Станции не выбраны — контур охватывает всю сеть.'
+              ) : !поштучно ? (
+                <>
+                  Условия отобрали <span className="font-medium text-foreground">{подУсловиями}</span> станций
+                  {' — они и войдут в контур · '}
+                  <span className="font-medium text-foreground">{pickedShare}%</span> зарядок сети
+                </>
               ) : (
                 <>
                   Выбрано <span className="font-medium text-foreground">{selected.length}</span> из {stations.length}
@@ -375,7 +425,7 @@ export function StationScopePicker({
               )}
             </span>
             {selected.length > 0 ? (
-              <Button variant="ghost" size="xs" className="h-7" onClick={() => onChange([])}>
+              <Button variant="ghost" size="xs" className="h-7" onClick={снятьВыбор}>
                 <Check data-icon="inline-start" />
                 Снять выбор
               </Button>
@@ -386,7 +436,9 @@ export function StationScopePicker({
 
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <ChevronDown className="size-3.5 rotate-[-90deg]" aria-hidden="true" />
-        Условия слева только сужают список; в рабочий контур уходят отмеченные станции.
+        {поштучно
+          ? 'Контур набран поштучно: условия слева сужают список, но выбор задают галки. «Снять выбор» вернёт отбор по условиям.'
+          : 'Условия слева задают контур целиком. Отметьте станции галками, если нужен точечный набор.'}
       </p>
     </div>
   )

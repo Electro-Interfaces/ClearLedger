@@ -188,6 +188,22 @@ export interface FacetValue { value: string; count: number }
  * всегда показывало бы «столько же, сколько отобрано», а остальные нули, и
  * фасетом нельзя было бы расширить выборку, не сбросив её.
  */
+/**
+ * Коды станций, которые задают условия отбора.
+ *
+ * Пусто — условий нет, и контур охватывает всю сеть: снятие последнего условия
+ * обязано возвращать сеть целиком, а не ноль станций.
+ *
+ * Это правило и есть ответ на «выбрал wallbox — покажи wallbox»: пока станции не
+ * отмечены руками, условия задают контур сами, без расстановки галок
+ * (Чурилов, 15.09.2026).
+ */
+export function codesByFacets(stations: FacetStation[], facets: Facets): string[] {
+  const есть = FACET_GROUPS.some((g) => (facets[g.key] ?? []).length > 0)
+  if (!есть) return []
+  return stations.filter((s) => matchesFacets(s, facets)).map((s) => s.code)
+}
+
 export function facetValues(stations: FacetStation[], facets: Facets): Map<GroupKey, FacetValue[]> {
   const result = new Map<GroupKey, FacetValue[]>()
   for (const group of FACET_GROUPS) {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  facetValues, matchesFacets, powerBucket, sortStations, stationMeta,
+  codesByFacets, facetValues, matchesFacets, powerBucket, sortStations, stationMeta,
   type FacetStation,
 } from './stationFacets.ts'
 
@@ -95,4 +95,23 @@ test('длинный справочник идёт по алфавиту, «не
 test('короткий справочник остаётся по числу станций', () => {
   const скорость = facetValues(NETWORK, {}).get('speed')!
   assert.equal(скорость[0].value, 'fast')             // быстрых больше — они первые
+})
+
+// ── условия задают контур сами (Чурилов, 15.09.2026) ──
+
+test('условия отбирают все подходящие станции, а не требуют галок', () => {
+  // «Выбрал медленные — покажи медленные»: отмечать их поштучно человек не обязан.
+  assert.deepEqual(codesByFacets(NETWORK, { speed: ['slow'] }), ['684'])
+  assert.deepEqual(codesByFacets(NETWORK, { city: ['Москва'] }).sort(), ['680'])
+})
+
+test('без условий контур пуст — это вся сеть, а не ноль станций', () => {
+  assert.deepEqual(codesByFacets(NETWORK, {}), [])
+  // Пустые списки значений — то же самое: условие снято, а не задано.
+  assert.deepEqual(codesByFacets(NETWORK, { speed: [], city: [] }), [])
+})
+
+test('условия разных групп складываются по «и»', () => {
+  assert.deepEqual(codesByFacets(NETWORK, { speed: ['fast'], placement: ['highway'] }), ['701'])
+  assert.deepEqual(codesByFacets(NETWORK, { speed: ['slow'], placement: ['highway'] }), [])
 })
