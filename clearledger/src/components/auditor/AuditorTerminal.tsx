@@ -400,17 +400,27 @@ export function AuditorTerminal() {
           </span>
         )}
         {health?.dictation && state === 'open' && (
-          <>
-            <span className="ml-2">
-              <DictateButton title="Продиктовать команду" onText={typeIntoTerminal} />
-            </span>
-            <span className="max-xl:hidden">
-              {dictation.state === 'rec' ? (
-                <span className="text-foreground">говорите — отпустите Ctrl+Пробел, чтобы распознать</span>
-              ) : dictation.state === 'busy' ? 'распознаю…'
-                : 'Ctrl+C — копировать экран · Shift+мышь — выделить · Ctrl+V — вставить'}
-            </span>
-          </>
+          <span className="ml-2">
+            <DictateButton title="Продиктовать команду" onText={typeIntoTerminal} />
+          </span>
+        )}
+        {/* 🔴 Про мышь человек должен прочитать ВСЕГДА, а не только там, где поднят
+            распознаватель речи и экран шире 1280.
+            Выделение мышью в мастерской не работает — её забирает приложение
+            (`mouse_any_flag=1`), и это выглядит поломкой браузера: тянешь, а ничего
+            не выделяется. Единственный ключ к обходу — эта строка, а она висела внутри
+            блока диктовки: в стеке без `asr` её не было вовсе, на ноутбуке 1366×768
+            (CSS-ширина ~1090 при масштабе 125%) — тоже. Человек оставался один на один
+            с терминалом, из которого «нельзя скопировать». */}
+        {state === 'open' && (
+          dictation.state === 'rec' ? (
+            <span className="text-foreground">говорите — отпустите Ctrl+Пробел, чтобы распознать</span>
+          ) : dictation.state === 'busy' ? <span>распознаю…</span> : (
+            <>
+              <span className="max-xl:hidden">Ctrl+C — копировать экран · Shift+мышь — выделить · Ctrl+V — вставить</span>
+              <span className="xl:hidden">Shift+мышь — выделить</span>
+            </>
+          )
         )}
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {/* Мышь занята приложением, поэтому даём прямой путь: весь экран в буфер. */}
