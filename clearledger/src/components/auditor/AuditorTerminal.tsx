@@ -181,6 +181,21 @@ export function AuditorTerminal() {
       termRef.current = term
       term.focus()   // открыли раздел — можно печатать сразу, без клика в поле
 
+      // 🔴 Тема терминала живёт СВОЕЙ жизнью и должна догонять тему страницы.
+      //
+      // Цвета xterm задаются при создании и дальше не пересчитываются: переключил
+      // человек светлую на тёмную — страница почернела, а терминал остался белым
+      // листом посреди тёмного экрана (поймано у Королёва 16.09.2026). Пересоздавать
+      // терминал ради этого нельзя — уедет сеанс, поэтому просто меняем палитру.
+      //
+      // Тема — класс `dark` на <html> (`hooks/useTheme.ts`), ловим его тем же
+      // наблюдателем, что и карта рынка. Кадр отсрочки — чтобы переменные CSS успели
+      // пересчитаться: без него `getComputedStyle` вернёт ещё старые цвета.
+      const themeObserver = new MutationObserver(() => {
+        requestAnimationFrame(() => { term.options.theme = pageTheme() })
+      })
+      themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       const ws = new WebSocket(`${proto}://${location.host}/auditor/ws/terminal`)
       wsRef.current = ws
@@ -361,7 +376,7 @@ export function AuditorTerminal() {
       cleanup = () => {
         clearInterval(tick); clearInterval(watch)
         cancelAnimationFrame(settle[0]); settle.slice(1).forEach((id) => clearTimeout(id))
-        ro.disconnect(); ws.close(); term.dispose()
+        ro.disconnect(); themeObserver.disconnect(); ws.close(); term.dispose()
         fitRef.current = null
         termRef.current = null   // иначе диктовка после ухода целится в уничтоженный терминал
       }
