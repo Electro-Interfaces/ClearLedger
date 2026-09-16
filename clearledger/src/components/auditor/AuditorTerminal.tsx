@@ -191,7 +191,16 @@ export function AuditorTerminal() {
       // Тема — класс `dark` на <html> (`hooks/useTheme.ts`), ловим его тем же
       // наблюдателем, что и карта рынка. Кадр отсрочки — чтобы переменные CSS успели
       // пересчитаться: без него `getComputedStyle` вернёт ещё старые цвета.
+      //
+      // 🔴 Сверяем, ИЗМЕНИЛАСЬ ли тема, а не просто «тронули класс». Класс на <html>
+      // трогают многие — фокус-кольца, блокировка прокрутки под окном, тултипы, — и на
+      // каждое такое касание мы переустанавливали палитру, а xterm на смену темы
+      // перерисовывает весь экран. Со стороны это ровно «экран дёргается сам по себе».
+      let dark = document.documentElement.classList.contains('dark')
       const themeObserver = new MutationObserver(() => {
+        const now = document.documentElement.classList.contains('dark')
+        if (now === dark) return
+        dark = now
         requestAnimationFrame(() => { term.options.theme = pageTheme() })
       })
       themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
