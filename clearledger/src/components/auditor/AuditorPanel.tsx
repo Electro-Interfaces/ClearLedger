@@ -7,7 +7,7 @@
  * Панель ничего не решает сама: вопрос уходит в сервис `auditor` стека, тот
  * выбирает навыки, берёт данные ТОКЕНОМ спросившего и отвечает потоком.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Bot, CornerDownLeft, Loader2, Paperclip, ShieldOff, Square, ThumbsDown, ThumbsUp, TriangleAlert } from 'lucide-react'
@@ -25,6 +25,8 @@ interface Message {
   role: 'user' | 'assistant'
   content: string
   findings?: auditor.AuditorFinding[]
+  /** Предложенные агентом действия: карточка с кнопкой, пока человек не нажал. */
+  actions?: auditor.AuditorAction[]
   /** id записи журнала — есть только у ответов по данным: их и оценивают. */
   runId?: string
   verdict?: auditor.AuditorVerdict
@@ -103,7 +105,59 @@ function Rating({ runId, verdict, onRated }: {
 }
 
 /** Блоки находок вырезаются из текста: они показываются карточками ниже ответа. */
-const withoutFindings = (text: string) => text.replace(/```finding[\s\S]*?```/g, '').trim()
+const withoutFindings = (text: string) => text
+  .replace(/```finding[\s\S]*?```/g, '')
+  // Действие человек видит карточкой с кнопкой — сырой JSON в тексте ему не нужен.
+  .replace(/```action[\s\S]*?```/g, '')
+  .trim()
+
+/**
+ * Действие, предложенное агентом: поручение, сообщение в чат, встреча.
+ *
+ * 🔴 Кнопка здесь — не украшение, а граница. Агент действий не совершает: он называет,
+ * что предлагает сделать, а запрос уходит только по нажатию и ПРАВАМИ НАЖАВШЕГО —
+ * автором записи в пространстве станет человек, и запрещённое ему не пройдёт и отсюда.
+ * Поэтому в карточке видно параметры целиком: подтверждать вслепую нечего.
+ */
+function ActionCard({ action }: { action: auditor.AuditorAction }) {
+  const { companyId } = useCompany()
+  const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle')
+  const params = Object.entries(action.params ?? {})
+    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+
+  const run = () => {
+    setState('busy')
+    auditor.act(companyId, action.id, action.params ?? {})
+      .then(() => { setState('done'); toast.success(`${action.name}: сделано`) })
+      .catch((e: Error) => { setState('idle'); toast.error(e.message) })
+  }
+
+  return (
+    <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
+      <div className="text-xs font-medium uppercase tracking-wide text-primary">{action.name}</div>
+      {action.summary && <div className="mt-1 font-medium text-foreground">{action.summary}</div>}
+      {params.length > 0 && (
+        <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+          {params.map(([k, v]) => (
+            <Fragment key={k}>
+              <dt>{k}</dt>
+              <dd className="truncate text-foreground">{typeof v === 'string' ? v : JSON.stringify(v)}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
+      <div className="mt-2">
+        {state === 'done' ? (
+          <span className="text-xs text-emerald-600 dark:text-emerald-400">сделано</span>
+        ) : (
+          <Button size="sm" onClick={run} disabled={state === 'busy'}>
+            {state === 'busy' ? <Loader2 className="size-3.5 animate-spin" /> : 'Выполнить'}
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
 
 /** Уровень находки: цвет альфа-шкалой — один класс работает в обеих темах. */
 const SEVERITY = {
@@ -219,6 +273,13 @@ export function AuditorPanel() {
           return next
         })
       },
+      onActions: (actions) => {
+        setMessages((prev) => {
+          const next = [...prev]
+          next[next.length - 1] = { ...next[next.length - 1], actions }
+          return next
+        })
+      },
       onRun: (runId) => {
         setMessages((prev) => {
           const next = [...prev]
@@ -287,6 +348,9 @@ export function AuditorPanel() {
                   <Rating runId={m.runId} verdict={m.verdict}
                     onRated={(v) => setMessages((prev) => prev.map((x, k) => (k === i ? { ...x, verdict: v } : x)))} />
                 )}
+                {m.actions?.map((a, j) => (
+                  <ActionCard key={`a${j}`} action={a} />
+                ))}
                 {m.findings?.map((f, j) => (
                   <div key={j} className={cn('rounded-lg border px-3 py-2', SEVERITY[f.severity]?.cls ?? SEVERITY.low.cls)}>
                     <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide">

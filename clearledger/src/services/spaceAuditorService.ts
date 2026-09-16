@@ -25,11 +25,26 @@ export interface AuditorFinding {
   action?: string
 }
 
+/**
+ * Действие, которое агент ПРЕДЛАГАЕТ сделать в пространстве: поручение, сообщение в чат,
+ * встреча. Сам он его не выполняет — панель показывает карточку, и запрос уходит только
+ * по нажатию человека, его же правами (`services/auditor/actions.js`).
+ */
+export interface AuditorAction {
+  id: string
+  /** Человеческое имя действия из реестра сервиса — «Поставить поручение». */
+  name: string
+  /** Строка для карточки: что именно произойдёт. */
+  summary?: string
+  params?: Record<string, unknown>
+}
+
 export interface AuditorEvents {
   onStatus?: (text: string) => void
   onSkills?: (ids: string[]) => void
   onText: (chunk: string) => void
   onFindings?: (findings: AuditorFinding[]) => void
+  onActions?: (actions: AuditorAction[]) => void
   /** id записи в журнале — по нему панель даёт оценить ответ. */
   onRun?: (runId: string) => void
   onError?: (message: string) => void
@@ -229,6 +244,24 @@ export async function exportWork() {
  * вкладке работа не показывалась. Ровно та история, о которой предупреждает
  * `agentHeaders`: забыл заголовки в новой ручке — раздел выглядит поломанным.
  */
+/**
+ * Выполнить действие, которое человек подтвердил кнопкой.
+ *
+ * Запрос уходит в сервис агента, а тот — в Ядро ТЕМ ЖЕ токеном: автором записи станет
+ * человек, а не агент, и чего ему нельзя, то не выйдет и отсюда. Между словами модели
+ * и этим вызовом всегда стоит нажатие.
+ */
+export async function act(companyId: string, id: string, params: Record<string, unknown> = {}) {
+  const res = await fetch(`${BASE}/act`, {
+    method: 'POST',
+    headers: { ...agentHeaders(companyId), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, params }),
+  })
+  const data = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(data?.error || `Не выполнилось (${res.status})`)
+  return data as { ok: boolean; action: string; result: unknown }
+}
+
 export async function getSessions(companyId: string): Promise<{ tab: number; live: boolean; shared?: boolean }[]> {
   const res = await fetch(`${BASE}/sessions`, { headers: agentHeaders(companyId) })
   if (!res.ok || !res.headers.get('content-type')?.includes('application/json')) return []
@@ -425,6 +458,7 @@ export function ask(
             else if (msg.type === 'status') ev.onStatus?.(msg.content)
             else if (msg.type === 'skills') ev.onSkills?.(msg.content)
             else if (msg.type === 'findings') ev.onFindings?.(msg.content)
+            else if (msg.type === 'actions') ev.onActions?.(msg.content)
             else if (msg.type === 'run') ev.onRun?.(msg.content)
             else if (msg.type === 'error') ev.onError?.(msg.content)
           } catch { /* не наша строка потока */ }
