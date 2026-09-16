@@ -1033,7 +1033,7 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
     card = (await db.execute(text("""
         SELECT i.external_uuid, i.name, i.unit, i.vat_rate, i.deleted,
                coalesce(i.price_owner, 'master') AS price_owner,
-               g.path AS group_path, i.sku_class, i.marked, i.mark_group,
+               g.path AS group_path, g.cash_section, i.sku_class, i.marked, i.mark_group,
                i.adult_only, i.mrc, i.brand, i.photo_url, i.sku
         FROM edge.item i
         LEFT JOIN edge.item_group g ON g.id = i.group_id
@@ -1105,6 +1105,15 @@ async def _queue_nsi_delta(db: AsyncSession, cid, item_id: int, station_id: int 
                      # требовать DataMatrix у маркируемого, а касса — паспорт
                      # у 18+, и решаться это должно на станции, офлайн.
                      "group_path": card["group_path"], "sku_class": card["sku_class"],
+                     # Отдел кассы — свойство товарной группы, и станция вывести
+                     # его сама не может, пока в кассе нет ни одной позиции этой
+                     # группы. Полная заливка его везла всегда, дельта — нет, и
+                     # карточка, признанная из черновика, приезжала без отдела:
+                     # 15.09.2026 на АЗС 8 так встали шесть позиций автохимии —
+                     # «у группы «Автотовары» не задан отдел кассы», при том что
+                     # в центре у неё отдел 1. Строка без отдела выпадает из
+                     # файла МОЛЧА (канон 8j).
+                     "cash_section": card["cash_section"],
                      "marked": bool(card["marked"]), "mark_group": card["mark_group"],
                      "adult_only": bool(card["adult_only"]),
                      "mrc": float(card["mrc"]) if card["mrc"] is not None else None,

@@ -628,6 +628,14 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
 
     Молчаливого «оставим как есть» тут быть не должно: черновик, который никто
     не разобрал, — это товар, который станция продаёт, а сеть не видит.
+
+    ⚠ Функция НИЧЕГО НЕ КОММИТИТ: решение и задание станции обязаны лечь одной
+    транзакцией. Прежде она фиксировала себя сама, а задание ставил роутер
+    следующим шагом — и между ними было окно, в котором карточка уже заведена,
+    черновик уже закрыт, а вниз не уехало ничего. Для станции это неотличимо от
+    «товаровед не разобрал»: она заводит карточку заново, тем самым дублем,
+    ради борьбы с которым очередь и существует. Коммитит вызывающий — после
+    того, как поставил задание.
     """
     draft = (await db.execute(text("""
         SELECT id, station_id, name, unit, vat_rate, barcodes, resolved_at, source_uuid, sku
@@ -645,7 +653,6 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
             UPDATE edge.item_draft SET resolved_at = now(), rejected = true, note = :n
             WHERE id = :id
         """), {"id": draft_id, "n": note})
-        await db.commit()
         # source_uuid возвращаем, чтобы отказ доехал до станции адресно: там
         # черновик опознаётся именно по нему, а не по нашему номеру строки.
         return {"action": "reject", "draft_id": draft_id,
@@ -685,13 +692,59 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
             подсказка = await item_group_guess.предложить(db, draft["name"])
             if подсказка is not None:
                 group_id = подсказка["group_id"]
+        # Умолчания группы — часть карточки, а не украшение справочника.
+        #
+        # Вниз на станцию дельта везёт `i.marked`, `i.mark_group`, `i.adult_only`
+        # ИЗ КАРТОЧКИ, а не из группы. Пока признание их не переносило, карточка
+        # рождалась ровно такой же неполной, какой была черновиком: 15.09.2026
+        # три пачки сигарет на 208 оказались в сети без маркировки и без 18+, и
+        # канал в кассу выпускал по ним файл каждые десять минут — признак у нас
+        # false, в кассе true, а короткий файл его не применяет.
+        #
+        # Товаровед при этом выбрал группу «Табак / Сигареты», где всё нужное
+        # проставлено. Берём оттуда: явных значений у черновика нет — станция их
+        # не заводит и не везёт.
+        умолчания = {"marked": False, "adult": False, "чз": None, "путь": ""}
+        if group_id is not None:
+            гр = (await db.execute(text("""
+                SELECT marked_default, adult_default, mark_group_default, path
+                  FROM edge.item_group WHERE id = :g
+            """), {"g": group_id})).mappings().first()
+            if гр is not None:
+                умолчания = {"marked": bool(гр["marked_default"]),
+                             "adult": bool(гр["adult_default"]),
+                             "чз": гр["mark_group_default"],
+                             "путь": гр["path"] or ""}
+        # Класс товара выводим из группы, а не оставляем пустым.
+        #
+        # Пустой класс — это невидимка: `ГотовыеБезКодаКассы` на станции ищет
+        # только живой ассортимент, и карточка без класса кода кассы не
+        # получает НИКОГДА. 15.09.2026 так на 208 лежало «Печенье Чоко-Пай»
+        # с ценой и остатком, которое нельзя было пробить, — а всего карточек
+        # без класса в сети набралось 69.
+        путь = умолчания["путь"].lower()
+        if "кухня" in путь or "общепит" in путь:
+            класс = "Блюдо" if "блюд" in путь else "Сырьё"
+        else:
+            класс = "Сопутка"
         row = (await db.execute(text("""
             INSERT INTO edge.item (external_uuid, sku, name, unit, vat_rate, source,
-                                   price_owner, company_id, group_id)
+                                   price_owner, company_id, group_id,
+                                   marked, adult_only, mark_group, sku_class)
             VALUES (gen_random_uuid(), :sku, :name, :unit, :vat, 'station', 'station',
-                    :cid, :group)
+                    :cid, :group, :marked, :adult, :mark_group, :class)
             RETURNING id, external_uuid
         """), {"sku": артикул, "cid": company_id, "group": group_id,
+               "marked": умолчания["marked"], "adult": умолчания["adult"],
+               # Группу «Честного знака» переносим НЕЗАВИСИМО от признака
+               # маркировки: это разные вещи. У пяти групп сети (энергетики,
+               # газировка, консервы, корма) товарная группа ЧЗ заполнена, а
+               # `marked_default` — нет, и это осознанно: маркируется там не
+               # всё подряд. Стереть группу заодно с признаком значило бы
+               # выбросить знание, которое потом неоткуда взять — выдумывать
+               # номер группы кассе нельзя (канон, п. 12).
+               "mark_group": умолчания["чз"],
+               "class": класс,
                "name": draft["name"], "unit": draft["unit"] or "шт",
                # Ставка обязательна в схеме, и форма станции её всегда
                # спрашивает. Подставляем розничную только на случай карточки,
@@ -762,16 +815,27 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
     # работа впустую, а оставить непризнанным хоть одну значит держать смену.
     близнецы: list[int] = []
     if codes:
+        # Ярус кода решает, где искать близнеца: сетевой EAN одинаков для всей
+        # сети, а короткий номер — внутреннее обозначение СВОЕЙ станции. Пока
+        # сравнение шло по всем кодам без разбора, «9233» с АЗС 8 закрывал бы
+        # заявку 208, где под этим номером другой товар, — и станция осталась бы
+        # без карточки, считая её разобранной. Граница та же, что при закреплении
+        # штрихкода ниже: восемь знаков (канон, п. 10 — EAN-8 самый короткий).
+        цифры = [_re.sub(r"[^0-9]", "", c) for c in codes]
+        сетевые = [c for c in цифры if len(c) >= 8]
+        станционные = [c for c in цифры if 0 < len(c) < 8]
         близнецы = [int(r[0]) for r in (await db.execute(text("""
             SELECT d.id FROM edge.item_draft d
             WHERE d.company_id = :cid AND d.id <> :id
               AND d.resolved_at IS NULL AND NOT d.rejected
               AND EXISTS (
                   SELECT 1 FROM unnest(d.barcodes) AS c
-                  WHERE regexp_replace(c, '[^0-9]', '', 'g') = ANY(:codes)
+                  WHERE regexp_replace(c, '[^0-9]', '', 'g') = ANY(:net)
+                     OR (d.station_id = :st
+                         AND regexp_replace(c, '[^0-9]', '', 'g') = ANY(:local))
               )
-        """), {"cid": company_id, "id": draft_id,
-               "codes": [_re.sub(r"[^0-9]", "", c) for c in codes]})).all()]
+        """), {"cid": company_id, "id": draft_id, "st": draft["station_id"],
+               "net": сетевые, "local": станционные})).all()]
         if близнецы:
             await db.execute(text("""
                 UPDATE edge.item_draft
@@ -780,7 +844,6 @@ async def resolve_item_draft(db: AsyncSession, company_id, draft_id: int,
                 WHERE id = ANY(:ids)
             """), {"item": item_id, "id": str(draft_id), "ids": близнецы})
 
-    await db.commit()
     return {"action": action, "draft_id": draft_id, "item_id": item_id,
             "uuid": canon_uuid, "barcodes_linked": привязано, "collisions": коллизий,
             "station_id": draft["station_id"], "codes": codes,
