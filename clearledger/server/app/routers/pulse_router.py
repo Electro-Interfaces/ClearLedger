@@ -28,7 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
 from app.auth import (
-    assert_company_member, assert_company_product, get_current_user,
+    assert_company_item, assert_company_member, assert_company_product,
+    get_current_user,
     resolve_member_modules,
 )
 import httpx
@@ -286,6 +287,24 @@ KPI_SCOPE = {
     "receivable": "business.money", "doc_requests": "business.requests",
     "periods": "business.accounting",
 }
+
+
+async def _sees_money(db: AsyncSession, cid: str, user: User) -> bool:
+    """Показывать ли этому человеку выручку.
+
+    Деньги сети — не «ещё один разрез», а отдельное право: контакт-центр работает в
+    пространстве заказчика по договору и выручку видеть не должен (решение МАГа
+    16.09.2026). Ключ один — пункт «Продажи»: он же гейтит карточки дня и KPI
+    (`KPI_SCOPE`), и заводить для тех же цифр второй признак значило бы развести
+    право и видимость.
+    """
+    visible = await _visible_items(db, cid, user)
+    return visible is None or "business.sales" in visible
+
+
+def _drop_money(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Убрать денежные строки разреза — для того, кто не видит выручку."""
+    return [r for r in rows if r.get("unit") != "₽"]
 
 
 async def _may_configure(db: AsyncSession, cid: str, user: User) -> bool:
@@ -2036,7 +2055,8 @@ async def pulse_business(
     Ни фамилий, ни заявок (PULSE.md §3): куратора интересует, в каком состоянии
     дело и как оно движется, а операциями занят директор.
     """
-    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    # Выжимка для куратора — это выручка сети и её тренд: свой пункт.
+    cid = await assert_company_item(company_id, current_user, db, "pulse", "business.summary")
     cid = str(cid)
 
     profile = await _profile(db, cid)
@@ -2145,14 +2165,20 @@ async def pulse_export(
     и не делит строку на колонки.
     """
     cid = str(await assert_company_product(company_id, current_user, db, "pulse"))
+    # Выгрузка обязана повторять экран, включая закрытое: файл — обход показа,
+    # если брать его отдельным путём. Деньги здесь режутся тем же правилом.
+    деньги = await _sees_money(db, cid, current_user)
     rows: list[list[Any]] = []
     if view == "week":
         d = await pulse_week_data(db, cid)
+        строки = d["rows"] if деньги else _drop_money(d["rows"])
         rows = [["Показатель", "За неделю", "Предыдущая", "Единица"]]
         rows += [[r["label"], r["value"], r["prev"] if r["prev"] is not None else "",
-                  r["unit"] or ""] for r in d["rows"]]
+                  r["unit"] or ""] for r in строки]
         name = "pulse-week"
     elif view == "objects":
+        # Разрез точек целиком про деньги: выручка, «под вопросом», начисления.
+        await assert_company_item(company_id, current_user, db, "pulse", "business.objects")
         o = await _objects_snapshot(db, cid)
         rows = [["Точка", "Код", "Признаки", "Под вопросом, ₽", "Выручка недели, ₽",
                  "Было неделей раньше, ₽", "Начислено за 2 мес, ₽", "Без документа",
@@ -2496,7 +2522,8 @@ async def pulse_objects(
     порядке. Здесь они сведены по одному ключу, и в список попадает точка, у
     которой сошлось несколько независимых признаков сразу.
     """
-    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    # В разрезе выручка точек и «под вопросом, ₽» — гейт по своему пункту.
+    cid = await assert_company_item(company_id, current_user, db, "pulse", "business.objects")
     s = await _objects_snapshot(db, str(cid))
     if not s:
         return {"available": False, "kpi": [], "pain": []}
@@ -2737,7 +2764,8 @@ async def pulse_sales(
     которого нет больше нигде: ЧТО именно двигает недельную цифру — конкретные
     станции и регионы, а не «выручка упала на 10%».
     """
-    cid = await assert_company_product(company_id, current_user, db, "pulse")
+    # Весь экран — про деньги: гейт по своему пункту, а не по продукту.
+    cid = await assert_company_item(company_id, current_user, db, "pulse", "business.sales")
     cid = str(cid)
 
     profile = await _profile(db, cid)
@@ -3622,7 +3650,12 @@ async def pulse_week(
     считает тот же экран дня, поэтому здесь только запрос-ответ.
     """
     cid = await assert_company_product(company_id, current_user, db, "pulse")
-    return await pulse_week_data(db, str(cid))
+    d = await pulse_week_data(db, str(cid))
+    # Экран недели нужен и тем, кто выручку не видит: заявки, звонки, сроки — их
+    # работа. Поэтому закрываем не экран, а денежные строки.
+    if not await _sees_money(db, str(cid), current_user):
+        d["rows"] = _drop_money(d["rows"])
+    return d
 
 
 async def pulse_week_data(db: AsyncSession, company_id: str) -> dict[str, Any]:

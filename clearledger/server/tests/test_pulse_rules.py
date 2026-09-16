@@ -7,7 +7,8 @@
 from datetime import datetime
 
 from app.routers.pulse_router import (
-    EXT_BACKLOG, MAX_CARDS, OWN_SLA_DAYS, SILENT_SHARE, STALE_DAYS, build_cards, money,
+    EXT_BACKLOG, MAX_CARDS, OWN_SLA_DAYS, SILENT_SHARE, STALE_DAYS, _drop_money,
+    build_cards, money,
 )
 
 AS_OF = datetime(2026, 7, 22, 9, 29)
@@ -375,3 +376,29 @@ def test_support_users_are_addressed_by_schema():
     block = text[text.index("async def _cc_tables"):text.index('@router.get("/team")')]
     bare = re.findall(r"(?:from|join)\s+users\b", block)
     assert not bare, f"таблица людей Поддержки без схемы: {bare}"
+
+
+# ── деньги сети видит не каждый (решение МАГа 16.09.2026) ──
+
+def test_денежные_строки_недели_убираются():
+    """Подрядчик работает в пространстве заказчика и выручку видеть не должен.
+
+    Экран недели ему нужен — заявки, звонки, сроки это его работа, — поэтому
+    закрывается не экран, а строки в рублях.
+    """
+    строки = [
+        {"label": "Выручка", "value": 1_200_000, "prev": 1_000_000, "unit": "₽"},
+        {"label": "Зарядок", "value": 840, "prev": 800, "unit": None},
+        {"label": "Заявок поступило", "value": 37, "prev": 41, "unit": None},
+        {"label": "Средний чек", "value": 1430, "prev": 1380, "unit": "₽"},
+    ]
+    вышло = _drop_money(строки)
+    assert [r["label"] for r in вышло] == ["Зарядок", "Заявок поступило"]
+    # Исходный список не трогаем: его же отдают тому, кто деньги видит.
+    assert len(строки) == 4
+
+
+def test_без_денежных_строк_список_не_ломается():
+    assert _drop_money([]) == []
+    assert _drop_money([{"label": "Звонков", "value": 12, "unit": None}]) == [
+        {"label": "Звонков", "value": 12, "unit": None}]
