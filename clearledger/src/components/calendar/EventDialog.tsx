@@ -22,6 +22,7 @@ import { PollPanel } from '@/components/calendar/PollPanel'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DateField, TimeField } from '@/components/ui/date-time-field'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -406,25 +407,51 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
               placeholder="Тема рабочей встречи" />
           </div>
 
+          {/* 🔴 Дата и время — РАЗДЕЛЬНО и с ручным вводом.
+              Было одно поле `datetime-local`: на телефоне это нативные барабаны, где
+              значение только прокручивают. Человек, который знает ответ («семнадцатого,
+              в девять тридцать»), крутил к нему колесо — и не мог просто напечатать
+              цифры (претензия МАГа 16.09.2026). Теперь в каждом поле печатают ИЛИ
+              выбирают: дату — сеткой месяца, время — списком получаса. */}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor={fieldId + "-start"}>Начало</Label>
-              <Input id={fieldId + "-start"} type={allDay ? 'date' : 'datetime-local'} value={allDay ? starts.slice(0, 10) : starts} disabled={!мой}
-                className="min-w-0 text-base sm:text-sm" onChange={(e) => changeStart(e.target.value)} />
+              <div className="flex gap-2">
+                <DateField id={fieldId + "-start"} className="min-w-0 flex-1" disabled={!мой}
+                  value={starts.slice(0, 10)}
+                  onChange={(d) => changeStart(allDay ? d : d + 'T' + starts.slice(11, 16))} />
+                {!allDay && (
+                  <TimeField className="w-28 shrink-0" disabled={!мой} aria-label="Время начала"
+                    value={starts.slice(11, 16)}
+                    onChange={(t) => changeStart(starts.slice(0, 10) + 'T' + t)} />
+                )}
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor={fieldId + "-end"}>{allDay ? "Последний день" : "Конец"}</Label>
-              <Input id={fieldId + "-end"} type={allDay ? 'date' : 'datetime-local'} value={allDay ? endDate : ends} disabled={!мой}
-                className="min-w-0 text-base sm:text-sm" onChange={(e) => {
-                  if (!allDay || !e.target.value) { setEnds(e.target.value); return }
-                  const end = new Date(e.target.value + 'T00:00'); end.setDate(end.getDate() + 1); setEnds(local(end))
-                }} />
+              <div className="flex gap-2">
+                <DateField id={fieldId + "-end"} className="min-w-0 flex-1" disabled={!мой}
+                  value={allDay ? endDate : ends.slice(0, 10)}
+                  onChange={(d) => {
+                    if (!allDay) { setEnds(d + 'T' + ends.slice(11, 16)); return }
+                    // «Весь день» хранит конец следующим днём: человек называет последний
+                    // день встречи, а система держит границу интервала.
+                    const end = new Date(d + 'T00:00'); end.setDate(end.getDate() + 1); setEnds(local(end))
+                  }} />
+                {!allDay && (
+                  <TimeField className="w-28 shrink-0" disabled={!мой} aria-label="Время окончания"
+                    value={ends.slice(11, 16)}
+                    onChange={(t) => setEnds(ends.slice(0, 10) + 'T' + t)} />
+                )}
+              </div>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={allDay} disabled={!мой} onChange={e => toggleAllDay(e.target.checked)} />Весь день</label>
-            {!allDay && мой && (!phone || more) && [30, 60, 90].map(minutes => <Button key={minutes} variant="outline" size="sm" disabled={!Number.isFinite(startMs)} onClick={() => setEnds(local(new Date(startMs + minutes * 60_000)))}>{minutes} мин</Button>)}
+            {/* Длительность раньше пряталась на телефоне под «ещё» — а это самый быстрый
+                способ задать конец: одно нажатие против набора четырёх цифр. */}
+            {!allDay && мой && [30, 60, 90].map(minutes => <Button key={minutes} variant="outline" size="sm" disabled={!Number.isFinite(startMs)} onClick={() => setEnds(local(new Date(startMs + minutes * 60_000)))}>{minutes} мин</Button>)}
           </div>
           {(!phone || more) && <p className="text-sm text-muted-foreground">Время показано в часовом поясе устройства: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>}
           {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
