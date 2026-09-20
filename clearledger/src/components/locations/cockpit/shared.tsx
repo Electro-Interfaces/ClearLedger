@@ -54,17 +54,31 @@ export function typeFlags(type: LocationType) {
 }
 
 /** Прокручиваемая обёртка тела вкладки (фикс. высота окна → внутренний скролл). */
-export function ScrollTab({ children, maxWidth = 'max-w-3xl', plain }: {
+export function ScrollTab({ children, maxWidth = 'max-w-[1400px]', plain, cols }: {
   children: ReactNode
   maxWidth?: string
   /** Вкладка показана ВНУТРИ другой (паспорт вобрал оборудование и интеграции):
    *  своя область прокрутки и отступы тут лишние — вложенный скролл в скролле. */
   plain?: boolean
+  /**
+   * Разложить карточки в колонки на широком экране.
+   *
+   * Окно станции занимает всю рабочую область — около 1600 px, а содержимое шло
+   * одной колонкой в 768 px: справа пустота, а паспорт приходилось прокручивать
+   * (замечание МАГа 20.09.2026). Колонки текстовые (`columns`), а не сетка:
+   * карточки разной высоты раскладываются сами, без ручного распределения по
+   * ячейкам, и ни одна не разрывается между колонками.
+   */
+  cols?: 2 | 3
 }) {
   if (plain) return <div className="space-y-4">{children}</div>
+  const раскладка = cols
+    ? `gap-4 [&>*]:mb-4 [&>*]:break-inside-avoid ${
+      cols === 3 ? 'lg:columns-2 2xl:columns-3' : 'xl:columns-2'}`
+    : 'space-y-4'
   return (
     <ScrollArea className="h-full">
-      <div className={`p-5 space-y-4 ${maxWidth}`}>{children}</div>
+      <div className={`p-5 ${раскладка} ${maxWidth}`}>{children}</div>
     </ScrollArea>
   )
 }
@@ -95,21 +109,41 @@ export function SectionCard({
 }
 
 /** Строка «подпись → значение» в две колонки. */
+/**
+ * Реквизит объекта: подпись сверху, значение под ней.
+ *
+ * Единственный вид пары в карточке станции — им же рисует
+ * `MetadataFieldsReader`. Значение не обрезается и переносится по словам:
+ * адреса и перечни коннекторов длиннее колонки, и прятать их многоточием
+ * значит заставить человека лезть в базу.
+ */
 export function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="min-w-0">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`font-medium break-words ${mono ? 'font-mono text-xs' : ''}`}>{value}</div>
+      <div className={`break-words font-medium ${mono ? 'font-mono text-xs tabular-nums' : ''}`}>
+        {value}
+      </div>
     </div>
   )
 }
 
-/** Однострочная пара dt/dd с разделителем (для перечней реквизитов-заделов). */
+/**
+ * Однострочная пара «показатель — значение» с разделителем.
+ *
+ * Для коротких значений (числа, статусы, даты): подпись слева, значение
+ * справа. Перенос по словам, а не по символам — `break-all` рвал «CHAdeMO»
+ * на «CHA deMO».
+ *
+ * ⚠ Для реквизитов объекта используется `Field` (подпись сверху): длинные
+ * значения в правом столбце нечитаемы, а два разных вида пар в одной карточке
+ * выглядят как недоделка.
+ */
 export function InfoRow({ label, value }: { label: ReactNode; value: ReactNode }) {
   return (
-    <div className="flex justify-between gap-3 border-b border-border/30 py-1.5 text-sm last:border-0">
+    <div className="flex items-baseline justify-between gap-4 border-b border-border/30 py-1.5 text-sm last:border-0">
       <span className="shrink-0 text-muted-foreground">{label}</span>
-      <span className="break-all text-right font-medium">{value}</span>
+      <span className="min-w-0 break-words text-right font-medium">{value}</span>
     </div>
   )
 }

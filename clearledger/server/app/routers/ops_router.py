@@ -8,18 +8,488 @@ import io
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter, Body, Depends, File, HTTPException, Query, UploadFile, status,
+)
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import User
 from app.services import ops_closing, ops_expectations, ops_payments, ops_terms
+from app.services.network_reliability import network_reliability
+from app.services.network_vendors import network_vendors
+from app.services.station_history import station_history
+from app.services.station_obligations import station_obligations
+from app.services import station_mapping as sm
+from app.services import contract_liability, intake_watch, ops_tickets
+from app.services.station_visits import station_visits
+from app.services import station_check as sc
+from app.services import station_upkeep as up
+from app.services.station_checklist import ITEM_BY_KEY, checklist_meta
+from app.services.network_state import network_state
+from app.services.ops_worklist import ops_worklist
+from app.services import space_projection
 from app.services.ops_dashboard import (
     ops_balance, ops_completeness, ops_overview, ops_station,
 )
 
 router = APIRouter(prefix="/ops", tags=["Управленческий кокпит (ЭЗС)"])
+
+
+@router.get("/network-state")
+async def get_network_state(
+    company_id: str = Query(...),
+    region: str | None = Query(None, description="фильтр: регион"),
+    only_problems: bool = Query(False, description="только расхождения статуса и факта"),
+    as_of: date | None = Query(None, description="состояние НА этот день (по умолчанию — граница данных)"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Состояние сети: статус станции из выгрузки рядом с фактом по сессиям.
+
+    Порознь оба источника врут: витрина зовёт станцию активной, когда та молчит
+    месяцами, и наоборот — «нет связи» у станции, которая исправно заряжает.
+    Ответ строится на их пересечении, а цена молчания считается по прошлой
+    выручке самой станции.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    return await network_state(db, cid, region=region, only_problems=only_problems,
+                               as_of=as_of)
+
+
+@router.get("/tickets")
+async def get_ops_tickets(
+    company_id: str = Query(...),
+    days: int = Query(90, ge=1, le=1095),
+    limit: int = Query(2000, ge=1, le=5000),
+    region: str | None = Query(None),
+    as_of: date | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Заявки сети: срез «Поддержки» с привязкой к реестру объектов.
+
+    Инженер спрашивает «что с работами по сети» из своего рабочего места; копии
+    заявок в Ядре нет — разрез берётся у приложения в момент показа.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        return await ops_tickets.ops_tickets(db, cid, days=days, limit=limit, region=region, as_of=as_of)
+    except space_projection.ProjectionError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+
+
+@router.get("/intake-health")
+async def get_intake_health(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Состояние выгрузки: приходит ли файл, всё ли в нём и всё ли доехало.
+
+    Три вопроса, которые иначе решались запросом в базу: свежесть, пропавшие
+    поля и платежи без сессий.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    return await intake_watch.здоровье(db, cid)
+
+
+@router.get("/worklist")
+async def get_ops_worklist(
+    company_id: str = Query(...),
+    region: str | None = Query(None, description="фильтр: регион"),
+    as_of: date | None = Query(None, description="список НА этот день"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Рабочий лист инженера: что делать сегодня, одним списком.
+
+    Разрезы «Мониторинга» отвечают на разные вопросы разными экранами — это
+    правильно для разбора и неудобно для утра. Здесь наоборот: сначала строки
+    работы, потом уже разрезы. Порядок — по цене бездействия.
+
+    Ход работы берём у «Поддержки»: она мастер этого состояния (docs/PROCESS.md).
+    Если приложение недоступно, список всё равно собирается — просто без пометок
+    «взято/не взято», и это честно сказано полем `workKnown`.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    работа: dict | None = None
+    try:
+        свёртка = await space_projection.network_open_tickets(db, cid, "support")
+        работа = {str(r.get("ecoObjectId")): r for r in свёртка.get("objects", [])}
+    except space_projection.ProjectionError:
+        работа = None
+    return await ops_worklist(db, cid, region=region, open_work=работа, as_of=as_of)
+
+
+@router.get("/vendors")
+async def get_network_vendors(
+    company_id: str = Query(...),
+    days: int = Query(90, ge=7, le=365),
+    region: str | None = Query(None),
+    vendor: str | None = Query(None, description="марка: вернуть ещё и её станции"),
+    as_of: date | None = Query(None, description="окно заканчивается этим днём"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сеть в разрезе производителей: чьё железо держит нагрузку, а чьё стоит.
+
+    Если у марки из четырнадцати станций работают две, дело не в конкретной
+    площадке — это вопрос к закупке и сервису, а не к выездной бригаде.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    return await network_vendors(db, cid, days=days, region=region, vendor=vendor,
+                                 as_of=as_of)
+
+
+@router.post("/contracts/{contract_id}/liability/parse")
+async def parse_contract_liability(
+    contract_id: str,
+    company_id: str = Query(...),
+    file: UploadFile | None = File(None),
+    text: str | None = Body(None, embed=True),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Предложить условия ответственности по тексту договора.
+
+    Ничего не сохраняет: возвращает найденное с цитатами и номерами пунктов,
+    чтобы человек подтвердил или поправил. Разбор ошибается на нестандартных
+    формулировках, а по этим числам потом считают деньги в претензии.
+    """
+    await assert_company_member(company_id, current_user, db)
+    if file is not None:
+        данные = await file.read()
+        содержимое, причина = contract_liability.извлечь_текст(file.filename or "", данные)
+    else:
+        содержимое, причина = (text or ""), None
+    if not содержимое.strip():
+        return {"found": {}, "reason": причина or "текст договора пуст"}
+    найдено = contract_liability.разобрать(содержимое)
+    return {"found": найдено, "reason": причина,
+            "chars": len(содержимое)}
+
+
+@router.put("/contracts/{contract_id}/liability")
+async def put_contract_liability(
+    contract_id: str,
+    company_id: str = Query(...),
+    body: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сохранить условия ответственности договора (подтверждённые человеком)."""
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        return await contract_liability.set_liability(
+            db, cid, uuid.UUID(contract_id), body,
+            автор=current_user.email)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@router.get("/station-mapping/{location_id}")
+async def get_station_mapping(
+    location_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Под какими идентификаторами станция известна другим системам.
+
+    Три вида записей и они не смешиваются: свои идентификаторы, снимок внешних
+    систем из загрузки и реестр соответствий, который ведём вручную.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    return await sm.station_mapping(db, cid, location_id)
+
+
+class ExternalIdIn(BaseModel):
+    system: str = Field(max_length=30)
+    role: str = Field(max_length=30)
+    value: str = Field(min_length=1, max_length=64)
+    valid_from: date | None = None
+    note: str | None = Field(default=None, max_length=300)
+
+
+@router.post("/station-mapping/{location_id}", status_code=status.HTTP_201_CREATED)
+async def add_station_external_id(
+    location_id: str,
+    body: ExternalIdIn,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Завести соответствие внешней системы (в том числе роуминговое OCPI)."""
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        return await sm.add_external_id(
+            db, cid, location_id,
+            system=body.system, role=body.role, value=body.value,
+            valid_from=body.valid_from, note=body.note,
+            author_name=current_user.name or current_user.email,
+            author_id=str(current_user.id))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
+
+
+@router.delete("/station-mapping/{location_id}/{link_id}")
+async def close_station_external_id(
+    location_id: str,
+    link_id: str,
+    company_id: str = Query(...),
+    reason: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Закрыть соответствие датой. Удаления нет: история связи — часть учёта."""
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        return await sm.close_external_id(db, cid, uuid.UUID(link_id), reason=reason)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e)) from e
+
+
+@router.get("/station-obligations/{location_id}")
+async def get_station_obligations(
+    location_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Договорная обвязка станции: два взгляда на одно.
+
+    Реестры смотрят со стороны контрагента и договора, инженер — со стороны
+    площадки: чем обвязана, кто отвечает, когда платить, до какого числа
+    гарантия. Данные те же, разрез обратный.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    return await station_obligations(db, cid, location_id)
+
+
+@router.get("/station-visits/{location_id}")
+async def get_station_visits(
+    location_id: str,
+    company_id: str = Query(...),
+    days: int = Query(30, ge=1, le=365),
+    only_failed: bool = Query(False, description="только приезды, кончившиеся ничем"),
+    limit: int = Query(200, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Приезды клиентов на станцию, каждый — с попытками внутри.
+
+    Инженеру нужен ход визита, а не итог: во сколько приехал, сколько раз пробовал,
+    на каком коннекторе и чем кончилась каждая попытка.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        return await station_visits(db, cid, location_id, days=days,
+                                    only_failed=only_failed, limit=limit)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.get("/station-checklist")
+async def get_station_checklist_meta(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Регламент осмотра станции: пункты, основания, сроки, где нужно фото."""
+    await assert_company_member(company_id, current_user, db)
+    return checklist_meta()
+
+
+@router.get("/station-check/{location_id}")
+async def get_station_check(
+    location_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Чек-лист станции: по каждому пункту последняя отметка и вывод.
+
+    Телеметрия отвечает, идёт ли ток. Есть ли на корпусе заводской номер, видна
+    ли цена до оплаты и цела ли оклейка — видно только на месте, а спрашивают
+    за это по ЗоЗПП и КоАП.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        return await sc.station_check(db, cid, location_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/station-check/{location_id}", status_code=201)
+async def post_station_check(
+    location_id: str,
+    company_id: str = Query(...),
+    item_key: str = Query(..., description="пункт регламента: info.price, body.serial …"),
+    state: str = Query("ok", description="ok | fail | na"),
+    note: str | None = Query(None),
+    checked_on: str | None = Query(None, description="дата осмотра, ГГГГ-ММ-ДД (по умолчанию сегодня)"),
+    file: UploadFile | None = File(None, description="снимок с места"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отметить пункт осмотра. Прежние отметки остаются — это история.
+
+    Снимок необязателен технически: заставлять инженера стоять у станции, пока
+    грузится фото на мобильном интернете, вреднее, чем принять запись, — но
+    пункт с `photo` без файла в карточке помечен как неподтверждённый.
+    """
+    import hashlib
+    import os
+    from pathlib import Path
+
+    from app.models import SourceFile
+
+    cid = await assert_company_member(company_id, current_user, db)
+
+    file_id = None
+    if file is not None:
+        content = await file.read()
+        if content:
+            file_id = uuid.uuid4()
+            upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            ext = Path(file.filename or "photo.jpg").suffix
+            path = upload_dir / f"{file_id}{ext}"
+            with open(path, "wb") as fh:
+                fh.write(content)
+            db.add(SourceFile(
+                id=file_id, company_id=cid, file_name=file.filename or "снимок",
+                mime_type=file.content_type or "image/jpeg", size=len(content),
+                storage_path=str(path), fingerprint=hashlib.sha256(content).hexdigest(),
+                purpose="attachment"))
+            await db.flush()
+
+    try:
+        res = await sc.add_check(
+            db, cid, location_id, item_key=item_key, state=state, note=note,
+            checked_on=checked_on, file_id=file_id,
+            user_id=current_user.id, user_name=current_user.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.commit()
+    return res
+
+
+@router.get("/station-upkeep/{location_id}")
+async def get_station_upkeep(
+    location_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Метрология и обслуживание станции: поверка счётчика и срок ТО.
+
+    Живёт у единицы оборудования, а не у точки: при замене станции поверка
+    уезжает вместе с железкой, а не остаётся за адресом.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        return await up.station_upkeep(db, cid, location_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+class UpkeepIn(BaseModel):
+    meterSerial: str | None = None
+    meterVerifiedOn: str | None = Field(None, description="дата поверки, ГГГГ-ММ-ДД")
+    meterVerifyUntil: str | None = Field(None, description="поверка действительна до")
+    serviceIntervalDays: int | None = Field(None, ge=0, le=3650)
+    lastServiceOn: str | None = Field(None, description="дата последнего ТО")
+
+
+@router.put("/station-upkeep/{location_id}")
+async def put_station_upkeep(
+    location_id: str,
+    body: UpkeepIn,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Записать поверку и график обслуживания. Пустая строка стирает значение."""
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        res = await up.set_upkeep(
+            db, cid, location_id,
+            meter_serial=body.meterSerial,
+            meter_verified_on=body.meterVerifiedOn,
+            meter_verify_until=body.meterVerifyUntil,
+            service_interval_days=body.serviceIntervalDays,
+            last_service_on=body.lastServiceOn)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.commit()
+    return res
+
+
+@router.get("/network-upkeep")
+async def get_network_upkeep(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сроки поверок и ТО по всей сети — кого пора ставить в план выездов."""
+    cid = await assert_company_member(company_id, current_user, db)
+    return await up.network_upkeep(db, cid)
+
+
+@router.get("/station-check/{location_id}/history")
+async def get_station_check_history(
+    location_id: str,
+    company_id: str = Query(...),
+    item_key: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """История осмотров станции — ответ на «а когда это было в порядке»."""
+    cid = await assert_company_member(company_id, current_user, db)
+    if item_key and item_key not in ITEM_BY_KEY:
+        raise HTTPException(400, f"Неизвестный пункт осмотра: {item_key}")
+    return await sc.check_history(db, cid, location_id, item_key=item_key, limit=limit)
+
+
+@router.get("/station-history/{location_id}")
+async def get_station_history(
+    location_id: str,
+    company_id: str = Query(...),
+    days: int = Query(90, ge=7, le=365),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """История станции: работа за окно, перерывы и смены состояния."""
+    cid = await assert_company_member(company_id, current_user, db)
+    try:
+        return await station_history(db, cid, location_id, days=days)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.get("/reliability")
+async def get_network_reliability(
+    company_id: str = Query(...),
+    days: int = Query(90, ge=7, le=365),
+    region: str | None = Query(None),
+    min_sessions: int = Query(10, ge=1, le=1000),
+    as_of: date | None = Query(None, description="окно заканчивается этим днём"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Надёжность станций: срывы, пустые зарядки, задетые клиенты.
+
+    «Состояние сети» отвечает, работает ли станция вообще; здесь — про станции,
+    которые в сети, но клиент уезжает ни с чем.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    return await network_reliability(db, cid, days=days, region=region,
+                                     min_sessions=min_sessions, as_of=as_of)
 
 
 @router.get("/overview")

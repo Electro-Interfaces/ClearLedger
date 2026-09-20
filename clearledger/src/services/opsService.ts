@@ -6,7 +6,7 @@
  * + собственные нужды станции (СН, оценка по idle-месяцам) + потери;
  * сигнал = СВЕРХНОРМАТИВНЫЙ небаланс (сверх СН).
  */
-import { del, get, patch, post, upload } from './apiClient'
+import { del, get, patch, post, put, upload } from './apiClient'
 
 export interface OpsSeriesPoint {
   period: string
@@ -135,6 +135,624 @@ export interface OpsStation {
   avgTariff: number | null
   series: OpsStationSeriesPoint[]
   contours: OpsStationContour[]
+}
+
+/** Строка состояния сети: что витрина думает о станции и что говорят сессии. */
+export interface NetworkStationRow {
+  locationId: string
+  code: string | null
+  number: string | null
+  name: string
+  region: string | null
+  city: string | null
+  status: string
+  statusLabel: string
+  /** Состояние словами витрины: «Нажата аварийная кнопка» и прочее вне справочника. */
+  statusRaw: string | null
+  lastSessionAt: string | null
+  /** Дней без зарядок. null — не заряжала ни разу. */
+  silentDays: number | null
+  sessions90d: number
+  sessions7d: number
+  revenuePerMonth: number
+  connectors: number | null
+  /** Числится рабочей, а энергии нет больше недели. */
+  mismatch: boolean
+  /** Зарабатывала и замолчала: ₽/мес, которые сеть недобирает. */
+  loss: number
+  attention: boolean
+  lifeStatus: string
+}
+
+export interface NetworkRegionRow {
+  region: string
+  stations: number
+  working: number
+  noLink: number
+  silentWeek: number
+  mismatch: number
+  revenuePerMonth: number
+}
+
+export interface OpsSnapshot {
+  asOf: string
+  dataThrough: string | null
+  dataLagHours: number | null
+  snapshotNote?: string
+}
+
+export interface NetworkState extends OpsSnapshot {
+  /** Момент, по который есть данные (последняя загруженная сессия). */
+  asOf: string
+  dataLagHours: number | null
+  totals: {
+    stations: number; active: number
+    charging2d: number; chargingWeek: number
+    silentWeek: number; silentMonth: number; neverCharged: number
+    mismatch: number; mismatchRevenue: number
+    attention: number; lossPerMonth: number
+    byStatus: Record<string, number>
+  }
+  statusLabels: Record<string, string>
+  regions: NetworkRegionRow[]
+  stations: NetworkStationRow[]
+  note: string
+}
+
+/** Строка надёжности: станция в сети, но клиент уезжает ни с чем. */
+export interface ReliabilityRow {
+  locationId: string
+  code: string | null
+  number: string | null
+  name: string
+  region: string | null
+  city: string | null
+  status: string
+  /** Марка и модель железа: тот же разрез, что в «Производителях». */
+  brand: string | null
+  model: string | null
+  /** Приезд клиента: несколько попыток подряд — один визит. */
+  visits: number
+  visitsOk: number
+  visitsFailed: number
+  failedVisitsPct: number
+  /** Сколько раз пришлось воткнуть разъём за приезд. */
+  attemptsPerVisit: number
+  clientsLost: number
+  sessions: number
+  failed: number
+  failedPct: number
+  /** Исход «успех», а энергии ноль: подключился, постоял, уехал. */
+  empty: number
+  emptyPct: number
+  clients: number
+  clientsAffected: number
+  energyKwh: number
+  revenue: number
+  kwhPerSession: number
+  lastSessionAt: string | null
+  connectors: number | null
+}
+
+export interface NetworkReliability extends OpsSnapshot {
+  trend: { current: { visits: number; failed: number; failedPct: number }; previous: { visits: number; failed: number; failedPct: number }; deltaPp: number }
+  asOf: string
+  days: number
+  minSessions: number
+  threshold: number
+  totals: {
+    populationStations: number; stations: number; stationsCounted: number
+    visits: number; visitsOk: number; visitsFailed: number
+    failedVisitsPct: number; attemptsPerVisit: number
+    sessions: number; failed: number; failedPct: number
+    empty: number; emptyPct: number
+    badStations: number; clientsAffected: number
+  }
+  regions: { region: string; stations: number; sessions: number
+             failed: number; failedPct: number; bad: number
+             visits: number; visitsFailed: number; failedVisitsPct: number }[]
+  stations: ReliabilityRow[]
+  note: string
+}
+
+export async function getNetworkReliability(
+  companyId: string,
+  options?: { days?: number; region?: string; minSessions?: number; asOf?: string },
+): Promise<NetworkReliability> {
+  const params: Record<string, string> = { company_id: companyId }
+  if (options?.days) params.days = String(options.days)
+  if (options?.region) params.region = options.region
+  if (options?.minSessions) params.min_sessions = String(options.minSessions)
+  if (options?.asOf) params.as_of = options.asOf
+  return get<NetworkReliability>('/api/ops/reliability', params)
+}
+
+/** Марка станций: как её железо держит сеть. */
+export interface VendorRow {
+  vendor: string
+  stations: number
+  active: number
+  working: number
+  noLink: number
+  decommissioned: number
+  /** Станций, отпускавших энергию за двое суток, и их доля от действующих. */
+  charging2d: number
+  livePct: number
+  silentWeek: number
+  neverCharged: number
+  visits: number
+  visitsFailed: number
+  failedVisitsPct: number
+  attemptsPerVisit: number
+  failedSessionsPct: number
+  energyKwh: number
+  revenue: number
+  badStations: number
+  models: string[]
+  modelsCount: number
+  avgPowerKwt: number | null
+  /** Отдача, сравнимая между марками разного размера. */
+  kwhPerStationDay: number
+}
+
+/** Станция марки — строка раскрытия. */
+export interface VendorStationRow {
+  locationId: string
+  code: string | null
+  number: string | null
+  name: string
+  region: string | null
+  city: string | null
+  status: string
+  vendor: string
+  model: string | null
+  powerKwt: number | null
+  connectors: number | null
+  silentDays: number | null
+  visits: number
+  visitsFailed: number
+  failedVisitsPct: number
+  attemptsPerVisit: number
+  energyKwh: number
+  revenue: number
+}
+
+export interface NetworkVendors extends OpsSnapshot {
+  asOf: string
+  days: number
+  threshold: number
+  totals: {
+    vendors: number; stations: number; visits: number
+    visitsFailed: number; failedVisitsPct: number; badStations: number
+  }
+  /** Регионы выборки — для отбора на экране, без своего справочника. */
+  regions: string[]
+  vendors: VendorRow[]
+  vendor: string | null
+  stations: VendorStationRow[]
+  note: string
+}
+
+export async function getNetworkVendors(
+  companyId: string,
+  /** vendor: марка — её станции; «*» — станции всех марок (для сводной). */
+  options?: { days?: number; region?: string; vendor?: string; asOf?: string },
+): Promise<NetworkVendors> {
+  const params: Record<string, string> = { company_id: companyId }
+  if (options?.days) params.days = String(options.days)
+  if (options?.region) params.region = options.region
+  if (options?.vendor) params.vendor = options.vendor
+  if (options?.asOf) params.as_of = options.asOf
+  return get<NetworkVendors>('/api/ops/vendors', params)
+}
+
+/** Шаг визита: одно втыкание разъёма и чем оно кончилось. */
+export interface VisitStep {
+  seq: number
+  at: string
+  minutes: number | null
+  connector: string | null
+  connectorType: string | null
+  result: string | null
+  /** Коротко словами: «зарядка», «ошибка», «без энергии». */
+  outcome: string
+  energyKwh: number
+  amount: number
+  tariff: number | null
+  sessionId: string | null
+}
+
+/** Визит — один приезд клиента: несколько попыток подряд входят в него. */
+export interface StationVisit {
+  visitKey: string
+  startedAt: string
+  endedAt: string | null
+  /** Сколько человек провозился у станции: от первой попытки до конца последней. */
+  minutesAtStation: number | null
+  attempts: number
+  charged: boolean
+  energyKwh: number
+  revenue: number
+  client: string | null
+  clientType: string | null
+  clientName: string | null
+  card: string | null
+  /** Картина приезда: ok · retry_same · retry_other · left_after_tries · left_first. */
+  pattern: string
+  steps: VisitStep[]
+}
+
+export interface StationVisits {
+  asOf: string
+  days: number
+  station: { locationId: string; name: string; number: string | null; status: string }
+  totals: {
+    visits: number; failed: number; failedPct: number
+    attempts: number; attemptsPerVisit: number
+  }
+  /** Раскладка приездов по картинам — почему приходилось пробовать снова. */
+  patterns: { key: string; label: string; hint: string; visits: number; pct: number }[]
+  /** Попытки без энергии: мгновенные (не дошло до тока) и затяжные (держала и не дала). */
+  empty: { attempts: number; instant: number; stuck: number; hint: string }
+  connectors: { connector: string; type: string | null; attempts: number
+                failed: number; failedPct: number; energyKwh: number }[]
+  visits: StationVisit[]
+  returned: number
+  note: string
+}
+
+export async function getStationVisits(
+  companyId: string, locationId: string,
+  options?: { days?: number; onlyFailed?: boolean; limit?: number },
+): Promise<StationVisits> {
+  const params: Record<string, string> = { company_id: companyId }
+  if (options?.days) params.days = String(options.days)
+  if (options?.onlyFailed) params.only_failed = 'true'
+  if (options?.limit) params.limit = String(options.limit)
+  return get<StationVisits>(
+    `/api/ops/station-visits/${encodeURIComponent(locationId)}`, params)
+}
+
+/** История одной станции: работа за окно, перерывы и смены состояния. */
+export interface StationHistory {
+  asOf: string
+  days: number
+  station: {
+    locationId: string; code: string | null; number: string | null; name: string
+    city: string | null; status: string; statusLabel: string; statusRaw: string | null
+    connectors: number | null; powerKwt: number | null
+    lastSessionAt: string | null; silentDays: number | null
+  }
+  work: {
+    sessions: number; failed: number; failedPct: number; empty: number
+    clients: number; energyKwh: number; revenue: number
+    avgMinutes: number | null; sessionsPerPortDay: number | null
+  }
+  days_series: { day: string; sessions: number; failed: number
+                 energyKwh: number; revenue: number }[]
+  /** Паузы дольше суток; `ongoing` — станция молчит прямо сейчас. */
+  breaks: { from: string; to: string | null; hours: number; days: number; ongoing: boolean }[]
+  breaksTotal: number
+  events: { at: string | null; kind: string; from: string | null
+            to: string | null; reason: string | null; author: string | null }[]
+  note: string
+}
+
+export async function getStationHistory(
+  companyId: string, locationId: string, days = 90,
+): Promise<StationHistory> {
+  return get<StationHistory>(
+    `/api/ops/station-history/${encodeURIComponent(locationId)}`,
+    { company_id: companyId, days: String(days) })
+}
+
+/** Условия ответственности стороны договора: то, на что ссылается претензия. */
+export interface ContractLiability {
+  responseHours?: number | null
+  fixDays?: number | null
+  calendar?: 'calendar' | 'business' | null
+  penaltyKind?: 'per_day_fixed' | 'per_day_pct' | 'none' | null
+  penaltyValue?: number | null
+  penaltyCap?: number | null
+  warrantyUntil?: string | null
+  warrantyMonths?: number | null
+  escalation?: { afterDays: number; action: string }[] | null
+  clauses?: { field: string; code: string; text: string; hint?: string }[] | null
+  source?: 'manual' | 'parsed' | null
+}
+
+/** Договор в паспорте обязательств станции. */
+export interface ObligationContract {
+  id: string
+  number: string
+  date: string | null
+  title: string | null
+  type: string
+  role: string
+  counterpartyId: string | null
+  counterparty: string | null
+  validUntil: string | null
+  isClosed: boolean
+  basis: string | null
+  scope: 'location' | 'company'
+  locationsCount: number
+  liability: ContractLiability | null
+}
+
+export interface ObligationTerm {
+  id: string
+  costItem: string
+  periodicity: string
+  amountGross: number | null
+  tariffRub: number | null
+  payDueDay: number | null
+  docDueDay: number | null
+  expectedDocs: string[] | null
+  counterpartyEmail: string | null
+  validFrom: string | null
+  validTo: string | null
+  note: string | null
+}
+
+export interface StationObligations {
+  locationId: string
+  found: boolean
+  name?: string
+  number?: string | null
+  brand?: string | null
+  model?: string | null
+  installedOn?: string | null
+  groups: {
+    role: string; label: string
+    contracts: ObligationContract[]
+    terms: Record<string, ObligationTerm[]>
+  }[]
+  settlements: {
+    role: string; counterpartyId: string | null; contractId: string | null
+    paymentStatus: string; paidThrough: string | null
+    basis: string | null; comment: string | null
+  }[]
+  documents: { id: string; kind: string; title: string; number: string | null
+               date: string | null; status: string }[]
+  gaps: string[]
+  metering: { known: boolean; note: string }
+}
+
+export async function parseContractLiability(
+  companyId: string, contractId: string, данные: { file?: File; text?: string },
+): Promise<{ found: ContractLiability; reason: string | null; chars?: number }> {
+  const url = `/api/ops/contracts/${encodeURIComponent(contractId)}/liability/parse`
+    + `?company_id=${encodeURIComponent(companyId)}`
+  if (данные.file) {
+    const fd = new FormData()
+    fd.append('file', данные.file)
+    return upload(url, fd)
+  }
+  return post(url, { text: данные.text ?? '' })
+}
+
+export async function putContractLiability(
+  companyId: string, contractId: string, body: ContractLiability,
+): Promise<ContractLiability> {
+  return put(`/api/ops/contracts/${encodeURIComponent(contractId)}/liability`
+    + `?company_id=${encodeURIComponent(companyId)}`, body)
+}
+
+/** Строка маппинга: под каким ключом станция известна внешней системе. */
+export interface MappingRow {
+  id: string | null
+  system: string
+  systemLabel: string
+  role: string
+  roleLabel: string
+  value: string
+  note: string | null
+  /** own — наш ключ, snapshot — из загрузки, registry — ведём вручную. */
+  source: 'own' | 'snapshot' | 'registry'
+  validFrom: string | null
+  validTo: string | null
+  basis: string | null
+  author: string | null
+}
+
+export interface StationMapping {
+  locationId: string
+  found: boolean
+  name?: string
+  own: MappingRow[]
+  snapshot: MappingRow[]
+  registry: MappingRow[]
+  roaming: MappingRow[]
+  systems: { code: string; label: string }[]
+  roles: { code: string; label: string }[]
+  note: string
+}
+
+export async function getStationMapping(
+  companyId: string, locationId: string,
+): Promise<StationMapping> {
+  return get<StationMapping>(
+    `/api/ops/station-mapping/${encodeURIComponent(locationId)}`,
+    { company_id: companyId })
+}
+
+export async function addStationExternalId(
+  companyId: string, locationId: string,
+  body: { system: string; role: string; value: string; valid_from?: string; note?: string },
+): Promise<{ id: string; system: string; role: string; value: string }> {
+  return post(`/api/ops/station-mapping/${encodeURIComponent(locationId)}`
+    + `?company_id=${encodeURIComponent(companyId)}`, body)
+}
+
+export async function closeStationExternalId(
+  companyId: string, locationId: string, linkId: string, reason?: string,
+): Promise<{ id: string; validTo: string }> {
+  const qs = new URLSearchParams({ company_id: companyId })
+  if (reason) qs.set('reason', reason)
+  return del(`/api/ops/station-mapping/${encodeURIComponent(locationId)}`
+    + `/${encodeURIComponent(linkId)}?${qs}`)
+}
+
+export async function getStationObligations(
+  companyId: string, locationId: string,
+): Promise<StationObligations> {
+  return get<StationObligations>(
+    `/api/ops/station-obligations/${encodeURIComponent(locationId)}`,
+    { company_id: companyId })
+}
+
+/** Причина, по которой станция попала в рабочий лист. */
+export interface WorkReason {
+  kind: 'silent' | 'failing' | 'breached' | 'meter' | 'service' | 'check'
+  label: string
+  note?: string | null
+}
+
+/** Строка рабочего листа: станция, причины и цена вопроса. */
+export interface WorklistRow {
+  locationId: string
+  code: string | null
+  number: string | null
+  name: string
+  region: string | null
+  city: string | null
+  status: string
+  statusLabel: string | null
+  reasons: WorkReason[]
+  silentDays: number | null
+  lossPerMonth: number
+  clientsLost: number
+  failedVisitsPct: number | null
+  visits: number
+  /** Приездов в сутки — загруженность площадки, третий ключ порядка очереди. */
+  visitsPerDay: number | null
+  /** Ход работы из «Поддержки»: сколько открытых заявок и есть ли срыв срока. */
+  openTickets: number
+  breachedTickets: number
+  lastTicketId: string | null
+  lastTicketNumber: string | null
+}
+
+export interface OpsWorklist extends OpsSnapshot {
+  asOf: string
+  dataLagHours: number | null
+  threshold: number
+  totals: {
+    rows: number; silent: number; failing: number; breached: number
+    notTaken: number | null; lossPerMonth: number; lossNotTaken: number | null; clientsLost: number
+    /** Профилактика: поверка счётчика, просроченное ТО, нарушения осмотра. */
+    meter: number; service: number; check: number
+    /** Сроки, которые вообще не заполнены: не работа, но и не «в порядке». */
+    upkeepUnknown: number
+  }
+  dataGaps: (NetworkStationRow & { units: number; meterUnknown: number; serviceUnknown: number })[]
+  rows: WorklistRow[]
+  /** false — «Поддержка» недоступна, пометки «взято/не взято» неизвестны. */
+  workKnown: boolean
+  note: string
+}
+
+/** Заявка в срезе эксплуатации: поля «Поддержки» плюс станция из реестра. */
+export interface TicketRow {
+  isOpen: boolean
+  /** Заведена внутри окна. false — попала в список как открытая работа. */
+  inWindow: boolean
+  id: string
+  number: string
+  title: string
+  status: string
+  statusLabel: string
+  priority: string | null
+  priorityLabel: string | null
+  kind: string
+  stage: string | null
+  source: string
+  createdAt: string
+  closedAt: string | null
+  /** Сколько дней заявке — считает сервер. */
+  ageDays: number | null
+  slaBreached: boolean
+  assignee: string | null
+  locationId: string | null
+  station: string | null
+  stationNumber: string | null
+  brand: string
+  region: string
+  city: string | null
+  ownerClass: string
+  owner: string
+  stationStatus: string | null
+}
+
+export interface TicketsCut { key: string; count: number; open?: number; breached?: number }
+
+export interface OpsTickets extends OpsSnapshot {
+  days: number
+  totals: {
+    total: number; open: number; inWindow: number; breached: number
+    /** Открытые, заведённые до окна: работа, которую окно прятало. */
+    openBeforeWindow: number
+    urgentOpen: number; staleOpen: number; objects: number
+    /** Станции с открытой работой — то же множество, что «взято» в очереди. */
+    openObjects: number
+    avgHours: number | null
+  }
+  by: Record<string, TicketsCut[]>
+  rows: TicketRow[]
+  shown: number
+  withoutStation: number
+  gaps: string[]
+  note: string
+}
+
+export async function getOpsTickets(
+  companyId: string, options?: { days?: number; limit?: number; region?: string; asOf?: string },
+): Promise<OpsTickets> {
+  const params: Record<string, string> = { company_id: companyId }
+  if (options?.days) params.days = String(options.days)
+  if (options?.limit) params.limit = String(options.limit)
+  if (options?.region) params.region = options.region
+  if (options?.asOf) params.as_of = options.asOf
+  return get<OpsTickets>('/api/ops/tickets', params)
+}
+
+/** Состояние ежедневной выгрузки: свежесть, пропавшие поля, потери. */
+export interface IntakeHealth {
+  everLoaded: boolean
+  hours: number | null
+  level: 'ok' | 'late' | 'alarm' | 'unknown'
+  lastLoadAt: string | null
+  dataThrough: string | null
+  thresholdHours?: number
+  lostFields: { field: string; label: string; lastSeen: string | null; rowsWithout: number }[]
+  payments: { total: number; orphans: number; orphanAmount: number }
+  sessionsWithoutStation: number
+  note: string
+}
+
+export async function getIntakeHealth(companyId: string): Promise<IntakeHealth> {
+  return get<IntakeHealth>('/api/ops/intake-health', { company_id: companyId })
+}
+
+export async function getOpsWorklist(
+  companyId: string, options?: { region?: string; asOf?: string },
+): Promise<OpsWorklist> {
+  const params: Record<string, string> = { company_id: companyId }
+  if (options?.region) params.region = options.region
+  if (options?.asOf) params.as_of = options.asOf
+  return get<OpsWorklist>('/api/ops/worklist', params)
+}
+
+export async function getNetworkState(
+  companyId: string,
+  /** `asOf` — состояние НА этот день (ISO), а не на границу данных. */
+  options?: { region?: string; onlyProblems?: boolean; asOf?: string },
+): Promise<NetworkState> {
+  const params: Record<string, string> = { company_id: companyId }
+  if (options?.region) params.region = options.region
+  if (options?.onlyProblems) params.only_problems = 'true'
+  if (options?.asOf) params.as_of = options.asOf
+  return get<NetworkState>('/api/ops/network-state', params)
 }
 
 export async function getOpsOverview(companyId: string, region?: string): Promise<OpsOverview> {
@@ -686,4 +1304,153 @@ export async function getOpsPaymentsCoverage(
   companyId: string,
 ): Promise<{ numbers_total: number; numbers_linked: number; hint: string }> {
   return get('/api/ops/payments/coverage', { company_id: companyId })
+}
+
+// ── Осмотр станции (чек-лист) ───────────────────────────────────────────────
+// Телеметрия отвечает, идёт ли ток. Есть ли на корпусе заводской номер, видна
+// ли цена до оплаты и цела ли оклейка — видно только на месте.
+// Бэкенд: services/station_checklist.py (регламент) + station_check.py (отметки).
+
+/** Вывод по пункту: чем плоха станция прямо сейчас. */
+export type CheckVerdict = 'ok' | 'stale' | 'fail' | 'never' | 'na'
+
+export interface StationCheckItem {
+  key: string
+  group: string
+  group_label: string
+  label: string
+  /** Норма, на которую ссылаемся, либо честное «требование сети». */
+  basis: string
+  hint: string
+  /** Отметка без снимка по этому пункту считается неподтверждённой. */
+  photo: boolean
+  /** Срок годности отметки в днях. */
+  days: number
+  verdict: CheckVerdict
+  state: string | null
+  stateLabel: string | null
+  checkedOn: string | null
+  ageDays: number | null
+  note: string | null
+  checkedBy: string | null
+  fileId: string | null
+  fileName: string | null
+  unconfirmed: boolean
+}
+
+export interface StationCheckState {
+  station: { locationId: string; name: string; number: string | null
+             brand: string | null; model: string | null; serial: string | null }
+  totals: {
+    ok: number; stale: number; fail: number; never: number; na: number
+    items: number; counted: number; okPct: number
+    unconfirmed: number; lastCheck: string | null
+  }
+  groups: { code: string; label: string; items: StationCheckItem[] }[]
+  note: string
+}
+
+export async function getStationCheck(
+  companyId: string, locationId: string,
+): Promise<StationCheckState> {
+  return get(`/api/ops/station-check/${encodeURIComponent(locationId)}`,
+    { company_id: companyId })
+}
+
+/** Записать отметку осмотра. Прежние остаются — это история станции. */
+export async function addStationCheck(
+  companyId: string, locationId: string,
+  fields: { itemKey: string; state: string; note?: string; checkedOn?: string },
+  file?: File | null,
+): Promise<{ id: string; itemKey: string; state: string; checkedOn: string }> {
+  const params = new URLSearchParams({
+    company_id: companyId, item_key: fields.itemKey, state: fields.state })
+  if (fields.note) params.set('note', fields.note)
+  if (fields.checkedOn) params.set('checked_on', fields.checkedOn)
+  const form = new FormData()
+  if (file) form.append('file', file)
+  return upload(
+    `/api/ops/station-check/${encodeURIComponent(locationId)}?${params}`, form)
+}
+
+export interface StationCheckHistoryRow {
+  id: string; itemKey: string; itemLabel: string
+  state: string; stateLabel: string
+  checkedOn: string; note: string | null; checkedBy: string | null
+  fileId: string | null
+}
+
+export async function getStationCheckHistory(
+  companyId: string, locationId: string, itemKey?: string,
+): Promise<StationCheckHistoryRow[]> {
+  const params: Record<string, string> = { company_id: companyId }
+  if (itemKey) params.item_key = itemKey
+  return get(`/api/ops/station-check/${encodeURIComponent(locationId)}/history`, params)
+}
+
+
+/** Срок: состояние и сколько дней осталось (минус — просрочено). */
+export interface UpkeepTerm {
+  state: 'ok' | 'soon' | 'overdue' | 'unknown'
+  stateLabel: string
+  daysLeft: number | null
+}
+
+export interface StationUpkeep {
+  hasUnit: boolean
+  note: string
+  unitId?: string
+  serial?: string | null
+  vendor?: string | null
+  model?: string | null
+  stationType?: string | null
+  warrantyUntil?: string | null
+  meter?: UpkeepTerm & {
+    serial: string | null
+    verifiedOn: string | null
+    verifyUntil: string | null
+  }
+  service?: UpkeepTerm & {
+    intervalDays: number
+    /** true — интервал взят из норматива типа, человек его не задавал. */
+    intervalDefault: boolean
+    lastOn: string | null
+    nextOn: string | null
+  }
+}
+
+export async function getStationUpkeep(
+  companyId: string, locationId: string,
+): Promise<StationUpkeep> {
+  return get(`/api/ops/station-upkeep/${encodeURIComponent(locationId)}`,
+    { company_id: companyId })
+}
+
+/** Записать метрологию и график ТО. Пустая строка стирает значение. */
+export async function putStationUpkeep(
+  companyId: string, locationId: string,
+  body: {
+    meterSerial?: string | null
+    meterVerifiedOn?: string | null
+    meterVerifyUntil?: string | null
+    serviceIntervalDays?: number | null
+    lastServiceOn?: string | null
+  },
+): Promise<StationUpkeep> {
+  return put(`/api/ops/station-upkeep/${encodeURIComponent(locationId)}` +
+    `?company_id=${encodeURIComponent(companyId)}`, body)
+}
+
+export interface NetworkUpkeep {
+  totals: {
+    units: number
+    meterOverdue: number; meterSoon: number; meterUnknown: number
+    serviceOverdue: number; serviceSoon: number; serviceUnknown: number
+  }
+  rows: (StationUpkeep & { locationId: string })[]
+  note: string
+}
+
+export async function getNetworkUpkeep(companyId: string): Promise<NetworkUpkeep> {
+  return get('/api/ops/network-upkeep', { company_id: companyId })
 }

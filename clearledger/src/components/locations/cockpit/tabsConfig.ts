@@ -1,69 +1,160 @@
 /**
- * Конфиг вкладок окна станции: 8 вкладок, сгруппированы в 4 смысловые группы.
- * «Оборудование» и «Интеграции» отдельными вкладками не живут — они внутри
- * «Паспорта» (решение МАГа 12.08.2026): это свойства объекта, а не свои экраны.
- * Порядок массива = порядок в шапке; группа задаёт визуальные разделители.
+ * Состав окна станции: четыре раздела, внутри каждого — виды.
+ *
+ * ПОЧЕМУ ПЕРЕСОБРАНО (20.09.2026, замечание МАГа). Вкладок стало одиннадцать, и
+ * они шли вперемешку: «Обязательства» рядом с «Договорами», «Работа» отдельно от
+ * «Статуса и диагностики», «Реализация» между «Треком» и «Снабжением». Ряд не
+ * помещался по ширине и обрывался молча — про «Договоры» спрашивали, есть ли они
+ * вообще. Одиннадцать равноправных вкладок — это не структура, а список.
+ *
+ * Разделов ровно четыре, и они отвечают на четыре разных вопроса о станции:
+ *
+ * | Раздел | Вопрос | Кто спрашивает |
+ * |---|---|---|
+ * | **Паспорт** | что это за станция | все: адрес, номера, железо, к чему подключена |
+ * | **Право** | кто за неё отвечает и на каких условиях | договорная и претензионная работа |
+ * | **Работа** | как она работает | эксплуатация и продажи |
+ * | **Сервис** | что с ней делают | инженер и поддержка |
+ *
+ * Внутри раздела — виды (уровень «ВИД» канона рабочей области,
+ * `docs/WORKSPACE_UX_PATTERN_PROMPT.md` §1). Вид переключается сегментами, а не
+ * новой вкладкой: это одна тема, показанная с разных сторон.
+ *
+ * Разрез по продукту здесь по-прежнему не делается (решение МАГа 12.08.2026):
+ * станция — ось работы, и все её стороны открываются из любого рабочего места.
  */
 import type { ComponentType } from 'react'
-import {
-  ClipboardList, Activity, Wrench,
-  FileSignature, FolderOpen, Wallet, Truck, MessageCircle, Zap,
-} from 'lucide-react'
+import { Activity, ClipboardList, Network, Scale, Wrench } from 'lucide-react'
 
-export type CockpitGroup = 'object' | 'connection' | 'service' | 'commerce'
+export interface CockpitView {
+  /** Ключ вида внутри раздела. */
+  k: string
+  label: string
+  /** Вид только для ЭЗС: у АЗС и офисов ему нечего показать. */
+  evOnly?: boolean
+}
 
-export interface CockpitTab {
+export interface CockpitSection {
   value: string
   label: string
   icon: ComponentType<{ className?: string }>
-  group: CockpitGroup
+  views: CockpitView[]
 }
 
-export const GROUP_META: Record<CockpitGroup, { label: string }> = {
-  object: { label: 'Объект' },
-  connection: { label: 'Подключение' },
-  service: { label: 'Сервис' },
-  commerce: { label: 'Коммерция' },
-}
-
-export const COCKPIT_TABS: CockpitTab[] = [
-  { value: 'passport', label: 'Паспорт', icon: ClipboardList, group: 'object' },
-  // Отпуск ЭЭ за период. Сквозная, как «Чаты»: вопрос «сколько станция отпустила
-  // с … по …» задаёт и эксплуатация, и проекты, а «Реализация» — разрез продаж,
-  // и денег в ней им видеть не положено.
-  { value: 'energy', label: 'Энергия', icon: Zap, group: 'object' },
-  { value: 'diagnostics', label: 'Статус и диагностика', icon: Activity, group: 'connection' },
-  // Заявки по объекту. Вкладка отрисовывалась модалкой, но кнопки в шапке не было —
-  // открыть её было нельзя, и обслуживание объекта из его карточки не смотрелось.
-  { value: 'service', label: 'Обслуживание', icon: Wrench, group: 'service' },
-  // Документооборот и поручения по объекту. Рядом с «Обслуживанием»: там заявки,
-  // здесь бумаги и работа — приказ о выводе в ремонт, акт обследования.
-  { value: 'track', label: 'Трек', icon: FolderOpen, group: 'service' },
-  { value: 'contracts', label: 'Договоры', icon: FileSignature, group: 'commerce' },
-  { value: 'sales', label: 'Реализация', icon: Wallet, group: 'commerce' },
-  { value: 'supply', label: 'Снабжение', icon: Truck, group: 'commerce' },
-  // Обсуждения объекта: группы чата, привязанные к нему. Сквозная вкладка — как и
-  // сам объект, разговоры о нём не принадлежат одному продукту.
-  { value: 'chats', label: 'Чаты', icon: MessageCircle, group: 'service' },
+export const COCKPIT_SECTIONS: CockpitSection[] = [
+  {
+    value: 'passport',
+    label: 'Паспорт',
+    icon: ClipboardList,
+    // Одна страница, а не три вида. Всё про саму станцию — как называется, где
+    // стоит, из чего собрана, к каким системам подключена и под какими
+    // идентификаторами там известна — читается подряд, сверху вниз. Резать это
+    // на сегменты значит заставить человека искать серийник в трёх местах
+    // (замечание МАГа 20.09.2026).
+    views: [{ k: 'about', label: 'Описание' }],
+  },
+  {
+    value: 'mapping',
+    label: 'Маппинг',
+    icon: Network,
+    // Под какими ключами станция известна другим системам: витрине, HubEx,
+    // зарядной сети, роумингу OCPI. Раньше это лежало внутри «Паспорта» одним
+    // блоком «Интеграции» и отвечало только на половину вопроса — какие
+    // источники подключены, но не какие у станции там номера
+    // (замечание МАГа 20.09.2026).
+    views: [{ k: 'ids', label: 'Идентификаторы и связи' }],
+  },
+  {
+    value: 'legal',
+    label: 'Право',
+    icon: Scale,
+    // Договорная сторона площадки: чем обвязана, кто поставил, какие условия и
+    // санкции, что уже поставлено. Отсюда пишется претензия производителю.
+    views: [
+      { k: 'obligations', label: 'Обязательства' },
+      { k: 'contracts', label: 'Все договоры' },
+      { k: 'supply', label: 'Снабжение' },
+    ],
+  },
+  {
+    value: 'work',
+    label: 'Работа',
+    icon: Activity,
+    // Как станция работает: на связи ли, что с приездами клиентов, сколько
+    // отпустила и сколько принесла. «Состояние» и «Приезды» рядом намеренно:
+    // «нет связи» и «связь есть, но ток не идёт» — соседние вопросы одного
+    // разбора.
+    views: [
+      { k: 'diagnostics', label: 'Состояние' },
+      { k: 'visits', label: 'Приезды', evOnly: true },
+      { k: 'energy', label: 'Энергия', evOnly: true },
+      { k: 'sales', label: 'Реализация' },
+    ],
+  },
+  {
+    value: 'service',
+    label: 'Сервис',
+    icon: Wrench,
+    // Что со станцией делают люди: заявки, документы и поручения, разговоры.
+    // Действия (заявка, поручение, чат) вынесены в шапку окна: они относятся к
+    // станции целиком, а не к одному из её разделов.
+    views: [
+      { k: 'tickets', label: 'Заявки' },
+      // Осмотр стоит вторым, а не последним: заявка заводится ПО итогам осмотра,
+      // и инженер, стоящий у станции, ищет чек-лист рядом с заявками.
+      { k: 'check', label: 'Осмотр', evOnly: true },
+      { k: 'track', label: 'Документы и поручения' },
+      { k: 'chats', label: 'Обсуждения' },
+    ],
+  },
 ]
 
 export type CockpitVariant = 'intake' | 'full'
-// intake = сырой ввод (левое меню «Точки обслуживания»): только object+connection.
-// full = рабочий модуль «Объекты» в Управленческом: все табы.
-export const INTAKE_TAB_VALUES = ['passport', 'energy', 'diagnostics']
 
 /**
- * Вкладки станции. Разреза по продукту больше нет (решение МАГа 12.08.2026):
- * станция — ось работы, направления по ней открываются из любого рабочего места.
- * Прежний разрез `SpaceProduct.objectTabs` прятал оборудование и заявки от того,
- * кто пришёл из «Продаж», и создавал впечатление, что их вовсе нет.
+ * Разделы для сырого ввода («Точки обслуживания»): только то, что относится к
+ * самому объекту и его работе. Права и сервиса там нет — объект ещё не введён
+ * в эксплуатацию, и показывать пустые договоры незачем.
  */
-export function cockpitTabsFor(variant: CockpitVariant = 'full', locationType?: string): CockpitTab[] {
-  const base = variant === 'intake'
-    ? COCKPIT_TABS.filter((t) => INTAKE_TAB_VALUES.includes(t.value))
-    : COCKPIT_TABS
-  // «Энергия» считает зарядные сессии: у АЗС и офисов ей нечего показать.
-  return locationType && locationType !== 'ev_charging'
-    ? base.filter((t) => t.value !== 'energy')
-    : base
+const INTAKE_SECTIONS = ['passport', 'mapping', 'work']
+
+/**
+ * Куда ведут прежние ключи вкладок. Ссылки на карточку живут в чужих экранах и
+ * в закладках людей; молча открывать не тот раздел нельзя, а ломать ссылку —
+ * тем более.
+ */
+export const LEGACY_TAB_MAP: Record<string, { section: string; view: string }> = {
+  passport: { section: 'passport', view: 'about' },
+  equipment: { section: 'passport', view: 'about' },
+  integrations: { section: 'mapping', view: 'ids' },
+  mapping: { section: 'mapping', view: 'ids' },
+  obligations: { section: 'legal', view: 'obligations' },
+  contracts: { section: 'legal', view: 'contracts' },
+  supply: { section: 'legal', view: 'supply' },
+  diagnostics: { section: 'work', view: 'diagnostics' },
+  work: { section: 'work', view: 'visits' },
+  energy: { section: 'work', view: 'energy' },
+  sales: { section: 'work', view: 'sales' },
+  service: { section: 'service', view: 'tickets' },
+  check: { section: 'service', view: 'check' },
+  track: { section: 'service', view: 'track' },
+  chats: { section: 'service', view: 'chats' },
+}
+
+/** Разделы окна с учётом варианта и типа объекта. */
+export function cockpitSectionsFor(
+  variant: CockpitVariant = 'full', locationType?: string,
+): CockpitSection[] {
+  const isEv = !locationType || locationType === 'ev_charging' || locationType === 'ezs'
+  const база = variant === 'intake'
+    ? COCKPIT_SECTIONS.filter((s) => INTAKE_SECTIONS.includes(s.value))
+    : COCKPIT_SECTIONS
+  return база
+    .map((s) => ({ ...s, views: s.views.filter((v) => !v.evOnly || isEv) }))
+    .filter((s) => s.views.length > 0)
+}
+
+/** Раздел и вид по прежнему ключу вкладки (для ссылок и закладок). */
+export function resolveLegacyTab(tab?: string | null): { section: string; view: string } {
+  return (tab && LEGACY_TAB_MAP[tab]) || { section: 'passport', view: 'about' }
 }
