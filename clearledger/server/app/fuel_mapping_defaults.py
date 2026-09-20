@@ -88,4 +88,9 @@ GIG_FUEL_MAPPINGS: list[dict] = [
     {"service_code": 5, "fuel_name": "Дизельное топливо",      "nomenclature_tonnes": "Дизельное топливо (т)",      "nomenclature_liters": "Дизельное топливо (л)",      "density": 0.819},
     {"service_code": 6, "fuel_name": "Дизельное топливо ЗИМА", "nomenclature_tonnes": "Дизельное топливо ЗИМА (т)", "nomenclature_liters": "Дизельное топливо ЗИМА (л)", "density": 0.840},
     {"service_code": 7, "fuel_name": "Газ углеводородный",     "nomenclature_tonnes": "Газ углеводородный (т)",     "nomenclature_liters": "СУГ (л)",                    "density": 0.550},
+    # 16 — газ АЗС №235 (Ужба Келлози). Своим кодом, а не седьмым: STS отдаёт СУГ
+    # этой станции как 16 (резервуар 6, пистолет 8 — пропан), и строки с кодом 16
+    # до 18.09.2026 не находили номенклатуру — газ выпадал из ОРП, ТТН не грузилась.
+    # Номенклатура та же, что у кода 7: газ в бухгалтерии один.
+    {"service_code": 16, "fuel_name": "Газ углеводородный",    "nomenclature_tonnes": "Газ углеводородный (т)",     "nomenclature_liters": "СУГ (л)",                    "density": 0.550},
 ]
