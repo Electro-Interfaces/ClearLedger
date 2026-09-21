@@ -97,26 +97,18 @@ function ElsyWorkspace() {
   }
   const launch = async (product: VendorProduct) => {
     if (!vendor || !product.demo || demoBusy) return
-    // Вкладка открывается ДО запроса, пустой: иначе браузер сочтёт её всплывающим
-    // окном и заблокирует — переход случился бы не по нажатию, а после ответа сервера.
-    const popup = window.open('about:blank', '_blank')
-    if (popup) {
-      popup.opener = null
-      popup.document.title = 'Открываем демонстрацию'
-      popup.document.body.textContent = 'Готовим доступ к демонстрации…'
-    }
     setDemoBusy(true)
     setDemoError('')
     try {
       const result = await launchVendorDemo(vendor.code, companyId, product.demo.code)
       const url = new URL(result.url)
       if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Не удалось открыть адрес демонстрации')
-      // Новую вкладку открыть не дали — показываем в этой же. Пропуск живёт минуты,
-      // «разрешите всплывающие окна и повторите» стоило человеку самого показа.
-      if (popup) popup.location.replace(url.href)
-      else window.location.assign(url.href)
+      // Показ открывается в этой же вкладке. Раньше вкладка открывалась заранее и
+      // пустой — иначе браузер счёл бы её всплывающим окном, — и человек успевал
+      // увидеть белый экран со словами «Готовим доступ к демонстрации…». Возврат из
+      // показа — обычная кнопка «назад», отдельное окно ради этого не нужно.
+      window.location.assign(url.href)
     } catch (error) {
-      popup?.close()
       setDemoError((error as Error).message || 'Не удалось открыть показ. Попробуйте ещё раз или напишите нам')
     } finally { setDemoBusy(false) }
   }
@@ -213,7 +205,7 @@ function ElsyWorkspace() {
               {connected(selected) && <Button disabled={!!appBusy} className="self-start" onClick={() => void openApp(connected(selected)!)}>
                 <ArrowUpRight />Открыть мой сервис</Button>}
               {selected.demo?.ready && selected.demo.allowed ? <>
-                <p className="text-sm text-muted-foreground">{selected.demo.description} Показ откроется в отдельной вкладке на учебных данных.</p>
+                <p className="text-sm text-muted-foreground">{selected.demo.description} Показ идёт на учебных данных; вернуться — кнопкой «назад».</p>
                 <Button disabled={demoBusy} className="self-start" onClick={() => void launch(selected)}>
                   {demoBusy ? <Loader2 className="animate-spin" /> : <Play />}Открыть демо</Button>
               </> : <p className="text-sm text-muted-foreground">{selected.stage === 'announced'
