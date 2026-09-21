@@ -593,7 +593,12 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
     if (import.meta.env.BASE_URL.startsWith('/demo-run/')) return renderStandLayers()
     // «Учёт» показывается всегда: в этой строке живут сообщения «загрузка» и
     // «приложения не подключены», и без неё стол пустого пространства молчит.
-    const visible = sections.filter((x) => x.apps.length > 0 || x.key === 'internal')
+    const shown = sections.filter((x) => x.apps.length > 0 || x.key === 'internal')
+    // «Системные» — в самый низ стола (решение МАГа 21.09.2026): настройка пространства
+    // и служебные данные нужны реже всего, ниже них ставить нечего. Поэтому строка
+    // уходит под предложенные продукты и пространства клиентов, а не между ними.
+    const visible = shown.filter((x) => x.key !== 'management')
+    const systemRow = shown.find((x) => x.key === 'management')
     // Избранное — первым слоем и в порядке, в котором человек его набирал.
     const picked = favorites.flatMap((code) => all.filter((a) => a.code === code))
     return (
@@ -683,6 +688,13 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
                 />
               )
             })}
+          </Section>
+        )}
+        {systemRow && (
+          <Section key={systemRow.key} title={systemRow.title} hint={systemRow.hint} view={view} divider
+                   storageKey={systemRow.key} count={systemRow.apps.length}
+                   defaultOpen={sectionDefaultOpen(systemRow.key, touch)}>
+            {systemRow.apps.map(renderProductTile)}
           </Section>
         )}
       </>
