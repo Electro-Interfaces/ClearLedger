@@ -97,20 +97,26 @@ function ElsyWorkspace() {
   }
   const launch = async (product: VendorProduct) => {
     if (!vendor || !product.demo || demoBusy) return
+    // Вкладка открывается ДО запроса, пустой: иначе браузер сочтёт её всплывающим
+    // окном и заблокирует — переход случился бы не по нажатию, а после ответа сервера.
     const popup = window.open('about:blank', '_blank')
-    if (!popup) { setDemoError('Разрешите открытие новой вкладки для демонстрации и повторите попытку'); return }
-    popup.opener = null
-    popup.document.title = 'Открываем демонстрацию'
-    popup.document.body.textContent = 'Готовим доступ к демонстрации…'
+    if (popup) {
+      popup.opener = null
+      popup.document.title = 'Открываем демонстрацию'
+      popup.document.body.textContent = 'Готовим доступ к демонстрации…'
+    }
     setDemoBusy(true)
     setDemoError('')
     try {
       const result = await launchVendorDemo(vendor.code, companyId, product.demo.code)
       const url = new URL(result.url)
       if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Не удалось открыть адрес демонстрации')
-      popup.location.replace(url.href)
+      // Новую вкладку открыть не дали — показываем в этой же. Пропуск живёт минуты,
+      // «разрешите всплывающие окна и повторите» стоило человеку самого показа.
+      if (popup) popup.location.replace(url.href)
+      else window.location.assign(url.href)
     } catch (error) {
-      popup.close()
+      popup?.close()
       setDemoError((error as Error).message || 'Не удалось открыть показ. Попробуйте ещё раз или напишите нам')
     } finally { setDemoBusy(false) }
   }
