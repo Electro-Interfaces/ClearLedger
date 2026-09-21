@@ -161,6 +161,9 @@ function Tile({
   title, subtitle, icon: Icon, badge, availability, busy, inactive, readiness, onClick,
   favorite, onToggleFavorite,
 }: TileProps) {
+  // `w-full` у кнопки обязателен: её ширина считается по содержимому, и плитка с
+  // коротким пояснением («Заявки, journey, поддержка») ужималась внутри своей ячейки
+  // сетки — а звёздочка стоит по краю ЯЧЕЙКИ и оставалась висеть в стороне от карточки.
   return (
     <div className="relative h-full">
     <button
@@ -169,7 +172,7 @@ function Tile({
       disabled={busy || inactive}
       title={[title, availability, subtitle, badge, readiness && READINESS_LABEL[readiness]]
         .filter(Boolean).join(' · ')}
-      className={`group relative flex h-full min-h-12 items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left
+      className={`group relative flex h-full w-full min-h-12 items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left
                   transition-colors duration-200 sm:min-h-0 sm:flex-col sm:items-stretch sm:gap-2
                   ${inactive
                     ? 'cursor-inherit border-dashed border-border bg-card'
