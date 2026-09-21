@@ -35,7 +35,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { type SsoApp } from '@/services/ssoService'
 import { listPartnerSpaces, visitPartnerSpace } from '@/services/partnerSpaceService'
-import { getVendorCatalog } from '@/services/vendorService'
+import { getVendorCatalog, launchVendorDemo } from '@/services/vendorService'
 import { useOpenApp } from '@/hooks/useOpenApp'
 import { assignTop, inFrame, spaceUrl } from '@/lib/topNav'
 import { useTouchInput } from '@/hooks/use-mobile'
@@ -510,11 +510,31 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
   })
   // Каталог не ответил — молчим о показе, а не обещаем его: несбывшееся «Демонстрация»
   // дороже скромного «По запросу».
-  const demoedApps = new Set(
-    (vendorCatalog.data?.products || [])
-      .filter((p) => p.demo?.allowed)
-      .flatMap((p) => p.appCodes || []),
-  )
+  //
+  // Код приложения → код показа: карточка на столе открывает показ САМА. Раньше она
+  // вела в «Элси+», где то же самое надо было нажать второй раз, — на карточке
+  // написано «Демонстрация», значит по ней и должна открываться демонстрация.
+  const demoByApp = new Map<string, string>()
+  for (const product of vendorCatalog.data?.products || []) {
+    if (!product.demo?.allowed) continue
+    for (const code of product.appCodes || []) demoByApp.set(code, product.demo.code)
+  }
+  const [demoBusy, setDemoBusy] = useState<string | null>(null)
+
+  async function openOffered(app: SsoApp) {
+    const demoCode = demoByApp.get(app.code)
+    // Показа нет — разговор о продукте: карточка ведёт туда, где его можно начать.
+    if (!demoCode || !vendor) { navigate('/elsy?view=products'); return }
+    setDemoBusy(app.code)
+    try {
+      const res = await launchVendorDemo(vendor.code, company.id, demoCode)
+      // Пропуск живёт минуты — открываем сразу и в этой же вкладке.
+      window.location.assign(res.url)
+    } catch (e) {
+      setDemoBusy(null)
+      toast.error('Не удалось открыть показ', { description: (e as Error).message })
+    }
+  }
 
   async function openSpace(code: string) {
     setVisiting(code)
@@ -666,8 +686,8 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
         ))}
         {/* Продукты, которых у компании ещё нет. Строка стоит после рабочих и до
             пространств клиентов: сначала то, чем человек пользуется, потом то, что
-            он может добавить. Плитка не открывает продукт — она ведёт в «Элси+»,
-            где показ на учебных данных и разговор о подключении. */}
+            он может добавить. Плитка с пометкой «Демонстрация» открывает показ сразу,
+            остальные ведут в «Элси+» — договориться о показе. */}
         {offered.length > 0 && (
           <Section title="Можно подключить" view={view} divider
                    hint={elsyReady
@@ -677,7 +697,7 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
                    defaultOpen={sectionDefaultOpen('offered', touch)}>
             {offered.map((a) => {
               const Item = view === 'list' ? Row : Tile
-              const hasDemo = demoedApps.has(a.code)
+              const hasDemo = demoByApp.has(a.code)
               return (
                 <Item
                   key={a.code}
@@ -687,7 +707,8 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
                   availability={!elsyReady ? 'Не подключено' : hasDemo ? 'Демонстрация' : 'По запросу'}
                   // Без «Элси+» открывать нечего: плитка остаётся рассказом о продукте.
                   inactive={!elsyReady}
-                  onClick={() => { if (elsyReady) navigate('/elsy?view=products') }}
+                  busy={demoBusy === a.code}
+                  onClick={() => { if (elsyReady) void openOffered(a) }}
                 />
               )
             })}
