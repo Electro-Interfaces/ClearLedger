@@ -35,6 +35,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
 import { type SsoApp } from '@/services/ssoService'
 import { listPartnerSpaces, visitPartnerSpace } from '@/services/partnerSpaceService'
+import { getVendorCatalog } from '@/services/vendorService'
 import { useOpenApp } from '@/hooks/useOpenApp'
 import { assignTop, inFrame, spaceUrl } from '@/lib/topNav'
 import { useTouchInput } from '@/hooks/use-mobile'
@@ -494,6 +495,27 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
     .filter((p) => p.role === 'client' && p.isActive && p.linked)
   const [visiting, setVisiting] = useState<string | null>(null)
 
+  // У предложенного продукта показ есть НЕ всегда: за половиной карточек стоит
+  // рассказ, а не стенд. Спрашиваем поставщика тем же каталогом, что и «Элси+»
+  // (продукт несёт `appCodes` — коды приложений пространства, и `demo.allowed`),
+  // и пишем «Демонстрация» только там, где показ действительно откроется.
+  const vendor = (partnerSpaces.data?.items || [])
+    .find((p) => p.role === 'vendor' && p.isActive && p.linked)
+  const vendorCatalog = useQuery({
+    queryKey: ['vendor-catalog', company.id, vendor?.code],
+    queryFn: () => getVendorCatalog(vendor!.code, company.id),
+    enabled: isApiEnabled() && !!company.id && !!vendor?.code && offered.length > 0,
+    staleTime: 5 * 60_000,
+    retry: 1,
+  })
+  // Каталог не ответил — молчим о показе, а не обещаем его: несбывшееся «Демонстрация»
+  // дороже скромного «По запросу».
+  const demoedApps = new Set(
+    (vendorCatalog.data?.products || [])
+      .filter((p) => p.demo?.allowed)
+      .flatMap((p) => p.appCodes || []),
+  )
+
   async function openSpace(code: string) {
     setVisiting(code)
     try {
@@ -655,13 +677,14 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
                    defaultOpen={sectionDefaultOpen('offered', touch)}>
             {offered.map((a) => {
               const Item = view === 'list' ? Row : Tile
+              const hasDemo = demoedApps.has(a.code)
               return (
                 <Item
                   key={a.code}
                   title={a.name}
                   subtitle={a.description || 'Продукт экосистемы'}
                   icon={appIcon(a.icon)}
-                  availability={elsyReady ? 'Демонстрация' : 'Не подключено'}
+                  availability={!elsyReady ? 'Не подключено' : hasDemo ? 'Демонстрация' : 'По запросу'}
                   // Без «Элси+» открывать нечего: плитка остаётся рассказом о продукте.
                   inactive={!elsyReady}
                   onClick={() => { if (elsyReady) navigate('/elsy?view=products') }}
