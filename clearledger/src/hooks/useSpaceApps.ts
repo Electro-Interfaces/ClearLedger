@@ -17,6 +17,12 @@ import { launcherSections, type LauncherSection } from '@/config/spaceLauncher'
 
 export function useSpaceApps(): {
   apps: SsoApp[]
+  /**
+   * Продукты, которые компании не подключены, но предлагаются. Показывает их только
+   * стол — отдельной строкой; меню рельса работает с `apps` и о них не знает: вести
+   * человека в продукт, которого у него нет, оно не должно.
+   */
+  offered: SsoApp[]
   sections: LauncherSection[]
   isLoading: boolean
 } {
@@ -30,5 +36,7 @@ export function useSpaceApps(): {
   const allowed = q.data?.allowed_apps ?? null
   const apps: SsoApp[] = (q.data?.apps ?? [])
     .filter((a) => allowed === null || allowed.includes(a.code))
-  return { apps, sections: launcherSections(apps), isLoading: q.isLoading }
+  // Предложение правами не гейтится: это витрина продукта, а не доступ к данным.
+  const offered: SsoApp[] = q.data?.offered_apps ?? []
+  return { apps, offered, sections: launcherSections(apps), isLoading: q.isLoading }
 }

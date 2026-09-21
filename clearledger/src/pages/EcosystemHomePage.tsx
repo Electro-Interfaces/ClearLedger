@@ -418,7 +418,10 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
 
   // Каталог продуктов и раскладка строк — общие с меню приложений в левом рельсе
   // (`hooks/useSpaceApps`): второго списка приложений в пространстве нет.
-  const { apps: all, sections, isLoading } = useSpaceApps()
+  const { apps: all, offered, sections, isLoading } = useSpaceApps()
+  // «Элси+» — дверь к показу и разговору о подключении. Нет его — предложенные
+  // продукты остаются рассказом, и плитка никуда не ведёт.
+  const elsyReady = all.some((a) => a.code === 'elsy')
 
   /**
    * Избранное человека (просьба МАГа 06.09.2026): раздел вверху каталога с тем, чем
@@ -634,6 +637,34 @@ export function EcosystemHomePage({ embedded, onNavigate }: {
             )}
           </Section>
         ))}
+        {/* Продукты, которых у компании ещё нет. Строка стоит после рабочих и до
+            пространств клиентов: сначала то, чем человек пользуется, потом то, что
+            он может добавить. Плитка не открывает продукт — она ведёт в «Элси+»,
+            где показ на учебных данных и разговор о подключении. */}
+        {offered.length > 0 && (
+          <Section title="Можно подключить" view={view} divider
+                   hint={elsyReady
+                     ? 'пока не в вашем составе — посмотреть показ и обсудить с нами'
+                     : 'пока не в вашем составе'}
+                   storageKey="offered" count={offered.length}
+                   defaultOpen={sectionDefaultOpen('offered', touch)}>
+            {offered.map((a) => {
+              const Item = view === 'list' ? Row : Tile
+              return (
+                <Item
+                  key={a.code}
+                  title={a.name}
+                  subtitle={a.description || 'Продукт экосистемы'}
+                  icon={appIcon(a.icon)}
+                  availability={elsyReady ? 'Демонстрация' : 'Не подключено'}
+                  // Без «Элси+» открывать нечего: плитка остаётся рассказом о продукте.
+                  inactive={!elsyReady}
+                  onClick={() => { if (elsyReady) navigate('/elsy?view=products') }}
+                />
+              )
+            })}
+          </Section>
+        )}
         {clientSpaces.length > 0 && (
           <Section title="Пространства клиентов" hint="войти своей учётной записью" view={view} divider
                    storageKey="client-spaces" count={clientSpaces.length}

@@ -123,6 +123,10 @@ async def list_apps(
     # должен появляться на столе. Раньше реестр гейтил только внутренние модули Ledger,
     # а мосты (Заявки, Конференции) показывались всегда — выключить их было нечем.
     chat_enabled = settings.chat_enabled
+    # Продукты, которые компании НЕ подключены, но предлагаются: у клиента они стоят
+    # отдельной строкой стола — «можно подключить», с показом из «Элси+». Раньше такой
+    # продукт просто исчезал, и человек не знал, что он вообще есть.
+    offered: list[dict[str, Any]] = []
     if company_id:
         from app.services import app_registry
         try:
@@ -132,6 +136,21 @@ async def list_apps(
         if reg_cid is not None:
             reg_apps = await app_registry.company_apps(db, reg_cid)
             registry = {a["code"]: a["enabled"] for a in reg_apps}
+            by_manifest = {a["code"]: a for a in apps}
+            offered = [{
+                "code": reg["code"], "name": reg["name"],
+                "icon": reg.get("icon") or by_manifest.get(reg["code"], {}).get("icon", ""),
+                "mode": by_manifest.get(reg["code"], {}).get("mode", "internal"),
+                "layer": INTERNAL_LAYERS.get(reg["code"],
+                                             by_manifest.get(reg["code"], {}).get("layer", "app")),
+                "description": reg.get("description") or "",
+            } for reg in reg_apps
+                # Предлагаем только то, что у нас действительно есть чем показать:
+                # свой экран в этом SPA либо манифест приложения. Продукт без того и
+                # другого дал бы плитку, ведущую в никуда.
+                if not reg["enabled"]
+                and (reg["code"] in INTERNAL_ROUTES or reg["code"] in by_manifest)
+                and INTERNAL_LAYERS.get(reg["code"]) != "admin"]
             apps = [a for a in apps if registry.get(a["code"], True)]
             chat_enabled = chat_enabled and registry.get("chat", True)
             # Описание из реестра — и мостам тоже. Раньше оно доезжало только до внутренних
@@ -192,6 +211,9 @@ async def list_apps(
         "chat_enabled": chat_enabled,
         "apps": apps,
         "allowed_apps": allowed,
+        # Отдельным списком, а не вперемешку с подключёнными: рельс и шапка показывают
+        # `apps` и не должны вести человека в продукт, которого у компании нет.
+        "offered_apps": offered,
     }
 
 
