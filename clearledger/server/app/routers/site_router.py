@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import secrets
 import uuid
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -468,6 +469,18 @@ async def _pull_company(db: AsyncSession, token: str | None) -> uuid.UUID:
     return conns[0].company_id
 
 
+def _access_version(key: Any, moment: datetime | None) -> str:
+    """Отпечаток выданного доступа: сайт гасит по нему ранее выданные пропуски.
+
+    Сайт (`EP-project/server/access.js`) отказывается работать без него и отвечает
+    503 `access_unavailable` — и на входе в кабинет, и на каталоге стендов. Считаем
+    из отметки изменения записи: правка уровня, списка стендов или самого стенда
+    двигает версию, и старый пропуск перестаёт действовать.
+    """
+    stamp = int(moment.timestamp()) if moment else 0
+    return f"{key}:{stamp}"
+
+
 @router.get("/pull/cabinet")
 async def pull_cabinet(
     email: str = Query(...),
@@ -513,6 +526,7 @@ async def pull_cabinet(
         # Пусто = все стенды: у сайта это звёздочка, форму ответа держим общей.
         "demos": list(row.demos or []),
         "space": space,
+        "accessVersion": _access_version(row.id, row.updated_at),
     }
 
 
@@ -530,6 +544,7 @@ async def pull_demos(
         "id": r.code, "title": r.title, "desc": r.description or "",
         "upstream": r.upstream_url or "", "external": r.external_url or "",
         "landing": r.landing or "",
+        "accessVersion": _access_version(r.code, r.updated_at),
     } for r in res.scalars().all()]}
 
 
