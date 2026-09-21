@@ -229,14 +229,26 @@ function ElsyWorkspace() {
             <div className="flex max-w-md flex-col gap-2"><label htmlFor="elsy-products-search" className="text-sm">Найти продукт или задачу</label>
               <Input id="elsy-products-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Например, учёт или поддержка" /></div>
             <div className="divide-y divide-border">
+              {/* Показ запускается прямо из списка. Раньше «Есть демо» было только
+                  меткой: чтобы открыть пример, надо было догадаться зайти в карточку
+                  продукта, и вопрос «а где сам показ» возникал на первой же строке. */}
               {products.filter((product) => `${product.title} ${product.name} ${product.description}`.toLocaleLowerCase('ru').includes(search.toLocaleLowerCase('ru')))
-                .map((product) => <Link key={product.code} to={href('products', { product: product.code })}
-                  className="grid items-start gap-4 py-5 transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-ring sm:grid-cols-[13rem_1fr_auto]">
-                  <div className="flex flex-col gap-1"><span className="font-semibold">{product.title}</span><span className="text-xs text-muted-foreground">{product.name} · {product.category}</span></div>
-                  <p className="max-w-prose text-sm leading-relaxed text-muted-foreground">{product.description}</p>
-                  <Badge variant="secondary" className="justify-self-start">{connected(product) ? 'Подключён'
-                    : product.stage === 'announced' ? 'В разработке' : product.demo?.ready && product.demo.allowed ? 'Есть демо' : 'Показ с нами'}</Badge>
-                </Link>)}
+                .map((product) => <div key={product.code}
+                  className="grid items-start gap-4 py-5 sm:grid-cols-[13rem_1fr_auto]">
+                  <Link to={href('products', { product: product.code })}
+                    className="flex flex-col gap-1 transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-ring">
+                    <span className="font-semibold">{product.title}</span>
+                    <span className="text-xs text-muted-foreground">{product.name} · {product.category}</span></Link>
+                  <Link to={href('products', { product: product.code })}
+                    className="max-w-prose text-sm leading-relaxed text-muted-foreground transition-colors hover:text-primary focus-visible:outline-2 focus-visible:outline-ring">
+                    {product.description}</Link>
+                  {product.demo?.ready && product.demo.allowed && !connected(product)
+                    ? <Button size="sm" disabled={demoBusy} className="justify-self-start"
+                        onClick={() => void launch(product)}>
+                        {demoBusy ? <Loader2 className="animate-spin" /> : <Play />}Открыть демо</Button>
+                    : <Badge variant="secondary" className="justify-self-start">{connected(product) ? 'Подключён'
+                      : product.stage === 'announced' ? 'В разработке' : 'Показ с нами'}</Badge>}
+                </div>)}
             </div>
             {!products.some((product) => `${product.title} ${product.name} ${product.description}`.toLocaleLowerCase('ru').includes(search.toLocaleLowerCase('ru')))
               && <Notice title="По этому запросу ничего не найдено">Попробуйте другое слово или обсудите задачу с нами.</Notice>}
