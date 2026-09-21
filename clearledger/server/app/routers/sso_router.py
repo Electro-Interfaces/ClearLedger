@@ -61,6 +61,10 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
                    # Аудитор: панель сквозная (шапка и правый док), а плитка ведёт на
                    # его страницу — каталог навыков и разговор во всю ширину.
                    "auditor": "/auditor"}
+# Продукты, которые предлагаем любой компании сверх её профиля: рабочее место
+# руководителя и наша поддержка нужны хоть сети АЗС, хоть офису. Всё остальное
+# предлагается по профилю — плитка «Периметр» рознице нефтепродуктов бессмысленна.
+OFFERED_ALWAYS = {"pulse", "support", "processing"}
 # Слой рабочего стола: управление пространством и служебная кухня стоят отдельно от
 # прикладных продуктов. «Данные» — служебное: ошибка там ломает все продукты сразу.
 INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect": "admin",
@@ -137,6 +141,12 @@ async def list_apps(
             reg_apps = await app_registry.company_apps(db, reg_cid)
             registry = {a["code"]: a["enabled"] for a in reg_apps}
             by_manifest = {a["code"]: a for a in apps}
+            # Предлагаем не весь реестр, а то, что этой компании подходит: продукты её
+            # профиля плюс универсальные рабочие места. Иначе рознице нефтепродуктов
+            # уезжали «Периметр», «Сайт» и «Аудитор» — наши служебные, ей ненужные.
+            profile_id = (await db.execute(
+                select(Company.profile_id).where(Company.id == reg_cid))).scalar_one_or_none()
+            offerable = app_registry.carved_products(profile_id) | OFFERED_ALWAYS
             offered = [{
                 "code": reg["code"], "name": reg["name"],
                 "icon": reg.get("icon") or by_manifest.get(reg["code"], {}).get("icon", ""),
@@ -145,10 +155,10 @@ async def list_apps(
                                              by_manifest.get(reg["code"], {}).get("layer", "app")),
                 "description": reg.get("description") or "",
             } for reg in reg_apps
-                # Предлагаем только то, что у нас действительно есть чем показать:
-                # свой экран в этом SPA либо манифест приложения. Продукт без того и
-                # другого дал бы плитку, ведущую в никуда.
+                # Показать должно быть чем: свой экран в этом SPA либо манифест
+                # приложения. Продукт без того и другого дал бы плитку в никуда.
                 if not reg["enabled"]
+                and reg["code"] in offerable
                 and (reg["code"] in INTERNAL_ROUTES or reg["code"] in by_manifest)
                 and INTERNAL_LAYERS.get(reg["code"]) != "admin"]
             apps = [a for a in apps if registry.get(a["code"], True)]
