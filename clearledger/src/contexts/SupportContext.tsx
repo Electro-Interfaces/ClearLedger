@@ -8,10 +8,13 @@
  * Переключатель режима (setInteractionMode) позволяет «закрепить справа» ↔
  * «открыть окном». Счётчик непрочитанных чата — живой (React Query).
  */
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { getToken, isApiEnabled } from '@/services/apiClient'
-import { getRooms } from '@/services/chatService'
+import { getRooms, isMuted } from '@/services/chatService'
+import { useAuth } from '@/contexts/AuthContext'
+import { useChatWs, type WsEvent } from '@/hooks/useChatWs'
 import { listTasks } from '@/services/tasksService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useTasksApp } from '@/hooks/useTasksApp'
@@ -110,6 +113,33 @@ export function SupportProvider({ children }: { children: ReactNode }) {
   // «Без звука» не красит общий счётчик: замьюченный чат человек откроет сам.
   const chatUnread = (rooms || []).reduce((a, r) => a + (
     r.mutedUntil && Date.parse(r.mutedUntil) > Date.now() ? 0 : (r.unreadCount || 0)), 0)
+
+  // Живые сообщения — на всём пространстве, а не только при открытой панели чатов.
+  // Раньше сокет открывала сама панель: пока она закрыта, счётчик в шапке ждал
+  // минутного опроса, а о новом сообщении не говорило ничего — человек узнавал о
+  // нём, случайно открыв чаты (замечание МАГа 23.09.2026).
+  // ponytail: при открытой панели у вкладки два сокета (этот и панели); свести в один, если станет тесно.
+  const qc = useQueryClient()
+  const { user } = useAuth()
+  const roomsRef = useRef(rooms)
+  roomsRef.current = rooms
+  const sectionRef = useRef(state.section)
+  sectionRef.current = state.section
+  const channels = useMemo(() => (rooms || []).map((r) => `chat:${r.id}`), [rooms])
+  const onChatEvent = useCallback((e: WsEvent) => {
+    if (e.type !== 'chat:message') return
+    void qc.invalidateQueries({ queryKey: ['chat-rooms'] })
+    if (!e.userId || String(e.userId) === user?.id || e.messageType === 'system') return
+    const room = roomsRef.current?.find((r) => r.id === String(e.roomId))
+    // Открытые чаты сами показывают новое (и пищат) — второй раз не зовём.
+    if (!room || isMuted(room) || sectionRef.current === 'chat'
+        || window.location.pathname.endsWith('/messages')) return
+    toast(room.name ? `${e.userName || 'Сообщение'} · ${room.name}` : String(e.userName || 'Новое сообщение'), {
+      description: String(e.content || e.fileName || 'Вложение').slice(0, 140),
+      action: { label: 'Открыть', onClick: () => setState({ section: 'chat', mode: 'dock', context: `room:${room.id}` }) },
+    })
+  }, [qc, user?.id])
+  useChatWs(channels, onChatEvent)
 
   // Задачи: на кнопке — только ПРОСРОЧЕННЫЕ. «Сколько всего на мне» в шапке ничего
   // не решает и горит у всех постоянно; красная цифра должна значить «уже опоздали».

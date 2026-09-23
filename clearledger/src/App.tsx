@@ -56,6 +56,7 @@ const MessagesPage = lazy(() => import('@/pages/MessagesPage').then((m) => ({ de
 const TicketsAppPage = lazy(() => import('@/pages/TicketsAppPage').then((m) => ({ default: m.TicketsAppPage })))
 const TasksRegulation = lazy(() => import('@/pages/tasks/TasksRegulation').then((m) => ({ default: m.TasksRegulation })))
 const DocsLayout = lazy(() => import('@/pages/docs/DocsLayout').then((m) => ({ default: m.DocsLayout })))
+const SupportFramePage = lazy(() => import('@/pages/SupportFramePage'))
 // Вход в «Трек» ведёт в «Моё»: реестр открывается тем же адресом с названным
 // разрезом, и прежние ссылки живы — разрез в них уже есть.
 const DocsHome = lazy(() => import('@/pages/docs/DocsRegistryPage').then((m) => ({ default: m.DocsHome })))
@@ -375,6 +376,8 @@ const router = createBrowserRouter([
           // «Треке» — реестр поручений и доска в «Компании», разрезы в «Обзоре»,
           // типы и маршруты в «Настройке». Пока он оставался, у продукта было
           // два лица, и настройку правили то там, то там.
+          // «Поддержка» — рабочая область в оболочке пространства (`pages/SupportFramePage`).
+          { path: '/support-app', element: <RequireApp code="support"><LazyPage><SupportFramePage /></LazyPage></RequireApp> },
           { path: '/t/:key', element: <TaskShortLink /> },
           { path: '/tasks-legacy', element: <LegacyTasksRedirect /> },
           { path: '/tasks-legacy/*', element: <LegacyTasksRedirect /> },

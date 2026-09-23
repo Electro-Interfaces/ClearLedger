@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { authorizeApp, type SsoApp } from '@/services/ssoService'
 import { useCompany } from '@/contexts/CompanyContext'
-import { assignTop } from '@/lib/topNav'
+import { assignTop, spaceUrl } from '@/lib/topNav'
 
 function isSameOrigin(url: string) {
   try {
@@ -40,6 +40,13 @@ export function useOpenApp() {
         assignTop('/conf')
         return
       }
+      // «Поддержка» — рабочая область оболочки (`pages/SupportFramePage`), а не
+      // отдельная страница: шапка, чаты и уведомления пространства остаются вокруг.
+      if (code === 'support') {
+        if (window.top !== window) assignTop(spaceUrl('/support-app'))
+        else navigate('/support-app')
+        return
+      }
       const url = await authorizeApp(code, companyId)
       // Чужой домен (мост) всегда уходит в новую вкладку: там своя сессия и свой «назад».
       if (newTab || !isSameOrigin(url)) window.open(url, '_blank', 'noopener,noreferrer')
@@ -52,7 +59,7 @@ export function useOpenApp() {
     } finally {
       setBusy(null)
     }
-  }, [busy, companyId])
+  }, [busy, companyId, navigate])
 
   /**
    * Внутренний продукт живёт в этом же SPA, но на десктопе открывается новой вкладкой —
