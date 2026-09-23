@@ -1380,6 +1380,7 @@ CASH_SECTION_MIGRATION_DDL = (
         ('Хозтовары и гигиена / Батарейки и электро',1),
         ('Хозтовары и гигиена / Гигиена',            1),
         ('Хозтовары и гигиена / Зоотовары',          1),
+        ('Хозтовары и гигиена / Дача и пикник',      1),
         ('Прочее',                                   1)
       ) AS x(path, section)
      WHERE g.path = x.path AND g.cash_section IS DISTINCT FROM x.section

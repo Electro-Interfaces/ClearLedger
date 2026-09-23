@@ -8,12 +8,14 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     AccountingSourceLink,
+    Company,
     Contract,
     ContractLocation,
     Counterparty,
@@ -159,6 +161,36 @@ def _vat_percent(value) -> Decimal | None:
     return Decimal(match.group(1)) if match else None
 
 
+#: Шаг цены на станции: она хранится за БАЗОВУЮ единицу (грамм, миллилитр) с
+#: четырьмя знаками, а сумма строки приходит из накладной. На большом
+#: количестве переокруглённая цена расходится с бумагой: 60 000 г × 0,1439 даёт
+#: 8 634,00 против 8 636,36 в накладной (АЗС 8, П-8-260911-0525). Это не ошибка
+#: ввода, а потеря точности в цене, и требовать точного равенства нельзя.
+_ШАГ_ЦЕНЫ = Decimal("0.0001")
+
+
+def _допуск_строки(qty: Decimal) -> Decimal:
+    """Насколько сумма строки вправе разойтись с количеством × цена.
+
+    Ровно шаг цены, помноженный на количество, плюс копейка округления самой
+    суммы. Ошибку ввода — не ту цифру, не то количество — допуск не покрывает:
+    она всегда на порядки больше.
+    """
+    return (qty.copy_abs() * _ШАГ_ЦЕНЫ).quantize(Decimal("0.01")) + Decimal("0.01")
+
+
+def _допуск_ндс(qty: Decimal, percent: Decimal) -> Decimal:
+    """Насколько налог строки вправе разойтись с расчётом по ставке.
+
+    Налог считается ОТ суммы, а сумма сама гуляет в пределах шага цены —
+    значит и налог гуляет на ту же величину, взятую по ставке. Плюс копейка
+    собственного округления. На накладной НОРД-ЛАЙН (145 строк) наибольшее
+    расхождение вышло 0,33 ₽ на 54 кг теста при допуске 1,20.
+    """
+    return (Decimal("0.01")
+            + (_допуск_строки(qty) * percent / Decimal("100"))).quantize(Decimal("0.0001"))
+
+
 def _strict_document_values(
     receipt: StoreReceipt,
     lines: list[dict],
@@ -174,7 +206,7 @@ def _strict_document_values(
         amount = _money(row.get("amount"), f"Товар {index}, сумма", errors)
         vat_amount = _money(row.get("vat_amount"), f"Товар {index}, НДС", errors)
         expected_amount = (qty_fact * price).quantize(Decimal("0.01"))
-        if amount != expected_amount:
+        if abs(amount - expected_amount) > _допуск_строки(qty_fact):
             errors.append(f"Товар {index}: сумма не равна количеству × цене")
         percent = _vat_percent(row.get("vat_rate"))
         if percent is None:
@@ -185,7 +217,10 @@ def _strict_document_values(
                 Decimal("0.00") if percent == 0
                 else (amount * percent / divisor).quantize(Decimal("0.01"))
             )
-            if vat_amount != expected_vat:
+            # НДС в накладной считают построчно и округляют до копейки, а сама
+            # сумма строки гуляет в пределах шага цены — копейки расхождения
+            # здесь норма, а не ошибка ставки.
+            if abs(vat_amount - expected_vat) > _допуск_ндс(qty_fact, percent):
                 errors.append(f"Товар {index}: сумма НДС не соответствует ставке")
     for index, row in enumerate(services, 1):
         amount = _money(row.get("amount"), f"Услуга {index}, сумма", errors)
@@ -199,17 +234,18 @@ def _strict_document_values(
                 Decimal("0.00") if percent == 0
                 else (amount * percent / divisor).quantize(Decimal("0.01"))
             )
-            if vat_amount != expected_vat:
+            if abs(vat_amount - expected_vat) > Decimal("0.01"):
                 errors.append(f"Услуга {index}: сумма НДС не соответствует ставке")
 
     goods_total = sum((_money(row.get("amount"), "Товар", errors) for row in lines),
                       Decimal("0.00"))
     services_total = sum((_money(row.get("amount"), "Услуга", errors) for row in services),
                          Decimal("0.00"))
-    vat_total = sum(
-        (_money(row.get("vat_amount"), "НДС строки", errors) for row in [*lines, *services]),
-        Decimal("0.00"),
-    )
+    goods_vat = sum((_money(row.get("vat_amount"), "НДС строки", errors) for row in lines),
+                    Decimal("0.00"))
+    services_vat = sum((_money(row.get("vat_amount"), "НДС строки", errors) for row in services),
+                       Decimal("0.00"))
+    vat_total = goods_vat + services_vat
     document_total = goods_total + services_total
     # Сумма к оплате: столько платят поставщику и столько стоит в подвале
     # накладной под «Всего к оплате». Когда цены в документе без налога, к
@@ -247,9 +283,16 @@ def _strict_document_values(
         _money(evidence["declared_total"], "declared_total", errors)
         if evidence.get("declared_total") is not None else None
     )
+    # Станция шлёт в подвале товары и услуги БЕЗ налога — так подписаны поля
+    # пакета («ИтогоТоваров» — товары без налога) и так их вводит оператор с
+    # бумаги. Когда цены в документе идут С налогом, сумма строк его уже
+    # содержит, и сравнивать надо за вычетом НДС: иначе расхождение выходит
+    # ровно на величину налога и документ не уезжает (АЗС 8, П-8-260908-1648:
+    # в подвале 1 998,55 при сумме строк 2 381,52 — разница 382,97 = НДС).
     declared = {
-        "declared_goods_total": goods_total,
-        "declared_services_total": services_total,
+        "declared_goods_total": goods_total - goods_vat if vat_included is True else goods_total,
+        "declared_services_total": (
+            services_total - services_vat if vat_included is True else services_total),
         "declared_vat_total": vat_total,
         "declared_total": payable_total,
     }
@@ -332,6 +375,29 @@ async def _contract_covers_receipt(
         statement = statement.with_for_update()
     location = (await session.execute(statement)).scalar_one_or_none()
     return location is not None
+
+
+async def _пояс_компании(session: AsyncSession, receipt: StoreReceipt) -> ZoneInfo:
+    """Пояс компании приёмки; по умолчанию Москва."""
+    company = await session.get(Company, receipt.company_id)
+    try:
+        return ZoneInfo(company.tz if company is not None and company.tz else "Europe/Moscow")
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("Europe/Moscow")
+
+
+async def _день_документа(session: AsyncSession, receipt: StoreReceipt) -> date:
+    """День документа в поясе компании.
+
+    doc_date хранится в UTC: накладная станции от 15.09 (полночь по Москве)
+    лежит как 14.09 21:00Z, и .date() давал 14.09 — договор до 14.09 проходил
+    проверку на документ от 15.09 (ревизия 23.09.2026, дата приёмки = дата
+    накладной). Пояс берём компании: срок договора — обязательство перед ней.
+    """
+    момент = receipt.doc_date
+    if момент.tzinfo is None:
+        return момент.date()
+    return момент.astimezone(await _пояс_компании(session, receipt)).date()
 
 
 async def assess_receipt(
@@ -420,7 +486,7 @@ async def assess_receipt(
         valid_until = _parse_valid_until(contract.valid_until)
         if contract.valid_until and valid_until is None:
             errors.append("Срок договора имеет неверный формат")
-        if valid_until and valid_until < receipt.doc_date.date():
+        if valid_until and valid_until < await _день_документа(session, receipt):
             errors.append("Срок договора истёк на дату приёмки")
         if not await _contract_covers_receipt(session, receipt, contract, lock=lock):
             errors.append("Договор не покрывает станцию приёмки")

@@ -37,7 +37,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .store_reports import _остатки_карточек, _период
+from .store_reports import _BUSINESS_TZ, _остатки_карточек, _период
 
 
 async def _остаток_в_рознице(db: AsyncSession, cid, на: datetime,
@@ -107,7 +107,10 @@ async def goods_report(db: AsyncSession, cid, date_from, date_to,
         приход.append({
             "station_id": r["station_id"],
             "name": r["supplier"] or "—",
-            "date": r["doc_date"].strftime("%d.%m.%Y") if r["doc_date"] else "",
+            # День в бизнес-поясе: doc_date — timestamptz, в UTC полночь
+            # накладной по Москве давала предыдущий день.
+            "date": (r["doc_date"].astimezone(_BUSINESS_TZ) if r["doc_date"].tzinfo
+                     else r["doc_date"]).strftime("%d.%m.%Y") if r["doc_date"] else "",
             "number": r["doc_number"] or "",
             "purchase": round(закуп, 2), "net": round(закуп - ндс, 2),
             "vat": round(ндс, 2), "margin": round(розница - закуп, 2),
