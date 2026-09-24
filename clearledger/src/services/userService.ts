@@ -43,6 +43,8 @@ export interface AdminUser {
   last_seen_at?: string | null // последний вход/активность — для состава и карточки
   companies: MembershipRef[]
   has_station_pin?: boolean // задан ли PIN станции (вход на рабочем месте АЗС)
+  /** Роль в приложениях стека по коду: `{ support: 'operator' }`. Нет ключа — по роли доступа. */
+  app_roles?: Record<string, string> | null
 }
 
 export async function listUsers(companyId: string): Promise<AdminUser[]> {
@@ -97,6 +99,7 @@ export async function updateUser(
     partyType?: 'internal' | 'partner' | 'vendor'
     organizationId?: string          // '' → снять связь с организацией
     departmentId?: string            // '' → вне штатной структуры
+    appRoles?: Record<string, string> // роль в приложении стека; '' → по роли доступа
   },
 ): Promise<AdminUser> {
   return patch<AdminUser>(`/api/users/${id}`, {
@@ -107,6 +110,7 @@ export async function updateUser(
     party_type: data.partyType,
     organization_id: data.organizationId,
     department_id: data.departmentId,
+    app_roles: data.appRoles,
   })
 }
 
