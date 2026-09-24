@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,7 @@ from app.models import (
     StoreReceipt,
     StoreReceiptStockMovement,
 )
+from app.services.closing_date import get_closing_date
 from app.services.store_document_contract import (
     ACCOUNTING_DOCUMENT_KINDS,
     PROJECTION_DOCUMENT_KINDS,
@@ -44,6 +46,10 @@ ADVISORY_LOCK = text(
 
 class ProjectionRevisionConflict(ValueError):
     pass
+
+
+# Дата запрета — день бухгалтерии компании; станции ГИГ живут по Москве.
+_ПОЯС_ЗАКРЫТИЯ = ZoneInfo("Europe/Moscow")
 
 
 @dataclass(frozen=True)
@@ -972,6 +978,18 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
         ))).scalars().all()
         if getattr(row, "source_uuid", None)
     }
+    # Снятые с проведения и служебные — по записи документа в центре.
+    #
+    # Пакет станции после приёма неизменен, а пометку удаления ставят на
+    # запись документа (пакет отмены станции или правка сопровождения): иначе
+    # отменённый пересчёт И-208-260924-0936 оставался в реестре, хотя в 1С уже
+    # не шёл (24.09.2026).
+    снятые = {str(v) for (v,) in (await db.execute(text("""
+        SELECT metadata->'Документ'->>'ИсточникUUID' FROM core.data_entries
+         WHERE company_id = :c AND source = 'edge'
+           AND (metadata->'Документ'->>'ПометкаУдаления' IN ('true', 'True', '1')
+             OR metadata->'Документ'->>'СлужебныйДокумент' IN ('true', 'True', '1'))
+    """), {"c": company_id})).all() if v}
     # копия пакета — не второй документ: на ключ остаётся самая свежая доставка
     freshest: dict[tuple, tuple[datetime, str, ProjectionCandidate]] = {}
     for packet in packets:
@@ -997,6 +1015,8 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
             # Снятый станцией с проведения (пакет отмены, 24.09.2026) — тоже не
             # документ: выгрузка в 1С его уже пропускает, реестр обязан так же.
             if document.get("ПометкаУдаления") in (True, "true", "True", "1", 1):
+                continue
+            if str(document.get("ИсточникUUID") or "") in снятые:
                 continue
             kind = str(document.get("Тип") or "").strip()
             # Выпуск без единой строки — не документ, а след старой сборки.
@@ -1835,6 +1855,53 @@ async def rebuild_store_document_projection(
     adapter_counts["onec_entries"] = sum(
         1 for c in candidates if c.projection_source == "onec_legacy")
 
+    # Закрытый период: учётный документ, уже стоящий в реестре, не меняется
+    # (24.09.2026).
+    #
+    # Станция после закрытия пересылала августовские документы (правки
+    # хронологии, свой расчёт себестоимости), и пересборка ловила «тот же
+    # revision с другим hash» — 84 документа, у 39 менялась сумма, у 18 НДС.
+    # Один такой конфликт останавливал реестр ЦЕЛИКОМ: с 07.09 он не
+    # обновлялся вовсе.
+    #
+    # Правило — по ДОКУМЕНТУ, не по строке: учётный документ закрытого периода
+    # (станция, 1С, приёмка центра), у которого в реестре уже есть записи,
+    # остаётся со всеми ними как был — не обновляется, не удаляется, новых
+    # записей не получает (иначе суммы менялись бы заменой записи: ОП-208-260819
+    # 4 831 → 7 396). Документы закрытого периода, которых в реестре нет,
+    # добавляются — не хватало смен 01–03.08, приёмки и инвентаризации 19.08.
+    # Кассовые данные (чеки, смены кассы) — факты кассы, а не учёт: они
+    # пересобираются как обычно, иначе оставались 1 618 чеков-сирот и смены,
+    # не сходящиеся со своими чеками. Два предыдущих варианта (полная
+    # заморозка; заморозка по строке) опровергли ревизоры до выкатки.
+    закрыт_по = await get_closing_date(db, company_id)
+
+    def в_закрытом(момент) -> bool:
+        if закрыт_по is None or момент is None:
+            return False
+        if getattr(момент, "tzinfo", None) is not None:
+            момент = момент.astimezone(_ПОЯС_ЗАКРЫТИЯ)
+        return момент.date() <= закрыт_по
+
+    кассовые = ("cheque", "store_shift")
+
+    def защищён(source_kind, момент) -> bool:
+        return source_kind not in кассовые and в_закрытом(момент)
+
+    # Защищаем и документ, и саму запись: у техкарт новая сборка даёт той же
+    # записи другой document_id, и защита по одному документу её пропускала.
+    защищённые_документы: set = set()
+    защищённые_записи: set = set()
+    for rec_id, doc_id, doc_at, s_kind in (await db.execute(select(
+            StoreDocumentProjection.id, StoreDocumentProjection.document_id,
+            StoreDocumentProjection.document_at, StoreDocumentProjection.source_kind).where(
+            StoreDocumentProjection.company_id == company_id))).all():
+        if защищён(s_kind, doc_at):
+            защищённые_записи.add(rec_id)
+            if doc_id is not None:
+                защищённые_документы.add(doc_id)
+    оставлено_конфликтов = 0
+
     source_links = (await db.execute(select(AccountingSourceLink).where(
         AccountingSourceLink.company_id == company_id))).scalars().all()
     links = {
@@ -1852,6 +1919,11 @@ async def rebuild_store_document_projection(
              candidate.source_document_id),
             candidate.document_id,
         )
+
+    def отбросить(c) -> bool:
+        return c.document_id in защищённые_документы or c.record_id in защищённые_записи
+    оставлено_конфликтов = sum(1 for c in candidates if отбросить(c))
+    candidates = [c for c in candidates if not отбросить(c)]
 
     by_document: dict[uuid.UUID, list[ProjectionCandidate]] = {}
     by_record: dict[uuid.UUID, ProjectionCandidate] = {}
@@ -1892,6 +1964,8 @@ async def rebuild_store_document_projection(
         StoreDocumentProjection.company_id == company_id).with_for_update()
     )).scalars().all()
     existing_by_id = {row.id: row for row in existing}
+    замороженные = {row.id for row in existing
+                    if row.document_id in защищённые_документы or row.id in защищённые_записи}
     created = updated = unchanged = 0
     now = datetime.now(timezone.utc)
     for record_id, candidate in by_record.items():
@@ -1905,14 +1979,18 @@ async def rebuild_store_document_projection(
                 id=record_id, company_id=company_id, rebuilt_at=now, **values))
             created += 1
             continue
-        if candidate.revision < current.revision:
+        # Кассовые данные закрытого периода собираются из самой кассы — верна
+        # свежая сборка, страж ревизий для них не нужен.
+        кассовые_закрытые = (candidate.source_kind in кассовые and (
+            в_закрытом(current.document_at) or в_закрытом(candidate.document_at)))
+        if candidate.revision < current.revision and not кассовые_закрытые:
             raise ProjectionRevisionConflict(
                 f"Source-record {candidate.source_record_id}: revision {candidate.revision} "
                 f"меньше сохранённой {current.revision}"
             )
         по_тем_же_правилам = (
             (current.header or {}).get("rules_version") == PROJECTION_RULES_VERSION)
-        if (по_тем_же_правилам and candidate.revision == current.revision
+        if (not кассовые_закрытые and по_тем_же_правилам and candidate.revision == current.revision
                 and current.content_hash and candidate.content_hash
                 and current.content_hash != candidate.content_hash):
             raise ProjectionRevisionConflict(
@@ -1929,7 +2007,7 @@ async def rebuild_store_document_projection(
         else:
             unchanged += 1
 
-    stale_ids = set(existing_by_id) - set(by_record)
+    stale_ids = set(existing_by_id) - set(by_record) - замороженные
     if stale_ids:
         await db.execute(delete(StoreDocumentProjection).where(
             StoreDocumentProjection.company_id == company_id,
@@ -1948,7 +2026,8 @@ async def rebuild_store_document_projection(
         StoreDocumentProjectionLine.company_id == company_id))).scalars().all()
     existing_line_map = {row.id: row for row in existing_lines}
     existing_line_ids = set(existing_line_map)
-    obsolete_lines = existing_line_ids - set(desired_lines)
+    obsolete_lines = {i for i in existing_line_ids - set(desired_lines)
+                      if existing_line_map[i].record_id not in замороженные}
     if obsolete_lines:
         await db.execute(delete(StoreDocumentProjectionLine).where(
             StoreDocumentProjectionLine.id.in_(obsolete_lines)))
@@ -2050,7 +2129,8 @@ async def rebuild_store_document_projection(
         StoreDocumentRelation.company_id == company_id))).scalars().all()
     existing_relation_map = {row.id: row for row in existing_relations}
     existing_relation_ids = set(existing_relation_map)
-    obsolete_relations = existing_relation_ids - set(desired_relations)
+    obsolete_relations = {i for i in existing_relation_ids - set(desired_relations)
+                          if existing_relation_map[i].record_id not in замороженные}
     if obsolete_relations:
         await db.execute(delete(StoreDocumentRelation).where(
             StoreDocumentRelation.id.in_(obsolete_relations)))
@@ -2071,6 +2151,10 @@ async def rebuild_store_document_projection(
         "removed": len(stale_ids), "records": len(by_record),
         "line_refs": len(desired_lines), "relations": len(desired_relations),
         "adapters": adapter_counts,
+        "closed_period": {"closing_date": закрыт_по.isoformat() if закрыт_по else None,
+                          "documents_kept": len(защищённые_документы),
+                          "records_kept": len(замороженные),
+                          "candidates_dropped": оставлено_конфликтов},
     }
 
 
