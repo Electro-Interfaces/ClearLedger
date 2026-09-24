@@ -34,6 +34,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.session_scope import station_locations_sql
+
 # Быстрые порты: здесь низкая мощность — сигнал, а не характеристика.
 DC_CONNECTORS = ("CCS Combo 2", "CHAdeMO", "GB/T DC")
 
@@ -83,7 +85,7 @@ async def port_efficiency(
     flt = ""
     if stations is not None:
         p["stations"] = stations
-        flt += " AND station_code = ANY(:stations)"
+        flt += f" AND (station_code = ANY(:stations) OR location_id = ANY{station_locations_sql()})"
     if regions is not None:
         p["regions"] = regions
         # Регион — из справочника (Ф1.3): location_id → region_id → regions.name.

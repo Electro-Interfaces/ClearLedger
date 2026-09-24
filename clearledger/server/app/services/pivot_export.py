@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession
+from app.services.session_scope import station_match
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 SESSIONS_TEMPLATE = TEMPLATE_DIR / "pivot_charge_sessions.xlsx"
@@ -104,7 +105,7 @@ async def build_sessions_pivot(
         # полуночи). См. правило в CLAUDE.md.
         where.append(S.started_at <= datetime.fromisoformat(f"{date_to[:10]}T23:59:59"))
     if stations:
-        where.append(S.station_code.in_(list(stations)))
+        where.append(station_match(S.station_code, S.location_id, company_id, stations))
     if regions:
         from app.models import Region, ServiceLocation
         where.append(S.location_id.in_(

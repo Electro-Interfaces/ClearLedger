@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.scope import acl_params, acl_sql
 
 from app.services.pii_account import mask_phone
+from app.services.session_scope import station_locations_sql
 
 # Порог склейки, мин. Меняя — пересчитать визиты по всем компаниям: показатели
 # надёжности сдвинутся, а старые значения останутся в кеше дашбордов.
@@ -173,7 +174,7 @@ def _scoped(sql: str, stations: list[str] | None, regions: list[str] | None = No
     Скоуп участника (app/scope.py) — та же граница, что в списках объектов."""
     flt = acl_sql("location_id")
     if stations is not None:
-        flt += " AND station_code = ANY(:stations)"
+        flt += f" AND (station_code = ANY(:stations) OR location_id = ANY{station_locations_sql()})"
     if regions is not None:
         flt += (" AND location_id IN (SELECT sl.id FROM service_locations sl"
                 " JOIN regions r ON r.id = sl.region_id"

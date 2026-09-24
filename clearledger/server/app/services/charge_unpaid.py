@@ -30,6 +30,7 @@ from app.scope import acl_params, acl_sql
 
 from app.services.charge_visits import CHARGED_MIN_KWH, _as_date
 from app.services.pii_account import mask_phone
+from app.services.session_scope import station_locations_sql
 
 # Сегмент сессии — та же логика, что в overview_service._segments и
 # corporate_service (ключ = client_name), чтобы цифры сходились между разделами.
@@ -70,7 +71,7 @@ def _scoped(sql: str, stations: list[str] | None, regions: list[str] | None = No
     # Скоуп участника (app/scope.py) — та же граница, что в списках объектов.
     flt = acl_sql("location_id")
     if stations is not None:
-        flt += " AND station_code = ANY(:stations)"
+        flt += f" AND (station_code = ANY(:stations) OR location_id = ANY{station_locations_sql()})"
     if regions is not None:
         # Регион — из справочника (Ф1.3): location_id → region_id → regions.name.
         flt += (" AND location_id IN (SELECT sl.id FROM service_locations sl"

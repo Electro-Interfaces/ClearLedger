@@ -39,6 +39,7 @@ from app.scope import acl_params, acl_sql
 
 from app.services.charge_grouping import _BRAND_CANON
 from app.services.charge_visits import CHARGED_MIN_KWH, VISIT_GAP_MIN, _as_date
+from app.services.session_scope import station_locations_sql
 
 NO_BRAND = "— (нет бренда)"
 #: Станция риска: заметный поток визитов и низкий успех — не единичный сбой.
@@ -66,7 +67,7 @@ def _scope_fragment(stations: list[str] | None, regions: list[str] | None,
     Скоуп участника (app/scope.py) — та же граница, что в списках объектов."""
     flt = acl_sql("location_id")
     if stations is not None:
-        flt += " AND station_code = ANY(:stations)"
+        flt += f" AND (station_code = ANY(:stations) OR location_id = ANY{station_locations_sql()})"
     if regions is not None:
         flt += (" AND location_id IN (SELECT sl.id FROM service_locations sl"
                 " JOIN regions r ON r.id = sl.region_id"

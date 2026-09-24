@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ChargeSession, Region, ServiceLocation
 from app.services.analytics_cache import cached_report
 from app.services.charge_payment_state import effective_paid_at
+from app.services.session_scope import station_match
 
 S = ChargeSession
 L = ServiceLocation
@@ -299,7 +300,8 @@ def _with_join(stmt: Select, group_by: str, region: str | None = None,
 
 def _apply_filters(stmt: Select, *, user_type: str | None, region: str | None,
                    connector: str | None, result: str | None, paid: str | None,
-                   search: str | None, regions: list[str] | None = None) -> Select:
+                   search: str | None, regions: list[str] | None = None,
+                   company_id=None) -> Select:
     """Те же фильтры, что в списке реестра: иначе итоги не сойдутся со списком."""
     if user_type:
         stmt = stmt.where(S.user_type == user_type)
@@ -327,6 +329,10 @@ def _apply_filters(stmt: Select, *, user_type: str | None, region: str | None,
             func.lower(func.coalesce(S.station_name, "")).like(like),
             func.lower(func.coalesce(S.station_code, "")).like(like),
             func.lower(func.coalesce(S.client_name, "")).like(like),
+            # Номер станции, введённый целиком, находит ВСЮ её историю: и под
+            # новым номером, и под бухгалтерским, и под прежними.
+            *([station_match(S.station_code, S.location_id, company_id, [search.strip()])]
+              if company_id is not None and search.strip() else []),
         ))
     return stmt
 
@@ -383,14 +389,14 @@ class ChargeGroupingService:
             S.started_at >= lo, S.started_at <= hi,
         )
         if station_codes:
-            stmt = stmt.where(S.station_code.in_(station_codes))
+            stmt = stmt.where(station_match(S.station_code, S.location_id, company_id, station_codes))
         # Разрез по визитам без ключа бессмыслен: строки без visit_key — это
         # сессии без клиента, каждая сама себе визит, склеивать их не с чем.
         if group_by == "visit":
             stmt = stmt.where(S.visit_key.is_not(None))
         stmt = _apply_filters(stmt, user_type=user_type, region=region, regions=regions,
                               connector=connector, result=result, paid=paid,
-                              search=search).group_by(expr)
+                              search=search, company_id=company_id).group_by(expr)
 
         SORTS = {
             "revenue": func.coalesce(func.sum(revenue_expr), 0),
@@ -466,12 +472,12 @@ class ChargeGroupingService:
             S.started_at >= lo, S.started_at <= hi,
         )
         if station_codes:
-            tot_stmt = tot_stmt.where(S.station_code.in_(station_codes))
+            tot_stmt = tot_stmt.where(station_match(S.station_code, S.location_id, company_id, station_codes))
         if group_by == "visit":
             tot_stmt = tot_stmt.where(S.visit_key.is_not(None))
         tot = (await self.db.execute(_apply_filters(
             tot_stmt, user_type=user_type, region=region, regions=regions, connector=connector,
-            result=result, paid=paid, search=search))).one()
+            result=result, paid=paid, search=search, company_id=company_id))).one()
 
         t_sessions = int(tot.sessions or 0)
         t_energy = float(tot.energy_kwh or 0)
@@ -526,13 +532,13 @@ class ChargeGroupingService:
             S.started_at >= lo, S.started_at <= hi,
         )
         if station_codes:
-            stmt = stmt.where(S.station_code.in_(station_codes))
+            stmt = stmt.where(station_match(S.station_code, S.location_id, company_id, station_codes))
         # Пустой ключ = группа «не заполнено»: сравнение с '' её не найдёт.
         expr = g["expr"]
         stmt = stmt.where(expr.is_(None) if key == "" else expr == key)
         stmt = _apply_filters(stmt, user_type=user_type, region=region, regions=regions,
                               connector=connector, result=result, paid=paid,
-                              search=search).order_by(S.started_at, S.session_ext_id)
+                              search=search, company_id=company_id).order_by(S.started_at, S.session_ext_id)
 
         rows = (await self.db.execute(stmt.limit(limit))).all()
         return {"group_by": group_by, "key": key, "rows": [{
