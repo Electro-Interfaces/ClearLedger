@@ -994,6 +994,10 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
             # сверке документ продолжал стоять как настоящий.
             if document.get("СлужебныйДокумент") in (True, "true", "True", "1", 1):
                 continue
+            # Снятый станцией с проведения (пакет отмены, 24.09.2026) — тоже не
+            # документ: выгрузка в 1С его уже пропускает, реестр обязан так же.
+            if document.get("ПометкаУдаления") in (True, "true", "True", "1", 1):
+                continue
             kind = str(document.get("Тип") or "").strip()
             # Выпуск без единой строки — не документ, а след старой сборки.
             #

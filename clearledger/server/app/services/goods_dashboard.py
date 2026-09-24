@@ -1977,7 +1977,7 @@ class GoodsDashboardService:
         for row in rows:
             meta = row.meta or {}
             document = meta.get("Документ") or {}
-            if document.get("СлужебныйДокумент"):
+            if document.get("СлужебныйДокумент") or document.get("ПометкаУдаления"):
                 continue
             station = str((meta.get("Смена") or {}).get("КодАЗС") or
                           (meta.get("Edge") or {}).get("station_id") or "")
