@@ -441,8 +441,6 @@ const ROUTE_APPS: [string, string][] = [
   // «Конференции» — своё приложение Ядра: без записи вкладка подписывалась
   // «Учёт», и среди вкладок пространства её было не отличить (CONF-09).
   ['/conf', 'conf'],
-  // «Поддержка» в рамке оболочки (`pages/SupportFramePage`).
-  ['/support-app', 'support'],
 ]
 
 /**
@@ -458,8 +456,6 @@ const CORE_APP_TITLES: Record<string, string> = {
 
 /** Имя приложения Ядра по адресу; null — адрес принадлежит Учёту или продукту. */
 export function coreAppTitle(pathname: string): string | null {
-  // Код `support` у «Заявок» (витрина) и у самой Поддержки один, а имена разные.
-  if (pathname === '/support-app') return 'Поддержка'
   const code = appCodeForPath(pathname)
   return CORE_APP_TITLES[code] ?? null
 }
@@ -574,8 +570,6 @@ export function pathAllowed(
   fallback: (pathname: string) => boolean,
   pageAllowed?: (appCode: string, pageCode: string) => boolean,
 ): boolean {
-  // «Поддержка» в рамке — приложение реестра: пускает право на него, а не ключи Учёта.
-  if (pathname === '/support-app') return canApp('support')
   if (isCarvedProfile(profileId)) {
     const product = productForPath(pathname)
     if (product) {
