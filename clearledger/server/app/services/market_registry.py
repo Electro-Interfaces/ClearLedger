@@ -30,7 +30,7 @@ import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (ChannelSyncLog, MarketObservation, MarketOperator,
@@ -356,6 +356,44 @@ def snapshot_coverage(seen: set[str], known: set[str]) -> tuple[float, bool]:
     return coverage, coverage < COVERAGE_MIN
 
 
+# Регион по координатам — для точек, у которых его не дали ни адрес, ни город
+# («Кабанский р-н»): таких было 727 из 8 955, из них 81 наша, и все они выпадали из
+# любого регионального среза. Замечание РусГидро 23.09.2026: в Бурятии «мы — 2 точки»
+# при пяти своих станциях. Сначала наш реестр объектов (точка совпала с нашей
+# станцией — регион паспорта), затем ближайшая точка рынка с известным регионом.
+# ponytail: сосед, а не полигон субъекта — у границы в 30 км может взять соседний
+# субъект; полигоны регионов, если такие ошибки всплывут.
+_FILL_REGION_OURS = text("""
+    UPDATE market_sites s SET region = r.name
+      FROM service_locations l JOIN regions r ON r.id = l.region_id
+     WHERE s.company_id = :cid AND l.company_id = :cid
+       AND coalesce(s.region, '') = '' AND s.latitude IS NOT NULL AND l.latitude IS NOT NULL
+       AND abs(s.latitude - l.latitude) < 0.0015 AND abs(s.longitude - l.longitude) < 0.0025
+""")
+_FILL_REGION_NEAREST = text("""
+    UPDATE market_sites s SET region = n.region
+      FROM (SELECT e.id, (SELECT m.region FROM market_sites m
+                           WHERE m.company_id = e.company_id AND coalesce(m.region, '') <> ''
+                             AND m.latitude BETWEEN e.latitude - 0.27 AND e.latitude + 0.27
+                             AND m.longitude BETWEEN e.longitude - 0.6 AND e.longitude + 0.6
+                             AND (111.0 * (m.latitude - e.latitude)) ^ 2
+                               + (111.0 * cos(radians(e.latitude)) * (m.longitude - e.longitude)) ^ 2 < 900
+                           ORDER BY (m.latitude - e.latitude) ^ 2
+                                  + (cos(radians(e.latitude)) * (m.longitude - e.longitude)) ^ 2
+                           LIMIT 1) AS region
+              FROM market_sites e
+             WHERE e.company_id = :cid AND coalesce(e.region, '') = '' AND e.latitude IS NOT NULL) n
+     WHERE s.id = n.id AND n.region IS NOT NULL
+""")
+
+
+async def fill_regions_by_coords(db: AsyncSession, company_id) -> int:
+    """Проставить регион точкам без него. Возвращает число заполненных."""
+    ours = (await db.execute(_FILL_REGION_OURS, {"cid": company_id})).rowcount or 0
+    near = (await db.execute(_FILL_REGION_NEAREST, {"cid": company_id})).rowcount or 0
+    return ours + near
+
+
 async def ingest_registry(
     db: AsyncSession,
     company_id: _uuid.UUID,
@@ -612,12 +650,16 @@ async def ingest_registry(
             site.closed_on = today
             closed += 1
 
+    await db.flush()
+    regioned = await fill_regions_by_coords(db, company_id)
     await _bump(db, log_id, total, total, created, updated)
+    logger.info("реестр рынка: регион по координатам у %s точек", regioned)
     logger.info("реестр рынка: %s строк, создано %s, обновлено %s, цен %s, пропущено %s",
                 total, created, updated, priced, skipped)
     return {"status": "success", "snapshotDate": today, "rows": total,
             "created": created, "updated": updated, "prices": priced,
             "skipped": skipped, "foreign": foreign, "missing": missing, "closed": closed,
+            "regioned": regioned,
             "coverage": round(coverage * 100, 1), "partial": partial,
             "message": (f"срез {today}: точек {created + updated} "
                         f"(новых {created}), цен {priced}, "
