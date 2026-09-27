@@ -204,7 +204,7 @@ function SessionKpis({ t, series }: { t: ChargeSessionLine; series?: ChargeTotal
         hint={t.charged ? `${nf0.format(t.charged)} с отпуском` : undefined}
         spark={series?.sessions} sparkLabel="Сессии по периодам" />
       <KpiCard label="Энергия" value={kwh(t.energy_kwh)} accent="info" spark={series?.energy} sparkLabel="Энергия по периодам" />
-      <KpiCard label="Цена ₽/кВтч" value={fmtMoney(t.price_per_kwh)} />
+      <KpiCard label="Факт ₽/кВтч" value={fmtMoney(t.price_per_kwh)} hint={t.tariff_avg != null ? `тариф в среднем ${fmtMoney(t.tariff_avg)}` : undefined} />
       {/* Средняя заправка — на состоявшуюся зарядку, а не на попытку подключения. */}
       <KpiCard label="Средняя заправка" value={fmtMoney(t.avg_check) + ' ₽'} spark={series?.avg_check} sparkLabel="Средний чек по периодам" />
       <KpiCard label="кВтч/день/порт" value={nf1.format(t.throughput_port)} hint="throughput" />
@@ -244,6 +244,12 @@ function useCS(companyId: string, dateFrom: string, dateTo: string, groupBy: Cha
     queryKey: ['charge-sessions', groupBy, companyId, dateFrom, dateTo, n.key, tz ?? 'msk', withSeries ? 'series' : ''],
     queryFn: () => getChargeSessions({ companyId, dateFrom, dateTo, groupBy, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal, tz, withSeries }),
   })
+}
+
+/** Тариф группы: одно число или диапазон «20,90–21,90» (тариф задан на тип разъёма). */
+function fmtTariff(l: ChargeSessionLine) {
+  if (l.tariff_min == null || l.tariff_max == null) return '—'
+  return l.tariff_min === l.tariff_max ? fmtMoney(l.tariff_min) : `${fmtMoney(l.tariff_min)}–${fmtMoney(l.tariff_max)}`
 }
 
 function sortLines(lines: ChargeSessionLine[], sort: { key: string; dir: 'asc' | 'desc' }) {
@@ -310,13 +316,15 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   const t = data.totals
   const maxUtil = Math.max(...data.lines.map((l) => l.utilization_pct), 0.01)
   const exCols = [col, ...(physical ? ['Портов'] : []), ...(showStations ? ['Станций'] : []), 'Сессий', 'Энергия, кВтч', 'Выручка, ₽', 'Доля, %',
-    ...(physical ? ['Загрузка, %', 'кВтч/д·порт'] : []), 'Ср. чек, ₽', '₽/кВтч', 'Успех, %']
+    ...(physical ? ['Загрузка, %', 'кВтч/д·порт'] : []), 'Ср. чек, ₽', 'Факт ₽/кВтч', 'Тариф от', 'Тариф до', 'Тариф средний', 'Недобор к тарифу, ₽', 'Успех, %']
   const exRow = (label: string, l: ChargeSessionLine) => [label, ...(physical ? [l.ports] : []), ...(showStations ? [l.stations] : []), l.sessions, l.energy_kwh, l.amount, l.share_pct,
-    ...(physical ? [l.utilization_pct, l.throughput_port] : []), l.avg_check, l.price_per_kwh, l.success_pct]
+    ...(physical ? [l.utilization_pct, l.throughput_port] : []), l.avg_check, l.price_per_kwh,
+    l.tariff_min ?? '', l.tariff_max ?? '', l.tariff_avg ?? '', l.tariff_shortfall ?? 0, l.success_pct]
   const exData: (string | number)[][] = [
     ...sortedLines.flatMap((l) => [exRow(l.label, l), ...(subMap[l.label] ?? []).map((s) => exRow(`${l.label} · ${s.label}`, s))]),
     ['Итого', ...(physical ? [t.ports] : []), ...(showStations ? [t.stations] : []), t.sessions, t.energy_kwh, t.amount, 100,
-      ...(physical ? [t.utilization_pct, t.throughput_port] : []), t.avg_check, t.price_per_kwh, t.success_pct],
+      ...(physical ? [t.utilization_pct, t.throughput_port] : []), t.avg_check, t.price_per_kwh,
+      t.tariff_min ?? '', t.tariff_max ?? '', t.tariff_avg ?? '', t.tariff_shortfall ?? 0, t.success_pct],
   ]
   const toggle = (key: string) => setSort((s) => (s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }))
   return (
@@ -376,7 +384,9 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
                 {physical && <SortableHeader column="utilization_pct" sort={sort} onSort={toggle}>Загрузка</SortableHeader>}
                 {physical && <SortableHeader column="throughput_port" sort={sort} onSort={toggle}>кВтч/д·порт</SortableHeader>}
                 <SortableHeader column="avg_check" sort={sort} onSort={toggle}>Ср. чек</SortableHeader>
-                <SortableHeader column="price_per_kwh" sort={sort} onSort={toggle}>₽/кВтч</SortableHeader>
+                <SortableHeader column="price_per_kwh" sort={sort} onSort={toggle}>Факт ₽/кВтч</SortableHeader>
+                <SortableHeader column="tariff_avg" sort={sort} onSort={toggle}>Тариф</SortableHeader>
+                <SortableHeader column="tariff_shortfall" sort={sort} onSort={toggle}>Недобор</SortableHeader>
                 <SortableHeader column="success_pct" sort={sort} onSort={toggle}>Успех</SortableHeader>
                 {physical && <th className="p-2 font-medium text-right whitespace-nowrap">Тренд ₽</th>}
               </tr>
@@ -404,6 +414,8 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
                   {physical && <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(l.throughput_port)}</td>}
                   <td className="p-2 text-right font-mono text-muted-foreground">{fmtMoney(l.avg_check)}</td>
                   <td className="p-2 text-right font-mono">{fmtMoney(l.price_per_kwh)}</td>
+                  <td className="p-2 text-right font-mono whitespace-nowrap" title={l.tariff_avg != null ? `Средний по энергии ${fmtMoney(l.tariff_avg)}` : undefined}>{fmtTariff(l)}</td>
+                  <td className={`p-2 text-right font-mono ${(l.tariff_shortfall ?? 0) > 0.5 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>{(l.tariff_shortfall ?? 0) > 0.5 ? fmtMoney(l.tariff_shortfall ?? 0) : '—'}</td>
                   <td className={`p-2 text-right font-mono ${succTxt(l.success_pct)}`}>{l.success_pct.toFixed(0)}%</td>
                   {physical && <td className="p-2 text-right"><TrendSpark values={j ? [] : sparkMap[l.label] ?? []} placeholder={<span className="text-muted-foreground/40">—</span>} /></td>}
                 </tr>
@@ -420,6 +432,8 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
                 {physical && <td className="p-2 text-right font-mono">{nf0.format(t.throughput_port)}</td>}
                 <td className="p-2 text-right font-mono">{fmtMoney(t.avg_check)}</td>
                 <td className="p-2 text-right font-mono">{fmtMoney(t.price_per_kwh)}</td>
+                <td className="p-2 text-right font-mono whitespace-nowrap" title={t.tariff_avg != null ? `Средний по энергии ${fmtMoney(t.tariff_avg)}` : undefined}>{fmtTariff(t)}</td>
+                <td className="p-2 text-right font-mono">{(t.tariff_shortfall ?? 0) > 0.5 ? fmtMoney(t.tariff_shortfall ?? 0) : '—'}</td>
                 <td className="p-2 text-right font-mono">{t.success_pct.toFixed(0)}%</td>
                 {physical && <td className="p-2" />}
               </tr>

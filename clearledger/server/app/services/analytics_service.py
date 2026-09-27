@@ -761,6 +761,16 @@ class AnalyticsService:
                       paid_at.is_(None)), 1), else_=0)), 0).label("unpaid_charged"),
             func.count(distinct(self._port_key())).label("ports"),
             func.count(distinct(S.station_code)).label("stations"),
+            # ── Установленный тариф («Цена тарифа» сессии) ──────────────────
+            # «₽/кВтч» — выручка на энергию, и её тянут вниз RFID-зарядки с нулевой
+            # суммой. Заказчик спрашивал тариф, а видел среднюю цену. Тариф задан на
+            # тип разъёма, поэтому у станции их может быть несколько: min–max.
+            func.min(case((and_(S.energy_kwh > 0, S.tariff > 0), S.tariff))).label("tariff_min"),
+            func.max(case((and_(S.energy_kwh > 0, S.tariff > 0), S.tariff))).label("tariff_max"),
+            func.coalesce(func.sum(case((and_(S.energy_kwh > 0, S.tariff > 0), S.tariff * S.energy_kwh), else_=0)), 0)
+                .label("tariff_amount"),
+            func.coalesce(func.sum(case((and_(S.energy_kwh > 0, S.tariff > 0), S.energy_kwh), else_=0)), 0)
+                .label("tariff_energy"),
         ).where(*self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
                                 station_id=station_id)).group_by(gcol)
         if self._uses_region(group_by, regions, dim_by) or self._needs_tz_join(tz, group_by):
@@ -838,6 +848,9 @@ class AnalyticsService:
         ports = int(getattr(r, "ports", 0) or 0)
         stations = int(getattr(r, "stations", 0) or 0)
         port_min = ports * period_days * 1440  # доступные порт-минуты за период
+        t_min = getattr(r, "tariff_min", None); t_max = getattr(r, "tariff_max", None)
+        t_amount = float(getattr(r, "tariff_amount", 0) or 0)
+        t_energy = float(getattr(r, "tariff_energy", 0) or 0)
         return {
             "label": self._cs_label(group_by, r.g),
             "sessions": cnt,
@@ -853,6 +866,7 @@ class AnalyticsService:
             # он про попытки подключения, а не про людей.
             "charged_pct": round(charged / cnt * 100, 1) if cnt else 0.0,
             "price_per_kwh": round(amount / energy, 2) if energy else 0.0,
+            **self._cs_tariff_fields(t_min, t_max, t_amount, t_energy, amount),
             # порт-нормированные метрики (валидны для физических разрезов: станция/коннектор/регион)
             "ports": ports,
             "stations": stations,   # уникальных станций в группе (для не-станционных разрезов)
@@ -869,6 +883,19 @@ class AnalyticsService:
             "_visits": visits, "_visits_ok": visits_ok,
             "_unpaid_charged": unpaid_charged, "_retail_charged": retail_charged,
             "_errors": errors,
+            "_tariff_amount": t_amount, "_tariff_energy": t_energy,
+        }
+
+    @staticmethod
+    def _cs_tariff_fields(t_min, t_max, t_amount: float, t_energy: float, amount: float) -> dict[str, Any]:
+        """Тариф группы: диапазон, средний по энергии и недобор выручки к тарифу."""
+        return {
+            "tariff_min": round(float(t_min), 2) if t_min is not None else None,
+            "tariff_max": round(float(t_max), 2) if t_max is not None else None,
+            "tariff_avg": round(t_amount / t_energy, 2) if t_energy else None,
+            # Выручка по тарифу минус фактическая: RFID с нулевой суммой, договорные
+            # скидки ЮЛ. Отрицательный — продано дороже тарифа.
+            "tariff_shortfall": round(t_amount - amount, 2) if t_energy else 0.0,
         }
 
     async def _cs_aggregate_2d(
@@ -1035,9 +1062,13 @@ class AnalyticsService:
             "unpaid_sessions": tunpaid,
             "error_sessions": terrors,
             "share_pct": 100.0,
+            **self._cs_tariff_fields(
+                min((l["tariff_min"] for l in lines if l["tariff_min"] is not None), default=None),
+                max((l["tariff_max"] for l in lines if l["tariff_max"] is not None), default=None),
+                sum(l["_tariff_amount"] for l in lines), sum(l["_tariff_energy"] for l in lines), total_amount),
         }
         for l in lines:
-            for k in ("_dur_sum", "_success", "_paid", "_cnt_retail", "_charged",
+            for k in ("_tariff_amount", "_tariff_energy", "_dur_sum", "_success", "_paid", "_cnt_retail", "_charged",
                       "_dur_charged", "_visits", "_visits_ok", "_unpaid_charged",
                       "_retail_charged", "_errors"):
                 l.pop(k, None)

@@ -151,7 +151,12 @@ export interface ChargeSessionLine {
   avg_energy: number
   avg_duration_min: number
   success_pct: number       // доля ВИЗИТОВ, закончившихся зарядкой (как на «Обзоре»)
-  price_per_kwh: number
+  price_per_kwh: number     // факт: выручка ÷ энергия
+  // Установленный тариф («Цена тарифа» сессии): задан на тип разъёма, у группы — диапазон
+  tariff_min?: number | null
+  tariff_max?: number | null
+  tariff_avg?: number | null      // средний по энергии
+  tariff_shortfall?: number       // выручка по тарифу − фактическая, ₽
   share_pct: number
   // порт-нормированные метрики (валидны для физических разрезов: станция/коннектор/регион; и в totals)
   ports: number
