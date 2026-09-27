@@ -135,3 +135,17 @@ def test_три_пункта_не_снимаются_ничьей_подпись
     # Дата ввода в эксплуатацию — основание перевода 08 → 01. Пункт назван явно,
     # чтобы удаление его из списка не прошло переименованием.
     assert "8.5" in WAIVE_FORBIDDEN
+
+
+def test_послабление_ищет_пункт_в_чек_листе_своего_вида_работ():
+    """У интеграции свой чек-лист: номер «2.1» там обязателен, а в строительном — нет."""
+    from app.services.ezs_site_work import GATES_BY_KIND
+    stage, items = next((st, its) for st, its in GATES_BY_KIND["integration"].items()
+                        if any(i.get("required") for i in its))
+    item = next(i for i in items if i.get("required"))
+    site = EzsSite(id=uuid.uuid4(), company_id=uuid.uuid4(), stage=stage, gates=None,
+                   kind="integration")
+    res = _run(set_gate_waiver(_FakeDb(site), site, item["key"], True,
+                               "Партнёр работает без NDA", _USER))
+    assert res["ok"] is True, res
+    assert site.gates[stage][item["key"]]["waived"] is True

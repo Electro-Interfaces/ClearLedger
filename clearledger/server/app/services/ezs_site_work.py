@@ -597,9 +597,17 @@ async def set_gate_item(db: AsyncSession, site: EzsSite, key: str, done: bool,
 # Пункт чек-листа по номеру, вместе со стадией, к которой он приписан. Гейты
 # разложены по стадиям, а послабление адресуется пункту: «3.12» человек называет
 # по номеру, не помня, на какой стадии он закрывается.
-_ITEM_BY_KEY: dict[str, tuple[str, dict[str, Any]]] = {
-    it["key"]: (st, it) for st, items in GATES.items() for it in items
-}
+#
+# Номер ищется в чек-листе СВОЕГО вида работ. Раньше поиск шёл по строительному:
+# у интеграции «2.1» обязателен, у стройки нет, и снятие обязательности отвечало
+# «пункт и так не обязателен», а пункты только интеграции (1.1…) не находило вовсе
+# (замечание Маркова, трек №67, 21.09.2026).
+def _item_by_key(kind: str | None, key: str) -> tuple[str, dict[str, Any]] | None:
+    for st, items in GATES_BY_KIND.get(kind or "", GATES).items():
+        for it in items:
+            if it["key"] == key:
+                return st, it
+    return None
 
 
 async def set_gate_waiver(db: AsyncSession, site: EzsSite, key: str, waived: bool,
@@ -619,7 +627,7 @@ async def set_gate_waiver(db: AsyncSession, site: EzsSite, key: str, waived: boo
     Право проверяет вызывающая сторона (роутер): здесь только правила самого
     чек-листа — какой пункт вообще можно ослабить.
     """
-    found = _ITEM_BY_KEY.get(key)
+    found = _item_by_key(site.kind, key)
     if found is None:
         return {"ok": False, "message": f"Пункт {key} в чек-листе не значится"}
     stage, item = found
