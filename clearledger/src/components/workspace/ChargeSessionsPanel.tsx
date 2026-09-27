@@ -246,6 +246,14 @@ function useCS(companyId: string, dateFrom: string, dateTo: string, groupBy: Cha
   })
 }
 
+function sortLines(lines: ChargeSessionLine[], sort: { key: string; dir: 'asc' | 'desc' }) {
+  const dir = sort.dir === 'asc' ? 1 : -1
+  const get = (l: ChargeSessionLine) => ((l as unknown as Record<string, unknown>)[sort.key] as number) ?? 0
+  return [...lines].sort((a, b) => (sort.key === 'label'
+    ? dir * a.label.localeCompare(b.label, 'ru')
+    : dir * (get(a) - get(b))))
+}
+
 /** Универсальная таблица разреза сессий — сортируемая, с data-bars загрузки. */
 function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKpis = false, controls = false, tabKey = 'cs_bd' }: {
   companyId: string; dateFrom: string; dateTo: string; groupBy: ChargeGroupBy; firstCol: string
@@ -253,7 +261,7 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
 }) {
   // Только представление (метрика распределения + топ-N). Период — из контура
   // рабочей области: вид-срез не имеет своего периода (см. CLAUDE.md, ур. 2/4).
-  const [p, patch] = useTabParams(tabKey, { metric: 'amount' as ChargeMetric, rows: 50 })
+  const [p, patch] = useTabParams(tabKey, { metric: 'amount' as ChargeMetric, rows: 50, detail: '' as '' | 'connector' })
   // Разрез — ЛОКАЛЬНО (не в useTabParams): всегда стартует от groupBy таба. Иначе при
   // переиспользовании экземпляра между табами (станции↔коннекторы) разрез залипал.
   const [group, setGroup] = useState<ChargeGroupBy>(groupBy)
@@ -268,15 +276,23 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   const showStations = physical && gb !== 'station'   // число станций в группе; для разреза «станция» = 1, скрываем
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'amount', dir: 'desc' })
   const lines = useMemo(() => data?.lines ?? [], [data?.lines])
-  const sortedLines = useMemo(() => {
-    const dir = sort.dir === 'asc' ? 1 : -1
-    const get = (l: Record<string, unknown>) => l[sort.key]
-    return [...lines].sort((a, b) => (sort.key === 'label'
-      ? dir * a.label.localeCompare(b.label, 'ru')
-      : dir * (((get(a as unknown as Record<string, unknown>) as number) ?? 0) - ((get(b as unknown as Record<string, unknown>) as number) ?? 0))))
-  }, [lines, sort])
+  const sortedLines = useMemo(() => sortLines(lines, sort), [lines, sort])
   const rowLimit = [10, 25, 50, 1000].includes(p.rows) ? p.rows : 50
   const shownLines = controls ? sortedLines.slice(0, rowLimit) : sortedLines
+  // Регион × стандарт коннектора. Выбор регионов в фильтре даёт их сумму, разрез
+  // «по регионам» — регионы без коннекторов; заказчику нужна выручка и загрузка
+  // каждого стандарта в каждом регионе. Запрос на регион — тот же разрез
+  // «по коннекторам», суженный до региона; порты и загрузка считаются внутри него.
+  const detail = controls && gb === 'region' && p.detail === 'connector'
+  const subQs = useQueries({
+    queries: shownLines.map((l) => ({
+      queryKey: ['charge-sessions', 'connector', companyId, period.from, period.to, n.key, 'in-region', l.label],
+      queryFn: () => getChargeSessions({ companyId, dateFrom: period.from, dateTo: period.to, groupBy: 'connector', stations: n.stations, regions: [l.label], dim: n.dim, dimVal: n.dimVal }),
+      enabled: detail,
+    })),
+  })
+  const subMap: Record<string, ChargeSessionLine[]> = {}
+  if (detail) shownLines.forEach((l, i) => { subMap[l.label] = sortLines(subQs[i]?.data?.lines ?? [], sort) })
   // Батч-тренд по месяцам для sparkline в строке (только физические разрезы).
   const spark = useQuery({
     queryKey: ['charge-slice-spark', companyId, period.from, period.to, gb, n.key],
@@ -295,9 +311,10 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
   const maxUtil = Math.max(...data.lines.map((l) => l.utilization_pct), 0.01)
   const exCols = [col, ...(physical ? ['Портов'] : []), ...(showStations ? ['Станций'] : []), 'Сессий', 'Энергия, кВтч', 'Выручка, ₽', 'Доля, %',
     ...(physical ? ['Загрузка, %', 'кВтч/д·порт'] : []), 'Ср. чек, ₽', '₽/кВтч', 'Успех, %']
+  const exRow = (label: string, l: ChargeSessionLine) => [label, ...(physical ? [l.ports] : []), ...(showStations ? [l.stations] : []), l.sessions, l.energy_kwh, l.amount, l.share_pct,
+    ...(physical ? [l.utilization_pct, l.throughput_port] : []), l.avg_check, l.price_per_kwh, l.success_pct]
   const exData: (string | number)[][] = [
-    ...sortedLines.map((l) => [l.label, ...(physical ? [l.ports] : []), ...(showStations ? [l.stations] : []), l.sessions, l.energy_kwh, l.amount, l.share_pct,
-      ...(physical ? [l.utilization_pct, l.throughput_port] : []), l.avg_check, l.price_per_kwh, l.success_pct]),
+    ...sortedLines.flatMap((l) => [exRow(l.label, l), ...(subMap[l.label] ?? []).map((s) => exRow(`${l.label} · ${s.label}`, s))]),
     ['Итого', ...(physical ? [t.ports] : []), ...(showStations ? [t.stations] : []), t.sessions, t.energy_kwh, t.amount, 100,
       ...(physical ? [t.utilization_pct, t.throughput_port] : []), t.avg_check, t.price_per_kwh, t.success_pct],
   ]
@@ -307,6 +324,17 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
       {controls && (
         <ViewParamsBar>
           <Field label="Разрез"><SeriesSelect value={group} onChange={(v) => setGroup(v as ChargeGroupBy)} /></Field>
+          {gb === 'region' && (
+            <Field label="Детализация">
+              <Select value={p.detail || 'none'} onValueChange={(v) => patch({ detail: v === 'connector' ? 'connector' : '' })}>
+                <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none" className="text-xs">Без детализации</SelectItem>
+                  <SelectItem value="connector" className="text-xs">По коннекторам</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <Field label="Метрика"><MetricSelect value={p.metric} onChange={(m) => patch({ metric: m })} /></Field>
           <Field label="Строк">
             <Select value={String(rowLimit)} onValueChange={(v) => patch({ rows: Number(v) })}>
@@ -354,15 +382,17 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
               </tr>
             </thead>
             <tbody>
-              {shownLines.map((l) => (
-                <tr key={l.label} className="border-b border-border/30 hover:bg-muted/30">
-                  <td className="p-2 font-medium truncate max-w-[240px]">{l.label}</td>
+              {shownLines.map((line) => [line, ...(subMap[line.label] ?? [])].map((l, j) => (
+                <tr key={j ? `${line.label}|${l.label}` : l.label} className={`border-b border-border/30 hover:bg-muted/30 ${j ? 'text-muted-foreground' : ''}`}>
+                  {j
+                    ? <td className="p-2 pl-6 truncate max-w-[240px]">{l.label}</td>
+                    : <td className="p-2 font-medium truncate max-w-[240px]">{l.label}</td>}
                   {physical && <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(l.ports)}</td>}
                   {showStations && <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(l.stations)}</td>}
                   <td className="p-2 text-right font-mono">{nf0.format(l.sessions)}</td>
                   <td className="p-2 text-right font-mono">{nf0.format(l.energy_kwh)}</td>
                   <td className="p-2 text-right font-mono">{fmtMoney(l.amount)}</td>
-                  <td className="p-2 text-right font-mono">{l.share_pct.toFixed(1)}%</td>
+                  <td className="p-2 text-right font-mono" title={j ? 'Доля в выручке региона' : undefined}>{l.share_pct.toFixed(1)}%</td>
                   {physical && (
                     <td className="p-2 text-right font-mono">
                       <div className="relative">
@@ -375,9 +405,9 @@ function BreakdownTable({ companyId, dateFrom, dateTo, groupBy, firstCol, withKp
                   <td className="p-2 text-right font-mono text-muted-foreground">{fmtMoney(l.avg_check)}</td>
                   <td className="p-2 text-right font-mono">{fmtMoney(l.price_per_kwh)}</td>
                   <td className={`p-2 text-right font-mono ${succTxt(l.success_pct)}`}>{l.success_pct.toFixed(0)}%</td>
-                  {physical && <td className="p-2 text-right"><TrendSpark values={sparkMap[l.label] ?? []} placeholder={<span className="text-muted-foreground/40">—</span>} /></td>}
+                  {physical && <td className="p-2 text-right"><TrendSpark values={j ? [] : sparkMap[l.label] ?? []} placeholder={<span className="text-muted-foreground/40">—</span>} /></td>}
                 </tr>
-              ))}
+              )))}
               <tr className="bg-muted/60 font-medium">
                 <td className="p-2">Итого</td>
                 {physical && <td className="p-2 text-right font-mono">{nf0.format(t.ports)}</td>}
