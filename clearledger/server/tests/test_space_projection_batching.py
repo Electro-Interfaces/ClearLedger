@@ -34,3 +34,43 @@ def test_empty_payload_still_sends_once():
     """Пустая проекция — это осмысленный запрос (приложение отвечает нулями), а не
     молчание: иначе кнопка «В приложения» на пустом реестре ничего бы не сообщила."""
     assert chunks([]) == [[]]
+
+
+def test_only_last_objects_batch_carries_full_list(monkeypatch):
+    """Полный состав едет одним списком с последней пачкой: приёмник архивирует
+    отсутствующих только по нему. Когда полным считалась каждая пачка, 28.09.2026
+    на rushydro ушли в архив 602 объекта и отменились 1722 заявки."""
+    import asyncio
+    from types import SimpleNamespace
+    from app.services import space_projection as sp
+
+    items = [{"id": f"o{i}", "name": f"Станция {i}"} for i in range(250)]
+    sent: list[dict] = []
+
+    async def fake_target(db, cid, app):
+        return SimpleNamespace(), SimpleNamespace(external_company_id="ext"), "t"
+
+    async def fake_payload(db, cid, app_row, app, entity):
+        return items
+
+    class Resp:
+        status_code = 200
+        def json(self): return {"created": 0, "updated": 0, "skipped": []}
+
+    class Client:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def post(self, url, json=None, headers=None):
+            sent.append(json)
+            return Resp()
+
+    monkeypatch.setattr(sp, "_target", fake_target)
+    monkeypatch.setattr(sp, "_payload", fake_payload)
+    monkeypatch.setattr(sp, "_internal_base_url", lambda *a: "http://support")
+    monkeypatch.setattr(sp.httpx, "AsyncClient", Client)
+
+    asyncio.run(sp.project(None, "cid", "support", "objects"))
+    assert len(sent) == 3
+    assert [("allIds" in b) for b in sent] == [False, False, True]
+    assert sent[-1]["allIds"] == [it["id"] for it in items]
