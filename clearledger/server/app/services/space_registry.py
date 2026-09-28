@@ -40,6 +40,10 @@ def to_card(loc: ServiceLocation) -> dict[str, Any]:
         "id": loc.id,
         "companyId": str(loc.company_id),
         "code": loc.code,
+        # Номер станции для людей и внешних систем (витрина, приказ о нумерации):
+        # журнал поставщиков пишет его в «Номер локации ЭЗС» — там требуют номер
+        # с корпуса станции, а не заводской код (замечание РусГидро 24.09.2026).
+        "stationNumber": getattr(loc, "station_number", None),
         "name": loc.name,
         "type": loc.type,
         "status": loc.status,
