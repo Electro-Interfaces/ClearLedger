@@ -22,6 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger,
 } from '@/components/ui/select'
 import { MobileShell } from '@/components/common/MobileShell'
+import { useExpandedWorkspace } from '@/hooks/useExpandedWorkspace'
 
 export interface PulseView { key: string; label: string; hint: string }
 
@@ -130,8 +131,11 @@ export function PulseLayout() {
   // десктопный вид на планшете и на телефоне, повёрнутом в альбом (844 px).
   const { canModule, company } = useCompany()
   const narrow = useMaxWidth(1024)
-  const [collapsed, setCollapsed] = useState(
+  const [collapsedOwn, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1')
+  // Развёрнутый экран сворачивает колонку до полосы: пункты остаются под рукой.
+  const [expanded, setExpanded] = useExpandedWorkspace()
+  const collapsed = collapsedOwn || expanded
 
   const route = Object.keys(PULSE_VIEWS).find(
     (r) => pathname === r || pathname === `${r}/`) ?? '/pulse'
@@ -144,7 +148,7 @@ export function PulseLayout() {
 
   if (!views.length) return <p className="p-4 text-sm text-muted-foreground">В этом разделе нет доступных вам пунктов.</p>
 
-  const toggle = () => setCollapsed((c) => {
+  const toggle = () => expanded ? setExpanded(false) : setCollapsed((c) => {
     localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
     return !c
   })

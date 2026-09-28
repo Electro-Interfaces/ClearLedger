@@ -13,6 +13,7 @@ import { AppsPanelProvider, AppsPanelSurface } from './AppsPanel'
 import InteractionHost from '@/components/support/InteractionHost'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useMaxWidth } from '@/hooks/use-mobile'
+import { useExpandedWorkspace } from '@/hooks/useExpandedWorkspace'
 import { isWorkspacePath } from '@/config/tabRegistry'
 import { useCompany } from '@/contexts/CompanyContext'
 import { routeAllowed } from '@/config/accessModules'
@@ -54,6 +55,7 @@ export function MainLayout() {
   // ≤1024: компактный shell (гамбургер-меню в drawer, без десктопных вкладок) —
   // чтобы планшеты не теряли ширину под inline-сайдбар (согласовано с WorkspaceLayout).
   const isMobile = useMaxWidth(1024)
+  const [expanded] = useExpandedWorkspace()
   const location = useLocation()
   const navigate = useNavigate()
   const { company, companyModules, canApp, canModule } = useCompany()
@@ -127,7 +129,7 @@ export function MainLayout() {
       <MobileContextBar />
 
       <div className="flex flex-1 min-h-0">
-        {!isMobile && <AppSidebar />}
+        {!isMobile && !expanded && <AppSidebar />}
 
         {isMobile && (
           <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
@@ -185,7 +187,7 @@ export function MainLayout() {
 
         {/* Правая вспомогательная область «Взаимодействие» (Чат / Заявки / Инфо).
             Десктоп: пристыкованная панель-вкладки, двигает контент; мобайл: оверлей. */}
-        <InteractionHost />
+        {!(expanded && !isMobile) && <InteractionHost />}
       </div>
 
       {/* Нижняя навигация телефонов (<768px; сама скрывается md:hidden) */}

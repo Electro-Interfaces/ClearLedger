@@ -22,6 +22,7 @@ import { workCounts } from '@/lib/workCounts'
 import { DocsScopeBar } from '@/components/docs/DocsScopeBar'
 import * as tasksService from '@/services/tasksService'
 import * as workService from '@/services/workService'
+import { useExpandedWorkspace } from '@/hooks/useExpandedWorkspace'
 
 export interface DocsView {
   key: string
@@ -176,8 +177,11 @@ export function DocsLayout() {
   const { company, isCompanyAdmin } = useCompany()
   const qc = useQueryClient()
   const narrow = useMaxWidth(1024)
-  const [collapsed, setCollapsed] = useState(
+  const [collapsedOwn, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1')
+  // Развёрнутый экран сворачивает колонку до полосы: пункты остаются под рукой.
+  const [expanded, setExpanded] = useExpandedWorkspace()
+  const collapsed = collapsedOwn || expanded
 
   const route = docsRouteOf(pathname)
   const views = (DOCS_VIEWS[route] ?? []).filter(
@@ -330,7 +334,7 @@ export function DocsLayout() {
     }, { replace: true })
   }, [active, params, route, setParams, isCompanyAdmin])
 
-  const toggle = () => setCollapsed((c) => {
+  const toggle = () => expanded ? setExpanded(false) : setCollapsed((c) => {
     localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
     return !c
   })

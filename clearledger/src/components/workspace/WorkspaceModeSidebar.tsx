@@ -12,6 +12,7 @@ import { useWorkspace, type CoreMode } from '@/contexts/WorkspaceContext'
 import { useVisibleSections } from './workspaceSections'
 import type { CentralMenuItem } from './CentralPanelLayout'
 import { ChevronDown, ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { useExpandedWorkspace } from '@/hooks/useExpandedWorkspace'
 
 const COLLAPSE_KEY = 'cl-mode-sidebar-collapsed'
 const GROUPS_KEY = 'cl-mode-sidebar-groups-v2'
@@ -63,10 +64,13 @@ export function WorkspaceModeSidebar() {
   useEffect(() => { setExpandedMode(coreMode) }, [coreMode])
 
   // Свёрнутость всей панели в узкий рельс (иконки) — с запоминанием.
-  const [collapsed, setCollapsed] = useState(() => {
+  const [collapsedOwn, setCollapsed] = useState(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === '1' } catch { return false }
   })
-  const toggleCollapsed = () => setCollapsed((c) => {
+  // Развёрнутый экран сворачивает колонку до полосы: пункты остаются под рукой.
+  const [expanded, setExpanded] = useExpandedWorkspace()
+  const collapsed = collapsedOwn || expanded
+  const toggleCollapsed = () => expanded ? setExpanded(false) : setCollapsed((c) => {
     const nv = !c
     try { localStorage.setItem(COLLAPSE_KEY, nv ? '1' : '0') } catch { /* ignore */ }
     return nv

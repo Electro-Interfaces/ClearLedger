@@ -15,6 +15,7 @@ import { Outlet, useLocation, useSearchParams } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
+import { useExpandedWorkspace } from '@/hooks/useExpandedWorkspace'
 
 export interface TasksView { key: string; label: string; hint: string }
 
@@ -69,14 +70,17 @@ export function TasksLayout() {
   // только на настоящем десктопе — при 640 телефон в альбоме (844 px) получал
   // десктопный вид.
   const narrow = useMaxWidth(1024)
-  const [collapsed, setCollapsed] = useState(
+  const [collapsedOwn, setCollapsed] = useState(
     () => localStorage.getItem(COLLAPSE_KEY) === '1')
+  // Развёрнутый экран сворачивает колонку до полосы: пункты остаются под рукой.
+  const [expanded, setExpanded] = useExpandedWorkspace()
+  const collapsed = collapsedOwn || expanded
 
   const route = tasksRouteOf(pathname)
   const views = TASKS_VIEWS[route] ?? []
   const active = useTasksView(route)
 
-  const toggle = () => setCollapsed((c) => {
+  const toggle = () => expanded ? setExpanded(false) : setCollapsed((c) => {
     localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
     return !c
   })

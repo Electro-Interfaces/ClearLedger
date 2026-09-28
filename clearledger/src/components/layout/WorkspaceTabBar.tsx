@@ -1,6 +1,6 @@
 import { useRef, type KeyboardEvent } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { LayoutGrid, Pin, X } from 'lucide-react'
+import { LayoutGrid, Maximize2, Minimize2, Pin, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
@@ -9,6 +9,7 @@ import { useTabs } from '@/contexts/TabsContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { resolveTab, describeView, viewKey } from '@/config/tabRegistry'
 import { cn } from '@/lib/utils'
+import { useExpandedWorkspace } from '@/hooks/useExpandedWorkspace'
 
 export function WorkspaceTabBar() {
   const { tabs, pinTab, closeTab, isPinned } = useTabs()
@@ -20,6 +21,7 @@ export function WorkspaceTabBar() {
   const current = describeView(location.pathname, location.search, company.profileId)
   const currentPinned = current ? isPinned(current.key) : false
   const canPin = !!current && !currentPinned
+  const [expanded, setExpanded] = useExpandedWorkspace()
 
   // Лента экранов — выделенный постоянный сервис переключения и закрепления
   // экранов: видна всегда, даже когда открыт единственный «Рабочий стол».
@@ -156,6 +158,22 @@ export function WorkspaceTabBar() {
           </Button>
         </div>
       ) : null}
+      {/* Здесь, а не в меню: кнопка обязана оставаться видимой, когда экран
+          развёрнут и все колонки скрыты, — иначе свернуть обратно нечем. */}
+      <div className="shrink-0 border-l border-border/60 pl-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="xs" className="h-7 rounded-md" onClick={() => setExpanded(!expanded)}
+              aria-pressed={expanded}>
+              {expanded ? <Minimize2 data-icon="inline-start" /> : <Maximize2 data-icon="inline-start" />}
+              {expanded ? 'Свернуть' : 'Развернуть'}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>
+            {expanded ? 'Вернуть меню и боковые панели' : 'Рабочая область на всю ширину: меню и боковые панели скрываются'}
+          </TooltipContent>
+        </Tooltip>
+      </div>
     </div>
   )
 }
