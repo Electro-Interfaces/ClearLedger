@@ -98,6 +98,17 @@ OBJ_SILENT_DAYS = 30    # нет сессий столько дней ДАННЫ
 OBJ_DROP_PCT = 50.0     # выручка недели упала на столько % — провал точки
 OBJ_PAIN_MIN = 2        # столько признаков сразу — «болит»
 OBJ_IDLE_COST_MIN = 10  # столько платных точек без выручки — карточка
+
+# Станции поштучно — «Первое окно» руководителя РусГидро (29.09.2026): сигналы
+# по каждой ЭЗС, а не по сети в целом. Сетевые карточки выше отвечают «как мы
+# продаём», эти — «сколько станций требуют разбора». Живой считается станция с
+# сессиями за ST_ALIVE_DAYS: давно закрытые не должны раздувать счётчик молчания.
+ST_ALIVE_DAYS = 60
+ST_SILENT_DAYS = 7      # ни одного кВт·ч столько дней данных — станция не отпускает
+ST_DROP_PCT = 50.0      # выручка недели упала на столько % к прошлой — «в 2 раза»
+ST_DROP_FLOOR = 5000    # прошлой недели меньше — процент ничего не значит
+ST_VISIT_OK = 70.0      # доля приездов с зарядом ниже — клиенты уезжают ни с чем
+ST_VISIT_MIN = 10       # приездов за неделю меньше — доля не показательна
 # Признаки словами: в выгрузке те же подписи, что на экране, иначе файл
 # приходится расшифровывать по коду.
 OBJ_FLAG_LABELS = {
@@ -262,6 +273,7 @@ CARD_SCOPE = {
     "own_reopen": "business.support",
     "silent_surge": "business.sales", "sales_drop": "business.sales",
     "sales_out": "business.sales", "sales_visit": "business.sales",
+    "st_silent": "business.sales", "st_drop": "business.sales", "st_visit": "business.sales",
     "cc_missed": "business.contacts", "cc_wrapup": "business.contacts",
     "cc_repeat": "business.contacts", "cc_escalation": "business.contacts",
     "pr_stuck": "business.projects", "pr_no_owner": "business.projects",
@@ -525,6 +537,15 @@ THRESHOLDS: dict[str, dict[str, Any]] = {
     "cc_wrapup_stuck": {"default": float(CC_WRAPUP_STUCK), "unit": "шт", "section": "Обращения",
         "label": "Разговоров брошено в разборе",
         "hint": "Сколько незакрытых обращений с просроченным ответом — уже система."},
+    "st_silent_days": {"default": float(ST_SILENT_DAYS), "unit": "дн", "section": "Станции",
+        "label": "Станция без отпуска",
+        "hint": "Сколько дней данных без единого кВт·ч считать, что станция не работает."},
+    "st_drop_pct": {"default": ST_DROP_PCT, "unit": "%", "section": "Станции",
+        "label": "Падение выручки станции",
+        "hint": "На сколько процентов недельная выручка станции должна упасть к прошлой неделе. 50% — «в 2 раза»."},
+    "st_visit_ok_pct": {"default": ST_VISIT_OK, "unit": "%", "section": "Станции",
+        "label": "Успешных приездов на станции",
+        "hint": "Ниже этой доли приездов с зарядом станция попадает в карточку."},
     "digest_hour": {"default": 9.0, "unit": "ч", "section": "Доставка",
         "label": "Час утреннего письма",
         "hint": "Во сколько по Москве отправлять карточки экрана дня тем, у кого есть доступ. −1 — не отправлять."},
@@ -574,6 +595,9 @@ CARD_TITLES = {
     "sales_drop": "Выручка сети просела",
     "sales_out": "Станции выпали из работы",
     "sales_visit": "Клиенты уезжают без заряда",
+    "st_silent": "Станции не отпускают энергию",
+    "st_drop": "Станции потеряли половину выручки",
+    "st_visit": "Станции, где не заряжаются",
     "pr_stuck": "Проекты стоят на месте",
     "pr_no_owner": "Проекты без ответственного",
     "pr_frozen": "Портфель не двигается",
@@ -615,7 +639,7 @@ def build_cards(
     projects: dict[str, Any] | None = None, ops: dict[str, Any] | None = None,
     objects: dict[str, Any] | None = None, th: dict[str, float] | None = None,
     sources: list[dict[str, Any]] | None = None, access: dict[str, Any] | None = None,
-    visible: set[str] | None = None,
+    visible: set[str] | None = None, stations: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Правила экрана дня — чистая функция над уже посчитанными цифрами.
 
@@ -768,6 +792,40 @@ def build_cards(
              f"Зарядкой заканчивается {visit_ok:.0f}% приездов: каждый "
              f"{max(2, round(100 / max(1, 100 - visit_ok)))}-й клиент уехал ни с чем.",
              count=int(round(100 - visit_ok)), link="/pulse/business")
+
+    # ── Станции поштучно: «Первое окно» руководителя ────────────────────────
+    # Сеть в целом может выглядеть нормально, пока десяток станций стоит.
+    # Карточка — сводка с тремя худшими по имени: список целиком живёт в
+    # «Эксплуатации» («На сегодня», «Надёжность»), сюда он не переезжает.
+    stations = stations or {}
+    alive = int(stations.get("alive") or 0)
+
+    def worst(key: str) -> str:
+        names = [n for n in (stations.get(key) or [])[:3] if n]
+        return f" Среди них: {', '.join(names)}." if names else ""
+
+    st_silent = int(stations.get("silent") or 0)
+    if st_silent:
+        card("st_silent", "Станции не отпускают энергию",
+             f"{st_silent} из {alive} работавших станций не отпустили ни одного кВт·ч "
+             f"за {t['st_silent_days']:.0f} дн. данных.{worst('silent_top')}",
+             count=st_silent, level="alert" if alive and st_silent / alive >= 0.1 else "warn",
+             link="/operations")
+
+    st_drop = int(stations.get("drop") or 0)
+    if st_drop:
+        card("st_drop", "Станции потеряли половину выручки",
+             f"У {st_drop} {plural(st_drop, 'станции', 'станций', 'станций')} выручка недели "
+             f"упала на {t['st_drop_pct']:.0f}% и больше к прошлой неделе — минус "
+             f"{money(stations.get('drop_lost'))} ₽.{worst('drop_top')}",
+             count=st_drop, link="/operations")
+
+    st_visit = int(stations.get("low_ok") or 0)
+    if st_visit:
+        card("st_visit", "Станции, где не заряжаются",
+             f"На {st_visit} {plural(st_visit, 'станции', 'станциях', 'станциях')} зарядкой "
+             f"заканчивается меньше {t['st_visit_ok_pct']:.0f}% приездов за неделю.{worst('low_ok_top')}",
+             count=st_visit, link="/operations")
 
     # ── Проекты: что компания строит ────────────────────────────────────────
     # Портфель меряется не неделями, а тем, движется ли он вообще и есть ли у
@@ -1129,6 +1187,68 @@ async def _objects_snapshot(db: AsyncSession, cid: str) -> dict[str, Any]:
         "total": len(rows), "pain": pain, "pain_count": len(pain),
         "idle_cost_count": int(idle_n), "idle_cost_amount": idle_amount,
         "at_risk_total": sum(p["at_risk"] for p in pain),
+    }
+
+
+async def _stations_snapshot(db: AsyncSession, cid: str, as_of: datetime | None,
+                             th: dict[str, float]) -> dict[str, Any]:
+    """Сигналы по каждой ЭЗС: молчит, провалила выручку, не заряжает.
+
+    Окна от `as_of`, как и у среза продаж. Только профиль energy: приезд
+    (`visit_*`) и кВт·ч — понятия зарядной сети.
+    """
+    if as_of is None or await _profile(db, cid) != "energy":
+        return {}
+    rows = (await db.execute(text("""
+        with s as (
+          select location_id,
+                 max(station_name) as name,
+                 coalesce(sum(energy_kwh) filter (
+                   where started_at > CAST(:as_of AS timestamp) - make_interval(days => :silent)), 0) as kwh_recent,
+                 coalesce(sum(amount) filter (
+                   where started_at > CAST(:as_of AS timestamp) - interval '30 days'), 0) as rev30,
+                 coalesce(sum(amount) filter (
+                   where started_at > CAST(:as_of AS timestamp) - interval '7 days'), 0) as rev,
+                 coalesce(sum(amount) filter (
+                   where started_at <= CAST(:as_of AS timestamp) - interval '7 days'
+                     and started_at > CAST(:as_of AS timestamp) - interval '14 days'), 0) as rev_prev,
+                 count(*) filter (where visit_seq = 1
+                   and started_at > CAST(:as_of AS timestamp) - interval '7 days') as visits,
+                 count(*) filter (where visit_seq = 1 and visit_charged
+                   and started_at > CAST(:as_of AS timestamp) - interval '7 days') as visits_ok
+          from charge_sessions
+          where company_id = :cid and location_id is not null
+            and started_at > CAST(:as_of AS timestamp) - make_interval(days => :alive)
+          group by location_id
+        )
+        select name, rev30, rev, rev_prev, visits, visits_ok,
+               kwh_recent = 0 as silent,
+               rev_prev > :floor and rev <= rev_prev * :keep as fell,
+               visits >= :vmin and visits_ok < visits * :ok as low_ok
+        from s
+    """), {
+        "cid": cid, "as_of": as_of, "alive": ST_ALIVE_DAYS,
+        "silent": int(th["st_silent_days"]), "floor": ST_DROP_FLOOR,
+        "keep": 1 - th["st_drop_pct"] / 100, "vmin": ST_VISIT_MIN,
+        "ok": th["st_visit_ok_pct"] / 100,
+    })).all()
+    if not rows:
+        return {}
+
+    def top(flag: str, key) -> list[str]:
+        return [r.name for r in sorted((r for r in rows if getattr(r, flag)), key=key)]
+
+    drops = [r for r in rows if r.fell]
+    return {
+        "alive": len(rows),
+        # Первыми — те, что приносили больше всего: их молчание дороже.
+        "silent": sum(1 for r in rows if r.silent),
+        "silent_top": top("silent", lambda r: -float(r.rev30)),
+        "drop": len(drops),
+        "drop_lost": sum(float(r.rev_prev) - float(r.rev) for r in drops),
+        "drop_top": top("fell", lambda r: float(r.rev) - float(r.rev_prev)),
+        "low_ok": sum(1 for r in rows if r.low_ok),
+        "low_ok_top": top("low_ok", lambda r: -(r.visits - r.visits_ok)),
     }
 
 
@@ -1555,6 +1675,7 @@ async def pulse_day_data(db: AsyncSession, company_id: str,
     th = await _thresholds(db, cid)
     sources = await _sources_snapshot(db, cid)
     access = await _access_snapshot(db, cid)
+    stations = await _stations_snapshot(db, cid, as_of, th)
 
     # ── Разговор с потребителем: одна плитка, подробности — в «Обращениях» ──
     cc = await _cc_snapshot(db)
@@ -1581,7 +1702,7 @@ async def pulse_day_data(db: AsyncSession, company_id: str,
         own_sla_stale=t.own_sla_stale, own_reopen=t.own_reopen, ext_old=t.ext_old,
         silent=(silent.silent if silent else 0), park=(silent.park if silent else 0),
         acked=acked, cc=cc, sales=sales, projects=projects, ops=ops, objects=objects,
-        th=th, sources=sources, access=access, visible=visible,
+        th=th, sources=sources, access=access, visible=visible, stations=stations,
     )
 
     # Карточки отобраны внутри правил (до колпака), здесь остаются плитки:

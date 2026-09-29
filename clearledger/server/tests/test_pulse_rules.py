@@ -402,3 +402,19 @@ def test_без_денежных_строк_список_не_ломается()
     assert _drop_money([]) == []
     assert _drop_money([{"label": "Звонков", "value": 12, "unit": None}]) == [
         {"label": "Звонков", "value": 12, "unit": None}]
+
+
+# ── Станции поштучно («Первое окно» руководителя РусГидро, 29.09.2026) ──────
+
+def test_station_signals_name_the_worst_and_respect_thresholds():
+    st = dict(alive=400, silent=81, silent_top=["ЭЗС А", "ЭЗС Б", "ЭЗС В", "ЭЗС Г"],
+              drop=15, drop_lost=120_000.0, drop_top=["ЭЗС Д"], low_ok=0)
+    got = {c["key"]: c for c in cards(stations=st)}
+    assert "st_visit" not in got
+    assert got["st_silent"]["level"] == "alert"          # 81 из 400 — больше 10% парка
+    assert "ЭЗС В." in got["st_silent"]["insight"] and "ЭЗС Г" not in got["st_silent"]["insight"]
+    assert f"{money(120_000)} ₽" in got["st_drop"]["insight"]
+    # Порог из «Целей» попадает в текст: руководитель видит свою норму.
+    c = cards(stations={**st, "low_ok": 7}, th={"st_visit_ok_pct": 60.0})
+    assert "меньше 60%" in [x for x in c if x["key"] == "st_visit"][0]["insight"]
+    assert cards(stations={}) == []
