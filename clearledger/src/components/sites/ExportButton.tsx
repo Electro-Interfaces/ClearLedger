@@ -16,8 +16,10 @@ import { Button } from '@/components/ui/button'
 import { Download, Loader2, Printer } from 'lucide-react'
 import { exportXlsx } from '@/services/sitesService'
 
-export function ExportButton({ companyId, report, fileName, label = 'Excel', print = true }: {
+export function ExportButton({ companyId, report, fileName, label = 'Excel', print = true, params }: {
   companyId: string
+  /** Отбор экрана — выгружается ровно то, что видно (параметры как у GET /api/sites). */
+  params?: Record<string, string | number | boolean | undefined>
   /** Ключ отчёта: portfolio | funnel | matrix | budget | accounting | tech-connections | equipment. */
   report: string
   fileName?: string
@@ -28,7 +30,7 @@ export function ExportButton({ companyId, report, fileName, label = 'Excel', pri
   const go = async () => {
     setBusy(true)
     try {
-      await exportXlsx(companyId, report, fileName)
+      await exportXlsx(companyId, report, fileName, params)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Выгрузка не удалась')
     } finally { setBusy(false) }

@@ -1334,9 +1334,16 @@ async def phase_durations(db: AsyncSession, company_id) -> dict[str, Any]:
     }
 
 
-async def export_portfolio_xlsx(db: AsyncSession, company_id) -> bytes:
-    """Выгрузка портфеля: проекты с этапом, ведением, ТП, бюджетом и субсидией."""
+async def export_portfolio_xlsx(db: AsyncSession, company_id, site_ids: list | None = None) -> bytes:
+    """Выгрузка портфеля: проекты с этапом, ведением, ТП, бюджетом и субсидией.
+
+    `site_ids` — ровно те проекты, что человек видит в списке после фильтров.
+    Без него выгружались все активные проекты: фильтр на экране и файл жили
+    отдельно (замечание Ступина, 29.09.2026). Ограничиваются все три листа."""
     import io
+
+    only = " and s.id = any(:ids)" if site_ids is not None else ""
+    ids_param = {"ids": [str(i) for i in site_ids]} if site_ids is not None else {}
 
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font
@@ -1356,9 +1363,12 @@ async def export_portfolio_xlsx(db: AsyncSession, company_id) -> bytes:
         from ezs_sites s
         left join users u on u.id = s.owner_user_id
         left join ezs_tech_connections tc on tc.site_id = s.id
-        where s.company_id = :cid and s.stage = any(:active) and coalesce(s.workspace_data->'scenario'->>'stage', '') <> 'done'
+        where s.company_id = :cid
+          and (""" + ("true" if site_ids is not None else
+                      "s.stage = any(:active) and coalesce(s.workspace_data->'scenario'->>'stage', '') <> 'done'")
+        + only + """)
         order by s.project_no
-    """), {"cid": company_id, "active": STAGE_ORDER})).mappings().all()
+    """), {"cid": company_id, "active": STAGE_ORDER, **ids_param})).mappings().all()
 
     wb = Workbook()
     ws = wb.active
@@ -1402,9 +1412,9 @@ async def export_portfolio_xlsx(db: AsyncSession, company_id) -> bytes:
         select s.project_no, coalesce(s.address, s.full_address) as address, s.stage,
                c.kind, c.title, c.plan_amount, c.fact_amount, c.doc_ref
         from ezs_site_costs c join ezs_sites s on s.id = c.site_id
-        where c.company_id = :cid
+        where c.company_id = :cid""" + only + """
         order by s.project_no, c.created_at
-    """), {"cid": company_id})).mappings().all()
+    """), {"cid": company_id, **ids_param})).mappings().all()
     wsc = wb.create_sheet("Бюджет")
     cost_headers = ["Проект", "Адрес", "Стадия", "Статья", "Судьба затрат", "Описание",
                     "План", "Факт", "Отклонение", "Основание факта"]
@@ -1435,9 +1445,9 @@ async def export_portfolio_xlsx(db: AsyncSession, company_id) -> bytes:
                t.due_date, t.done_date, t.needs_reconstruction, t.applicant_term_months,
                t.substation_owner, t.transformer_kva
         from ezs_tech_connections t join ezs_sites s on s.id = t.site_id
-        where t.company_id = :cid
+        where t.company_id = :cid""" + only + """
         order by s.project_no
-    """), {"cid": company_id})).mappings().all()
+    """), {"cid": company_id, **ids_param})).mappings().all()
     wst = wb.create_sheet("Присоединение")
     tc_headers = ["Проект", "Адрес", "Стадия", "Статус ТП", "Сетевая организация",
                   "Заявка №", "Заявка от", "ТУ №", "ТУ от", "Договор ТП №", "Договор от",

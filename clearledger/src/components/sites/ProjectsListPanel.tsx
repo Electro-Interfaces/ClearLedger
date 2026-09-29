@@ -222,6 +222,16 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
     search: search || undefined, risk: risk || undefined, node: node || undefined,
   }), [region, ownerId, overdue, search, risk, node, kind, placeKind])
 
+  // Отбор для выгрузки — тот же, что у списка. Этап из нескольких стадий список
+  // дофильтровывает у себя, поэтому в выгрузку он едет перечнем стадий.
+  const exportParams = {
+    stage: closed ? 'archive'
+      : stagePick || (phase ? (stagesOfPhase as string[]).join(',') || undefined : 'active'),
+    region: region || undefined, kind: kind || undefined, place_kind: placeKind || undefined,
+    owner_id: ownerId || undefined, overdue, search: search || undefined,
+    risk: risk || undefined, node: node || undefined,
+  }
+
   const q = useQuery({
     queryKey: ['pr-projects', companyId, phase, stagePick, node, ownerId, region, closed, overdue, search, risk, page, kind, placeKind],
     queryFn: () => getSites({
@@ -446,7 +456,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           const next = new URLSearchParams(prev); next.set('scenarioSettings', '1'); return next
         }, { replace: true })}>Сценарии</Button>
         {/* Реестр тоже уходит на совещание — своей выгрузкой, а не пересказом. */}
-        <ExportButton companyId={companyId} report="portfolio" fileName="projects_portfolio.xlsx" />
+        <ExportButton companyId={companyId} report="portfolio" fileName="projects_portfolio.xlsx" params={exportParams} />
         {risk && (
           <button type="button" onClick={clearRisk}
             className="px-2.5 py-1 text-sm rounded-md border border-primary bg-primary/10 text-primary">

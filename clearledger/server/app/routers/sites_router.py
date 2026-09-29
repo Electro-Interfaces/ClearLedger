@@ -469,6 +469,13 @@ _EXPORTS = {
 @router.get("/export/{report}")
 async def export_report(
     report: str, company_id: str = Query(...),
+    # Отбор списка проектов — те же параметры, что у GET /sites. Передан хоть один —
+    # портфель выгружается ровно по нему, иначе файл расходился с экраном.
+    stage: str | None = Query(None), region: str | None = Query(None),
+    search: str | None = Query(None), owner_id: uuid.UUID | None = Query(None),
+    overdue: bool = Query(False), risk: str | None = Query(None),
+    node: str | None = Query(None), kind: str | None = Query(None),
+    place_kind: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Выгрузка экрана в xlsx: воронка, приоритеты, бюджет, учёт, ТП, оборудование."""
@@ -479,7 +486,15 @@ async def export_report(
     cid = await assert_company_member(company_id, user, db)
     _, fname = _EXPORTS[report]
     fn = getattr(ezs_project, f"export_{report.replace('-', '_')}_xlsx")
-    data = await fn(db, cid)
+    filtered = any([stage, region, search, owner_id, overdue, risk, node, kind, place_kind])
+    if report == "portfolio" and filtered:
+        listed = await ezs_sites.list_sites(db, cid, stage=stage, region=region, search=search,
+                                            owner_id=owner_id, overdue=overdue, risk=risk,
+                                            node=node, kind=kind, place_kind=place_kind,
+                                            page=1, page_size=100000)
+        data = await fn(db, cid, site_ids=[it["id"] for it in listed["items"]])
+    else:
+        data = await fn(db, cid)
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

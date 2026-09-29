@@ -1258,6 +1258,8 @@ async def list_sites(
         conds += _risk_conditions(risk)
     if stage == "active":            # вся живая часть воронки одним фильтром
         conds.append(project_reporting_stage(S).in_(STAGE_ORDER))
+    elif stage and "," in stage:     # этап из нескольких стадий — выгрузка по фильтру этапа
+        conds.append(project_reporting_stage(S).in_([x for x in stage.split(",") if x]))
     elif stage:
         conds.append(project_reporting_stage(S) == stage)
     if node:

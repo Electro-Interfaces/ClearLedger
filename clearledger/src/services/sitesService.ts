@@ -891,11 +891,18 @@ export async function getPhaseDurations(companyId: string): Promise<PhaseDuratio
  * | equipment. Один клиент на все выгрузки — иначе на каждый экран пишется своя
  * копия качания блоба, и они разъезжаются по мелочам (имя файла, обработка 401).
  */
-export async function exportXlsx(companyId: string, report: string, fileName?: string): Promise<void> {
+export async function exportXlsx(companyId: string, report: string, fileName?: string,
+  params?: Record<string, string | number | boolean | undefined>): Promise<void> {
   const { getToken } = await import('./apiClient')
   const token = getToken()
   const base = import.meta.env.VITE_API_URL ?? ''
-  const res = await fetch(`${base}/api/sites/export/${report}?company_id=${companyId}`, {
+  // Отбор экрана едет в выгрузку теми же параметрами, что и в список: иначе файл
+  // содержит все проекты, а на экране — отфильтрованные (замечание Ступина 29.09.2026).
+  const qs = new URLSearchParams({ company_id: companyId })
+  for (const [k, v] of Object.entries(params ?? {})) {
+    if (v !== undefined && v !== '' && v !== false) qs.set(k, String(v === true ? 1 : v))
+  }
+  const res = await fetch(`${base}/api/sites/export/${report}?${qs}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
   if (!res.ok) throw new Error(`Выгрузка не удалась (${res.status})`)
