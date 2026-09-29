@@ -1223,8 +1223,9 @@ async def _stations_snapshot(db: AsyncSession, cid: str, as_of: datetime | None,
                          nullif(sl.city, coalesce(sl.name, s.name))) as name,
                rev30, rev, rev_prev, visits, visits_ok,
                kwh_recent = 0 as silent,
-               rev_prev > :floor and rev <= rev_prev * :keep as fell,
-               visits >= :vmin and visits_ok < visits * :ok as low_ok
+               rev_prev > :floor and rev <= rev_prev * CAST(:keep AS numeric) as fell,
+               -- Тип параметра явно: у count() он bigint, и драйвер привёл бы 0.7 к 0.
+               visits >= :vmin and visits_ok < visits * CAST(:ok AS float) as low_ok
         from s left join service_locations sl on sl.id = s.location_id
     """), {
         "cid": cid, "as_of": as_of, "alive": ST_ALIVE_DAYS,
