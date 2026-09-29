@@ -8,11 +8,12 @@
  * Подача — канон пространства: `Card`, `Badge`, альфа-шкала статусных цветов,
  * общая плитка показателя (`parts.tsx`). Своих примитивов «Пульс» не заводит.
  */
+import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity, AlertTriangle, ArrowUpRight, CalendarClock, CheckCheck, ClipboardList, Database,
-  Eye, MessageCircle, MoreHorizontal, ShieldCheck, SlidersHorizontal,
+  Eye, ListChecks, MessageCircle, MoreHorizontal, ShieldCheck, SlidersHorizontal,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { NewTaskDialog } from '@/components/tasks/NewTaskDialog'
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   ackCard, getPulseAccepted, getPulseDay, type PulseCard, type PulseKpi,
@@ -241,6 +243,11 @@ function CardsBlock({ cards, companyId }: { cards: PulseCard[]; companyId: strin
     },
     onError: () => toast.error('Не удалось снять карточку — попробуйте ещё раз'),
   })
+  // Сигнал → поручение: последний шаг цикла «отклонение → причина → действие»
+  // (замечание руководителя РусГидро, 29.09.2026). Форма «Трека» та же, что в
+  // приложении, текст карточки уезжает в описание. `n` пересоздаёт форму: её
+  // заготовка подставляется один раз.
+  const [errand, setErrand] = useState<{ card: PulseCard; n: number } | null>(null)
 
   if (!cards.length) {
     return (
@@ -310,6 +317,10 @@ function CardsBlock({ cards, companyId }: { cards: PulseCard[]; companyId: strin
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setErrand({ card: c, n: Date.now() })}>
+                      <ListChecks className="mr-2 h-3.5 w-3.5" />Поручить в «Трек»
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => ack.mutate({ key: c.key, days: 3 })}>
                       <CalendarClock className="mr-2 h-3.5 w-3.5" />Вернуться через 3 дня
                     </DropdownMenuItem>
@@ -330,6 +341,13 @@ function CardsBlock({ cards, companyId }: { cards: PulseCard[]; companyId: strin
           </Card>
         )
       })}
+      {errand && (
+        <div className="hidden">
+          <NewTaskDialog key={errand.n} companyId={companyId}
+            draft={{ title: `Разобрать: ${errand.card.title}`, description: errand.card.insight }}
+            onCreated={() => { ack.mutate({ key: errand.card.key }); setErrand(null) }} />
+        </div>
+      )}
     </div>
   )
 }

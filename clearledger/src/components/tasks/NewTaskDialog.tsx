@@ -47,7 +47,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
    * дважды проходить постановку задачи» (Чурилов, 12.09.2026): набранное и
    * выбранный исполнитель терялись на переходе.
    */
-  draft?: { title?: string; assigneeId?: string }
+  draft?: { title?: string; assigneeId?: string; description?: string }
 }) {
   const qc = useQueryClient()
   const { user } = useAuth()
@@ -75,6 +75,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
     if (!draft.title && !draft.assigneeId) return
     заготовкаПодставлена.current = true
     if (draft.title) setTitle(draft.title)
+    if (draft.description) setDescription(draft.description)
     if (draft.assigneeId) setAssigneeId(draft.assigneeId)
     setOpen(true)
   }, [draft])
