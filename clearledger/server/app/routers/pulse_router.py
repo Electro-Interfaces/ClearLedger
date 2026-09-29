@@ -273,7 +273,7 @@ CARD_SCOPE = {
     "own_reopen": "business.support",
     "silent_surge": "business.sales", "sales_drop": "business.sales",
     "sales_out": "business.sales", "sales_visit": "business.sales",
-    "st_silent": "business.sales", "st_drop": "business.sales", "st_visit": "business.sales",
+    "st_attention": "business.sales",
     "cc_missed": "business.contacts", "cc_wrapup": "business.contacts",
     "cc_repeat": "business.contacts", "cc_escalation": "business.contacts",
     "pr_stuck": "business.projects", "pr_no_owner": "business.projects",
@@ -595,9 +595,7 @@ CARD_TITLES = {
     "sales_drop": "Выручка сети просела",
     "sales_out": "Станции выпали из работы",
     "sales_visit": "Клиенты уезжают без заряда",
-    "st_silent": "Станции не отпускают энергию",
-    "st_drop": "Станции потеряли половину выручки",
-    "st_visit": "Станции, где не заряжаются",
+    "st_attention": "Станции требуют разбора",
     "pr_stuck": "Проекты стоят на месте",
     "pr_no_owner": "Проекты без ответственного",
     "pr_frozen": "Портфель не двигается",
@@ -795,37 +793,36 @@ def build_cards(
 
     # ── Станции поштучно: «Первое окно» руководителя ────────────────────────
     # Сеть в целом может выглядеть нормально, пока десяток станций стоит.
-    # Карточка — сводка с тремя худшими по имени: список целиком живёт в
-    # «Эксплуатации» («На сегодня», «Надёжность»), сюда он не переезжает.
+    # Одна сводная карточка, а не три: при колпаке в семь мест три отдельные
+    # вытеснялись карточками контакт-центра (проверено на rushydro 29.09).
+    # Список целиком живёт в «Эксплуатации», здесь — счёт и две самые дорогие.
     stations = stations or {}
     alive = int(stations.get("alive") or 0)
 
     def worst(key: str) -> str:
-        names = [n for n in (stations.get(key) or [])[:3] if n]
-        return f" Среди них: {', '.join(names)}." if names else ""
+        names = [n for n in (stations.get(key) or [])[:2] if n]
+        return f" ({'; '.join(names)})" if names else ""
 
     st_silent = int(stations.get("silent") or 0)
-    if st_silent:
-        card("st_silent", "Станции не отпускают энергию",
-             f"{st_silent} из {alive} работавших станций не отпустили ни одного кВт·ч "
-             f"за {t['st_silent_days']:.0f} дн. данных.{worst('silent_top')}",
-             count=st_silent, level="alert" if alive and st_silent / alive >= 0.1 else "warn",
-             link="/operations")
-
     st_drop = int(stations.get("drop") or 0)
-    if st_drop:
-        card("st_drop", "Станции потеряли половину выручки",
-             f"У {st_drop} {plural(st_drop, 'станции', 'станций', 'станций')} выручка недели "
-             f"упала на {t['st_drop_pct']:.0f}% и больше к прошлой неделе — минус "
-             f"{money(stations.get('drop_lost'))} ₽.{worst('drop_top')}",
-             count=st_drop, link="/operations")
-
     st_visit = int(stations.get("low_ok") or 0)
+    parts = []
+    if st_silent:
+        parts.append(f"{st_silent} из {alive} не отпустили ни одного кВт·ч за "
+                     f"{t['st_silent_days']:.0f} дн.{worst('silent_top')}")
+    if st_drop:
+        parts.append(f"у {st_drop} выручка недели упала на {t['st_drop_pct']:.0f}% и больше — "
+                     f"минус {money(stations.get('drop_lost'))} ₽{worst('drop_top')}")
     if st_visit:
-        card("st_visit", "Станции, где не заряжаются",
-             f"На {st_visit} {plural(st_visit, 'станции', 'станциях', 'станциях')} зарядкой "
-             f"заканчивается меньше {t['st_visit_ok_pct']:.0f}% приездов за неделю.{worst('low_ok_top')}",
-             count=st_visit, link="/operations")
+        parts.append(f"на {st_visit} зарядкой заканчивается меньше "
+                     f"{t['st_visit_ok_pct']:.0f}% приездов{worst('low_ok_top')}")
+    if parts:
+        text_ = "; ".join(parts)
+        card("st_attention", "Станции требуют разбора",
+             text_[0].upper() + text_[1:] + ".",
+             count=st_silent + st_drop + st_visit,
+             level="alert" if alive and st_silent / alive >= 0.1 else "warn",
+             link="/operations")
 
     # ── Проекты: что компания строит ────────────────────────────────────────
     # Портфель меряется не неделями, а тем, движется ли он вообще и есть ли у
@@ -1221,11 +1218,14 @@ async def _stations_snapshot(db: AsyncSession, cid: str, as_of: datetime | None,
             and started_at > CAST(:as_of AS timestamp) - make_interval(days => :alive)
           group by location_id
         )
-        select name, rev30, rev, rev_prev, visits, visits_ok,
+        -- Имя — из реестра объектов: в сессиях оно пустое у части станций.
+        select concat_ws(', ', coalesce(sl.name, s.name),
+                         nullif(sl.city, coalesce(sl.name, s.name))) as name,
+               rev30, rev, rev_prev, visits, visits_ok,
                kwh_recent = 0 as silent,
                rev_prev > :floor and rev <= rev_prev * :keep as fell,
                visits >= :vmin and visits_ok < visits * :ok as low_ok
-        from s
+        from s left join service_locations sl on sl.id = s.location_id
     """), {
         "cid": cid, "as_of": as_of, "alive": ST_ALIVE_DAYS,
         "silent": int(th["st_silent_days"]), "floor": ST_DROP_FLOOR,

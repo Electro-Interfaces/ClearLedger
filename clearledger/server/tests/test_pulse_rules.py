@@ -406,15 +406,17 @@ def test_без_денежных_строк_список_не_ломается()
 
 # ── Станции поштучно («Первое окно» руководителя РусГидро, 29.09.2026) ──────
 
-def test_station_signals_name_the_worst_and_respect_thresholds():
-    st = dict(alive=400, silent=81, silent_top=["ЭЗС А", "ЭЗС Б", "ЭЗС В", "ЭЗС Г"],
+def test_station_signals_are_one_card_naming_the_worst():
+    """Одна сводная карточка: три отдельные вытеснялись колпаком (rushydro, 29.09)."""
+    st = dict(alive=400, silent=81, silent_top=["ЭЗС А", "ЭЗС Б", "ЭЗС В"],
               drop=15, drop_lost=120_000.0, drop_top=["ЭЗС Д"], low_ok=0)
-    got = {c["key"]: c for c in cards(stations=st)}
-    assert "st_visit" not in got
-    assert got["st_silent"]["level"] == "alert"          # 81 из 400 — больше 10% парка
-    assert "ЭЗС В." in got["st_silent"]["insight"] and "ЭЗС Г" not in got["st_silent"]["insight"]
-    assert f"{money(120_000)} ₽" in got["st_drop"]["insight"]
+    got = [c for c in cards(stations=st) if c["key"] == "st_attention"]
+    assert len(got) == 1 and got[0]["level"] == "alert"   # 81 из 400 — больше 10% парка
+    ins = got[0]["insight"]
+    assert ins.startswith("81 из 400") and "ЭЗС Б" in ins and "ЭЗС В" not in ins
+    assert f"{money(120_000)} ₽" in ins and "приездов" not in ins
     # Порог из «Целей» попадает в текст: руководитель видит свою норму.
-    c = cards(stations={**st, "low_ok": 7}, th={"st_visit_ok_pct": 60.0})
-    assert "меньше 60%" in [x for x in c if x["key"] == "st_visit"][0]["insight"]
+    c = cards(stations={"alive": 400, "low_ok": 7}, th={"st_visit_ok_pct": 60.0})
+    assert c[0]["insight"].startswith("На 7") and "меньше 60%" in c[0]["insight"]
+    assert c[0]["level"] == "warn"
     assert cards(stations={}) == []
