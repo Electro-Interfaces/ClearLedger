@@ -437,26 +437,12 @@ async def phase_durations(
     return await ezs_project.phase_durations(db, cid)
 
 
-@router.get("/export/portfolio")
-async def export_portfolio(
-    company_id: str = Query(...),
-    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
-):
-    """Выгрузка портфеля проектов в xlsx — то, что уходит на совещание."""
-    from fastapi.responses import Response
-
-    cid = await assert_company_member(company_id, user, db)
-    data = await ezs_project.export_portfolio_xlsx(db, cid)
-    return Response(
-        content=data,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="projects_portfolio.xlsx"'},
-    )
-
-
 # Выгрузка любого экрана раздела: совещание идёт по Excel, и если таблицы нет,
 # цифры переписывают руками в свой файл — а он назавтра расходится с системой.
 _EXPORTS = {
+    # Портфель — через общую ручку: отдельная /export/portfolio стояла раньше неё,
+    # перехватывала запрос и выгружала всё без фильтров (Ступин, 29.09.2026).
+    "portfolio": ("Проекты", "projects_portfolio"),
     "funnel": ("Воронка", "funnel"),
     "matrix": ("Приоритеты", "priorities"),
     "budget": ("Бюджет", "budget"),
