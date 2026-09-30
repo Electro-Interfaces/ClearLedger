@@ -361,6 +361,23 @@ async def bulk_assign(
     return res
 
 
+@router.post("/bulk/exit")
+async def bulk_exit(
+    payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Проставить тип причины и дату возврата сразу нескольким отказам и паузам."""
+    cid = await assert_company_member(company_id, user, db)
+    ids = [uuid.UUID(str(i)) for i in (payload.get("site_ids") or [])]
+    res = await ezs_site_work.bulk_exit(
+        db, cid, ids, exit_kind=payload.get("exit_kind") or None,
+        hold_until=payload.get("hold_until") or None, user=user)
+    if res.get("error"):
+        raise HTTPException(400, res["error"])
+    await db.commit()
+    return res
+
+
 @router.post("", status_code=201)
 async def create_site(
     payload: dict, company_id: str = Query(...),
@@ -545,6 +562,28 @@ async def analysis_matrix(
     """Приоритеты: привлекательность × исполнимость по активным площадкам."""
     cid = await assert_company_member(company_id, user, db)
     return await ezs_site_analysis.priority_matrix(db, cid, stage=stage, region=region)
+
+
+@router.get("/analysis/forecast")
+async def analysis_forecast(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Прогноз при решении против факта станций после ввода — по портфелю."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_site_analysis.forecast_vs_fact(db, cid)
+
+
+@router.get("/{site_id}/forecast")
+async def site_forecast(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Прогноз, с которым решали по проекту, и факт станции, если она введена."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    res = await ezs_site_analysis.forecast_vs_fact(db, cid, site=site)
+    return res["items"][0] if res["items"] else {"forecast": None, "fact": None}
 
 
 @router.get("/analysis/exits")

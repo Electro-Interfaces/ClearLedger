@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Info } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
 import {
-  getSitesMatrix, getSitesOverview, getExitReasons, QUADRANT_META, STAGE_META,
+  getSitesMatrix, getSitesOverview, getExitReasons, getForecastVsFact, QUADRANT_META, STAGE_META,
   type MatrixItem, type Quadrant,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
@@ -213,9 +213,64 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
       )}
 
       <ExitReasons companyId={companyId} />
+      <ForecastVsFact companyId={companyId} onOpen={openProject} />
 
       {detailId && <SiteCardDialog companyId={companyId} id={detailId} onClose={() => setDetailId(null)} />}
     </div>
+  )
+}
+
+/**
+ * Прогноз при решении против факта станции. Главный способ проверить, умеет ли
+ * отдел выбирать места: оценка сегодня всегда сходится с сегодняшней сетью, а
+ * обещание, данное при решении, — нет.
+ */
+function ForecastVsFact({ companyId, onOpen }: { companyId: string; onOpen: (id: string) => void }) {
+  const q = useQuery({ queryKey: ['sites-forecast', companyId], queryFn: () => getForecastVsFact(companyId) })
+  const d = q.data
+  if (!d) return null
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div data-zone="Прогноз при решении против факта станции" className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
+          Прогноз и факт · прогноз зафиксирован у {nf0.format(d.withForecast)}, факт есть у {nf0.format(d.withFact)}
+        </div>
+        {d.items.length === 0 ? (
+          <div className="p-3 text-sm text-muted-foreground">
+            Прогноз фиксируется, когда проект проходит «Решение». Факт появится после ввода станции и привязки к объекту сети.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/20 text-muted-foreground text-left">
+                  <th className="p-2">Проект</th><th className="p-2">Стадия</th>
+                  <th className="p-2 text-right">Прогноз, кВт·ч/мес</th><th className="p-2 text-right">Факт, кВт·ч/мес</th>
+                  <th className="p-2 text-right">Прогноз маржи, ₽/мес</th><th className="p-2 text-right">Факт маржи, ₽/мес</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.items.map((i) => (
+                  <tr key={i.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer" onClick={() => onOpen(i.id)}>
+                    <td className="p-2"><span className="font-mono text-xs text-muted-foreground">{i.projectNo ?? '—'}</span> {i.title ?? ''}</td>
+                    <td className="p-2">{i.stageLabel}</td>
+                    <td className="p-2 text-right tabular-nums" title={i.forecast?.retro ? 'зафиксирован задним числом' : undefined}>
+                      {i.forecast?.kwhMonth != null ? nf0.format(i.forecast.kwhMonth) : '—'}{i.forecast?.retro ? '*' : ''}
+                    </td>
+                    <td className="p-2 text-right tabular-nums">
+                      {i.fact ? `${nf0.format(i.fact.kwhMonth)} за ${i.fact.months} мес` : '—'}
+                    </td>
+                    <td className="p-2 text-right tabular-nums">{i.forecast?.marginMonth != null ? nf0.format(i.forecast.marginMonth) : '—'}</td>
+                    <td className="p-2 text-right tabular-nums">{i.fact?.marginMonth != null ? nf0.format(i.fact.marginMonth) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="px-3 py-2 text-xs text-muted-foreground">* прогноз зафиксирован задним числом — проект прошёл «Решение» раньше, чем появилась фиксация.</div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

@@ -520,3 +520,130 @@ async def coverage_gaps(db: AsyncSession, company_id) -> dict[str, Any]:
         "withoutCoords": sum(1 for s in sites if s.lat is None),
         "thresholds": {"cannibalKm": CANNIBAL_KM, "gapKm": GAP_KM},
     }
+
+
+# ── Прогноз при решении и факт после ввода ─────────────────────────────────
+# Оценка площадки пересчитывается по текущим сессиям сети, поэтому через год
+# «что мы обещали, когда решали» из неё не восстановить. Прогноз фиксируется
+# событием в истории проекта в момент перехода в «Решение» и больше не меняется.
+# Сравнение с фактом станции после ввода — то, на чём отдел учится выбирать места.
+FORECAST_STAGE = "decision"
+
+
+async def snapshot_forecast(db: AsyncSession, site: EzsSite, *, retro: bool = False,
+                            user=None) -> dict[str, Any]:
+    """Зафиксировать прогноз площадки событием `forecast` в истории проекта.
+
+    `retro` — снимок сделан позже решения (проект уже прошёл «Решение», когда
+    снимок появился). Такой прогноз помечается: он знает больше, чем знали при решении.
+    """
+    from app.services import ezs_project
+    from app.services.ezs_changes import make_change
+    from app.services.ezs_site_work import log_event
+
+    bench = await cached_benchmarks(db, site.company_id)
+    near = await nearest_station_km(db, site.company_id, ids=[site.id])
+    costs = await ezs_project.list_costs(db, site.company_id, site.id)
+    capex = costs["capitalFact"] or costs["capitalPlan"] or None
+    sc = score_site(site, near_km=near.get(str(site.id)), bench=bench)
+    eco = economics(site, bench, capex_budget=capex)
+    snap = {
+        "stage": site.stage, "retro": retro,
+        "quadrant": sc["quadrant"], "attract": sc["attract"], "feasible": sc["feasible"],
+        "confidence": sc["confidence"], "unknown": sc["unknown"],
+        "ok": eco.get("ok", False),
+        "kwhMonth": eco.get("kwhMonth"), "kwhMonthGood": (eco.get("good") or {}).get("kwhMonth"),
+        "marginMonth": eco.get("marginMonth"), "tariff": eco.get("tariff"),
+        "inputPrice": eco.get("inputPrice"), "rentMonth": eco.get("rentMonth"),
+        "capex": eco.get("capex"), "paybackMonths": eco.get("paybackMonths"),
+        "benchmarkSource": eco.get("benchmarkSource"), "assumptions": eco.get("assumptions"),
+    }
+    if snap["ok"]:
+        summary = f"{snap['kwhMonth']} кВт·ч/мес, маржа {snap['marginMonth']} ₽/мес"
+    else:
+        summary = "экономика не посчитана"
+    change = make_change("forecast", None, summary, label="Прогноз при решении",
+                         category="decision", new_display=summary)
+    change["snapshot"] = snap
+    lead = "Прогноз зафиксирован задним числом: " if retro else "Прогноз зафиксирован при решении: "
+    await log_event(db, site, "forecast", user=user, source="system", changes=[change],
+                    text=lead + summary)
+    return snap
+
+
+async def site_forecasts(db: AsyncSession, company_id, site_ids: list | None = None
+                         ) -> dict[str, dict[str, Any]]:
+    """Первый зафиксированный прогноз по каждому проекту — тот, с которым решали."""
+    from sqlalchemy import select
+    from app.models import EzsSiteEvent
+
+    q = (select(EzsSiteEvent.site_id, EzsSiteEvent.created_at, EzsSiteEvent.changes)
+         .where(EzsSiteEvent.company_id == company_id, EzsSiteEvent.kind == "forecast")
+         .order_by(EzsSiteEvent.site_id, EzsSiteEvent.created_at))
+    if site_ids is not None:
+        q = q.where(EzsSiteEvent.site_id.in_(site_ids))
+    out: dict[str, dict[str, Any]] = {}
+    for sid, at, changes in (await db.execute(q)).all():
+        if str(sid) in out:
+            continue
+        snap = next((c.get("snapshot") for c in (changes or []) if c.get("snapshot")), None)
+        if snap:
+            out[str(sid)] = {**snap, "at": at.isoformat()}
+    return out
+
+
+async def station_fact(db: AsyncSession, company_id, location_id: str,
+                       since: str | None, input_price: float | None) -> dict[str, Any] | None:
+    """Факт станции после ввода тем же способом, что и прогноз: кВт·ч и тариф на
+    месяц с сессиями, без пустых месяцев. Иначе план и факт считались бы по-разному."""
+    row = (await db.execute(text("""
+        select sum(energy_kwh) kwh, sum(coalesce(client_amount, amount)) amount,
+               count(distinct date_trunc('month', started_at)) months,
+               min(started_at) first_at, max(started_at) last_at
+        from charge_sessions
+        where company_id = :cid and location_id = :loc and energy_kwh > 0
+          and (cast(:since as date) is null or started_at >= cast(:since as date))
+    """), {"cid": company_id, "loc": location_id, "since": since})).mappings().one()
+    if not row["months"]:
+        return None
+    kwh = float(row["kwh"]) / row["months"]
+    tariff = float(row["amount"] or 0) / float(row["kwh"]) if row["kwh"] else 0.0
+    margin = kwh * (tariff - input_price) if input_price is not None else None
+    return {"kwhMonth": round(kwh), "tariff": round(tariff, 2),
+            "marginMonth": round(margin) if margin is not None else None,
+            "months": int(row["months"]),
+            "from": row["first_at"].date().isoformat() if row["first_at"] else None,
+            "to": row["last_at"].date().isoformat() if row["last_at"] else None}
+
+
+async def forecast_vs_fact(db: AsyncSession, company_id, site: EzsSite | None = None
+                           ) -> dict[str, Any]:
+    """Прогноз при решении против факта станции. Для одной карточки или по портфелю."""
+    from sqlalchemy import select
+
+    if site is not None:
+        sites = [site]
+    else:
+        sites = (await db.execute(select(EzsSite).where(
+            EzsSite.company_id == company_id,
+            EzsSite.stage.in_(STAGE_ORDER[STAGE_ORDER.index(FORECAST_STAGE):])))).scalars().all()
+    fc = await site_forecasts(db, company_id, [s.id for s in sites])
+    items = []
+    for s in sites:
+        f = fc.get(str(s.id))
+        fact = None
+        if s.location_id and s.stage == "live":
+            # Маржа факта — по той же входной цене, что заложена в прогноз.
+            price = (f or {}).get("inputPrice")
+            fact = await station_fact(db, company_id, s.location_id, s.commissioned_on,
+                                      float(price) if price is not None else None)
+        if f is None and fact is None:
+            continue
+        items.append({
+            "id": str(s.id), "projectNo": s.project_no,
+            "title": s.title or s.address or s.full_address,
+            "stage": s.stage, "stageLabel": STAGE_LABELS.get(s.stage, s.stage),
+            "commissionedOn": s.commissioned_on, "forecast": f, "fact": fact,
+        })
+    return {"items": items, "withForecast": sum(1 for i in items if i["forecast"]),
+            "withFact": sum(1 for i in items if i["fact"])}

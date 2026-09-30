@@ -24,14 +24,28 @@ import { ExportButton } from './ExportButton'
 import { SortTh } from '@/components/workspace/SortableTh'
 import { useTableSort } from '@/hooks/useTableSort'
 import {
-  getSites, getRouteNodes, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner, getProjectKinds, projectObjectLabel,
-  PHASE_META, STAGE_META, FUNNEL_STAGES, QUADRANT_META, type SiteStage, type SiteRow,
+  getSites, getRouteNodes, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner, bulkExit, getProjectKinds, projectObjectLabel,
+  PHASE_META, STAGE_META, FUNNEL_STAGES, QUADRANT_META, EXIT_REASONS, type SiteStage, type SiteRow,
 } from '@/services/sitesService'
 
 // Решение по проекту — не настраиваемая колонка: ради неё реестр и открывают.
 // Сортировка ставит вверх то, по чему есть на чём решать.
 const DECISION_ORDER = { do_now: 0, unblock: 1, option: 2, drop: 3, need_data: 4 } as const
-function DecisionChip({ d }: { d: SiteRow['decision'] }) {
+function DecisionChip({ d, row }: { d: SiteRow['decision']; row?: SiteRow }) {
+  // Отказ и пауза: решать нечего, важно — почему вышли и когда возвращаться.
+  if (!d && row && (row.stage === 'archive' || row.stage === 'on_hold')) {
+    const label = EXIT_REASONS.find((r) => r.key === row.exitKind)?.label
+    return (
+      <span className="text-xs" title={row.exitText ?? 'причина не записана'}>
+        {label ? <span>{label}</span> : <span className="text-amber-700 dark:text-amber-400">тип не указан</span>}
+        {row.stage === 'on_hold' && (
+          <span className={row.holdUntil ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-400'}>
+            {' · '}{row.holdUntil ? `вернуться ${row.holdUntil}` : 'без даты возврата'}
+          </span>
+        )}
+      </span>
+    )
+  }
   if (!d) return <span className="text-muted-foreground">—</span>
   const m = QUADRANT_META[d.quadrant]
   const title = d.unknown.length ? `${m.hint}. Не хватает: ${d.unknown.join('; ')}` : m.hint
@@ -236,12 +250,14 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   // дофильтровывает у себя, поэтому в выгрузку он едет перечнем стадий.
   const exportParams = {
     stage: closed ? 'archive'
-      : stagePick || (phase ? (stagesOfPhase as string[]).join(',') || undefined : 'active'),
+      : stagePick || (phase ? (stagesOfPhase as string[]).join(',') || undefined
+        : risk === 'no_exit_kind' || risk === 'no_hold_date' ? undefined : 'active'),
     region: region || undefined, kind: kind || undefined, place_kind: placeKind || undefined,
     owner_id: ownerId || undefined, overdue, search: search || undefined,
     risk: risk || undefined, node: node || undefined,
   }
 
+  const exitRisk = risk === 'no_exit_kind' || risk === 'no_hold_date'
   const q = useQuery({
     queryKey: ['pr-projects', companyId, phase, stagePick, node, ownerId, region, closed, overdue, search, risk, page, kind, placeKind],
     queryFn: () => getSites({
@@ -250,7 +266,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
       // фильтром, а не в отдельном разделе, иначе теряется история места.
       stage: closed ? 'archive'
         : stagePick
-        || (phase && stagesOfPhase.length === 1 ? stagesOfPhase[0] : (phase ? undefined : 'active')),
+        || (phase && stagesOfPhase.length === 1 ? stagesOfPhase[0] : (phase || exitRisk ? undefined : 'active')),
       region: region || undefined,
       kind: kind || undefined, placeKind: placeKind || undefined,
       ownerId: ownerId || undefined, overdue, search: search || undefined,
@@ -304,6 +320,20 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось назначить'),
   })
 
+  // Разбор накопленных отказов и пауз: тип причины и дата возврата пачкой.
+  const [exitKind, setExitKind] = useState('')
+  const [holdUntil, setHoldUntil] = useState('')
+  const pickedClosed = rows.filter((r) => picked.has(r.id) && (r.stage === 'archive' || r.stage === 'on_hold')).length
+  const mExit = useMutation({
+    mutationFn: () => bulkExit(companyId, [...picked], { kind: exitKind, holdUntil }),
+    onSuccess: async (r) => {
+      toast.success(`Разобрано: ${r.updated}${r.skipped ? `, без изменений ${r.skipped}` : ''}`)
+      setPicked(new Set()); setExitKind(''); setHoldUntil('')
+      await q.refetch()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось проставить'),
+  })
+
   const [filtersOpen, setFiltersOpen] = useState(false)
   const changeWorkspace = (next: Partial<ProjectWorkspacePreferences>) => {
     patchWorkspace(next)
@@ -319,8 +349,8 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
       <ProjectsWorkspaceControls value={workspace} onChange={changeWorkspace} kinds={kinds.data?.kinds ?? []} />
       <label className="inline-flex flex-wrap items-center gap-2 text-sm">Контроль работы
         <select className="h-9 max-w-full rounded-md border bg-background px-2" value={risk} onChange={(e) => { const value = e.target.value; setParams((prev) => { const next = new URLSearchParams(prev); if (value) next.set('risk', value); else next.delete('risk'); return next }, { replace: true }); reset() }}>
-          <option value="">Все проекты</option><option value="no_next">Без следующего действия</option><option value="step_overdue">Просрочен следующий шаг</option><option value="external_wait">Ждём внешних</option><option value="contact_overdue">Просрочен контакт</option><option value="result_pending">Ожидается возврат результата</option><option value="no_owner">Без ответственного</option>
-          {risk && !['no_next', 'step_overdue', 'external_wait', 'contact_overdue', 'result_pending', 'no_owner'].includes(risk) && <option value={risk}>Фильтр из обзора</option>}
+          <option value="">Все проекты</option><option value="no_next">Без следующего действия</option><option value="step_overdue">Просрочен следующий шаг</option><option value="external_wait">Ждём внешних</option><option value="contact_overdue">Просрочен контакт</option><option value="result_pending">Ожидается возврат результата</option><option value="no_owner">Без ответственного</option><option value="no_exit_kind">Отказ или пауза без типа причины</option><option value="no_hold_date">Пауза без даты возврата</option>
+          {risk && !['no_next', 'step_overdue', 'external_wait', 'contact_overdue', 'result_pending', 'no_owner', 'no_exit_kind', 'no_hold_date'].includes(risk) && <option value={risk}>Фильтр из обзора</option>}
         </select>
       </label>
       {/* Телефон: сначала данные, настройки по требованию. На широком экране
@@ -507,6 +537,25 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
             onClick={() => mAssign.mutate()}>
             {mAssign.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Назначить
           </Button>
+          {pickedClosed > 0 && (
+            <>
+              <span className="text-muted-foreground">· отказ и пауза {pickedClosed}:</span>
+              <Select value={exitKind} onValueChange={setExitKind}>
+                <SelectTrigger className="h-8 w-[230px] text-sm"><SelectValue placeholder="Тип причины" /></SelectTrigger>
+                <SelectContent>
+                  {EXIT_REASONS.map((r) => <SelectItem key={r.key} value={r.key} className="text-sm">{r.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <label className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                вернуться к паузам
+                <Input type="date" value={holdUntil} onChange={(e) => setHoldUntil(e.target.value)} className="h-8 w-[150px] text-sm" />
+              </label>
+              <Button size="sm" className="h-8 text-sm" disabled={(!exitKind && !holdUntil) || mExit.isPending}
+                onClick={() => mExit.mutate()}>
+                {mExit.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Проставить
+              </Button>
+            </>
+          )}
           <button type="button" className="text-muted-foreground hover:text-foreground"
             onClick={() => setPicked(new Set())}>сбросить</button>
         </div>
@@ -561,7 +610,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                       className="w-full text-left px-3 py-3 active:bg-muted/40">
                       <div className="flex items-baseline gap-2">
                         <span className="font-mono text-xs text-muted-foreground shrink-0">{s.projectNo ?? '—'}</span>
-                        {s.decision && <DecisionChip d={s.decision} />}
+                        <DecisionChip d={s.decision} row={s} />
                         {columns.includes('stage') && <span className={`text-[11px] rounded border px-1.5 py-0.5 shrink-0 ${STAGE_META[s.stage as SiteStage]?.cls ?? ''}`}>
                           {s.stageLabel}
                         </span>}
@@ -624,7 +673,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                         {s.title || s.address || s.installPlace || s.fullAddress || '—'}
                         <span className="text-muted-foreground"> · {s.city ?? s.region ?? ''}</span>
                       </td>
-                      <td className="p-2"><DecisionChip d={s.decision} /></td>
+                      <td className="p-2"><DecisionChip d={s.decision} row={s} /></td>
                       {columns.includes('kind') && <td className="p-2">{kindLabel(s.kind)}</td>}
                       {columns.includes('placeKind') && <td className="p-2">{projectObjectLabel(s.placeKind)}</td>}
                       {columns.includes('phase') && <td className="p-2">

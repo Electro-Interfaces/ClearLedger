@@ -42,6 +42,7 @@ CATEGORY_LABELS = {
 FIELD_META: dict[str, tuple[str, str]] = {
     "stage": ("Стадия", "stage"),
     "archive_reason": ("Причина отклонения", "decision"),
+    "exit_kind": ("Тип причины выхода", "decision"),
     "control_form": ("Форма контроля", "decision"),
     "subsidy_planned": ("Субсидия предусмотрена", "decision"),
     "subsidy_amount": ("Сумма субсидии", "decision"),

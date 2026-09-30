@@ -609,8 +609,90 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
     )
     from app.services.ezs_lifecycle import sync_from_site
     await sync_from_site(db, site.company_id, site)
+    # Прогноз фиксируется, когда проект впервые проходит «Решение»: с этим
+    # обещанием его и сравнят со станцией после ввода.
+    from app.services.ezs_site_analysis import FORECAST_STAGE, snapshot_forecast
+    if (forward and (site.kind or "new_build") == "new_build"
+            and _pos(prev) < _pos(FORECAST_STAGE) <= _pos(stage)):
+        # Прогноз — приложение к решению, а не условие перехода: его сбой не должен
+        # останавливать проект. Точка сохранения, чтобы упавший запрос не испортил сессию.
+        try:
+            async with db.begin_nested():
+                await snapshot_forecast(db, site, user=user)
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).exception("прогноз при решении не зафиксирован: %s", site.id)
     return {"moved": True, "missing": missing, "overridden": bool(forward and gate["blocking"] and override),
             "gate": gate_state(site, doc_kinds=doc_kinds, equipment_supplied=eq_ok)}
+
+
+async def exit_texts(db: AsyncSession, sites: list[EzsSite]) -> dict[Any, str]:
+    """Текст причины из события перехода — для выходов без причины в карточке.
+
+    До 27.08.2026 причина паузы жила только в тексте события «Переговоры →
+    Заморожен. …»: на пилоте так записаны 91 из 93 пауз. Карточку не переписываем —
+    читаем оттуда, где человек её оставил.
+    """
+    ids = [s.id for s in sites if not (s.archive_reason or "").strip()]
+    if not ids:
+        return {}
+    rows = (await db.execute(
+        select(EzsSiteEvent.site_id, EzsSiteEvent.text, EzsSiteEvent.to_stage)
+        .join(EzsSite, EzsSite.id == EzsSiteEvent.site_id)
+        .where(EzsSiteEvent.site_id.in_(ids), EzsSiteEvent.kind == "stage",
+               EzsSiteEvent.to_stage == EzsSite.stage)
+        .order_by(EzsSiteEvent.site_id, EzsSiteEvent.created_at.desc())
+    )).all()
+    out: dict[Any, str] = {}
+    for site_id, text_, _ in rows:
+        if site_id in out or not text_:
+            continue
+        # «Переговоры → Заморожен. Причина» — нужна только причина.
+        _, _, why = text_.partition(". ")
+        if why.strip():
+            out[site_id] = why.strip()
+    return out
+
+
+async def bulk_exit(db: AsyncSession, company_id, site_ids: list[Any], *,
+                    exit_kind: str | None, hold_until: str | None,
+                    user: User | None) -> dict[str, Any]:
+    """Разобрать отказы и паузы пачкой: тип причины и дата возврата.
+
+    Новые переходы требуют и того, и другого, а накопленное до этого (598 отказов
+    без причины, 93 паузы без даты) само не разберётся. Трогаем только проекты вне
+    работы — живой проект так в архив не уйдёт.
+    """
+    if exit_kind and exit_kind not in EXIT_REASONS:
+        return {"updated": 0, "error": f"Неизвестный тип причины: {exit_kind}"}
+    if not exit_kind and not hold_until:
+        return {"updated": 0, "error": "Нечего проставлять: нужен тип причины или дата возврата"}
+    if not site_ids:
+        return {"updated": 0, "skipped": 0}
+    rows = (await db.execute(select(EzsSite).where(
+        EzsSite.company_id == company_id, EzsSite.id.in_(site_ids),
+        EzsSite.stage.in_(CLOSING_STAGES)))).scalars().all()
+    texts = await exit_texts(db, rows)
+    now = datetime.now(timezone.utc)
+    updated = 0
+    for s in rows:
+        changes = []
+        if exit_kind and s.exit_kind != exit_kind:
+            changes.append(make_change("exit_kind", s.exit_kind, exit_kind))
+            s.exit_kind = exit_kind
+        if hold_until and s.stage == "on_hold" and s.hold_until != hold_until[:10]:
+            changes.append(make_change("hold_until", s.hold_until, hold_until[:10]))
+            s.hold_until = hold_until[:10]
+            why = (s.archive_reason or "").strip() or texts.get(s.id, "")
+            s.next_action = (f"Вернуться к проекту после паузы: {why}" if why
+                             else "Вернуться к проекту после паузы")[:300]
+            s.next_action_due = hold_until[:10]
+        if not changes:
+            continue
+        s.updated_at = now
+        await log_event(db, s, "edit", text="Разбор выхода из работы", changes=changes, user=user)
+        updated += 1
+    return {"updated": updated, "skipped": len(site_ids) - updated}
 
 
 async def exit_reasons_report(db: AsyncSession, company_id) -> dict[str, Any]:
@@ -619,10 +701,13 @@ async def exit_reasons_report(db: AsyncSession, company_id) -> dict[str, Any]:
     Тип, выбранный человеком, и тип, определённый по тексту, считаются раздельно:
     второй — догадка по словам, и выдавать её за решение отдела нельзя.
     """
-    rows = (await db.execute(
-        select(EzsSite.stage, EzsSite.exit_kind, EzsSite.archive_reason, EzsSite.hold_until)
-        .where(EzsSite.company_id == company_id, EzsSite.stage.in_(CLOSING_STAGES))
-    )).all()
+    sites = (await db.execute(
+        select(EzsSite).where(EzsSite.company_id == company_id,
+                              EzsSite.stage.in_(CLOSING_STAGES))
+    )).scalars().all()
+    texts = await exit_texts(db, sites)
+    rows = [(s.stage, s.exit_kind, (s.archive_reason or "").strip() or texts.get(s.id),
+             s.hold_until) for s in sites]
     today = date.today().isoformat()
     kinds = {k: {"key": k, "label": v, "archive": 0, "onHold": 0, "chosen": 0, "guessed": 0}
              for k, v in EXIT_REASONS.items()}

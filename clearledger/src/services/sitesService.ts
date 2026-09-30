@@ -62,6 +62,9 @@ export interface SiteRow {
   archiveReason: string | null
   /** Тип причины выхода из работы (EXIT_REASONS на сервере). */
   exitKind?: string | null
+  /** Причина выхода: из карточки, у старых пауз — из события перехода. */
+  exitText?: string | null
+  holdUntil?: string | null
   /** Решение по проекту в работе: квадрант и чего не хватает для оценки. */
   decision?: { quadrant: Quadrant; confidence: number; unknown: string[] } | null
   cadastralNo: string | null
@@ -1192,6 +1195,38 @@ export async function getCostsReport(companyId: string): Promise<CostsReport> {
 }
 
 /** Назначить (или снять, `ownerId = null`) ответственного пачкой проектов. */
+/** Прогноз, зафиксированный при решении: с ним сравнивают станцию после ввода. */
+export interface SiteForecastSnap {
+  at: string; stage: string; retro: boolean; ok: boolean
+  quadrant: Quadrant; confidence: number
+  kwhMonth: number | null; kwhMonthGood: number | null; marginMonth: number | null
+  tariff: number | null; inputPrice: number | null; paybackMonths: number | null
+}
+export interface StationFact {
+  kwhMonth: number; tariff: number; marginMonth: number | null
+  months: number; from: string | null; to: string | null
+}
+export interface ForecastFactItem {
+  id: string; projectNo: string | null; title: string | null
+  stage: SiteStage; stageLabel: string; commissionedOn: string | null
+  forecast: SiteForecastSnap | null; fact: StationFact | null
+}
+export function getSiteForecast(companyId: string, id: string): Promise<Partial<ForecastFactItem>> {
+  return get(`/api/sites/${id}/forecast`, { company_id: companyId })
+}
+export function getForecastVsFact(companyId: string): Promise<{ items: ForecastFactItem[]; withForecast: number; withFact: number }> {
+  return get('/api/sites/analysis/forecast', { company_id: companyId })
+}
+
+/** Разбор отказов и пауз пачкой: тип причины и дата возврата. */
+export async function bulkExit(
+  companyId: string, siteIds: string[], p: { kind?: string; holdUntil?: string },
+): Promise<{ updated: number; skipped: number }> {
+  return post(`/api/sites/bulk/exit?company_id=${companyId}`, {
+    site_ids: siteIds, exit_kind: p.kind || undefined, hold_until: p.holdUntil || undefined,
+  })
+}
+
 export async function bulkAssignOwner(
   companyId: string, siteIds: string[], ownerId: string | null,
 ): Promise<{ assigned: number }> {

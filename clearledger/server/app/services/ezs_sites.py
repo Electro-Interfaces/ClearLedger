@@ -1103,6 +1103,12 @@ def _risk_conditions(risk: str) -> list[Any]:
         return [*active, literal_column(next_step_overdue_sql())]
     if risk == "no_owner":
         return [*active, S.owner_user_id.is_(None)]
+    # Разбор выхода из работы: накопленные отказы и паузы без типа причины и без
+    # даты возврата. Это не про живые проекты, поэтому без `active`.
+    if risk == "no_exit_kind":
+        return [S.stage.in_(("archive", "on_hold")), S.exit_kind.is_(None)]
+    if risk == "no_hold_date":
+        return [S.stage == "on_hold", S.hold_until.is_(None)]
     if risk == "no_next":
         return [*active, S.next_action.is_(None), S.workspace_data["next_ref"].astext.is_(None),
                 S.workspace_data["external_wait"]["waiting_for"].astext.is_(None)]
@@ -1292,14 +1298,18 @@ async def list_sites(
         .offset((page - 1) * page_size).limit(page_size)
     )).all()
     from app.services.ezs_site_analysis import verdicts
+    from app.services.ezs_site_work import exit_texts
     decisions = await verdicts(db, company_id, [s for s, _ in rows])
+    # У старых пауз причина только в событии перехода — показываем её в строке.
+    texts = await exit_texts(db, [s for s, _ in rows if s.stage in ("archive", "on_hold")])
     items = []
     for s, owner_name in rows:
         row = _site_out(s)
         row.update({"ownerName": owner_name, "nextAction": s.next_action,
                     "nextActionDue": s.next_action_due,
                     "lastTouchAt": s.last_touch_at.isoformat() if s.last_touch_at else None,
-                    "decision": decisions.get(str(s.id))})
+                    "decision": decisions.get(str(s.id)),
+                    "exitText": (s.archive_reason or "").strip() or texts.get(s.id)})
         items.append(row)
     return {"total": total, "page": page, "pageSize": page_size, "items": items}
 

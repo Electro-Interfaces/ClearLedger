@@ -35,7 +35,7 @@ import * as chatApi from '@/services/chatService'
 import { ChatsTab } from '@/components/locations/cockpit/ChatsTab'
 import { useSupportContext } from '@/contexts/SupportContext'
 import {
-  getSiteEvents, getSiteMembers, getSiteEconomics, getProjectContext, getSiteDocs,
+  getSiteEvents, getSiteMembers, getSiteEconomics, getSiteForecast, getProjectContext, getSiteDocs,
   patchSite, moveSiteStage, markSiteGate, waiveSiteGate, addSiteEvent, uploadSiteDoc,
   deleteSiteDoc, downloadSiteDoc, getProjectRoutes,
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
@@ -2519,6 +2519,42 @@ const DECISION_FIELDS = [
   { k: 'controlForm', api: 'control_form', label: 'Право на участок', num: false },
 ] as const
 
+// Прогноз, с которым решали, и факт станции. Показывается с «Решения» и дальше:
+// до решения обещать было нечего, а текущая оценка — не обещание.
+function ForecastLine({ site, companyId }: { site: SiteDetail; companyId: string }) {
+  const past = FUNNEL_STAGES.indexOf(site.stage) >= FUNNEL_STAGES.indexOf('decision')
+  const q = useQuery({
+    queryKey: ['site-forecast', companyId, site.id],
+    queryFn: () => getSiteForecast(companyId, site.id),
+    enabled: past,
+  })
+  if (!past || !q.data) return null
+  const f = q.data.forecast
+  const fact = q.data.fact
+  if (!f && !fact) {
+    return <div className="text-xs text-muted-foreground">Прогноз при решении не зафиксирован.</div>
+  }
+  const pct = (a?: number | null, b?: number | null) =>
+    a != null && b ? ` (${a >= b ? '+' : ''}${Math.round(((a - b) / b) * 100)}% к прогнозу)` : ''
+  return (
+    <div className="text-xs space-y-0.5">
+      {f && (
+        <div className="text-muted-foreground">
+          Прогноз при решении{f.retro ? ' (зафиксирован задним числом)' : ''}, {fmtDate(f.at)}:{' '}
+          {f.ok ? `${nf0.format(f.kwhMonth ?? 0)} кВт·ч/мес, маржа ${nf0.format(f.marginMonth ?? 0)} ₽/мес` : 'экономика не посчитана'}
+        </div>
+      )}
+      {fact && (
+        <div className={fact.months < 3 ? 'text-muted-foreground' : ''}>
+          Факт станции за {fact.months} мес: {nf0.format(fact.kwhMonth)} кВт·ч/мес{pct(fact.kwhMonth, f?.kwhMonth)}
+          {fact.marginMonth != null ? `, маржа ${nf0.format(fact.marginMonth)} ₽/мес` : ''}
+          {fact.months < 3 ? ' — меньше трёх месяцев, выводы рано' : ''}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function DecisionBlock({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
   const qc = useQueryClient()
   const live = FUNNEL_STAGES.includes(site.stage) && (site.kind ?? 'new_build') === 'new_build'
@@ -2575,6 +2611,7 @@ function DecisionBlock({ site, companyId, onDone }: { site: SiteDetail; companyI
       {score && score.unknown.length > 0 && (
         <div className="text-xs text-amber-700 dark:text-amber-400">Не хватает: {score.unknown.join('; ')}</div>
       )}
+      <ForecastLine site={site} companyId={companyId} />
       <div className="flex flex-wrap items-end gap-2">
         {DECISION_FIELDS.map((f) => (
           <div key={f.k}>
@@ -2720,7 +2757,7 @@ function Metric({ label, value, warn, source }: {
 
 const KIND_LABEL: Record<string, string> = {
   stage: 'Стадия', touch: 'Касание', note: 'Заметка', edit: 'Правка', import: 'Импорт', gate: 'Гейт',
-  doc: 'Документ',
+  doc: 'Документ', forecast: 'Прогноз',
 }
 
 export function HistoryTab({ site, companyId }: { site: SiteDetail; companyId: string }) {
