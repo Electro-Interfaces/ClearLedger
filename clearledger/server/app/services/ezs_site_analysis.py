@@ -25,7 +25,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import EzsSite
@@ -647,3 +647,64 @@ async def forecast_vs_fact(db: AsyncSession, company_id, site: EzsSite | None = 
         })
     return {"items": items, "withForecast": sum(1 for i in items if i["forecast"]),
             "withFact": sum(1 for i in items if i["fact"])}
+
+
+# ── Мощность по регионам ───────────────────────────────────────────────────
+# Нет мощности — главная записанная причина отказов, а свободная мощность известна
+# у единиц живых проектов (30.09.2026: Приморский край 3 из 43). Спрашивать её у
+# сетевой по одному адресу — месяц на каждый; по региону одним письмом — один.
+POWER_STAGES = ("lead", "screening", "negotiation", "dd", "decision", "contracting")
+POWER_WAIT_PREFIX = "Ждём ответа сетевой о свободной мощности"
+
+
+async def power_by_region(db: AsyncSession, company_id) -> dict[str, Any]:
+    """Где мощность известна, где нет, где уже ждём ответа и сколько отказов из-за неё."""
+    from sqlalchemy import select
+    from app.models import EzsTechConnection
+    from app.services.ezs_site_work import CLOSING_STAGES, exit_texts, guess_exit_kind
+
+    sites = (await db.execute(select(EzsSite).where(
+        EzsSite.company_id == company_id,
+        EzsSite.stage.in_(POWER_STAGES + CLOSING_STAGES)))).scalars().all()
+    closed = [s for s in sites if s.stage in CLOSING_STAGES]
+    texts = await exit_texts(db, closed)
+    ops = (await db.execute(
+        select(func.coalesce(EzsSite.region_norm, EzsSite.region), EzsTechConnection.grid_operator)
+        .join(EzsSite, EzsSite.id == EzsTechConnection.site_id)
+        .where(EzsTechConnection.company_id == company_id,
+               func.coalesce(EzsTechConnection.grid_operator, "") != "")
+    )).all()
+
+    regions: dict[str, dict[str, Any]] = {}
+
+    def reg(name: str | None) -> dict[str, Any]:
+        key = name or "— регион не указан"
+        return regions.setdefault(key, {"region": key, "live": 0, "known": 0, "waiting": 0,
+                                        "noPowerExits": 0, "operators": set(), "unknown": []})
+
+    for s in sites:
+        r = reg(s.region_norm or s.region)
+        if s.stage in CLOSING_STAGES:
+            kind = s.exit_kind or guess_exit_kind((s.archive_reason or "").strip() or texts.get(s.id))
+            if kind == "no_power":
+                r["noPowerExits"] += 1
+            continue
+        r["live"] += 1
+        if s.free_power_num is not None:
+            r["known"] += 1
+            continue
+        waiting = (s.next_action or "").startswith(POWER_WAIT_PREFIX)
+        r["waiting"] += int(waiting)
+        r["unknown"].append({
+            "id": str(s.id), "projectNo": s.project_no, "city": s.city,
+            "address": s.address or s.full_address or s.install_place,
+            "lat": s.lat, "lon": s.lon, "plannedPowerKwt": s.planned_power_kwt,
+            "waiting": waiting, "waitingDue": s.next_action_due if waiting else None,
+        })
+    for name, op in ops:
+        if (name or "— регион не указан") in regions:
+            regions[name or "— регион не указан"]["operators"].add(op.strip())
+    items = [{**r, "operators": sorted(r["operators"])} for r in regions.values() if r["live"]]
+    items.sort(key=lambda r: (-(r["live"] - r["known"]), r["region"]))
+    return {"items": items,
+            "live": sum(r["live"] for r in items), "known": sum(r["known"] for r in items)}

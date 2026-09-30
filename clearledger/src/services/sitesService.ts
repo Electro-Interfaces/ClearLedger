@@ -1218,6 +1218,27 @@ export function getForecastVsFact(companyId: string): Promise<{ items: ForecastF
   return get('/api/sites/analysis/forecast', { company_id: companyId })
 }
 
+/** Свободная мощность по регионам: где известна, где нет, где ждём ответа сетевой. */
+export interface PowerSite {
+  id: string; projectNo: string | null; city: string | null; address: string | null
+  lat: number | null; lon: number | null; plannedPowerKwt: number | null
+  waiting: boolean; waitingDue: string | null
+}
+export interface PowerRegion {
+  region: string; live: number; known: number; waiting: number; noPowerExits: number
+  operators: string[]; unknown: PowerSite[]
+}
+export function getPowerByRegion(companyId: string): Promise<{ items: PowerRegion[]; live: number; known: number }> {
+  return get('/api/sites/analysis/power', { company_id: companyId })
+}
+export function bulkPowerRequest(
+  companyId: string, siteIds: string[], p: { gridOperator: string; due: string; taskRef?: string },
+): Promise<{ updated: number; skipped: number }> {
+  return post(`/api/sites/bulk/power-request?company_id=${companyId}`, {
+    site_ids: siteIds, grid_operator: p.gridOperator, due: p.due, task_ref: p.taskRef,
+  })
+}
+
 /** Разбор отказов и пауз пачкой: тип причины и дата возврата. */
 export async function bulkExit(
   companyId: string, siteIds: string[], p: { kind?: string; holdUntil?: string },

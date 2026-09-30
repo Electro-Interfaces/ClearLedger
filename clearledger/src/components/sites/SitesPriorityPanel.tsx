@@ -10,7 +10,11 @@
  * середины шкалы и прямо говорит, что делать дальше (добрать факты).
  */
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { NewTaskDialog } from '@/components/tasks/NewTaskDialog'
 import { Card, CardContent } from '@/components/ui/card'
 import { SortTh } from '@/components/workspace/SortableTh'
 import { useTableSort } from '@/hooks/useTableSort'
@@ -18,7 +22,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Info } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
 import {
-  getSitesMatrix, getSitesOverview, getExitReasons, getForecastVsFact, QUADRANT_META, STAGE_META,
+  getSitesMatrix, getSitesOverview, getExitReasons, getForecastVsFact, getPowerByRegion, bulkPowerRequest,
+  QUADRANT_META, STAGE_META, type PowerRegion,
   type MatrixItem, type Quadrant,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
@@ -212,11 +217,133 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
         </>
       )}
 
+      <PowerByRegion companyId={companyId} />
       <ExitReasons companyId={companyId} />
       <ForecastVsFact companyId={companyId} onOpen={openProject} />
 
       {detailId && <SiteCardDialog companyId={companyId} id={detailId} onClose={() => setDetailId(null)} />}
     </div>
+  )
+}
+
+/**
+ * Свободная мощность по регионам. Нет мощности — главная записанная причина
+ * отказов, а узнают о ней по одному адресу, уже после переговоров. Здесь её
+ * спрашивают у сетевой пачкой: одно поручение в «Трек» с перечнем адресов, а у
+ * проектов — следующий шаг «ждём ответа» со сроком.
+ */
+function PowerByRegion({ companyId }: { companyId: string }) {
+  const q = useQuery({ queryKey: ['sites-power', companyId], queryFn: () => getPowerByRegion(companyId) })
+  const [open, setOpen] = useState<string | null>(null)
+  const d = q.data
+  if (!d) return null
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div data-zone="Свободная мощность по регионам" className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
+          Свободная мощность по регионам · известна у {nf0.format(d.known)} из {nf0.format(d.live)} проектов до стройки
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/20 text-muted-foreground text-left">
+                <th className="p-2">Регион</th><th className="p-2 text-right">Проектов</th>
+                <th className="p-2 text-right">Мощность известна</th><th className="p-2 text-right">Ждём ответа</th>
+                <th className="p-2 text-right">Отказов из-за мощности</th><th className="p-2">Сетевые в карточках</th><th className="p-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {d.items.map((r) => (
+                <PowerRow key={r.region} r={r} companyId={companyId}
+                  open={open === r.region} onToggle={() => setOpen((v) => (v === r.region ? null : r.region))} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function PowerRow({ r, companyId, open, onToggle }: {
+  r: PowerRegion; companyId: string; open: boolean; onToggle: () => void
+}) {
+  const qc = useQueryClient()
+  const asked = r.unknown.filter((s) => !s.waiting)
+  const [operator, setOperator] = useState(r.operators[0] ?? '')
+  const [due, setDue] = useState(() => {
+    const x = new Date(); x.setDate(x.getDate() + 30); return x.toISOString().slice(0, 10)
+  })
+  const [draft, setDraft] = useState<{ title: string; description: string } | null>(null)
+  const lines = asked.map((s, i) => [
+    `${i + 1}. ${s.projectNo ?? '—'} · ${[s.city, s.address].filter(Boolean).join(', ') || 'адрес не указан'}`,
+    s.lat != null && s.lon != null ? ` · ${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}` : '',
+    ` · нужно ${nf0.format(s.plannedPowerKwt ?? 150)} кВт`,
+  ].join(''))
+  const record = async (taskId: string) => {
+    try {
+      const res = await bulkPowerRequest(companyId, asked.map((s) => s.id), { gridOperator: operator.trim(), due, taskRef: taskId })
+      toast.success(`Запрос мощности отмечен у ${res.updated} проектов`)
+      setDraft(null); onToggle()
+      await qc.invalidateQueries({ queryKey: ['sites-power', companyId] })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось отметить запрос у проектов')
+    }
+  }
+  return (
+    <>
+      <tr className="border-b border-border/30">
+        <td className="p-2">{r.region}</td>
+        <td className="p-2 text-right tabular-nums">{nf0.format(r.live)}</td>
+        <td className={`p-2 text-right tabular-nums ${r.known < r.live ? 'text-amber-700 dark:text-amber-400' : ''}`}>{nf0.format(r.known)}</td>
+        <td className="p-2 text-right tabular-nums">{r.waiting ? nf0.format(r.waiting) : '—'}</td>
+        <td className="p-2 text-right tabular-nums">{r.noPowerExits ? nf0.format(r.noPowerExits) : '—'}</td>
+        <td className="p-2 text-xs text-muted-foreground max-w-[240px] truncate" title={r.operators.join('; ')}>{r.operators.join('; ') || '—'}</td>
+        <td className="p-2 text-right">
+          {asked.length > 0 && (
+            <button type="button" className="text-xs text-primary hover:underline whitespace-nowrap" onClick={onToggle}>
+              запросить пачкой ({asked.length})
+            </button>
+          )}
+        </td>
+      </tr>
+      {open && (
+        <tr className="border-b border-border/30 bg-muted/20">
+          <td colSpan={7} className="p-3 space-y-2">
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="text-xs text-muted-foreground">Сетевая организация
+                <Input value={operator} onChange={(e) => setOperator(e.target.value)} list={`ops-${r.region}`}
+                  placeholder="кому уходит запрос" className="h-8 w-[280px] text-sm" />
+                <datalist id={`ops-${r.region}`}>{r.operators.map((o) => <option key={o} value={o} />)}</datalist>
+              </label>
+              <label className="text-xs text-muted-foreground">Ждём ответа до
+                <Input type="date" value={due} onChange={(e) => setDue(e.target.value)} className="h-8 w-[150px] text-sm" />
+              </label>
+              <Button size="sm" className="h-8 text-sm" disabled={!operator.trim() || !due}
+                onClick={() => setDraft({
+                  title: `Запросить свободную мощность: ${operator.trim()}, ${r.region} — ${asked.length} адр.`,
+                  description: [
+                    `Запрос в ${operator.trim()} о свободной мощности по ${asked.length} адресам (${r.region}).`,
+                    `Ответ ждём до ${due}. Ответ по каждому адресу внести в карточку проекта: «Решение» → «Свободная мощность, кВт».`,
+                    '', ...lines,
+                  ].join('\n'),
+                })}>
+                Поставить поручение в «Трек»
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              В поручение уйдут {asked.length} адресов без известной мощности; уже ждущие ответа не повторяются.
+              После постановки у каждого проекта следующим шагом станет «Ждём ответа сетевой» со сроком {due}.
+            </div>
+            {draft && (
+              <div className="hidden">
+                <NewTaskDialog companyId={companyId} draft={draft} onCreated={(id) => { void record(id) }} />
+              </div>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 

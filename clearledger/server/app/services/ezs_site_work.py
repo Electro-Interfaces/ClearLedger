@@ -945,3 +945,54 @@ async def company_members(db: AsyncSession, company_id) -> list[dict[str, str]]:
         .where(UserCompany.company_id == company_id)
         .order_by(func.coalesce(User.name, User.email)))).all()
     return [{"id": str(i), "name": n or e} for i, n, e in rows]
+
+
+async def bulk_power_request(db: AsyncSession, company_id, site_ids: list[Any], *,
+                             grid_operator: str, due: str, task_ref: str | None,
+                             user: User | None) -> dict[str, Any]:
+    """Отметить у проектов запрос свободной мощности, отправленный сетевой пачкой.
+
+    Это ещё не заявка на техприсоединение: статус карточки присоединения не
+    трогаем, иначе разрез по сетевым посчитал бы «заявка → ТУ» от запроса справки.
+    Запрос становится следующим шагом со сроком ответа — его подхватят «План работ»
+    и «Просрочено». Сетевую пишем в карточку присоединения, только если она заведена.
+    """
+    from app.models import EzsTechConnection
+    from app.services.ezs_site_analysis import POWER_STAGES, POWER_WAIT_PREFIX
+
+    operator = (grid_operator or "").strip()
+    if not operator:
+        return {"updated": 0, "error": "Укажите сетевую организацию"}
+    try:
+        date.fromisoformat(due[:10])
+    except (TypeError, ValueError):
+        return {"updated": 0, "error": "Срок ответа — дата ГГГГ-ММ-ДД"}
+    if not site_ids:
+        return {"updated": 0}
+    rows = (await db.execute(select(EzsSite).where(
+        EzsSite.company_id == company_id, EzsSite.id.in_(site_ids),
+        EzsSite.stage.in_(POWER_STAGES)))).scalars().all()
+    tcs = {tc.site_id: tc for tc in (await db.execute(select(EzsTechConnection).where(
+        EzsTechConnection.company_id == company_id,
+        EzsTechConnection.site_id.in_([s.id for s in rows])))).scalars().all()}
+    now = datetime.now(timezone.utc)
+    note = f"Запрошена свободная мощность у {operator} (пачкой, {len(rows)} адресов"
+    note += f", поручение {task_ref})" if task_ref else ")"
+    for s in rows:
+        changes = []
+        action = f"{POWER_WAIT_PREFIX}: {operator}"[:300]
+        if s.next_action != action:
+            changes.append(make_change("next_action", s.next_action, action))
+            s.next_action = action
+        if s.next_action_due != due[:10]:
+            changes.append(make_change("next_action_due", s.next_action_due, due[:10]))
+            s.next_action_due = due[:10]
+        tc = tcs.get(s.id)
+        if tc is not None and not (tc.grid_operator or "").strip():
+            changes.append(make_change("tc.grid_operator", None, operator))
+            tc.grid_operator = operator
+            tc.updated_at = now
+        s.last_touch_at = now
+        s.updated_at = now
+        await log_event(db, s, "note", text=note, changes=changes or None, user=user)
+    return {"updated": len(rows), "skipped": len(site_ids) - len(rows)}
