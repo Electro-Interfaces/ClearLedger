@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Info } from 'lucide-react'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
 import {
-  getSitesMatrix, getSitesOverview, QUADRANT_META, STAGE_META,
+  getSitesMatrix, getSitesOverview, getExitReasons, QUADRANT_META, STAGE_META,
   type MatrixItem, type Quadrant,
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
@@ -212,8 +212,55 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
         </>
       )}
 
+      <ExitReasons companyId={companyId} />
+
       {detailId && <SiteCardDialog companyId={companyId} id={detailId} onClose={() => setDetailId(null)} />}
     </div>
+  )
+}
+
+/**
+ * Почему проекты выходят из работы. Отказы — не мусор, а опыт отдела: по ним видно,
+ * кого перестать искать (ТЦ со слабой сетью) и где мощность надо просить пачкой у
+ * сетевой. Тип, выбранный человеком, и тип, определённый по тексту причины, идут
+ * раздельно — догадку по словам нельзя выдавать за решение отдела.
+ */
+function ExitReasons({ companyId }: { companyId: string }) {
+  const q = useQuery({ queryKey: ['sites-exits', companyId], queryFn: () => getExitReasons(companyId) })
+  const d = q.data
+  if (!d) return null
+  const max = Math.max(1, ...d.items.map((i) => i.archive + i.onHold))
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div data-zone="Почему проекты выходят из работы" className="px-3 py-2 text-sm font-semibold text-muted-foreground border-b bg-muted/40">
+          Почему проекты выходят из работы · отказ и пауза, {nf0.format(d.total)}
+        </div>
+        <div className="p-3 space-y-1.5">
+          {d.items.map((i) => {
+            const n = i.archive + i.onHold
+            return (
+              <div key={i.key} className="grid grid-cols-[minmax(0,14rem)_1fr_auto] items-center gap-2 text-sm">
+                <span className="truncate" title={i.label}>{i.label}</span>
+                <div className="h-2 rounded bg-muted overflow-hidden">
+                  <div className="h-full bg-primary/60" style={{ width: `${(n / max) * 100}%` }} />
+                </div>
+                <span className="tabular-nums text-xs text-muted-foreground whitespace-nowrap"
+                  title={`выбрано человеком ${i.chosen}, определено по тексту ${i.guessed}`}>
+                  отказ {nf0.format(i.archive)} · пауза {nf0.format(i.onHold)}
+                  {i.guessed > 0 ? ` · по тексту ${nf0.format(i.guessed)}` : ''}
+                </span>
+              </div>
+            )
+          })}
+          <div className="pt-1 text-xs text-muted-foreground">
+            Без причины {nf0.format(d.noReason)}, причина есть, но тип не определить {nf0.format(d.unclassified)}.
+            {' '}На паузе без даты возврата {nf0.format(d.holdNoDate)}, срок возврата наступил {nf0.format(d.holdDue)}.
+            {' '}Тип «по тексту» определён по словам в причине — при следующем переводе стадии его выбирает человек.
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

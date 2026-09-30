@@ -60,6 +60,10 @@ export interface SiteRow {
   stageSince: string | null
   prevStage: SiteStage | null
   archiveReason: string | null
+  /** Тип причины выхода из работы (EXIT_REASONS на сервере). */
+  exitKind?: string | null
+  /** Решение по проекту в работе: квадрант и чего не хватает для оценки. */
+  decision?: { quadrant: Quadrant; confidence: number; unknown: string[] } | null
   cadastralNo: string | null
   statusRaw: string | null
   receivedDate: string | null
@@ -346,12 +350,40 @@ export async function patchSite(
 /** Перевод по воронке. Незакрытый гейт не блокирует — возвращается в `missing`. */
 export async function moveSiteStage(
   companyId: string, id: string, stage: SiteStage, reason?: string, override?: boolean,
+  exit?: { kind?: string; holdUntil?: string },
 ): Promise<{
   moved: boolean; blocked?: boolean; blocking?: string[]; message?: string
   mayOverride?: boolean; overridden?: boolean; missing?: string[]
   gate: GateState; site?: SiteDetail
 }> {
-  return post(`/api/sites/${id}/stage?company_id=${companyId}`, { stage, reason, override })
+  return post(`/api/sites/${id}/stage?company_id=${companyId}`, {
+    stage, reason, override, exit_kind: exit?.kind || undefined, hold_until: exit?.holdUntil || undefined,
+  })
+}
+
+/** Типы причин выхода из работы — зеркало EXIT_REASONS в server/app/services/ezs_site_work.py. */
+export const EXIT_REASONS: { key: string; label: string }[] = [
+  { key: 'no_power', label: 'Нет свободной мощности' },
+  { key: 'grid_cost', label: 'Дорого или долго подключать' },
+  { key: 'owner_refused', label: 'Собственник отказал' },
+  { key: 'commercial', label: 'Не сошлись в условиях' },
+  { key: 'land', label: 'Участок не подходит' },
+  { key: 'demand', label: 'Слабый спрос или конкурент рядом' },
+  { key: 'our_priority', label: 'Наше решение: очерёдность и сроки' },
+  { key: 'duplicate', label: 'Дубль другого проекта' },
+  { key: 'other', label: 'Другое' },
+]
+
+export interface ExitReasonsReport {
+  total: number
+  items: { key: string; label: string; archive: number; onHold: number; chosen: number; guessed: number }[]
+  noReason: number
+  unclassified: number
+  holdNoDate: number
+  holdDue: number
+}
+export function getExitReasons(companyId: string): Promise<ExitReasonsReport> {
+  return get('/api/sites/analysis/exits', { company_id: companyId })
 }
 
 /* ── Ход проекта по маршруту (кейс в Координаторе) ──────────────────────── */

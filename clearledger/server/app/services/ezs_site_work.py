@@ -56,6 +56,46 @@ def gates_for(kind: str | None, stage: str) -> list[dict[str, Any]]:
 # и тот же: «почему стоим», а не «в каком он состоянии».
 CLOSING_STAGES = ("archive", "on_hold")
 
+# Почему проект выходит из работы. Список собран по живым причинам пилота
+# (сентябрь 2026): свободным текстом одна и та же «нет мощности» записана на пять
+# ладов, и сложить опыт отказов было нечем — 598 архивных проектов без причины вовсе.
+EXIT_REASONS: dict[str, str] = {
+    "no_power": "Нет свободной мощности",
+    "grid_cost": "Дорого или долго подключать",
+    "owner_refused": "Собственник отказал",
+    "commercial": "Не сошлись в условиях",
+    "land": "Участок не подходит",
+    "demand": "Слабый спрос или конкурент рядом",
+    "our_priority": "Наше решение: очерёдность и сроки",
+    "duplicate": "Дубль другого проекта",
+    "other": "Другое",
+}
+
+# Порядок важен: «КА отказал из-за слабой сети» — это мощность, а не отказ.
+# Только явные формулировки: «согласовано ЛИ» или «заключен договор аренды» в
+# архиве — не причина отказа, их не угадываем.
+_EXIT_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("duplicate", ("дубль",)),
+    ("no_power", ("мощност", "слабой сети", "слабая сеть")),
+    ("grid_cost", ("до тп", "до ближайшей тп", "стоимость тп", "стоимость подключ",
+                   "стоимость присоедин", "длинна трассы", "длина трассы",
+                   "экономически не целесообраз", "усилени")),
+    ("land", ("назначение зу", "назначения зу", "ври", "обременен", "не принадлежит")),
+    ("our_priority", ("рассмотрим в 20", "поэтапн", "очерёдн", "очередн", "директив")),
+    ("commercial", ("размер ап", "арендн", "протокол разноглас", "стоимост")),
+    ("owner_refused", ("отказал", "не интересен", "не готов", "не размещать", "отказ ка")),
+    ("demand", ("конкурент", "слабый спрос", "низкий спрос")),
+)
+
+
+def guess_exit_kind(text_: str | None) -> str | None:
+    """Тип причины по тексту — для записей до справочника и для отказов с маршрута."""
+    low = (text_ or "").lower()
+    for kind, hints in _EXIT_HINTS:
+        if any(h in low for h in hints):
+            return kind
+    return None
+
 # Поля, которые можно править из карточки.
 EDITABLE_FIELDS = {
     "region", "city", "address", "full_address", "place_kind", "install_place", "route",
@@ -463,7 +503,9 @@ async def create_site(db: AsyncSession, company_id, payload: dict[str, Any],
 
 async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str | None,
                     user: User | None, may_override: bool = False,
-                    override: bool = False, source: str = "user") -> dict[str, Any]:
+                    override: bool = False, source: str = "user",
+                    exit_kind: str | None = None,
+                    hold_until: str | None = None) -> dict[str, Any]:
     """Перевод стадии.
 
     Обязательные пункты гейта **блокируют** движение вперёд. Обход возможен
@@ -487,6 +529,10 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
             "message": ("Нужна причина отказа" if stage == "archive"
                         else "Нужна причина приостановки"),
         }
+    if exit_kind is not None and exit_kind not in EXIT_REASONS:
+        return {"moved": False, "blocked": True,
+                "gate": gate_state(site, doc_kinds=doc_kinds, equipment_supplied=eq_ok),
+                "message": f"Неизвестный тип причины: {exit_kind}"}
     prev = site.stage
     gate = gate_state(site, prev, doc_kinds=doc_kinds, equipment_supplied=eq_ok)
     missing = [i["label"] for i in gate["items"] if not i["done"]]
@@ -528,6 +574,16 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
         site.archive_reason = reason[:200]
         manual = set(site.manual_fields or []); manual.add("archive_reason")
         site.manual_fields = sorted(manual)
+        # Тип выбирает человек; с маршрута Координатора приходит только текст —
+        # тогда тип определяем по нему, чтобы отказ не выпал из разбивки.
+        site.exit_kind = exit_kind or guess_exit_kind(reason)
+        # Пауза с датой возврата становится следующим шагом: её подхватывают те же
+        # «План работ» и «Просрочено», что и любой шаг. Отдельной напоминалки не
+        # нужно, а «рассмотрим в 2027» перестаёт быть способом забыть проект.
+        if stage == "on_hold" and hold_until:
+            site.hold_until = hold_until[:10]
+            site.next_action = f"Вернуться к проекту после паузы: {reason}"[:300]
+            site.next_action_due = hold_until[:10]
     else:
         old_archive_reason = site.archive_reason
 
@@ -555,6 +611,46 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
     await sync_from_site(db, site.company_id, site)
     return {"moved": True, "missing": missing, "overridden": bool(forward and gate["blocking"] and override),
             "gate": gate_state(site, doc_kinds=doc_kinds, equipment_supplied=eq_ok)}
+
+
+async def exit_reasons_report(db: AsyncSession, company_id) -> dict[str, Any]:
+    """Почему проекты выходят из работы: отказ и пауза по типам причин.
+
+    Тип, выбранный человеком, и тип, определённый по тексту, считаются раздельно:
+    второй — догадка по словам, и выдавать её за решение отдела нельзя.
+    """
+    rows = (await db.execute(
+        select(EzsSite.stage, EzsSite.exit_kind, EzsSite.archive_reason, EzsSite.hold_until)
+        .where(EzsSite.company_id == company_id, EzsSite.stage.in_(CLOSING_STAGES))
+    )).all()
+    today = date.today().isoformat()
+    kinds = {k: {"key": k, "label": v, "archive": 0, "onHold": 0, "chosen": 0, "guessed": 0}
+             for k, v in EXIT_REASONS.items()}
+    no_text = unclassified = hold_no_date = hold_due = 0
+    for stage, kind, reason, hold in rows:
+        if stage == "on_hold":
+            if not hold:
+                hold_no_date += 1
+            elif hold <= today:
+                hold_due += 1
+        k = kind if kind in kinds else None
+        chosen = k is not None
+        if k is None:
+            k = guess_exit_kind(reason)
+        if k is None:
+            if (reason or "").strip():
+                unclassified += 1
+            else:
+                no_text += 1
+            continue
+        row = kinds[k]
+        row["archive" if stage == "archive" else "onHold"] += 1
+        row["chosen" if chosen else "guessed"] += 1
+    items = sorted((r for r in kinds.values() if r["archive"] or r["onHold"]),
+                   key=lambda r: -(r["archive"] + r["onHold"]))
+    return {"total": len(rows), "items": items, "noReason": no_text,
+            "unclassified": unclassified, "holdNoDate": hold_no_date, "holdDue": hold_due,
+            "reasons": [{"key": k, "label": v} for k, v in EXIT_REASONS.items()]}
 
 
 def _pos(stage: str) -> int:

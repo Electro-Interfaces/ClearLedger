@@ -6492,6 +6492,9 @@ class EzsSite(Base):
     stage_since: Mapped[str | None] = mapped_column(String(10), nullable=True)   # ISO-дата входа в стадию
     prev_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)    # откуда пришла
     archive_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)  # почему отклонена
+    # Тип причины выхода из работы (отказ/пауза) — выбор из ezs_site_work.EXIT_REASONS.
+    # Текст причины остаётся рядом: тип нужен, чтобы опыт отказов можно было сложить.
+    exit_kind: Mapped[str | None] = mapped_column(String(24), nullable=True)
     status_raw: Mapped[str | None] = mapped_column(String(80), nullable=True)   # исходный «Статус»
     received_date: Mapped[str | None] = mapped_column(String(10), nullable=True)  # ISO, «Дата поступления»
     # ── идентичность площадки (иначе повторный импорт плодит дубли) ──

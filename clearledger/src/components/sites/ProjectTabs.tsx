@@ -42,7 +42,7 @@ import {
   linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
   getProjectCase, openProjectCase, applyProjectStep, undoProjectStep,
   getSiteParticipants, addSiteParticipant, removeSiteParticipant, registerEquipmentUnit,
-  STAGE_META, FUNNEL_STAGES, CLOSING_STAGES, QUADRANT_META, PROJECT_OBJECT_TYPES, projectObjectLabel,
+  STAGE_META, FUNNEL_STAGES, CLOSING_STAGES, QUADRANT_META, EXIT_REASONS, PROJECT_OBJECT_TYPES, projectObjectLabel,
   type SiteDetail, type SiteStage, type ProjectContext, type CaseAction,
   type SiteEquipment,
 } from '@/services/sitesService'
@@ -84,7 +84,12 @@ export type ProjectTabKey = (typeof PROJECT_TABS)[number]['k']
 export function ProjectTabContent({ tab, site, companyId, onDone }: {
   tab: ProjectTabKey; site: SiteDetail; companyId: string; onDone: () => Promise<void>
 }) {
-  if (tab === 'overview') return <ProjectOverviewTab site={site} companyId={companyId} />
+  if (tab === 'overview') return (
+    <div className="space-y-4">
+      <DecisionBlock site={site} companyId={companyId} onDone={onDone} />
+      <ProjectOverviewTab site={site} companyId={companyId} />
+    </div>
+  )
   if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId} />
   if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'passport') return <PassportTab site={site} companyId={companyId} onDone={onDone} />
@@ -713,6 +718,13 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
   // Пометка дубля: номер оригинала собирается в причину архивации.
   const [dupOpen, setDupOpen] = useState(false)
   const [dupNo, setDupNo] = useState('')
+  // Тип причины и дата возврата. Тип нужен, чтобы опыт отказов складывался в
+  // разбивку «почему уходим», а дата паузы становится следующим шагом проекта:
+  // «рассмотрим в 2027» без даты было способом забыть проект.
+  const [exitKind, setExitKind] = useState('')
+  const [holdUntil, setHoldUntil] = useState(() => {
+    const d = new Date(); d.setMonth(d.getMonth() + 3); return d.toISOString().slice(0, 10)
+  })
   const nextStage = FUNNEL_STAGES[FUNNEL_STAGES.indexOf(site.stage as never) + 1]
 
   // Стадию передаём аргументом: кнопка «Перевести в …» не может ждать, пока
@@ -721,10 +733,14 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
     // Причину, как и стадию, можно передать аргументом: `setReason` доедет только
     // к следующему рендеру, и кнопка «Пометить дублем» отправила бы пустую причину
     // — ровно та же грабля, из-за которой аргументом передаётся стадия.
-    mutationFn: (p?: SiteStage | { to: SiteStage; reason: string }) => {
-      const to = typeof p === 'string' ? p : p?.to
+    mutationFn: (p?: SiteStage | { to: SiteStage; reason: string; kind?: string }) => {
+      const to = (typeof p === 'string' ? p : p?.to) ?? stage
       const why = p && typeof p === 'object' ? p.reason : reason
-      return moveSiteStage(companyId, site.id, to ?? stage, why || undefined, override)
+      const exit = CLOSING_STAGES.includes(to)
+        ? { kind: (p && typeof p === 'object' ? p.kind : undefined) ?? exitKind,
+            holdUntil: to === 'on_hold' ? holdUntil : undefined }
+        : undefined
+      return moveSiteStage(companyId, site.id, to, why || undefined, override, exit)
     },
     onSuccess: async (r) => {
       setMayOverride(!!r.mayOverride)
@@ -734,7 +750,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
         toast.warning(r.message ?? 'Переход заблокирован гейтом')
         return
       }
-      setBlocked(null); setOverride(false); setReason('')
+      setBlocked(null); setOverride(false); setReason(''); setExitKind('')
       toast.success(r.overridden ? 'Стадия изменена в обход гейта — запись в истории'
                                  : 'Стадия изменена')
       await onDone()
@@ -950,6 +966,21 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
             {/* «Обязательна по смыслу» — обещание, которого система не выполняла:
                 пустую причину принимала, и проект уходил в архив без объяснения.
                 Раз обязательна — значит обязательна, кнопка ждёт текста. */}
+            {CLOSING_STAGES.includes(stage) && (
+              <Select value={exitKind} onValueChange={setExitKind}>
+                <SelectTrigger className="h-8 w-[230px] text-sm"><SelectValue placeholder="Почему — выберите" /></SelectTrigger>
+                <SelectContent>
+                  {EXIT_REASONS.map((r) => <SelectItem key={r.key} value={r.key} className="text-sm">{r.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {stage === 'on_hold' && (
+              <label className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                вернуться
+                <Input type="date" value={holdUntil} onChange={(e) => setHoldUntil(e.target.value)}
+                  className="h-8 w-[150px] text-sm" />
+              </label>
+            )}
             <Input value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder={override ? 'Обоснование обхода — обязательно'
                 : stage === 'archive' ? 'Причина отклонения — обязательна'
@@ -962,7 +993,8 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
                 // Выход из работы без причины запрещён с обеих сторон: у
                 // замороженного места «почему стоим» — тот же вопрос, что у
                 // отклонённого, и через полгода на него отвечать нечем.
-                || (CLOSING_STAGES.includes(stage) && !reason.trim())
+                || (CLOSING_STAGES.includes(stage) && (!reason.trim() || !exitKind))
+                || (stage === 'on_hold' && !holdUntil)
                 || (override && !reason.trim())}
               onClick={() => mMove.mutate(undefined)}>
               {mMove.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}Перевести
@@ -994,7 +1026,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
                   placeholder="ЭЗС-2026-0000" className="h-8 w-[190px] text-sm" />
                 <Button size="sm" variant="destructive" className="h-8 text-sm"
                   disabled={!dupNo.trim() || mMove.isPending}
-                  onClick={() => mMove.mutate({ to: 'archive', reason: `Дубль проекта ${dupNo.trim()}` })}>
+                  onClick={() => mMove.mutate({ to: 'archive', reason: `Дубль проекта ${dupNo.trim()}`, kind: 'duplicate' })}>
                   Пометить дублем
                 </Button>
                 <button type="button" onClick={() => { setDupOpen(false); setDupNo('') }}
@@ -2467,6 +2499,106 @@ function BudgetEditor({ site, companyId, ctx, onDone }: {
         <Button size="sm" className="h-8 text-sm" disabled={busy || (!plan && !fact)} onClick={add}>Добавить</Button>
       </div>
     </div>
+  )
+}
+
+/* ── Решение по проекту: брать или нет ──────────────────────────────────── */
+
+/**
+ * Пять граф, от которых зависит исполнимость. Из десятков граф паспорта именно
+ * их на пилоте почти никто не заполнял (30.09.2026: мощность у 53 живых проектов
+ * из 329, стоимость подключения у 11), поэтому 169 из 236 проектов в работе
+ * система не могла оценить. Графы стоят рядом с вердиктом: ввёл цифру — сразу
+ * видишь, как изменилось решение.
+ */
+const DECISION_FIELDS = [
+  { k: 'freePowerNum', api: 'free_power_num', label: 'Свободная мощность, кВт', num: true },
+  { k: 'distanceToTpM', api: 'distance_to_tp_m', label: 'До ТП, м', num: true },
+  { k: 'tpCost', api: 'tp_cost', label: 'Подключение, ₽', num: true },
+  { k: 'rentRate', api: 'rent_rate', label: 'Аренда, ₽/мес', num: true },
+  { k: 'controlForm', api: 'control_form', label: 'Право на участок', num: false },
+] as const
+
+function DecisionBlock({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
+  const qc = useQueryClient()
+  const live = FUNNEL_STAGES.includes(site.stage) && (site.kind ?? 'new_build') === 'new_build'
+  const q = useQuery({
+    queryKey: ['site-economics', companyId, site.id],
+    queryFn: () => getSiteEconomics(companyId, site.id),
+    enabled: live,
+  })
+  const initial = () => Object.fromEntries(DECISION_FIELDS.map((f) => {
+    const v = (site as unknown as Record<string, unknown>)[f.k]
+    return [f.k, v == null ? '' : String(v)]
+  })) as Record<string, string>
+  const [vals, setVals] = useState(initial)
+  useEffect(() => { setVals(initial()) }, [site]) // eslint-disable-line react-hooks/exhaustive-deps
+  const dirty = DECISION_FIELDS.some((f) => vals[f.k] !== initial()[f.k])
+  const mSave = useMutation({
+    mutationFn: () => patchSite(companyId, site.id, Object.fromEntries(DECISION_FIELDS.map((f) => {
+      const v = vals[f.k].trim()
+      return [f.api, v === '' ? null : f.num ? Number(v.replace(/\s/g, '').replace(',', '.')) : v]
+    }))),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['site-economics', companyId, site.id] })
+      await onDone()
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось сохранить'),
+  })
+  if (!live) return null
+  const score = q.data?.score
+  const e = q.data?.economics
+  const base = e?.ok ? e.base : undefined
+  const bad = DECISION_FIELDS.some((f) => f.num && vals[f.k].trim() !== ''
+    && !Number.isFinite(Number(vals[f.k].replace(/\s/g, '').replace(',', '.'))))
+
+  return (
+    <section data-zone="Решение по проекту" className="rounded-lg border border-border p-3 space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold">Решение</span>
+        {score ? (
+          <span className={`text-xs rounded border px-1.5 py-0.5 ${QUADRANT_META[score.quadrant].cls}`}>
+            {QUADRANT_META[score.quadrant].label}
+          </span>
+        ) : q.isLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
+        {score && <span className="text-xs text-muted-foreground">
+          {QUADRANT_META[score.quadrant].hint} · уверенность оценки {score.confidence}%
+        </span>}
+      </div>
+      {base && (
+        <div className="text-xs text-muted-foreground">
+          По сессиям соседних станций: ~{nf0.format(base.kwhMonth)} кВт·ч и {nf0.format(base.marginMonth)} ₽ маржи в месяц
+          {base.paybackMonths != null ? ` · окупаемость подключения ${base.paybackMonths} мес` : ''}
+          {score?.cannibalization ? ' · рядом наша станция, трафик поделится' : ''}
+        </div>
+      )}
+      {score && score.unknown.length > 0 && (
+        <div className="text-xs text-amber-700 dark:text-amber-400">Не хватает: {score.unknown.join('; ')}</div>
+      )}
+      <div className="flex flex-wrap items-end gap-2">
+        {DECISION_FIELDS.map((f) => (
+          <div key={f.k}>
+            <Label>{f.label}</Label>
+            {f.num ? (
+              <Input className="h-8 w-[140px] text-sm" inputMode="decimal" value={vals[f.k]}
+                onChange={(ev) => setVals((v) => ({ ...v, [f.k]: ev.target.value }))} />
+            ) : (
+              <Select value={vals[f.k] || '__none__'}
+                onValueChange={(x) => setVals((v) => ({ ...v, [f.k]: x === '__none__' ? '' : x }))}>
+                <SelectTrigger className="h-8 w-[200px] text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__" className="text-sm">не определено</SelectItem>
+                  {CONTROL_FORMS.map((c) => <SelectItem key={c} value={c} className="text-sm">{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        ))}
+        <Button size="sm" className="h-8 text-sm" disabled={!dirty || bad || mSave.isPending} onClick={() => mSave.mutate()}>
+          {mSave.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}Пересчитать
+        </Button>
+      </div>
+    </section>
   )
 }
 

@@ -1291,12 +1291,15 @@ async def list_sites(
         .order_by(func.coalesce(S.region_norm, S.region).nulls_last(), S.city.nulls_last(), S.id)
         .offset((page - 1) * page_size).limit(page_size)
     )).all()
+    from app.services.ezs_site_analysis import verdicts
+    decisions = await verdicts(db, company_id, [s for s, _ in rows])
     items = []
     for s, owner_name in rows:
         row = _site_out(s)
         row.update({"ownerName": owner_name, "nextAction": s.next_action,
                     "nextActionDue": s.next_action_due,
-                    "lastTouchAt": s.last_touch_at.isoformat() if s.last_touch_at else None})
+                    "lastTouchAt": s.last_touch_at.isoformat() if s.last_touch_at else None,
+                    "decision": decisions.get(str(s.id))})
         items.append(row)
     return {"total": total, "page": page, "pageSize": page_size, "items": items}
 
@@ -1315,7 +1318,8 @@ def _site_out(s: EzsSite) -> dict[str, Any]:
         "phaseLabel": {p["key"]: p["label"] for p in phases_for(s.kind)}.get(
             stage_phase(s.stage, s.kind) or ""),
         "stageSince": s.stage_since, "prevStage": s.prev_stage,
-        "archiveReason": s.archive_reason, "cadastralNo": s.cadastral_no,
+        "archiveReason": s.archive_reason, "exitKind": s.exit_kind, "holdUntil": s.hold_until,
+        "cadastralNo": s.cadastral_no,
         "statusRaw": s.status_raw, "receivedDate": s.received_date,
         "region": s.region_norm or s.region, "regionRaw": s.region,
         "city": s.city, "address": s.address, "fullAddress": s.full_address,

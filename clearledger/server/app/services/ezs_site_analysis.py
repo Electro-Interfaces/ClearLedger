@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from sqlalchemy import text
@@ -109,6 +110,22 @@ async def region_benchmarks(db: AsyncSession, company_id) -> dict[str, Any]:
     }
 
 
+# Спрос сети считается по всем сессиям (1+ с на пилоте) и за час почти не меняется.
+# Реестр спрашивает оценку на каждой странице — без кэша он встал бы на секунду.
+# ponytail: кэш в памяти процесса, при нескольких воркерах у каждого свой; хватает.
+BENCH_TTL_S = 900
+_bench_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+async def cached_benchmarks(db: AsyncSession, company_id) -> dict[str, Any]:
+    hit = _bench_cache.get(str(company_id))
+    if hit and time.monotonic() - hit[0] < BENCH_TTL_S:
+        return hit[1]
+    bench = await region_benchmarks(db, company_id)
+    _bench_cache[str(company_id)] = (time.monotonic(), bench)
+    return bench
+
+
 def _f(v: Any) -> float | None:
     return None if v is None else float(v)
 
@@ -123,11 +140,16 @@ def _region_bench(bench: dict[str, Any], region: str | None) -> dict[str, Any] |
     return None
 
 
-async def nearest_station_km(db: AsyncSession, company_id) -> dict[str, float]:
-    """Расстояние от площадки до ближайшей СВОЕЙ работающей станции, км."""
+async def nearest_station_km(db: AsyncSession, company_id,
+                             ids: list | None = None) -> dict[str, float]:
+    """Расстояние от площадки до ближайшей СВОЕЙ работающей станции, км.
+
+    `ids` сужает расчёт до строк страницы реестра: считать всю сеть ради ста строк незачем.
+    """
     rows = (await db.execute(text("""
         with s as (select id, lat, lon from ezs_sites
-                   where company_id = :cid and lat is not null),
+                   where company_id = :cid and lat is not null
+                     and (cast(:ids as uuid[]) is null or id = any(cast(:ids as uuid[])))),
              l as (select latitude lat, longitude lon from service_locations
                    where company_id = :cid and type = 'ev_charging'
                      and coalesce(is_test, false) = false
@@ -138,7 +160,7 @@ async def nearest_station_km(db: AsyncSession, company_id) -> dict[str, float]:
             select min(111.0 * sqrt(power(s.lat - l.lat, 2)
                    + power((s.lon - l.lon) * cos(radians(s.lat)), 2))) as km from l
         ) d on true
-    """), {"cid": company_id})).all()
+    """), {"cid": company_id, "ids": ids})).all()
     return {str(i): float(km) for i, km in rows if km is not None}
 
 
@@ -386,13 +408,32 @@ def _input_price(site: EzsSite) -> float | None:
     return None
 
 
+async def verdicts(db: AsyncSession, company_id, sites: list[EzsSite]) -> dict[str, dict[str, Any]]:
+    """Решение по каждой площадке для строк реестра: квадрант и чего не хватает.
+
+    Реестр — главный экран отдела, а решение жило только на «Приоритетах» и во
+    вкладке «Экономика». Решать, за какой проект браться, приходилось вслепую.
+    """
+    live = [s for s in sites if s.stage in STAGE_ORDER]
+    if not live:
+        return {}
+    bench = await cached_benchmarks(db, company_id)
+    near = await nearest_station_km(db, company_id, ids=[s.id for s in live])
+    out = {}
+    for s in live:
+        sc = score_site(s, near_km=near.get(str(s.id)), bench=bench)
+        out[str(s.id)] = {"quadrant": sc["quadrant"], "confidence": sc["confidence"],
+                          "unknown": sc["unknown"]}
+    return out
+
+
 # ── Матрица приоритетов и разрывы покрытия ─────────────────────────────────
 async def priority_matrix(db: AsyncSession, company_id, *, stage: str | None = None,
                           region: str | None = None) -> dict[str, Any]:
     """Скоринг активных площадок + раскладка по квадрантам."""
     from sqlalchemy import select
 
-    bench = await region_benchmarks(db, company_id)
+    bench = await cached_benchmarks(db, company_id)
     near = await nearest_station_km(db, company_id)
 
     conds = [EzsSite.company_id == company_id]

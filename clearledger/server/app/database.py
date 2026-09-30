@@ -2874,6 +2874,7 @@ async def create_all() -> None:
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS next_action_due VARCHAR(10)",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS last_touch_at TIMESTAMPTZ",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS hold_until VARCHAR(10)",
+            "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS exit_kind VARCHAR(24)",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS gates JSONB",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS manual_fields JSONB",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS control_form VARCHAR(40)",

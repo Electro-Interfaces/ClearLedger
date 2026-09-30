@@ -547,6 +547,16 @@ async def analysis_matrix(
     return await ezs_site_analysis.priority_matrix(db, cid, stage=stage, region=region)
 
 
+@router.get("/analysis/exits")
+async def analysis_exits(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Почему проекты выходят из работы: отказ и пауза по типам причин."""
+    cid = await assert_company_member(company_id, user, db)
+    return await ezs_site_work.exit_reasons_report(db, cid)
+
+
 @router.get("/analysis/gaps")
 async def analysis_gaps(
     company_id: str = Query(...),
@@ -608,8 +618,8 @@ async def site_economics(
     """Оценка экономики площадки по фактическим сессиям сети + допущения расчёта."""
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
-    bench = await ezs_site_analysis.region_benchmarks(db, cid)
-    near = await ezs_site_analysis.nearest_station_km(db, cid)
+    bench = await ezs_site_analysis.cached_benchmarks(db, cid)
+    near = await ezs_site_analysis.nearest_station_km(db, cid, ids=[site.id])
     # Факт капвложений точнее плана: пока стройка не закрыта, берём план.
     costs = await ezs_project.list_costs(db, cid, site.id)
     capex_budget = costs["capitalFact"] or costs["capitalPlan"] or None
@@ -669,7 +679,9 @@ async def move_stage(
     may_override = await _is_company_admin(db, cid, user)
     res = await ezs_site_work.set_stage(
         db, site, stage, reason=payload.get("reason"), user=user,
-        may_override=may_override, override=bool(payload.get("override")))
+        may_override=may_override, override=bool(payload.get("override")),
+        exit_kind=payload.get("exit_kind") or None,
+        hold_until=payload.get("hold_until") or None)
     if not res.get("moved") and res.get("blocked"):
         await db.rollback()
         return {**res, "mayOverride": may_override}

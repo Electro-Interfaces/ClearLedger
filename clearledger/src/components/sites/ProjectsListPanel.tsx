@@ -25,8 +25,18 @@ import { SortTh } from '@/components/workspace/SortableTh'
 import { useTableSort } from '@/hooks/useTableSort'
 import {
   getSites, getRouteNodes, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner, getProjectKinds, projectObjectLabel,
-  PHASE_META, STAGE_META, FUNNEL_STAGES, type SiteStage,
+  PHASE_META, STAGE_META, FUNNEL_STAGES, QUADRANT_META, type SiteStage, type SiteRow,
 } from '@/services/sitesService'
+
+// Решение по проекту — не настраиваемая колонка: ради неё реестр и открывают.
+// Сортировка ставит вверх то, по чему есть на чём решать.
+const DECISION_ORDER = { do_now: 0, unblock: 1, option: 2, drop: 3, need_data: 4 } as const
+function DecisionChip({ d }: { d: SiteRow['decision'] }) {
+  if (!d) return <span className="text-muted-foreground">—</span>
+  const m = QUADRANT_META[d.quadrant]
+  const title = d.unknown.length ? `${m.hint}. Не хватает: ${d.unknown.join('; ')}` : m.hint
+  return <span className={`text-xs rounded border px-1.5 py-0.5 whitespace-nowrap ${m.cls}`} title={title}>{m.label}</span>
+}
 import { SiteCardDialog } from './SiteCardDialog'
 import { useOpenProject } from './useOpenProject'
 import { NewProjectDialog } from './NewProjectDialog'
@@ -267,6 +277,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const сортировка = useMemo(() => ({
     projectNo: (s: typeof отобранные[number]) => s.projectNo,
     title: (s: typeof отобранные[number]) => s.title || s.address || s.fullAddress,
+    decision: (s: typeof отобранные[number]) => (s.decision ? DECISION_ORDER[s.decision.quadrant] : 9),
     kind: (s: typeof отобранные[number]) => s.kind,
     placeKind: (s: typeof отобранные[number]) => s.placeKind,
     phase: (s: typeof отобранные[number]) => s.phaseLabel ?? s.phase,
@@ -550,6 +561,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                       className="w-full text-left px-3 py-3 active:bg-muted/40">
                       <div className="flex items-baseline gap-2">
                         <span className="font-mono text-xs text-muted-foreground shrink-0">{s.projectNo ?? '—'}</span>
+                        {s.decision && <DecisionChip d={s.decision} />}
                         {columns.includes('stage') && <span className={`text-[11px] rounded border px-1.5 py-0.5 shrink-0 ${STAGE_META[s.stage as SiteStage]?.cls ?? ''}`}>
                           {s.stageLabel}
                         </span>}
@@ -583,6 +595,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                   </th>
                   <SortTh sortKey="projectNo" sort={sort} onSort={toggle}>Проект</SortTh>
                   <SortTh sortKey="title" sort={sort} onSort={toggle}>Объект</SortTh>
+                  <SortTh sortKey="decision" sort={sort} onSort={toggle}>Решение</SortTh>
                   {columns.includes('kind') && <SortTh sortKey="kind" sort={sort} onSort={toggle}>Вид работ</SortTh>}
                   {columns.includes('placeKind') && <SortTh sortKey="placeKind" sort={sort} onSort={toggle}>Тип объекта</SortTh>}
                   {columns.includes('phase') && <SortTh sortKey="phase" sort={sort} onSort={toggle}>Этап проекта</SortTh>}
@@ -611,6 +624,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                         {s.title || s.address || s.installPlace || s.fullAddress || '—'}
                         <span className="text-muted-foreground"> · {s.city ?? s.region ?? ''}</span>
                       </td>
+                      <td className="p-2"><DecisionChip d={s.decision} /></td>
                       {columns.includes('kind') && <td className="p-2">{kindLabel(s.kind)}</td>}
                       {columns.includes('placeKind') && <td className="p-2">{projectObjectLabel(s.placeKind)}</td>}
                       {columns.includes('phase') && <td className="p-2">
