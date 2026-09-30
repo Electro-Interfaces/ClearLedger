@@ -133,8 +133,11 @@ def status_signals_from(days: list[date], series: dict[str, dict[date, tuple[str
                    if st in РАЗЪЁМ_НЕИСПРАВЕН and before[1].get(no) in РАЗЪЁМ_НЕИСПРАВЕН]
             if bad:
                 conn_fault.append((lid, len(bad)))
+        # Доступность — только у станций, которые сейчас «Активные»: остальные уже
+        # в «без связи» и «отключена», и карточка посчитала бы их дважды (30.09:
+        # 110 из 119 с долей ниже 50% стояли без связи или отключёнными сейчас).
         window = [v for d, v in s.items() if d >= since_window]
-        if len(window) >= МИН_СРЕЗОВ:
+        if cur[0] == "working" and len(window) >= МИН_СРЕЗОВ:
             share = 100 * sum(1 for v in window if v[0] == "working") / len(window)
             if share < avail_pct:
                 avail_low.append((lid, round(share)))

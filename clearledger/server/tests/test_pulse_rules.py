@@ -454,8 +454,10 @@ def test_status_availability_over_window():
     from app.services.station_status_days import status_signals_from
 
     d = [date(2026, 9, 1) + timedelta(days=i) for i in range(10)]
-    s = {"half": {x: (("working" if i < 4 else "no_link"), {}) for i, x in enumerate(d)},
-         "good": {x: ("working", {}) for x in d}}
+    s = {"half": {x: (("no_link" if i < 6 else "working"), {}) for i, x in enumerate(d)},
+         "good": {x: ("working", {}) for x in d},
+         # стоит сейчас — уже в «без связи», в доступность не идёт
+         "down": {x: ("no_link", {}) for x in d}}
     got = status_signals_from(d, s, 50.0)
     assert got["avail_low"] == [("half", 40)]
 
