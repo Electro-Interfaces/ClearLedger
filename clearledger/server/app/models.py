@@ -859,6 +859,47 @@ class SecurityEvent(Base):
     hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class ClientError(Base):
+    """Сбой интерфейса у пользователя: что упало в браузере, где и у кого.
+
+    До 18.09.2026 о падении экрана мы знали ровно то, что видел человек:
+    «Minified React error #185» без места и без повторяемости. Разбор начинался с
+    угадывания, а «периодически возникает» так и оставалось периодическим.
+
+    Одна строка на отпечаток в час, повторы копятся в `hits`: цикл перерисовки
+    шлёт сотни сообщений в секунду, и без свёртки журнал сбоев сам стал бы отказом.
+    """
+
+    __tablename__ = "client_errors"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    # Последний раз, когда этот же сбой повторился: окно свёртки считается по нему.
+    last_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    # Текст ошибки + маршрут + начало стека компонентов.
+    fingerprint: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    message: Mapped[str] = mapped_column(String(2000), nullable=False)
+    stack: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Стек компонентов React: единственное, что показывает экран, а не бандл.
+    component_stack: Mapped[str | None] = mapped_column(Text, nullable=True)
+    path: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    # Экран раздела, если интерфейс его знает: «Маркетинг · Компании и расклад сил».
+    screen: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    user_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="SET NULL"), nullable=True
+    )
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    hits: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+
 # ---------------------------------------------------------------------------
 # AuditEvent
 # ---------------------------------------------------------------------------
@@ -1242,6 +1283,20 @@ class Contract(Base):
     is_closed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # Ответственность стороны по договору (НАШ слой): срок реакции и устранения,
+    # санкция за простой, гарантия, лестница эскалации и ЦИТАТЫ пунктов, из
+    # которых это взято.
+    #
+    # Почему JSONB, а не колонки: состав условий у поставки, сервиса и аренды
+    # разный, и заводить два десятка колонок, из которых у каждого договора
+    # заполнена треть, — значит разложить пустоту по таблице. Версионности тут
+    # тоже не нужно, в отличие от ставок (`ops_contract_terms`): условие
+    # ответственности живёт весь срок договора, а меняется допсоглашением,
+    # которое заводится отдельным договором.
+    #
+    # Цитата обязательна: претензия ссылается на пункт, и «30 дней» без «п. 7.3»
+    # в досудебном споре не стоит ничего.
+    liability: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Охват договора по торговым точкам (НАШ слой, не из 1С):
     # company (вся компания) | locations (набор contract_locations) | unassigned (дефолт).
     # См. TRADELEDGER_COUNTERPARTY_AXIS §5, SCHEMA_REFS_GIG §2a.
@@ -5194,7 +5249,8 @@ class FuelMapping(Base):
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=False, index=True,
     )
-    # service_code из STS (1=АИ-100 2=АИ-92 3=АИ-95 4=АИ-98 5=ДТ 6=ДТ зим 7=СУГ)
+    # service_code из STS (1=АИ-100 2=АИ-92 3=АИ-95 4=АИ-98 5=ДТ 6=ДТ зим 7=СУГ,
+    # 16=ГАЗ АЗС №235 — своим кодом, номенклатура общая с седьмым)
     service_code: Mapped[int] = mapped_column(Integer, nullable=False)
     fuel_name: Mapped[str] = mapped_column(String(255), nullable=False)
     # Номенклатура БП: имя (отображение/документы) + GUID 1С (единый источник
@@ -6064,6 +6120,21 @@ class EzsEquipmentUnit(Base):
         String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
     reserved_for_location_id: Mapped[str | None] = mapped_column(
         String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
+    # ── Метрология (ФЗ-102 «Об обеспечении единства измерений») ─────────────
+    # Станция считает деньги по своему счётчику. Показания счётчика с истёкшей
+    # поверкой недействительны для расчётов — и с клиентом, и с поставщиком
+    # энергии: спор о киловаттах такая станция проигрывает заранее. Поэтому не
+    # примечание в чек-листе, а поля: срок надо СЧИТАТЬ по всей сети, а не
+    # перечитывать текст осмотров.
+    meter_serial: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    meter_verified_on: Mapped[str | None] = mapped_column(String(10), nullable=True)   # ISO, дата поверки
+    meter_verify_until: Mapped[str | None] = mapped_column(String(10), nullable=True)  # ISO, до какого действительна
+    # ── График обслуживания ─────────────────────────────────────────────────
+    # Периодичность ТО — свойство модели, а не площадки: быстрая DC требует
+    # обхода чаще медленной AC. Пустое поле означает «по нормативу типа»
+    # (services/station_upkeep.py), а не «обслуживать не надо».
+    service_interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_service_on: Mapped[str | None] = mapped_column(String(10), nullable=True)     # ISO
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -6287,6 +6358,50 @@ class EzsConnector(Base):
 
     __table_args__ = (
         UniqueConstraint("evse_id", "number", name="uq_ezs_connector_number"),
+    )
+
+
+class StationCheck(Base):
+    """Отметка осмотра станции: один пункт чек-листа, один выезд.
+
+    Пункты живут в коде (`services/station_checklist.py`) — это регламент, а не
+    данные компании. Здесь только факт: кто, когда и что увидел.
+
+    Пишем ИСТОРИЕЙ, а не состоянием. Строка на каждый осмотр, текущее состояние —
+    последняя по `checked_on`. Затирать предыдущую отметку нельзя: вопрос
+    «когда у этой станции последний раз была цела оклейка» возникает ровно
+    тогда, когда кто-то предъявляет претензию за сегодняшнее состояние, и
+    ответить на него надо датами, а не одной галочкой.
+
+    Фото лежит в общем хранилище файлов (`source_files`), как документы
+    площадки: своего хранилища ради снимков заводить незачем.
+    """
+    __tablename__ = "station_checks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    location_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # Ключ пункта регламента: info.price, body.serial, brand.wrap …
+    item_key: Mapped[str] = mapped_column(String(40), nullable=False)
+    # ok | fail | na — см. station_checklist.STATES
+    state: Mapped[str] = mapped_column(String(8), nullable=False, default="ok")
+    checked_on: Mapped[date_type] = mapped_column(Date, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Снимок с места. Пункты с `photo: True` без него считаются
+    # неподтверждёнными, но запись всё равно принимается: связи в поле нет, и
+    # терять осмотр из-за неудавшейся загрузки хуже, чем принять его без фото.
+    file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="SET NULL"), nullable=True)
+    checked_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    checked_by_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_station_check_last", "location_id", "item_key", "checked_on"),
     )
 
 
@@ -7442,6 +7557,14 @@ class ChatMessage(Base):
     type: Mapped[str] = mapped_column(String(20), nullable=False, default="text")  # text|image|video|file|system
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # Вложение (одиночный файл на сообщение; серия изображений = серия сообщений-«альбом»).
+    #
+    # Какой отправкой пришло сообщение. Пять файлов, выбранных разом, уезжают пятью
+    # сообщениями, и склеить их обратно в альбом можно только зная, что отправка
+    # была одна. Прежде лента угадывала это по времени — две минуты между
+    # картинками, — и приклеивала к альбому снимок, посланный отдельно минуту
+    # спустя: человек видел, как фото «дописывается» в уже отправленное сообщение
+    # (МАГ, 18.09.2026). Пусто — сообщение отправлено само по себе.
+    batch_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     file_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     file_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)

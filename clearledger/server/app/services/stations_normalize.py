@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json as _json
 import logging
 import re as _re
 import uuid as _uuid
@@ -32,7 +33,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.station_passport import (
     passport_value, stations_by_location, write_value)
-from app.models import ChannelSyncLog, ChargeSession, Region, ServiceLocation
+from app.models import (AuditEvent, ChannelSyncLog, ChargeSession, Region,
+                        ServiceLocation)
 from app.services.mapping import canon_brand, canon_city, canon_region, geo_in_russia
 
 logger = logging.getLogger("clearledger.stations")
@@ -403,6 +405,24 @@ async def _ingest_compact(
                 if mode == "append":
                     skipped += 1
                     continue
+                # Смену состояния записываем в журнал. До 19.09.2026 загрузка
+                # молча перезаписывала статус, и журнал станции был пуст: экран
+                # показывал «нет связи», но с какого дня — сказать было нечем, а
+                # готовность сети за месяц не считалась вовсе. Пишем только
+                # ПЕРЕХОДЫ: у 600 станций ежесуточное «всё так же» превратило бы
+                # журнал в шум.
+                прежний = loc.operational_status
+                if прежний != oper:
+                    db.add(AuditEvent(
+                        company_id=company_id,
+                        user_id="vitrina",
+                        user_name="Загрузка витрины",
+                        action="location_op_status",
+                        details=_json.dumps(
+                            {"location_id": loc.id, "from": прежний, "to": oper,
+                             "reason": _s(row.get("status_dev")) or "выгрузка витрины"},
+                            ensure_ascii=False, separators=(",", ":")),
+                    ))
                 loc.operational_status = oper
                 if oper == "decommissioned":
                     loc.status = "closed"
