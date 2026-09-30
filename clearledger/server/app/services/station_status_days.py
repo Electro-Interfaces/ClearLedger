@@ -169,3 +169,59 @@ async def status_signals(db: AsyncSession, company_id, avail_pct: float,
     for r in rows:
         series.setdefault(r.location_id, {})[r.day] = (r.operational_status, r.connectors or {})
     return status_signals_from(days, series, avail_pct)
+
+
+def status_now_from(days: list[date], series: dict[str, dict[date, tuple[str, dict]]]
+                    ) -> dict[str, dict[str, Any]]:
+    """Станция → статус на последний срез, с какого дня он держится и какие
+    разъёмы неисправны две книги подряд (только у станции на связи)."""
+    if not days:
+        return {}
+    last = days[-1]
+    prev = days[-2] if len(days) > 1 else None
+    out: dict[str, dict[str, Any]] = {}
+    for lid, s in series.items():
+        cur = s.get(last)
+        if cur is None:
+            continue
+        first = last
+        for d in reversed(days):
+            if d not in s or s[d][0] != cur[0]:
+                break
+            first = d
+        faults = []
+        before = s.get(prev) if prev else None
+        if cur[0] == "working" and before and before[0] == "working":
+            for no, st in sorted(cur[1].items(), key=lambda x: str(x[0]).zfill(3)):
+                if st not in РАЗЪЁМ_НЕИСПРАВЕН or before[1].get(no) not in РАЗЪЁМ_НЕИСПРАВЕН:
+                    continue
+                since = prev
+                for d in reversed(days[:-1]):
+                    if d not in s or s[d][1].get(no) not in РАЗЪЁМ_НЕИСПРАВЕН:
+                        break
+                    since = d
+                faults.append({"no": str(no), "status": st, "since": since.isoformat(),
+                               "openStart": since == days[0]})
+        out[lid] = {"status": cur[0], "since": first.isoformat(),
+                    "openStart": first == days[0], "faults": faults}
+    return out
+
+
+async def status_now(db: AsyncSession, company_id, as_of: date | None = None
+                     ) -> tuple[str | None, dict[str, dict[str, Any]]]:
+    """(день среза, {станция: состояние}) на последнюю книгу не позже `as_of`."""
+    rows = (await db.execute(text("""
+        with top as (select max(day) as d from station_status_days
+                     where company_id = :cid and (CAST(:as_of AS date) is null or day <= CAST(:as_of AS date)))
+        select location_id, day, operational_status, connectors from station_status_days, top
+        where company_id = :cid and day <= top.d and day > top.d - make_interval(days => :win)
+    """), {"cid": str(company_id), "as_of": as_of, "win": ОКНО_ДОСТУПНОСТИ})).all()
+    if not rows:
+        return None, {}
+    days = sorted({r.day for r in rows})
+    if days[-1] < (as_of or date.today()) - timedelta(days=СВЕЖЕСТЬ_ДНЕЙ):
+        return None, {}
+    series: dict[str, dict[date, tuple[str, dict]]] = {}
+    for r in rows:
+        series.setdefault(r.location_id, {})[r.day] = (r.operational_status, r.connectors or {})
+    return days[-1].isoformat(), status_now_from(days, series)

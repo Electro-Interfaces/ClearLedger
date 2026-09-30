@@ -24,7 +24,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { OpsSnapshotNotice } from './OpsSnapshotNotice'
 import {
-  AlertTriangle, ClipboardCheck, ClipboardX, Gauge, Loader2, Users, WifiOff,
+  AlertTriangle, ClipboardCheck, ClipboardX, Gauge, Loader2, Plug, Users,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -65,6 +65,7 @@ const ЦВЕТ_ПРИЧИНЫ: Record<string, string> = {
   meter: 'bg-sky-500/15 text-sky-700 dark:text-sky-400',
   service: 'bg-sky-500/15 text-sky-700 dark:text-sky-400',
   check: 'bg-orange-500/15 text-orange-700 dark:text-orange-400',
+  connector: 'bg-rose-500/15 text-rose-700 dark:text-rose-400',
 }
 
 /** Слово причины для сводной: самая тяжёлая идёт первой в строке. */
@@ -75,6 +76,7 @@ const СЛОВО_ПРИЧИНЫ: Record<string, string> = {
   meter: 'поверка счётчика',
   service: 'просрочено ТО',
   check: 'нарушение по осмотру',
+  connector: 'неисправен разъём',
 }
 
 /** Профилактика — не отказ: у неё своё «сколько всего». */
@@ -161,6 +163,7 @@ export function OpsWorklistPanel() {
     silent: (r: WorklistRow) => r.silentDays,
     failed: (r: WorklistRow) => r.failedVisitsPct,
     clients: (r: WorklistRow) => r.clientsLost,
+    last: (r: WorklistRow) => r.lastSessionAt ?? null,
     visits: (r: WorklistRow) => r.visitsPerDay,
     work: (r: WorklistRow) => r.openTickets || null,
   }), [])
@@ -187,7 +190,9 @@ export function OpsWorklistPanel() {
       <OpsSnapshotNotice data={d} />
       {/* Если выгрузка молчит — сказать это первым, до всяких чисел: список
           работы построен на последнем загруженном дне. */}
-      <IntakeHealthBar />
+      {/* Только «выгрузка не приходила»: платежи без сессии и пропавшие графы —
+          вопрос к данным и экономисту, инженер их не исправит (МАГ, 30.09.2026). */}
+      <IntakeHealthBar compact />
 
       <Card>
         <CardContent className="space-y-3 p-3">
@@ -218,7 +223,7 @@ export function OpsWorklistPanel() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {/* Плитки — это и есть фильтры списка: нажатие показывает ровно те
                 строки, про которые число. */}
             <Плитка icon={ClipboardCheck} label="Станций в списке" value={nf.format(t.rows)}
@@ -227,7 +232,9 @@ export function OpsWorklistPanel() {
               onClick={() => { setНеВзятые(false); setПричина('all') }} />
             {/* Разрыв между «видно» и «делается» — главное число экрана. */}
             <Плитка icon={ClipboardX} label="Никем не взято" value={t.notTaken == null ? '—' : nf.format(t.notTaken)}
-              hint={d.workKnown ? 'нет открытой заявки' : наДень ? 'история заявок на день не восстановлена' : 'связь с Поддержкой недоступна'}
+              hint={d.workKnown
+                ? `нет открытой заявки${t.lossNotTaken ? ` · ${money(t.lossNotTaken)}/мес` : ''}`
+                : наДень ? 'история заявок на день не восстановлена' : 'связь с Поддержкой недоступна'}
               tone={t.notTaken ? 'text-red-600 dark:text-red-400' : undefined}
               active={неВзятые && причина === 'all'}
               onClick={() => { setНеВзятые(true); setПричина('all') }} />
@@ -241,38 +248,38 @@ export function OpsWorklistPanel() {
                 setНеВзятые(false)
                 setПричина(причина === 'breached' ? 'all' : 'breached')
               }} />
-            <Плитка icon={WifiOff} label="Цена бездействия" value={t.lossNotTaken == null ? '—' : money(t.lossNotTaken)}
-              hint={`всего по списку ${money(t.lossPerMonth)}`}
-              tone="text-red-600 dark:text-red-400"
-              active={неВзятые && причина === 'silent'}
-              onClick={() => { setНеВзятые(true); setПричина('silent') }} />
-            <Плитка icon={Users} label="Ушло клиентов" value={nf.format(t.clientsLost)}
-              hint="за квартал, по этим станциям"
-              active={причина === 'failing'}
-              onClick={() => setПричина(причина === 'failing' ? 'all' : 'failing')} />
-            {/* Профилактика висит на тех же станциях: смотреть её отдельно
-                бессмысленно, а не видеть — значит поехать дважды. */}
-            <Плитка icon={Gauge} label="Поверка и ТО"
-              value={nf.format(t.meter + t.service)}
-              hint={t.meter + t.service + t.check
-                ? `поверка ${nf.format(t.meter)} · ТО ${nf.format(t.service)}`
-                  + (t.check ? ` · осмотр ${nf.format(t.check)}` : '')
-                // Нулей здесь не бывает от хорошей жизни: у 537 станций пилота
-                // сроки просто не заполнены, и молчать об этом — врать нулём.
-                : `сроки не заполнены у ${nf.format(t.upkeepUnknown)} станций`}
-              tone={t.meter ? 'text-sky-600 dark:text-sky-400' : undefined}
-              active={причина === 'meter'}
-              onClick={() => {
-                // Сроки не зависят от того, взята ли станция в работу: отбор
-                // «никем не взято» здесь только прячет половину поверок.
-                setНеВзятые(false)
-                setПричина(причина === 'meter' ? 'all' : 'meter')
-              }} />
+            {/* Разъём по статусу витрины: станция на связи и продаёт, а один
+                разъём две книги подряд в ошибке — клиент с этим типом уезжает. */}
+            <Плитка icon={Plug} label="Неисправен разъём" value={nf.format(t.connector ?? 0)}
+              hint={d.statusDay ? 'больше суток, станция на связи' : 'статусов витрины нет'}
+              tone={t.connector ? 'text-rose-600 dark:text-rose-400' : undefined}
+              active={причина === 'connector'}
+              onClick={() => { setНеВзятые(false); setПричина(причина === 'connector' ? 'all' : 'connector') }} />
+            {/* Цена бездействия и ушедшие клиенты — показатели руководителя: здесь
+                они задают порядок строк, отдельная плитка не нужна. Профилактика —
+                плиткой, только когда она есть: «0» при незаполненных сроках
+                читался как «всё в порядке». Сроки не зависят от того, взята ли
+                станция в работу, поэтому отбор «никем не взято» снимается. */}
+            {t.meter + t.service + t.check > 0 && (
+              <Плитка icon={Gauge} label="Поверка и ТО"
+                value={nf.format(t.meter + t.service)}
+                hint={`поверка ${nf.format(t.meter)} · ТО ${nf.format(t.service)}`
+                  + (t.check ? ` · осмотр ${nf.format(t.check)}` : '')}
+                tone={t.meter ? 'text-sky-600 dark:text-sky-400' : undefined}
+                active={причина === 'meter'}
+                onClick={() => {
+                  setНеВзятые(false)
+                  setПричина(причина === 'meter' ? 'all' : 'meter')
+                }} />
+            )}
           </div>
 
-          <p className="text-xs text-muted-foreground">{d.note}</p>
-          {d.dataGaps.length > 0 && <details className="rounded-md border p-2">
-            <summary className="cursor-pointer text-sm min-h-11 flex items-center">Заполнить сроки: {d.dataGaps.length} станций</summary>
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer">Как собран список</summary>
+            <p className="pt-1">{d.note}</p>
+          </details>
+          {d.dataGaps.length > 0 && <details className="text-xs">
+            <summary className="cursor-pointer text-muted-foreground">Сроки поверки и ТО не заполнены у {nf.format(d.dataGaps.length)} станций — заполнить</summary>
             <p className="text-xs text-muted-foreground py-2">Откройте карточку станции → Сервис → Осмотр. В блоке «Метрология и обслуживание» нажмите «Править» и заполните сроки. Впереди — площадки с большим числом попыток зарядки.</p>
             <div className="max-h-72 overflow-auto space-y-2">
               {d.dataGaps.map((r) => <div key={r.locationId} className="text-xs flex flex-wrap gap-2">
@@ -303,6 +310,7 @@ export function OpsWorklistPanel() {
                 <SelectItem value="meter">Поверка счётчика</SelectItem>
                 <SelectItem value="service">Просрочено ТО</SelectItem>
                 <SelectItem value="check">Нарушение по осмотру</SelectItem>
+                <SelectItem value="connector">Неисправен разъём</SelectItem>
               </SelectContent>
             </Select>
             <Select value={регионОтбора} onValueChange={setРегионОтбора}>
@@ -375,7 +383,7 @@ export function OpsWorklistPanel() {
                   <SortTh sortKey="name" sort={таблица.sort} onSort={таблица.toggle}>Станция</SortTh>
                   <SortTh sortKey="region" sort={таблица.sort} onSort={таблица.toggle}>Регион</SortTh>
                   <SortTh>Что со станцией</SortTh>
-                  <SortTh sortKey="clients" sort={таблица.sort} onSort={таблица.toggle} align="right">Ушло клиентов</SortTh>
+                  <SortTh sortKey="last" sort={таблица.sort} onSort={таблица.toggle} align="right">Последняя зарядка</SortTh>
                   <SortTh sortKey="visits" sort={таблица.sort} onSort={таблица.toggle} align="right">Приездов в сутки</SortTh>
                   <SortTh sortKey="loss" sort={таблица.sort} onSort={таблица.toggle} align="right">Цена ₽/мес</SortTh>
                   <SortTh sortKey="work" sort={таблица.sort} onSort={таблица.toggle}>В работе</SortTh>
@@ -416,8 +424,14 @@ export function OpsWorklistPanel() {
                         ))}
                       </div>
                     </td>
-                    <td className="p-1.5 text-right tabular-nums text-muted-foreground">
-                      {r.clientsLost || '—'}
+                    {/* Дата, а не «молчит N дн»: по ней инженер сверяется с клиентом
+                        и оператором. Ушедшие клиенты — в подсказке, сводной и выгрузке. */}
+                    <td className="p-1.5 text-right tabular-nums text-muted-foreground"
+                      title={r.clientsLost ? `ушло клиентов за квартал: ${r.clientsLost}` : undefined}>
+                      {r.lastSessionAt
+                        ? new Date(r.lastSessionAt).toLocaleDateString('ru-RU',
+                          { day: '2-digit', month: '2-digit', timeZone: 'Europe/Moscow' })
+                        : '—'}
                     </td>
                     {/* Загруженность площадки: при равных деньгах вперёд идёт
                         та, где больше людей, а у профилактики это вообще
