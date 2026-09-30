@@ -13697,3 +13697,33 @@ class ConfPresence(Base):
         DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("uq_conf_presence", "session_id", "user_id", unique=True),)
+
+
+class StationStatusDay(Base):
+    """Статус станции и её коннекторов на дату выгрузки витрины АСУиМ.
+
+    Витрина приходит книгой раз в сутки и знает только «сейчас»: статус станции
+    («Активная», «Нет связи», «Отключена», …) и каждого разъёма («Доступен»,
+    «Ошибка», …). Карточка станции хранит последнее значение и перезаписывает
+    его — тогда «отключена больше суток» и «доступность за месяц» не посчитать.
+    Здесь ряд: одна строка на станцию и день, повторная загрузка той же книги
+    обновляет строку. Точность — сутки, чаще витрина не приходит.
+    """
+    __tablename__ = "station_status_days"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    location_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="CASCADE"), nullable=False)
+    day: Mapped[date_type] = mapped_column(Date, nullable=False)       # дата среза витрины (МСК)
+    status_dev: Mapped[str | None] = mapped_column(String(60), nullable=True)   # как в витрине
+    operational_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    # {"1": "Доступен", "2": "Ошибка"} — номер разъёма → статус витрины
+    connectors: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_station_status_day", "company_id", "location_id", "day", unique=True),
+        Index("ix_station_status_days_company_day", "company_id", "day"),
+    )

@@ -420,3 +420,53 @@ def test_station_signals_are_one_card_naming_the_worst():
     assert c[0]["insight"].startswith("На 7") and "меньше 60%" in c[0]["insight"]
     assert c[0]["level"] == "warn"
     assert cards(stations={}) == []
+
+
+# ── Статусы витрины АСУиМ по дням («Первое окно», 30.09.2026) ───────────────
+
+def test_status_signals_count_only_what_lasted_a_day():
+    """«Больше суток» = две книги подряд; разъём — только у станции на связи."""
+    from datetime import date
+    from app.services.station_status_days import status_signals_from
+
+    d = [date(2026, 9, 28), date(2026, 9, 29), date(2026, 9, 30)]
+    ok = ("working", {"1": "Доступен"})
+    s = {
+        "off2": {d[1]: ("disabled", {}), d[2]: ("disabled", {})},
+        "off1": {d[1]: ok, d[2]: ("disabled", {})},                   # отключили сегодня
+        "nolink": {d[0]: ("no_link", {}), d[1]: ok, d[2]: ("no_link", {})},
+        "nolink_old": {x: ("no_link", {"1": "Ошибка"}) for x in d},   # разъём застыл
+        "conn": {d[1]: ("working", {"1": "Ошибка", "2": "Доступен"}),
+                 d[2]: ("working", {"1": "Недоступен", "2": "Доступен"})},
+        "conn1": {d[1]: ok, d[2]: ("working", {"1": "Ошибка"})},
+        "gone": {x: ("decommissioned", {}) for x in d},
+    }
+    got = status_signals_from(d, s, 50.0)
+    assert [x[0] for x in got["disabled"]] == ["off2"]
+    assert dict(got["no_link"]) == {"nolink_old": (d[0], True), "nolink": (d[2], False)}
+    assert got["conn_fault"] == [("conn", 1)]
+    assert got["avail_low"] == []            # меньше семи срезов — долю не считаем
+    assert status_signals_from([], {}, 50.0) == {}
+
+
+def test_status_availability_over_window():
+    from datetime import date, timedelta
+    from app.services.station_status_days import status_signals_from
+
+    d = [date(2026, 9, 1) + timedelta(days=i) for i in range(10)]
+    s = {"half": {x: (("working" if i < 4 else "no_link"), {}) for i, x in enumerate(d)},
+         "good": {x: ("working", {}) for x in d}}
+    got = status_signals_from(d, s, 50.0)
+    assert got["avail_low"] == [("half", 40)]
+
+
+def test_status_signals_in_station_card():
+    st = dict(no_link=127, no_link_top=["ЭЗС 12 с 11.09 и раньше", "ЭЗС 40 с 14.09", "ЭЗС 7"],
+              disabled=19, disabled_top=["ЭЗС 3 с 20.09"], conn_fault=9, conn_fault_top=["ЭЗС 5"],
+              avail_low=4, avail_low_top=["ЭЗС 9 20%"])
+    c = [x for x in cards(stations=st) if x["key"] == "st_attention"]
+    assert len(c) == 1 and c[0]["count"] == 127 + 19 + 9 + 4
+    ins = c[0]["insight"]
+    assert ins.startswith("127 без связи (ЭЗС 12 с 11.09 и раньше; ЭЗС 40 с 14.09)")
+    assert "ЭЗС 7" not in ins and "19 отключены больше суток" in ins
+    assert "неисправен разъём" in ins and "доступность за 30 дн. ниже 50%" in ins

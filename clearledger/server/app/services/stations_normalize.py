@@ -738,6 +738,18 @@ async def ingest_stations(
                 чужой = by_serial.get(str(typed.get("serial_number") or "").strip())
                 if чужой is not None and чужой is not loc:
                     typed.pop("serial_number", None)
+                # Переход статуса — в журнал станции, как в компактной выгрузке CPO:
+                # книга витрины идёт этой веткой и раньше перезаписывала статус молча.
+                новый = typed.get("operational_status")
+                if новый and loc.operational_status != новый:
+                    db.add(AuditEvent(
+                        company_id=company_id, user_id="vitrina",
+                        user_name="Загрузка витрины", action="location_op_status",
+                        details=_json.dumps(
+                            {"location_id": loc.id, "from": loc.operational_status, "to": новый,
+                             "reason": _s(row.get("status_dev")) or "выгрузка витрины"},
+                            ensure_ascii=False, separators=(",", ":")),
+                    ))
                 # ОБОГАЩАЕМ существующий объект: заполняем типизированные колонки +
                 # мержим паспорт; id / code / source_bindings НЕ трогаем.
                 for k, v in typed.items():

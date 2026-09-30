@@ -1010,6 +1010,7 @@ async def ingest_asuim_book(
         single = len(sheets) == 1
         order = {v: i for i, v in enumerate(VIEW_ORDER)}
         report: list[dict[str, Any]] = []
+        срез: dict[str, list[dict[str, Any]]] = {}
         for view in sorted(sheets, key=lambda v: order.get(v, len(order))):
             if view == "admins":
                 # Единственное представление, которое не берём принципиально:
@@ -1024,6 +1025,8 @@ async def ingest_asuim_book(
             if day is None and not single and mode == "append" and view in INCREMENTAL:
                 day = await _last_loaded_day(db, company_id, view)
             rows = _read_sheet(wb[sheets[view]], INCREMENTAL.get(view), day)
+            if view in ("stations", "connectors"):
+                срез[view] = rows
             if not rows and day:
                 report.append({"view": view, "label": VIEW_LABELS.get(view, view), "since": day,
                                "status": "success", "created": 0, "skipped": 0,
@@ -1042,6 +1045,18 @@ async def ingest_asuim_book(
 
     if single:
         return {k: v for k, v in report[0].items() if k not in ("view", "label", "sheet")}
+
+    # Статусы станций и разъёмов на день книги: карточка хранит только «сейчас»,
+    # а сигналы «отключена больше суток» и «доступность за месяц» считаются по ряду.
+    if срез.get("stations"):
+        try:
+            from app.services.station_status_days import record_book_day
+            day = await record_book_day(db, company_id, срез["stations"], срез.get("connectors") or [])
+            report.append({"view": "status_days", "label": "статусы станций за день",
+                           "status": "success",
+                           "message": f"срез {day['day']}: станций {day['stations']}"})
+        except Exception as exc:  # noqa: BLE001 — ряд статусов не повод рушить загрузку
+            logger.warning("книга витрины: срез статусов не записан: %s", exc)
 
     # Связь станций с брендами и группами витрина не отдаёт (колонки пусты), её
     # восстанавливает сопоставление по содержимому — иначе протухает до ручного запуска.

@@ -109,6 +109,7 @@ ST_DROP_PCT = 50.0      # выручка недели упала на столь
 ST_DROP_FLOOR = 5000    # прошлой недели меньше — процент ничего не значит
 ST_VISIT_OK = 70.0      # доля приездов с зарядом ниже — клиенты уезжают ни с чем
 ST_VISIT_MIN = 10       # приездов за неделю меньше — доля не показательна
+ST_AVAIL_PCT = 50.0     # доля дней «Активная» за 30 дн. по витрине ниже — «Первое окно»
 # Признаки словами: в выгрузке те же подписи, что на экране, иначе файл
 # приходится расшифровывать по коду.
 OBJ_FLAG_LABELS = {
@@ -546,6 +547,9 @@ THRESHOLDS: dict[str, dict[str, Any]] = {
     "st_visit_ok_pct": {"default": ST_VISIT_OK, "unit": "%", "section": "Станции",
         "label": "Успешных приездов на станции",
         "hint": "Ниже этой доли приездов с зарядом станция попадает в карточку."},
+    "st_avail_pct": {"default": ST_AVAIL_PCT, "unit": "%", "section": "Станции",
+        "label": "Доступность станции за 30 дней",
+        "hint": "Доля дней, когда витрина АСУиМ показывала станцию «Активной». Ниже — станция в карточке."},
     "digest_hour": {"default": 9.0, "unit": "ч", "section": "Доставка",
         "label": "Час утреннего письма",
         "hint": "Во сколько по Москве отправлять карточки экрана дня тем, у кого есть доступ. −1 — не отправлять."},
@@ -816,11 +820,25 @@ def build_cards(
     if st_visit:
         parts.append(f"на {st_visit} зарядкой заканчивается меньше "
                      f"{t['st_visit_ok_pct']:.0f}% приездов{worst('low_ok_top')}")
+    # Статусы витрины АСУиМ — раз в сутки, поэтому «больше суток» = две книги подряд.
+    st_nolink = int(stations.get("no_link") or 0)
+    st_off = int(stations.get("disabled") or 0)
+    st_conn = int(stations.get("conn_fault") or 0)
+    st_avail = int(stations.get("avail_low") or 0)
+    if st_nolink:
+        parts.append(f"{st_nolink} без связи{worst('no_link_top')}")
+    if st_off:
+        parts.append(f"{st_off} отключены больше суток{worst('disabled_top')}")
+    if st_conn:
+        parts.append(f"на {st_conn} работающих больше суток неисправен разъём{worst('conn_fault_top')}")
+    if st_avail:
+        parts.append(f"у {st_avail} доступность за 30 дн. ниже "
+                     f"{t['st_avail_pct']:.0f}%{worst('avail_low_top')}")
     if parts:
         text_ = "; ".join(parts)
         card("st_attention", "Станции требуют разбора",
              text_[0].upper() + text_[1:] + ".",
-             count=st_silent + st_drop + st_visit,
+             count=st_silent + st_drop + st_visit + st_nolink + st_off + st_conn + st_avail,
              level="alert" if alive and st_silent / alive >= 0.1 else "warn",
              link="/operations")
 
@@ -1194,8 +1212,11 @@ async def _stations_snapshot(db: AsyncSession, cid: str, as_of: datetime | None,
     Окна от `as_of`, как и у среза продаж. Только профиль energy: приезд
     (`visit_*`) и кВт·ч — понятия зарядной сети.
     """
-    if as_of is None or await _profile(db, cid) != "energy":
+    if await _profile(db, cid) != "energy":
         return {}
+    out = await _stations_status(db, cid, th)
+    if as_of is None:
+        return out
     rows = (await db.execute(text("""
         with s as (
           select location_id,
@@ -1234,13 +1255,14 @@ async def _stations_snapshot(db: AsyncSession, cid: str, as_of: datetime | None,
         "ok": th["st_visit_ok_pct"] / 100,
     })).all()
     if not rows:
-        return {}
+        return out
 
     def top(flag: str, key) -> list[str]:
         return [r.name for r in sorted((r for r in rows if getattr(r, flag)), key=key)]
 
     drops = [r for r in rows if r.fell]
     return {
+        **out,
         "alive": len(rows),
         # Первыми — те, что приносили больше всего: их молчание дороже.
         "silent": sum(1 for r in rows if r.silent),
@@ -1250,6 +1272,35 @@ async def _stations_snapshot(db: AsyncSession, cid: str, as_of: datetime | None,
         "drop_top": top("fell", lambda r: float(r.rev) - float(r.rev_prev)),
         "low_ok": sum(1 for r in rows if r.low_ok),
         "low_ok_top": top("low_ok", lambda r: -(r.visits - r.visits_ok)),
+    }
+
+
+async def _stations_status(db: AsyncSession, cid: str, th: dict[str, float]) -> dict[str, Any]:
+    """Сигналы по статусам витрины АСУиМ: без связи, отключена, разъём, доступность."""
+    from app.services.station_status_days import status_signals
+
+    sig = await status_signals(db, cid, th["st_avail_pct"])
+    if not sig:
+        return {}
+    ids = {lid for key in ("no_link", "disabled", "conn_fault", "avail_low") for lid, _ in sig[key]}
+    names = {r.id: r.name for r in (await db.execute(text(
+        "select id, concat_ws(', ', name, nullif(city, name)) as name "
+        "from service_locations where id = any(:ids)"), {"ids": list(ids)})).all()} if ids else {}
+
+    def dm(since) -> str:
+        d, open_start = since
+        return f"с {d.day:02d}.{d.month:02d}" + (" и раньше" if open_start else "")
+
+    return {
+        "status_day": sig["status_day"],
+        "no_link": len(sig["no_link"]),
+        "no_link_top": [f"{names.get(i) or i} {dm(d)}" for i, d in sig["no_link"]],
+        "disabled": len(sig["disabled"]),
+        "disabled_top": [f"{names.get(i) or i} {dm(d)}" for i, d in sig["disabled"]],
+        "conn_fault": len(sig["conn_fault"]),
+        "conn_fault_top": [names.get(i) or i for i, _ in sig["conn_fault"]],
+        "avail_low": len(sig["avail_low"]),
+        "avail_low_top": [f"{names.get(i) or i} {p}%" for i, p in sig["avail_low"]],
     }
 
 
