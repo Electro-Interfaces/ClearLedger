@@ -90,6 +90,18 @@ export function SitesPriorityPanel({ companyId }: { companyId: string }) {
         </div>
       </div>
 
+      {/* Три раздела ниже таблицы проектов: без ссылок до них не долистывают. */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        {[['Свободная мощность по регионам', 'Мощность по регионам'],
+          ['Почему проекты выходят из работы', 'Почему проекты выходят из работы'],
+          ['Прогноз при решении против факта станции', 'Прогноз и факт']].map(([zone, label]) => (
+          <button key={zone} type="button" className="text-primary hover:underline"
+            onClick={() => document.querySelector(`[data-zone="${zone}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+            {label} ↓
+          </button>
+        ))}
+      </div>
+
       <ProjectPhaseStrip current="select"
         note="Приоритеты считаются для проектов на первом этапе — что двигать вперёд к земле и реализации." />
 
@@ -274,7 +286,7 @@ function PowerRow({ r, companyId, open, onToggle }: {
   const [due, setDue] = useState(() => {
     const x = new Date(); x.setDate(x.getDate() + 30); return x.toISOString().slice(0, 10)
   })
-  const [draft, setDraft] = useState<{ title: string; description: string } | null>(null)
+  const [draft, setDraft] = useState<{ n: number; title: string; description: string } | null>(null)
   const lines = asked.map((s, i) => [
     `${i + 1}. ${s.projectNo ?? '—'} · ${[s.city, s.address].filter(Boolean).join(', ') || 'адрес не указан'}`,
     s.lat != null && s.lon != null ? ` · ${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}` : '',
@@ -320,14 +332,15 @@ function PowerRow({ r, companyId, open, onToggle }: {
                 <Input type="date" value={due} onChange={(e) => setDue(e.target.value)} className="h-8 w-[150px] text-sm" />
               </label>
               <Button size="sm" className="h-8 text-sm" disabled={!operator.trim() || !due}
-                onClick={() => setDraft({
+                onClick={() => setDraft((prev) => ({
+                  n: (prev?.n ?? 0) + 1,
                   title: `Запросить свободную мощность: ${operator.trim()}, ${r.region} — ${asked.length} адр.`,
                   description: [
                     `Запрос в ${operator.trim()} о свободной мощности по ${asked.length} адресам (${r.region}).`,
                     `Ответ ждём до ${due}. Ответ по каждому адресу внести в карточку проекта: «Решение» → «Свободная мощность, кВт».`,
                     '', ...lines,
                   ].join('\n'),
-                })}>
+                }))}>
                 Поставить поручение в «Трек»
               </Button>
             </div>
@@ -337,7 +350,7 @@ function PowerRow({ r, companyId, open, onToggle }: {
             </div>
             {draft && (
               <div className="hidden">
-                <NewTaskDialog companyId={companyId} draft={draft} onCreated={(id) => { void record(id) }} />
+                <NewTaskDialog key={draft.n} companyId={companyId} draft={draft} onCreated={(id) => { void record(id) }} />
               </div>
             )}
           </td>
@@ -422,7 +435,7 @@ function ExitReasons({ companyId }: { companyId: string }) {
           {d.items.map((i) => {
             const n = i.archive + i.onHold
             return (
-              <div key={i.key} className="grid grid-cols-[minmax(0,14rem)_1fr_auto] items-center gap-2 text-sm">
+              <div key={i.key} className="grid grid-cols-[minmax(0,17rem)_1fr_auto] items-center gap-2 text-sm">
                 <span className="truncate" title={i.label}>{i.label}</span>
                 <div className="h-2 rounded bg-muted overflow-hidden">
                   <div className="h-full bg-primary/60" style={{ width: `${(n / max) * 100}%` }} />

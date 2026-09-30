@@ -36,14 +36,19 @@ function DecisionChip({ d, row }: { d: SiteRow['decision']; row?: SiteRow }) {
   if (!d && row && (row.stage === 'archive' || row.stage === 'on_hold')) {
     const label = EXIT_REASONS.find((r) => r.key === row.exitKind)?.label
     return (
-      <span className="text-xs" title={row.exitText ?? 'причина не записана'}>
-        {label ? <span>{label}</span> : <span className="text-amber-700 dark:text-amber-400">тип не указан</span>}
-        {row.stage === 'on_hold' && (
-          <span className={row.holdUntil ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-400'}>
-            {' · '}{row.holdUntil ? `вернуться ${row.holdUntil}` : 'без даты возврата'}
-          </span>
-        )}
-      </span>
+      <div className="text-xs max-w-[280px]">
+        <div className="whitespace-nowrap">
+          {label ? <span>{label}</span> : <span className="text-amber-700 dark:text-amber-400">тип не указан</span>}
+          {row.stage === 'on_hold' && (
+            <span className={row.holdUntil ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-400'}>
+              {' · '}{row.holdUntil ? `вернуться ${row.holdUntil}` : 'без даты'}
+            </span>
+          )}
+        </div>
+        <div className="truncate text-muted-foreground" title={row.exitText ?? undefined}>
+          {row.exitText ?? 'причина не записана'}
+        </div>
+      </div>
     )
   }
   if (!d) return <span className="text-muted-foreground">—</span>

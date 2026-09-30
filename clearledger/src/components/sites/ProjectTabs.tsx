@@ -983,8 +983,8 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
             )}
             <Input value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder={override ? 'Обоснование обхода — обязательно'
-                : stage === 'archive' ? 'Причина отклонения — обязательна'
-                : stage === 'on_hold' ? 'Причина приостановки — обязательна'
+                : stage === 'archive' ? 'Причина отказа (обязательно)'
+                : stage === 'on_hold' ? 'Причина паузы (обязательно)'
                 : 'Комментарий к переходу'}
               className="h-8 text-sm flex-1 min-w-[220px]" />
             <Button size="sm" variant={stage === 'archive' ? 'destructive' : 'default'}
