@@ -141,6 +141,7 @@ async def list_gates(
 @router.get("/meta/routes")
 async def list_project_routes(
     company_id: str = Query(...),
+    kind: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Маршруты, по которым можно повести проект: полный регламент, короткий, свой.
@@ -150,7 +151,7 @@ async def list_project_routes(
     """
     cid = await assert_company_member(company_id, user, db)
     try:
-        return {"routes": await projects_process.list_routes(db, cid)}
+        return {"routes": await projects_process.list_routes(db, cid, kind=kind)}
     except ProjectionError as e:
         # Недоступный Координатор — не повод не дать завести проект: без списка он
         # поедет по маршруту умолчания, как ездил всегда.
@@ -241,6 +242,8 @@ async def start_project(
     """Завести на площадке новый проект (вторая очередь, модернизация, демонтаж)."""
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
+    if payload.get("kind") == "integration":
+        raise HTTPException(400, "Создайте самостоятельный проект интеграции через «Новый проект»")
     res = await ezs_lifecycle.start_project(
         db, cid, site=site, kind=str(payload.get("kind") or "new_build"),
         title=payload.get("title"), location_id=payload.get("location_id"),
@@ -402,7 +405,10 @@ async def create_site(
 ):
     """Завести площадку руками — лид, который пришёл не из файла."""
     cid = await assert_company_member(company_id, user, db)
-    site = await ezs_site_work.create_site(db, cid, payload, user)
+    try:
+        site = await ezs_site_work.create_site(db, cid, payload, user)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
     await db.commit()
     return await ezs_sites.site_detail(db, cid, site.id)
 
@@ -713,6 +719,75 @@ async def get_site(
     return out
 
 
+@router.get("/{site_id}/integration")
+async def get_integration(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import project_integration
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    if site.kind != "integration":
+        raise HTTPException(400, "Это не проект интеграции")
+    data = project_integration.read(site)
+    return {"data": data, "tasks": [{**t, "section": project_integration.section_for(t["key"])} for t in ezs_checklist_integration.TASKS],
+            "phases": ezs_checklist_integration.PHASES_DOC,
+            "gates": [ezs_site_work.gate_state(site, stage=p) for p in ezs_sites.STAGE_ORDER]}
+
+
+@router.get("/{site_id}/integration/stations")
+async def integration_stations(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import project_integration
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    if site.kind != "integration":
+        raise HTTPException(400, "Это не проект интеграции")
+    return await project_integration.station_catalog(db, cid)
+
+
+@router.patch("/{site_id}/integration")
+async def update_integration(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import project_integration
+    cid = await assert_company_member(company_id, user, db)
+    site = (await db.execute(select(EzsSite).where(EzsSite.company_id == cid, EzsSite.id == site_id).with_for_update())).scalar_one_or_none()
+    if site is None:
+        raise HTTPException(404, "Проект не найден")
+    if site.kind != "integration":
+        raise HTTPException(400, "Это не проект интеграции")
+    try:
+        data = await project_integration.save(db, site, payload, user)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(409 if "Карточка изменилась" in str(exc) else 400, str(exc)) from exc
+    await db.commit()
+    return data
+
+
+@router.post("/{site_id}/integration/confirm")
+async def confirm_integration(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import project_integration
+    cid = await assert_company_member(company_id, user, db)
+    site = (await db.execute(select(EzsSite).where(EzsSite.company_id == cid, EzsSite.id == site_id).with_for_update())).scalar_one_or_none()
+    if site is None:
+        raise HTTPException(404, "Проект не найден")
+    if site.kind != "integration":
+        raise HTTPException(400, "Это не проект интеграции")
+    try:
+        data = await project_integration.confirm(db, site, str(payload.get("key") or ""), payload.get("revision"), user)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(409 if "Карточка изменилась" in str(exc) else 400, str(exc)) from exc
+    await db.commit()
+    return data
+
+
 @router.patch("/{site_id}")
 async def patch_site(
     site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
@@ -1021,6 +1096,8 @@ async def link_location(
     """Связать проект с объектом сети — цикл замкнут."""
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
+    if site.kind == "integration":
+        raise HTTPException(400, "В проекте интеграции выбирайте ЭЗС в сценариях подключения")
     res = await ezs_project.link_location(db, cid, site, payload.get("location_id"), user)
     if not res.get("ok"):
         raise HTTPException(404, res.get("message", "Объект не найден"))

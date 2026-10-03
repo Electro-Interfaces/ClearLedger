@@ -55,6 +55,7 @@ import { ProjectTrackTab } from './ProjectTrackTab'
 import { ProjectRoadmapTab } from './ProjectRoadmapTab'
 import { useOpenProject } from './useOpenProject'
 import { formatDate } from '@/lib/formatDate'
+import { IntegrationPassport, IntegrationChecklist, IntegrationDocuments, IntegrationWorkPlan, IntegrationAccountingFields } from './IntegrationProjectPanels'
 
 export const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const CONTROL_FORMS = ['аренда', 'сервитут', 'разрешение на размещение', 'собственность', 'соглашение с ТЦ']
@@ -79,6 +80,9 @@ export const PROJECT_TABS = [
   { k: 'history', label: 'История' },
 ] as const
 export type ProjectTabKey = (typeof PROJECT_TABS)[number]['k']
+export function projectTabsFor(kind: string | null | undefined) {
+  return kind === 'integration' ? PROJECT_TABS.filter((t) => !['tp', 'equipment', 'economics'].includes(t.k)) : PROJECT_TABS
+}
 
 /** Рендер вкладки по ключу — чтобы вызывающий не знал про внутренние компоненты. */
 export function ProjectTabContent({ tab, site, companyId, onDone }: {
@@ -86,16 +90,16 @@ export function ProjectTabContent({ tab, site, companyId, onDone }: {
 }) {
   if (tab === 'overview') return (
     <div className="space-y-4">
-      <DecisionBlock site={site} companyId={companyId} onDone={onDone} />
+      {site.kind !== 'integration' && <DecisionBlock site={site} companyId={companyId} onDone={onDone} />}
       <ProjectOverviewTab site={site} companyId={companyId} />
     </div>
   )
   if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId} />
   if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} />
-  if (tab === 'passport') return <PassportTab site={site} companyId={companyId} onDone={onDone} />
+  if (tab === 'passport') return site.kind === 'integration' ? <IntegrationPassport site={site} companyId={companyId} onDone={onDone} /> : <PassportTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'tp') return <TechConnectionTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'equipment') return <EquipmentTab site={site} companyId={companyId} onDone={onDone} />
-  if (tab === 'docs') return <DocsTab site={site} companyId={companyId} onDone={onDone} />
+  if (tab === 'docs') return site.kind === 'integration' ? <IntegrationDocuments site={site} companyId={companyId} onDone={onDone} /> : <DocsTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'track') return <ProjectTrackTab site={site} companyId={companyId} />
   if (tab === 'chats') return (
     <ChatsTab plain companyId={companyId} subject={{
@@ -175,8 +179,8 @@ function RoutePanel({ site, companyId, onDone }: {
   // Маршруты спрашиваем только пока проект не на рельсах: у идущего выбор уже
   // сделан и менять его нечем — лишний запрос в карточку каждого проекта.
   const qRoutes = useQuery({
-    queryKey: ['project-routes', companyId],
-    queryFn: () => getProjectRoutes(companyId),
+    queryKey: ['project-routes', companyId, site.kind],
+    queryFn: () => getProjectRoutes(companyId, site.kind || undefined),
     enabled: state != null && !state.exists,
     staleTime: 5 * 60_000,
   })
@@ -726,6 +730,8 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
     const d = new Date(); d.setMonth(d.getMonth() + 3); return d.toISOString().slice(0, 10)
   })
   const nextStage = FUNNEL_STAGES[FUNNEL_STAGES.indexOf(site.stage as never) + 1]
+  const integrationLabels: Record<string, string> = { lead: 'Заявка', screening: 'Оценка партнёра', negotiation: 'Переговоры', dd: 'Техническое согласование', decision: 'Решение о пилоте', contracting: 'Пилотное соглашение', construction: 'Настройка и тесты', commissioning: 'Договор', live: 'Работает' }
+  const stageLabel = (st: SiteStage) => site.kind === 'integration' ? integrationLabels[st] || STAGE_META[st].label : STAGE_META[st].label
 
   // Стадию передаём аргументом: кнопка «Перевести в …» не может ждать, пока
   // setStage доедет до следующего рендера, иначе уйдёт предыдущее значение.
@@ -782,7 +788,8 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
   const mWaive = useMutation({
     mutationFn: (p: { key: string; waived: boolean; reason: string }) =>
       waiveSiteGate(companyId, site.id, p.key, p.waived, p.reason),
-    onSuccess: async (_r, p) => {
+    onSuccess: async (r, p) => {
+      if (r.ok === false) { toast.error(r.message || 'Обязательность не изменена'); return }
       setWaiveFor(null); setWaiveWhy('')
       toast.success(p.waived ? 'Обязательность снята' : 'Обязательность возвращена')
       await onDone()
@@ -803,8 +810,10 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
       <PartiesPanel site={site} companyId={companyId}
         onChanged={() => qc.invalidateQueries({ queryKey: ['site-case', companyId, site.id] })} />
 
+      {site.kind === 'integration' && <><IntegrationWorkPlan site={site} companyId={companyId} onDone={onDone} /><IntegrationChecklist site={site} companyId={companyId} onDone={onDone} /></>}
+
       {/* Гейт текущей стадии */}
-      <section className="rounded-lg border border-border">
+      {site.kind !== 'integration' && <section className="rounded-lg border border-border">
         <div data-zone="Чек-лист стадии по регламенту" className="px-3 py-2 text-sm font-semibold border-b bg-muted/40 flex items-center justify-between">
           <span>Чек-лист согласования · стадия «{gate.stageLabel}»</span>
           <span className={`font-mono ${gate.done === gate.total ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
@@ -919,7 +928,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
             )
           })}
         </div>
-      </section>
+      </section>}
 
       {/* Перевод стадии.
           В девяти случаях из десяти нужен один и тот же шаг — следующая стадия по
@@ -937,7 +946,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
               {mMove.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
               {/* Без предлога: «перевести в «Проработка»» требует падежа, которого
                   у названия стадии нет — а склонять названия справочника нельзя. */}
-              Дальше: {STAGE_META[nextStage].label}
+              Дальше: {stageLabel(nextStage)}
             </Button>
             <Input value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder="Комментарий к переходу (необязательно)"
@@ -953,7 +962,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
               <SelectTrigger className="h-8 w-[190px] text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {FUNNEL_STAGES.map((st) => (
-                  <SelectItem key={st} value={st} className="text-sm">{STAGE_META[st].label}</SelectItem>
+                  <SelectItem key={st} value={st} className="text-sm">{stageLabel(st)}</SelectItem>
                 ))}
                 {/* Пауза и отказ — не продолжение воронки: отделяем чертой и подписью. */}
                 <div className="mt-1 border-t px-2 pb-0.5 pt-1 text-xs uppercase tracking-wide text-muted-foreground">
@@ -2271,7 +2280,8 @@ function ObjectTicketsSection({ site, companyId }: { site: SiteDetail; companyId
 export function AccountingTab({ site, companyId, onDone }: {
   site: SiteDetail; companyId: string; onDone: () => Promise<void>
 }) {
-  const specialized = ['warehouse', 'procurement', 'corporate_client'].includes(site.kind ?? '')
+  const integration = site.kind === 'integration'
+  const specialized = integration || ['warehouse', 'procurement', 'corporate_client'].includes(site.kind ?? '')
   const ctx = useQuery({
     queryKey: ['site-project', companyId, site.id],
     queryFn: () => getProjectContext(companyId, site.id),
@@ -2286,7 +2296,7 @@ export function AccountingTab({ site, companyId, onDone }: {
   const locations = useQuery({
     queryKey: ['locations', companyId],
     queryFn: () => loadLocations(companyId),
-    enabled: !ctx.data?.location,
+    enabled: !integration && !ctx.data?.location,
   })
   const mLinkContract = useMutation({
     mutationFn: (contractId: string) => linkContract(companyId, site.id, contractId),
@@ -2307,6 +2317,7 @@ export function AccountingTab({ site, companyId, onDone }: {
 
   return (
     <div className="space-y-3">
+      {integration && <IntegrationAccountingFields site={site} companyId={companyId} onDone={onDone} />}
       {/* связи с учётом */}
       <section className="rounded-lg border border-border p-3 space-y-2">
         <div data-zone="Связь с учётом: договор и объект" className="text-sm font-semibold">Записи в учёте</div>
@@ -2333,7 +2344,7 @@ export function AccountingTab({ site, companyId, onDone }: {
               </div>
             )}
           </div>
-          <div>
+          {!integration && <div>
             <Label>Объект сети</Label>
             {d.location ? (
               <div>{d.location.name} <span className="text-muted-foreground">({d.location.code})</span></div>
@@ -2349,7 +2360,7 @@ export function AccountingTab({ site, companyId, onDone }: {
                   }))} />
               </div>
             )}
-          </div>
+          </div>}
         </div>
         <p className="text-xs text-muted-foreground">
           Записи в бухгалтерии создаются в своих разделах, здесь — только связь: учётный контур
@@ -2406,7 +2417,7 @@ export function AccountingTab({ site, companyId, onDone }: {
 function BudgetEditor({ site, companyId, ctx, onDone }: {
   site: SiteDetail; companyId: string; ctx: ProjectContext; onDone: () => Promise<void>
 }) {
-  const [kind, setKind] = useState('tp')
+  const [kind, setKind] = useState(site.kind === 'integration' ? 'integration' : 'tp')
   const [title, setTitle] = useState('')
   const [plan, setPlan] = useState('')
   const [fact, setFact] = useState('')
@@ -2484,7 +2495,7 @@ function BudgetEditor({ site, companyId, ctx, onDone }: {
           <Select value={kind} onValueChange={setKind}>
             <SelectTrigger className="h-8 w-[190px] text-sm"><SelectValue /></SelectTrigger>
             <SelectContent>
-              {ctx.costKinds.map((k) => <SelectItem key={k.key} value={k.key} className="text-sm">{k.label}</SelectItem>)}
+              {ctx.costKinds.filter((k) => site.kind !== 'integration' || ['integration', 'admin', 'other'].includes(k.key)).map((k) => <SelectItem key={k.key} value={k.key} className="text-sm">{k.label}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -2806,4 +2817,3 @@ export function fmtDate(iso: string | null | undefined): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })
 }
-

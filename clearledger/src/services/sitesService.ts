@@ -124,6 +124,9 @@ export interface GateItem {
   /** Можно ли снимать обязательность с этого пункта вообще. */
   waivable?: boolean
   documentState?: 'file' | 'approved' | 'signed'
+  needsConfirmation?: boolean
+  confirmedBy?: string | null
+  confirmedAt?: string | null
 }
 export interface GateState {
   stage: SiteStage; stageLabel: string; items: GateItem[]; done: number; total: number
@@ -487,9 +490,9 @@ export async function openProjectCase(
 
 /** Маршруты, из которых выбирают, ставя проект на рельсы. */
 export async function getProjectRoutes(
-  companyId: string,
+  companyId: string, kind?: string,
 ): Promise<{ routes: ProjectRoute[]; error?: string }> {
-  return get('/api/sites/meta/routes', { company_id: companyId })
+  return get('/api/sites/meta/routes', { company_id: companyId, kind })
 }
 
 /**
@@ -553,7 +556,7 @@ export async function markSiteGate(
  */
 export async function waiveSiteGate(
   companyId: string, id: string, key: string, waived: boolean, reason: string,
-): Promise<{ ok: boolean; gate?: GateState; site?: SiteDetail }> {
+): Promise<{ ok: boolean; message?: string; gate?: GateState; site?: SiteDetail }> {
   return post(`/api/sites/${id}/gate/waive?company_id=${companyId}`, { key, waived, reason })
 }
 

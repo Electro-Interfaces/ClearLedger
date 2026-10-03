@@ -144,6 +144,11 @@ def gate_state(site: EzsSite, stage: str | None = None,
     отменён и его всё ещё видно. Он просто перестаёт держать переход.
     """
     st = stage or site.stage
+    stage_labels, phase_labels = STAGE_LABELS, PHASE_LABELS_DOC
+    if site.kind == "integration":
+        from app.services.ezs_checklist_integration import STAGE_LABELS as integration_labels, PHASES_DOC
+        stage_labels = {**STAGE_LABELS, **integration_labels}
+        phase_labels = {p["code"]: p["label"] for p in PHASES_DOC}
     items = gates_for(site.kind, st)
     marks = (site.gates or {}).get(st, {}) if isinstance(site.gates, dict) else {}
     docs = doc_kinds or set()
@@ -151,7 +156,13 @@ def gate_state(site: EzsSite, stage: str | None = None,
     for it in items:
         mark = marks.get(it["key"]) or {}
         waived = bool(mark.get("waived"))
-        if it.get("manual"):
+        needs_confirmation = False
+        if site.kind == "integration":
+            from app.services.project_integration import stale
+            needs_confirmation = stale(site, it["key"], mark)
+            done = bool(mark.get("done")) and not needs_confirmation
+            waived = waived and not needs_confirmation
+        elif it.get("manual"):
             done = bool(marks.get(it["key"], {}).get("done"))
         elif it.get("doc"):
             requirement = it.get("document_state", "file")
@@ -166,6 +177,8 @@ def gate_state(site: EzsSite, stage: str | None = None,
         else:
             done = _field_filled(site, it["field"])
         out.append({"key": it["key"], "label": it["label"], "manual": bool(it.get("manual")),
+                    "needsConfirmation": needs_confirmation,
+                    "confirmedBy": mark.get("by_name"), "confirmedAt": mark.get("at"),
                     "doc": it.get("doc"), "documentState": it.get("document_state", "file"), "equipment": bool(it.get("equipment")),
                     # `required` остаётся истиной и после послабления: по регламенту
                     # пункт обязателен, снята обязательность только в этом проекте
@@ -183,13 +196,21 @@ def gate_state(site: EzsSite, stage: str | None = None,
                     # Из 55 граф иначе не понять, какие нужны прямо сейчас.
                     "fields": it.get("fields") or ([it["field"]] if it.get("field") else []),
                     "phase": it.get("phase"),
-                    "phaseLabel": PHASE_LABELS_DOC.get(it.get("phase", ""), "")})
+                    "phaseLabel": phase_labels.get(it.get("phase", ""), "")})
     blocking = [i["label"] for i in out if i["required"] and not i["done"] and not i["waived"]]
+    if site.kind == "integration" and st in STAGE_ORDER:
+        from app.services.ezs_checklist_integration import TASKS
+        from app.services.project_integration import stale
+        previous = STAGE_ORDER[:STAGE_ORDER.index(st)]
+        for task in TASKS:
+            mark = (site.gates or {}).get(task["stage"], {}).get(task["key"], {})
+            if task["stage"] in previous and task.get("required") and stale(site, task["key"], mark):
+                blocking.append(f"Требует повторного подтверждения: {task['label']}")
     waived = [{"key": i["key"], "label": i["label"], "by": i["waivedBy"],
                "at": i["waivedAt"], "reason": i["waiveReason"]}
               for i in out if i["waived"]]
     return {
-        "stage": st, "stageLabel": STAGE_LABELS.get(st, st),
+        "stage": st, "stageLabel": stage_labels.get(st, st),
         "items": out,
         "done": sum(1 for i in out if i["done"]),
         "total": len(out),
@@ -474,6 +495,15 @@ async def create_site(db: AsyncSession, company_id, payload: dict[str, Any],
     site = EzsSite(company_id=company_id, stage=payload.get("stage") or "lead", kind=kind,
                    stage_since=date.today().isoformat(), project_no=await next_project_no(db, company_id),
                    first_seen_at=now, last_seen_at=now, updated_at=now, last_touch_at=now)
+    if kind == "integration":
+        from app.services.project_integration import normalize, read, validate_refs
+        data = normalize({**(payload.get("integration") or {}), "revision": 0}, read(site))
+        if not data["partner"].get("name") or not data["scenarios"]:
+            raise ValueError("Укажите партнёра, формат и направление интеграции")
+        await validate_refs(db, site, data)
+        site.workspace_data = {"integration": data}
+        site.route_code = "ezs_integration"
+        payload = {k: v for k, v in payload.items() if k in {"title", "owner_user_id", "next_action", "next_action_due"}}
     fields = {f: payload.get(f) for f in EDITABLE_FIELDS if f in payload}
     for f, v in fields.items():
         setattr(site, f, _coerce(f, v))
@@ -495,7 +525,7 @@ async def create_site(db: AsyncSession, company_id, payload: dict[str, Any],
     project = await sync_from_site(db, site.company_id, site)
     await db.flush()
     await log_event(
-        db, site, "note", text="Площадка заведена вручную", user=user,
+        db, site, "note", text="Проект интеграции создан" if kind == "integration" else "Площадка заведена вручную", user=user,
         project_id=project.id,
     )
     return site
@@ -745,7 +775,9 @@ def _pos(stage: str) -> int:
 async def set_gate_item(db: AsyncSession, site: EzsSite, key: str, done: bool,
                         user: User | None) -> dict[str, Any]:
     """Отметка пункта гейта, который нельзя вывести из полей (проверка глазами)."""
-    items = {i["key"]: i for i in gates_for(site.kind, site.stage) if i.get("manual")}
+    if site.kind == "integration" and done:
+        return {"ok": False, "message": "Сохраните содержательный результат и подтвердите пункт в карточке интеграции"}
+    items = {i["key"]: i for i in gates_for(site.kind, site.stage) if i.get("manual") or site.kind == "integration"}
     if key not in items:
         return {"ok": False, "message": "пункт не относится к текущей стадии"}
     gates = dict(site.gates or {})
@@ -825,7 +857,11 @@ async def set_gate_waiver(db: AsyncSession, site: EzsSite, key: str, waived: boo
     stage_marks = dict(gates.get(stage) or {})
     mark = dict(stage_marks.get(key) or {})
     was = bool(mark.get("waived"))
-    if was == bool(waived):
+    needs_new_waiver = False
+    if site.kind == "integration" and waived:
+        from app.services.project_integration import stale
+        needs_new_waiver = stale(site, key, mark)
+    if was == bool(waived) and not needs_new_waiver:
         return {"ok": True, "unchanged": True, "gate": await gate_now(db, site)}
 
     now = datetime.now(timezone.utc).isoformat()
@@ -840,6 +876,9 @@ async def set_gate_waiver(db: AsyncSession, site: EzsSite, key: str, waived: boo
                                if user is not None else None),
             "waive_reason": reason[:500],
         })
+        if site.kind == "integration":
+            from app.services.project_integration import snapshot
+            mark.update(snapshot=snapshot(site, key), needs_confirmation=False, done=False)
     else:
         # Возврат обязательности стирает послабление, но не отметку выполнения:
         # это две разные вещи в одной записи.

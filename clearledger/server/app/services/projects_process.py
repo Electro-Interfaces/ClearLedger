@@ -154,8 +154,8 @@ async def _instance_id(db: AsyncSession, company_id, site: EzsSite) -> tuple[str
     }
     # Предпросмотр рисуем по ВЫБРАННОМУ маршруту, а не по умолчанию: иначе человек
     # видел бы до первого шага один путь, а поехал бы по другому.
-    if site.route_code:
-        params["route"] = site.route_code
+    if site.route_code or site.kind == "integration":
+        params["route"] = site.route_code or "ezs_integration"
     data = await _call(db, company_id, "GET", f"{FACADE}/instances", params=params)
     items = data.get("instances") or []
     return (items[0].get("processId") if items else None), (data.get("definitionPreview") or {})
@@ -173,13 +173,18 @@ def _context(site: EzsSite) -> dict[str, Any]:
     `project_kind` — ось развилки на входе: новое строительство уходит на согласование
     земли, перенос и модернизация — сразу в планирование работ.
     """
-    return {
+    context = {
         "project_kind": site.kind or "new_build",
         "eco_stage": site.stage,
         "eco_project_no": site.project_no or "",
         "eco_region": site.region_norm or site.region or "",
         "eco_address": site.full_address or site.address or "",
     }
+    if site.kind == "integration":
+        from app.services.ezs_site_work import gate_state
+        context["eco_prev_stage"] = site.prev_stage or "lead"
+        context["integration_gate"] = gate_state(site)["canAdvance"]
+    return context
 
 
 async def _call(db: AsyncSession, company_id, method: str, path: str,
@@ -257,7 +262,7 @@ async def _participants(db: AsyncSession, site: EzsSite) -> list[dict[str, Any]]
             for p, u in rows]
 
 
-async def list_routes(db: AsyncSession, company_id) -> list[dict[str, Any]]:
+async def list_routes(db: AsyncSession, company_id, kind=None) -> list[dict[str, Any]]:
     """Маршруты, по которым можно вести проект, — из чего выбирает человек.
 
     Список приходит из Координатора: там маршруты и живут, там же их правят и
@@ -266,7 +271,8 @@ async def list_routes(db: AsyncSession, company_id) -> list[dict[str, Any]]:
     """
     data = await _call(db, company_id, "GET",
                        f"{FACADE}/definitions/{PROCESS_DEFINITION}/routes")
-    return list(data.get("routes") or [])
+    routes = list(data.get("routes") or [])
+    return [r for r in routes if (r.get("code") == "ezs_integration") == (kind == "integration")]
 
 
 async def sync_case(db: AsyncSession, company_id, site: EzsSite,
@@ -284,7 +290,7 @@ async def sync_case(db: AsyncSession, company_id, site: EzsSite,
                if site.location_id else [])
     card = await _call(db, company_id, "POST", f"{FACADE}/instances", json={
         "definition": PROCESS_DEFINITION,
-        "route": site.route_code or None,
+        "route": site.route_code or ("ezs_integration" if site.kind == "integration" else None),
         "subject": {"type": SUBJECT_TYPE, "id": str(site.id)},
         "title": site.title or site.project_no or f"Проект ЭЗС {site.id}",
         "actorEmail": getattr(user, "email", None),
@@ -334,6 +340,8 @@ async def case_state(db: AsyncSession, company_id, site: EzsSite,
     # кейсе: человек их ввёл, а чек-лист проекта об этом не знал. Значения кейса —
     # канонические, поэтому сверка идемпотентна и повтор ей не вредит.
     state["needsReconcile"] = _pending_diff(site, state)
+    if site.kind == "integration" and not ((state.get("stage") or {}).get("code") or "").startswith("int_"):
+        state.update(readonly=True, actions=[], readonlyReason="Проект использует прежний маршрут. Перенос на маршрут интеграции выполняется отдельно")
     return state
 
 
@@ -343,6 +351,12 @@ def _pending_diff(site: EzsSite, state: dict[str, Any]) -> list[str]:
     Возвращает причины на языке человека: их видно в карточке, и по ним понятно,
     что даст кнопка «Сверить». Пустой список означает, что сверять нечего.
     """
+    if getattr(site, "kind", None) == "integration":
+        code = (state.get("stage") or {}).get("code") or state.get("stageCode") or ""
+        if code.startswith("int_"):
+            target = {"hold": "on_hold", "rejected": "archive"}.get(code[4:], code[4:])
+            return [] if target == site.stage else ["Стадия проекта отличается от маршрута интеграции"]
+        return ["Проект интеграции ведётся по прежнему маршруту; нужен отдельный перенос"] if code else []
     reasons: list[str] = []
     values = state.get("values") or {}
     for source, column in STEP_FIELDS_TO_SITE.items():
@@ -380,6 +394,8 @@ async def reconcile(db: AsyncSession, company_id, site: EzsSite,
         db, company_id, "GET", f"{FACADE}/instances/{process_id}",
         params={"actorEmail": getattr(user, "email", None) or ""}))
     before = {column: getattr(site, column, None) for column in STEP_FIELDS_TO_SITE.values()}
+    if site.kind == "integration" and not ((state.get("stage") or {}).get("code") or "").startswith("int_"):
+        raise ProjectionError("Для прежнего маршрута интеграции нужен отдельный перенос")
     written = _reflect_step_fields(site, state.get("values") or {})
     if written:
         state["siteFieldsWritten"] = written
@@ -417,6 +433,16 @@ async def _reflect_outcome(db: AsyncSession, site: EzsSite, state: dict[str, Any
     stage_code = (state.get("stage") or {}).get("code")
     from app.services import ezs_site_work
 
+    if site.kind == "integration" and stage_code and stage_code.startswith("int_"):
+        target = {"hold": "on_hold", "rejected": "archive"}.get(stage_code[4:], stage_code[4:])
+        if target == site.stage:
+            return None
+        reason = (payload or {}).get("cancel_reason") or (payload or {}).get("hold_reason") or "Переход по маршруту интеграции"
+        moved = await ezs_site_work.set_stage(db, site, target, user=user, source="system", reason=reason)
+        return {"moved": moved.get("moved", False), "blocking": moved.get("blocking") or [], "message": moved.get("message")}
+
+    if site.kind == "integration":
+        return None
     if stage_code == "ezs_rejected" and site.stage != "archive":
         reason = str((payload or {}).get("cancel_reason") or "").strip()
         moved = await ezs_site_work.set_stage(
@@ -503,6 +529,8 @@ def _reflect_step_fields(site: EzsSite, payload: dict[str, Any] | None) -> list[
 
     Пустым не затираем: маршрут дополняет карточку, а не переписывает её.
     """
+    if site.kind == "integration":
+        return []
     written: list[str] = []
     for code, column in STEP_FIELDS_TO_SITE.items():
         value = (payload or {}).get(code)
@@ -552,6 +580,17 @@ async def apply_step(db: AsyncSession, company_id, site: EzsSite, link_id: str,
     # связь оборвётся после того, как Координатор закоммитил переход, отметка
     # останется и фоновый проход досверит проект. Раньше это чинилось только тем,
     # что кто-нибудь откроет карточку.
+    if site.kind == "integration":
+        process_id, _ = await _instance_id(db, company_id, site)
+        if not process_id:
+            raise ProjectionError("По этому проекту маршрут ещё не начат")
+        current = _from_facade(await _call(db, company_id, "GET", f"{FACADE}/instances/{process_id}"))
+        if not ((current.get("stage") or {}).get("code") or "").startswith("int_"):
+            raise ProjectionError("Для прежнего маршрута интеграции нужен отдельный перенос")
+        await _call(db, company_id, "POST", f"{FACADE}/instances", json={
+            "definition": PROCESS_DEFINITION, "route": "ezs_integration",
+            "subject": {"type": SUBJECT_TYPE, "id": str(site.id)}, "context": _context(site),
+        })
     site.pending_link_id = str(link_id)
     site.pending_at = datetime.now(timezone.utc)
     await db.commit()

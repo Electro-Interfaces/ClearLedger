@@ -137,14 +137,19 @@ function FacetGroup({
 
 export function StationScopePicker({
   stations, selected, onChange, regionIds, onRegionsChange, companyId,
+  explicitSelection = false, persistFacets = true, groupRegions = false, showSessionStats = true,
 }: {
-  stations: ChargeDimensionStation[]
+  stations: (ChargeDimensionStation & { displayCode?: string })[]
   selected: string[]
   onChange: (codes: string[]) => void
   regionIds: string[]
   onRegionsChange: (regions: string[]) => void
   /** Чей контур: условия отбора запоминаются по компании. */
   companyId?: string | null
+  explicitSelection?: boolean
+  persistFacets?: boolean
+  groupRegions?: boolean
+  showSessionStats?: boolean
 }) {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<StationSort>('sessions')
@@ -161,13 +166,14 @@ export function StationScopePicker({
   const ключФасетов = `cl-station-facets-${companyId ?? 'all'}`
   const [localFacets, setLocalFacets] = useState<Facets>(() => {
     try {
-      const saved = localStorage.getItem(ключФасетов)
+      const saved = persistFacets ? localStorage.getItem(ключФасетов) : null
       return saved ? (JSON.parse(saved) as Facets) : {}
     } catch { return {} }
   })
   useEffect(() => {
+    if (!persistFacets) return
     try { localStorage.setItem(ключФасетов, JSON.stringify(localFacets)) } catch { /* приватный режим */ }
-  }, [ключФасетов, localFacets])
+  }, [ключФасетов, localFacets, persistFacets])
 
   const selectedSet = useMemo(() => new Set(selected), [selected])
   // Регион живёт в общем фильтре, остальные фасеты — здесь. Для расчётов это
@@ -187,7 +193,7 @@ export function StationScopePicker({
         ? regionIds.filter((r) => r !== value)
         : [...regionIds, value]
       onRegionsChange(регионы)
-      if (!поштучно) onChange(контурПоУсловиям({ ...localFacets, region: регионы }))
+      if (!explicitSelection && !поштучно) onChange(контурПоУсловиям({ ...localFacets, region: регионы }))
       return
     }
     const picked = localFacets[key] ?? []
@@ -196,7 +202,7 @@ export function StationScopePicker({
       [key]: picked.includes(value) ? picked.filter((v) => v !== value) : [...picked, value],
     }
     setLocalFacets(next)
-    if (!поштучно) onChange(контурПоУсловиям({ ...next, region: regionIds }))
+    if (!explicitSelection && !поштучно) onChange(контурПоУсловиям({ ...next, region: regionIds }))
   }
 
   /** Отметка станции руками: дальше контур набирается поштучно. */
@@ -209,13 +215,13 @@ export function StationScopePicker({
    *  можно было бы только закрыв окно. */
   const снятьВыбор = () => {
     setПоштучно(false)
-    onChange(контурПоУсловиям({ ...localFacets, region: regionIds }))
+    onChange(explicitSelection ? [] : контурПоУсловиям({ ...localFacets, region: regionIds }))
   }
 
   const снятьУсловия = () => {
     setLocalFacets({})
     onRegionsChange([])
-    if (!поштучно) onChange([])
+    if (!explicitSelection && !поштучно) onChange([])
   }
 
   const searched = useMemo(() => {
@@ -226,13 +232,14 @@ export function StationScopePicker({
 
   const groupValues = useMemo(() => facetValues(searched, facets), [facets, searched])
 
-  const filtered = useMemo(() => sortStations(
-    searched.filter((s) => matchesFacets(s, facets))
-      .filter((s) => !onlyPicked || selectedSet.has(s.code)),
-    sort,
-  ), [facets, onlyPicked, searched, selectedSet, sort])
+  const filtered = useMemo(() => {
+    const rows = sortStations(searched.filter((s) => matchesFacets(s, facets))
+      .filter((s) => !onlyPicked || selectedSet.has(s.code)), sort)
+    return groupRegions ? rows.sort((a, b) => (a.region || 'Регион не указан').localeCompare(b.region || 'Регион не указан', 'ru')) : rows
+  }, [facets, onlyPicked, searched, selectedSet, sort, groupRegions])
 
   const shownCodes = useMemo(() => filtered.map((s) => s.code), [filtered])
+  const displayCodes = useMemo(() => new Map(stations.map((s) => [s.code, s.displayCode || s.code])), [stations])
   // Сколько станций подходит под условия — без учёта поиска и режима «только
   // выбранные»: это и есть контур, когда набор идёт условиями.
   const подУсловиями = useMemo(
@@ -372,10 +379,12 @@ export function StationScopePicker({
                   </Button>
                 ) : null}
               </div>
-            ) : filtered.map((station) => {
+            ) : filtered.map((station, index) => {
               const active = selectedSet.has(station.code)
               const meta = stationMeta(station)
               return (
+                <div key={station.code}>
+                  {groupRegions && (index === 0 || filtered[index - 1].region !== station.region) && <div className="border-b bg-muted/40 px-3 py-2 text-xs font-semibold">{station.region || 'Регион не указан'}</div>}
                 <label
                   key={station.code}
                   className={cn(
@@ -395,12 +404,12 @@ export function StationScopePicker({
                     {meta ? <span className="block text-muted-foreground">{meta}</span> : null}
                   </span>
                   <span className="flex shrink-0 flex-col items-end">
-                    <span className="font-mono tabular-nums text-muted-foreground">{station.code}</span>
-                    <span className="tabular-nums text-muted-foreground">
+                    <span className="font-mono tabular-nums text-muted-foreground">{displayCodes.get(station.code) || station.code}</span>
+                    {showSessionStats && <span className="tabular-nums text-muted-foreground">
                       {station.sessions > 0 ? `${station.sessions.toLocaleString('ru')} зар.` : 'нет зарядок'}
-                    </span>
+                    </span>}
                   </span>
-                </label>
+                </label></div>
               )
             })}
           </div>
@@ -408,7 +417,7 @@ export function StationScopePicker({
           <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/30 px-3 py-2 text-xs">
             <span className="text-muted-foreground">
               {selected.length === 0 ? (
-                'Станции не выбраны — контур охватывает всю сеть.'
+                explicitSelection ? 'Станции не выбраны. Условия фильтра не добавляют их в перечень.' : 'Станции не выбраны — контур охватывает всю сеть.'
               ) : !поштучно ? (
                 <>
                   Условия отобрали <span className="font-medium text-foreground">{подУсловиями}</span> станций
@@ -418,8 +427,7 @@ export function StationScopePicker({
               ) : (
                 <>
                   Выбрано <span className="font-medium text-foreground">{selected.length}</span> из {stations.length}
-                  {' · '}
-                  <span className="font-medium text-foreground">{pickedShare}%</span> зарядок сети
+                  {showSessionStats && <> · <span className="font-medium text-foreground">{pickedShare}%</span> зарядок сети</>}
                   {outOfView > 0 ? ` · вне текущего отбора: ${outOfView}` : ''}
                 </>
               )}
@@ -436,7 +444,7 @@ export function StationScopePicker({
 
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <ChevronDown className="size-3.5 rotate-[-90deg]" aria-hidden="true" />
-        {поштучно
+        {explicitSelection ? 'Условия сужают список. Состав перечня задают отметки; снятие выбора оставляет перечень пустым.' : поштучно
           ? 'Контур набран поштучно: условия слева сужают список, но выбор задают галки. «Снять выбор» вернёт отбор по условиям.'
           : 'Условия слева задают контур целиком. Отметьте станции галками, если нужен точечный набор.'}
       </p>

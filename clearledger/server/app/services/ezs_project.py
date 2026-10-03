@@ -613,6 +613,7 @@ async def equipment_report(db: AsyncSession, company_id) -> dict[str, Any]:
 # У отменённого проекта капитализированное списывается (Дт 91.02 Кт 08), расходы
 # периода списаны уже тогда, когда были понесены.
 COST_KINDS = [
+    {"key": "integration", "label": "Интеграция: разработка и подключение", "capital": False},
     {"key": "tp", "label": "Техприсоединение", "capital": True},
     {"key": "equipment", "label": "Оборудование", "capital": True},
     {"key": "smr", "label": "СМР и монтаж", "capital": True},

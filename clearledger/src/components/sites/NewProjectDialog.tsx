@@ -17,6 +17,7 @@ import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { createSite, getProjectKinds, getSites } from '@/services/sitesService'
 import { useOpenProject } from './useOpenProject'
+import { initialIntegration, INTEGRATION_DIRECTIONS, INTEGRATION_FORMATS } from '@/services/projectIntegrationService'
 
 export function NewProjectDialog({ companyId, onClose, onCreated }: {
   companyId: string; onClose: () => void; onCreated: (id: string) => void
@@ -29,6 +30,9 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
   // земли и договор или сразу планировать работы. Спросить потом уже поздно:
   // проект успеет уехать по чужой ветке.
   const [kind, setKind] = useState('new_build')
+  const [partner, setPartner] = useState('')
+  const [format, setFormat] = useState<keyof typeof INTEGRATION_FORMATS | ''>('')
+  const [direction, setDirection] = useState<keyof typeof INTEGRATION_DIRECTIONS | ''>('')
   const kinds = useQuery({ queryKey: ['pr-kinds', companyId], queryFn: () => getProjectKinds(companyId) })
   const kindDef = (kinds.data?.kinds ?? []).find((k) => k.key === kind)
   const [busy, setBusy] = useState(false)
@@ -39,7 +43,7 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
   // это имя партнёра и цель проекта (замечание Маркова 11.09.2026).
   const безМеста = kind === 'integration'
   const canSave = безМеста
-    ? Boolean(form.title.trim())
+    ? Boolean(partner.trim() && format && direction)
     : Boolean(form.address.trim() || form.install_place.trim())
 
   // Подсказка о дубле. Место занимается один раз, а проектов по нему заводят
@@ -58,7 +62,7 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
   const similar = useQuery({
     queryKey: ['pr-duplicates', companyId, debounced],
     queryFn: () => getSites({ companyId, search: debounced, pageSize: 5 }),
-    enabled: debounced.length >= 4,
+    enabled: !безМеста && debounced.length >= 4,
   })
   const duplicates = similar.data?.items ?? []
 
@@ -66,7 +70,10 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
     setBusy(true)
     try {
       // Стадию старта берём у вида: переносу и демонтажу подбор локации не нужен.
-      const s = await createSite(companyId, { ...form, kind, stage: kindDef?.startStage ?? 'lead' })
+      const payload = безМеста && format && direction
+        ? { title: form.title.trim() || `Интеграция с ${partner.trim()}`, integration: initialIntegration(partner.trim(), format, direction) }
+        : form
+      const s = await createSite(companyId, { ...payload, kind, stage: kindDef?.startStage ?? 'lead' })
       await qc.invalidateQueries({ queryKey: ['pr-projects', companyId] })
       await qc.invalidateQueries({ queryKey: ['pr-board', companyId] })
       await qc.invalidateQueries({ queryKey: ['pr-suggestions', companyId] })
@@ -135,10 +142,19 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
               </p>
             )}
           </div>
-          {suggestField('title', безМеста ? 'Партнёр и цель' : 'Название проекта',
+          {безМеста && <div className="space-y-2">
+            <label className="block text-sm">Партнёр<Input aria-label="Партнёр" value={partner} onChange={(e) => setPartner(e.target.value)} /></label>
+            <label className="block text-sm">Формат интеграции<select aria-label="Формат интеграции" className="h-10 w-full rounded-md border bg-background px-2" value={format} onChange={(e) => setFormat(e.target.value as typeof format)}>
+              <option value="">Выберите формат</option>{Object.entries(INTEGRATION_FORMATS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select></label>
+            <label className="block text-sm">Направление интеграции<select aria-label="Направление интеграции" className="h-10 w-full rounded-md border bg-background px-2" value={direction} onChange={(e) => setDirection(e.target.value as typeof direction)}>
+              <option value="">Выберите направление</option>{Object.entries(INTEGRATION_DIRECTIONS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select></label>
+          </div>}
+          {suggestField('title', 'Название проекта',
             безМеста ? 'Роуминг с PUNKT E: наши станции в их приложении'
               : 'ЭЗС на парковке ТЦ «Гринвич»')}
-          <div className="grid grid-cols-2 gap-2">
+          {!безМеста && <><div className="grid grid-cols-2 gap-2">
             {suggestField('region', 'Регион', 'Свердловская область')}
             {suggestField('city', 'Город', 'Екатеринбург')}
           </div>
@@ -154,15 +170,15 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
             </Select>
           </div>
           {suggestField('install_place', 'Место установки', 'ТЦ «Гринвич», парковка')}
-          {field('owner', 'Собственник', 'если известен')}
+          {field('owner', 'Собственник', 'если известен')}</>}
           {!canSave && (
             <p className="text-xs text-muted-foreground">
               {безМеста
-                ? 'Назовите партнёра и цель — иначе проект не отличить от соседнего.'
+                ? 'Укажите партнёра, формат и направление интеграции.'
                 : 'Нужен адрес или место установки — иначе проект не отличить от соседнего.'}
             </p>
           )}
-          {duplicates.length > 0 && (
+          {!безМеста && duplicates.length > 0 && (
             <div className="border border-amber-500/40 bg-amber-500/[0.06] rounded-md px-2.5 py-2 space-y-1.5">
               <div className="text-xs font-medium">
                 Похожее место уже заводили — {duplicates.length === 5 ? 'нашлось не меньше пяти' : `нашлось ${duplicates.length}`}

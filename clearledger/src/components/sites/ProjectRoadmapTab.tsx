@@ -114,7 +114,7 @@ export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; compa
       )}
 
       {/* Этапы проекта: стадии + свои параллельные треки под общим заголовком */}
-      {PHASE_BLOCKS.map((ph) => {
+      {(site.kind === 'integration' ? d.phases.filter((p) => p.key !== 'closed').map((p, i) => ({ ...p, n: i + 1 })) : PHASE_BLOCKS).map((ph) => {
         const stages = d.steps.filter((s) => s.phase === ph.key)
         const tracks = d.tracks.filter((t) => t.phase === ph.key)
         const isActive = activePhase === ph.key

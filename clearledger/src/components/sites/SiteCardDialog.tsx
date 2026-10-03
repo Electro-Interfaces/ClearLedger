@@ -13,7 +13,7 @@ import { Loader2, Maximize2 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { useWorkspaceSubView } from '@/contexts/WorkspaceContext'
 import { getSite, STAGE_META } from '@/services/sitesService'
-import { PROJECT_TABS, ProjectTabContent, type ProjectTabKey } from './ProjectTabs'
+import { projectTabsFor, ProjectTabContent, type ProjectTabKey } from './ProjectTabs'
 
 export function SiteCardDialog({ companyId, id, onClose }: {
   companyId: string; id: string; onClose: () => void
@@ -74,7 +74,7 @@ export function SiteCardDialog({ companyId, id, onClose }: {
         ) : (
           <>
             <div className="inline-flex rounded-md border border-border p-0.5 gap-0.5 w-fit flex-wrap">
-              {PROJECT_TABS.map((t) => (
+              {projectTabsFor(s.kind).map((t) => (
                 <button key={t.k} type="button" onClick={() => setLocalTab(t.k)}
                   className={`px-3 py-1 text-sm rounded-[5px] transition-colors ${tab === t.k ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                   {t.label}
