@@ -1029,6 +1029,18 @@ async def delete_contract_link(
     return await _contract_links_resp(db, c)
 
 
+@router.get("/contract-quality")
+async def get_contract_quality(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Качество договоров: что поправить, чтобы договор работал разрезом учёта."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.services.contract_quality import contract_quality
+    return await contract_quality(db, cid)
+
+
 @router.get("/space-documents")
 async def get_space_documents(
     company_id: str = Query(...),

@@ -1593,6 +1593,17 @@ function CorpClientsView() {
   })
   const clients = data?.clients ?? []
   const t = data?.totals
+  // Договор клиента — из общего реестра договоров по его контрагенту: постоплата
+  // заводится при загрузке организаций, номер и срок уточняются здесь же.
+  const { data: contracts = [] } = useContracts()
+  const contractOf = useMemo(() => {
+    const m = new Map<string, Contract>()
+    for (const c of contracts) {
+      const prev = m.get(c.counterpartyId)
+      if (!prev || (c.type === 'Корпоративная зарядка (постоплата)' && prev.type !== c.type) || (!c.isClosed && prev.isClosed)) m.set(c.counterpartyId, c)
+    }
+    return m
+  }, [contracts])
   return (
     <Card className="lg:h-[calc(100vh-13rem)] flex flex-col">
       <CardContent className="p-3 flex flex-col gap-2.5 min-h-0">
@@ -1612,7 +1623,7 @@ function CorpClientsView() {
               <TableRow>
                 <TableHead>Клиент</TableHead>
                 <TableHead className="w-[130px]">Режим тарифа</TableHead>
-                <TableHead className="w-[110px]">Договор с</TableHead>
+                <TableHead className="w-[190px]">Договор</TableHead>
                 <TableHead className="w-[90px] text-right">Сессии</TableHead>
                 <TableHead className="w-[110px] text-right">кВт·ч</TableHead>
                 <TableHead className="w-[130px] text-right">Выручка, ₽</TableHead>
@@ -1630,7 +1641,20 @@ function CorpClientsView() {
                 <TableRow key={c.phone}>
                   <TableCell className="text-sm font-medium max-w-[280px] truncate">{c.name}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{CORP_MODE_LABEL[c.mode] ?? c.mode}</TableCell>
-                  <TableCell className="text-sm whitespace-nowrap">{c.contract_start || '—'}</TableCell>
+                  <TableCell className="text-sm">{(() => {
+                    const k = c.counterparty_id ? contractOf.get(c.counterparty_id) : undefined
+                    if (!c.counterparty_id) return <span className="text-xs text-amber-700 dark:text-amber-400">контрагент не сопоставлен</span>
+                    if (!k) return <ContractFormDialog counterpartyId={c.counterparty_id}>
+                      <Button size="sm" variant="outline" className="h-7">Завести договор</Button></ContractFormDialog>
+                    return <div className="flex items-center gap-1">
+                      <ContractDetailDialog contract={k}>
+                        <button type="button" className="text-left text-primary hover:underline">№ {k.number} от {k.date || c.contract_start || '—'}</button>
+                      </ContractDetailDialog>
+                      <ContractFormDialog counterpartyId={c.counterparty_id} edit={k}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={`Изменить договор ${c.name}`}><Pencil className="size-3.5" /></Button>
+                      </ContractFormDialog>
+                    </div>
+                  })()}</TableCell>
                   <TableCell className="text-right text-sm tabular-nums">{c.sessions.toLocaleString('ru-RU')}</TableCell>
                   <TableCell className="text-right text-sm tabular-nums">{Math.round(c.energy_kwh).toLocaleString('ru-RU')}</TableCell>
                   <TableCell className="text-right text-sm tabular-nums">{Math.round(c.corp_revenue).toLocaleString('ru-RU')}</TableCell>

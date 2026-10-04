@@ -10,6 +10,8 @@ export interface CorpClient {
   name: string
   phone: string
   ext_id?: string | null
+  /** Контрагент пространства (по нему — договор клиента). */
+  counterparty_id?: string | null
   mode: string                 // matrix | flat | retail
   rate?: number | null         // ставка для flat
   matrix?: Record<string, Record<string, number>> | null  // {регион: {CCS2,TYPE2,TYPE1}}

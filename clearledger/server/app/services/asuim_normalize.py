@@ -599,6 +599,15 @@ async def ingest_organizations(db: AsyncSession, company_id, rows: list[dict[str
                 obj.contract_start = start
             updated += 1
     await db.flush()
+    # Клиент без контрагента — клиент без договора: так четыре организации из витрины
+    # (08–09.2026) жили в реестре покупателей, не попав ни в «Контрагенты», ни в
+    # «Договоры». Тот же разбор, что у справочника организаций канала сессий: найти
+    # контрагента по имени или завести, договор постоплаты «б/н» с датой начала.
+    from app.services.charge_sessions_normalize import _sync_corporate_contracts
+    orphans = (await db.execute(select(CorporateClient).where(
+        CorporateClient.company_id == company_id, CorporateClient.counterparty_id.is_(None)))).scalars().all()
+    await _sync_corporate_contracts(db, company_id, [
+        {"name": c.name, "inn": c.inn, "phone": c.phone, "contract_start": c.contract_start} for c in orphans])
     return {"status": "success", "kind": "asuim_organizations", "created": created,
             "updated": updated, "skipped": skipped, "errors": 0,
             "message": f"организации: добавлено {created}, обновлено {updated}"

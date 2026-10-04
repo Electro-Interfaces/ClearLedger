@@ -54,6 +54,8 @@ class CorporateService:
         success = int(m.success) if m else 0
         return {
             "name": c.name, "phone": c.phone, "ext_id": c.ext_id,
+            # Контрагент клиента — по нему карточка клиента находит свой договор.
+            "counterparty_id": str(c.counterparty_id) if c.counterparty_id else None,
             "mode": c.mode, "rate": float(c.rate) if c.rate is not None else None,
             "matrix": c.matrix, "contract_start": c.contract_start,
             "status": c.status, "users": c.users,

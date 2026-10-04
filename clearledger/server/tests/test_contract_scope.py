@@ -264,3 +264,19 @@ async def test_space_documents_tree(auth_client: AsyncClient):
     docs = (await auth_client.get("/api/references/space-documents", params={"company_id": "gig"})).json()
     card = next(d for d in docs if d.get("contractId") == ct["id"] and d["docType"] == "contract_card")
     assert card["catalog"] == "Договоры/Арендодатель-7 ООО/№ А∕7 от 2026-07-01"   # «/» в номере не рвёт путь
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_contract_quality(auth_client: AsyncClient):
+    """Качество договоров: «на станциях» без станций и без даты попадают в свои списки."""
+    org_id = await _organization(auth_client)
+    cp = await _post(auth_client, "/api/references/counterparties", {
+        "company_id": "gig", "inn": "7800000801", "name": "Арендодатель-8 ООО",
+    })
+    ct = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "А-8", "date": "", "type": "Аренда",
+        "counterpartyId": cp["id"], "organizationId": org_id, "scopeType": "locations"})
+    q = {s["key"]: s for s in (await auth_client.get("/api/references/contract-quality", params={"company_id": "gig"})).json()["sections"]}
+    assert any(i["id"] == ct["id"] for i in q["no_stations"]["items"])
+    assert any(i["id"] == ct["id"] for i in q["no_date"]["items"])
+    assert any(i["id"] == ct["id"] for i in q["orphan"]["items"])
