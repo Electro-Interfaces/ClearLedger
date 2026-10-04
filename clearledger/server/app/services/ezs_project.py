@@ -1337,7 +1337,8 @@ async def phase_durations(db: AsyncSession, company_id) -> dict[str, Any]:
     }
 
 
-async def export_portfolio_xlsx(db: AsyncSession, company_id, site_ids: list | None = None) -> bytes:
+async def export_portfolio_xlsx(db: AsyncSession, company_id, site_ids: list | None = None,
+                                user=None, history_days: int = 90) -> bytes:
     """Выгрузка портфеля: проекты с этапом, ведением, ТП, бюджетом и субсидией.
 
     `site_ids` — ровно те проекты, что человек видит в списке после фильтров.
@@ -1352,7 +1353,7 @@ async def export_portfolio_xlsx(db: AsyncSession, company_id, site_ids: list | N
     from openpyxl.styles import Alignment, Font
 
     rows = (await db.execute(text("""
-        select s.project_no, s.title, coalesce(s.region_norm, s.region) as region, s.city,
+        select s.id, s.project_no, s.title, coalesce(s.region_norm, s.region) as region, s.city,
                coalesce(s.address, s.full_address, s.install_place) as address,
                s.stage, s.stage_since, s.owner, u.name as owner_user,
                s.next_action, s.next_action_due,
@@ -1478,6 +1479,19 @@ async def export_portfolio_xlsx(db: AsyncSession, company_id, site_ids: list | N
                            18, 20, 16, 14, 14, 16, 16, 20, 16], start=1):
         wst.column_dimensions[wst.cell(row=1, column=i).column_letter].width = w
     wst.freeze_panes = "A2"
+
+    # История, открытые пункты чек-листа и работа — то, чего в выгрузке не хватало
+    # для совещания (замечание коллег 04.10.2026: «история не выгружается»). Те же
+    # проекты, что на листе «Проекты»; история — за `history_days` дней, иначе по
+    # старому портфелю это десятки тысяч строк.
+    from app.services import project_report as pr
+    ids = [r["id"] for r in rows]
+    since = date.today() - timedelta(days=max(1, min(int(history_days or 90), 3650)))
+    pr.add_sheet(wb, f"История ({history_days} дн.)", pr.HISTORY_COLUMNS, await pr.history(db, company_id, ids, since))
+    sites = (await db.execute(select(EzsSite).where(EzsSite.id.in_(ids)))).scalars().all() if ids else []
+    pr.add_sheet(wb, "Чек-лист", pr.CHECKLIST_COLUMNS, await pr.open_gates(db, sites))
+    if user is not None:
+        pr.add_sheet(wb, "Работа", pr.WORK_COLUMNS, await pr.work_rows(db, company_id, user, ids))
 
     buf = io.BytesIO()
     wb.save(buf)

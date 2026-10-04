@@ -516,6 +516,7 @@ async def export_report(
     overdue: bool = Query(False), risk: str | None = Query(None),
     node: str | None = Query(None), kind: str | None = Query(None),
     place_kind: str | None = Query(None), without_kind: str | None = Query(None),
+    history_days: int = Query(90, ge=1, le=3650, description="портфель: глубина листа «История», дней"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Выгрузка экрана в xlsx: воронка, приоритеты, бюджет, учёт, ТП, оборудование."""
@@ -533,7 +534,9 @@ async def export_report(
                                             node=node, kind=kind, place_kind=place_kind,
                                             without_kind=without_kind,
                                             page=1, page_size=100000)
-        data = await fn(db, cid, site_ids=[it["id"] for it in listed["items"]])
+        data = await fn(db, cid, site_ids=[it["id"] for it in listed["items"]], user=user, history_days=history_days)
+    elif report == "portfolio":
+        data = await fn(db, cid, user=user, history_days=history_days)
     else:
         data = await fn(db, cid)
     return Response(
@@ -732,6 +735,36 @@ async def get_site(
     site = await _owned(db, cid, site_id)
     out["mayWaive"] = await _may_waive_gate(db, cid, site, user)
     return out
+
+
+@router.get("/{site_id}/report")
+async def project_report_data(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Отчёт проекта одним ответом — для PDF-презентации (тот же сборщик, что у Excel)."""
+    from app.services import project_report
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    return await project_report.project_report(db, cid, user, site)
+
+
+@router.get("/{site_id}/report.xlsx")
+async def project_report_xlsx(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Excel проекта: сводка, чек-лист, работа, присоединение/оборудование/бюджет или
+    сценарии/станции/испытания/сверки интеграции, документы, полная история."""
+    from urllib.parse import quote
+    from fastapi.responses import Response
+    from app.services import project_report
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    data = project_report.project_xlsx(await project_report.project_report(db, cid, user, site))
+    name = f"project_{site.project_no or site.id}.xlsx".replace(" ", "_")
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename=\"{quote(name)}\"; filename*=UTF-8''{quote(name)}"})
 
 
 @router.get("/{site_id}/integration")

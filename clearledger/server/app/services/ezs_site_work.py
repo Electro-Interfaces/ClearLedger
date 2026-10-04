@@ -24,7 +24,7 @@ from app.services.ezs_checklist import PHASE_LABELS_DOC, WAIVE_FORBIDDEN, gates_
 from app.services.ezs_checklist_integration import gates_by_stage as integration_gates
 from app.services.ezs_sites import (
     STAGE_LABELS, STAGE_ORDER, _site_out, format_project_no, parse_project_seq,
-    project_no_prefix,
+    project_no_prefix, stage_label,
 )
 from app.services.ezs_changes import make_change
 
@@ -333,8 +333,8 @@ async def log_event(db: AsyncSession, site: EzsSite, kind: str, *, text: str | N
         from app.audit import log_audit
 
         name = site.project_no or site.title or site.address or "проект"
-        details = ({"из": STAGE_LABELS.get(from_stage or "", from_stage or "—"),
-                    "в": STAGE_LABELS.get(to_stage or "", to_stage or "—")}
+        details = ({"из": stage_label(from_stage, site.kind) or "—",
+                    "в": stage_label(to_stage, site.kind) or "—"}
                    if kind == "stage" else {"пункт" if kind == "gate" else "событие": text or ""})
         await log_audit(db, actor=user, company_id=site.company_id,
                         action=f"project.{kind}", target=name, details=details)
@@ -617,7 +617,7 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
     else:
         old_archive_reason = site.archive_reason
 
-    note = f"{STAGE_LABELS.get(prev, prev)} → {STAGE_LABELS.get(stage, stage)}"
+    note = f"{stage_label(prev, site.kind)} → {stage_label(stage, site.kind)}"
     if reason:
         note += f". {reason}"
     # Пропущенные пункты гейта пишем в историю: через месяц никто не вспомнит,
@@ -916,17 +916,33 @@ async def add_touch(db: AsyncSession, site: EzsSite, text: str, kind: str,
     return {"id": str(ev.id)}
 
 
+def relabel_stage_text(text: str | None, from_stage: str | None, to_stage: str | None, kind: str | None) -> str | None:
+    """Начало текста «стадия → стадия» — подписями своего вида работ.
+
+    До 04.10.2026 смена стадии записывалась общими подписями, и у интеграции в
+    журнале стояло «Решение → Оформление земли». Запись не переписываем —
+    переподписываем при показе по кодам стадий из того же события.
+    """
+    if not text or not (from_stage or to_stage):
+        return text
+    old = f"{STAGE_LABELS.get(from_stage or '', from_stage)} → {STAGE_LABELS.get(to_stage or '', to_stage)}"
+    if not text.startswith(old):
+        return text
+    return f"{stage_label(from_stage, kind)} → {stage_label(to_stage, kind)}" + text[len(old):]
+
+
 async def site_events(db: AsyncSession, company_id, site_id, limit: int = 200) -> list[dict[str, Any]]:
+    kind = (await db.execute(select(EzsSite.kind).where(EzsSite.id == site_id))).scalar_one_or_none()
     rows = (await db.execute(
         select(EzsSiteEvent, User.name, User.email)
         .outerjoin(User, User.id == EzsSiteEvent.author_user_id)
         .where(EzsSiteEvent.company_id == company_id, EzsSiteEvent.site_id == site_id)
         .order_by(EzsSiteEvent.created_at.desc()).limit(limit))).all()
     return [{
-        "id": str(e.id), "kind": e.kind, "text": e.text,
+        "id": str(e.id), "kind": e.kind,
+        "text": relabel_stage_text(e.text, e.from_stage, e.to_stage, kind) if e.kind == "stage" else e.text,
         "fromStage": e.from_stage, "toStage": e.to_stage,
-        "fromLabel": STAGE_LABELS.get(e.from_stage or "", e.from_stage),
-        "toLabel": STAGE_LABELS.get(e.to_stage or "", e.to_stage),
+        "fromLabel": stage_label(e.from_stage, kind), "toLabel": stage_label(e.to_stage, kind),
         "author": name or email, "createdAt": e.created_at.isoformat() if e.created_at else None,
     } for e, name, email in rows]
 

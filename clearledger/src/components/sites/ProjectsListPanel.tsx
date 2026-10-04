@@ -268,6 +268,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   }
 
   const exitRisk = risk === 'no_exit_kind' || risk === 'no_hold_date'
+  const [historyDays, setHistoryDays] = useState(90)
   const q = useQuery({
     queryKey: ['pr-projects', companyId, phase, stagePick, node, ownerId, region, closed, overdue, search, risk, page, kind, placeKind],
     queryFn: () => getSites({
@@ -507,7 +508,15 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           const next = new URLSearchParams(prev); next.set('scenarioSettings', '1'); return next
         }, { replace: true })}>Сценарии</Button>
         {/* Реестр тоже уходит на совещание — своей выгрузкой, а не пересказом. */}
-        <ExportButton companyId={companyId} report="portfolio" fileName="projects_portfolio.xlsx" params={exportParams} />
+        {/* В файле — листы «История», «Чек-лист» и «Работа»; глубина истории выбирается
+            здесь: по старому портфелю журнал за всё время — десятки тысяч строк. */}
+        <select aria-label="Глубина истории в выгрузке" title="Сколько истории положить в лист «История»"
+          className="h-8 rounded-md border bg-background px-2 text-sm" value={historyDays}
+          onChange={(e) => setHistoryDays(Number(e.target.value))}>
+          <option value={30}>История: 30 дней</option><option value={90}>История: 90 дней</option>
+          <option value={365}>История: год</option><option value={3650}>История: вся</option>
+        </select>
+        <ExportButton companyId={companyId} report="portfolio" fileName="projects_portfolio.xlsx" params={{ ...exportParams, history_days: historyDays }} />
         {risk && (
           <button type="button" onClick={clearRisk}
             className="px-2.5 py-1 text-sm rounded-md border border-primary bg-primary/10 text-primary">

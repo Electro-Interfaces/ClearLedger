@@ -25,6 +25,7 @@ import { ProjectPhaseStrip } from './ProjectPhaseStrip'
 import { ProjectsListPanel } from './ProjectsListPanel'
 import { ProjectScenarioSettings } from './ProjectScenarioSettings'
 import { plural } from '@/lib/textUtils'
+import { ProjectReportButtons } from './ProjectReportButtons'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -198,6 +199,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
             })()}
           </div>
         </div>
+        <ProjectReportButtons companyId={companyId} siteId={id} projectNo={s.projectNo} />
       </div>
 
       {/* Где проект в жизненном цикле — видно на любой вкладке */}
