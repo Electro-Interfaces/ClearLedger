@@ -24,6 +24,7 @@ import {
 import { Kpi } from '@/components/workspace/analytics/Kpi'
 import { getWarehousesSummary, type UnitState, type WarehouseSummaryRow } from '@/services/equipmentService'
 import { createLocation, loadLocations } from '@/services/locationService'
+import { CONTRACT_STATUS, WarehouseCardDialog } from './WarehouseCardDialog'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 
@@ -112,6 +113,7 @@ function NewWarehouseDialog({ existingCodes, onCreated }: {
 
 export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
   const qc = useQueryClient()
+  const [cardId, setCardId] = useState<string | null>(null)
   const { data, isLoading } = useQuery({
     queryKey: ['equipment-warehouses', companyId],
     queryFn: () => getWarehousesSummary(companyId),
@@ -236,6 +238,16 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
                           {w.location.address}
                         </div>
                       )}
+                      {/* Реквизиты склада: чей он, по какому договору и кто отвечает. */}
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+                        {w.card?.ownershipLabel && <span>{w.card.ownershipLabel}</span>}
+                        {w.card?.counterpartyName && <span>· {w.card.counterpartyName}</span>}
+                        {w.card?.contractLabel && <span>· {w.card.contractLabel}</span>}
+                        {w.card?.contractStatus && <span className={CONTRACT_STATUS[w.card.contractStatus][1]}>· {CONTRACT_STATUS[w.card.contractStatus][0]}</span>}
+                        {w.card?.responsible && <span>· МОЛ: {w.card.responsible}</span>}
+                        <button type="button" className="underline hover:no-underline min-h-6" onClick={() => setCardId(w.location.id)}>
+                          {w.card?.ownership ? 'карточка' : 'заполнить карточку'}</button>
+                      </div>
                     </td>
                     {STATE_COLS.map((c) => (
                       <td key={c.state} className="p-2 text-right font-mono">
@@ -290,6 +302,7 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
           </CardContent>
         </Card>
       )}
+      {cardId && <WarehouseCardDialog companyId={companyId} warehouseId={cardId} onClose={() => setCardId(null)} />}
     </div>
   )
 }

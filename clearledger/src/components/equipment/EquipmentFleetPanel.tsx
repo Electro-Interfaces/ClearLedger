@@ -37,6 +37,7 @@ import { useEquipmentScope, scopeKeyOf } from './useEquipmentScope'
 import { ApiError } from '@/services/apiClient'
 import { getLocations, loadLocations } from '@/services/locationService'
 import type { ServiceLocation } from '@/types/location'
+import { MovementDocumentDialog } from './MovementDocumentDialog'
 import {
   applyUnitMovement, createUnit, deleteUnit, dismantleFromSite,
   getEquipmentOverview, getUnit, importUnitsXlsx, listUnits, patchUnit,
@@ -652,8 +653,13 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
         )}
 
         {unit && movementOp && (
-          <MovementDialog companyId={companyId} unit={unit} op={movementOp}
-            warehouses={warehouses} sites={sites} onClose={() => setMovementOp(null)} />
+          // Операция проводится документом (номер, договор, сдал/принял); корректировка
+          // учёта — прежней формой: ей нужны новое состояние и обязательный комментарий.
+          movementOp === 'correction'
+            ? <MovementDialog companyId={companyId} unit={unit} op={movementOp}
+              warehouses={warehouses} sites={sites} onClose={() => setMovementOp(null)} />
+            : <MovementDocumentDialog companyId={companyId} units={[unit]} op={movementOp}
+              warehouses={warehouses} sites={sites} onClose={() => setMovementOp(null)} />
         )}
       </DialogContent>
     </Dialog>
@@ -1064,6 +1070,9 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
   const [createOpen, setCreateOpen] = useState(false)
   const [dismantleOpen, setDismantleOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  // Отмеченные единицы — для одного документа на несколько (накладная, акт).
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [docOpen, setDocOpen] = useState(false)
 
   // Справочник локаций (гидрация из бэкенда; склады + площадки ЭЗС)
   const locQ = useQuery({
@@ -1208,6 +1217,11 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
         </Select>
 
         <div className="ml-auto flex flex-wrap gap-2">
+          {picked.size > 0 && (
+            <Button size="sm" className="h-8" onClick={() => setDocOpen(true)}>
+              Оформить документ ({picked.size})
+            </Button>
+          )}
           <Button size="sm" className="h-8" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4 mr-1.5" />
             Добавить единицу
@@ -1248,6 +1262,11 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b bg-muted/40 text-muted-foreground">
+                  <th className="w-8 p-2">
+                    <input type="checkbox" aria-label="Отметить все на странице" className="cursor-pointer"
+                      checked={rows.length > 0 && rows.every((r) => picked.has(r.id))}
+                      onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())} />
+                  </th>
                   <H k="serialNumber">Серийный №</H>
                   <H k="vendor">Производитель</H>
                   <H k="model">Модель</H>
@@ -1262,6 +1281,14 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
                 {rows.map((u) => (
                   <tr key={u.id} onClick={() => setDetailsId(u.id)}
                     className="cursor-pointer border-b border-border/30 hover:bg-muted/30">
+                    <td className="p-2" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" aria-label={`Отметить ${u.serialNumber ?? u.model ?? 'единицу'}`} className="cursor-pointer"
+                        checked={picked.has(u.id)} onChange={(e) => setPicked((prev) => {
+                          const next = new Set(prev)
+                          if (e.target.checked) next.add(u.id); else next.delete(u.id)
+                          return next
+                        })} />
+                    </td>
                     <td className="p-2 font-mono font-medium whitespace-nowrap">
                       {u.serialNumber ?? '—'}
                       {!u.dataConfirmed && (
@@ -1294,6 +1321,10 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
       )}
 
       {/* Диалоги */}
+      {docOpen && (
+        <MovementDocumentDialog companyId={companyId} units={rows.filter((r) => picked.has(r.id))}
+          warehouses={warehouses} sites={sites} onClose={() => setDocOpen(false)} onDone={() => setPicked(new Set())} />
+      )}
       {detailsId && (
         <UnitDetailsDialog companyId={companyId} unitId={detailsId}
           warehouses={warehouses} sites={sites} onClose={() => setDetailsId(null)} />

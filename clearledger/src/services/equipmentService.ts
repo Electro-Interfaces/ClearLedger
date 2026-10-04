@@ -164,6 +164,7 @@ export interface MovementPayload {
 }
 
 export interface WarehouseSummaryRow {
+  card?: WarehouseCard
   location: LocBrief
   unitsByState: Partial<Record<UnitState, number>>
   unitsTotal: number
@@ -591,3 +592,74 @@ export async function receiveSupplyLine(companyId: string, supplyId: string, lin
 export async function listSuppliers(companyId: string): Promise<{ items: SupplierBrief[] }> {
   return get('/api/equipment/suppliers', { company_id: companyId })
 }
+
+// ─── документы движения и карточка склада (04.10.2026) ──────────────────────
+
+/** Из каких состояний доступна операция — зеркало TRANSITIONS сервера (проверяет сервер). */
+export const OP_FROM: Partial<Record<UnitOp, UnitState[] | 'nonterminal'>> = {
+  transfer: ['in_stock_new', 'in_stock_used', 'reserved'],
+  reserve: ['in_stock_new', 'in_stock_used'],
+  unreserve: ['reserved'],
+  to_installation: ['in_stock_new', 'in_stock_used', 'reserved'],
+  commissioning: ['in_installation'],
+  dismantle: ['in_operation'],
+  to_repair: ['in_stock_new', 'in_stock_used', 'reserved'],
+  from_repair: ['in_repair'],
+  to_vendor: ['in_stock_new', 'in_stock_used', 'in_repair'],
+  write_off: 'nonterminal',
+}
+export const opAllowedFor = (op: UnitOp, state: UnitState) => {
+  const f = OP_FROM[op]
+  return f === 'nonterminal' ? state !== 'written_off' && state !== 'returned_to_vendor' : !!f?.includes(state)
+}
+
+export interface EquipmentDocsMeta {
+  kinds: Record<string, { prefix: string; title: string }>
+  contractTypes: Record<string, string[]>
+  counterpartyRequired: string[]
+  ownership: Record<string, string>
+}
+export interface EquipmentDocLine {
+  unitId: string; serialNumber: string | null; inventoryNumber: string | null; vendor: string | null
+  model: string | null; powerKwt: number | null; purchaseAmount: number | null
+  from: string | null; to: string | null; fromState: string | null; toState: string | null
+}
+export interface EquipmentDocument {
+  id: string; op: UnitOp; opLabel: string; title: string; number: string; docDate: string
+  counterpartyId: string | null; counterpartyName: string | null; contractId: string | null; contractLabel: string | null
+  fromLocation: string | null; toLocation: string | null; responsibleFrom: string | null; responsibleTo: string | null
+  basis: string | null; comment: string | null; createdBy: string | null; createdAt: string | null; units: number | null
+  lines?: EquipmentDocLine[]; warnings?: string[]
+}
+export interface EquipmentDocPayload {
+  op: UnitOp; unitIds: string[]; docDate: string; number?: string; toLocationId?: string
+  counterpartyId?: string; contractId?: string; responsibleFrom?: string; responsibleTo?: string
+  basis?: string; comment?: string; custodian?: 'contractor' | 'vendor'; reservedForLocationId?: string
+  toState?: UnitState; syncPassport?: boolean
+}
+export interface WarehouseCard {
+  id: string; name: string; address: string | null
+  ownership?: 'own' | 'rent' | 'custody'; ownershipLabel?: string
+  counterpartyId?: string | null; counterpartyName?: string; contractId?: string | null
+  contractLabel?: string; contractValidUntil?: string | null
+  contractStatus?: 'active' | 'expired' | 'closed' | 'missing' | null
+  responsible?: string | null; phone?: string | null; note?: string | null
+}
+export type WarehousePayload = Partial<Pick<WarehouseCard, 'name' | 'address' | 'ownership' | 'counterpartyId' | 'contractId' | 'responsible' | 'phone' | 'note'>>
+
+export const getEquipmentDocsMeta = () => get<EquipmentDocsMeta>('/api/equipment/documents/meta')
+export const listEquipmentDocuments = (p: { companyId: string; op?: string; q?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }) =>
+  get<{ items: EquipmentDocument[]; total: number }>('/api/equipment/documents', {
+    company_id: p.companyId, op: p.op || undefined, q: p.q || undefined, date_from: p.dateFrom || undefined,
+    date_to: p.dateTo || undefined, limit: p.limit ?? 50, offset: p.offset ?? 0 })
+export const getEquipmentDocument = (companyId: string, id: string) =>
+  get<EquipmentDocument>(`/api/equipment/documents/${id}`, { company_id: companyId })
+export const postEquipmentDocument = (companyId: string, body: EquipmentDocPayload) =>
+  post<EquipmentDocument>(`/api/equipment/documents?company_id=${companyId}`, body)
+export const getWarehouseCard = (companyId: string, id: string) =>
+  get<WarehouseCard>(`/api/equipment/warehouses/${encodeURIComponent(id)}/card`, { company_id: companyId })
+export const createWarehouse = (companyId: string, body: WarehousePayload) =>
+  post<WarehouseCard>(`/api/equipment/warehouses?company_id=${companyId}`, body)
+export const updateWarehouse = (companyId: string, id: string, body: WarehousePayload) =>
+  patch<WarehouseCard>(`/api/equipment/warehouses/${encodeURIComponent(id)}?company_id=${companyId}`, body)
+

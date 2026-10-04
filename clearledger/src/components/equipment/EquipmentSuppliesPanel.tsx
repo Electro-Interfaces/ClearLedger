@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/dialog'
 import { Loader2, Plus, Search, Trash2 } from 'lucide-react'
 import { ApiError } from '@/services/apiClient'
+import { CounterpartyContractPicker } from './CounterpartyContractPicker'
 import { loadLocations } from '@/services/locationService'
 import {
   listSupplies, createSupply, listSuppliers, listSpareParts,
@@ -226,7 +227,9 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
   const [docType, setDocType] = useState<SupplyDocType>('supply')
   const [number, setNumber] = useState('')
   const [docDate, setDocDate] = useState(todayISO())
-  const [counterpartyId, setCounterpartyId] = useState('')
+  // Поставщик и договор поставки — из справочников пространства (договор раньше не выбирался).
+  const [party, setParty] = useState({ counterpartyId: '', contractId: '' })
+  const counterpartyId = party.counterpartyId
   const [warehouseId, setWarehouseId] = useState('')
   const [note, setNote] = useState('')
   const [lines, setLines] = useState<DraftLine[]>([])
@@ -249,6 +252,7 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
       docType, number: number.trim(), docDate,
       counterpartyId: counterpartyId || null,
       counterpartyName: suppliersQ.data?.items.find((x) => x.id === counterpartyId)?.name ?? null,
+      contractId: party.contractId || null,
       warehouseId: warehouseId || null, note: note || null,
       lines: lines.map(({ _key, ...l }) => l),
     }),
@@ -287,16 +291,9 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
             <Label className="text-xs">Дата</Label>
             <Input type="date" value={docDate} onChange={(e) => setDocDate(e.target.value)} className="h-9" />
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Поставщик</Label>
-            <Select value={counterpartyId} onValueChange={setCounterpartyId}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="—" /></SelectTrigger>
-              <SelectContent>
-                {(suppliersQ.data?.items ?? []).map((s) => (
-                  <SelectItem key={s.id} value={s.id}>{s.shortName || s.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="col-span-2 sm:col-span-3">
+            <CounterpartyContractPicker companyId={companyId} value={party} onChange={setParty}
+              label={docType === 'return' ? 'Кому возвращаем' : 'Поставщик'} preferredTypes={['Поставка ЭЗС', 'Поставка']} />
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Склад по умолчанию</Label>

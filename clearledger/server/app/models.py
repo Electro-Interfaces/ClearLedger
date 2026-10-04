@@ -6113,9 +6113,45 @@ class EzsEquipmentMovement(Base):
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Документ движения (накладная, акт), которым проведено движение (04.10.2026).
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+
     __table_args__ = (
         Index("ix_ezs_move_company_date", "company_id", "occurred_on"),
         Index("ix_ezs_move_unit_created", "unit_id", "created_at"),
+    )
+
+
+class EzsEquipmentDocument(Base):
+    """Документ движения оборудования: накладная на перемещение, акт монтажа,
+    ввода, демонтажа, ремонта, возврата, списания. Проводит операцию по одной или
+    нескольким единицам; контрагент и договор — ссылками на справочники
+    пространства, ответственные — кто сдал и кто принял (services/ezs_equipment_docs.py)."""
+    __tablename__ = "ezs_equipment_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    op: Mapped[str] = mapped_column(String(30), nullable=False)
+    number: Mapped[str] = mapped_column(String(60), nullable=False)
+    doc_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    counterparty_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    contract_label: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    from_location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    to_location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    responsible_from: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    responsible_to: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    basis: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "number", name="uq_ezs_eq_doc_number"),
+        Index("ix_ezs_eq_doc_company_date", "company_id", "doc_date"),
     )
 
 

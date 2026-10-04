@@ -2821,6 +2821,10 @@ async def create_all() -> None:
             "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS supply_line_id UUID",
             "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS supply_id UUID",
             "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS supply_line_id UUID",
+            # 04.10.2026: движение проводится документом (накладная, акт).
+            "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS document_id UUID",
+            "CREATE INDEX IF NOT EXISTS ix_ezs_equipment_movements_document_id "
+            "ON ezs_equipment_movements (document_id)",
             "CREATE INDEX IF NOT EXISTS ix_ezs_unit_supply "
             "ON ezs_equipment_units (company_id, supply_id)",
         ):

@@ -506,6 +506,119 @@ async def list_movements(
 
 # ─── склады и обзор ─────────────────────────────────────────────────────────
 
+# ─── документы движения и карточка склада ───────────────────────────────────
+
+class EquipmentDocIn(BaseModel):
+    op: str
+    unitIds: list[str] = Field(default_factory=list)
+    docDate: str
+    number: str | None = None
+    toLocationId: str | None = None
+    counterpartyId: str | None = None
+    contractId: str | None = None
+    responsibleFrom: str | None = None
+    responsibleTo: str | None = None
+    basis: str | None = None
+    comment: str | None = None
+    custodian: str | None = None
+    reservedForLocationId: str | None = None
+    toState: str | None = None
+    syncPassport: bool = False
+
+
+class WarehouseIn(BaseModel):
+    name: str | None = None
+    address: str | None = None
+    ownership: str | None = None
+    counterpartyId: str | None = None
+    contractId: str | None = None
+    responsible: str | None = None
+    phone: str | None = None
+    note: str | None = None
+
+
+@router.get("/documents/meta")
+async def documents_meta(user: User = Depends(get_current_user)):
+    """Виды документов, подходящие типы договоров, виды владения складом."""
+    from app.services import ezs_equipment_docs as D
+    return {"kinds": {op: {"prefix": p, "title": t} for op, (p, t) in D.DOC_KINDS.items()},
+            "contractTypes": {k: list(v) for k, v in D.CONTRACT_TYPES.items()},
+            "counterpartyRequired": sorted(D.COUNTERPARTY_REQUIRED), "ownership": D.OWNERSHIP}
+
+
+@router.get("/documents")
+async def documents_list(
+    company_id: str = Query(...), op: str | None = Query(None), q: str | None = Query(None),
+    date_from: str | None = Query(None), date_to: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.list_documents(db, cid, op=op, q=q, date_from=date_from, date_to=date_to, limit=limit, offset=offset)
+
+
+@router.get("/documents/{doc_id}")
+async def documents_get(
+    doc_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.get_document(db, cid, doc_id)
+
+
+@router.post("/documents")
+async def documents_post(
+    body: EquipmentDocIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Провести документ движения по одной или нескольким единицам — атомарно."""
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.post_document(db, cid, user, {
+        "op": body.op, "unit_ids": body.unitIds, "doc_date": body.docDate, "number": body.number,
+        "to_location_id": body.toLocationId, "counterparty_id": body.counterpartyId,
+        "contract_id": body.contractId, "responsible_from": body.responsibleFrom,
+        "responsible_to": body.responsibleTo, "basis": body.basis, "comment": body.comment,
+        "custodian": body.custodian, "reserved_for_location_id": body.reservedForLocationId,
+        "to_state": body.toState, "sync_passport": body.syncPassport,
+    })
+
+
+@router.get("/warehouses/{loc_id}/card")
+async def warehouse_card(
+    loc_id: str, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    loc = await db.get(ServiceLocation, loc_id)
+    if loc is None or loc.company_id != cid or loc.type != "warehouse":
+        raise HTTPException(404, "Склад не найден")
+    return await D.warehouse_card(db, cid, loc)
+
+
+@router.post("/warehouses")
+async def warehouse_create(
+    body: WarehouseIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.save_warehouse(db, cid, None, body.model_dump())
+
+
+@router.patch("/warehouses/{loc_id}")
+async def warehouse_update(
+    loc_id: str, body: WarehouseIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.save_warehouse(db, cid, loc_id, body.model_dump(exclude_unset=True))
+
+
 @router.get("/warehouses/summary")
 async def warehouses_summary(
     company_id: str = Query(...),
@@ -548,11 +661,13 @@ async def warehouses_summary(
         .group_by(U.custodian)
     )).all()
 
+    from app.services.ezs_equipment_docs import warehouse_card as _card
     out = []
     for wh in sorted(warehouses, key=lambda w: w.name):
         states = by_wh.get(wh.id, {})
         sp = spare_by_wh.get(wh.id, {"positions": 0, "qty": 0.0})
         out.append({
+            "card": await _card(db, cid, wh),
             "location": _loc_brief(wh),
             "unitsByState": states,
             "unitsTotal": sum(states.values()),

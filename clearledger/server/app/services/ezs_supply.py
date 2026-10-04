@@ -212,6 +212,10 @@ async def create_supply(db: AsyncSession, company_id, user: User | None,
     wh_id = payload.get("warehouse_id")
     if wh_id:
         await _get_location(db, company_id, wh_id, want_type="warehouse")
+    # Договор поставки — из справочника пространства и того же поставщика: поле
+    # было в модели, но интерфейс его не заполнял, а сервер не проверял.
+    from app.services.ezs_equipment_docs import check_contract
+    await check_contract(db, company_id, payload.get("contract_id"), cp_id)
 
     doc = EzsSupplyDocument(
         company_id=company_id, doc_type=doc_type, number=number, doc_date=doc_date,
@@ -260,7 +264,9 @@ async def update_supply(db: AsyncSession, company_id, user: User | None,
             doc.counterparty_id = None
             doc.counterparty_name = (payload.get("counterparty_name") or "").strip() or None
     if "contract_id" in payload:
-        doc.contract_id = payload.get("contract_id")
+        from app.services.ezs_equipment_docs import check_contract
+        await check_contract(db, company_id, payload.get("contract_id"), doc.counterparty_id)
+        doc.contract_id = payload.get("contract_id") or None
     if "warehouse_id" in payload:
         wh_id = payload.get("warehouse_id")
         if wh_id:

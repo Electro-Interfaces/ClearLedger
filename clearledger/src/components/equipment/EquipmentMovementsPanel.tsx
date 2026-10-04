@@ -24,6 +24,7 @@ import {
 } from '@/services/equipmentService'
 import { loadLocations } from '@/services/locationService'
 import { formatDate } from '@/lib/formatDate'
+import { EquipmentDocumentsSection } from './EquipmentDocumentsSection'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const PAGE_SIZE = 200
@@ -117,6 +118,7 @@ export function EquipmentMovementsPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="space-y-4 p-4">
+      <EquipmentDocumentsSection companyId={companyId} />
       <div className="flex flex-wrap items-center gap-3" data-export-ignore>
         <Field label="Период">
           <Input type="date" value={f.dateFrom} onChange={(e) => patch({ dateFrom: e.target.value })}
