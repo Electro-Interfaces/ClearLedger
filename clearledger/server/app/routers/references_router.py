@@ -22,6 +22,7 @@ from app.models import (
     Company,
     Contract,
     ContractDimension,
+    ContractLink,
     ContractLocation,
     Counterparty,
     CounterpartyContact,
@@ -89,7 +90,7 @@ from app.schemas import (
     WarehouseUpdate,
 )
 
-from app.services.contract_usage import contract_usage
+from app.services.contract_usage import contract_usage, usage_by_contract
 router = APIRouter(prefix="/references", tags=["НСИ (Справочники)"])
 
 
@@ -902,6 +903,130 @@ async def delete_contract(
         raise HTTPException(status_code=409,
                             detail=f"Договор используется: {where}. Удалить нельзя — закройте договор")
     await db.delete(c)
+
+
+# ---------------------------------------------------------------------------
+# Договор → приложение и проект (сквозной разрез: договоры приложения)
+# ---------------------------------------------------------------------------
+
+_SITE_LABEL = ("COALESCE(NULLIF(s.title, ''), NULLIF(s.address, ''), s.id::text)"
+               " || CASE WHEN s.project_no IS NOT NULL THEN ' · ' || s.project_no ELSE '' END")
+
+
+async def _project_labels(db: AsyncSession, company_id: uuid.UUID, refs: set[str]) -> dict[str, str]:
+    """Подписи проектов `site:<id>`. Других видов проектов пока нет — «Проекты» ведут площадки."""
+    ids = [r[5:] for r in refs if r.startswith("site:")]
+    if not ids:
+        return {}
+    from sqlalchemy import text as _t
+    rows = (await db.execute(_t(f"SELECT 'site:' || s.id::text, {_SITE_LABEL} FROM ezs_sites s"
+                                " WHERE s.company_id = :co AND s.id::text = ANY(:ids)"), {"co": company_id, "ids": ids})).all()
+    return dict(rows)
+
+
+@router.get("/contract-bindings")
+async def contract_bindings(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Приложения и проекты каждого договора: привязанные человеком ∪ используемые по факту.
+
+    {contracts: {id: {apps: [...], projects: [...], linked: [...]}}, projects: {ref: label}}.
+    `linked` — только явные привязки (приложение или `app|проект`), чтобы отличить их от факта.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    out: dict[str, dict] = {}
+    for k, v in (await usage_by_contract(db, cid)).items():
+        out[str(k)] = {"apps": set(v["apps"]), "projects": set(v["projects"]), "linked": set()}
+    for ln in (await db.execute(select(ContractLink).where(ContractLink.company_id == cid))).scalars():
+        e = out.setdefault(str(ln.contract_id), {"apps": set(), "projects": set(), "linked": set()})
+        e["apps"].add(ln.app_code)
+        e["linked"].add(ln.app_code + ("|" + ln.project_ref if ln.project_ref else ""))
+        if ln.project_ref:
+            e["projects"].add(ln.project_ref)
+    refs = set().union(*(e["projects"] for e in out.values())) if out else set()
+    return {"contracts": {k: {kk: sorted(vv) for kk, vv in e.items()} for k, e in out.items()},
+            "projects": await _project_labels(db, cid, refs)}
+
+
+@router.get("/contract-projects")
+async def search_contract_projects(
+    company_id: str = Query(...),
+    q: str = Query(""),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Поиск проекта для привязки договора: площадки «Проектов» по названию, номеру, адресу."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from sqlalchemy import text as _t
+    rows = (await db.execute(_t(
+        f"SELECT 'site:' || s.id::text AS ref, {_SITE_LABEL} AS label, s.kind FROM ezs_sites s"
+        " WHERE s.company_id = :co AND (:q = '' OR concat_ws(' ', s.title, s.project_no, s.address, s.city) ILIKE '%' || :q || '%')"
+        " ORDER BY s.kind = 'integration' DESC, s.updated_at DESC NULLS LAST LIMIT 30"), {"co": cid, "q": q.strip()})).mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def _contract_links_resp(db: AsyncSession, c: Contract) -> list[dict]:
+    links = (await db.execute(select(ContractLink).where(ContractLink.contract_id == c.id)
+                              .order_by(ContractLink.created_at))).scalars().all()
+    labels = await _project_labels(db, c.company_id, {ln.project_ref for ln in links if ln.project_ref})
+    return [{"id": str(ln.id), "app": ln.app_code, "projectRef": ln.project_ref or None,
+             "projectLabel": labels.get(ln.project_ref)} for ln in links]
+
+
+@router.get("/contracts/{item_id}/links")
+async def get_contract_links(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    c = await get_owned(Contract, _parse_uuid(item_id), current_user, db)
+    return await _contract_links_resp(db, c)
+
+
+@router.post("/contracts/{item_id}/links")
+async def add_contract_link(
+    item_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Привязать договор к приложению {app} и, если указан, к проекту {projectRef: 'site:<id>'}."""
+    c = await get_owned(Contract, _parse_uuid(item_id), current_user, db)
+    from sqlalchemy import text as _t
+    app = str(body.get("app") or "").strip()
+    ref = str(body.get("projectRef") or "").strip()
+    if not (await db.execute(_t("SELECT 1 FROM eco_apps WHERE code = :c"), {"c": app})).first():
+        raise HTTPException(status_code=422, detail=f"Неизвестное приложение: {app or '—'}")
+    if ref:
+        ok = ref.startswith("site:") and (await db.execute(_t(
+            "SELECT 1 FROM ezs_sites WHERE company_id = :co AND id::text = :id"), {"co": c.company_id, "id": ref[5:]})).first()
+        if not ok:
+            raise HTTPException(status_code=422, detail="Проект не найден в пространстве")
+    exists = (await db.execute(select(ContractLink).where(
+        ContractLink.contract_id == c.id, ContractLink.app_code == app, ContractLink.project_ref == ref))).scalar_one_or_none()
+    if exists is None:
+        db.add(ContractLink(company_id=c.company_id, contract_id=c.id, app_code=app, project_ref=ref,
+                            created_by=current_user.id))
+        await db.flush()
+    return await _contract_links_resp(db, c)
+
+
+@router.delete("/contracts/{item_id}/links/{link_id}")
+async def delete_contract_link(
+    item_id: str,
+    link_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    c = await get_owned(Contract, _parse_uuid(item_id), current_user, db)
+    ln = await db.get(ContractLink, _parse_uuid(link_id))
+    if ln is None or ln.contract_id != c.id:
+        raise HTTPException(status_code=404, detail="Привязка не найдена")
+    await db.delete(ln)
+    await db.flush()
+    return await _contract_links_resp(db, c)
 
 
 @router.get("/contracts/{item_id}/usage")

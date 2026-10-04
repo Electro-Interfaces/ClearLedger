@@ -1278,6 +1278,30 @@ class Contract(Base):
 # производное (объединение охватов его договоров). См.
 # TRADELEDGER_COUNTERPARTY_AXIS §5, SCHEMA_REFS_GIG §2a.
 # ---------------------------------------------------------------------------
+class ContractLink(Base):
+    """Договор → приложение пространства и, где уместно, проект внутри него.
+
+    Договор один на пространство; приложение видит «свои» договоры по этой привязке
+    и по фактическому использованию (расчёты, документы — `services/contract_usage`).
+    Привязку ставит человек: энергоснабжение относится и к «Эксплуатации», и к
+    проекту строительства станции. Проект — ссылка в формате «Трека» (`site:<id>`),
+    пустая строка — «всё приложение» (пустая, а не NULL: так работает уникальность).
+    """
+    __tablename__ = "contract_links"
+    __table_args__ = (UniqueConstraint("contract_id", "app_code", "project_ref", name="uq_contract_link"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    contract_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="CASCADE"), nullable=False, index=True)
+    app_code: Mapped[str] = mapped_column(String(40), nullable=False)       # eco_apps.code
+    project_ref: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ContractLocation(Base):
     __tablename__ = "contract_locations"
 

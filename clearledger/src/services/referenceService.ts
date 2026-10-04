@@ -468,6 +468,31 @@ export async function getContractUsage(id: string): Promise<ContractUsage[]> {
   return get<ContractUsage[]>(`/api/references/contracts/${id}/usage`)
 }
 
+/** Явная привязка договора к приложению и (необязательно) проекту внутри него. */
+export interface ContractLinkRef { id: string; app: string; projectRef: string | null; projectLabel: string | null }
+export interface ContractBindings {
+  /** По договору: приложения и проекты (привязанные ∪ используемые), `linked` — только явные (`app` или `app|ref`). */
+  contracts: Record<string, { apps: string[]; projects: string[]; linked: string[] }>
+  projects: Record<string, string>
+}
+export interface ContractProjectOption { ref: string; label: string; kind: string }
+
+export async function getContractBindings(companyId: string): Promise<ContractBindings> {
+  return get<ContractBindings>('/api/references/contract-bindings', { company_id: companyId })
+}
+export async function searchContractProjects(companyId: string, q: string): Promise<ContractProjectOption[]> {
+  return get<ContractProjectOption[]>('/api/references/contract-projects', { company_id: companyId, q })
+}
+export async function getContractLinks(id: string): Promise<ContractLinkRef[]> {
+  return get<ContractLinkRef[]>(`/api/references/contracts/${id}/links`)
+}
+export async function addContractLink(id: string, app: string, projectRef?: string | null): Promise<ContractLinkRef[]> {
+  return post<ContractLinkRef[]>(`/api/references/contracts/${id}/links`, { app, projectRef: projectRef || null })
+}
+export async function deleteContractLink(id: string, linkId: string): Promise<ContractLinkRef[]> {
+  return del<ContractLinkRef[]>(`/api/references/contracts/${id}/links/${linkId}`)
+}
+
 // ---- Ось договор↔торговые точки (Фаза 2; требует backend) ----
 
 /** Установить охват договора: company | locations (+ набор точек) | unassigned. */

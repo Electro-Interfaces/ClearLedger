@@ -17,6 +17,7 @@
  *
  * Правка любого поля помечает его «ручным»: следующий импорт файла его не тронет.
  */
+import { ProjectContractsBlock } from './ProjectContractsBlock'
 import { ProjectOverviewTab } from './ProjectOverviewTab'
 import { ProjectDocumentsTrack, PromoteProjectFile } from './ProjectDocumentsTrack'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -99,7 +100,9 @@ export function ProjectTabContent({ tab, site, companyId, onDone }: {
   if (tab === 'passport') return site.kind === 'integration' ? <IntegrationPassport site={site} companyId={companyId} onDone={onDone} /> : <PassportTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'tp') return <TechConnectionTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'equipment') return <EquipmentTab site={site} companyId={companyId} onDone={onDone} />
-  if (tab === 'docs') return site.kind === 'integration' ? <IntegrationDocuments site={site} companyId={companyId} onDone={onDone} /> : <DocsTab site={site} companyId={companyId} onDone={onDone} />
+  // Договоры проекта — над документами: договор живёт у контрагента, здесь его вид из проекта.
+  if (tab === 'docs') return <div className="space-y-4"><ProjectContractsBlock siteId={site.id} companyId={companyId} />
+    {site.kind === 'integration' ? <IntegrationDocuments site={site} companyId={companyId} onDone={onDone} /> : <DocsTab site={site} companyId={companyId} onDone={onDone} />}</div>
   if (tab === 'track') return <ProjectTrackTab site={site} companyId={companyId} />
   if (tab === 'chats') return (
     <ChatsTab plain companyId={companyId} subject={{
