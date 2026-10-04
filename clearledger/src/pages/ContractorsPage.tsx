@@ -50,6 +50,7 @@ import { ROLE_LABEL, PAYMENT_META, paidThroughLabel } from '@/types/settlement'
 import { ContractScopeDialog, ContractScopeBadgeLabel } from '@/components/reference/ContractScopeDialog'
 import { ContractStationsField, contractStatus, type ContractStationsValue } from '@/components/reference/ContractStationsField'
 import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
+import { getSiteMembers } from '@/services/sitesService'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import type { Counterparty, Contract, CounterpartyType } from '@/types'
 
@@ -250,8 +251,17 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
             <Req label="Вид взаиморасчётов" value={c.settlementKind} />
             <Req label="Договор закрыт" value={c.isClosed ? 'Да' : 'Нет'} />
             {isEnergy && <Req label="Охват точек" value={ContractScopeBadgeLabel(c.scopeType, c.locationsCount)} />}
+            <Req label="Подписан" value={c.signed == null ? undefined : c.signed ? `Да${c.signedAt ? `, ${c.signedAt}` : ''}` : 'Нет'} />
+            <Req label="Срок оплаты" value={c.paymentTermDays != null ? `${c.paymentTermDays} дн.` : undefined} />
+            <Req label="Сумма НДС" value={vatAmount(c)} />
+            <Req label="Госконтракт" value={c.isStateContract ? `Да${c.igk ? ` · ИГК ${c.igk}` : ''}` : undefined} />
+            <Req label="Основание заключения" value={c.basis} />
+            <Req label="Ответственный" value={c.responsibleId ? <MemberName id={c.responsibleId} /> : undefined} />
+            <Req label="Подписант с нашей стороны" value={[c.signerOur, c.signerOurPosition].filter(Boolean).join(', ') || undefined} />
+            <Req label="Подписант контрагента" value={[c.signerCp, c.signerCpPosition, c.signerCpBasis && `на основании: ${c.signerCpBasis}`].filter(Boolean).join(', ') || undefined} />
             <Req label="Комментарий" value={c.comment || (raw.Комментарий as string)} span />
           </div>
+          <ContractUsageBlock id={c.id} />
           {/* Условие — это договор, прочитанный учётом: «5000 ₽ в месяц до 10-го
               числа». Держим его здесь же, а не отдельным реестром приложения:
               иначе человек ищет связь, которую система знает сама. */}
@@ -267,6 +277,36 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** Сумма НДС из суммы и ставки (реквизит 1С СуммаНДС считается, а не вводится). */
+function vatAmount(c: Contract): string | undefined {
+  const rate = Number(String(c.vatRate ?? '').replace(/[^\d.,]/g, '').replace(',', '.'))
+  if (!c.amountLimit || !rate) return undefined
+  const v = c.amountInclVat === false ? c.amountLimit * rate / 100 : c.amountLimit * rate / (100 + rate)
+  return v.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+}
+
+function MemberName({ id }: { id: string }) {
+  const { companyId } = useCompany()
+  const people = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId), staleTime: 300_000 })
+  return <>{people.data?.find((p) => p.id === id)?.name ?? 'сотрудник недоступен'}</>
+}
+
+const USAGE_APP: Record<string, string> = { ops: 'Эксплуатация', projects: 'Проекты', docs: 'Трек', shop: 'Магазин', books: 'Бухгалтерия', mail: 'Почта' }
+
+/** Где договор используется — по фактическим ссылкам приложений. */
+function ContractUsageBlock({ id }: { id: string }) {
+  const usage = useQuery({ queryKey: ['contract-usage', id], queryFn: () => refs.getContractUsage(id) })
+  return (
+    <div className="space-y-1.5 border-t border-border/50 pt-3">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Где используется</p>
+      {usage.isLoading ? <p className="text-xs text-muted-foreground">Загрузка…</p>
+        : !usage.data?.length ? <p className="text-xs text-muted-foreground">Нигде: ни расчётов, ни документов, ни проектов по договору.</p>
+        : <ul className="text-sm space-y-0.5">{usage.data.map((u) => <li key={u.label}>
+            <span className="text-muted-foreground">{USAGE_APP[u.app] ?? u.app} · </span>{u.label}: {u.count}</li>)}</ul>}
+    </div>
   )
 }
 
@@ -779,7 +819,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                         <ContractFormDialog counterpartyId={cp.externalRef || cp.id} edit={c}>
                           <Button variant="ghost" size="icon" className="h-8 w-8"><Pencil className="size-4" /></Button>
                         </ContractFormDialog>
-                        <DeleteContractButton id={c.id} />
+                        <DeleteContractButton contract={c} />
                       </div>
                     )}
                   </TableCell>
@@ -926,8 +966,9 @@ function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; child
 }
 
 // ─── Форма договора (создание/правка) ────────────────────────────────────────
-function ContractFormDialog({ counterpartyId, edit, children }: {
-  counterpartyId: string; edit?: Contract; children: React.ReactNode
+function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, children }: {
+  /** Контрагент задан (карточка контрагента) — или выбирается в форме (раздел «Договоры»). */
+  counterpartyId?: string; counterparties?: Counterparty[]; edit?: Contract; children: React.ReactNode
 }) {
   const { companyId } = useCompany()
   const qc = useQueryClient()
@@ -954,7 +995,23 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
     // пустой `valid_until` уже везде читается как «действует до расторжения».
     perpetual: !edit?.validUntil,
     typeCode: edit?.typeCode ?? '',
+    counterpartyId: fixedCp ?? edit?.counterpartyId ?? '',
+    cpQuery: '',
+    basis: edit?.basis ?? '',
+    signed: edit?.signed ?? false, signedAt: edit?.signedAt ?? '',
+    paymentTermDays: edit?.paymentTermDays != null ? String(edit.paymentTermDays) : '',
+    isStateContract: edit?.isStateContract ?? false, igk: edit?.igk ?? '',
+    responsibleId: edit?.responsibleId ?? '',
+    signerOur: edit?.signerOur ?? '', signerOurPosition: edit?.signerOurPosition ?? '',
+    signerCp: edit?.signerCp ?? '', signerCpPosition: edit?.signerCpPosition ?? '', signerCpBasis: edit?.signerCpBasis ?? '',
   })
+  const counterpartyId = f.counterpartyId
+  const people = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId), enabled: open, staleTime: 300_000 })
+  const cpOptions = useMemo(() => {
+    const q = f.cpQuery.trim().toLocaleLowerCase('ru')
+    return (counterparties ?? []).filter((c) => !q || `${c.name} ${c.inn ?? ''}`.toLocaleLowerCase('ru').includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru')).slice(0, 200)
+  }, [counterparties, f.cpQuery])
   // Вид по справочнику (основание по ГК) — рядом со свободным «предметом».
   const typesQuery = useQuery({ queryKey: ['references', 'contract-types'], queryFn: refs.getContractTypes, staleTime: 3_600_000 })
   // Станции договора — прямо в форме. При правке охват сохраняется, только если
@@ -967,14 +1024,23 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
     if (open && edit && currentLocs.data && !scopeDirty) setScopeValue({ scopeType: edit.scopeType ?? 'unassigned', locationIds: currentLocs.data.map((l) => l.id) })
   }, [open, edit, currentLocs.data, scopeDirty])
   const orgId = f.organizationId || (orgs[0]?.externalRef || orgs[0]?.id || '')
-  const canSave = f.number.trim() !== '' && f.date.trim() !== '' && orgId !== ''
+  const canSave = f.number.trim() !== '' && f.date.trim() !== '' && orgId !== '' && counterpartyId !== ''
   const pending = create.isPending || update.isPending || setScope.isPending
   async function save() {
     const payload = {
       number: f.number.trim(), date: f.date.trim(), counterpartyId,
       organizationId: orgId, kind: f.kind, type: f.type.trim() || kindLabel(f.kind),
-      currency: f.currency.trim() || 'RUB', validUntil: f.validUntil.trim() || undefined,
-      amountLimit: f.amountLimit ? Number(f.amountLimit) : undefined,
+      // null — явная очистка: бессрочный договор стирает прежний срок, пустая сумма — сумму.
+      currency: f.currency.trim() || 'RUB', validUntil: f.perpetual ? null : (f.validUntil.trim() || null),
+      amountLimit: f.amountLimit ? Number(f.amountLimit) : null,
+      basis: f.basis.trim() || null,
+      signed: f.signed, signedAt: f.signed ? (f.signedAt || null) : null,
+      paymentTermDays: f.paymentTermDays ? Number(f.paymentTermDays) : null,
+      isStateContract: f.isStateContract, igk: f.isStateContract ? (f.igk.trim() || null) : null,
+      responsibleId: f.responsibleId || null,
+      signerOur: f.signerOur.trim() || null, signerOurPosition: f.signerOurPosition.trim() || null,
+      signerCp: f.signerCp.trim() || null, signerCpPosition: f.signerCpPosition.trim() || null,
+      signerCpBasis: f.signerCpBasis.trim() || null,
       vatRate: f.vatRate.trim() || undefined,
       amountInclVat: f.amountInclVat === '' ? undefined : f.amountInclVat === 'true',
       settlementKind: f.settlementKind.trim() || undefined,
@@ -1011,6 +1077,16 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
+          {!fixedCp && <div className="space-y-1.5"><Label>Контрагент <span className="text-destructive">*</span></Label>
+            <Input aria-label="Поиск контрагента" value={f.cpQuery} placeholder="Название или ИНН"
+              onChange={(e) => setF((s) => ({ ...s, cpQuery: e.target.value }))} />
+            <select aria-label="Контрагент" className="h-9 w-full rounded-md border bg-muted/60 px-2 text-sm" value={f.counterpartyId}
+              onChange={(e) => setF((s) => ({ ...s, counterpartyId: e.target.value }))}>
+              <option value="">Выберите контрагента</option>
+              {f.counterpartyId && !cpOptions.some((c) => (c.externalRef || c.id) === f.counterpartyId) &&
+                <option value={f.counterpartyId}>{counterparties?.find((c) => (c.externalRef || c.id) === f.counterpartyId)?.name ?? 'выбранный'}</option>}
+              {cpOptions.map((c) => <option key={c.id} value={c.externalRef || c.id}>{c.name}{c.inn ? ` · ИНН ${c.inn}` : ''}</option>)}
+            </select></div>}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5"><Label>Номер <span className="text-destructive">*</span></Label>
               <Input value={f.number} onChange={(e) => setF((s) => ({ ...s, number: e.target.value }))} /></div>
@@ -1074,6 +1150,41 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
             </AdvancedOnly>
           </div>
           <AdvancedHint count={2} what="поля — валюта и вид взаиморасчётов" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="space-y-1.5"><Label>Подписание</Label>
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input type="checkbox" checked={f.signed} className="size-4 accent-primary"
+                  onChange={(e) => setF((s) => ({ ...s, signed: e.target.checked }))} /> подписан</label>
+              {f.signed && <Input type="date" aria-label="Дата подписания" value={f.signedAt} onChange={(e) => setF((s) => ({ ...s, signedAt: e.target.value }))} />}</div>
+            <div className="space-y-1.5"><Label>Срок оплаты, дней</Label>
+              <Input inputMode="numeric" value={f.paymentTermDays} placeholder="не установлен"
+                onChange={(e) => setF((s) => ({ ...s, paymentTermDays: e.target.value.replace(/\D/g, '') }))} /></div>
+            <div className="space-y-1.5"><Label>Ответственный</Label>
+              <select aria-label="Ответственный" className="h-9 w-full rounded-md border bg-muted/60 px-2 text-sm" value={f.responsibleId}
+                onChange={(e) => setF((s) => ({ ...s, responsibleId: e.target.value }))}>
+                <option value="">не назначен</option>
+                {f.responsibleId && !people.data?.some((p) => p.id === f.responsibleId) && <option value={f.responsibleId}>сотрудник недоступен</option>}
+                {people.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select></div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5"><Label>Основание заключения</Label>
+              <Input value={f.basis} placeholder="Закупка 223-ФЗ №…, протокол, решение" onChange={(e) => setF((s) => ({ ...s, basis: e.target.value }))} /></div>
+            <div className="space-y-1.5"><Label>Государственный контракт</Label>
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input type="checkbox" checked={f.isStateContract} className="size-4 accent-primary"
+                  onChange={(e) => setF((s) => ({ ...s, isStateContract: e.target.checked }))} /> госконтракт</label>
+              {f.isStateContract && <Input aria-label="ИГК" value={f.igk} placeholder="Идентификатор госконтракта (ИГК)" onChange={(e) => setF((s) => ({ ...s, igk: e.target.value }))} />}</div>
+          </div>
+          <div className="space-y-2 border-t pt-3"><Label>Подписанты</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Input aria-label="Подписант с нашей стороны" value={f.signerOur} placeholder="Наш подписант (ФИО)" onChange={(e) => setF((s) => ({ ...s, signerOur: e.target.value }))} />
+              <Input aria-label="Должность нашего подписанта" value={f.signerOurPosition} placeholder="Должность" onChange={(e) => setF((s) => ({ ...s, signerOurPosition: e.target.value }))} />
+              <Input aria-label="Подписант контрагента" value={f.signerCp} placeholder="Подписант контрагента (ФИО)" onChange={(e) => setF((s) => ({ ...s, signerCp: e.target.value }))} />
+              <Input aria-label="Должность подписанта контрагента" value={f.signerCpPosition} placeholder="Должность" onChange={(e) => setF((s) => ({ ...s, signerCpPosition: e.target.value }))} />
+              <Input aria-label="Основание полномочий" className="sm:col-span-2" value={f.signerCpBasis} placeholder="Основание полномочий: Устав, доверенность №…" onChange={(e) => setF((s) => ({ ...s, signerCpBasis: e.target.value }))} />
+            </div>
+          </div>
           <div className="space-y-1.5"><Label>Комментарий</Label>
             <Textarea value={f.comment} onChange={(e) => setF((s) => ({ ...s, comment: e.target.value }))} rows={2} /></div>
           <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -1120,24 +1231,41 @@ function DeleteCounterpartyButton({ cp }: { cp: Counterparty }) {
   )
 }
 
-function DeleteContractButton({ id }: { id: string }) {
+/** Удаление как пометка удаления в 1С: договор, на который ссылаются расчёты, документы
+ *  или проекты, не стирается — его закрывают. Удаляется только неиспользованный. */
+function DeleteContractButton({ contract: c }: { contract: Contract }) {
   const del = useDeleteContract()
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const usage = useQuery({ queryKey: ['contract-usage', c.id], queryFn: () => refs.getContractUsage(c.id), enabled: open })
+  const used = (usage.data?.length ?? 0) > 0
+  const close = useMutation({
+    mutationFn: () => refs.updateContract(companyId, c.id, { isClosed: true }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['references', companyId] }); toast.success('Договор закрыт') },
+    onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
   return (
-    <AlertDialog>
+    <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8"><Trash2 className="size-4 text-destructive" /></Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Удалить договор ${c.number}`}><Trash2 className="size-4 text-destructive" /></Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Удалить договор?</AlertDialogTitle>
-          <AlertDialogDescription>Действие необратимо.</AlertDialogDescription>
+          <AlertDialogTitle>{used ? `Договор № ${c.number} используется` : `Удалить договор № ${c.number}?`}</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div>{usage.isLoading ? 'Проверяю, где используется договор…'
+              : used ? <>Удалить нельзя — на договор ссылаются: {usage.data!.map((u) => `${u.label} (${u.count})`).join(', ')}. Договор можно закрыть: он останется в истории расчётов и документов.</>
+              : 'Договор нигде не используется. Удаление необратимо.'}</div>
+          </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Отмена</AlertDialogCancel>
-          <AlertDialogAction onClick={() => del.mutate(id, {
-            onSuccess: () => toast.success('Договор удалён'),
-            onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
-          })}>Удалить</AlertDialogAction>
+          {used ? (!c.isClosed && <AlertDialogAction onClick={() => close.mutate()}>Закрыть договор</AlertDialogAction>)
+            : <AlertDialogAction disabled={usage.isLoading} onClick={() => del.mutate(c.id, {
+              onSuccess: () => toast.success('Договор удалён'),
+              onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+            })}>Удалить</AlertDialogAction>}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -1151,6 +1279,22 @@ const chipCls = (active: boolean) =>
            : 'bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted'
   }`
 
+/** Строки списка с заголовками групп: заголовок — перед договорами контрагента; у свёрнутой
+ *  группы договоры скрыты, заголовок остаётся. Предел считается по строкам договоров. */
+function withGroups(all: Contract[], limit: number, collapsed: Set<string>): { c: Contract | null; head: string | null }[] {
+  const out: { c: Contract | null; head: string | null }[] = []
+  let prev: string | null = null
+  let n = 0
+  for (const c of all) {
+    if (c.counterpartyId !== prev) {
+      if (n >= limit) break
+      out.push({ c: null, head: c.counterpartyId }); prev = c.counterpartyId
+    }
+    if (!collapsed.has(c.counterpartyId) && n < limit) { out.push({ c, head: null }); n++ }
+  }
+  return out
+}
+
 // ─── Глобальный список всех договоров (с фильтром по типу) ───────────────────
 function AllContractsView({ counterparties }: { counterparties: Counterparty[] }) {
   const { company } = useCompany()
@@ -1163,6 +1307,9 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
   const [limit, setLimit] = useState(100)
   const [sortKey, setSortKey] = useState<'date' | 'amount'>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  // По контрагентам — как договоры и заводятся: контрагент → его договоры.
+  const [grouped, setGrouped] = useState(true)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toggleSort = (col: 'date' | 'amount') => {
     if (sortKey === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(col); setSortDir('desc') }
@@ -1194,6 +1341,10 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
     })
     const sign = sortDir === 'asc' ? 1 : -1
     return [...list].sort((a, b) => {
+      if (grouped) {
+        const g = (cpName.get(a.counterpartyId) ?? '').localeCompare(cpName.get(b.counterpartyId) ?? '', 'ru')
+        if (g) return g
+      }
       if (sortKey === 'amount') {
         // пустые суммы всегда внизу, независимо от направления
         const an = a.amountLimit == null, bn = b.amountLimit == null
@@ -1209,14 +1360,21 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
       if (!bd) return -1
       return sign * ad.localeCompare(bd)
     })
-  }, [allContracts, search, typeFilter, cpName, sortKey, sortDir])
+  }, [allContracts, search, typeFilter, cpName, sortKey, sortDir, grouped])
+  const groupStat = useMemo(() => {
+    const m = new Map<string, { n: number; sum: number }>()
+    for (const c of filtered) { const s = m.get(c.counterpartyId) ?? { n: 0, sum: 0 }; s.n++; s.sum += c.amountLimit ?? 0; m.set(c.counterpartyId, s) }
+    return m
+  }, [filtered])
 
   const SortIcon = ({ col }: { col: 'date' | 'amount' }) =>
     sortKey !== col ? <ArrowUpDown className="size-3 opacity-40" />
       : sortDir === 'desc' ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />
 
-  useEffect(() => { setLimit(100) }, [search, typeFilter])
-  const shown = filtered.slice(0, limit)
+  useEffect(() => { setLimit(100) }, [search, typeFilter, grouped])
+  const visible = grouped ? filtered.filter((c) => !collapsed.has(c.counterpartyId)) : filtered
+  const shown = visible.slice(0, limit)
+  const cols = isEnergy ? 7 : 6
 
   return (
     <Card className="lg:h-[calc(100vh-13rem)] flex flex-col">
@@ -1230,6 +1388,12 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
           <span className="text-[11px] text-muted-foreground whitespace-nowrap">
             Найдено: {filtered.length}{filtered.length !== allContracts.length && ` из ${allContracts.length}`}
           </span>
+          <label className="flex items-center gap-1.5 text-xs whitespace-nowrap cursor-pointer">
+            <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="size-3.5 accent-primary" />
+            по контрагентам</label>
+          <ContractFormDialog counterparties={counterparties}>
+            <Button size="sm" className="shrink-0"><Plus className="size-4 mr-1" /> Договор</Button>
+          </ContractFormDialog>
         </div>
 
         {/* Фильтр по типу договора */}
@@ -1262,16 +1426,33 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
                     Сумма <SortIcon col="amount" />
                   </button>
                 </TableHead>
+                <TableHead className="w-[84px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading && (
-                <TableRow><TableCell colSpan={isEnergy ? 6 : 5} className="h-20 text-center text-muted-foreground">Загрузка…</TableCell></TableRow>
+                <TableRow><TableCell colSpan={cols} className="h-20 text-center text-muted-foreground">Загрузка…</TableCell></TableRow>
               )}
               {!isLoading && filtered.length === 0 && (
-                <TableRow><TableCell colSpan={isEnergy ? 6 : 5} className="h-20 text-center text-muted-foreground">Договоры не найдены</TableCell></TableRow>
+                <TableRow><TableCell colSpan={cols} className="h-20 text-center text-muted-foreground">Договоры не найдены</TableCell></TableRow>
               )}
-              {shown.map((c) => (
+              {(grouped ? withGroups(filtered, limit, collapsed) : shown.map((c) => ({ c, head: null as string | null }))).map(({ c, head }) => head ? (
+                <TableRow key={`g-${head}`} className="bg-muted/40 hover:bg-muted/60">
+                  <TableCell colSpan={cols - 1}>
+                    <button type="button" className="flex items-center gap-2 text-left font-medium" onClick={() => setCollapsed((s) => { const n = new Set(s); n.has(head) ? n.delete(head) : n.add(head); return n })}>
+                      <ChevronDown className={`size-4 transition-transform ${collapsed.has(head) ? '-rotate-90' : ''}`} />
+                      {cpName.get(head) ?? 'Контрагент не найден'}
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {groupStat.get(head)?.n} дог.{groupStat.get(head)?.sum ? ` · ${groupStat.get(head)!.sum.toLocaleString('ru-RU')}` : ''}</span>
+                    </button>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <ContractFormDialog counterpartyId={head}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Добавить договор: ${cpName.get(head) ?? ''}`}><Plus className="size-4" /></Button>
+                    </ContractFormDialog>
+                  </TableCell>
+                </TableRow>
+              ) : c && (
                 <TableRow key={c.id}>
                   <TableCell>
                     <ContractDetailDialog contract={c}>
@@ -1299,14 +1480,20 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
                   <TableCell className="text-right text-sm tabular-nums">
                     {c.amountLimit ? c.amountLimit.toLocaleString('ru-RU') : '—'}
                   </TableCell>
+                  <TableCell className="text-right whitespace-nowrap">
+                    <ContractFormDialog counterpartyId={c.counterpartyId} edit={c}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Изменить договор ${c.number}`}><Pencil className="size-4" /></Button>
+                    </ContractFormDialog>
+                    <DeleteContractButton contract={c} />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          {filtered.length > limit && (
+          {visible.length > limit && (
             <div className="p-2 text-center border-t">
               <Button variant="ghost" size="sm" onClick={() => setLimit((l) => l + 200)}>
-                Показать ещё ({filtered.length - limit})
+                Показать ещё ({visible.length - limit})
               </Button>
             </div>
           )}

@@ -815,6 +815,17 @@ class ContractCreate(BaseModel):
     basis: str | None = None
     isClosed: bool = False
     scopeType: str = "unassigned"
+    signed: bool | None = None
+    signedAt: str | None = None
+    paymentTermDays: int | None = None
+    isStateContract: bool | None = None
+    igk: str | None = None
+    responsibleId: str | None = None
+    signerOur: str | None = None
+    signerOurPosition: str | None = None
+    signerCp: str | None = None
+    signerCpPosition: str | None = None
+    signerCpBasis: str | None = None
 
 
 class ContractUpdate(BaseModel):
@@ -835,6 +846,17 @@ class ContractUpdate(BaseModel):
     basis: str | None = None
     isClosed: bool | None = None
     scopeType: str | None = None
+    signed: bool | None = None
+    signedAt: str | None = None
+    paymentTermDays: int | None = None
+    isStateContract: bool | None = None
+    igk: str | None = None
+    responsibleId: str | None = None
+    signerOur: str | None = None
+    signerOurPosition: str | None = None
+    signerCp: str | None = None
+    signerCpPosition: str | None = None
+    signerCpBasis: str | None = None
 
 
 class ContractResponse(BaseModel):
@@ -862,6 +884,17 @@ class ContractResponse(BaseModel):
     basis: str | None = None
     isClosed: bool = False
     scopeType: str = "unassigned"
+    signed: bool | None = None
+    signedAt: str | None = None
+    paymentTermDays: int | None = None
+    isStateContract: bool | None = None
+    igk: str | None = None
+    responsibleId: Annotated[str | None, BeforeValidator(lambda v: str(v) if v else None)] = None
+    signerOur: str | None = None
+    signerOurPosition: str | None = None
+    signerCp: str | None = None
+    signerCpPosition: str | None = None
+    signerCpBasis: str | None = None
     externalRef: str | None = None
     raw: dict | None = None           # полный снимок реквизитов 1С
     createdAt: str

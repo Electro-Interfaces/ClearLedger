@@ -450,13 +450,22 @@ export async function updateContract(
 
 export async function deleteContract(companyId: string, id: string): Promise<boolean> {
   if (isApiEnabled()) {
-    try { await del(`/api/references/contracts/${id}`); return true } catch { return false }
+    // Ошибку не глотаем: «используется — удалить нельзя» должно дойти до человека,
+    // а не превратиться в «Договор удалён» при живом договоре.
+    await del(`/api/references/contracts/${id}`); return true
   }
   const list = await loadList<Contract>(contractsKey(companyId))
   const filtered = list.filter((c) => c.id !== id)
   if (filtered.length === list.length) return false
   await saveList(contractsKey(companyId), filtered)
   return true
+}
+
+export interface ContractUsage { app: string; label: string; count: number }
+
+/** Где договор используется (по приложениям). Непустой ответ — удалить нельзя, только закрыть. */
+export async function getContractUsage(id: string): Promise<ContractUsage[]> {
+  return get<ContractUsage[]>(`/api/references/contracts/${id}/usage`)
 }
 
 // ---- Ось договор↔торговые точки (Фаза 2; требует backend) ----

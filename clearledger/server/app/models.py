@@ -1237,6 +1237,20 @@ class Contract(Base):
     # Без ForeignKey: сам справочник заведён сырым DDL и в метаданных ORM его нет,
     # а FK на неизвестную таблицу уронил бы create_all.
     type_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Реквизиты 1С (ДоговорПодписан, СрокОплаты, ГосударственныйКонтракт, руководители
+    # сторон) — колонками, чтобы синхронизация и выгрузка в БП шли поле в поле.
+    signed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    signed_at: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    payment_term_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_state_contract: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    igk: Mapped[str | None] = mapped_column(String(40), nullable=True)   # идентификатор госконтракта
+    responsible_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    signer_our: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    signer_our_position: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    signer_cp: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    signer_cp_position: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    signer_cp_basis: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # СрокДействия (ISO-дата строкой) и ДоговорЗакрыт
     valid_until: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_closed: Mapped[bool] = mapped_column(

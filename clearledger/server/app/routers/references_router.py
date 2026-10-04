@@ -89,6 +89,7 @@ from app.schemas import (
     WarehouseUpdate,
 )
 
+from app.services.contract_usage import contract_usage
 router = APIRouter(prefix="/references", tags=["НСИ (Справочники)"])
 
 
@@ -700,6 +701,21 @@ async def delete_nomenclature(
 # Contract (Договоры)
 # ---------------------------------------------------------------------------
 
+_CONTRACT_REQ_FIELDS = {
+    "signed": "signed", "signedAt": "signed_at", "paymentTermDays": "payment_term_days",
+    "isStateContract": "is_state_contract", "igk": "igk", "responsibleId": "responsible_id",
+    "signerOur": "signer_our", "signerOurPosition": "signer_our_position", "signerCp": "signer_cp",
+    "signerCpPosition": "signer_cp_position", "signerCpBasis": "signer_cp_basis",
+}
+
+
+def _req_val(api: str, v):
+    # Пустая строка — очистка поля; ответственный — UUID пользователя.
+    if v == "" or v is None:
+        return None
+    return _parse_uuid(v) if api == "responsibleId" else v
+
+
 def _contract_resp(c: Contract) -> ContractResponse:
     return ContractResponse(
         id=str(c.id),
@@ -721,6 +737,7 @@ def _contract_resp(c: Contract) -> ContractResponse:
         isClosed=c.is_closed,
         scopeType=c.scope_type,
         typeCode=c.type_code,
+        **{api: getattr(c, col) for api, col in _CONTRACT_REQ_FIELDS.items()},
         externalRef=c.external_ref,
         raw=c.raw,
         createdAt=_ts(c.created_at),
@@ -804,6 +821,7 @@ async def create_contract(
         basis=body.basis,
         is_closed=body.isClosed,
         scope_type=body.scopeType,
+        **{col: _req_val(api, getattr(body, api)) for api, col in _CONTRACT_REQ_FIELDS.items()},
     )
     db.add(c)
     await db.flush()
@@ -820,6 +838,14 @@ async def update_contract(
     uid = _parse_uuid(item_id)
     c = await get_owned(Contract, uid, current_user, db)  # 404 для чужого/несуществующего
 
+    sent = body.model_fields_set
+    for api, col in (("validUntil", "valid_until"), ("amountLimit", "amount_limit"), ("vatRate", "vat_rate"),
+                     ("amountInclVat", "amount_incl_vat"), ("settlementKind", "settlement_kind"),
+                     ("comment", "comment"), ("basis", "basis"), *_CONTRACT_REQ_FIELDS.items()):
+        if api in sent:
+            setattr(c, col, _req_val(api, getattr(body, api)))
+    if "typeCode" in sent and body.typeCode is None:
+        c.type_code = None
     if body.number is not None:
         c.number = body.number
     if body.date is not None:
@@ -868,7 +894,25 @@ async def delete_contract(
 ):
     uid = _parse_uuid(item_id)
     c = await get_owned(Contract, uid, current_user, db)  # 404 для чужого/несуществующего
+    # Договор со ссылками не стирается — закрывается (как пометка удаления в 1С).
+    # Иначе расчёты станции и условия «Хозяйства» молча теряли договор.
+    used = await contract_usage(db, c.id)
+    if used:
+        where = ", ".join(f"{u['label']} ({u['count']})" for u in used)
+        raise HTTPException(status_code=409,
+                            detail=f"Договор используется: {where}. Удалить нельзя — закройте договор")
     await db.delete(c)
+
+
+@router.get("/contracts/{item_id}/usage")
+async def get_contract_usage(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Где договор используется: [{app, label, count}] по приложениям."""
+    c = await get_owned(Contract, _parse_uuid(item_id), current_user, db)
+    return await contract_usage(db, c.id)
 
 
 # ---------------------------------------------------------------------------

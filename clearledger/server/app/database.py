@@ -3128,6 +3128,18 @@ async def create_all() -> None:
             """,
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS type_code TEXT REFERENCES contract_types(code)",
             "CREATE INDEX IF NOT EXISTS idx_contracts_type_code ON contracts (company_id, type_code)",
+            # Реквизиты 1С: подписание, срок оплаты, госконтракт, ответственный, подписанты.
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signed BOOLEAN",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signed_at VARCHAR(20)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS payment_term_days INTEGER",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS is_state_contract BOOLEAN",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS igk VARCHAR(40)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS responsible_id UUID REFERENCES users(id) ON DELETE SET NULL",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_our VARCHAR(200)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_our_position VARCHAR(200)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_cp VARCHAR(200)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_cp_position VARCHAR(200)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_cp_basis VARCHAR(200)",
             # Разбор накопленного текста. Список закрытый: что не опознано, остаётся
             # без кода и видно запросом, а не растворяется в «прочем».
             """

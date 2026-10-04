@@ -425,11 +425,11 @@ export interface Contract {
   counterpartyId: string
   organizationId: string
   type: string        // "Поставка", "Услуги", "Аренда" и т.д.
-  amountLimit?: number
+  amountLimit?: number | null
   // Универсальный pull из 1С (Фаза 1)
   kind?: string             // ВидДоговора: «С поставщиком»/«С покупателем»/…
   currency?: string
-  validUntil?: string
+  validUntil?: string | null
   vatRate?: string          // ставка НДС
   amountInclVat?: boolean   // сумма включает НДС
   settlementKind?: string   // вид взаиморасчётов
@@ -443,6 +443,20 @@ export interface Contract {
   typeCode?: string | null
   /** Сколько станций привязано (в списке договоров). */
   locationsCount?: number | null
+  /** Основание заключения: закупка (223-ФЗ №…), решение, протокол. */
+  basis?: string | null
+  // Реквизиты 1С (Справочник.ДоговорыКонтрагентов): подписание, оплата, госконтракт, подписанты.
+  signed?: boolean | null
+  signedAt?: string | null
+  paymentTermDays?: number | null
+  isStateContract?: boolean | null
+  igk?: string | null
+  responsibleId?: string | null
+  signerOur?: string | null
+  signerOurPosition?: string | null
+  signerCp?: string | null
+  signerCpPosition?: string | null
+  signerCpBasis?: string | null
   createdAt: string
   updatedAt: string
 }

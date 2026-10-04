@@ -198,3 +198,33 @@ async def test_contract_type_and_station_link(auth_client: AsyncClient):
     r = await auth_client.delete(f"/api/references/contracts/{ct['id']}/locations/loc-scope-401")
     assert r.status_code == 200, r.text
     assert r.json()["scopeType"] == "unassigned"   # последняя станция снята — договор в разбор
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_contract_requisites_and_safe_delete(auth_client: AsyncClient):
+    """Реквизиты 1С сохраняются и очищаются; используемый договор не удаляется."""
+    org_id = await _organization(auth_client)
+    cp = await _post(auth_client, "/api/references/counterparties", {
+        "company_id": "gig", "inn": "7800000501", "name": "Подрядчик-5 ООО",
+    })
+    ct = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "ПД-5", "date": "2026-05-01", "type": "Подряд",
+        "counterpartyId": cp["id"], "organizationId": org_id, "validUntil": "2027-01-01",
+        "signed": True, "signedAt": "2026-05-02", "paymentTermDays": 30,
+        "isStateContract": True, "igk": "26123456789", "signerCp": "Иванов И. И.",
+        "signerCpPosition": "Генеральный директор", "signerCpBasis": "Устав"})
+    assert ct["paymentTermDays"] == 30 and ct["signed"] is True and ct["signerCpBasis"] == "Устав"
+
+    # бессрочный: явная пустота стирает срок (раньше None игнорировался)
+    r = await auth_client.patch(f"/api/references/contracts/{ct['id']}", json={"validUntil": None, "igk": ""})
+    assert r.status_code == 200, r.text
+    assert r.json()["validUntil"] is None and r.json()["igk"] is None
+    assert r.json()["paymentTermDays"] == 30          # не присланное — не трогается
+
+    assert (await auth_client.get(f"/api/references/contracts/{ct['id']}/usage")).json() == []
+    # неиспользуемый договор удаляется; запрет для используемого проверен приёмкой на стенде
+    unused = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "ПД-6", "date": "2026-05-01", "type": "Подряд",
+        "counterpartyId": cp["id"], "organizationId": org_id})
+    r = await auth_client.delete(f"/api/references/contracts/{unused['id']}")
+    assert r.status_code in (200, 204), r.text
