@@ -75,7 +75,30 @@ CONTRACT_FETCH = [
     "СрокДействия", "ДоговорЗакрыт", "Сумма", "СуммаВключаетНДС", "Комментарий",
 ]
 
+# Реквизиты БП 3.0, которых может не быть в конфигурации клиента (старые релизы,
+# доработанные базы). Просим их сверх базового набора, но если база их не знает и
+# первый же запрос падает — повторяем базовым набором (`_iter_with_fallback`): без
+# этого один отсутствующий реквизит останавливал бы загрузку всех договоров.
+CONTRACT_FETCH_EXT = ["ДоговорПодписан", "УстановленСрокОплаты", "СрокОплаты", "ГосударственныйКонтракт"]
+
 _EMPTY_GUID = "00000000-0000-0000-0000-000000000000"
+
+
+async def _iter_with_fallback(client: Any, entity: str, primary: list[str], fallback: list[str], **kw: Any):
+    """Выборка с расширенным набором; ошибка на первой странице — повтор базовым."""
+    it = client.iter_entity(entity, select=primary, **kw)
+    try:
+        first = await it.__anext__()
+    except StopAsyncIteration:
+        return
+    except Exception as exc:  # noqa: BLE001 — транспорт COM/OData отвечает разными типами ошибок
+        logger.warning("%s: расширенные реквизиты недоступны (%s) — загрузка базовым набором", entity, exc)
+        async for item in client.iter_entity(entity, select=fallback, **kw):
+            yield item
+        return
+    yield first
+    async for item in it:
+        yield item
 
 
 def _clean_ref(val: Any) -> str | None:
@@ -122,6 +145,25 @@ def _norm_contract_kind(raw: Any) -> str | None:
         return None
     s = str(raw).strip()
     return _CONTRACT_KIND_BY_SYNONYM.get(s.lower(), s)
+
+
+def _contract_requisites(item: dict[str, Any]) -> dict[str, Any]:
+    """Реквизиты договора БП 3.0 → колонки: подписан, срок оплаты, госконтракт.
+
+    Просятся сверх базового набора (`CONTRACT_FETCH_EXT`); база, которая их не знает,
+    грузится базовым набором — тогда их нет в строке, и колонки не трогаются:
+    возвращаются только пришедшие реквизиты.
+    """
+    out: dict[str, Any] = {}
+    if isinstance(item.get("ДоговорПодписан"), bool):
+        out["signed"] = item["ДоговорПодписан"]
+    if isinstance(item.get("ГосударственныйКонтракт"), bool):
+        out["is_state_contract"] = item["ГосударственныйКонтракт"]
+    if isinstance(item.get("УстановленСрокОплаты"), bool):
+        days = item.get("СрокОплаты")
+        out["payment_term_days"] = (int(days) if item["УстановленСрокОплаты"]
+                                    and isinstance(days, (int, float)) and days > 0 else None)
+    return out
 
 
 def _clean_1c_date(val: Any) -> str:
@@ -1155,7 +1197,9 @@ class OneCSyncService:
             Organization, connection.company_id, by="id")
         # Полная выборка: промо-поля + ВСЕ реквизиты (describe) → raw полный снимок.
         select_list = await self._full_select(client, ENTITY_CONTRACTS, CONTRACT_FETCH)
-        async for item in client.iter_entity(ENTITY_CONTRACTS, select=select_list, orderby="Ref_Key", page_size=500):
+        extended = select_list + [f for f in CONTRACT_FETCH_EXT if f not in select_list]
+        async for item in _iter_with_fallback(client, ENTITY_CONTRACTS, extended, select_list,
+                                              orderby="Ref_Key", page_size=500):
             stats["processed"] += 1
             if item.get("DeletionMark"):
                 stats["skipped"] += 1
@@ -1197,6 +1241,7 @@ class OneCSyncService:
                 incl_vat = item.get("СуммаВключаетНДС")
                 incl_vat = incl_vat if isinstance(incl_vat, bool) else None
                 comment = (item.get("Комментарий") or "").strip() or None
+                req = _contract_requisites(item)
                 if existing is None:
                     self.session.add(Contract(
                         id=uuid.uuid4(),
@@ -1213,6 +1258,7 @@ class OneCSyncService:
                         amount_limit=amount_limit,
                         amount_incl_vat=incl_vat,
                         comment=comment,
+                        **req,
                         scope_type="unassigned",
                         raw=item,
                     ))
@@ -1232,6 +1278,8 @@ class OneCSyncService:
                         existing.amount_incl_vat = incl_vat
                     if comment and not existing.comment:   # свой комментарий пространства не затираем
                         existing.comment = comment
+                    for col, val in req.items():   # реквизиты 1С — источник 1С, если база их знает
+                        setattr(existing, col, val)
                     existing.raw = item
                     # scope_type НЕ трогаем — наш слой охвата, не из 1С
                     stats["updated"] += 1

@@ -74,6 +74,43 @@ def test_clean_ref():
     assert _clean_ref("  abc  ") == "abc"
 
 
+def test_contract_requisites():
+    """Реквизиты БП 3.0 переносятся, если база их отдала; отсутствующие колонку не трогают."""
+    from app.services.onec.sync_service import _contract_requisites
+    assert _contract_requisites({"ДоговорПодписан": True, "ГосударственныйКонтракт": False,
+                                 "УстановленСрокОплаты": True, "СрокОплаты": 30}) == {
+        "signed": True, "is_state_contract": False, "payment_term_days": 30}
+    assert _contract_requisites({"УстановленСрокОплаты": False, "СрокОплаты": 30}) == {"payment_term_days": None}
+    assert _contract_requisites({"Номер": "1"}) == {}          # старая конфигурация — ничего не стираем
+
+
+def test_iter_with_fallback():
+    """База без расширенного реквизита: первый запрос падает — загрузка идёт базовым набором."""
+    import asyncio
+    from app.services.onec.sync_service import _iter_with_fallback
+
+    class Client:
+        def __init__(self):
+            self.selects = []
+
+        async def iter_entity(self, entity, select=None, **kw):
+            self.selects.append(select)
+            if "ДоговорПодписан" in select:
+                raise RuntimeError("Поле не найдено: Т.ДоговорПодписан")
+            for i in range(2):
+                yield {"Ref_Key": str(i)}
+
+    async def run(primary):
+        c = Client()
+        rows = [x async for x in _iter_with_fallback(c, "Catalog_X", primary, ["Ref_Key"])]
+        return rows, c.selects
+
+    rows, selects = asyncio.run(run(["Ref_Key", "ДоговорПодписан"]))
+    assert len(rows) == 2 and selects == [["Ref_Key", "ДоговорПодписан"], ["Ref_Key"]]
+    rows, selects = asyncio.run(run(["Ref_Key", "Номер"]))
+    assert len(rows) == 2 and selects == [["Ref_Key", "Номер"]]     # без ошибки — один запрос
+
+
 def test_norm_contract_kind():
     assert _norm_contract_kind("С поставщиком") == "СПоставщиком"   # синоним (COM)
     assert _norm_contract_kind("СПоставщиком") == "СПоставщиком"    # уже код (OData)
