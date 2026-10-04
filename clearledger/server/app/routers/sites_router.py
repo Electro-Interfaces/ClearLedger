@@ -81,6 +81,7 @@ async def list_sites(
     overdue: bool = Query(False), risk: str | None = Query(None),
     node: str | None = Query(None, description="узел маршрута: ezs_contract_approval и т. п."),
     kind: str | None = Query(None), place_kind: str | None = Query(None),
+    without_kind: str | None = Query(None, description="исключить вид работ: реестр стройки без интеграций"),
     page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=2000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
@@ -91,6 +92,7 @@ async def list_sites(
     return await ezs_sites.list_sites(db, cid, stage=stage, region=region, search=search,
                                       owner_id=owner_id, overdue=overdue, risk=risk,
                                       node=node, kind=kind, place_kind=place_kind,
+                                      without_kind=without_kind,
                                       page=page, page_size=page_size)
 
 
@@ -413,6 +415,18 @@ async def create_site(
     return await ezs_sites.site_detail(db, cid, site.id)
 
 
+@router.get("/integrations")
+async def integrations_portfolio(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Раздел «Интеграции»: реестр проектов интеграции и сводка отчёта."""
+    from app.services import project_integration
+
+    cid = await assert_company_member(company_id, user, db)
+    return await project_integration.portfolio(db, cid)
+
+
 @router.get("/portfolio")
 async def portfolio(
     company_id: str = Query(...),
@@ -501,7 +515,7 @@ async def export_report(
     search: str | None = Query(None), owner_id: uuid.UUID | None = Query(None),
     overdue: bool = Query(False), risk: str | None = Query(None),
     node: str | None = Query(None), kind: str | None = Query(None),
-    place_kind: str | None = Query(None),
+    place_kind: str | None = Query(None), without_kind: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Выгрузка экрана в xlsx: воронка, приоритеты, бюджет, учёт, ТП, оборудование."""
@@ -512,11 +526,12 @@ async def export_report(
     cid = await assert_company_member(company_id, user, db)
     _, fname = _EXPORTS[report]
     fn = getattr(ezs_project, f"export_{report.replace('-', '_')}_xlsx")
-    filtered = any([stage, region, search, owner_id, overdue, risk, node, kind, place_kind])
+    filtered = any([stage, region, search, owner_id, overdue, risk, node, kind, place_kind, without_kind])
     if report == "portfolio" and filtered:
         listed = await ezs_sites.list_sites(db, cid, stage=stage, region=region, search=search,
                                             owner_id=owner_id, overdue=overdue, risk=risk,
                                             node=node, kind=kind, place_kind=place_kind,
+                                            without_kind=without_kind,
                                             page=1, page_size=100000)
         data = await fn(db, cid, site_ids=[it["id"] for it in listed["items"]])
     else:

@@ -267,6 +267,8 @@ export async function getSitesOverview(companyId: string): Promise<SitesOverview
 export async function getSites(p: {
   companyId: string; stage?: string; region?: string; search?: string
   kind?: string; placeKind?: string
+  /** Исключить вид работ: реестр стройки не показывает интеграции, у них свой раздел. */
+  withoutKind?: string
   ownerId?: string; overdue?: boolean; risk?: string; node?: string
   page?: number; pageSize?: number
 }): Promise<SitesList> {
@@ -276,6 +278,7 @@ export async function getSites(p: {
     overdue: p.overdue ? 1 : undefined, risk: p.risk || undefined,
     node: p.node || undefined,
     kind: p.kind || undefined, place_kind: p.placeKind || undefined,
+    without_kind: (!p.kind && p.withoutKind) || undefined,
     page: p.page ?? 1, page_size: p.pageSize ?? 300,
   })
 }

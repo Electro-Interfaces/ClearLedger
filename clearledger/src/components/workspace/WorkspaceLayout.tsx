@@ -158,6 +158,7 @@ function ModePanel() {
           различаются составом пунктов (см. workspaceSections). */}
       {coreMode === 'projects' && <ManagementPanel mode="projects" />}
       {coreMode === 'projects_analytics' && <ManagementPanel mode="projects_analytics" />}
+      {coreMode === 'projects_integration' && <ManagementPanel mode="projects_integration" />}
       {STORE_MODES.includes(coreMode) && <StorePanel />}
       {/* Окно пункта поверх экрана — рядом с панелью, а не внутри неё: панель
           перерисовывается сменой пункта и уносила бы окно с собой. */}

@@ -19,8 +19,10 @@ import { createSite, getProjectKinds, getSites } from '@/services/sitesService'
 import { useOpenProject } from './useOpenProject'
 import { initialIntegration, INTEGRATION_DIRECTIONS, INTEGRATION_FORMATS } from '@/services/projectIntegrationService'
 
-export function NewProjectDialog({ companyId, onClose, onCreated }: {
+export function NewProjectDialog({ companyId, onClose, onCreated, initialKind = 'new_build' }: {
   companyId: string; onClose: () => void; onCreated: (id: string) => void
+  /** Раздел «Интеграции» открывает диалог сразу на своём виде работ. */
+  initialKind?: string
 }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
@@ -29,7 +31,7 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
   // Вид работы — ось маршрута: по нему процесс на входе решает, вести ли подбор
   // земли и договор или сразу планировать работы. Спросить потом уже поздно:
   // проект успеет уехать по чужой ветке.
-  const [kind, setKind] = useState('new_build')
+  const [kind, setKind] = useState(initialKind)
   const [partner, setPartner] = useState('')
   const [format, setFormat] = useState<keyof typeof INTEGRATION_FORMATS | ''>('')
   const [direction, setDirection] = useState<keyof typeof INTEGRATION_DIRECTIONS | ''>('')

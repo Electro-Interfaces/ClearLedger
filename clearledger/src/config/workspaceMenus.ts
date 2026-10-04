@@ -220,7 +220,15 @@ export const SITES_ANALYTICS_MENU: CentralMenuItem[] = [
 ]
 // Общий список — для карты прав и роутера: право на пункт не зависит от того,
 // в каком разделе пункт показан.
-export const SITES_MENU: CentralMenuItem[] = [...SITES_WORK_MENU, ...SITES_ANALYTICS_MENU]
+// ИНТЕГРАЦИИ — проекты подключения партнёров (роуминг, информационный обмен). Это
+// тоже развитие сети, но без площадки: свой маршрут, чек-лист, согласования и
+// отчёт. В реестре и сводках стройки они только мешали бы — поэтому третий раздел,
+// а не фильтр общего реестра.
+export const SITES_INTEGRATION_MENU: CentralMenuItem[] = [
+  { key: 'pr_integrations',        label: 'Реестр' },
+  { key: 'pr_integrations_report', label: 'Отчёт' },
+]
+export const SITES_MENU: CentralMenuItem[] = [...SITES_WORK_MENU, ...SITES_ANALYTICS_MENU, ...SITES_INTEGRATION_MENU]
 // `sites_list` не показывается в меню, но остаётся живым ключом: на него выданы
 // права и ведут старые ссылки из обзора и воронки.
 export const SITES_KEYS = [...SITES_MENU.map((m) => m.key), 'sites_list']
@@ -232,7 +240,8 @@ export const SITES_KEYS = [...SITES_MENU.map((m) => m.key), 'sites_list']
  * площадок (работа). Если сменить только `?sub=`, пункт окажется не из текущего
  * раздела и панель откатится на первый — поэтому вместе с `sub` ставим и `mode`.
  */
-export function sitesModeForKey(key: string): 'projects' | 'projects_analytics' {
+export function sitesModeForKey(key: string): 'projects' | 'projects_analytics' | 'projects_integration' {
+  if (SITES_INTEGRATION_MENU.some((m) => m.key === key)) return 'projects_integration'
   return SITES_ANALYTICS_MENU.some((m) => m.key === key) ? 'projects_analytics' : 'projects'
 }
 

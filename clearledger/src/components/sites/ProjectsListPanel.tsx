@@ -175,6 +175,10 @@ function StageBoard({ companyId, stages, filters, onOpen }: {
   )
 }
 
+// Интеграции ведутся в своём разделе «Проектов»: в общем реестре без явного выбора
+// вида работ их нет. Выбрали «Интеграция» в фильтре — видны, как и раньше.
+const OWN_SECTION = 'integration'
+
 export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const { user } = useAuth()
   const [workspace, patchWorkspace] = useTabParams(`pr_workspace_${user?.id ?? 'anonymous'}`, PROJECT_WORKSPACE_DEFAULTS)
@@ -247,7 +251,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   }, [closed, stagePick, phase, stagesOfPhase])
   const boardFilters = useMemo(() => ({
     region: region || undefined, ownerId: ownerId || undefined, overdue,
-    kind: kind || undefined, placeKind: placeKind || undefined,
+    kind: kind || undefined, placeKind: placeKind || undefined, withoutKind: OWN_SECTION,
     search: search || undefined, risk: risk || undefined, node: node || undefined,
   }), [region, ownerId, overdue, search, risk, node, kind, placeKind])
 
@@ -258,6 +262,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
       : stagePick || (phase ? (stagesOfPhase as string[]).join(',') || undefined
         : risk === 'no_exit_kind' || risk === 'no_hold_date' ? undefined : 'active'),
     region: region || undefined, kind: kind || undefined, place_kind: placeKind || undefined,
+    without_kind: kind ? undefined : OWN_SECTION,
     owner_id: ownerId || undefined, overdue, search: search || undefined,
     risk: risk || undefined, node: node || undefined,
   }
@@ -273,7 +278,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         : stagePick
         || (phase && stagesOfPhase.length === 1 ? stagesOfPhase[0] : (phase || exitRisk ? undefined : 'active')),
       region: region || undefined,
-      kind: kind || undefined, placeKind: placeKind || undefined,
+      kind: kind || undefined, placeKind: placeKind || undefined, withoutKind: OWN_SECTION,
       ownerId: ownerId || undefined, overdue, search: search || undefined,
       risk: risk || undefined, node: node || undefined, page, pageSize: PAGE,
     }),

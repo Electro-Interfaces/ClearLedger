@@ -40,3 +40,29 @@ export const getIntegration = (companyId: string, siteId: string) => get<Integra
 export const getIntegrationStations = (companyId: string, siteId: string) => get<IntegrationStation[]>(`/api/sites/${siteId}/integration/stations`, { company_id: companyId })
 export const saveIntegration = (companyId: string, siteId: string, data: Partial<IntegrationData> & { revision: number }) => patch<IntegrationData>(`/api/sites/${siteId}/integration?company_id=${companyId}`, data)
 export const confirmIntegration = (companyId: string, siteId: string, key: string, revision: number) => post<IntegrationData>(`/api/sites/${siteId}/integration/confirm?company_id=${companyId}`, { key, revision })
+
+/* ── Раздел «Интеграции»: реестр и отчёт ─────────────────────────────────── */
+export interface IntegrationStationCounts { selected: number; agreed: number; connected: number; pilot: number }
+export interface IntegrationRow {
+  id: string; projectNo: string | null; title: string | null; stage: string; stageLabel: string
+  owner: string | null; nextAction: string | null; nextActionDue: string | null; overdue: boolean
+  partner: string; legalEntity: string
+  formats: ('information' | 'roaming')[]; directions: ('outgoing' | 'incoming')[]
+  scenarios: (IntegrationStationCounts & { direction: 'outgoing' | 'incoming'; format: 'information' | 'roaming'; name: string })[]
+  stations: IntegrationStationCounts
+  pilotDecision: string; pilotOutcome: string; launchDate: string
+  checklist: { required: number; closed: number; stale: number }
+  updatedAt: string | null
+}
+export interface IntegrationsPortfolio {
+  items: IntegrationRow[]
+  summary: {
+    total: number; active: number; live: number; onHold: number; archived: number
+    byStage: Record<string, number>
+    stations: Record<string, IntegrationStationCounts & { projects: number }>
+    partners: { partner: string; projects: number; selected: number; agreed: number; connected: number; stages: string[] }[]
+    attention: { stale: string[]; overdue: string[]; noOwner: string[]; noScenario: string[] }
+    pilots: { id: string; title: string | null; partner: string; decision: string; outcome: string }[]
+  }
+}
+export const getIntegrationsPortfolio = (companyId: string) => get<IntegrationsPortfolio>('/api/sites/integrations', { company_id: companyId })

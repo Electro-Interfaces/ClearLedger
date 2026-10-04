@@ -309,3 +309,87 @@ async def station_catalog(db, company_id):
             "owner": operator_name, "protocol": None, "model": None,
             "access": None, "lifecycle": None, "corp": False, "group": operator_name or ""})
     return rows
+
+# Раздел «Интеграции»: реестр и отчёт. Интеграция живёт в той же таблице проектов,
+# но читается своими вопросами — с кем, в каком формате, сколько станций передано и
+# подключено, где подтверждения устарели. Стройка этих проектов в своих сводках не
+# видит (`ezs_sites.not_integration`).
+def portfolio_row(site, owner_name=None, today=None):
+    from app.services.ezs_checklist_integration import STAGE_LABELS as labels
+    from app.services.ezs_sites import STAGE_LABELS as common
+    from app.services.ezs_site_work import GATES_BY_KIND
+    data = read(site)
+    today = today or date.today().isoformat()
+    scenarios = [{"direction": s["direction"], "format": s["format"], "name": s.get("name") or "",
+                  **{k: len(s.get(f) or []) for k, f in (("selected", "selectedIds"), ("agreed", "agreedIds"),
+                                                         ("connected", "connectedIds"), ("pilot", "pilotIds"))}}
+                 for s in data["scenarios"]]
+    gates = site.gates or {}
+    required = done = stale_n = 0
+    for stage, items in GATES_BY_KIND["integration"].items():
+        for it in items:
+            mark = (gates.get(stage) or {}).get(it["key"]) or {}
+            outdated = stale(site, it["key"], mark)
+            stale_n += outdated
+            if it.get("required"):
+                required += 1
+                done += bool(mark.get("done") or mark.get("waived")) and not outdated
+    due = site.next_action_due or None
+    return {
+        "id": str(site.id), "projectNo": site.project_no, "title": site.title,
+        "stage": site.stage, "stageLabel": labels.get(site.stage) or common.get(site.stage, site.stage),
+        "owner": owner_name, "nextAction": site.next_action, "nextActionDue": due,
+        "overdue": bool(due and due < today and site.stage not in ("archive", "live")),
+        "partner": data["partner"].get("name") or "", "legalEntity": data["partner"].get("legalEntity") or "",
+        "formats": sorted({s["format"] for s in scenarios}), "directions": sorted({s["direction"] for s in scenarios}),
+        "scenarios": scenarios,
+        "stations": {k: sum(s[k] for s in scenarios) for k in ("selected", "agreed", "connected", "pilot")},
+        "pilotDecision": data["work"].get("pilotDecision") or "", "pilotOutcome": data["work"].get("pilotOutcome") or "",
+        "launchDate": data["work"].get("launchDate") or "",
+        "checklist": {"required": required, "closed": done, "stale": stale_n},
+        "updatedAt": site.last_touch_at.isoformat() if site.last_touch_at else None,
+    }
+
+
+def summarize(rows):
+    """Сводка отчёта по строкам реестра — чистая функция, проверяется без БД."""
+    active = [r for r in rows if r["stage"] not in ("archive", "live")]
+    by = lambda key: {v: sum(1 for r in rows for x in [r[key]] if x == v) for v in sorted({r[key] for r in rows})}
+    stations = {}
+    for r in rows:
+        for s in r["scenarios"]:
+            cell = stations.setdefault(f'{s["direction"]}:{s["format"]}', {"selected": 0, "agreed": 0, "connected": 0, "pilot": 0, "projects": 0})
+            for k in ("selected", "agreed", "connected", "pilot"):
+                cell[k] += s[k]
+            cell["projects"] += 1
+    partners = {}
+    for r in rows:
+        name = r["partner"] or r["title"] or "—"
+        p = partners.setdefault(name, {"partner": name, "projects": 0, "selected": 0, "agreed": 0, "connected": 0, "stages": []})
+        p["projects"] += 1
+        for k in ("selected", "agreed", "connected"):
+            p[k] += r["stations"][k]
+        p["stages"].append(r["stageLabel"])
+    return {
+        "total": len(rows), "active": len(active), "live": sum(r["stage"] == "live" for r in rows),
+        "onHold": sum(r["stage"] == "on_hold" for r in rows), "archived": sum(r["stage"] == "archive" for r in rows),
+        "byStage": by("stageLabel"),
+        "stations": stations,
+        "partners": sorted(partners.values(), key=lambda p: (-p["connected"], -p["agreed"], p["partner"])),
+        "attention": {
+            "stale": [r["id"] for r in rows if r["checklist"]["stale"]],
+            "overdue": [r["id"] for r in active if r["overdue"]],
+            "noOwner": [r["id"] for r in active if not r["owner"]],
+            "noScenario": [r["id"] for r in active if not r["scenarios"]],
+        },
+        "pilots": [{"id": r["id"], "title": r["title"], "partner": r["partner"], "decision": r["pilotDecision"],
+                    "outcome": r["pilotOutcome"]} for r in rows if r["pilotDecision"] or r["pilotOutcome"]],
+    }
+
+
+async def portfolio(db, company_id):
+    from app.models import EzsSite, User
+    res = (await db.execute(select(EzsSite, User.name).outerjoin(User, User.id == EzsSite.owner_user_id).where(
+        EzsSite.company_id == company_id, EzsSite.kind == "integration").order_by(EzsSite.last_touch_at.desc().nullslast()))).all()
+    rows = [portfolio_row(s, owner) for s, owner in res]
+    return {"items": rows, "summary": summarize(rows)}

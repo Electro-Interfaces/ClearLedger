@@ -97,7 +97,8 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
                        ['site-project', companyId, id], ['site-docs', companyId, id],
                        ['site-roadmap', companyId, id],
                        ['pr-portfolio', companyId], ['pr-overview', companyId],
-                       ['pr-projects', companyId], ['pr-tc', companyId], ['pr-equipment', companyId]]) {
+                       ['pr-projects', companyId], ['pr-tc', companyId], ['pr-equipment', companyId],
+                       ['pr-integrations', companyId]]) {
       await qc.invalidateQueries({ queryKey: key })
     }
   }

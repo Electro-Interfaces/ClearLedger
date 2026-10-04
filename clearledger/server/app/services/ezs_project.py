@@ -861,7 +861,8 @@ async def portfolio(db: AsyncSession, company_id) -> dict[str, Any]:
     S = EzsSite
     stage_expr = project_reporting_stage(S)
     by_stage = {r.stage: int(r.n) for r in (await db.execute(
-        select(stage_expr.label("stage"), func.count().label("n")).where(S.company_id == company_id)
+        select(stage_expr.label("stage"), func.count().label("n")).where(
+            S.company_id == company_id, func.coalesce(S.kind, "new_build") != "integration")
         .group_by(stage_expr))).all()}
     phases = []
     for p in PHASES:
@@ -938,6 +939,7 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
         with active as (
             select s.* from ezs_sites s
             where s.company_id = :cid and s.stage = any(:active) and coalesce(s.workspace_data->'scenario'->>'stage', '') <> 'done'
+              and coalesce(s.kind, 'new_build') <> 'integration'
         ),
         stage_events as (
             select e.site_id, e.from_stage, e.to_stage

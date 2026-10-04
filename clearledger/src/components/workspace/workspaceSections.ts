@@ -26,7 +26,7 @@ import { STORE_SECTIONS, STORE_HELP_MENU, storeMenu } from '@/config/storeCatalo
 import {
   MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
   EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
-  SITES_WORK_MENU, SITES_ANALYTICS_MENU,
+  SITES_WORK_MENU, SITES_ANALYTICS_MENU, SITES_INTEGRATION_MENU,
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU,
@@ -167,6 +167,10 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     items: SITES_WORK_MENU, connected: true }
   const projectsAnalytics: WorkspaceSection = { mode: 'projects_analytics', label: 'Аналитика',
     icon: BarChart3, items: SITES_ANALYTICS_MENU, connected: true }
+  // «Интеграции» — проекты подключения партнёров: развитие сети без площадки.
+  // Только у energy: у топливного профиля таких проектов нет.
+  const projectsIntegration: WorkspaceSection = { mode: 'projects_integration', label: 'Интеграции',
+    icon: Handshake, items: isEnergy ? SITES_INTEGRATION_MENU : [], connected: isEnergy }
   const ops: WorkspaceSection = { mode: 'operations', label: isEnergy ? 'Мониторинг' : 'Управленческий',
     icon: Gauge, items: opsItems, connected: opsItems.length > 0 }
   const opsEquipment: WorkspaceSection = { mode: 'ops_equipment', label: 'Оборудование',
@@ -296,7 +300,7 @@ export function useWorkspaceSections(): WorkspaceSection[] {
        connect]
     : isEnergy
     ? [sales, salesSessions, salesCommerce, corporate, marketingDecision, marketing, marketingArea, marketingPrice,
-       projects, projectsAnalytics, ops, opsEquipment, opsEconomy,
+       projects, projectsAnalytics, projectsIntegration, ops, opsEquipment, opsEconomy,
        storeSections[0], ...accSections, exp, normalize, reconcile, connect]
     : [sales, salesSessions, salesCommerce, salesGoods, salesHelp, ...storeSections, storeHelp, ops,
        ...accSections, normalize, reconcile, connect]

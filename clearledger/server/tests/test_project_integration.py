@@ -200,3 +200,27 @@ def test_каталог_использует_идентификаторы_объ
     rows = asyncio.run(integration.station_catalog(db, uuid.uuid4()))
     assert rows[0]["id"] == "location-id" and rows[0]["code"] == "319"
     assert rows[1]["id"] == str(m.id) and rows[1]["network"] == "incoming"
+
+
+def test_реестр_и_отчёт_интеграций_считают_станции_и_внимание():
+    a = site("negotiation")
+    a.title, a.next_action_due = "Партнёр А", "2026-01-01"
+    a.workspace_data = {"integration": {**integration.read(a), "partner": {"name": "А"},
+        "scenarios": [scenario(agreedIds=["station-a"], connectedIds=["station-a"]),
+                      scenario(id="s2", direction="incoming", format="roaming", selectedIds=["x"])]}}
+    a.gates = {"lead": {"1.1": {"done": True, "needs_confirmation": True}}}
+    b = site("live")
+    b.title, b.owner_user_id = "Без сценария", None
+    rows = [integration.portfolio_row(a, "Руководитель", today="2026-10-04"), integration.portfolio_row(b, None)]
+    assert rows[0]["stations"] == {"selected": 3, "agreed": 1, "connected": 1, "pilot": 0}
+    assert rows[0]["overdue"] and rows[0]["checklist"]["stale"] == 1
+    assert rows[0]["stageLabel"] == "Переговоры"
+    s = integration.summarize(rows)
+    assert (s["total"], s["active"], s["live"]) == (2, 1, 1)
+    assert s["stations"]["outgoing:information"]["connected"] == 1
+    assert s["stations"]["incoming:roaming"]["selected"] == 1
+    assert s["attention"]["stale"] == [rows[0]["id"]]
+    assert s["attention"]["overdue"] == [rows[0]["id"]]
+    assert s["attention"]["noOwner"] == []  # закрытый проект во внимание не попадает
+    assert s["partners"][0]["partner"] == "А"
+

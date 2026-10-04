@@ -16,6 +16,7 @@ import { AwaitingAccountingPanel } from './AwaitingAccountingPanel'
 import { ProjectBudgetPanel } from './ProjectBudgetPanel'
 import { ParkWorkPlanPanel } from './ParkWorkPlanPanel'
 import { ProjectChangesPanel } from './ProjectChangesPanel'
+import { IntegrationsPanel } from './IntegrationsPanel'
 
 export function SitesRouter({ tab, companyId }: { tab: string; companyId: string }) {
   // Один пункт: без выбранного проекта — реестр, с выбранным — рабочий экран.
@@ -26,6 +27,8 @@ export function SitesRouter({ tab, companyId }: { tab: string; companyId: string
   if (tab === 'pr_budget') return <ProjectBudgetPanel companyId={companyId} />
   if (tab === 'pr_accounting') return <AwaitingAccountingPanel companyId={companyId} />
   if (tab === 'pr_changes') return <ProjectChangesPanel companyId={companyId} />
+  if (tab === 'pr_integrations') return <IntegrationsPanel companyId={companyId} view="registry" />
+  if (tab === 'pr_integrations_report') return <IntegrationsPanel companyId={companyId} view="report" />
   if (tab === 'sites_overview') return <SitesOverviewPanel companyId={companyId} />
   // Старый реестр площадок схлопнут в реестр проектов: место и работа на нём —
   // одна сущность. Ключ живёт ради старых ссылок и прав, экран — тот же.
