@@ -15,20 +15,28 @@ SECTIONS = {
                    "discountFunding", "settlements", "reporting"),
     "data": ("outgoing", "incoming", "statisticsUse", "sessionHistory", "analytics", "brand", "appTransitions"),
     "technical": ("systems", "protocol", "version", "contacts", "responsibilities", "support",
-                  "access", "security", "acceptanceCriteria"),
+                  "access", "security", "acceptanceCriteria", "productionAccess"),
+    # Порядок расчётов — общий для всех сценариев: когда, в какой срок, какими
+    # документами и как разрешаются споры. Кто кому платит — в каждом сценарии.
+    "settlement": ("period", "paymentTerm", "documents", "vat", "disputes", "minimums",
+                   "penalties", "accountingChannel"),
     "work": ("pilotDecision", "pilotOutcome", "testResults", "launchDate"),
     "accounting": ("counterpartyId",),
 }
 RESULT_FIELDS = ("comment", "workRef", "docId", "notApplicable")
+PAYERS = {"", "partner", "us", "none"}          # партнёр платит нам / мы партнёру / без расчётов
+MODELS = {"", "commission", "fixed", "margin", "none"}
+CONNECT_BASIS = {"check", "session"}            # проверено у принимающей стороны / прошла первая сессия
+TEST_STATUSES = {"pending", "passed", "failed", "na"}
 DOCUMENT_KINDS = {"nda", "pilot", "contract", "stations", "specification", "test_program", "test_protocol", "instruction", "other"}
-SECTION_LABELS = {"partner": "партнёр и цель", "commercial": "коммерческие условия", "data": "данные, аналитика и бренд", "technical": "технические параметры и сопровождение", "work": "пилот и проверки", "accounting": "связь с контрагентом", "scenarios": "сценарии и перечни ЭЗС", "documents": "редакции документов", "results": "результаты чек-листа", "dates": "план этапов", "contractIds": "договоры учёта"}
+SECTION_LABELS = {"settlement": "порядок расчётов и учёт", "tests": "испытания", "reconciliations": "сверки", "listVersions": "версии перечней", "partner": "партнёр и цель", "commercial": "коммерческие условия", "data": "данные, аналитика и бренд", "technical": "технические параметры и сопровождение", "work": "пилот и проверки", "accounting": "связь с контрагентом", "scenarios": "сценарии и перечни ЭЗС", "documents": "редакции документов", "results": "результаты чек-листа", "dates": "план этапов", "contractIds": "договоры учёта"}
 
 
 def read(site):
     stored = deepcopy((site.workspace_data or {}).get("integration") or {})
     for section in SECTIONS:
         stored.setdefault(section, {})
-    for section in ("scenarios", "documents", "contractIds"):
+    for section in ("scenarios", "documents", "contractIds", "tests", "reconciliations", "listVersions"):
         stored.setdefault(section, [])
     for section in ("results", "dates"):
         stored.setdefault(section, {})
@@ -43,22 +51,45 @@ def section_for(key):
         return "scenarios"
     if key in {"2.2", "2.3", "6.1", "6.2", "6.3"}:
         return "commercial"
-    if key in {"2.5", "3.2", "6.4"}:
+    if key in {"2.5", "2.6", "2.7", "3.2", "6.4"}:
         return "data"
-    if key in {"2.6", "4.2", "5.10", "6.12"}:
+    if key in {"2.8", "4.2", "6.12"}:
         return "work"
+    if key in {"5.10", "5.11"}:
+        return "tests"
+    if key in {"5.12", "6.3"}:
+        return "settlement"
+    if key in {"5.13", "6.14"}:
+        return "reconciliations"
     if key in {"4.3", "6.6"}:
         return "documents"
     return "technical"
+
+
+# От чего ещё зависит подтверждение пункта, кроме своего раздела: изменились эти
+# данные — подтверждение устарело. Условия сценария — без перечней станций:
+# иначе каждая отметка станции сбрасывала бы согласование комиссии.
+DEPENDS = {
+    "2.2": ("terms", "settlement"), "2.3": ("terms",), "6.2": ("terms", "settlement"),
+    "5.10": ("work",), "5.11": ("documents",), "6.6": ("listVersions",),
+    "6.7": ("listVersions",),
+}
+TERM_FIELDS = ("payer", "model", "rate", "base", "clientPrice", "acquiring")
+
+
+def _terms(data):
+    return [{"id": s["id"], **{f: s.get(f, "") for f in ("direction", "format", *TERM_FIELDS)}} for s in data["scenarios"]]
 
 
 def snapshot(site, key, data=None):
     data = data or read(site)
     section = section_for(key)
     values = {section: data.get(section), "result": data["results"].get(key)}
+    for dep in DEPENDS.get(key, ()):
+        values[dep] = _terms(data) if dep == "terms" else data.get(dep)
     if key == "1.4":
         values = {"owner": str(site.owner_user_id or ""), "result": data["results"].get(key)}
-    if key == "2.6":
+    if key == "2.8":
         values["dates"] = data["dates"]
     if key in {"5.10", "5.7", "5.8"}:
         values["work"] = data["work"]
@@ -70,35 +101,89 @@ def stale(site, key, mark):
                 (mark.get("snapshot") and mark["snapshot"] != snapshot(site, key)))
 
 
+# Расхождение сверки: сессии — штука в штуку, энергия и деньги — до округления
+# (0,1 кВт·ч и 1 ₽). Больше — расхождение, его закрывает только урегулирование с
+# актом: «примерно сошлось» сверкой не считается.
+RECON_TOLERANCE = {"sessions": 0, "kwh": 0.1, "amount": 1.0}
+
+
+def recon_state(r):
+    diff = any(abs(float(r["ours"].get(k) or 0) - float(r["partner"].get(k) or 0)) > tol
+               for k, tol in RECON_TOLERANCE.items())
+    if not diff:
+        return "match"
+    return "resolved" if r.get("resolution") and r.get("docId") else "diff"
+
+
+def tests_state(data):
+    """Испытания: все обязательные пройдены или неприменимы, проваленных нет."""
+    tests = data["tests"]
+    if not any(x["required"] for x in tests):
+        return False, "Сформируйте испытания по сценариям и отметьте обязательные"
+    open_ = [x["title"] for x in tests if x["required"] and x["status"] not in ("passed", "na")]
+    if open_:
+        return False, "Не пройдены обязательные испытания: " + "; ".join(open_[:3])
+    return True, None
+
+
+def versions_state(data):
+    """Каждый согласованный перечень совпадает с последней версией, привязанной к подписанному документу."""
+    docs = {d["id"]: d for d in data["documents"]}
+    for s in data["scenarios"]:
+        if not s["agreedIds"]:
+            continue
+        own = [v for v in data["listVersions"] if v["scenarioId"] == s["id"]]
+        if not own:
+            return False, f"Зафиксируйте версию перечня сценария «{s.get('name') or s['direction']}»"
+        last = max(own, key=lambda v: v["version"])
+        if set(last["stationIds"]) != set(s["agreedIds"]):
+            return False, f"Согласованный перечень сценария «{s.get('name') or s['direction']}» изменён после версии {last['version']}"
+        if not (docs.get(last["documentId"]) or {}).get("signedDocId"):
+            return False, f"Версия {last['version']} перечня не привязана к подписанному документу"
+    return True, None
+
+
 def confirmation_problem(site, key, data):
     result = data["results"].get(key) or {}
     if result.get("notApplicable"):
-        if key in {"4.3", "6.6"}:
+        if key in {"4.3", "5.11", "6.6"}:
             return "Подписание обязательного документа нельзя заменить неприменимостью; решение об исключении оформляется снятием обязательности"
         return None if result.get("comment", "").strip() else "Укажите причину неприменимости"
     if not any(result.get(f) for f in ("comment", "workRef", "docId")):
         return "Запишите результат проверки, выберите документ или свяжите поручение"
-    p, t, w, c = (data[k] for k in ("partner", "technical", "work", "commercial"))
+    p, t, w, c, st = (data[k] for k in ("partner", "technical", "work", "commercial", "settlement"))
+    scenarios = data["scenarios"]
+    terms_ok = bool(scenarios) and all(s.get("payer") and (s["payer"] == "none" or (s.get("model") and s.get("rate"))) for s in scenarios)
+    tests_ok, tests_problem = tests_state(data)
+    versions_ok, versions_problem = versions_state(data)
     required = {
         "1.1": (p.get("name") and p.get("purpose"), "Заполните партнёра и цель в паспорте"),
         "1.2": (bool(data["scenarios"]), "Добавьте сценарий подключения"),
         "1.4": (bool(site.owner_user_id), "Назначьте руководителя проекта в Работе"),
         "1.6": (any(s["selectedIds"] for s in data["scenarios"]), "Выберите станции сценария"),
-        "2.2": (c.get("commission") and c.get("settlements"), "Заполните комиссию и взаиморасчёты"),
-        "2.3": (c.get("tariffs"), "Заполните правила тарифов"),
+        "2.2": (terms_ok and st.get("period"), "Укажите по каждому сценарию, кто кому платит, модель и ставку, и периодичность расчётов"),
+        "2.3": (c.get("tariffs") or all(s.get("clientPrice") for s in scenarios if s["format"] == "roaming"), "Укажите цену для чужого клиента по сценариям роуминга или правила тарифов"),
         "2.4": (t.get("responsibilities") and t.get("support"), "Заполните ответственность и поддержку"),
-        "2.6": (bool(data["dates"]), "Укажите плановые даты этапов"),
+        "2.8": (bool(data["dates"]), "Укажите плановые даты этапов"),
         "3.1": (t.get("protocol") and t.get("version"), "Укажите протокол и версию"),
         "3.6": (t.get("contacts"), "Укажите технические контакты сторон"),
         "4.1": (p.get("legalEntity"), "Укажите юридическое лицо партнёра"),
         "4.2": (w.get("pilotDecision"), "Зафиксируйте решение о пилоте"),
         "5.3": (any(s["pilotIds"] for s in data["scenarios"]), "Выберите пилотный перечень из станций сценария"),
-        "5.10": (w.get("pilotOutcome"), "Зафиксируйте итог пилота"),
-        "6.7": (bool(data["scenarios"]) and all(s["agreedIds"] and set(s["agreedIds"]) <= set(s["connectedIds"]) for s in data["scenarios"]), "Отметьте фактически подключённые станции согласованных перечней"),
+        "5.10": (tests_ok and w.get("pilotOutcome"), tests_problem or "Зафиксируйте итог пилота"),
+        "5.11": (tests_ok, tests_problem),
+        "5.12": (st.get("accountingChannel"), "Опишите, как сессии партнёра выделяются в учёте"),
+        "5.13": (any(r["kind"] == "pilot" and recon_state(r) != "diff" for r in data["reconciliations"]), "Внесите пробную сверку по пилоту: без расхождений или с урегулированием и актом"),
+        "6.2": (terms_ok and all(st.get(f) for f in ("period", "paymentTerm", "documents", "vat")), "Заполните условия по сценариям и порядок расчётов: периодичность, срок оплаты, документы, НДС"),
+        "6.3": (st.get("disputes"), "Опишите порядок сверки и разрешения расхождений"),
+        "6.6": (versions_ok, versions_problem),
+        "6.13": (t.get("productionAccess"), "Зафиксируйте выдачу боевых доступов и отзыв тестовых"),
+        "6.14": (any(r["kind"] == "monthly" and recon_state(r) != "diff" and r.get("docId") for r in data["reconciliations"]), "Внесите месячную сверку без расхождений (или урегулированную) с подписанным актом"),
+        "6.7": (bool(scenarios) and versions_ok and all(s["agreedIds"] and set(s["agreedIds"]) <= set(s["connectedIds"]) and all((s.get("connectedMeta") or {}).get(i, {}).get("at") for i in s["connectedIds"]) for s in scenarios), "Отметьте подключение всех станций согласованной версии перечня с датой и основанием"),
         "6.12": (w.get("launchDate"), "Зафиксируйте дату коммерческого запуска"),
     }
-    if key in {"4.3", "6.6"}:
-        kinds = {"nda", "pilot"} if key == "4.3" else {"contract"}
+    if key in {"4.3", "5.11", "6.6"}:
+        kinds = {"4.3": {"nda", "pilot"}, "5.11": {"test_protocol"}, "6.6": {"contract"}}[key]
         signed = [d for d in data["documents"] if d["kind"] in kinds and d.get("signedDocId") and d.get("signingEvidence")]
         if not signed:
             return "Выберите подписанную версию нужного документа и подтверждение подписания"
@@ -147,6 +232,22 @@ def normalize(payload, old):
                 raise ValueError("Подключённые станции должны входить в согласованный перечень")
             if not set(row["pilotIds"]) <= set(row["selectedIds"]):
                 raise ValueError("Пилотные станции должны входить в сценарий")
+            # Кто кому платит — в каждом сценарии свой ответ: в двустороннем
+            # роуминге деньги идут в обе стороны и по разным правилам.
+            if (s.get("payer") or "") not in PAYERS or (s.get("model") or "") not in MODELS:
+                raise ValueError("Неизвестный плательщик или модель расчётов")
+            row.update({f: str(s.get(f) or "").strip()[:500] for f in TERM_FIELDS})
+            meta = s.get("connectedMeta") or {}
+            if not isinstance(meta, dict) or not set(meta) <= set(row["connectedIds"]):
+                raise ValueError("Дата подключения указана для станции вне подключённого перечня")
+            row["connectedMeta"] = {}
+            for sid, m in meta.items():
+                at, basis = str(m.get("at") or ""), str(m.get("basis") or "")
+                if at:
+                    date.fromisoformat(at)
+                if basis not in CONNECT_BASIS:
+                    raise ValueError("Укажите основание подключения: проверка у принимающей стороны или первая сессия")
+                row["connectedMeta"][sid] = {"at": at, "basis": basis, "ref": str(m.get("ref") or "").strip()[:300]}
             scenarios.append(row)
         data["scenarios"] = scenarios
     if "documents" in payload:
@@ -165,6 +266,75 @@ def normalize(payload, old):
                 raise ValueError("Укажите подтверждение подписания документа")
             documents.append(row)
         data["documents"] = documents
+    if "tests" in payload:
+        source = payload["tests"]
+        if not isinstance(source, list) or len(source) > 300:
+            raise ValueError("Некорректный перечень испытаний")
+        known = {s["id"] for s in data["scenarios"]}
+        tests, seen = [], set()
+        for x in source:
+            row = {k: str(x.get(k) or "").strip()[:2000] for k in ("id", "scenarioId", "title", "sessionRef", "comment", "docId")}
+            row["id"] = row["id"] or str(uuid.uuid4())
+            if row["id"] in seen or not row["title"]:
+                raise ValueError("У испытания должно быть название")
+            seen.add(row["id"])
+            if row["scenarioId"] not in known:
+                row["scenarioId"] = ""  # сценарий удалён — испытание остаётся общим
+            row["status"] = str(x.get("status") or "pending")
+            if row["status"] not in TEST_STATUSES:
+                raise ValueError("Неизвестный статус испытания")
+            if row["status"] in ("failed", "na") and not row["comment"]:
+                raise ValueError(f"Испытание «{row['title']}»: опишите замечание или причину неприменимости")
+            row["required"] = bool(x.get("required"))
+            tests.append(row)
+        data["tests"] = tests
+    if "reconciliations" in payload:
+        source = payload["reconciliations"]
+        if not isinstance(source, list) or len(source) > 120:
+            raise ValueError("Некорректный перечень сверок")
+        recs, seen = [], set()
+        for r in source:
+            row = {k: str(r.get(k) or "").strip()[:2000] for k in ("id", "period", "resolution", "docId")}
+            row["id"] = row["id"] or str(uuid.uuid4())
+            if row["id"] in seen:
+                raise ValueError("Идентификаторы сверок повторяются")
+            seen.add(row["id"])
+            row["kind"] = str(r.get("kind") or "")
+            if row["kind"] not in ("pilot", "monthly") or not row["period"]:
+                raise ValueError("Укажите вид сверки и период")
+            for side in ("ours", "partner"):
+                values = r.get(side) or {}
+                try:
+                    row[side] = {k: max(0.0, float(values.get(k) or 0)) for k in RECON_TOLERANCE}
+                except (TypeError, ValueError):
+                    raise ValueError("Сессии, кВт·ч и суммы сверки должны быть числами")
+            recs.append(row)
+        data["reconciliations"] = recs
+    if "listVersions" in payload:
+        source = payload["listVersions"]
+        if not isinstance(source, list):
+            raise ValueError("Некорректные версии перечней")
+        old_versions = {v["id"]: v for v in old["listVersions"]}
+        # Версия перечня — то, что подписали: прежние версии не правятся и не
+        # удаляются, новая — только снимок текущего согласованного перечня.
+        if not set(old_versions) <= {str(v.get("id")) for v in source}:
+            raise ValueError("Зафиксированную версию перечня удалить нельзя")
+        versions = []
+        for v in source:
+            vid = str(v.get("id") or "")
+            if vid in old_versions:
+                versions.append(old_versions[vid])
+                continue
+            scenario = next((s for s in data["scenarios"] if s["id"] == v.get("scenarioId")), None)
+            if scenario is None or not scenario["agreedIds"]:
+                raise ValueError("Версию можно зафиксировать только для сценария с согласованным перечнем")
+            if not any(d["id"] == v.get("documentId") for d in data["documents"]):
+                raise ValueError("Выберите документ, к которому относится версия перечня")
+            number = 1 + max([x["version"] for x in versions + list(old_versions.values()) if x["scenarioId"] == scenario["id"]], default=0)
+            versions.append({"id": vid or str(uuid.uuid4()), "scenarioId": scenario["id"], "version": number,
+                             "stationIds": sorted(scenario["agreedIds"]), "documentId": str(v["documentId"]),
+                             "note": str(v.get("note") or "").strip()[:1000], "new": True})
+        data["listVersions"] = versions
     if "results" in payload:
         keys = {t["key"] for t in TASKS}
         if not isinstance(payload["results"], dict) or not set(payload["results"]) <= keys:
@@ -204,6 +374,7 @@ async def validate_refs(db, site, data):
                 raise ValueError("Перечень содержит станции вне выбранной сети или пространства")
     doc_ids = {d[f] for d in data["documents"] for f in ("fileDocId", "agreedDocId", "signedDocId") if d.get(f)}
     doc_ids.update(r["docId"] for r in data["results"].values() if r.get("docId"))
+    doc_ids.update(r["docId"] for r in data["tests"] + data["reconciliations"] if r.get("docId"))
     if doc_ids:
         found = {str(i) for i in (await db.execute(select(EzsSiteDoc.id).where(
             EzsSiteDoc.company_id == site.company_id, EzsSiteDoc.site_id == site.id,
@@ -230,11 +401,36 @@ async def validate_refs(db, site, data):
             raise ValueError("Договор не относится к пространству")
 
 
+def stamp(old, data, user):
+    """Автор и дата у испытаний, сверок и версий перечня ставит сервер, а не клиент.
+
+    Испытание и сверка подписываются тем, кто изменил их содержание; не тронутые
+    строки сохраняют прежнего автора — иначе любое сохранение перечня переписало
+    бы, кто и когда провёл испытание.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    who = {"by": str(user.id), "byName": getattr(user, "name", None) or getattr(user, "email", ""), "at": now}
+    authored = ("by", "byName", "at")
+    for key, fields in (("tests", ("status", "sessionRef", "comment", "docId", "required", "title")),
+                        ("reconciliations", ("period", "kind", "ours", "partner", "resolution", "docId"))):
+        before = {x["id"]: x for x in old[key]}
+        for row in data[key]:
+            prev = before.get(row["id"])
+            if prev and all(prev.get(f) == row.get(f) for f in fields):
+                row.update({f: prev.get(f) for f in authored})
+            else:
+                row.update(who)
+    for v in data["listVersions"]:
+        if v.pop("new", False):
+            v.update(who)
+
+
 async def save(db, site, payload, user):
     from app.services.ezs_site_work import log_event
     old = read(site)
     data = normalize(payload, old)
     await validate_refs(db, site, data)
+    stamp(old, data, user)
     changed = [k for k in data if k != "revision" and data[k] != old.get(k)]
     if not changed:
         return old
@@ -347,6 +543,12 @@ def portfolio_row(site, owner_name=None, today=None):
         "pilotDecision": data["work"].get("pilotDecision") or "", "pilotOutcome": data["work"].get("pilotOutcome") or "",
         "launchDate": data["work"].get("launchDate") or "",
         "checklist": {"required": required, "closed": done, "stale": stale_n},
+        "tests": {"total": len(data["tests"]), "required": sum(x["required"] for x in data["tests"]),
+                  "passed": sum(x["status"] == "passed" for x in data["tests"]),
+                  "failed": sum(x["status"] == "failed" for x in data["tests"])},
+        "reconciliation": (lambda r: r and {"kind": r["kind"], "period": r["period"], "state": recon_state(r)})(
+            data["reconciliations"][-1] if data["reconciliations"] else None),
+        "launchOpen": site.stage == "live" and done < required,
         "updatedAt": site.last_touch_at.isoformat() if site.last_touch_at else None,
     }
 
@@ -381,6 +583,9 @@ def summarize(rows):
             "overdue": [r["id"] for r in active if r["overdue"]],
             "noOwner": [r["id"] for r in active if not r["owner"]],
             "noScenario": [r["id"] for r in active if not r["scenarios"]],
+            "testsFailed": [r["id"] for r in rows if r["tests"]["failed"]],
+            "reconDiff": [r["id"] for r in rows if (r["reconciliation"] or {}).get("state") == "diff"],
+            "launchOpen": [r["id"] for r in rows if r["launchOpen"]],
         },
         "pilots": [{"id": r["id"], "title": r["title"], "partner": r["partner"], "decision": r["pilotDecision"],
                     "outcome": r["pilotOutcome"]} for r in rows if r["pilotDecision"] or r["pilotOutcome"]],

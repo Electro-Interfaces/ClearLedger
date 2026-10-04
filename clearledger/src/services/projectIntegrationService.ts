@@ -4,12 +4,29 @@ import type { GateState } from './sitesService'
 
 export const INTEGRATION_FORMATS = { information: 'Информационная', roaming: 'Роуминг', hybrid: 'Гибридная' }
 export const INTEGRATION_DIRECTIONS = { outgoing: 'Наши ЭЗС в сервисе партнёра', incoming: 'ЭЗС партнёра в нашем приложении', both: 'Двусторонняя' }
-export type IntegrationSection = 'partner' | 'commercial' | 'data' | 'technical' | 'work' | 'accounting'
+export type IntegrationSection = 'partner' | 'commercial' | 'settlement' | 'data' | 'technical' | 'work' | 'accounting'
+export const INTEGRATION_PAYERS = { partner: 'Партнёр платит нам', us: 'Мы платим партнёру', none: 'Без расчётов' }
+export const INTEGRATION_MODELS = { commission: 'Комиссия, %', fixed: 'Фиксированная плата', margin: 'Наценка к тарифу', none: 'Без оплаты' }
+export const CONNECT_BASIS = { check: 'Проверено у принимающей стороны', session: 'Прошла первая сессия' }
+export const TEST_STATUSES = { pending: 'Не проведено', passed: 'Пройдено', failed: 'Замечание', na: 'Неприменимо' }
 export interface IntegrationScenario {
   id: string; name: string; direction: 'outgoing' | 'incoming'; format: 'information' | 'roaming'
   geography: string; restrictions: string; partnerNetwork: string
   selectedIds: string[]; agreedIds: string[]; connectedIds: string[]; pilotIds: string[]
+  payer?: '' | keyof typeof INTEGRATION_PAYERS; model?: '' | keyof typeof INTEGRATION_MODELS
+  rate?: string; base?: string; clientPrice?: string; acquiring?: string
+  connectedMeta?: Record<string, { at: string; basis: keyof typeof CONNECT_BASIS; ref: string }>
 }
+export interface IntegrationTest {
+  id: string; scenarioId: string; title: string; required: boolean; status: keyof typeof TEST_STATUSES
+  sessionRef: string; comment: string; docId: string; byName?: string; at?: string
+}
+export interface IntegrationReconciliation {
+  id: string; kind: 'pilot' | 'monthly'; period: string; resolution: string; docId: string
+  ours: { sessions: number; kwh: number; amount: number }; partner: { sessions: number; kwh: number; amount: number }
+  byName?: string; at?: string
+}
+export interface IntegrationListVersion { id: string; scenarioId: string; version: number; stationIds: string[]; documentId: string; note: string; byName?: string; at?: string }
 export interface IntegrationDocument {
   id: string; kind: string; title: string; edition: string
   fileDocId: string; agreedDocId: string; signedDocId: string; signingEvidence: string
@@ -17,14 +34,23 @@ export interface IntegrationDocument {
 export interface IntegrationResult { comment: string; workRef: string; docId: string; notApplicable: boolean }
 export type IntegrationData = Record<IntegrationSection, Record<string, string>> & {
   revision: number; scenarios: IntegrationScenario[]; documents: IntegrationDocument[]; contractIds: string[]
+  tests: IntegrationTest[]; reconciliations: IntegrationReconciliation[]; listVersions: (IntegrationListVersion | Pick<IntegrationListVersion, 'scenarioId' | 'documentId' | 'note'>)[]
   results: Record<string, IntegrationResult>; dates: Record<string, { start: string; end: string }>
 }
-export interface IntegrationTask { key: string; label: string; stage: string; role: string; required?: boolean; section: IntegrationSection | 'scenarios' | 'documents' }
+export interface IntegrationTask { key: string; label: string; stage: string; role: string; required?: boolean; section: IntegrationSection | 'scenarios' | 'documents' | 'tests' | 'reconciliations' }
 export interface IntegrationState {
   data: IntegrationData; tasks: IntegrationTask[]; gates: GateState[]
   phases: { code: string; label: string; term: string; stages: string[] }[]
 }
 export interface IntegrationStation extends ChargeDimensionStation { id: string; network: 'outgoing' | 'incoming'; group: string }
+/** Станция выведена из работы: закрыта или выведена из эксплуатации. В новый выбор не предлагается, в перечнях подсвечивается. */
+export const isRetired = (s?: IntegrationStation) => !!s && (s.lifecycle === 'closed' || s.opStatus === 'decommissioned')
+/** Расхождение сверки — то же правило, что на сервере (`recon_state`). */
+export function reconState(r: IntegrationReconciliation): 'match' | 'resolved' | 'diff' {
+  const tol = { sessions: 0, kwh: 0.1, amount: 1 } as const
+  const diff = (Object.keys(tol) as (keyof typeof tol)[]).some((k) => Math.abs((+r.ours[k] || 0) - (+r.partner[k] || 0)) > tol[k])
+  return !diff ? 'match' : r.resolution && r.docId ? 'resolved' : 'diff'
+}
 
 export function initialIntegration(partner: string, format: keyof typeof INTEGRATION_FORMATS, direction: keyof typeof INTEGRATION_DIRECTIONS) {
   return {
@@ -52,6 +78,9 @@ export interface IntegrationRow {
   stations: IntegrationStationCounts
   pilotDecision: string; pilotOutcome: string; launchDate: string
   checklist: { required: number; closed: number; stale: number }
+  tests: { total: number; required: number; passed: number; failed: number }
+  reconciliation: { kind: string; period: string; state: 'match' | 'resolved' | 'diff' } | null
+  launchOpen: boolean
   updatedAt: string | null
 }
 export interface IntegrationsPortfolio {
@@ -61,7 +90,7 @@ export interface IntegrationsPortfolio {
     byStage: Record<string, number>
     stations: Record<string, IntegrationStationCounts & { projects: number }>
     partners: { partner: string; projects: number; selected: number; agreed: number; connected: number; stages: string[] }[]
-    attention: { stale: string[]; overdue: string[]; noOwner: string[]; noScenario: string[] }
+    attention: { stale: string[]; overdue: string[]; noOwner: string[]; noScenario: string[]; testsFailed: string[]; reconDiff: string[]; launchOpen: string[] }
     pilots: { id: string; title: string | null; partner: string; decision: string; outcome: string }[]
   }
 }

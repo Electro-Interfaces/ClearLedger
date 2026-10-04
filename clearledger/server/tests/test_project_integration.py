@@ -145,6 +145,11 @@ def test_нельзя_подтвердить_фактическое_подклю
     data["results"]["6.7"] = {"comment": "Запуск"}
     assert integration.confirmation_problem(s, "6.7", data)
     data["scenarios"][0]["connectedIds"] = ["station-a"]
+    assert integration.confirmation_problem(s, "6.7", data)  # нет версии перечня и даты подключения
+    data["documents"] = [{"id": "list", "kind": "stations", "signedDocId": "f", "signingEvidence": "подписано"}]
+    data["listVersions"] = [{"id": "v1", "scenarioId": "scenario-1", "version": 1, "stationIds": ["station-a"], "documentId": "list"}]
+    assert integration.confirmation_problem(s, "6.7", data)
+    data["scenarios"][0]["connectedMeta"] = {"station-a": {"at": "2026-10-04", "basis": "session", "ref": "S-1"}}
     assert integration.confirmation_problem(s, "6.7", data) is None
 
 
@@ -224,3 +229,116 @@ def test_реестр_и_отчёт_интеграций_считают_стан
     assert s["attention"]["noOwner"] == []  # закрытый проект во внимание не попадает
     assert s["partners"][0]["partner"] == "А"
 
+
+def _with(s, **patch):
+    data = integration.read(s)
+    data.update(patch)
+    return data
+
+
+def test_условия_по_сценариям_и_порядок_расчётов():
+    s = site("negotiation")
+    data = _with(s, scenarios=[scenario(format="roaming"), scenario(id="s2", direction="incoming", format="information")])
+    data["results"]["2.2"] = data["results"]["6.2"] = {"comment": "ок"}
+    assert integration.confirmation_problem(s, "2.2", data)
+    data["scenarios"][0].update(payer="partner", model="commission", rate="7 %")
+    data["scenarios"][1].update(payer="none")  # информационный обмен без денег — допустимо
+    assert "периодичность" in integration.confirmation_problem(s, "2.2", data)
+    data["settlement"] = {"period": "ежемесячно"}
+    assert integration.confirmation_problem(s, "2.2", data) is None
+    assert integration.confirmation_problem(s, "6.2", data)  # срок оплаты, документы, НДС
+    data["settlement"].update(paymentTerm="10 рабочих дней", documents="отчёт агента, акт", vat="с НДС 20 %")
+    assert integration.confirmation_problem(s, "6.2", data) is None
+
+
+def test_согласование_комиссии_не_сбрасывается_отметкой_станций():
+    s = site("negotiation")
+    data = _with(s, scenarios=[scenario(payer="partner", model="commission", rate="7 %")])
+    before = integration.snapshot(s, "2.2", data)
+    data["scenarios"][0]["agreedIds"] = ["station-a"]
+    assert integration.snapshot(s, "2.2", data) == before
+    data["scenarios"][0]["rate"] = "8 %"
+    assert integration.snapshot(s, "2.2", data) != before
+
+
+def test_испытания_и_техническая_приёмка():
+    s = site("construction")
+    data = _with(s, work={"pilotOutcome": "принят"})
+    data["results"]["5.10"] = {"comment": "ок"}
+    data["results"]["5.11"] = {"comment": "ок"}
+    assert "Сформируйте" in integration.confirmation_problem(s, "5.10", data)
+    data["tests"] = [{"id": "t1", "title": "Старт и стоп", "required": True, "status": "failed", "comment": "не стартует"},
+                     {"id": "t2", "title": "Отображение", "required": False, "status": "pending"}]
+    assert "Старт и стоп" in integration.confirmation_problem(s, "5.10", data)
+    data["tests"][0]["status"] = "passed"
+    assert integration.confirmation_problem(s, "5.10", data) is None
+    assert "подписанную" in integration.confirmation_problem(s, "5.11", data)  # нужен протокол испытаний
+    data["documents"] = [{"id": "p", "kind": "test_protocol", "signedDocId": "f", "signingEvidence": "ИТ обеих сторон"}]
+    assert integration.confirmation_problem(s, "5.11", data) is None
+    data["results"]["5.11"] = {"comment": "", "notApplicable": True}
+    assert integration.confirmation_problem(s, "5.11", data)  # приёмку нельзя объявить неприменимой
+
+
+@pytest.mark.parametrize("ours,partner,state", [
+    ({"sessions": 10, "kwh": 100, "amount": 1500}, {"sessions": 10, "kwh": 100.05, "amount": 1500.5}, "match"),
+    ({"sessions": 10, "kwh": 100, "amount": 1500}, {"sessions": 9, "kwh": 100, "amount": 1500}, "diff"),
+    ({"sessions": 10, "kwh": 100, "amount": 1500}, {"sessions": 10, "kwh": 100, "amount": 1502}, "diff"),
+])
+def test_расхождение_сверки(ours, partner, state):
+    assert integration.recon_state({"ours": ours, "partner": partner}) == state
+
+
+def test_сверки_пилота_и_месяца():
+    s = site("construction")
+    data = _with(s)
+    data["results"]["5.13"] = {"comment": "ок"}
+    data["results"]["6.14"] = {"comment": "ок"}
+    diff = {"id": "r1", "kind": "pilot", "period": "пилот", "ours": {"sessions": 5, "kwh": 50, "amount": 700},
+            "partner": {"sessions": 4, "kwh": 40, "amount": 560}}
+    data["reconciliations"] = [diff]
+    assert integration.confirmation_problem(s, "5.13", data)
+    diff.update(resolution="одна сессия у партнёра не дошла, доначислено", docId="act")
+    assert integration.confirmation_problem(s, "5.13", data) is None
+    month = {"id": "r2", "kind": "monthly", "period": "2026-11", "ours": {"sessions": 5, "kwh": 50, "amount": 700},
+             "partner": {"sessions": 5, "kwh": 50, "amount": 700}}
+    data["reconciliations"].append(month)
+    assert integration.confirmation_problem(s, "6.14", data)  # без подписанного акта
+    month["docId"] = "act2"
+    assert integration.confirmation_problem(s, "6.14", data) is None
+
+
+def test_версия_перечня_снимок_и_неизменность():
+    s = site("commissioning")
+    old = integration.normalize({"revision": 0, "scenarios": [scenario(agreedIds=["station-a"])],
+                                 "documents": [{"id": "list", "kind": "stations"}]}, integration.read(s))
+    data = integration.normalize({"revision": 0, "listVersions": [{"scenarioId": "scenario-1", "documentId": "list"}]}, old)
+    v = data["listVersions"][0]
+    assert (v["version"], v["stationIds"]) == (1, ["station-a"])
+    v.pop("new")
+    with pytest.raises(ValueError):  # удалить зафиксированную версию нельзя
+        integration.normalize({"revision": 0, "listVersions": []}, data)
+    data["scenarios"][0]["agreedIds"] = ["station-a", "station-b"]
+    ok, problem = integration.versions_state(data)
+    assert not ok and "изменён после версии 1" in problem
+    again = integration.normalize({"revision": 0, "listVersions": [v, {"scenarioId": "scenario-1", "documentId": "list"}]}, data)
+    assert [x["version"] for x in again["listVersions"]] == [1, 2]
+    assert again["listVersions"][0]["stationIds"] == ["station-a"]  # первая версия не переписана
+
+
+def test_автор_испытания_не_переписывается_чужим_сохранением():
+    s = site("construction")
+    old = integration.read(s)
+    old["tests"] = [{"id": "t1", "scenarioId": "", "title": "Старт", "required": True, "status": "passed",
+                     "sessionRef": "S-1", "comment": "", "docId": "", "by": "u1", "byName": "Иванов", "at": "2026-10-01"}]
+    data = integration.normalize({"revision": 0, "tests": [dict(old["tests"][0]), {"title": "Стоп", "required": True}]}, old)
+    integration.stamp(old, data, SimpleNamespace(id="u2", name="Петров"))
+    assert data["tests"][0]["byName"] == "Иванов" and data["tests"][1]["byName"] == "Петров"
+
+
+def test_сроки_держит_пункт_2_8_а_не_бренд():
+    s = site("negotiation")
+    data = _with(s)
+    data["results"]["2.6"] = {"comment": "ок"}
+    data["results"]["2.8"] = {"comment": "ок"}
+    assert integration.confirmation_problem(s, "2.6", data) is None
+    assert integration.confirmation_problem(s, "2.8", data)

@@ -231,6 +231,9 @@ function IntegrationsReport({ companyId }: { companyId: string }) {
     ['Просрочен следующий шаг', s.attention.overdue, ''],
     ['Без руководителя', s.attention.noOwner, ''],
     ['Без сценария подключения', s.attention.noScenario, ''],
+    ['Испытания с замечаниями', s.attention.testsFailed ?? [], 'есть испытания со статусом «Замечание»'],
+    ['Сверка с расхождением', s.attention.reconDiff ?? [], 'последняя сверка не сошлась и не урегулирована'],
+    ['Запуск не закрыт', s.attention.launchOpen ?? [], 'интеграция работает, но обязательные пункты запуска (боевые доступы, первая сверка) не закрыты'],
   ]
   const cells = Object.entries(s.stations)
 
