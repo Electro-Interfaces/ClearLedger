@@ -6145,6 +6145,9 @@ class EzsEquipmentDocument(Base):
     responsible_to: Mapped[str | None] = mapped_column(String(200), nullable=True)
     basis: Mapped[str | None] = mapped_column(String(500), nullable=True)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Детали вида документа: ремонт — заявка Поддержки, гарантия/платный, плановый
+    # возврат, стоимость, результат.
+    details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

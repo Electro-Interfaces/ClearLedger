@@ -34,6 +34,7 @@ export function equipmentDocHtml(d: EquipmentDocument, orgName: string): string 
 <table class="head">
 ${field('Операция', d.opLabel)}${field('Откуда', d.fromLocation)}${field('Куда', d.toLocation)}
 ${field('Контрагент', d.counterpartyName)}${field('Договор', d.contractLabel)}${field('Основание', d.basis)}${field('Комментарий', d.comment)}
+${field('Заявка Поддержки', d.details?.ticketRef ? '№ ' + d.details.ticketRef : '')}${field('Вид ремонта', d.details?.repairKind ? { warranty: 'гарантийный', paid: 'платный' }[d.details.repairKind] : '')}${field('Плановый возврат', ru(d.details?.plannedReturn))}${field('Оценка стоимости', d.details?.costEstimate != null ? d.details.costEstimate.toLocaleString('ru-RU') + ' ₽' : '')}${field('Стоимость ремонта', d.details?.costActual != null ? d.details.costActual.toLocaleString('ru-RU') + ' ₽' : '')}${field('Результат', d.details?.result ? { repaired: 'отремонтировано', unrepairable: 'ремонту не подлежит' }[d.details.result] : '')}
 </table>
 <table class="lines"><thead><tr><th>№</th><th>Оборудование</th><th>Серийный №</th><th>Инв. №</th><th>Откуда</th><th>Куда</th><th>Состояние после</th></tr></thead>
 <tbody>${rows}</tbody></table>

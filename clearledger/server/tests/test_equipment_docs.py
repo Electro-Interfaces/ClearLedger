@@ -81,3 +81,14 @@ def test_у_каждой_операции_есть_документ():
     assert set(TRANSITIONS) - {"receipt"} <= set(D.DOC_KINDS)
     prefixes = [p for p, _ in D.DOC_KINDS.values()]
     assert len(prefixes) == len(set(prefixes))
+
+
+def test_детали_ремонта():
+    d = D.repair_details("to_repair", {"ticketRef": " 12345 ", "repairKind": "warranty", "plannedReturn": "2026-11-01", "costEstimate": "15000.5"})
+    assert d == {"ticketRef": "12345", "repairKind": "warranty", "plannedReturn": "2026-11-01", "costEstimate": 15000.5}
+    assert D.repair_details("from_repair", {"result": "unrepairable", "costActual": 0}) == {"result": "unrepairable", "costActual": 0.0}
+    assert D.repair_details("transfer", {"ticketRef": "1"}) is None
+    for bad in ({"repairKind": "дружеский"}, {"plannedReturn": "01.11.2026"}, {"costEstimate": -1}, {"costEstimate": "много"}):
+        with pytest.raises(HTTPException):
+            D.repair_details("to_repair", bad)
+

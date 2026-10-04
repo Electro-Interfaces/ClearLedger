@@ -8,6 +8,7 @@ import { EquipmentWarehousesPanel } from './EquipmentWarehousesPanel'
 import { EquipmentSuppliesPanel } from './EquipmentSuppliesPanel'
 import { EquipmentMovementsPanel } from './EquipmentMovementsPanel'
 import { EquipmentSparesPanel } from './EquipmentSparesPanel'
+import { EquipmentAuditPanel } from './EquipmentAuditPanel'
 
 export function EquipmentRouter({ tab, companyId }: { tab: string; companyId: string }) {
   switch (tab) {
@@ -16,6 +17,7 @@ export function EquipmentRouter({ tab, companyId }: { tab: string; companyId: st
     case 'eq_supplies':   return <EquipmentSuppliesPanel companyId={companyId} />
     case 'eq_movements':  return <EquipmentMovementsPanel companyId={companyId} />
     case 'eq_spares':     return <EquipmentSparesPanel companyId={companyId} />
+    case 'eq_audit':      return <EquipmentAuditPanel companyId={companyId} />
     default:              return null
   }
 }

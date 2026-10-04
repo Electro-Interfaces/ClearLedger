@@ -162,6 +162,8 @@ export const EQUIPMENT_MENU: CentralMenuItem[] = [
   { key: 'eq_supplies',   label: 'Поставки и возвраты' },
   { key: 'eq_movements',  label: 'Движения' },
   { key: 'eq_spares',     label: 'ЗИП и запчасти' },
+  // Разбор данных: что в учёте не так и каким документом это закрывается (04.10.2026).
+  { key: 'eq_audit',      label: 'Разбор данных' },
 ]
 export const EQUIPMENT_KEYS = EQUIPMENT_MENU.map((m) => m.key)
 

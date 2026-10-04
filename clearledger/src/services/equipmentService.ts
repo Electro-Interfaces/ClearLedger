@@ -630,12 +630,17 @@ export interface EquipmentDocument {
   fromLocation: string | null; toLocation: string | null; responsibleFrom: string | null; responsibleTo: string | null
   basis: string | null; comment: string | null; createdBy: string | null; createdAt: string | null; units: number | null
   lines?: EquipmentDocLine[]; warnings?: string[]
+  details?: RepairDetails
+}
+export interface RepairDetails {
+  ticketRef?: string; repairKind?: 'warranty' | 'paid'; plannedReturn?: string
+  costEstimate?: number; costActual?: number; result?: 'repaired' | 'unrepairable'
 }
 export interface EquipmentDocPayload {
   op: UnitOp; unitIds: string[]; docDate: string; number?: string; toLocationId?: string
   counterpartyId?: string; contractId?: string; responsibleFrom?: string; responsibleTo?: string
   basis?: string; comment?: string; custodian?: 'contractor' | 'vendor'; reservedForLocationId?: string
-  toState?: UnitState; syncPassport?: boolean
+  toState?: UnitState; syncPassport?: boolean; details?: RepairDetails
 }
 export interface WarehouseCard {
   id: string; name: string; address: string | null
@@ -662,4 +667,21 @@ export const createWarehouse = (companyId: string, body: WarehousePayload) =>
   post<WarehouseCard>(`/api/equipment/warehouses?company_id=${companyId}`, body)
 export const updateWarehouse = (companyId: string, id: string, body: WarehousePayload) =>
   patch<WarehouseCard>(`/api/equipment/warehouses/${encodeURIComponent(id)}?company_id=${companyId}`, body)
+
+// ─── разбор данных ──────────────────────────────────────────────────────────
+export interface AuditUnit {
+  id: string; serialNumber: string | null; vendor: string | null; model: string | null
+  state: UnitState; stateLabel: string; location: LocBrief | null
+  keeper?: string | null; supplier?: string | null; region?: string | null
+  group?: string; due?: string; document?: string; reason?: string | null
+}
+export interface AuditSite { id: string; name: string; address: string | null; brand: string | null; model: string | null; serialNumber: string | null }
+export interface AuditSection {
+  key: 'stock_no_place' | 'operating_at_closed' | 'terminal_no_doc' | 'keeper_text' | 'repair_overdue' | 'unconfirmed' | 'sites_no_card'
+  title: string; hint: string; action: string; count: number; items: (AuditUnit | AuditSite)[]
+}
+export const getEquipmentAudit = (companyId: string) =>
+  get<{ sections: AuditSection[]; units: number; noCost: number }>('/api/equipment/audit', { company_id: companyId })
+export const createCardsFromSites = (companyId: string, body: { siteIds: string[]; docDate?: string; basis?: string }) =>
+  post<EquipmentDocument>(`/api/equipment/units/from-sites?company_id=${companyId}`, body)
 

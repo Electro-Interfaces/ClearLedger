@@ -334,7 +334,9 @@ async def apply_movement(db: AsyncSession, company_id, user: User | None,
 
     # целевое состояние
     if op == "correction":
-        to_state = payload.get("to_state")
+        # Без нового состояния — оформить факт как есть (списана/возвращена без
+        # документа): состояние единицы не меняется.
+        to_state = payload.get("to_state") or unit.state
         if to_state not in STATES:
             raise HTTPException(400, f"Недопустимое состояние корректировки: {to_state}")
         if not (payload.get("comment") or "").strip():
@@ -376,7 +378,10 @@ async def apply_movement(db: AsyncSession, company_id, user: User | None,
 
     custod = rule["custodian"]
     if op == "correction":
-        unit.current_location_id = to_loc_id
+        if payload.get("to_location_id") or not payload.get("keep_location"):
+            unit.current_location_id = to_loc_id
+        else:
+            to_loc_id = unit.current_location_id
         unit.custodian = payload.get("custodian") or unit.custodian
         unit.custodian_name = counterparty or unit.custodian_name
     elif custod == "external":
@@ -450,6 +455,27 @@ async def _sync_passport(db: AsyncSession, company_id, user: User | None,
     ))
 
 
+async def unit_from_site(db: AsyncSession, company_id, site: ServiceLocation) -> EzsEquipmentUnit:
+    """Карточка единицы из паспорта станции: работает на площадке, б/у."""
+    serial = (site.serial_number or "").strip() or None
+    if serial and await _serial_conflict(db, company_id, serial):
+        serial = None  # серийник уже занят другой карточкой — не дублируем ключ
+    unit = EzsEquipmentUnit(
+        company_id=company_id,
+        serial_number=serial,
+        vendor=canon_vendor(site.brand), vendor_raw=site.brand,
+        model=site.model, power_kwt=site.power_kwt,
+        connectors_count=site.connectors_count, connector_types=site.connector_types,
+        inventory_number=site.inventory_number,
+        state="in_operation", is_used=True,
+        current_location_id=site.id, custodian="site",
+        origin_location_id=site.id,
+    )
+    db.add(unit)
+    await db.flush()
+    return unit
+
+
 async def dismantle_from_site(db: AsyncSession, company_id, user: User | None,
                               payload: dict[str, Any]) -> tuple[EzsEquipmentUnit, EzsEquipmentMovement, bool]:
     """Демонтаж станции с площадки → склад. Если карточки единицы нет —
@@ -471,22 +497,7 @@ async def dismantle_from_site(db: AsyncSession, company_id, user: User | None,
 
     created = False
     if unit is None:
-        serial = (site.serial_number or "").strip() or None
-        if serial and await _serial_conflict(db, company_id, serial):
-            serial = None  # серийник уже занят другой карточкой — не дублируем ключ
-        unit = EzsEquipmentUnit(
-            company_id=company_id,
-            serial_number=serial,
-            vendor=canon_vendor(site.brand), vendor_raw=site.brand,
-            model=site.model, power_kwt=site.power_kwt,
-            connectors_count=site.connectors_count, connector_types=site.connector_types,
-            inventory_number=site.inventory_number,
-            state="in_operation", is_used=True,
-            current_location_id=site_id, custodian="site",
-            origin_location_id=site_id,
-        )
-        db.add(unit)
-        await db.flush()
+        unit = await unit_from_site(db, company_id, site)
         created = True
 
     _, move = await apply_movement(db, company_id, user, unit.id, {

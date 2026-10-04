@@ -53,6 +53,47 @@ CONTRACT_TYPES: dict[str, tuple[str, ...]] = {
 # Без контрагента не бывает: железо уходит из наших рук.
 COUNTERPARTY_REQUIRED = {"to_repair", "from_repair", "to_vendor"}
 OWNERSHIP = {"own": "Собственный", "rent": "Арендованный", "custody": "Ответственное хранение у контрагента"}
+REPAIR_KINDS = {"warranty": "Гарантийный", "paid": "Платный"}
+REPAIR_RESULTS = {"repaired": "Отремонтировано", "unrepairable": "Ремонту не подлежит"}
+
+
+def repair_details(op: str, raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Ремонт как заказ: заявка Поддержки, вид, плановый возврат, стоимость, результат."""
+    if op not in ("to_repair", "from_repair") or not raw:
+        return None
+    out: dict[str, Any] = {}
+    ticket = str(raw.get("ticketRef") or "").strip()[:60]
+    if ticket:
+        out["ticketRef"] = ticket
+    if op == "to_repair":
+        kind = raw.get("repairKind") or ""
+        if kind and kind not in REPAIR_KINDS:
+            raise HTTPException(400, "Неизвестный вид ремонта")
+        if kind:
+            out["repairKind"] = kind
+        planned = str(raw.get("plannedReturn") or "")
+        if planned:
+            try:
+                date.fromisoformat(planned)
+            except ValueError:
+                raise HTTPException(400, "Плановая дата возврата из ремонта указана неверно")
+            out["plannedReturn"] = planned
+    else:
+        result = raw.get("result") or ""
+        if result and result not in REPAIR_RESULTS:
+            raise HTTPException(400, "Неизвестный результат ремонта")
+        if result:
+            out["result"] = result
+    for key in ("costEstimate", "costActual"):
+        if raw.get(key) not in (None, ""):
+            try:
+                value = round(float(raw[key]), 2)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Стоимость ремонта — число")
+            if value < 0:
+                raise HTTPException(400, "Стоимость ремонта не может быть отрицательной")
+            out[key] = value
+    return out or None
 
 
 def _today() -> str:
@@ -131,6 +172,7 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
         responsible_from=(p.get("responsible_from") or "").strip()[:200] or None,
         responsible_to=(p.get("responsible_to") or "").strip()[:200] or None,
         basis=(p.get("basis") or "").strip()[:500] or None, comment=(p.get("comment") or "").strip()[:2000] or None,
+        details=repair_details(op, p.get("details")),
         created_by_id=str(user.id) if user else None,
         created_by_name=(user.name or user.email) if user else None,
     )
@@ -145,6 +187,7 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
             "counterparty": cp.name if cp else None, "basis": basis, "comment": doc.comment,
             "custodian": p.get("custodian"), "reserved_for_location_id": p.get("reserved_for_location_id"),
             "to_state": p.get("to_state"), "sync_passport": bool(p.get("sync_passport")),
+            "keep_location": op == "correction" and not doc.to_location_id,
         })
         move.document_id = doc.id
         froms.add(move.from_location_id)
@@ -166,6 +209,7 @@ def _doc_head(d: EzsEquipmentDocument, locs: dict[str, ServiceLocation], units: 
         "fromLocation": name(d.from_location_id), "toLocation": name(d.to_location_id),
         "responsibleFrom": d.responsible_from, "responsibleTo": d.responsible_to,
         "basis": d.basis, "comment": d.comment, "createdBy": d.created_by_name,
+        "details": d.details or {},
         "createdAt": d.created_at.isoformat() if d.created_at else None, "units": units,
     }
 
@@ -276,3 +320,107 @@ async def save_warehouse(db: AsyncSession, company_id, loc_id: str | None, p: di
     loc.extra_metadata = meta
     await db.flush()
     return await warehouse_card(db, company_id, loc)
+
+
+# ── Разбор данных ───────────────────────────────────────────────────────────
+# Учёт оборудования пришёл разовым импортом (21.08.2026) и с тех пор не вёлся. Экран
+# разбора показывает, что в нём не так, списками — и закрывается это документами,
+# а не правкой базы: у каждой поправки остаются номер, дата, автор и основание.
+
+def _unit_brief(u: EzsEquipmentUnit, locs: dict[str, ServiceLocation]) -> dict[str, Any]:
+    loc = locs.get(u.current_location_id) if u.current_location_id else None
+    return {"id": str(u.id), "serialNumber": u.serial_number, "vendor": u.vendor or u.brand, "model": u.model,
+            "state": u.state, "stateLabel": STATE_LABELS.get(u.state, u.state),
+            "location": {"id": loc.id, "name": loc.name, "type": loc.type, "address": loc.address} if loc else None,
+            "keeper": u.keeper, "supplier": u.supplier, "region": u.region}
+
+
+async def audit(db: AsyncSession, company_id) -> dict[str, Any]:
+    U = EzsEquipmentUnit
+    locs = await _locs(db, company_id)
+    units = (await db.execute(select(U).where(U.company_id == company_id))).scalars().all()
+    documented = set((await db.execute(select(EzsEquipmentMovement.unit_id).where(
+        EzsEquipmentMovement.company_id == company_id,
+        EzsEquipmentMovement.op.in_(("write_off", "to_vendor", "correction"))))).scalars().all())
+    closed = {i for i, l in locs.items() if l.type == "ev_charging" and (l.status == "closed" or l.operational_status == "decommissioned")}
+    at_site = {u.current_location_id for u in units if u.state in ("in_operation", "in_installation")}
+    sites_no_card = [l for l in locs.values() if l.type == "ev_charging" and not getattr(l, "is_test", False)
+                     and l.id not in closed and l.id not in at_site]
+    # Ремонт со сроком: последний документ передачи в ремонт по единице.
+    repair_due: dict[Any, EzsEquipmentDocument] = {}
+    rows = (await db.execute(select(EzsEquipmentMovement.unit_id, EzsEquipmentDocument).join(
+        EzsEquipmentDocument, EzsEquipmentDocument.id == EzsEquipmentMovement.document_id).where(
+        EzsEquipmentMovement.company_id == company_id, EzsEquipmentMovement.op == "to_repair")
+        .order_by(EzsEquipmentDocument.doc_date))).all()
+    for uid, d in rows:
+        repair_due[uid] = d
+    today = _today()
+    keeper_units = [u for u in units if (u.keeper or "").strip() and u.state != "in_operation"
+                    and (u.keeper or "").strip() != "Общество"]
+    sections = [
+        {"key": "stock_no_place", "title": "На складе, но склад не указан", "action": "correction_place",
+         "hint": "Укажите склад актом корректировки учёта: единица числится на складе, а на каком — неизвестно.",
+         "items": [_unit_brief(u, locs) for u in units if u.state in ("in_stock_new", "in_stock_used", "reserved") and not u.current_location_id]},
+        {"key": "operating_at_closed", "title": "В эксплуатации на закрытой станции", "action": "dismantle",
+         "hint": "Станция закрыта или выведена из эксплуатации, а единица числится работающей: оформите демонтаж на склад или списание.",
+         "items": [_unit_brief(u, locs) for u in units if u.state == "in_operation" and u.current_location_id in closed]},
+        {"key": "terminal_no_doc", "title": "Списаны или возвращены без документа", "action": "correction_doc",
+         "hint": "Состояние пришло из файла, документа нет: оформите акт задним числом (корректировка без смены состояния) с датой и основанием.",
+         "items": [_unit_brief(u, locs) for u in units if u.state in ("written_off", "returned_to_vendor") and u.id not in documented]},
+        {"key": "keeper_text", "title": "Хранитель записан текстом", "action": "transfer",
+         "hint": "Хранитель и договор хранения — текстом в карточке. Заведите склад ответственного хранения у контрагента с договором и переместите единицы на него.",
+         "items": [{**_unit_brief(u, locs), "group": (u.keeper or "").strip()} for u in keeper_units]},
+        {"key": "repair_overdue", "title": "В ремонте дольше планового срока", "action": "from_repair",
+         "hint": "Плановая дата возврата из ремонта прошла.",
+         "items": [{**_unit_brief(u, locs), "due": (repair_due[u.id].details or {}).get("plannedReturn"),
+                    "document": repair_due[u.id].number}
+                   for u in units if u.state == "in_repair" and u.id in repair_due
+                   and (repair_due[u.id].details or {}).get("plannedReturn", "9999") < today]},
+        {"key": "unconfirmed", "title": "Данные не подтверждены поставщиком", "action": "open",
+         "hint": "Количество портов или модель ждут уточнения у поставщика.",
+         "items": [{**_unit_brief(u, locs), "reason": u.unconfirmed_reason} for u in units if not u.data_confirmed]},
+        {"key": "sites_no_card", "title": "Действующие станции без карточки оборудования", "action": "create_from_site",
+         "hint": "Станция работает, а единицы оборудования на ней нет: заведите карточку по паспорту станции.",
+         "items": [{"id": l.id, "name": l.name, "address": l.address, "brand": l.brand, "model": l.model,
+                    "serialNumber": l.serial_number} for l in sorted(sites_no_card, key=lambda x: x.name or "")]},
+    ]
+    for s in sections:
+        s["count"] = len(s["items"])
+    no_cost = sum(1 for u in units if u.purchase_amount is None and u.state not in ("written_off", "returned_to_vendor"))
+    return {"sections": sections, "units": len(units), "noCost": no_cost}
+
+
+async def cards_from_sites(db: AsyncSession, company_id, user: User | None, site_ids: list[str],
+                           doc_date: str | None = None, basis: str | None = None) -> dict[str, Any]:
+    """Карточки единиц по паспортам действующих станций — одним актом корректировки учёта."""
+    from app.services.ezs_equipment import _movement, unit_from_site
+    ids = list(dict.fromkeys(str(i) for i in site_ids))
+    if not ids:
+        raise HTTPException(400, "Выберите станции")
+    doc_date = doc_date or _today()
+    sites = (await db.execute(select(ServiceLocation).where(ServiceLocation.company_id == company_id,
+                                                            ServiceLocation.id.in_(ids)))).scalars().all()
+    if len(sites) != len(ids) or any(s.type != "ev_charging" for s in sites):
+        raise HTTPException(400, "Среди выбранных есть не станции пространства")
+    busy = set((await db.execute(select(EzsEquipmentUnit.current_location_id).where(
+        EzsEquipmentUnit.company_id == company_id, EzsEquipmentUnit.current_location_id.in_(ids),
+        EzsEquipmentUnit.state.in_(("in_operation", "in_installation"))))).scalars().all())
+    if busy:
+        raise HTTPException(409, f"На {len(busy)} станциях карточка уже есть — обновите разбор")
+    number = await next_number(db, company_id, "correction", doc_date)
+    doc = EzsEquipmentDocument(
+        company_id=company_id, op="correction", number=number, doc_date=doc_date,
+        basis=(basis or "Карточки заведены по паспортам станций").strip()[:500],
+        created_by_id=str(user.id) if user else None,
+        created_by_name=(user.name or user.email) if user else None)
+    db.add(doc)
+    await db.flush()
+    for s in sites:
+        unit = await unit_from_site(db, company_id, s)
+        move = _movement(company_id, unit, "correction", user=user, to_location_id=s.id, from_state=None,
+                         to_state="in_operation", occurred_on=doc_date,
+                         basis=f"Акт корректировки учёта № {number} от {doc_date}; {doc.basis}")
+        move.document_id = doc.id
+        db.add(move)
+    await db.flush()
+    return await get_document(db, company_id, doc.id)

@@ -2825,6 +2825,7 @@ async def create_all() -> None:
             "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS document_id UUID",
             "CREATE INDEX IF NOT EXISTS ix_ezs_equipment_movements_document_id "
             "ON ezs_equipment_movements (document_id)",
+            "ALTER TABLE IF EXISTS ezs_equipment_documents ADD COLUMN IF NOT EXISTS details JSONB",
             "CREATE INDEX IF NOT EXISTS ix_ezs_unit_supply "
             "ON ezs_equipment_units (company_id, supply_id)",
         ):

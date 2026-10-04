@@ -524,6 +524,13 @@ class EquipmentDocIn(BaseModel):
     reservedForLocationId: str | None = None
     toState: str | None = None
     syncPassport: bool = False
+    details: dict[str, Any] | None = None
+
+
+class SitesToCardsIn(BaseModel):
+    siteIds: list[str] = Field(default_factory=list)
+    docDate: str | None = None
+    basis: str | None = None
 
 
 class WarehouseIn(BaseModel):
@@ -582,8 +589,30 @@ async def documents_post(
         "contract_id": body.contractId, "responsible_from": body.responsibleFrom,
         "responsible_to": body.responsibleTo, "basis": body.basis, "comment": body.comment,
         "custodian": body.custodian, "reserved_for_location_id": body.reservedForLocationId,
-        "to_state": body.toState, "sync_passport": body.syncPassport,
+        "to_state": body.toState, "sync_passport": body.syncPassport, "details": body.details,
     })
+
+
+@router.get("/audit")
+async def equipment_audit(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Разбор данных складского учёта: что не так и каким документом закрывается."""
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.audit(db, cid)
+
+
+@router.post("/units/from-sites")
+async def units_from_sites(
+    body: SitesToCardsIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Карточки оборудования по паспортам действующих станций — одним актом корректировки."""
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.cards_from_sites(db, cid, user, body.siteIds, body.docDate, body.basis)
 
 
 @router.get("/warehouses/{loc_id}/card")

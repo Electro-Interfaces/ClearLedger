@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   UNIT_OP_META, UNIT_STATE_META, getEquipmentDocsMeta, opAllowedFor, postEquipmentDocument,
-  type EquipmentUnit, type UnitOp, type UnitState,
+  type EquipmentUnit, type RepairDetails, type UnitOp, type UnitState,
 } from '@/services/equipmentService'
 import type { ServiceLocation } from '@/types/location'
 import { CounterpartyContractPicker } from './CounterpartyContractPicker'
@@ -43,7 +43,7 @@ function LocSelect({ items, value, onChange, label }: { items: ServiceLocation[]
   </label>
 }
 
-export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehouses, sites, onClose, onDone }: {
+export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehouses, sites, onClose, onDone, correctionMode, presetBasis }: {
   companyId: string
   units: Pick<EquipmentUnit, 'id' | 'serialNumber' | 'model' | 'vendor' | 'state' | 'location'>[]
   op?: UnitOp | null
@@ -51,6 +51,9 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
   sites: ServiceLocation[]
   onClose: () => void
   onDone?: () => void
+  /** Корректировка из «Разбора данных»: указать склад или оформить существующий факт документом. */
+  correctionMode?: 'place' | 'doc'
+  presetBasis?: string
 }) {
   const qc = useQueryClient()
   const { company } = useCompany()
@@ -63,7 +66,8 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
   const [party, setParty] = useState({ counterpartyId: '', contractId: '' })
   const [responsibleFrom, setResponsibleFrom] = useState('')
   const [responsibleTo, setResponsibleTo] = useState('')
-  const [basis, setBasis] = useState('')
+  const [basis, setBasis] = useState(presetBasis ?? '')
+  const [repair, setRepair] = useState<RepairDetails>({})
   const [comment, setComment] = useState('')
   const [custodian, setCustodian] = useState<'contractor' | 'vendor'>('contractor')
   const [syncPassport, setSyncPassport] = useState(false)
@@ -76,18 +80,20 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
       contractId: party.contractId || undefined, responsibleFrom: responsibleFrom.trim() || undefined,
       responsibleTo: responsibleTo.trim() || undefined, basis: basis.trim() || undefined, comment: comment.trim() || undefined,
       custodian: op === 'to_repair' ? custodian : undefined, syncPassport: op === 'commissioning' ? syncPassport : undefined,
+      details: op === 'to_repair' || op === 'from_repair' ? repair : undefined,
     }),
     onSuccess: (doc) => {
       toast.success(`${doc.title} № ${doc.number} проведён: ${doc.units} ед.`)
       for (const w of doc.warnings ?? []) toast.warning(w)
-      for (const k of ['eq-units', 'eq-unit', 'eq-overview', 'eq-movements', 'eq-warehouses', 'equipment-warehouses', 'eq-documents']) void qc.invalidateQueries({ queryKey: [k] })
+      for (const k of ['eq-units', 'eq-unit', 'eq-overview', 'eq-movements', 'eq-warehouses', 'equipment-warehouses', 'eq-documents', 'eq-audit']) void qc.invalidateQueries({ queryKey: [k] })
       try { printEquipmentDocument(doc, company?.name || 'Пространство') } catch (e) { toast.info(e instanceof Error ? e.message : String(e)) }
       onDone?.(); onClose()
     },
     onError: (e) => toast.error('Документ не проведён', { description: e instanceof Error ? e.message : String(e) }),
   })
   const problem = !op ? 'Выберите операцию'
-    : NEEDS_WAREHOUSE.includes(op) && !toLocationId ? 'Выберите склад-получатель'
+    : (NEEDS_WAREHOUSE.includes(op) || (op === 'correction' && correctionMode === 'place')) && !toLocationId ? 'Выберите склад-получатель'
+    : op === 'correction' && !comment.trim() ? 'Для корректировки учёта обязателен комментарий: что и почему исправляется'
     : op === 'to_installation' && !toLocationId ? 'Выберите площадку ЭЗС'
     : needsCp && !party.counterpartyId ? 'Выберите контрагента: оборудование уходит из наших рук'
     : !docDate ? 'Укажите дату документа' : null
@@ -112,6 +118,22 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
         </div>
         {op && NEEDS_WAREHOUSE.includes(op) && <LocSelect label="Склад-получатель" items={warehouses.filter((w) => !(op === 'transfer' && units.every((u) => u.location?.id === w.id)))} value={toLocationId} onChange={setToLocationId} />}
         {op === 'to_installation' && <LocSelect label="Площадка ЭЗС" items={sites} value={toLocationId} onChange={setToLocationId} />}
+        {op === 'correction' && correctionMode === 'place' && <LocSelect label="Склад-получатель" items={warehouses} value={toLocationId} onChange={setToLocationId} />}
+        {op === 'correction' && correctionMode === 'doc' && <p className="text-xs text-muted-foreground">Состояние и место единиц не меняются: акт оформляет уже случившийся факт — укажите дату, основание и, если был, контрагента и договор.</p>}
+        {(op === 'to_repair' || op === 'from_repair') && <div className="grid gap-2 sm:grid-cols-4 rounded-md border p-2">
+          <label className="text-xs">Заявка Поддержки №<Input aria-label="Номер заявки Поддержки" value={repair.ticketRef ?? ''} onChange={(e) => setRepair({ ...repair, ticketRef: e.target.value })} className="h-9" /></label>
+          {op === 'to_repair' ? <>
+            <label className="text-xs">Вид ремонта<select aria-label="Вид ремонта" className={selectClass} value={repair.repairKind ?? ''} onChange={(e) => setRepair({ ...repair, repairKind: (e.target.value || undefined) as RepairDetails['repairKind'] })}>
+              <option value="">—</option><option value="warranty">Гарантийный</option><option value="paid">Платный</option></select></label>
+            <label className="text-xs">Плановый возврат<Input aria-label="Плановый возврат из ремонта" type="date" value={repair.plannedReturn ?? ''} onChange={(e) => setRepair({ ...repair, plannedReturn: e.target.value || undefined })} className="h-9" /></label>
+            <label className="text-xs">Оценка стоимости, ₽<Input aria-label="Оценка стоимости ремонта" type="number" min={0} value={repair.costEstimate ?? ''} onChange={(e) => setRepair({ ...repair, costEstimate: e.target.value === '' ? undefined : Number(e.target.value) })} className="h-9" /></label>
+          </> : <>
+            <label className="text-xs">Результат<select aria-label="Результат ремонта" className={selectClass} value={repair.result ?? ''} onChange={(e) => setRepair({ ...repair, result: (e.target.value || undefined) as RepairDetails['result'] })}>
+              <option value="">—</option><option value="repaired">Отремонтировано</option><option value="unrepairable">Ремонту не подлежит</option></select></label>
+            <label className="text-xs">Стоимость ремонта, ₽<Input aria-label="Фактическая стоимость ремонта" type="number" min={0} value={repair.costActual ?? ''} onChange={(e) => setRepair({ ...repair, costActual: e.target.value === '' ? undefined : Number(e.target.value) })} className="h-9" /></label>
+          </>}
+        </div>}
+        {op === 'from_repair' && repair.result === 'unrepairable' && <p className="text-xs text-amber-700 dark:text-amber-400">Единица вернётся на склад как б/у; после этого оформите акт списания (ОС-4).</p>}
         {op === 'to_repair' && <label className="text-xs block">Кому передаётся
           <select aria-label="Кому передаётся" className={selectClass} value={custodian} onChange={(e) => setCustodian(e.target.value as 'contractor' | 'vendor')}>
             <option value="contractor">Подрядчику (ремонт)</option><option value="vendor">Производителю (гарантия)</option></select></label>}
