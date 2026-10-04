@@ -9,7 +9,7 @@
  * Проект открывается прямо в разделе (`?project=`): «назад» возвращает в реестр
  * интеграций, а не в общий список строительных проектов.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2, Plus, RefreshCw, AlertTriangle } from 'lucide-react'
@@ -27,19 +27,35 @@ import { plural } from '@/lib/textUtils'
 const nf0 = new Intl.NumberFormat('ru-RU')
 const DIRECTION_SHORT: Record<string, string> = { outgoing: 'Наши → партнёр', incoming: 'Партнёр → нам' }
 
-function useOpenHere() {
+// Карточка открыта из конкретного пункта раздела (`pfrom`): переход между «Реестром»
+// и «Отчётом» её закрывает. Раньше `?project=` переживал смену пункта, и «Отчёт»
+// продолжал показывать карточку — нажатие на пункт выглядело как «ничего не
+// происходит» (замечание МАГа 04.10.2026).
+function useOpenHere(view: 'registry' | 'report') {
   const [, setParams] = useSearchParams()
   return (id: string) => setParams((prev) => {
     const next = new URLSearchParams(prev)
     next.set('project', id)
+    next.set('pfrom', view)
     next.delete('ptab')
     return next
   }, { replace: true })
 }
 
 export function IntegrationsPanel({ companyId, view }: { companyId: string; view: 'registry' | 'report' }) {
-  const [params] = useSearchParams()
-  if (params.get('project')) return <ProjectWorkspacePanel companyId={companyId} />
+  const [params, setParams] = useSearchParams()
+  const own = !!params.get('project') && params.get('pfrom') === view
+  // Ушли в другой пункт — карточка закрыта: иначе возврат в прежний пункт снова
+  // показал бы брошенную карточку вместо списка.
+  useEffect(() => {
+    if (!params.get('project') || own) return
+    setParams((prev) => {
+      const next = new URLSearchParams(prev)
+      for (const k of ['project', 'pfrom', 'ptab']) next.delete(k)
+      return next
+    }, { replace: true })
+  }, [params, own, setParams])
+  if (own) return <ProjectWorkspacePanel companyId={companyId} />
   return view === 'report' ? <IntegrationsReport companyId={companyId} /> : <IntegrationsRegistry companyId={companyId} />
 }
 
@@ -104,7 +120,7 @@ const CLOSED = ['archive', 'live']
 function IntegrationsRegistry({ companyId }: { companyId: string }) {
   const q = usePortfolio(companyId)
   const qc = useQueryClient()
-  const open = useOpenHere()
+  const open = useOpenHere('registry')
   const [search, setSearch] = useState('')
   const [scope, setScope] = useState<'active' | 'all' | 'closed'>('active')
   const [creating, setCreating] = useState(false)
@@ -221,7 +237,7 @@ function IntegrationsRegistry({ companyId }: { companyId: string }) {
 
 function IntegrationsReport({ companyId }: { companyId: string }) {
   const q = usePortfolio(companyId)
-  const open = useOpenHere()
+  const open = useOpenHere('report')
   if (!q.data) return <LoadState q={q} what="отчёт по интеграциям" />
   const d: IntegrationsPortfolio = q.data
   const s = d.summary
