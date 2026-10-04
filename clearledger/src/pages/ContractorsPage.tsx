@@ -53,6 +53,7 @@ import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
 import { getSiteMembers } from '@/services/sitesService'
 import { ContractAppsField, saveContractLinks, useAppLabel, type ContractLinkDraft } from '@/components/reference/ContractAppsField'
 import { useSearchParams } from 'react-router-dom'
+import { ContractDocumentsBlock } from '@/components/reference/ContractDocumentsBlock'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import type { Counterparty, Contract, CounterpartyType } from '@/types'
 
@@ -263,6 +264,7 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
             <Req label="Подписант контрагента" value={[c.signerCp, c.signerCpPosition, c.signerCpBasis && `на основании: ${c.signerCpBasis}`].filter(Boolean).join(', ') || undefined} />
             <Req label="Комментарий" value={c.comment || (raw.Комментарий as string)} span />
           </div>
+          <ContractDocumentsBlock contract={c} />
           <ContractLinksBlock id={c.id} />
           <ContractUsageBlock id={c.id} />
           {/* Условие — это договор, прочитанный учётом: «5000 ₽ в месяц до 10-го
@@ -1363,6 +1365,8 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
   const [params, setParams] = useSearchParams()
   const appFilter = params.get('app') ?? ''
   const projectFilter = params.get('project') ?? ''
+  // Один договор — переход из «Документов» пространства («Карточка договора»).
+  const contractFilter = params.get('contract') ?? ''
   const setParam = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n }, { replace: true })
   const appCounts = useMemo(() => {
     const m = new Map<string, number>()
@@ -1383,6 +1387,7 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
       const bd = bindings.data?.contracts[c.id]
       if (appFilter === '-' ? bd?.apps.length : appFilter && !bd?.apps.includes(appFilter)) return false
       if (projectFilter && !bd?.projects.includes(projectFilter)) return false
+      if (contractFilter && c.id !== contractFilter) return false
       if (!q) return true
       const name = cpName.get(c.counterpartyId) ?? ''
       return c.number.toLowerCase().includes(q) || name.toLowerCase().includes(q)
@@ -1408,7 +1413,7 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
       if (!bd) return -1
       return sign * ad.localeCompare(bd)
     })
-  }, [allContracts, search, typeFilter, cpName, sortKey, sortDir, grouped, bindings.data, appFilter, projectFilter])
+  }, [allContracts, search, typeFilter, cpName, sortKey, sortDir, grouped, bindings.data, appFilter, projectFilter, contractFilter])
   const groupStat = useMemo(() => {
     const m = new Map<string, { n: number; sum: number }>()
     for (const c of filtered) { const s = m.get(c.counterpartyId) ?? { n: 0, sum: 0 }; s.n++; s.sum += c.amountLimit ?? 0; m.set(c.counterpartyId, s) }
@@ -1451,6 +1456,9 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
             {appCounts.map(([a, n]) => <option key={a} value={a}>{appLabel(a)} · {n}</option>)}
             <option value="-">Ни к чему не относится · {allContracts.filter((c) => !bindings.data?.contracts[c.id]?.apps.length).length}</option>
           </select>
+          {contractFilter && <span className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5">
+            Договор № {allContracts.find((c) => c.id === contractFilter)?.number ?? '…'}
+            <button type="button" aria-label="Показать все договоры" onClick={() => setParam('contract', '')}>×</button></span>}
           {projectFilter && <span className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5">
             Проект: {bindings.data?.projects[projectFilter] ?? projectFilter}
             <button type="button" aria-label="Снять фильтр проекта" onClick={() => setParam('project', '')}>×</button></span>}

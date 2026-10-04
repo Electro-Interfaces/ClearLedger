@@ -249,3 +249,18 @@ async def test_contract_app_links(auth_client: AsyncClient):
     assert b["contracts"][ct["id"]]["apps"] == ["ops"] and b["contracts"][ct["id"]]["linked"] == ["ops"]
     left = (await auth_client.delete(f"/api/references/contracts/{ct['id']}/links/{links[0]['id']}")).json()
     assert left == []
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_space_documents_tree(auth_client: AsyncClient):
+    """«Документы» пространства: каждый договор — папка контрагента с карточкой договора."""
+    org_id = await _organization(auth_client)
+    cp = await _post(auth_client, "/api/references/counterparties", {
+        "company_id": "gig", "inn": "7800000701", "name": "Арендодатель-7 ООО",
+    })
+    ct = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "А/7", "date": "2026-07-01", "type": "Аренда",
+        "counterpartyId": cp["id"], "organizationId": org_id})
+    docs = (await auth_client.get("/api/references/space-documents", params={"company_id": "gig"})).json()
+    card = next(d for d in docs if d.get("contractId") == ct["id"] and d["docType"] == "contract_card")
+    assert card["catalog"] == "Договоры/Арендодатель-7 ООО/№ А∕7 от 2026-07-01"   # «/» в номере не рвёт путь

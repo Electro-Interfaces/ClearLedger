@@ -134,13 +134,33 @@ STARTER_KINDS_ENERGY: list[dict[str, Any]] = [
 ]
 
 
+# Документы договора: доп. соглашения, акты, спецификации — то, что 1С держит табличной
+# частью «ДополнительныеСоглашения» и файлом договора. Договор один на пространство
+# (справочник), а его бумаги живут здесь, в «Треке», и привязываются к нему связью
+# `annex_of → contract:<id>`: предмет карточки уникален, а бумаг у договора много.
+STARTER_KINDS_CONTRACT: list[dict[str, Any]] = [
+    {"code": "contract_scan", "name": "Договор (подписанный экземпляр)", "family": "contract",
+     "direction": "none", "number_prefix": "ДГ", "desc": "Скан или файл самого договора"},
+    {"code": "contract_supplement", "name": "Дополнительное соглашение", "family": "contract",
+     "direction": "none", "number_prefix": "ДС", "desc": "Изменение условий: срок, сумма, предмет, станции"},
+    {"code": "contract_spec", "name": "Спецификация / приложение", "family": "contract",
+     "direction": "none", "number_prefix": "СП", "desc": "Приложение к договору: перечень, график, расчёт"},
+    {"code": "contract_act", "name": "Акт по договору", "family": "contract",
+     "direction": "none", "number_prefix": "АД", "desc": "Акт оказанных услуг, выполненных работ, сверки"},
+    {"code": "contract_invoice", "name": "Счёт по договору", "family": "contract",
+     "direction": "none", "number_prefix": "СЧ", "desc": "Счёт, счёт-фактура, УПД"},
+    {"code": "contract_claim", "name": "Претензия / письмо по договору", "family": "contract",
+     "direction": "none", "number_prefix": "ПР", "desc": "Претензия, уведомление, переписка по исполнению"},
+]
+
+
 def starter_kinds(profile_id: str | None) -> list[dict[str, Any]]:
     """Что сеять этому пространству: общее делопроизводство плюс профильное.
 
     Офису и рознице виды под проекты ЭЗС не нужны — они бы просто засоряли
     список, а пустой вид в реестре читается как незаполненный, а не как лишний.
     """
-    return STARTER_KINDS + (STARTER_KINDS_ENERGY if profile_id == "energy" else [])
+    return STARTER_KINDS + STARTER_KINDS_CONTRACT + (STARTER_KINDS_ENERGY if profile_id == "energy" else [])
 
 
 # ── Помощники ────────────────────────────────────────────────────────────────
@@ -1381,6 +1401,37 @@ async def create_starter_kinds(
     if added:
         await db.commit()
     return {"added": added}
+
+
+@router.get("/contract-kinds")
+async def contract_kinds(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Виды документов договора; недостающие заводятся.
+
+    Без админа: это не настройка делопроизводства, а системный набор, без которого к
+    договору нельзя приложить ни одной бумаги. Переименовать вид админ может как обычно.
+    """
+    cid = await assert_company_product(company_id, current_user, db, "docs")
+    have = {k.code: k for k in (await db.execute(select(DocKind).where(
+        DocKind.company_id == cid, DocKind.code.in_([s["code"] for s in STARTER_KINDS_CONTRACT])))).scalars()}
+    added = False
+    for i, spec in enumerate(STARTER_KINDS_CONTRACT):
+        if spec["code"] in have:
+            continue
+        k = DocKind(company_id=cid, code=spec["code"], name=spec["name"], description=spec.get("desc"),
+                    family=spec["family"], direction=spec["direction"], number_prefix=spec["number_prefix"],
+                    number_template="{prefix}-{yyyy}-{n:04d}", sort_order=200 + i)
+        db.add(k)
+        have[spec["code"]] = k
+        added = True
+    if added:
+        await db.commit()
+        for k in have.values():
+            await db.refresh(k)
+    return {"kinds": [_kind_out(have[s["code"]]) for s in STARTER_KINDS_CONTRACT if have[s["code"]].is_active]}
 
 
 class ProcessStartIn(BaseModel):

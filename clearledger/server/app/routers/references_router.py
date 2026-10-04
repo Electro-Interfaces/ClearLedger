@@ -1029,6 +1029,18 @@ async def delete_contract_link(
     return await _contract_links_resp(db, c)
 
 
+@router.get("/space-documents")
+async def get_space_documents(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Дерево «Документов» пространства: договоры с их бумагами, документы проектов, «Трек»."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.services.space_documents import space_documents
+    return await space_documents(db, cid, current_user)
+
+
 @router.get("/contracts/{item_id}/usage")
 async def get_contract_usage(
     item_id: str,

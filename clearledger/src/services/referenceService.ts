@@ -463,6 +463,17 @@ export async function deleteContract(companyId: string, id: string): Promise<boo
 
 export interface ContractUsage { app: string; label: string; count: number }
 
+/** Лист «Документов» пространства: документ с файлом или карточка договора. */
+export interface SpaceDocument {
+  id: string; docType: 'space_file' | 'contract_card'; title: string; catalog: string; date: string
+  contractId?: string | null; docId?: string; fileId?: string | null; fileName?: string | null; size?: number | null; status?: string | null
+}
+
+/** Дерево «Документов» пространства: договоры с их бумагами, документы проектов, «Трек». */
+export async function getSpaceDocuments(companyId: string): Promise<SpaceDocument[]> {
+  return get<SpaceDocument[]>('/api/references/space-documents', { company_id: companyId })
+}
+
 /** Где договор используется (по приложениям). Непустой ответ — удалить нельзя, только закрыть. */
 export async function getContractUsage(id: string): Promise<ContractUsage[]> {
   return get<ContractUsage[]>(`/api/references/contracts/${id}/usage`)
