@@ -342,3 +342,24 @@ def test_сроки_держит_пункт_2_8_а_не_бренд():
     data["results"]["2.8"] = {"comment": "ок"}
     assert integration.confirmation_problem(s, "2.6", data) is None
     assert integration.confirmation_problem(s, "2.8", data)
+
+def test_правило_сессий_партнёра_держит_5_12():
+    s = site("construction")
+    data = _with(s)
+    data["results"]["5.12"] = {"comment": "проверено на тестовой сессии"}
+    assert integration.confirmation_problem(s, "5.12", data)
+    data["settlement"] = {"matchKind": "account", "matchValues": "5;\n 17, 5"}
+    assert integration.match_values(data["settlement"]) == ["17", "5"]
+    assert integration.confirmation_problem(s, "5.12", data) is None
+    with pytest.raises(ValueError):
+        integration.normalize({"revision": 0, "settlement": {"matchKind": "телефон"}}, integration.read(s))
+
+
+def test_период_сверки_датами():
+    s = site("construction")
+    row = {"kind": "monthly", "period": "ноябрь", "from": "2026-11-01", "to": "2026-11-30"}
+    data = integration.normalize({"revision": 0, "reconciliations": [row]}, integration.read(s))
+    assert (data["reconciliations"][0]["from"], data["reconciliations"][0]["to"]) == ("2026-11-01", "2026-11-30")
+    with pytest.raises(ValueError):
+        integration.normalize({"revision": 0, "reconciliations": [{**row, "from": "2026-12-01"}]}, integration.read(s))
+

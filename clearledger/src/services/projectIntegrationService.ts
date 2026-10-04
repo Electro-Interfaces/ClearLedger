@@ -8,6 +8,15 @@ export type IntegrationSection = 'partner' | 'commercial' | 'settlement' | 'data
 export const INTEGRATION_PAYERS = { partner: 'Партнёр платит нам', us: 'Мы платим партнёру', none: 'Без расчётов' }
 export const INTEGRATION_MODELS = { commission: 'Комиссия, %', fixed: 'Фиксированная плата', margin: 'Наценка к тарифу', none: 'Без оплаты' }
 export const CONNECT_BASIS = { check: 'Проверено у принимающей стороны', session: 'Прошла первая сессия' }
+export const MATCH_KINDS = { account: 'Договорной аккаунт клиента', client: 'Юрлицо клиента в сессии', card: 'Номера карт' }
+export interface PartnerSessions {
+  rule: { kind: keyof typeof MATCH_KINDS; label: string; values: string[] }; from: string; to: string
+  total: { sessions: number; kwh: number; amount: number }
+  byMonth: { month: string; sessions: number; kwh: number; amount: number }[]
+  sample: { at: string | null; station: string | null; client: string | null; card: string | null; kwh: number; amount: number }[]
+}
+export const getPartnerSessions = (companyId: string, siteId: string, from?: string, to?: string) =>
+  get<PartnerSessions>(`/api/sites/${siteId}/integration/sessions`, { company_id: companyId, from: from || undefined, to: to || undefined })
 export const TEST_STATUSES = { pending: 'Не проведено', passed: 'Пройдено', failed: 'Замечание', na: 'Неприменимо' }
 export interface IntegrationScenario {
   id: string; name: string; direction: 'outgoing' | 'incoming'; format: 'information' | 'roaming'
@@ -22,7 +31,7 @@ export interface IntegrationTest {
   sessionRef: string; comment: string; docId: string; byName?: string; at?: string
 }
 export interface IntegrationReconciliation {
-  id: string; kind: 'pilot' | 'monthly'; period: string; resolution: string; docId: string
+  id: string; kind: 'pilot' | 'monthly'; period: string; resolution: string; docId: string; from?: string; to?: string
   ours: { sessions: number; kwh: number; amount: number }; partner: { sessions: number; kwh: number; amount: number }
   byName?: string; at?: string
 }

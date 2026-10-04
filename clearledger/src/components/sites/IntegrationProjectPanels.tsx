@@ -11,7 +11,7 @@ import { getProjectCase, openProjectCase, getSiteDocs, downloadSiteDoc, uploadSi
 import {
   getIntegration, getIntegrationStations, saveIntegration, confirmIntegration,
   INTEGRATION_DIRECTIONS, INTEGRATION_FORMATS, INTEGRATION_PAYERS, INTEGRATION_MODELS, CONNECT_BASIS, TEST_STATUSES,
-  isRetired, reconState,
+  isRetired, reconState, MATCH_KINDS, getPartnerSessions, type PartnerSessions as PartnerSessionsData,
   type IntegrationData, type IntegrationSection, type IntegrationScenario,
   type IntegrationDocument, type IntegrationStation, type IntegrationTask, type IntegrationResult,
   type IntegrationTest, type IntegrationReconciliation, type IntegrationListVersion,
@@ -258,6 +258,7 @@ export function IntegrationChecklist(props: Props) {
     <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}><DialogContent className="sm:max-w-4xl w-[96vw] max-h-[90dvh] overflow-y-auto"><DialogHeader><DialogTitle>{editing?.key} · {editing?.label}</DialogTitle></DialogHeader>
       {editing && <><p className="text-xs text-muted-foreground">Связанные данные сохраняются в паспорте. Их заполнение само по себе не подтверждает пункт.</p>
         {[editing.section, ...(EXTRA_EDITORS[editing.key] || [])].map((section) => <TaskEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh} />)}
+        {editing.key === '5.12' && <PartnerSessionsRule key={`match:${data.revision}`} data={data} props={props} onSaved={refresh} />}
         {editing.key === '2.8' && <PhaseDates key={`dates:${data.revision}`} props={props} state={query.data} onSaved={refresh} />}
         {editing.key === '1.4' && <p className="text-sm">Назначьте руководителя в «Работе»; сейчас: {props.site.ownerName || 'не назначен'}.</p>}
         <ResultEditor key={`${editing.key}:${data.revision}`} task={editing} props={props} data={data} onSaved={refresh} />
@@ -325,6 +326,7 @@ export function IntegrationAccountingFields(props: Props) {
     <fieldset className="max-h-64 overflow-auto space-y-2"><legend className="text-sm font-medium">Договоры проекта</legend>{(contracts.data || []).map((c) => <label key={c.id} className="flex gap-2 text-sm"><input type="checkbox" checked={pickedContracts.includes(c.id)} onChange={(e) => setPickedContracts(e.target.checked ? [...pickedContracts, c.id] : pickedContracts.filter((id) => id !== c.id))} />{c.number} · {c.date} · {c.type}</label>)}</fieldset>
     {(counterparties.isError || contracts.isError) && <p role="alert">Не удалось загрузить справочник учётной системы</p>}
     <Button disabled={busy || counterparties.isLoading || contracts.isLoading || counterparties.isError || contracts.isError} onClick={() => void save()}>Сохранить связи</Button>
+    <PartnerSessionsRule key={`match:${query.data.data.revision}`} data={query.data.data} props={props} onSaved={refresh} />
     <ReconciliationsEditor key={`recon:${query.data.data.revision}`} data={query.data.data} props={props} onSaved={refresh} />
   </section>
 }
@@ -513,6 +515,15 @@ function ReconciliationsEditor({ data, props, onSaved }: { data: IntegrationData
     finally { setBusy(false) }
   }
   const cols = [['sessions', 'Сессии'], ['kwh', 'кВт·ч'], ['amount', 'Сумма, ₽']] as const
+  // «Наш учёт» не вводится руками: он считается по сессиям партнёра из учёта за даты
+  // сверки. Руками вводится только сторона партнёра — из его отчёта.
+  const fillOurs = async (r: IntegrationReconciliation) => {
+    try {
+      const res = await getPartnerSessions(props.companyId, props.site.id, r.from, r.to)
+      change(r.id, { ours: { ...res.total } })
+      toast.success(`Из учёта: ${res.total.sessions} сессий, ${res.total.kwh} кВт·ч, ${res.total.amount} ₽ — сохраните сверку`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось посчитать сессии') }
+  }
   return <section className="rounded-md border p-3 space-y-3 mt-3">
     <h3 className="text-sm font-semibold">Сверки с партнёром</h3>
     <p className="text-xs text-muted-foreground">Цифры двух сторон: сессии — штука в штуку, кВт·ч и деньги — до 0,1 кВт·ч и 1 ₽. Расхождение закрывается только урегулированием с актом. Пробная сверка закрывает пункт 5.13, первая месячная с подписанным актом — 6.14; дальше сверка — регулярная работа «Эксплуатации».</p>
@@ -523,6 +534,12 @@ function ReconciliationsEditor({ data, props, onSaved }: { data: IntegrationData
           <label className="text-xs">Вид<select aria-label="Вид сверки" className={selectClass} value={r.kind} onChange={(e) => change(r.id, { kind: e.target.value as IntegrationReconciliation['kind'] })}>{Object.entries(RECON_KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
           <label className="text-xs">Период<Input aria-label="Период сверки" value={r.period} onChange={(e) => change(r.id, { period: e.target.value })} placeholder="пилот 01–14.11 / ноябрь 2026" /></label>
           <span className={`text-xs font-medium ${cls}`}>{label}</span>
+        </div>
+        <div className="grid gap-2 grid-cols-2 sm:grid-cols-[1fr_1fr_auto] items-end">
+          <label className="text-xs">С<Input aria-label="Начало периода сверки" type="date" value={r.from || ''} onChange={(e) => change(r.id, { from: e.target.value })} /></label>
+          <label className="text-xs">По<Input aria-label="Конец периода сверки" type="date" value={r.to || ''} onChange={(e) => change(r.id, { to: e.target.value })} /></label>
+          <Button className="col-span-2 sm:col-span-1" variant="outline" size="sm" disabled={!r.from || !r.to || !data.settlement.matchKind} title={data.settlement.matchKind ? undefined : 'Сначала задайте правило выделения сессий партнёра'}
+            onClick={() => void fillOurs(r)}>Наш учёт из сессий</Button>
         </div>
         <div className="overflow-x-auto"><table className="w-full text-xs table-fixed"><thead><tr className="text-muted-foreground text-left"><th className="p-1 font-medium w-24 sm:w-32" />{cols.map(([, l]) => <th key={l} className="p-1 font-medium">{l}</th>)}</tr></thead>
           <tbody>{(['ours', 'partner'] as const).map((side) => <tr key={side}><td className="p-1 whitespace-nowrap">{side === 'ours' ? 'Наш учёт' : 'Отчёт партнёра'}</td>
@@ -535,5 +552,43 @@ function ReconciliationsEditor({ data, props, onSaved }: { data: IntegrationData
       </div>
     })}
     <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => add('pilot')}>Пробная сверка по пилоту</Button><Button variant="outline" onClick={() => add('monthly')}>Месячная сверка</Button><Button disabled={busy} onClick={() => void save()}>Сохранить сверки</Button></div>
+  </section>
+}
+
+/** Как сессии партнёра находятся в нашем учёте — и проверка правила на живых сессиях. */
+function PartnerSessionsRule({ data, props, onSaved }: { data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
+  const [kind, setKind] = useState(data.settlement.matchKind || '')
+  const [values, setValues] = useState(data.settlement.matchValues || '')
+  const [busy, setBusy] = useState(false)
+  const [check, setCheck] = useState<PartnerSessionsData | null>(null)
+  const dirty = kind !== (data.settlement.matchKind || '') || values !== (data.settlement.matchValues || '')
+  const save = async () => {
+    setBusy(true)
+    try { await saveIntegration(props.companyId, props.site.id, { revision: data.revision, settlement: { ...data.settlement, matchKind: kind, matchValues: values } }); await onSaved(); toast.success('Правило сохранено') }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось сохранить правило') }
+    finally { setBusy(false) }
+  }
+  const run = async () => {
+    setBusy(true)
+    try { setCheck(await getPartnerSessions(props.companyId, props.site.id)) }
+    catch (e) { setCheck(null); toast.error(e instanceof Error ? e.message : 'Проверка не удалась') }
+    finally { setBusy(false) }
+  }
+  const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
+  return <section className="rounded-md border p-3 space-y-3 mt-3">
+    <h3 className="text-sm font-semibold">Сессии партнёра в учёте</h3>
+    <p className="text-xs text-muted-foreground">Без правила сессии партнёра не отличить от остальных, и сверка невозможна. Клиенты партнёра обычно заряжаются под договорным аккаунтом его юрлица — укажите номер аккаунта (или юрлицо, или номера карт) и проверьте на тестовой сессии. Пункт 5.12.</p>
+    <div className="grid gap-2 sm:grid-cols-[240px_1fr]">
+      <label className="text-xs">Как находить<select aria-label="Как находить сессии партнёра" className={selectClass} value={kind} onChange={(e) => setKind(e.target.value)}><option value="">Не задано</option>{Object.entries(MATCH_KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+      <label className="text-xs">Значения — по одному в строке или через запятую<Textarea aria-label="Значения правила сессий партнёра" rows={2} value={values} onChange={(e) => setValues(e.target.value)} placeholder={kind === 'client' ? 'ООО «Партнёр»' : kind === 'card' ? '0123456789' : 'номер аккаунта в АСУиМ'} /></label>
+    </div>
+    <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || !dirty} onClick={() => void save()}>Сохранить правило</Button>
+      <Button variant="outline" disabled={busy || dirty || !data.settlement.matchKind} onClick={() => void run()}>Проверить за 90 дней</Button></div>
+    {dirty && <p className="text-xs text-muted-foreground">Проверка идёт по сохранённому правилу.</p>}
+    {check && <div className="space-y-1 text-xs" role="status">
+      <p className="font-medium">{check.total.sessions ? `Найдено ${nf.format(check.total.sessions)} сессий · ${nf.format(check.total.kwh)} кВт·ч · ${nf.format(check.total.amount)} ₽ (${check.from} — ${check.to})` : `За ${check.from} — ${check.to} сессий по правилу нет: проведите тестовую сессию и проверьте снова`}</p>
+      {check.byMonth.length > 0 && <p className="text-muted-foreground">{check.byMonth.map((m) => `${m.month}: ${m.sessions}`).join(' · ')}</p>}
+      {check.sample.length > 0 && <ul className="text-muted-foreground">{check.sample.map((s, i) => <li key={i}>{s.at ? new Date(s.at).toLocaleString('ru-RU') : '—'} · {s.station || '—'} · {s.client || s.card || '—'} · {nf.format(s.kwh)} кВт·ч · {nf.format(s.amount)} ₽</li>)}</ul>}
+    </div>}
   </section>
 }

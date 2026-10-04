@@ -763,6 +763,29 @@ async def integration_stations(
     return await project_integration.station_catalog(db, cid)
 
 
+@router.get("/{site_id}/integration/sessions")
+async def integration_sessions(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    date_from: date | None = Query(None, alias="from"), date_to: date | None = Query(None, alias="to"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Сессии партнёра в нашем учёте за период (по умолчанию — 90 дней) по правилу паспорта."""
+    from datetime import timedelta
+    from app.services import project_integration
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    if site.kind != "integration":
+        raise HTTPException(400, "Это не проект интеграции")
+    date_to = date_to or date.today()
+    date_from = date_from or date_to - timedelta(days=90)
+    if date_from > date_to or (date_to - date_from).days > 400:
+        raise HTTPException(400, "Период — не больше 400 дней, начало не позже конца")
+    try:
+        return await project_integration.partner_sessions(db, site, date_from, date_to)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.patch("/{site_id}/integration")
 async def update_integration(
     site_id: uuid.UUID, payload: dict, company_id: str = Query(...),

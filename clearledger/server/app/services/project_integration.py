@@ -19,7 +19,7 @@ SECTIONS = {
     # Порядок расчётов — общий для всех сценариев: когда, в какой срок, какими
     # документами и как разрешаются споры. Кто кому платит — в каждом сценарии.
     "settlement": ("period", "paymentTerm", "documents", "vat", "disputes", "minimums",
-                   "penalties", "accountingChannel"),
+                   "penalties", "accountingChannel", "matchKind", "matchValues"),
     "work": ("pilotDecision", "pilotOutcome", "testResults", "launchDate"),
     "accounting": ("counterpartyId",),
 }
@@ -28,6 +28,11 @@ PAYERS = {"", "partner", "us", "none"}          # партнёр платит н
 MODELS = {"", "commission", "fixed", "margin", "none"}
 CONNECT_BASIS = {"check", "session"}            # проверено у принимающей стороны / прошла первая сессия
 TEST_STATUSES = {"pending", "passed", "failed", "na"}
+# Как сессия партнёра выглядит в нашем учёте. Партнёрский клиент заряжается под
+# договорным аккаунтом юрлица (так сегодня приходят корпоративные клиенты: в сессии
+# `card_owner_ext_id` и `client_name`, сумма — по тарифу клиента) или по выданным
+# партнёру картам. Правило задаётся в паспорте и проверяется на живых сессиях.
+MATCH_KINDS = {"account": "Договорной аккаунт клиента", "client": "Юрлицо клиента в сессии", "card": "Номера карт"}
 DOCUMENT_KINDS = {"nda", "pilot", "contract", "stations", "specification", "test_program", "test_protocol", "instruction", "other"}
 SECTION_LABELS = {"settlement": "порядок расчётов и учёт", "tests": "испытания", "reconciliations": "сверки", "listVersions": "версии перечней", "partner": "партнёр и цель", "commercial": "коммерческие условия", "data": "данные, аналитика и бренд", "technical": "технические параметры и сопровождение", "work": "пилот и проверки", "accounting": "связь с контрагентом", "scenarios": "сценарии и перечни ЭЗС", "documents": "редакции документов", "results": "результаты чек-листа", "dates": "план этапов", "contractIds": "договоры учёта"}
 
@@ -115,6 +120,48 @@ def recon_state(r):
     return "resolved" if r.get("resolution") and r.get("docId") else "diff"
 
 
+def match_values(settlement):
+    """Значения правила: по одному на строку, через запятую или точку с запятой."""
+    import re
+    return sorted({v.strip() for v in re.split(r"[\n,;]+", settlement.get("matchValues") or "") if v.strip()})
+
+
+async def partner_sessions(db, site, date_from, date_to):
+    """Сессии партнёра в нашем учёте за период — по правилу из паспорта.
+
+    Деньги — по тарифу клиента, где он есть (у корпоративного аккаунта `amount` = 0,
+    расчёт идёт по договору), иначе списанное. Это та цифра, которую сверяют с
+    отчётом партнёра.
+    """
+    from sqlalchemy import func, or_
+    from app.models import ChargeSession as CS
+    st = read(site)["settlement"]
+    kind, values = st.get("matchKind"), match_values(st)
+    if not kind or not values:
+        raise ValueError("Правило выделения сессий партнёра не задано")
+    column = {"account": [CS.card_owner_ext_id], "client": [CS.client_name], "card": [CS.card_number, CS.rfid]}[kind]
+    match = or_(*[c.in_(values) for c in column])
+    start = datetime.combine(date_from, datetime.min.time())
+    end = datetime.combine(date_to, datetime.max.time())
+    where = (CS.company_id == site.company_id, CS.started_at >= start, CS.started_at <= end, match)
+    money = func.coalesce(CS.client_amount, CS.amount)
+    month = func.to_char(CS.started_at, "YYYY-MM")
+    rows = (await db.execute(select(month.label("m"), func.count().label("n"), func.coalesce(func.sum(CS.energy_kwh), 0).label("kwh"),
+                                    func.coalesce(func.sum(money), 0).label("amount")).where(*where).group_by(month).order_by(month))).all()
+    sample = (await db.execute(select(CS.started_at, CS.station_name, CS.client_name, CS.card_number, CS.energy_kwh, money.label("amount"))
+                               .where(*where).order_by(CS.started_at.desc()).limit(5))).all()
+    by_month = [{"month": r.m, "sessions": int(r.n), "kwh": round(float(r.kwh), 3), "amount": round(float(r.amount), 2)} for r in rows]
+    return {
+        "rule": {"kind": kind, "label": MATCH_KINDS[kind], "values": values},
+        "from": date_from.isoformat(), "to": date_to.isoformat(),
+        "total": {"sessions": sum(m["sessions"] for m in by_month), "kwh": round(sum(m["kwh"] for m in by_month), 3),
+                  "amount": round(sum(m["amount"] for m in by_month), 2)},
+        "byMonth": by_month,
+        "sample": [{"at": r.started_at.isoformat() if r.started_at else None, "station": r.station_name, "client": r.client_name,
+                    "card": r.card_number, "kwh": round(float(r.energy_kwh or 0), 3), "amount": round(float(r.amount or 0), 2)} for r in sample],
+    }
+
+
 def tests_state(data):
     """Испытания: все обязательные пройдены или неприменимы, проваленных нет."""
     tests = data["tests"]
@@ -172,7 +219,7 @@ def confirmation_problem(site, key, data):
         "5.3": (any(s["pilotIds"] for s in data["scenarios"]), "Выберите пилотный перечень из станций сценария"),
         "5.10": (tests_ok and w.get("pilotOutcome"), tests_problem or "Зафиксируйте итог пилота"),
         "5.11": (tests_ok, tests_problem),
-        "5.12": (st.get("accountingChannel"), "Опишите, как сессии партнёра выделяются в учёте"),
+        "5.12": (st.get("matchKind") and match_values(st), "Задайте правило, по которому сессии партнёра находятся в учёте, и проверьте его на тестовой сессии"),
         "5.13": (any(r["kind"] == "pilot" and recon_state(r) != "diff" for r in data["reconciliations"]), "Внесите пробную сверку по пилоту: без расхождений или с урегулированием и актом"),
         "6.2": (terms_ok and all(st.get(f) for f in ("period", "paymentTerm", "documents", "vat")), "Заполните условия по сценариям и порядок расчётов: периодичность, срок оплаты, документы, НДС"),
         "6.3": (st.get("disputes"), "Опишите порядок сверки и разрешения расхождений"),
@@ -207,6 +254,8 @@ def normalize(payload, old):
             if not isinstance(source, dict):
                 raise ValueError("Некорректный раздел паспорта")
             data[section] = {f: str(source.get(f) or "").strip()[:6000] for f in fields}
+    if (data["settlement"].get("matchKind") or "") not in ("", *MATCH_KINDS):
+        raise ValueError("Неизвестный способ выделения сессий партнёра")
     if "scenarios" in payload:
         source = payload["scenarios"]
         if not isinstance(source, list) or len(source) > 50:
@@ -299,6 +348,12 @@ def normalize(payload, old):
             if row["id"] in seen:
                 raise ValueError("Идентификаторы сверок повторяются")
             seen.add(row["id"])
+            for f in ("from", "to"):
+                row[f] = str(r.get(f) or "")
+                if row[f]:
+                    date.fromisoformat(row[f])
+            if row["from"] and row["to"] and row["from"] > row["to"]:
+                raise ValueError("Конец периода сверки раньше начала")
             row["kind"] = str(r.get("kind") or "")
             if row["kind"] not in ("pilot", "monthly") or not row["period"]:
                 raise ValueError("Укажите вид сверки и период")
