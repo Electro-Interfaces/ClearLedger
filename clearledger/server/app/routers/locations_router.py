@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_company_by_api_key, get_current_user
 from app.database import get_db
 from app.deps import CompanyDep, get_owned
-from app.services import object_control
+from app.services import object_control, space_projection
 from app.services.export_policy import (
     PUBLIC_FIELDS, filter_for_export, is_publishable)
 from app.services.object_freeze import freeze_reasons, number_changed
@@ -320,6 +320,9 @@ async def create_location(
     # прежние колонки точки, а список рядом — паспорт станции. Одна выборка по
     # одному объекту, N+1 тут неоткуда взяться.
     stations = await stations_by_location(db, loc.company_id, [loc.id])
+    # Объект уехал в приложения сразу: между заведением станции и её появлением
+    # у сервисной службы больше нет человека, который должен нажать кнопку.
+    await space_projection.project_object(db, loc.company_id, loc.id)
     return _out(loc, stations.get(loc.id))
 
 
@@ -358,6 +361,7 @@ async def update_location(
     # прежние колонки точки, а список рядом — паспорт станции. Одна выборка по
     # одному объекту, N+1 тут неоткуда взяться.
     stations = await stations_by_location(db, loc.company_id, [loc.id])
+    await space_projection.project_object(db, loc.company_id, loc.id)
     return _out(loc, stations.get(loc.id))
 
 
@@ -406,6 +410,9 @@ async def set_operational_status(
     # прежние колонки точки, а список рядом — паспорт станции. Одна выборка по
     # одному объекту, N+1 тут неоткуда взяться.
     stations = await stations_by_location(db, loc.company_id, [loc.id])
+    # Смена «работает / в ремонте» нужна сервисной службе раньше всех остальных
+    # правок карточки: по ней решают, ехать ли на объект.
+    await space_projection.project_object(db, loc.company_id, loc.id)
     return _out(loc, stations.get(loc.id))
 
 

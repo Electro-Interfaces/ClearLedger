@@ -598,6 +598,10 @@ class MessageOut(BaseModel):
     fileUrl: str | None = None
     fileName: str | None = None
     fileSize: int | None = None
+    # Какой отправкой пришло: пять файлов, выбранных разом, уезжают пятью
+    # сообщениями, и лента собирает их обратно в альбом по этому признаку, а не
+    # по времени между ними (МАГ, 18.09.2026).
+    batchId: str | None = None
     # Кадр видео для ленты: показывается до того, как файл вообще начали качать.
     posterUrl: str | None = None
     replyTo: str | None = None
@@ -641,6 +645,8 @@ class SendMessageBody(BaseModel):
     fileName: str | None = None
     fileSize: int | None = None
     posterUrl: str | None = None
+    # Общий признак отправки: его ставит отправитель на все сообщения одной пачки.
+    batchId: str | None = None
     mentions: list[str] = Field(default_factory=list)
 
 
@@ -1031,6 +1037,7 @@ def _msg_out(m: ChatMessage, read_count: int, reply: ChatMessage | None,
         fileUrl=None if deleted else m.file_url,
         fileName=None if deleted else m.file_name,
         fileSize=None if deleted else m.file_size,
+        batchId=str(m.batch_id) if m.batch_id else None,
         posterUrl=None if deleted else m.poster_url,
         replyTo=str(m.reply_to) if m.reply_to else None,
         replyPreview=(None if not reply or reply.deleted_at else reply.content[:120]),
@@ -1196,11 +1203,18 @@ async def send_message(
                 file_size = факт
         except (ValueError, TypeError):
             pass
+    # Признак отправки приходит от клиента: только он знает, что пять сообщений —
+    # это одно действие человека. Мусор в поле безвреден (склеится разве что само
+    # с собой), поэтому проверяем лишь формат.
+    try:
+        batch_id = uuid.UUID(body.batchId) if body.batchId else None
+    except (ValueError, TypeError, AttributeError):
+        batch_id = None
     msg = ChatMessage(
         room_id=rid, user_id=current_user.id, user_name=current_user.name,
         type=mtype, content=content, reply_to=reply_to,
         file_url=body.fileUrl or None, file_name=body.fileName or None,
-        file_size=file_size,
+        file_size=file_size, batch_id=batch_id,
         poster_url=body.posterUrl or None,
     )
     db.add(msg)

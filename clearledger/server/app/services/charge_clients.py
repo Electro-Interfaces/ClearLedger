@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession
 from app.services.analytics_service import AnalyticsService
+from app.services.session_scope import station_match
 
 S = ChargeSession
 CLIENT_KEY = func.coalesce(func.nullif(S.client_name, ""), func.nullif(S.user_id, ""))
@@ -44,7 +45,7 @@ def _conds(company_id, station_codes: list[str] | None, regions: list[str] | Non
     conds = [S.company_id == company_id, CLIENT_KEY.is_not(None),
              S.started_at.is_not(None)]
     if station_codes:
-        conds.append(S.station_code.in_(station_codes))
+        conds.append(station_match(S.station_code, S.location_id, company_id, station_codes))
     if regions:
         conds.append(S.region.in_(regions))
     if dim and dim_val is not None:

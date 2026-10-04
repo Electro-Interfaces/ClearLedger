@@ -31,6 +31,7 @@ import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { MarketSiteCard } from './MarketSiteCard'
 import { useFullscreenPanel } from '@/hooks/useFullscreenPanel'
 import { useCompany } from '@/contexts/CompanyContext'
+import { StationLink } from '@/components/common/StationLink'
 import {
   listMarketSites, listMarketObservations, listMarketOperators, getOurMapPoints,
   getSitesBreakdown, getMarketPivot, getMarketPivotCatalog,
@@ -165,7 +166,9 @@ function OurPopupBody({ p }: { p: OurMapPoint }) {
   const мы = company.shortName || company.name || 'наш объект'
   return (
     <>
-      <b>{p.name}</b> · {мы}<br />
+      {/* Имя на карте — вход в станцию: «что это за точка» и «как она работает»
+          один вопрос, и раньше между ними лежал поиск в «Объектах». */}
+      <b><StationLink station={p.id}>{p.name}</StationLink></b> · {мы}<br />
       {p.city ?? ''}{p.brand ? ` · ${p.brand}` : ''}
       {p.powerKwt ? ` · ${p.powerKwt} кВт` : ''}
       {p.ports ? ` · ${p.ports} портов` : ''}<br />
@@ -918,7 +921,7 @@ function MarketSites() {
               s.price?.basis ?? null, s.price?.observedOn ?? s.lastSeenAt ?? null,
               s.photoCount ?? 0, s.duplicateOfId ? 'та же станция заведена другой записью' : null,
             ]))}>
-            <thead className="sticky top-0 bg-muted/60 text-muted-foreground">
+            <thead className="sticky top-0 bg-muted text-muted-foreground">
               <tr>
                 <SortTh sortKey="name" sort={sort} onSort={toggle}>Точка</SortTh>
                 <th className="p-2 text-left font-medium">Вид</th>

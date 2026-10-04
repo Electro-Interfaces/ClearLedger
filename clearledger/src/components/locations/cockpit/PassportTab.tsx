@@ -3,9 +3,8 @@
  * идентификация, тип, статусы, расположение, характеристики (кроме оборудования).
  */
 import type { ReactNode } from 'react'
-import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Pencil, MapPin } from 'lucide-react'
+import { IdCard, MapPin, Pencil } from 'lucide-react'
 import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { MetadataFieldsReader } from '@/components/manual/MetadataFieldsReader'
 import { LOCATION_STATUS_META, locationValues, type ServiceLocation } from '@/types/location'
@@ -43,9 +42,12 @@ export function PassportTab({
   )
 
   return (
-    <ScrollTab>
-      <Card>
-        <CardContent className="grid grid-cols-2 gap-x-8 gap-y-2 pt-5 text-sm">
+    <ScrollTab cols={2}>
+      {/* Заголовок есть у каждой карточки, включая первую: без него блок
+          читается как «шапка страницы», и в двухколоночной раскладке соседний
+          блок справа выглядит подписанным, а этот — нет. */}
+      <SectionCard title="Идентификация" icon={IdCard}>
+        <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm">
           <Field label="Код / серийник" value={String(meta.serialNumber ?? '') || location.code} mono />
           <Field label="Тип" value={typeDef?.name ?? location.type} />
           <Field label="Жизненный статус" value={lifeMeta?.label ?? location.status} />
@@ -55,12 +57,12 @@ export function PassportTab({
           {location.description && (
             <div className="col-span-2"><Field label="Описание" value={location.description} /></div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SectionCard>
 
       {(lat || lon || meta.federalDistrict != null || meta.federalSubject != null) && (
         <SectionCard title="Расположение" icon={MapPin}>
-          <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm">
             {meta.federalDistrict != null && <Field label="Федеральный округ" value={String(meta.federalDistrict)} />}
             {meta.federalSubject != null && <Field label="Регион" value={String(meta.federalSubject)} />}
             {meta.cityName != null && <Field label="Город" value={String(meta.cityName)} />}
@@ -88,7 +90,7 @@ export function PassportTab({
       {(pp.locationClass != null || pp.speedClass != null || pp.installedOn != null
         || pp.decommissionedOn != null || pp.inventoryNumber != null || pp.isCorp != null) && (
         <SectionCard title="Учётные атрибуты (сводная контрагента)">
-          <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm">
             {pp.locationClass != null && (
               <Field label="Размещение" value={pp.locationClass === 'highway' ? 'Трасса' : 'Город'} />
             )}
@@ -109,15 +111,10 @@ export function PassportTab({
 
       {/* Оборудование и подключение — часть паспорта, а не отдельные вкладки
           (решение МАГа 12.08.2026): десять табов на карточку станции читались
-          как десять разных экранов, хотя это свойства одного объекта. */}
-      <div className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
-        Оборудование
-      </div>
+          как десять разных экранов, хотя это свойства одного объекта.
+          Заголовок и содержимое — одним блоком: в колоночной раскладке иначе
+          подпись остаётся внизу одной колонки, а карточка уезжает в другую. */}
       <EquipmentTab location={location} embedded />
-
-      <div className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
-        Интеграции
-      </div>
       <IntegrationsTab location={location} embedded />
 
       {renderEdit?.(location, (

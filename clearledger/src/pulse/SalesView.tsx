@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowUpRight, MapPin, PlugZap } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+import { StationLink } from '@/components/common/StationLink'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getPulseSales } from './pulseService'
 import { KpiTile, PulseError, PulseLoading, fmtNum, fmtDate } from './parts'
@@ -85,7 +86,9 @@ export function SalesView() {
                   <div className="space-y-1.5">
                     {col.rows.map((m) => (
                       <div key={m.location_id} className="flex items-center gap-2 text-xs">
-                        <span className="min-w-0 flex-1 truncate" title={m.station}>{m.station}</span>
+                        <span className="min-w-0 flex-1 truncate" title={m.station}>
+                          <StationLink station={m.location_id}>{m.station}</StationLink>
+                        </span>
                         {/* Полоса — доля этой станции в общем сдвиге недели:
                             «минус 18 тысяч» без масштаба ни о чём не говорит. */}
                         <div className="hidden h-1.5 w-20 shrink-0 rounded bg-muted sm:block">
@@ -118,7 +121,9 @@ export function SalesView() {
               {d.out_stations.map((s) => (
                 <div key={s.location_id} className="flex items-center gap-3 px-3 py-2 text-xs">
                   <PlugZap className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-                  <span className="min-w-0 flex-1 truncate" title={s.station}>{s.station}</span>
+                  <span className="min-w-0 flex-1 truncate" title={s.station}>
+                    <StationLink station={s.location_id}>{s.station}</StationLink>
+                  </span>
                   <span className="shrink-0 text-muted-foreground">
                     последняя сессия {fmtDate(s.last_seen)}
                   </span>

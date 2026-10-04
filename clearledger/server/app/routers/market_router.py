@@ -87,6 +87,65 @@ async def _member(company_id: str, user: User, db: AsyncSession) -> uuid.UUID:
     return await assert_company_member(company_id, user, db)
 
 
+def область(
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
+) -> list[Any]:
+    """Область учёта из шапки пространства — условия отбора точек рынка.
+
+    Человек выбирает «Забайкальский край» и ждёт рынок Читы, а не страны. Прежде
+    раздел область не читал: чип висел в шапке, а доли, сети и цены оставались
+    общероссийскими — замечание РусГидро 18.09.2026. Условие одно на все ручки,
+    поэтому и сузились они разом, а не тот экран, до которого дошли руки.
+
+    Пусто — вся страна: отсутствие выбора не должно прятать рынок.
+    """
+    conds: list[Any] = []
+    рег = [x.strip() for x in (regions or "").split(",") if x.strip()]
+    гор = [x.strip() for x in (cities or "").split(",") if x.strip()]
+    if рег:
+        conds.append(MarketSite.region.in_(рег))
+    if гор:
+        conds.append(MarketSite.city.in_(гор))
+    return conds
+
+
+def площадки_в_области(regions: str | None, cities: str | None) -> list[Any]:
+    """Условия по площадкам «Проектов»: стройка тоже принадлежит территории.
+
+    «220 площадок в работе» рядом с рынком одного края означало бы, что стройка
+    идёт здесь, — а она по всей стране.
+    """
+    conds: list[Any] = []
+    рег = [x.strip() for x in (regions or "").split(",") if x.strip()]
+    гор = [x.strip() for x in (cities or "").split(",") if x.strip()]
+    if рег:
+        # `region_norm` — канон справочника; в `region` лежит написание из файла.
+        conds.append(sa_or(EzsSite.region_norm.in_(рег), EzsSite.region.in_(рег)))
+    if гор:
+        conds.append(EzsSite.city.in_(гор))
+    return conds
+
+
+def наши_в_области(cid: uuid.UUID, regions: str | None, cities: str | None):
+    """Подзапрос: наши объекты в той же области. None — область не выбрана.
+
+    Регион берём каноном (`regions.name` через `region_id`) — так же, как считает
+    аналитика сессий и оборудование; денорм-поле у объектов заполнено не везде.
+    """
+    рег = [x.strip() for x in (regions or "").split(",") if x.strip()]
+    гор = [x.strip() for x in (cities or "").split(",") if x.strip()]
+    if not рег and not гор:
+        return None
+    q = select(ServiceLocation.id).where(ServiceLocation.company_id == cid)
+    if рег:
+        q = q.where(ServiceLocation.region_id.in_(
+            select(Region.id).where(Region.company_id == cid, Region.name.in_(рег))))
+    if гор:
+        q = q.where(ServiceLocation.city.in_(гор))
+    return q
+
+
 def _dedup_key(kind: str, lat: float | None, lon: float | None, name: str) -> str:
     """Ключ совпадения точек: координата с округлением ~50 м + вид.
 
@@ -102,6 +161,7 @@ def _dedup_key(kind: str, lat: float | None, lon: float | None, name: str) -> st
 @router.get("/operators")
 async def list_operators(
     company_id: str = Query(...),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Компании рынка: у кого сколько точек, почём и какого качества.
@@ -134,7 +194,7 @@ async def list_operators(
                    func.avg(MarketSite.success_charge_pct),
                    func.avg(MarketSite.rating),
                    func.sum(MarketSite.reviews_count))
-            .where(MarketSite.company_id == cid,
+            .where(MarketSite.company_id == cid, *обл,
                    MarketSite.operator_id.is_not(None),
                    MarketSite.site_class != "home",
                    MarketSite.status != "closed")
@@ -146,7 +206,7 @@ async def list_operators(
     last_price = await _last_prices(db, cid)
     site_operator = dict((str(sid), str(oid)) for sid, oid in (await db.execute(
         select(MarketSite.id, MarketSite.operator_id)
-        .where(MarketSite.company_id == cid,
+        .where(MarketSite.company_id == cid, *обл,
                MarketSite.operator_id.is_not(None)))).all())
     prices: dict[str, list[float]] = {}
     for site_id, obs in last_price.items():
@@ -167,6 +227,10 @@ async def list_operators(
             "success": None, "rating": None, "reviews": 0} | agg.get(str(o.id), {})),
     } for o in rows]
     operators.sort(key=lambda r: (-r["sites"], r["name"]))
+    # Выбрана территория — реестр показывает тех, кто на ней стоит. Компания без
+    # точек в области здесь не «компания с нулём», а просто не здешняя.
+    if обл:
+        operators = [o for o in operators if o["sites"]]
     return {"operators": operators}
 
 
@@ -189,7 +253,11 @@ def _operator_facts(o: MarketOperator) -> dict[str, Any]:
     # версия для проверки, и выдавать её за реквизиты компании нельзя.
     trusted = (o.legal_confidence or "").startswith("подтвержд")
     return {
-        "class": o.player_class, "classChecked": o.class_checked,
+        # Свою сеть не угадываем: разбор ставил РусГидро «агрегатор без своих
+        # станций», потому что счётчик точек у своей записи не пересчитывался
+        # (замечание РусГидро 23.09.2026). Что это наша сеть — факт, не версия.
+        "class": "наша сеть" if o.relation == "own" else o.player_class,
+        "classChecked": True if o.relation == "own" else o.class_checked,
         # Три роли, которые рынок смешивает: владеть станцией, эксплуатировать её и
         # давать для неё ИТ-систему — разные дела. Роли не исключают друг друга:
         # «Пункт Е» делает всё три, ItCharge для чужих сетей — только платформа.
@@ -236,6 +304,7 @@ def _operator_facts(o: MarketOperator) -> dict[str, Any]:
 async def operator_card(
     operator_id: uuid.UUID,
     company_id: str = Query(...),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Карточка компании: где стоит, чем оснащена, почём заряжает и как её оценивают.
@@ -252,7 +321,7 @@ async def operator_card(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оператор не найден")
 
     sites = (await db.execute(select(MarketSite).where(
-        MarketSite.company_id == cid,
+        MarketSite.company_id == cid, *обл,
         MarketSite.operator_id == operator_id))).scalars().all()
     network = [s for s in sites if (s.site_class or "") != "home"]
     alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
@@ -354,6 +423,7 @@ async def list_sites(
     search: str | None = Query(None, description="имя, город или адрес"),
     limit: int = Query(SITES_PAGE_DEFAULT, le=SITES_PAGE_MAX),
     offset: int = Query(0, ge=0),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Точки рынка для карты и списка — с последней ценой и её возрастом.
@@ -368,7 +438,7 @@ async def list_sites(
     """
     cid = await _member(company_id, user, db)
     own_ids = await _own_operator_ids(db, cid)
-    q = select(MarketSite).where(MarketSite.company_id == cid)
+    q = select(MarketSite).where(MarketSite.company_id == cid, *обл)
     if search and search.strip():
         # Искать надо по всей выдаче, а не по первой странице: список показывал
         # 5 000 из 9 118 и отвечал «ничего не найдено» о точке, которая есть в
@@ -489,9 +559,8 @@ async def list_sites(
 @router.get("/sites/breakdown")
 async def sites_breakdown(
     company_id: str = Query(...),
-    city: str | None = Query(None),
-    region: str | None = Query(None),
     operator_id: str | None = Query(None),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Разрезы рынка по точкам: чем оснащены, живы ли, кто владеет.
@@ -507,12 +576,8 @@ async def sites_breakdown(
     alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
     own_ids = await _own_operator_ids(db, cid)
 
-    q = select(MarketSite).where(MarketSite.company_id == cid,
+    q = select(MarketSite).where(MarketSite.company_id == cid, *обл,
                                  MarketSite.kind == "ezs")
-    if city:
-        q = q.where(MarketSite.city == city)
-    if region:
-        q = q.where(MarketSite.region == region)
     if operator_id:
         q = q.where(MarketSite.operator_id == uuid.UUID(operator_id))
     rows = (await db.execute(q)).scalars().all()
@@ -670,6 +735,7 @@ async def list_observations(
     company_id: str = Query(...),
     site_id: uuid.UUID | None = Query(None),
     limit: int = Query(200, le=1000),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Лента наблюдений — «откуда мы это знаем». По точке или по всей компании."""
@@ -677,6 +743,11 @@ async def list_observations(
     q = select(MarketObservation).where(MarketObservation.company_id == cid)
     if site_id:
         q = q.where(MarketObservation.site_id == site_id)
+    if обл:
+        # Наблюдение относится к точке, а точка — к территории: в области учёта
+        # показываем то, чем эта область и подтверждается.
+        q = q.where(MarketObservation.site_id.in_(
+            select(MarketSite.id).where(MarketSite.company_id == cid, *обл)))
     rows = (await db.execute(
         q.order_by(MarketObservation.observed_on.desc(),
                    MarketObservation.created_at.desc()).limit(limit)
@@ -730,24 +801,34 @@ async def create_observation(
 @router.get("/summary")
 async def market_summary(
     company_id: str = Query(...),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Сводка рынка для карточки продукта на столе и шапки раздела."""
     cid = await _member(company_id, user, db)
     by_kind = dict((k, int(c)) for k, c in (await db.execute(
         select(MarketSite.kind, func.count())
-        .where(MarketSite.company_id == cid, MarketSite.status != "closed")
+        .where(MarketSite.company_id == cid, *обл, MarketSite.status != "closed")
         .group_by(MarketSite.kind))).all())
-    operators = int((await db.execute(
-        select(func.count()).select_from(MarketOperator)
-        .where(MarketOperator.company_id == cid, MarketOperator.relation == "competitor")
-    )).scalar() or 0)
-    observations = int((await db.execute(
-        select(func.count()).select_from(MarketObservation)
-        .where(MarketObservation.company_id == cid))).scalar() or 0)
-    last_obs = (await db.execute(
-        select(func.max(MarketObservation.observed_on))
-        .where(MarketObservation.company_id == cid))).scalar()
+    точки_области = (select(MarketSite.id)
+                     .where(MarketSite.company_id == cid, *обл)) if обл else None
+    конкуренты = select(func.count()).select_from(MarketOperator).where(
+        MarketOperator.company_id == cid, MarketOperator.relation == "competitor")
+    if обл:
+        конкуренты = конкуренты.where(MarketOperator.id.in_(
+            select(MarketSite.operator_id).where(
+                MarketSite.company_id == cid, *обл,
+                MarketSite.operator_id.is_not(None))))
+    operators = int((await db.execute(конкуренты)).scalar() or 0)
+    набл = select(func.count()).select_from(MarketObservation).where(
+        MarketObservation.company_id == cid)
+    посл = select(func.max(MarketObservation.observed_on)).where(
+        MarketObservation.company_id == cid)
+    if точки_области is not None:
+        набл = набл.where(MarketObservation.site_id.in_(точки_области))
+        посл = посл.where(MarketObservation.site_id.in_(точки_области))
+    observations = int((await db.execute(набл)).scalar() or 0)
+    last_obs = (await db.execute(посл)).scalar()
     return {
         "byKind": by_kind,
         "competitors": operators,
@@ -922,6 +1003,9 @@ async def market_position(
     company_id: str = Query(...),
     days: int = Query(30, ge=1, le=365, description="окно наших продаж"),
     radius_km: float = Query(DEFAULT_RADIUS_KM, ge=0.5, le=50),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Наши объекты в окружении рынка: продажи, наша цена, соседи и их цена.
@@ -937,12 +1021,17 @@ async def market_position(
     # Тестовые стенды заказчика («БЦ Гидропроект (Тест)» и подобные) в рыночный
     # анализ не идут: они ничего не продают, но занимают строки и портят покрытие —
     # «посчитано по 7 из 641» становится «из 638», и это честнее.
-    ours = (await db.execute(
-        select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.code,
-               ServiceLocation.city, ServiceLocation.latitude, ServiceLocation.longitude)
-        .where(ServiceLocation.company_id == cid,
-               ServiceLocation.is_test.is_(False))
-    )).all()
+    # Область учёта сужает обе стороны сравнения: и наши объекты, и рынок вокруг
+    # них. Иначе выбранный «Забайкальский край» давал бы страницу объектов со всей
+    # страны (замечание РусГидро 18.09.2026).
+    наши = наши_в_области(cid, regions, cities)
+    свои = (select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.code,
+                   ServiceLocation.city, ServiceLocation.latitude, ServiceLocation.longitude)
+            .where(ServiceLocation.company_id == cid,
+                   ServiceLocation.is_test.is_(False)))
+    if наши is not None:
+        свои = свои.where(ServiceLocation.id.in_(наши))
+    ours = (await db.execute(свои)).all()
 
     # ── наши продажи за окно: сессии, энергия, выручка ──
     # Цену считаем только по сессиям с оплатой: у ЮЛ `amount` = 0 (постоплата), и
@@ -971,7 +1060,7 @@ async def market_position(
     # ── точки рынка с их последней ценой ──
     market = (await db.execute(
         select(MarketSite).where(
-            MarketSite.company_id == cid, MarketSite.status != "closed",
+            MarketSite.company_id == cid, *обл, MarketSite.status != "closed",
             MarketSite.latitude.is_not(None), MarketSite.longitude.is_not(None))
     )).scalars().all()
     last_price = await _last_prices(db, cid)
@@ -1058,6 +1147,7 @@ async def market_position(
 @router.get("/sources")
 async def market_sources(
     company_id: str = Query(...),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Что мы знаем о рынке, откуда и насколько это свежо."""
@@ -1074,7 +1164,7 @@ async def market_sources(
                func.count(MarketSite.last_session_at),
                func.sum(case((MarketSite.status == "closed", 1), else_=0)),
                func.sum(case((MarketSite.site_class == "home", 1), else_=0)))
-        .where(MarketSite.company_id == cid)
+        .where(MarketSite.company_id == cid, *обл)
         .group_by(MarketSite.source))).all()
 
     sources = [{
@@ -1132,6 +1222,7 @@ async def market_changes(
     base: str | None = Query(None, description="дата среза-основания (ISO)"),
     current: str | None = Query(None, description="дата свежего среза (ISO)"),
     limit: int = Query(50, ge=1, le=500),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Что изменилось между двумя срезами реестра.
@@ -1155,10 +1246,14 @@ async def market_changes(
                 "message": "срез пока один — сравнивать не с чем, следующая выгрузка даст сравнение"}
 
     async def _snap(date: str) -> dict[str, Any]:
-        return {str(s.site_id): s for s in (await db.execute(
-            select(MarketSiteSnapshot).where(
-                MarketSiteSnapshot.company_id == cid,
-                MarketSiteSnapshot.snapshot_date == date))).scalars().all()}
+        q = select(MarketSiteSnapshot).where(
+            MarketSiteSnapshot.company_id == cid,
+            MarketSiteSnapshot.snapshot_date == date)
+        if обл:
+            # У среза своей территории нет — она у точки, на которую он ссылается.
+            q = q.where(MarketSiteSnapshot.site_id.in_(
+                select(MarketSite.id).where(MarketSite.company_id == cid, *обл)))
+        return {str(s.site_id): s for s in (await db.execute(q)).scalars().all()}
 
     was, fresh_map = await _snap(base_date), await _snap(cur_date)
     ids = {uuid.UUID(i) for i in (set(was) | set(fresh_map))}
@@ -1273,6 +1368,9 @@ async def market_territories(
     company_id: str = Query(...),
     level: str = Query("city", pattern="^(city|region)$"),
     days: int = Query(90, ge=1, le=365),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Территории: где мы стоим, кто рядом, чья доля и какая цена держится."""
@@ -1280,16 +1378,19 @@ async def market_territories(
     since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
     alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
 
-    ours = (await db.execute(
-        select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
-               ServiceLocation.region_id)
-        .where(ServiceLocation.company_id == cid,
-               ServiceLocation.is_test.is_(False)))).all()
+    наши = наши_в_области(cid, regions, cities)
+    свои = (select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
+                   ServiceLocation.region_id)
+            .where(ServiceLocation.company_id == cid,
+                   ServiceLocation.is_test.is_(False)))
+    if наши is not None:
+        свои = свои.where(ServiceLocation.id.in_(наши))
+    ours = (await db.execute(свои)).all()
     # Регион объекта берём строкой из паспорта: справочник регионов у нас по id, а
     # рынок несёт название. Сводить их по id пришлось бы обеим сторонам.
-    regions = dict((rid, name) for rid, name in (await db.execute(
+    имена_регионов = dict((rid, name) for rid, name in (await db.execute(
         select(Region.id, Region.name).where(Region.company_id == cid))).all())
-    ours = [(loc_id, name, city, regions.get(rid)) for loc_id, name, city, rid in ours]
+    ours = [(loc_id, name, city, имена_регионов.get(rid)) for loc_id, name, city, rid in ours]
 
     # `amount` — списание с карты; у юрлица оно нулевое, а реализация лежит в
     # `client_amount`. Карта и «Позиция» перешли на общее правило раньше, а
@@ -1314,7 +1415,7 @@ async def market_territories(
     # включая наши собственные 429 записей. Отделяет только оператор.
     own_ids = await _own_operator_ids(db, cid)
     sites = [x for x in (await db.execute(select(MarketSite).where(
-        MarketSite.company_id == cid, MarketSite.status == "active",
+        MarketSite.company_id == cid, *обл, MarketSite.status == "active",
         MarketSite.kind == "ezs",
         MarketSite.location_id.is_(None)))).scalars().all()
         if _is_external(x, own_ids)]
@@ -1329,6 +1430,8 @@ async def market_territories(
 async def market_whitespots(
     company_id: str = Query(...),
     level: str = Query("city", pattern="^(city|region)$"),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Белые пятна: рынок есть, нас нет.
@@ -1340,6 +1443,8 @@ async def market_whitespots(
     """
     cid = await _member(company_id, user, db)
     reply = await market_territories(company_id=company_id, level=level, days=90,
+                                     regions=regions, cities=cities,
+                                     обл=область(regions, cities),
                                      user=user, db=db)
     spots = [r for r in reply["territories"]
              if r["ourSites"] == 0 and r["rivalSites"] > 0
@@ -1688,6 +1793,9 @@ POWER_BUCKETS = (
 async def market_price_landscape(
     company_id: str = Query(...),
     days: int = Query(90, ge=30, le=365),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Ценовой ландшафт: почём заряжает рынок по классам мощности и где в нём мы.
@@ -1700,7 +1808,7 @@ async def market_price_landscape(
     since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
 
     sites = {str(s.id): s for s in (await db.execute(select(MarketSite).where(
-        MarketSite.company_id == cid, MarketSite.status != "closed",
+        MarketSite.company_id == cid, *обл, MarketSite.status != "closed",
         MarketSite.site_class != "home"))).scalars().all()}
     # Только точки из отобранного списка: прежде общая медиана считалась по более
     # широкому набору наблюдений, чем разложенные по классам мощности (К4).
@@ -1765,6 +1873,9 @@ async def market_pressure(
     company_id: str = Query(...),
     months: int = Query(24, ge=3, le=60),
     radius_km: float = Query(DEFAULT_RADIUS_KM, ge=0.5, le=50),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Давление конкурента: кто открылся рядом с нашими объектами и что стало с нами.
@@ -1777,18 +1888,21 @@ async def market_pressure(
     cid = await _member(company_id, user, db)
     horizon = datetime.now(timezone.utc) - timedelta(days=months * 30)
 
-    ours = (await db.execute(
-        select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
-               ServiceLocation.latitude, ServiceLocation.longitude)
-        .where(ServiceLocation.company_id == cid,
-               ServiceLocation.is_test.is_(False),
-               ServiceLocation.latitude.is_not(None)))).all()
+    наши = наши_в_области(cid, regions, cities)
+    свои = (select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
+                   ServiceLocation.latitude, ServiceLocation.longitude)
+            .where(ServiceLocation.company_id == cid,
+                   ServiceLocation.is_test.is_(False),
+                   ServiceLocation.latitude.is_not(None)))
+    if наши is not None:
+        свои = свои.where(ServiceLocation.id.in_(наши))
+    ours = (await db.execute(свои)).all()
     window = timedelta(days=90)
     # Окно «после» должно целиком уместиться в прошлом: иначе сравниваются 90 дней
     # до с двумя неделями после, и любой сосед выглядит как обвал на 100 %.
     latest_ok = datetime.now(timezone.utc) - window
     newcomers = [s for s in (await db.execute(select(MarketSite).where(
-        MarketSite.company_id == cid, MarketSite.site_class != "home",
+        MarketSite.company_id == cid, *обл, MarketSite.site_class != "home",
         MarketSite.kind == "ezs",
         MarketSite.latitude.is_not(None),
         MarketSite.first_seen_at.is_not(None),
@@ -1855,6 +1969,8 @@ async def market_elasticity(
     min_change_pct: float = Query(5.0, ge=1.0, le=50.0),
     min_sessions: int = Query(20, ge=1, le=500,
                               description="минимум сессий в неделю, иначе это шум"),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Отклик спроса на нашу цену: что было с сессиями после её изменения.
@@ -1870,6 +1986,8 @@ async def market_elasticity(
     # одних и тех же строк. Когда числитель считал всю выручку, а знаменатель —
     # энергию только оплаченных строк, неделя с почти полностью корпоративным
     # потреблением давала 2 081 ₽/кВт·ч и «рост цены на 12 216 %» (аудит А07).
+    наши = наши_в_области(cid, regions, cities)
+    контур = [ChargeSession.location_id.in_(наши)] if наши is not None else []
     week = func.date_trunc("week", ChargeSession.started_at)
     rows = (await db.execute(
         select(ChargeSession.location_id, week.label("week"), func.count(),
@@ -1879,7 +1997,7 @@ async def market_elasticity(
                func.coalesce(func.sum(
                    case((ChargeSession.amount > 0, ChargeSession.energy_kwh), else_=0)), 0))
         .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
-               ChargeSession.location_id.is_not(None))
+               ChargeSession.location_id.is_not(None), *контур)
         .group_by(ChargeSession.location_id, week)
         .order_by(ChargeSession.location_id, week))).all()
 
@@ -2267,20 +2385,26 @@ async def measure_scenario(
 async def market_partners(
     company_id: str = Query(...),
     min_sites: int = Query(2, ge=1, le=100),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Кандидаты на роуминг: чем каждая сеть дополняет нашу, а чем дублирует."""
     cid = await _member(company_id, user, db)
     alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
 
-    our_cities = {city for (city,) in (await db.execute(
-        select(ServiceLocation.city).where(
-            ServiceLocation.company_id == cid,
-            ServiceLocation.is_test.is_(False),
-            ServiceLocation.city.is_not(None)))).all() if city}
+    наши = наши_в_области(cid, regions, cities)
+    свои_города = (select(ServiceLocation.city).where(
+        ServiceLocation.company_id == cid,
+        ServiceLocation.is_test.is_(False),
+        ServiceLocation.city.is_not(None)))
+    if наши is not None:
+        свои_города = свои_города.where(ServiceLocation.id.in_(наши))
+    our_cities = {city for (city,) in (await db.execute(свои_города)).all() if city}
 
     sites = (await db.execute(select(MarketSite).where(
-        MarketSite.company_id == cid, MarketSite.status != "closed",
+        MarketSite.company_id == cid, *обл, MarketSite.status != "closed",
         MarketSite.site_class != "home", MarketSite.kind == "ezs",
         MarketSite.operator_id.is_not(None)))).scalars().all()
     operators = {o.id: o for o in (await db.execute(select(MarketOperator).where(
@@ -2557,6 +2681,7 @@ async def market_pivot(
     search: str | None = Query(None),
     include_home: bool = Query(False, description="считать домашние розетки частников"),
     limit: int = Query(20000, le=50000),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Листья сводной по точкам рынка: GROUP BY по выбранному набору измерений.
@@ -2579,7 +2704,7 @@ async def market_pivot(
     except ValueError as e:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
 
-    conds = [MarketSite.company_id == cid,
+    conds = [MarketSite.company_id == cid, *обл,
              # Запись, признанная той же станцией, из счёта уходит — иначе сводная
              # повторит двойной счёт, который экран «Спорных точек» разбирает.
              MarketSite.duplicate_of_id.is_(None)]
@@ -2841,6 +2966,8 @@ def _presence(our_sites: int, rival_sites: int,
 async def growth_presence(
     company_id: str = Query(...),
     days: int = Query(90, ge=30, le=365),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Регионы по нашему положению: где мы одни, где делим рынок, где нас нет.
@@ -2851,6 +2978,8 @@ async def growth_presence(
     """
     cid = await _member(company_id, user, db)
     reply = await market_territories(company_id=company_id, level="region", days=days,
+                                     regions=regions, cities=cities,
+                                     обл=область(regions, cities),
                                      user=user, db=db)
     # Регион, где нас нет, но идут пятнадцать площадок, — это не «нас нет», это
     # «входим». Решение о территории там уже принято, и предлагать его заново
@@ -2919,6 +3048,8 @@ async def growth_presence(
 async def growth_overview(
     company_id: str = Query(...),
     days: int = Query(90, ge=30, le=365),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Пять направлений роста с живыми мерами каждого.
@@ -2940,7 +3071,8 @@ async def growth_overview(
         by_track.setdefault(track, {})[lead_status] = int(count)
 
     # ── стройка: белые пятна и то, что уже в «Проектах» ──
-    spots = await market_whitespots(company_id=company_id, level="city", user=user, db=db)
+    spots = await market_whitespots(company_id=company_id, level="city",
+                                    regions=regions, cities=cities, user=user, db=db)
     alive_spots = [x for x in spots["spots"] if x["rivalAlive"] > 0]
     # «Площадок в Проектах» — это те, что В РАБОТЕ. Введённые в эксплуатацию уже стали
     # объектами сети и считаются в другом месте, архив и заморозка — не работа;
@@ -2948,11 +3080,14 @@ async def growth_overview(
     projects = dict((stage, int(count)) for stage, count in (await db.execute(
         select(EzsSite.stage, func.count()).where(
             EzsSite.company_id == cid,
-            EzsSite.stage.notin_(["live", "archive", "on_hold"]))
+            EzsSite.stage.notin_(["live", "archive", "on_hold"]),
+            *площадки_в_области(regions, cities))
         .group_by(EzsSite.stage))).all())
 
     # ── роуминг и франшиза: чужие сети, дополняющие нас ──
-    partners = await market_partners(company_id=company_id, min_sites=1, user=user, db=db)
+    partners = await market_partners(company_id=company_id, min_sites=1,
+                                     regions=regions, cities=cities,
+                                     обл=область(regions, cities), user=user, db=db)
     complements = [p for p in partners["partners"] if p["complementSites"] > 0]
     # Франшиза — про малые сети: у них нет своего процессинга и обслуживания, и
     # именно им есть смысл встать на наше. Крупная сеть строит своё.
@@ -3061,7 +3196,8 @@ async def growth_overview(
         },
     ]
 
-    presence = await growth_presence(company_id=company_id, days=days, user=user, db=db)
+    presence = await growth_presence(company_id=company_id, days=days,
+                                     regions=regions, cities=cities, user=user, db=db)
     return {"days": days, "tracks": tracks, "presence": presence["groups"],
             "trackLabels": GROWTH_TRACKS}
 
@@ -3088,6 +3224,9 @@ STAGE_LABEL = {
 @router.get("/growth/pipeline")
 async def growth_pipeline(
     company_id: str = Query(...),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Перспективные проекты рядом с рынком: где мы уже идём и что там вокруг."""
@@ -3096,20 +3235,24 @@ async def growth_pipeline(
 
     projects = (await db.execute(select(EzsSite).where(
         EzsSite.company_id == cid,
-        EzsSite.stage.notin_(["live", "archive", "on_hold"])))).scalars().all()
+        EzsSite.stage.notin_(["live", "archive", "on_hold"]),
+        *площадки_в_области(regions, cities)))).scalars().all()
     if not projects:
         return {"projects": 0, "message": "площадок в работе нет — воронка «Проектов» пуста"}
 
     own_ids = await _own_operator_ids(db, cid)
     market = [x for x in (await db.execute(select(MarketSite).where(
-        MarketSite.company_id == cid, MarketSite.status == "active",
+        MarketSite.company_id == cid, *обл, MarketSite.status == "active",
         MarketSite.kind == "ezs"))).scalars().all()
         if _is_external(x, own_ids) and (x.site_class or "") != "home"]
-    ours = (await db.execute(
-        select(ServiceLocation.city, ServiceLocation.region_id)
-        .where(ServiceLocation.company_id == cid,
-               ServiceLocation.is_test.is_(False)))).all()
-    regions = dict((rid, name) for rid, name in (await db.execute(
+    наши = наши_в_области(cid, regions, cities)
+    свои = (select(ServiceLocation.city, ServiceLocation.region_id)
+            .where(ServiceLocation.company_id == cid,
+                   ServiceLocation.is_test.is_(False)))
+    if наши is not None:
+        свои = свои.where(ServiceLocation.id.in_(наши))
+    ours = (await db.execute(свои)).all()
+    имена_регионов = dict((rid, name) for rid, name in (await db.execute(
         select(Region.id, Region.name).where(Region.company_id == cid))).all())
 
     def key(value: str | None) -> str:
@@ -3121,7 +3264,7 @@ async def growth_pipeline(
     our_cities = {key(c) for c, _ in ours if c}
     our_by_region: dict[str, int] = {}
     for _, rid in ours:
-        name = regions.get(rid)
+        name = имена_регионов.get(rid)
         if name:
             our_by_region[name] = our_by_region.get(name, 0) + 1
 
@@ -3379,6 +3522,9 @@ async def market_self_view(
     match_km: float = Query(0.3, ge=0.05, le=2.0,
                             description="радиус сопоставления с нашим реестром"),
     days: int = Query(90, ge=30, le=365),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Наш публичный профиль: что о нас говорит рынок и сходится ли это с нами."""
@@ -3390,16 +3536,19 @@ async def market_self_view(
         MarketOperator.company_id == cid,
         MarketOperator.relation == "own"))).scalars().all()}
     mine = [s for s in (await db.execute(select(MarketSite).where(
-        MarketSite.company_id == cid,
+        MarketSite.company_id == cid, *обл,
         MarketSite.latitude.is_not(None)))).scalars().all()
         if s.operator_id in own_ops]
 
-    ours = (await db.execute(
-        select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
-               ServiceLocation.latitude, ServiceLocation.longitude)
-        .where(ServiceLocation.company_id == cid,
-               ServiceLocation.is_test.is_(False),
-               ServiceLocation.latitude.is_not(None)))).all()
+    наши = наши_в_области(cid, regions, cities)
+    свои = (select(ServiceLocation.id, ServiceLocation.name, ServiceLocation.city,
+                   ServiceLocation.latitude, ServiceLocation.longitude)
+            .where(ServiceLocation.company_id == cid,
+                   ServiceLocation.is_test.is_(False),
+                   ServiceLocation.latitude.is_not(None)))
+    if наши is not None:
+        свои = свои.where(ServiceLocation.id.in_(наши))
+    ours = (await db.execute(свои)).all()
     sales_rows = (await db.execute(
         select(ChargeSession.location_id, func.count(),
                func.coalesce(func.sum(func.coalesce(
@@ -3460,6 +3609,10 @@ async def market_self_view(
 
     # Как выглядят на этом фоне лидеры рынка: сравнивать себя не с абсолютом, а с
     # теми, кто рядом в том же реестре.
+    # Сети для сравнения качества берутся по ВСЕЙ стране, а не по области учёта:
+    # порог в 30 точек внутри одного края не проходит никто, и строка сравнения
+    # осталась бы пустой. Вопрос здесь «как мы выглядим против крупных сетей», а он
+    # от территории не зависит.
     rivals = (await db.execute(
         select(MarketOperator.name,
                func.avg(MarketSite.connection_quality_24h),
@@ -3738,6 +3891,8 @@ async def territory_profile(
 async def our_map_points(
     company_id: str = Query(...),
     days: int = Query(90, ge=7, le=365),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Наши станции для карты — со всем, что мы о них знаем.
@@ -3764,12 +3919,16 @@ async def our_map_points(
                         "errors": int(err or 0), "clients": int(u or 0)}
              for loc, c, e, a, err, u in rows}
 
-    regions = dict((rid, name) for rid, name in (await db.execute(
+    имена_регионов = dict((rid, name) for rid, name in (await db.execute(
         select(Region.id, Region.name).where(Region.company_id == cid))).all())
-    locations = (await db.execute(select(ServiceLocation).where(
+    наши = наши_в_области(cid, regions, cities)
+    свои = select(ServiceLocation).where(
         ServiceLocation.company_id == cid,
         ServiceLocation.is_test.is_(False),
-        ServiceLocation.latitude.is_not(None)))).scalars().all()
+        ServiceLocation.latitude.is_not(None))
+    if наши is not None:
+        свои = свои.where(ServiceLocation.id.in_(наши))
+    locations = (await db.execute(свои)).scalars().all()
 
     points = []
     for loc in locations:
@@ -3778,7 +3937,7 @@ async def our_map_points(
         ports = loc.connectors_count or 0
         points.append({
             "id": loc.id, "name": loc.name, "code": loc.code,
-            "city": loc.city, "region": regions.get(loc.region_id),
+            "city": loc.city, "region": имена_регионов.get(loc.region_id),
             "lat": float(loc.latitude), "lon": float(loc.longitude),
             # Паспорт: по нему отбирают «быстрые DC от 100 кВт» или «всё, что Fora»
             "powerKwt": float(loc.power_kwt) if loc.power_kwt else None,
@@ -3812,9 +3971,14 @@ async def our_map_points(
 @router.get("/landscape")
 async def market_landscape(
     company_id: str = Query(...),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    """Кто есть кто на рынке: размер, охват, платформа, роуминг, сервис."""
+    """Кто есть кто на рынке: размер, охват, платформа, роуминг, сервис.
+
+    Всё считается в границах области учёта из шапки: доля сети в Забайкальском крае
+    и доля по стране — разные числа, и для разговора о регионе нужно первое.
+    """
     cid = await _member(company_id, user, db)
     alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
 
@@ -3835,7 +3999,7 @@ async def market_landscape(
                              (and_(MarketSite.last_session_at.is_not(None),
                                    MarketSite.last_session_at < datetime.now(timezone.utc)
                                    - timedelta(days=180)), 1), else_=0)))
-                  .where(MarketSite.company_id == cid,
+                  .where(MarketSite.company_id == cid, *обл,
                          MarketSite.operator_id.is_not(None),
                          MarketSite.site_class == "network",
                          MarketSite.status != "closed",
@@ -3856,7 +4020,7 @@ async def market_landscape(
                                func.sum(MarketSite.ports),
                                func.sum(case((MarketSite.last_session_at >= alive_since, 1),
                                              else_=0)))
-                        .where(MarketSite.company_id == cid,
+                        .where(MarketSite.company_id == cid, *обл,
                                MarketSite.owner_id.is_not(None),
                                MarketSite.site_class == "network",
                                MarketSite.status != "closed",
@@ -3868,7 +4032,7 @@ async def market_landscape(
     last_price = await _last_prices(db, cid)
     site_operator = dict((str(sid), str(oid)) for sid, oid in (await db.execute(
         select(MarketSite.id, MarketSite.operator_id)
-        .where(MarketSite.company_id == cid,
+        .where(MarketSite.company_id == cid, *обл,
                MarketSite.operator_id.is_not(None)))).all())
     prices: dict[str, list[float]] = {}
     for site_id, obs in last_price.items():
@@ -3876,10 +4040,27 @@ async def market_landscape(
         if oid:
             prices.setdefault(oid, []).append(obs["price"])
 
+    # Охват сети внутри области: «155 городов» — факт о стране, и рядом с 26
+    # точками в крае он сбивает с толку. Когда территория выбрана, города считаем
+    # по её точкам, а федеральные округа не считаем вовсе — в границах одного
+    # субъекта это тавтология.
+    города_области: dict[str, int] = {}
+    if обл:
+        города_области = {str(oid): int(n) for oid, n in (await db.execute(
+            select(MarketSite.operator_id, func.count(func.distinct(MarketSite.city)))
+            .where(MarketSite.company_id == cid, *обл,
+                   MarketSite.operator_id.is_not(None),
+                   MarketSite.site_class == "network",
+                   MarketSite.status != "closed",
+                   MarketSite.duplicate_of_id.is_(None))
+            .group_by(MarketSite.operator_id))).all()}
+
     rows = []
     for op in operators:
         c = counts.get(str(op.id), {})
         sites = c.get("sites", 0)
+        охват = ({"citiesCount": города_области.get(str(op.id), 0), "districts": None}
+                 if обл else {})
         rows.append({
             "id": str(op.id), "name": op.name, "relation": op.relation,
             "isOurs": op.relation == "own",
@@ -3888,6 +4069,7 @@ async def market_landscape(
             # разговор с агрегатором на чужой платформе и с владельцем сети — это
             # два разных разговора.
             **_operator_facts(op),
+            **охват,
             "sites": sites, "ports": c.get("ports", 0), "alive": c.get("alive", 0),
             "silentHalfYear": c.get("silent", 0),
             "quality": c.get("quality"), "success": c.get("success"),
@@ -3899,7 +4081,7 @@ async def market_landscape(
     # сетей — нижняя оценка, а не факт.
     unnamed_sites = int((await db.execute(
         select(func.count()).select_from(MarketSite).where(
-            MarketSite.company_id == cid, MarketSite.status == "active",
+            MarketSite.company_id == cid, *обл, MarketSite.status == "active",
             MarketSite.kind == "ezs", MarketSite.site_class != "home",
             MarketSite.operator_id.is_(None)))).scalar() or 0)
 
@@ -3942,7 +4124,7 @@ async def market_landscape(
     platform_ids = [op.id for op in operators if op.is_platform]
     owner_unclear = int((await db.execute(
         select(func.count()).select_from(MarketSite).where(
-            MarketSite.company_id == cid, MarketSite.status != "closed",
+            MarketSite.company_id == cid, *обл, MarketSite.status != "closed",
             MarketSite.kind == "ezs", MarketSite.site_class == "network",
             MarketSite.duplicate_of_id.is_(None),
             MarketSite.owner_checked.is_(False),
@@ -4027,6 +4209,9 @@ async def market_landscape(
 @router.get("/coverage")
 async def market_coverage(
     company_id: str = Query(...),
+    regions: str | None = Query(None, description="регионы через запятую — контур"),
+    cities: str | None = Query(None, description="города через запятую — контур"),
+    обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Обеспеченность регионов: машин на зарядку и на РАБОТАЮЩУЮ зарядку.
@@ -4042,17 +4227,24 @@ async def market_coverage(
     cid = await _member(company_id, user, db)
     alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
 
-    stats = (await db.execute(select(MarketRegionStat).where(
-        MarketRegionStat.company_id == cid))).scalars().all()
+    выбранные = [x.strip() for x in (regions or "").split(",") if x.strip()]
+    статистика = select(MarketRegionStat).where(MarketRegionStat.company_id == cid)
+    if выбранные:
+        статистика = статистика.where(MarketRegionStat.region.in_(выбранные))
+    stats = (await db.execute(статистика)).scalars().all()
 
     # Наша сеть в тех же регионах: сколько наших точек и сколько из них работают.
-    regions = dict((rid, name) for rid, name in (await db.execute(
+    имена_регионов = dict((rid, name) for rid, name in (await db.execute(
         select(Region.id, Region.name).where(Region.company_id == cid))).all())
     ours: dict[str, dict[str, int]] = {}
-    for loc in (await db.execute(select(ServiceLocation).where(
-            ServiceLocation.company_id == cid,
-            ServiceLocation.is_test.is_(False)))).scalars().all():
-        name = regions.get(loc.region_id)
+    наши = наши_в_области(cid, regions, cities)
+    свои = select(ServiceLocation).where(
+        ServiceLocation.company_id == cid,
+        ServiceLocation.is_test.is_(False))
+    if наши is not None:
+        свои = свои.where(ServiceLocation.id.in_(наши))
+    for loc in (await db.execute(свои)).scalars().all():
+        name = имена_регионов.get(loc.region_id)
         if not name:
             continue
         row = ours.setdefault(name, {"sites": 0, "working": 0})
@@ -4063,7 +4255,7 @@ async def market_coverage(
     # Что рынок говорит о регионе сегодня — против того, что записано в статистике.
     market: dict[str, dict[str, int]] = {}
     for site in (await db.execute(select(MarketSite).where(
-            MarketSite.company_id == cid, MarketSite.kind == "ezs",
+            MarketSite.company_id == cid, *обл, MarketSite.kind == "ezs",
             MarketSite.status != "closed",
             MarketSite.site_class != "home"))).scalars().all():
         if not site.region:

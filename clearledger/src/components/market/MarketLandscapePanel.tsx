@@ -25,7 +25,7 @@ import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { MarketCompaniesPanel } from './MarketCompaniesPanel'
 import {
-  getMarketLandscape, type MarketNetworkRow, type MarketOwnerRow,
+  getMarketLandscape, marketScope, type MarketNetworkRow, type MarketOwnerRow,
 } from '@/services/marketService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -58,6 +58,9 @@ function rowClass(r: MarketNetworkRow): string {
 
 export function MarketLandscapePanel() {
   const { companyId } = useCompany()
+  // Область выбрана — колонка штаб-квартиры не про неё: «Южно-Сахалинск» у РусГидро
+  // в срезе Бурятии читался как станция на Сахалине (замечание РусГидро 23.09.2026).
+  const региональный = marketScope().regions.length > 0 || marketScope().cities.length > 0
   const экран = useRef<HTMLDivElement>(null)
   const [вид, setВид] = useState<string>('power')
   // Расклад отвечает «кто сильнее», карточка — «что он делает». Второй вопрос
@@ -161,9 +164,14 @@ export function MarketLandscapePanel() {
           <span className="flex items-center gap-2 text-sm font-medium">
             <Swords className="size-4 text-primary" aria-hidden />
             {ours
-              ? `Мы ${ours.sharePct} % рынка: ${nf.format(ours.sites)} точек в ${nf.format(ours.citiesCount ?? 0)} городах.`
+              ? `Мы ${ours.sharePct} % среди сетей с известным владельцем: ${nf.format(ours.sites)} точек в ${nf.format(ours.citiesCount ?? 0)} городах.`
               : `На рынке ${t?.networks ?? 0} сетей.`}
           </span>
+          {(t?.unnamedSites ?? 0) > 0 && (
+            <span className="text-xs text-warning">
+              Ещё {nf.format(t!.unnamedSites!)} точек без названного владельца в долю не вошли.
+            </span>
+          )}
           <span className="text-xs text-muted-foreground">
             {nf.format(t?.networks ?? 0)} сетей · {nf.format(t?.networkSites ?? 0)} точек ·
             своя платформа у {t?.ownPlatform ?? 0} · в роуминге {t?.roamingNetworks ?? 0}
@@ -186,21 +194,21 @@ export function MarketLandscapePanel() {
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
           <table className="w-full text-xs"
             {...exportRows('Расклад сил', [
-              'Сеть', 'Мы', 'Точек', 'Доля, %', 'Городов', 'Округов', 'Модель', 'База',
+              'Сеть', 'Мы', 'Точек', 'Доля, %', 'Городов', 'Округов', 'Модель', 'Штаб-квартира',
               'Средняя мощность, кВт', 'Медиана цены, ₽/кВт·ч',
             ], rows.map((r) => [
               r.name, r.isOurs ? 'мы' : null, r.sites, r.sharePct, r.citiesCount, r.districts,
               r.class ?? 'не определена', r.baseCity, r.avgPowerKw, r.medianPricePerKwh,
             ]))}>
-            <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
               <tr>
                 <SortTh sortKey="name" sort={sort} onSort={toggle}>Сеть</SortTh>
                 <SortTh sortKey="sites" sort={sort} onSort={toggle} align="right">Точек</SortTh>
                 <SortTh sortKey="share" sort={sort} onSort={toggle} align="right">Доля</SortTh>
                 <SortTh sortKey="cities" sort={sort} onSort={toggle} align="right">Городов</SortTh>
-                <SortTh sortKey="districts" sort={sort} onSort={toggle} align="right">Округов</SortTh>
+                {!региональный && <SortTh sortKey="districts" sort={sort} onSort={toggle} align="right">Округов</SortTh>}
                 <SortTh sortKey="model" sort={sort} onSort={toggle}>Модель</SortTh>
-                <SortTh sortKey="base" sort={sort} onSort={toggle}>База</SortTh>
+                {!региональный && <SortTh sortKey="base" sort={sort} onSort={toggle}>Штаб-квартира</SortTh>}
                 <SortTh sortKey="power" sort={sort} onSort={toggle} align="right">Средняя мощность</SortTh>
                 <SortTh sortKey="price" sort={sort} onSort={toggle} align="right">Медиана цены</SortTh>
               </tr>
@@ -216,14 +224,14 @@ export function MarketLandscapePanel() {
                   <td className="p-2 text-right"><Num v={r.sites} /></td>
                   <td className="p-2 text-right"><Num v={r.sharePct} unit="%" digits={1} /></td>
                   <td className="p-2 text-right"><Num v={r.citiesCount} /></td>
-                  <td className="p-2 text-right"><Num v={r.districts} /></td>
+                  {!региональный && <td className="p-2 text-right"><Num v={r.districts} /></td>}
                   <td className="p-2 text-muted-foreground">
                     {r.class ?? 'не определена'}
                     {r.class && !r.classChecked && (
                       <span className="ml-1 text-xs">· не проверено</span>
                     )}
                   </td>
-                  <td className="p-2 text-muted-foreground">{r.baseCity ?? '—'}</td>
+                  {!региональный && <td className="p-2 text-muted-foreground">{r.baseCity ?? '—'}</td>}
                   <td className="p-2 text-right"><Num v={r.avgPowerKw} unit="кВт" digits={1} /></td>
                   <td className="p-2 text-right"><Num v={r.medianPricePerKwh} digits={1} /></td>
                 </tr>
@@ -261,7 +269,7 @@ export function MarketLandscapePanel() {
                   .filter(Boolean).join(', '),
                 r.legalTrusted ? r.legalName : null, r.legalTrusted ? r.inn : null,
               ]))}>
-              <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+              <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
                 <tr>
                   <SortTh sortKey="name" sort={владельцы.sort} onSort={владельцы.toggle}>Владелец</SortTh>
                   <SortTh sortKey="sites" sort={владельцы.sort} onSort={владельцы.toggle} align="right">Точек</SortTh>
@@ -317,7 +325,7 @@ export function MarketLandscapePanel() {
           <ReportPivot
             fields={['model', 'platform', 'roaming', 'base', 'ours', 'trusted',
                      'networks', 'sites', 'ports', 'alive', 'silent']}
-            columns={['Модель', 'Платформа', 'Роуминг', 'База', 'Чья сеть', 'Реквизиты',
+            columns={['Модель', 'Платформа', 'Роуминг', 'Штаб-квартира', 'Чья сеть', 'Реквизиты',
                       'Сетей', 'Точек', 'Портов', 'Живых', 'Молчат полгода']}
             rows={rows.map((r) => ({
               model: r.class ?? '— не определена —',
@@ -444,7 +452,7 @@ export function MarketLandscapePanel() {
               r.sites > 0 ? (r.silentHalfYear / r.sites) * 100 : null,
               r.appRating, r.appReviews, r.appName,
             ]))}>
-            <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
               <tr>
                 <SortTh sortKey="name" sort={сервис.sort} onSort={сервис.toggle}>Сеть</SortTh>
                 <SortTh sortKey="sites" sort={сервис.sort} onSort={сервис.toggle} align="right">Точек</SortTh>

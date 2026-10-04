@@ -13,9 +13,11 @@ import {
   type ReactNode,
 } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { nanoid } from 'nanoid'
 import { useCompany } from './CompanyContext'
 import { clearFilterSelections, sameFilterState } from './filterState'
+import { setMarketScope } from '@/services/marketService'
 
 /** Период дат [from, to] в ISO (YYYY-MM-DD). */
 export interface Period {
@@ -206,6 +208,20 @@ export function FilterProvider({ children, syncUrl = true }: { children: ReactNo
   const [presets, setPresets] = useState<NamedPreset[]>(() => loadPresets(companyId))
   const stateRef = useRef(state)
   const pendingUrlStateRef = useRef<FilterState | null>(null)
+  const qc = useQueryClient()
+
+  // Раздел «Маркетинг» берёт область учёта отсюда: его запросы шлют её параметром.
+  // Записываем ДО отрисовки детей — эффекты выполняются снизу вверх, и в эффекте
+  // первый запрос панели ушёл бы ещё по всей стране.
+  setMarketScope(state.regionIds)
+
+  // Сменилась область — ответы рынка, посчитанные по прежней, больше не ответ.
+  // Ключи кэша территории не содержат, поэтому обновляем их по имени раздела.
+  useEffect(() => {
+    qc.invalidateQueries({
+      predicate: (q) => String(q.queryKey[0] ?? '').startsWith('market-'),
+    })
+  }, [qc, state.regionIds])
 
   useEffect(() => {
     stateRef.current = state

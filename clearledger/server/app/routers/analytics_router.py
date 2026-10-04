@@ -21,6 +21,7 @@ from app.auth import assert_company_member, assert_company_module, assert_compan
 from app.database import get_db
 from app.models import User
 from app.services.analytics_service import AnalyticsService, PeriodFilter
+from app.services.session_scope import station_locations_sql
 
 router = APIRouter(prefix="/analytics", tags=["Аналитика"])
 
@@ -625,7 +626,8 @@ async def get_charge_long_trend(
         scope_params["regions"] = scope_regions
     if scope_stations:
         file_scope += " AND sl.code = ANY(:stations)"
-        sess_scope += " AND s.station_code = ANY(:stations)"
+        sess_scope += (" AND (s.station_code = ANY(:stations) OR s.location_id = ANY"
+                       f"{station_locations_sql(':stations', ':cid')})")
         scope_params["stations"] = scope_stations
 
     dim_file = {

@@ -51,6 +51,7 @@ import * as departmentsService from '@/services/departmentsService'
 import { ObjectScopeDialog } from './ObjectScopeDialog'
 import { StationPinDialog } from './StationPinDialog'
 import { PartyBadge } from '@/components/chat/PartyBadge'
+import { useAppEnabled } from '@/hooks/useCompanyRegistry'
 
 /** «31.07, 14:02» — компактная отметка последнего входа для строки состава. */
 const seenShort = (iso?: string | null) => iso
@@ -788,6 +789,15 @@ function MemberAccessPanel({
   )
 }
 
+/** Роли «Поддержки» (ALLOWED_ROLES приёмника проекции, TSupport `routes/v1/eco.js`). */
+const SUPPORT_ROLES: [string, string][] = [
+  ['operator', 'Оператор КЦ'], ['cc_head', 'Руководитель КЦ'],
+  ['coordinator', 'Координатор сервиса'], ['partner', 'Менеджер'],
+  ['tech', 'Техспециалист'], ['field', 'Выездной инженер'], ['admin', 'Администратор'],
+  ['company', 'Сотрудник компании'], ['customer', 'Клиент'],
+  ['vendor', 'Производитель'], ['developer', 'Разработчик'],
+]
+
 /** Карточка участника: кто он и на каком основании здесь. Права — в матрице. */
 function MemberCard({
   u, companyId, canManage, isSelf, roles, orgs, contracts, onSaved, onClose,
@@ -808,6 +818,7 @@ function MemberCard({
   // пространством, и вернуть его будет некому. Своя роль остаётся только
   // для чтения; чужую суперадминскую меняет лишь суперадмин.
   const accessEditable = editable && !isSelf
+  const supportOn = useAppEnabled(companyId, 'support') === true
 
   const update = useMutation({
     mutationFn: (data: Parameters<typeof userService.updateUser>[1]) => userService.updateUser(u.id, data),
@@ -915,6 +926,28 @@ function MemberCard({
               </p>
             )}
           </div>
+          {/* Роль в «Поддержке» — её рабочее место: линия оператора, руководитель КЦ,
+              выезды. Назначалась только через API/SQL (`app_roles`), и каждого нового
+              оператора заводили вручную. В Поддержку уезжает плановым проходом
+              проекции людей (`space_projection_scheduler`, раз в 30 минут). */}
+          {supportOn && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Роль в Поддержке</Label>
+              <Select value={u.app_roles?.support ?? 'default'} disabled={!accessEditable}
+                onValueChange={(v) => update.mutate({ companyId, appRoles: { support: v === 'default' ? '' : v } })}>
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">— по роли доступа —</SelectItem>
+                  {SUPPORT_ROLES.map(([code, label]) => (
+                    <SelectItem key={code} value={code}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">Вступает в силу в Поддержке в течение получаса.</p>
+            </div>
+          )}
           {dirty && editable && (
             <Button size="sm" className="h-8" disabled={update.isPending}
               onClick={() => update.mutate({ companyId, name, position })}>

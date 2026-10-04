@@ -9,12 +9,14 @@
 превращаться в бесконечную повторную доставку.
 """
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import (
     APIRouter, BackgroundTasks, Depends, HTTPException, Request,
     status as http_status,
 )
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +24,7 @@ from app.auth import get_company_by_api_key
 from app.database import get_db
 from app.models import (
     App, AppCompanyLink, ApprovalRequest, Company, DocAcquaint, DocCard,
-    SpaceConnection, Task,
+    EventSubscription, OutboxEvent, ServiceLocation, SpaceConnection, Task,
 )
 from app.services import inbound_events, raw_intake, space_connection_registry
 
@@ -538,3 +540,180 @@ async def accept_raw_batch(
         # что разбор можно будет повторить.
         return {"status": "skipped", "note": "пакет не сохранён, подробности в журнале"}
     return {"status": "accepted", "batchId": str(batch_id)}
+@router.get("/bus-summary")
+async def bus_summary(
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Состояние шины Ядра для общей витрины пространства.
+
+    Шин в пространстве две: своя у Ядра и своя у Поддержки. Разводить их по
+    разным экранам значит спрашивать у человека, в какой из двух смотреть,
+    когда он ещё не знает, где встало. Витрина одна — в разделе «Шина»
+    Поддержки, и эта ручка отдаёт ей вторую половину картины.
+
+    Отдаём счётчики и молчащие подписки, не сами события: чинят их здесь, в
+    своей витрине (`/api/v1/space-events/outbox`), а знать заранее нужно
+    только одно — есть ли что чинить.
+    """
+    counts = dict((await db.execute(
+        select(OutboxEvent.status, func.count())
+        .where(OutboxEvent.company_id == company.id)
+        .group_by(OutboxEvent.status),
+    )).all())
+
+    stuck = (await db.execute(
+        select(func.count()).select_from(OutboxEvent).where(
+            OutboxEvent.company_id == company.id,
+            OutboxEvent.status == "pending",
+            OutboxEvent.attempts > 0,
+        ),
+    )).scalar_one()
+
+    subs = (await db.execute(
+        select(EventSubscription).where(
+            EventSubscription.company_id == company.id),
+    )).scalars().all()
+
+    return {
+        "source": "core",
+        "queue": {
+            "pending": int(counts.get("pending", 0)),
+            "retrying": int(stuck),
+            "failed": int(counts.get("failed", 0)),
+            "done": int(counts.get("done", 0)),
+        },
+        "subscriptions": [
+            {
+                "id": str(s.id),
+                "label": s.label,
+                "target": s.app_code or s.url,
+                "enabled": bool(s.enabled),
+                "failure_streak": int(s.failure_streak or 0),
+                "last_error": s.last_error,
+            }
+            for s in subs
+        ],
+    }
+class AppSupportRequest(BaseModel):
+    """Обращение, которое приложение пространства просит отправить в поддержку."""
+
+    vendor: str | None = Field(None, max_length=60)
+    title: str = Field(..., min_length=1, max_length=300)
+    body: str = Field(..., min_length=1, max_length=20000)
+    subject_kind: str | None = Field(None, max_length=30)
+    subject_ref: str | None = Field(None, max_length=120)
+    subject_label: str | None = Field(None, max_length=300)
+    author_email: str | None = Field(None, max_length=200)
+    author_name: str | None = Field(None, max_length=200)
+    # Ключ отправителя: приложение шлёт очередью с ретраями, и без него повтор
+    # положил бы второе обращение по тому же поводу.
+    external_id: str | None = Field(None, max_length=120)
+
+
+@router.post("/support-request")
+async def app_support_request(
+    payload: AppSupportRequest,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Приложение пространства обращается к нашей поддержке — через своё Ядро.
+
+    Единственный правильный путь наружу (`docs/CORE.md` §2.4): приложение не
+    ходит в чужую поддержку напрямую своим ключом, а просит об этом пространство,
+    в котором живёт. Кто обращается и от чьего имени, отвечает пространство — оно
+    знает своих людей и их роли; продукт, называющий себя сам, не доказывает
+    ничего, кроме того, что знает ключ.
+
+    Обращение ложится в тот же реестр тем, что и открытое человеком в панели
+    «Техподдержка»: у клиента одна лента обращений независимо от того, из какого
+    приложения спросили. Ответ поддержки придёт обычным путём моста.
+    """
+    from app.models import PartnerSpace
+    from app.services import partner_bridge
+
+    title = payload.title.strip()
+    body = payload.body.strip()
+    if not title or not body:
+        raise HTTPException(http_status.HTTP_400_BAD_REQUEST,
+                            "Нужны тема обращения и текст")
+
+    # Вендор по коду, а если не назван — единственный поставщик пространства.
+    # Требовать код от приложения, когда поставщик один, значит заставить его
+    # знать нашу настройку.
+    q = select(PartnerSpace).where(
+        PartnerSpace.company_id == company.id,
+        PartnerSpace.role == "vendor",
+        PartnerSpace.is_active.is_(True),
+    )
+    if payload.vendor:
+        q = q.where(PartnerSpace.code == payload.vendor)
+    vendors = (await db.execute(q)).scalars().all()
+    if not vendors:
+        raise HTTPException(http_status.HTTP_404_NOT_FOUND,
+                            "Поставщик поддержки для пространства не настроен")
+    if len(vendors) > 1:
+        raise HTTPException(http_status.HTTP_400_BAD_REQUEST,
+                            "Поставщиков несколько — назовите код в поле vendor")
+    partner = vendors[0]
+
+    topic = await partner_bridge.ensure_topic(
+        db, company.id, partner, uuid.uuid4().hex, title=title,
+        subject_kind=payload.subject_kind, subject_ref=payload.subject_ref,
+        subject_label=(payload.subject_label or "").strip()[:300] or None)
+
+    self_code = (await db.execute(
+        select(Company.slug).where(Company.id == company.id))).scalar_one()
+    row = await partner_bridge.send(
+        db, company.id, partner, self_code=self_code, body=body,
+        author_email=payload.author_email, author_name=payload.author_name,
+        subject_kind=payload.subject_kind, subject_ref=payload.subject_ref,
+        external_id=payload.external_id, topic=topic)
+
+    return {
+        "code": topic.code,
+        "state": topic.state,
+        "vendor": partner.code,
+        "delivered": row.delivered_at is not None,
+        # Недоставленное остаётся у нас в ленте с причиной: приложение должно
+        # знать, что обращение принято пространством, даже если сосед молчит.
+        "error": row.delivery_error,
+    }
+@router.get("/stations-summary")
+async def stations_summary(
+    as_of: str | None = None,
+    company: Company = Depends(get_company_by_api_key),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Сколько станций на обслуживании: быстрые (DC) и медленные (AC).
+
+    Нужно акту об оказании Услуг: его форма считает оплату от КОЛИЧЕСТВА станций по
+    двум типам («техническая поддержка 1 (одной) DC ЭЗС» × количество). Без этих
+    чисел акт не считает сумму, то есть не работает как основание платежа.
+
+    Класс берём из паспорта объекта (`speed_class`), а не выводим из мощности:
+    граница 22 кВт принадлежит обоим классам, и вывод по ней разошёлся бы с тем,
+    что заказчик сам записал в реестре. Объекты без класса отдаём отдельным числом —
+    их нельзя молча приписать ни к DC, ни к AC.
+    """
+    rows = (await db.execute(
+        select(ServiceLocation.speed_class, func.count())
+        .where(
+            ServiceLocation.company_id == company.id,
+            ServiceLocation.status == "active",
+        )
+        .group_by(ServiceLocation.speed_class),
+    )).all()
+
+    counts = {"fast": 0, "slow": 0, "unknown": 0}
+    for speed_class, count in rows:
+        key = speed_class if speed_class in ("fast", "slow") else "unknown"
+        counts[key] += int(count)
+
+    return {
+        "as_of": as_of or datetime.now(timezone.utc).date().isoformat(),
+        "dc": counts["fast"],
+        "ac": counts["slow"],
+        "unknown": counts["unknown"],
+        "total": counts["fast"] + counts["slow"] + counts["unknown"],
+    }

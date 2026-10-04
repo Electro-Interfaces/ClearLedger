@@ -33,6 +33,7 @@ from app.routers import (
     auditor_router,
     auth_router,
     books_router,
+    client_errors_router,
     intake_docs_router,
     mail_router,
     dedup_ingest_router,
@@ -303,8 +304,31 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:  # noqa: BLE001 — чтение БП не критично для API
         logger.warning(f"Такт чтения БП не запущен: {e}")
 
+    # Догон проекции справочников в приложения: объекты уезжают точечно при
+    # правке, а контрагенты, оборудование и люди приходят пачками — их отправляет
+    # редкий общий проход. Без него непрошедшая проекция ждала бы кнопки.
+    projection_task: asyncio.Task | None = None
+    try:
+        from app.services.space_projection_scheduler import run_forever as _projection
+        projection_task = asyncio.create_task(_projection())
+    except Exception as e:  # noqa: BLE001 — догон не критичен для API
+        logger.warning(f"Догон проекции пространства не запущен: {e}")
+
+    # Сторож свежести выгрузки: витрину кладёт человек, расписания у неё нет, и
+    # молчание файла до сих пор замечали только по странным цифрам на экранах.
+    intake_task: asyncio.Task | None = None
+    try:
+        from app.services.intake_watch import run_forever as _intake
+        intake_task = asyncio.create_task(_intake())
+    except Exception as e:  # noqa: BLE001 — сторож не критичен для API
+        logger.warning(f"Сторож свежести выгрузки не запущен: {e}")
+
     logger.info("TradeLedger Server запущен")
     yield
+    if intake_task is not None:
+        intake_task.cancel()
+    if projection_task is not None:
+        projection_task.cancel()
     if onec_read_task is not None:
         onec_read_task.cancel()
     if prices_task is not None:
@@ -405,6 +429,8 @@ async def organization_context(request, call_next):
 API_PREFIX = "/api"
 
 app.include_router(auth_router.router, prefix=API_PREFIX)
+# Журнал сбоев интерфейса: открыт без токена — экран входа падает до входа.
+app.include_router(client_errors_router.router, prefix=API_PREFIX)
 # Рабочее место станции: прокси к вебу агента через хаб TradeLink.
 app.include_router(station_console_router.router, prefix=API_PREFIX)
 app.include_router(tickets_router.router, prefix=API_PREFIX)

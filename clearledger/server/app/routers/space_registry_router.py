@@ -101,6 +101,24 @@ async def list_objects(
     return {"companyId": str(cid), "objects": objects, "total": len(objects)}
 
 
+@router.get("/objects/open-tickets")
+async def network_open_tickets(
+    company_id: str = Query(...),
+    app: str = Query("support"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Открытые заявки по всей сети, свёрнутые по объекту.
+
+    Нужна витринам сети: рядом с «станция молчит» должно стоять «и никто её не
+    взял». Без этого экран показывает беду, которая никуда не уходит.
+    """
+    cid = await _member(company_id, user, db)
+    try:
+        return await space_projection.network_open_tickets(db, cid, app)
+    except space_projection.ProjectionError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+
+
 @router.get("/objects/{object_id}")
 async def get_object(
     object_id: str,
@@ -457,10 +475,48 @@ async def object_tickets(
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
 
 
+@router.post("/objects/match-app")
+async def match_objects_with_app(
+    company_id: str = Query(...),
+    app: str = Query("support"),
+    apply: bool = Query(False, description="false — предпросмотр, true — записать связи"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Связать карточки объектов в приложении с объектами пространства.
+
+    Единый разрез учёта: объект пространства — мастер, приложения ссылаются на
+    него. Карточки, заведённые в приложении своим импортом, остаются без связи —
+    здесь они сопоставляются по номеру станции и заводскому номеру.
+
+    По умолчанию — предпросмотр: сначала человек смотрит, что с чем сойдётся.
+    """
+    cid = await _member(company_id, user, db)
+    try:
+        return await space_projection.match_objects(db, cid, apply=apply, app_code=app)
+    except space_projection.ProjectionError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+
+
+@router.get("/ticket-types")
+async def ticket_kinds(
+    company_id: str = Query(...),
+    app: str = Query("support"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Виды работ приложения — чтобы заявку заводили с маршрутом, а не «инцидентом»."""
+    cid = await _member(company_id, user, db)
+    try:
+        return await space_projection.ticket_kinds(db, cid, app)
+    except space_projection.ProjectionError as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+
+
 class ObjectTicketIn(BaseModel):
     description: str = Field(min_length=10, max_length=4000)
     title: str | None = Field(default=None, max_length=300)
     priority: str = "medium"
+    # Вид работы из справочника приложения: он решает маршрут заявки.
+    type_code: str | None = Field(default=None, max_length=64)
 
 
 @router.post("/objects/{object_id}/tickets", status_code=status.HTTP_201_CREATED)
@@ -484,10 +540,59 @@ async def create_object_ticket(
         return await space_projection.create_object_ticket(
             db, cid, object_id,
             description=body.description, title=body.title, priority=body.priority,
-            author_email=user.email, app_code=app,
+            type_code=body.type_code, author_email=user.email, app_code=app,
         )
     except space_projection.ProjectionError as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
+
+
+class BulkTicketIn(BaseModel):
+    """Пачка заявок по отобранным станциям — одна беда, много адресов."""
+    object_ids: list[str] = Field(min_length=1, max_length=50)
+    description: str = Field(min_length=10, max_length=4000)
+    title: str | None = Field(default=None, max_length=300)
+    priority: str = "medium"
+    type_code: str | None = Field(default=None, max_length=64)
+
+
+@router.post("/objects/tickets-bulk", status_code=status.HTTP_201_CREATED)
+async def create_object_tickets_bulk(
+    body: BulkTicketIn,
+    company_id: str = Query(...),
+    app: str = Query("support"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Завести заявки сразу по нескольким станциям.
+
+    На пилоте 280 станций молчат больше недели и ни по одной нет заявки: руками
+    это 280 карточек, то есть не будет сделано вовсе. Пачка ограничена полусотней
+    — не из-за нагрузки, а чтобы человек видел список, который подтверждает.
+
+    Ошибка по одной станции не отменяет остальные: приложение может не знать
+    объект, заведённый после последней проекции, и это не повод терять сорок
+    девять заведённых заявок. Отчёт возвращается построчно.
+    """
+    cid = await _member(company_id, user, db)
+    заведено: list[dict] = []
+    ошибки: list[dict] = []
+    for object_id in body.object_ids:
+        объект = await space_registry.get_object(db, cid, object_id)
+        if объект is None:
+            ошибки.append({"objectId": object_id, "error": "Объект не найден в этой компании"})
+            continue
+        try:
+            r = await space_projection.create_object_ticket(
+                db, cid, object_id,
+                description=body.description,
+                title=body.title or f"Работа на объекте: {объект.name}",
+                priority=body.priority, type_code=body.type_code,
+                author_email=user.email, app_code=app)
+            заведено.append({"objectId": object_id, "name": объект.name,
+                             "number": r.get("display_number") or r.get("number")})
+        except space_projection.ProjectionError as e:
+            ошибки.append({"objectId": object_id, "name": объект.name, "error": str(e)})
+    return {"created": заведено, "failed": ошибки,
+            "createdCount": len(заведено), "failedCount": len(ошибки)}
 
 
 @router.get("/object-types")

@@ -50,6 +50,7 @@ import { ContractScopeDialog, ContractScopeBadgeLabel } from '@/components/refer
 import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import type { Counterparty, Contract, CounterpartyType } from '@/types'
+import { useSpacePageSub } from '@/hooks/useSpacePageSub'
 
 const TYPE_COLOR: Record<string, string> = {
   'ЮЛ': 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
@@ -1374,11 +1375,14 @@ const CP_FLAGS = [
 type CpFlag = (typeof CP_FLAGS)[number]['key']
 
 export function ContractorsPage() {
-  const { company, companyId } = useCompany()
-  const isEnergy = company.profileId === 'energy'
+  const { companyId } = useCompany()
   const { data: counterparties = [], isLoading } = useCounterparties()
   const { data: allContracts = [] } = useContracts()
-  const [view, setView] = useState<'counterparties' | 'contracts' | 'corp' | 'quality'>('counterparties')
+  // Раздел страницы задаётся вертикальным меню (`?sub=`), а не своим
+  // переключателем: один язык навигации на рабочий стол (20.09.2026).
+  const [sub, setSub] = useSpacePageSub()
+  const view = sub as 'counterparties' | 'contracts' | 'corp' | 'quality'
+  const setView = setSub
   // <1024 (порог грида lg): мастер-деталь — карточка шторкой поверх списка.
   const isNarrow = useMaxWidth(1024)
   const [search, setSearch] = useState('')
@@ -1487,30 +1491,10 @@ export function ContractorsPage() {
         </div>
       </div>
 
-      {/* Переключатель режимов: список контрагентов / все договоры */}
-      <div className="mb-4 inline-flex rounded-lg border border-border/60 bg-muted/30 p-0.5">
-        <button onClick={() => setView('counterparties')}
-          className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'counterparties' ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
-          Контрагенты ({counterparties.length})
-        </button>
-        <button onClick={() => setView('contracts')}
-          className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'contracts' ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
-          Все договоры ({allContracts.length})
-        </button>
-        {isEnergy && (
-          <button onClick={() => setView('corp')}
-            className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'corp' ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
-            Покупатели (корп.)
-          </button>
-        )}
-        {/* «Качество» — там, где есть чем мерить: проверки стоят на документах
-            бухгалтерии. У компаний без неё вкладка ответила бы пустотой. */}
-        {hasStats && (
-          <button onClick={() => setView('quality')}
-            className={`px-3 py-1.5 rounded-md text-sm transition-colors ${view === 'quality' ? 'bg-background shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
-            Качество
-          </button>
-        )}
+      {/* Счётчики остаются на виду: меню слева называет разделы, а сколько в
+          них записей — вопрос этой страницы. */}
+      <div className="mb-3 text-xs text-muted-foreground">
+        контрагентов {counterparties.length} · договоров {allContracts.length}
       </div>
 
       {view === 'quality' ? (

@@ -1080,6 +1080,21 @@ export interface StationReliabilityRow {
   failed_visits: number
   /** Зарядившиеся визиты, где получилось НЕ с первой попытки (attempts>1). */
   retried_visits: number
+  // ── картина сбоя: чем именно плохо оборудование (предмет разговора с вендором) ──
+  /** Зарядился, но пришлось втыкать снова в ТОТ ЖЕ разъём: замок/рукопожатие через раз. */
+  retried_same_connector: number
+  /** Зарядился на ДРУГОМ разъёме: беда в конкретном коннекторе, а не в станции. */
+  retried_other_connector: number
+  /** Уехал после первой же неудачи — отказ сразу, клиент не стал пробовать. */
+  left_first_try: number
+  /** Пробовал несколько раз и уехал ни с чем — станция вовсе не отдаёт ток. */
+  left_after_tries: number
+  /** Пустые попытки короче минуты: не дошло до отпуска тока. */
+  wasted_instant: number
+  /** Пустые попытки дольше пяти минут: станция держала машину и тока не дала. */
+  wasted_stuck: number
+  left_first_pct: number
+  left_after_pct: number
   sessions: number
   /** Повторных сессий = сессий − визитов (лишние переподключения разъёма). */
   repeat_sessions: number
@@ -1109,6 +1124,9 @@ export interface BrandReliabilityResponse {
     brands: number; stations: number; visits: number; sessions: number
     charged_visits: number; failed_visits: number; repeat_sessions: number
     wasted_sessions: number; visit_success_pct: number
+    retried_same_connector: number; retried_other_connector: number
+    left_first_try: number; left_after_tries: number
+    wasted_instant: number; wasted_stuck: number
     energy_kwh: number; amount: number; risk_stations: number
   }
   stations: StationReliabilityRow[]

@@ -12,6 +12,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { StationLink } from '@/components/common/StationLink'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -270,7 +271,11 @@ function ChargesTable({ rows, isClosed, period, onCorrect, correcting }: {
         {rows.map((r) => (
           <div key={r.id} className="space-y-1 p-3 text-sm">
             <div className="flex items-start justify-between gap-2">
-              <span className="font-medium">{r.locationName ?? 'Общая затрата компании'}</span>
+              <span className="font-medium">
+                {r.locationName
+                  ? <StationLink station={r.locationId}>{r.locationName}</StationLink>
+                  : 'Общая затрата компании'}
+              </span>
               <span className="shrink-0 tabular-nums">{money(r.expectedGross)} ₽</span>
             </div>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -309,7 +314,9 @@ function ChargesTable({ rows, isClosed, period, onCorrect, correcting }: {
               <TableRow key={r.id} className={r.seq > 0 ? 'bg-blue-500/5' : undefined}>
                 <TableCell className="max-w-[220px] truncate font-medium"
                   title={r.locationName ?? undefined}>
-                  {r.locationName ?? <span className="text-muted-foreground">вся компания</span>}
+                  {r.locationName
+                    ? <StationLink station={r.locationId}>{r.locationName}</StationLink>
+                    : <span className="text-muted-foreground">вся компания</span>}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
                   {r.costItemLabel}

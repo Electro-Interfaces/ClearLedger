@@ -1,18 +1,48 @@
-# CLAUDE.md — ClearLedger (продукт = TradeLedger)
+# CLAUDE.md — центр ElsyPlus Ledger (кодовая база clearledger)
 
-> Инструкции для Claude Code при работе внутри `clearledger/`.
-> Актуальные результаты всех агентов и версии стендов:
-> `D:/Users/magsp/ELSYPLUS/ecosystem-deploy/docs/CURRENT-STATE.md`.
-> Память Claude и общий канон: `docs/AGENT-MEMORY.md` в том же репозитории.
-> 📛 **Имя продукта = TradeLedger** (канон: `D:\Users\magsp\ELSYPLUS\Ledger\app\GLOSSARY.md`). `ClearLedger`/`clearledger/` — текущее имя кодовой базы; переименование в `tradeledger/` — отдельная Tier-3 миграция (затрагивает прод-деплой `ledger.dataworker.ru/ClearLedger/`). Термины входного слоя (Источник/Канал/Поток/Разрез сверки) и **4 слоя данных** (L1 RAW→L2 CLEAN→L3 EXPORT→L4 1C_REF) — по GLOSSARY.
+> **Этот файл — канон разработки центра**: код, команды, правила запросов и
+> достоверности. **Операционный канон** (мастер-НСИ, заявки на карточки, очередь
+> `ExportPacket`, канал в БП ГИГ, сверка) — навык `ledger-center`. Товарный контур
+> целиком и правила кассы — `D:\Users\magsp\ELSYPLUS\Ledger\edge\CLAUDE.md`.
+> Состояние стендов и работа всех агентов — `D:\Users\magsp\ELSYPLUS\ecosystem-deploy\docs\CURRENT-STATE.md`.
+>
+> 📛 **Продукт — ElsyPlus Ledger (Элси+ Учёт).** `ClearLedger`/`clearledger/` —
+> историческое имя кодовой базы, `TradeLedger` — только имя расширения БП
+> `TradeLedger.cfe`. Термины входного слоя и 4 слоя данных (L1 RAW → L2 CLEAN →
+> L3 EXPORT → L4 1C_REF) — `D:\Users\magsp\ELSYPLUS\Ledger\app\GLOSSARY.md`.
 
----
+## Что это сейчас
 
-## Проект
+Одна кодовая база, один бэкенд-образ на все пространства, фронт — свой на стек:
 
-TradeLedger — мультитенантная рабочая среда учёта, документов и отраслевой аналитики. Текущая реализация — React SPA + FastAPI + PostgreSQL + nginx в Docker; `ClearLedger` остаётся техническим именем кодовой базы.
+- **Ядро пространства** — вход и SSO, реестр компаний и приложений, Центр
+  управления, Чаты (Matrix), Трек, Пульс, Инфо. Данные — схема `core` базы
+  `elsyplus` в контейнере `<стек>-support-db`; `public` той же базы — Поддержка.
+- **«Торговый центр»** (`/shop`, продукт `shop`) — управление сетью магазинов:
+  мастер-НСИ, документы сети, матрица станций, выгрузка в 1С. На станции ту же
+  структуру показывает агент («Магазин»), центр её повторяет.
+- **Отраслевые продукты** — «Топливо»/«Продажи» (`sales`), Управленческий,
+  Бухгалтерский и др.; набор задаёт профиль компании.
+- Боевой центр сети ГИГ — `gig.dataworker.ru`, стек `gig` на ВМ `elsy-eco-01`.
 
-**Путь:** `D:\Users\magsp\ELSYPLUS\Ledger\app\clearledger\`
+## Карта server/app
+
+| Где | Что |
+|---|---|
+| `main.py` | сборка приложения, все роутеры под `/api` |
+| `routers/edge_router.py` | **приёмник станций** `/api/edge/*`: пакеты смен (`/packets`, идемпотентно, повтор → 409), `heartbeat`, `downlink` + `ack` (задания вниз: НСИ, цены), сверка, остатки. Аутентификация — `X-Cloud-API-Key` компании |
+| `services/edge_service.py` | теневая сверка пакета агента против пакета ЦБ; рядом `edge_nsi`, `edge_stock`, `edge_transfers`, `edge_projection` |
+| `routers/store_router.py`, `services/store_*` | «Торговый центр» (`/api/store`): карточки, штрихкоды, цены, документы сети; правка НСИ — только через функции роутера |
+| `routers/export_packets_router.py`, `services/accounting_egress.py`, `models.py: ExportPacket` | очередь L3 в бухгалтерию, её разбирает `TradeLedger.cfe` |
+| `services/onec_accounting_read.py`, `services/onec/` | чтение БП через COM-агента (одно соединение на всех) |
+| `routers/sso_router.py`, `services/sso.py` | SSO: лаунчер, handoff, JWKS |
+| `routers/core_router.py`, `space_registry_router.py`, `app_registry_router.py` | состояние Ядра, реестр пространства и приложений |
+| `routers/analytics_router.py`, `charge_sessions_router.py`, `services/charge_*` | «Продажи» ЭЗС (РусГидро) |
+| `models.py` | модели SQLAlchemy; таблицы создаются `create_all` при старте, Alembic нет |
+
+Фронт: `src/App.tsx` (маршруты), `src/config/spaceProducts.ts` (продукты и режимы),
+`src/config/storeCatalog.ts` (разделы «Торгового центра», единственный источник),
+`src/components/workspace/` (панели рабочей области).
 
 ---
 
@@ -21,305 +51,75 @@ TradeLedger — мультитенантная рабочая среда учё�
 ```bash
 npm run dev       # Vite dev-server :3010, авто-открытие браузера
 npm run build     # vite build → dist/; типы проверяются отдельной командой
-npm run typecheck # tsc -b (инкрементально, ~25 с) — проверка перед выкаткой
+npm run typecheck # tsc -b (инкрементально) — проверка перед выкаткой
 npm run lint      # eslint
 npm run preview   # превью production-сборки
 ```
 
-### Выкатка на стенд
+### Выкатка
 
-Одной командой, локальную сборку НЕ делать (образ собирается на ВМ, и `vite build`
-на Windows просто удваивает ожидание — 13 минут против 3):
+Только через навык `elsy-deploy`: `~/.claude/skills/elsy-deploy/scripts/ship.sh <стек> front|back|both`
+(сам проверяет типы `npx tsc --noEmit -p tsconfig.app.json`, поднимает версию, везёт
+рабочее дерево, собирает образ на ВМ). Локально `vite build` перед выкаткой не делать.
+Порядок и канон версии — `D:\Users\magsp\ELSYPLUS\ecosystem-deploy\CLAUDE.md`.
 
-```bash
-~/.claude/skills/elsy-deploy/scripts/ship.sh office front   # типы → исходники → образ → релиз
-```
-
-**Версия проекта поднимается на каждой выкатке фронта** (требование МАГа 15.08.2026).
-`ship.sh` увеличивает patch в `package.json` сам; при ручной сборке поднимать руками.
-Причина: приложение сравнивает свою версию с `version.json` на сервере и предлагает
-обновиться. Пока номер не менялся, человек видел «вышла новая версия 1.2.1 — у вас
-1.2.1» и не понимал, что именно ему предлагают. Версия видна в ШАПКЕ, строкой
-`<Компания> · <версия>` под именем приложения (`Header.tsx`, правило МАГа 28.08.2026),
-и в меню профиля — это первый ответ на «у меня выглядит иначе, чем вы описываете».
-
-Номер ОДИН на пространство, а не на приложение: «Трек», «Чаты», «Пульс» живут в одном
-SPA и выкатываются одним образом. Своих констант версии в коде не заводить — источник
-только `APP_VERSION` из `@/lib/appUpdate` (то есть `package.json` на сборке).
-
-При выпуске из чистого временного worktree там может не быть `node_modules`.
-Сначала выполнить `npm run typecheck` в основном рабочем каталоге, затем допустим
-`ship.sh <stack> front --no-check`: сборка образа всё равно ставит зависимости с
-нуля. Поднятый `ship.sh` номер версии после релиза синхронизировать обратно в ветку.
+**Версия** — одна на пространство, поднимается каждой выкаткой фронта. Своих констант
+версии не заводить: источник только `APP_VERSION` из `@/lib/appUpdate` (= `package.json`),
+видна в шапке (`Header.tsx`) и меню профиля.
 
 ---
 
 ## Техстек
 
-- React 19 + TypeScript 5.9 (strict) + Vite 7
-- React Router 7 (маршрутизация)
-- TanStack React Query 5 (кеш, мутации, инвалидация)
-- shadcn/ui (Radix + Tailwind 4) — UI-компоненты в `src/components/ui/`
-- react-hook-form + Zod — формы и валидация
-- pdfjs-dist — PDF-парсинг (до 20 страниц)
-- xlsx, fast-xml-parser, mammoth, postal-mime — парсинг Excel, XML, Word, email
-- date-fns — даты
-- lucide-react — иконки
-- nanoid — генерация ID
+React 19 + TypeScript (strict) + Vite 7 · React Router 7 · TanStack Query 5 · shadcn/ui
+(Radix + Tailwind 4) · react-hook-form + Zod. Бэкенд: FastAPI + SQLAlchemy (async) + PostgreSQL 16.
 
 **Алиас:** `@/*` → `./src/*`
 
----
-
-## Исторический локальный слой DataEntry
-
-Рабочие пространства используют FastAPI и PostgreSQL, изоляцию компаний и SSO.
-Ниже описан локальный слой раннего интерфейса/демо, а не база рабочего пространства.
-Его правила не переносить на API Ядра, Чаты, Трек и Поддержку.
-
-| Хранилище | Что хранит | Ключи |
-|-----------|-----------|-------|
-| localStorage | DataEntry[] (метаданные), компании, настройки | `clearledger-entries-{companyId}`, `clearledger-company`, `clearledger-companies`, `clearledger-customizations`, `clearledger-seeded` |
-| IndexedDB `clearledger-store` | sources (Blob), extracts (текст + поля) | По sourceId |
-
-**Рабочая архитектура:** Docker (FastAPI + PostgreSQL 16 + nginx), Ядро в схеме
-`core`, Поддержка в `public` базы выбранного пространства. Контракт слоёв —
-`../LAYER2_ARCHITECTURE.md`, состав стека — `ecosystem-deploy/docs/CORE.md`.
-
----
-
-## Ключевые сущности
-
-### DataEntry (localStorage)
-
-Основная бизнес-сущность. Поля: `id`, `title`, `categoryId`, `subcategoryId`, `docTypeId?`, `companyId`, `status`, `docPurpose`, `syncStatus`, `source`, `sourceLabel`, `metadata` (Record), `sourceId?`, `createdAt`, `updatedAt`.
-
-**Статусы:** `new` → `recognized` → `verified` → `transferred` | `error`
-**Назначение (docPurpose):** `accounting` | `reference` | `context` | `archive`
-**Синхронизация (syncStatus):** `not_applicable` | `pending` | `exported` | `confirmed` | `rejected_1c`
-
-**Источники:** `upload`, `photo`, `manual`, `api`, `email`, `oneC`, `whatsapp`, `telegram`, `paste`
-
-### Профили и компании
-
-5 профилей: `fuel`, `trade`, `retail`, `energy`, `general`. Каждый определяет набор категорий, подкатегорий, типов документов, метаполей.
-
-5 компаний из коробки: НПК (`npk`), РТИ (`rti`), ТС-94 (`ts94`), ОФ ПТК (`ofptk`), РусГидро (`rushydro`).
-
-**Источник истины для профилей:** `src/config/profiles.ts` (~37 КБ).
-
----
-
-## Структура src/
-
-```
-components/
-  ui/           — shadcn/ui примитивы (НЕ менять вручную, только через shadcn CLI)
-  layout/       — MainLayout, Header, AppSidebar, MobileBottomNav
-  inbox/        — верификация (split-view: документ + форма)
-  intake/       — drag-n-drop, очередь обработки, дубликаты
-  data/         — таблицы по категориям, карточки записей
-  settings/     — OneCSyncStatus, OneCSyncHistory (форма подключения — pages/oneC/ConnectionPage)
-  dev/          — DevPanel (только import.meta.env.DEV)
-  normalization/ — NormalizationKpiCards, ValidationResultsTable, EnrichmentResultsTable, ComplianceReport, AuditTab
-  common/       — переиспользуемые примитивы
-config/         — profiles.ts, categories.ts, companies.ts, statuses.ts
-contexts/       — CompanyContext (текущая компания, кастомизация)
-hooks/          — useEntries, useConnectors, useNormalization, use-mobile
-services/       — бизнес-логика, CRUD, хранилище
-  intake/       — pipeline (detect → extract → classify → dedup → save)
-pages/          — по маршрутам (Dashboard, InboxPage, IntakePage, ...)
-types/          — DataEntry, Connector, IntakeItem, SourceRecord, ExtractRecord
-lib/            — queryClient, cn() утилита
-```
-
----
-
-## Паттерны и конвенции
-
-### Данные
-
-- CRUD через `src/services/dataEntryService.ts` — НЕ обращаться к localStorage напрямую
-- IndexedDB через `src/services/sourceStore.ts` — для файлов (Blob)
-- После мутации данных — `queryClient.invalidateQueries()` для обновления UI
-- ID записей — `nanoid()` через `nextId()` из `storage.ts`
-- Категории — через фасад `src/config/categories.ts`: `getCategories(profileId)`, `getAllDocumentTypes(profileId)`
-
 ### Компоненты
 
-- Используй существующие shadcn/ui компоненты из `src/components/ui/`
-- Новые shadcn/ui компоненты: `npx shadcn@latest add <component>`
-- Стилизация: Tailwind CSS 4, утилита `cn()` из `src/lib/utils.ts`
-- Responsive: `useIsMobile()` хук из `src/hooks/use-mobile.ts` (breakpoint 768px)
-- Иконки: `lucide-react`
+- Использовать существующие shadcn/ui из `src/components/ui/`; новые — `npx shadcn@latest add <component>`, вручную не менять.
+- Стилизация: Tailwind CSS 4, утилита `cn()` из `src/lib/utils.ts`; токены и палитра — `DESIGN.md` (**цвет = статус**, не декорация; источники нейтральным `zinc`, без неона).
+- Responsive: `useIsMobile()` из `src/hooks/use-mobile.ts` (breakpoint 768px). Иконки — `lucide-react`.
+- Dev-only код — только под `import.meta.env.DEV` (tree-shaking уберёт из production).
 
-### Маршруты
-
-Определены в `src/App.tsx`. Главный layout — `MainLayout.tsx`. Все страницы — в `src/pages/`.
-
-### Dev Tools
-
-- `import.meta.env.DEV` — гейт для dev-only кода
-- DevPanel: lazy-загрузка в `MainLayout.tsx`
-- `window.__cl`: утилиты в консоли (`__cl.stats()`, `__cl.generate(50)`, ...)
-- Сервис: `src/services/devToolsService.ts` — чистые функции для манипуляции данными
-
-### Intake Pipeline
-
-`src/services/intake/pipeline.ts` — оркестратор. Стадии:
-1. **detect** — тип файла по расширению/MIME
-2. **extract** — текст из PDF/Excel/XML/Word/email (с вложениями)
-3. **classify** — rule-based, 27 правил в `classify.ts` (документы, email, 1С XML, Excel, чаты, OCR)
-4. **dedup** — SHA-256 + Email Message-ID + 1С GUID + семантический ключ
-5. **save** — Blob → IndexedDB, DataEntry → localStorage
-6. **attachments** — email-вложения рекурсивно через pipeline
+Ранний локальный слой DataEntry (localStorage/IndexedDB, профили и компании из коробки,
+Intake pipeline, DevTools, интеграция 1С раннего интерфейса) — `docs/LEGACY_DATAENTRY.md`.
+Его правила не переносить на API Ядра и рабочие пространства.
 
 ---
 
-## Важные файлы
+## Рабочая область: уровни и слои контролов
 
-| Файл | Что делает |
-|------|-----------|
-| `src/config/profiles.ts` | Определение всех 5 профилей (категории, типы, метаполя) |
-| `src/services/dataEntryService.ts` | CRUD DataEntry + seed начальных данных |
-| `src/services/storage.ts` | Абстракция localStorage (getItem, setItem, nextId, entriesKey) |
-| `src/services/sourceStore.ts` | IndexedDB для файлов (sources + extracts) |
-| `src/contexts/CompanyContext.tsx` | Контекст компании, профиль, кастомизация |
-| `src/services/intake/pipeline.ts` | Intake pipeline оркестратор |
-| `src/services/intake/classify.ts` | 27 правил классификации документов |
-| `src/services/linkService.ts` | CRUD связей между документами (DocumentLink) |
-| `src/services/oneCIntegrationService.ts` | API-сервис интеграции 1С (OData + файловый обмен) |
-| `src/hooks/useOneCSync.ts` | React Query хуки для 1С (12 хуков) |
-| `src/services/normalizationService.ts` | Нормализация: валидация, обогащение, compliance, аудит TSupport |
-| `src/hooks/useNormalization.ts` | React Query хуки для нормализации (7 хуков) |
-| `src/components/normalization/AuditTab.tsx` | Полный отчёт аудитора TSupport (5 collapsible-секций, bulk apply) |
-| `src/components/workspace/WorkspaceLayout.tsx` | Каркас рабочего стола: меню разделов (полная высота) + тулбар + холст |
-| `src/components/workspace/PanelViewTabs.tsx` | **Ур. 3** — табы вида пункта (единый компонент для всех панелей) |
-| `src/components/workspace/ViewParamsBar.tsx` | **Ур. 4** — панель параметров текущего таба |
-| `src/components/workspace/WorkspaceFilterBar.tsx` | **Ур. 2** — чипы фильтра + `PeriodControl` (пресеты, кварталы, календарь-диапазон) |
-| `src/components/workspace/WorkspaceScopePopover.tsx` | Модальный выбор сети: регионы · станции/точки · сводка «Выбрано» |
-| `src/types/index.ts` | Все TypeScript типы |
+Полный свод с обоснованиями и эталонными файлами — `docs/WORKSPACE_CONTROLS.md`;
+переносимый вариант — `docs/WORKSPACE_UX_PATTERN_PROMPT.md`.
 
----
+| # | Уровень | Компонент |
+|---|---------|-----------|
+| 1 | ЭКРАНЫ | `layout/WorkspaceTabBar.tsx` |
+| 2 | ФИЛЬТР области (период · сеть · данные) | `workspace/WorkspaceToolbar.tsx` → `WorkspaceFilterBar.tsx` |
+| 3 | ВИД — табы пункта | `workspace/PanelViewTabs.tsx` |
+| 4 | ПАРАМЕТРЫ таба | `workspace/ViewParamsBar.tsx` |
+| 5 | Данные | панели разделов, холст `bg-background` |
 
-## Интеграция 1С
+| Слой | Вопрос | Где | Персист |
+|------|--------|-----|---------|
+| КОНТУР | какие данные | только ур. 2 (`FilterContext`) | по компании |
+| ПРЕДСТАВЛЕНИЕ | как смотрю | ур. 4 (`useTabParams`) | компания × пункт |
+| НАВИГАЦИЯ | найти строку | ур. 5 у таблицы | не персистится |
 
-Живое подключение к 1С:БП 3.0 через OData (чтение) + EnterpriseData XML (запись). UI в Настройках → «Интеграция с 1С» (при `isApiEnabled()`).
+- Табы вида — только `PanelViewTabs`, параметры — только `ViewParamsBar`; разметку уровней 3–4 не копипастить.
+- Активный выбор = `bg-primary text-primary-foreground` везде; шасси (ур. 1–2) на `bg-card`, холст на `bg-background`, границы сплошные.
+- Не дублировать метку при контекстном бейдже (`label={null}`) и название раздела, видное в меню.
+- Чип фильтра открывает свой селектор (`PeriodControl`, `WorkspaceScopePopover`); выбор — в черновике, применяется кнопкой, «Отмена» возвращает как было.
+- Не показывать счётчики, не зависящие от фильтра (справочники `charge-sessions/dimensions`).
+- Контур задаётся только наверху; таб может сузить, расширить — только «Горизонтом анализа» (`HorizonControl`) в Динамике/Нарезке/Сравнении.
+- Любое отклонение от контура видно чипом с ✕; сужение поднимается в контур `ApplyToScope`.
+- Смена контура сбрасывает поиск и пагинацию (`useResetOnScopeChange`), смена компании — всё локальное; горизонт не персистится.
+- Экспорт печатает фактический контур — `useScopeSubtitle`, вручную из `dateFrom`/`dateTo` не собирать.
+- ⚠️ Контурные поля в `useTabParams` не класть: он переживает сессии.
 
-| Компонент | Файл |
-|-----------|------|
-| Форма подключения | `src/pages/oneC/ConnectionPage.tsx` |
-| Статус + кнопки sync | `src/components/settings/OneCSyncStatus.tsx` |
-| История синхронизаций | `src/components/settings/OneCSyncHistory.tsx` |
-
-Бэкенд: `backend/app/services/onec/` (odata_client, sync_service, mapping, file_exchange, crypto, scheduler), `backend/app/api/onec.py` (13 эндпоинтов).
-
----
-
-## Документация
-
-| Документ | Описание |
-|----------|----------|
-| `WHAT_IS_DONE.md` | Что реализовано в v0.2 |
-| `EZS_ANALYTICS_BLUEPRINT.md` | Канонические метрики, API и проверенное состояние приложения «Продажи» РусГидро |
-| `../LAYER2_ARCHITECTURE.md` | Целевая трёхуровневая архитектура (ADR) |
-| `../ARCHITECTURE_ANALYSIS.md` | Стратегический архитектурный анализ |
-| `../PLAN.md` | План системы учёта (философия, модули, AI) |
-| `../FUEL_ACCOUNTING_SYSTEM.md` | Модуль учёта ГСМ (сверка, матрица) |
-
----
-
-## Иерархия управления рабочей области (обязательный паттерн)
-
-Пять уровней сверху вниз. У каждого — своя поверхность и подпись, вес убывает:
-чем ниже уровень, тем он локальнее и тише. Пользователь должен понимать, к чему
-относится каждый блок управления.
-
-| # | Уровень | Компонент | Оформление |
-|---|---------|-----------|------------|
-| 1 | **ЭКРАНЫ** — закрепление и переключение экранов | `layout/WorkspaceTabBar.tsx` | `bg-card` + `border-b border-border` + `shadow-soft`, метка `▦ ЭКРАНЫ` |
-| 2 | **ФИЛЬТР рабочей области** — общий контур (период · сеть · данные) | `workspace/WorkspaceToolbar.tsx` → `WorkspaceFilterBar.tsx` | `bg-card`, слева **акцентный якорь** (иконка в `bg-primary/10 text-primary` + подпись); чипы-параметры `h-11` с рамками |
-| 3 | **ВИД** — табы конкретного пункта меню | `workspace/PanelViewTabs.tsx` | сегменты на плашке `bg-muted/60` + рамка; **активный залит `bg-primary text-primary-foreground`**; метка `ВИД` |
-| 4 | **ПАРАМЕТРЫ** — настройка содержимого текущего таба | `workspace/ViewParamsBar.tsx` | панель `bg-muted/30` + `border` + `rounded-lg`, метка `⧩ ПАРАМЕТРЫ` |
-| 5 | **Данные** — карточки, таблицы, графики | панели разделов | холст `bg-background` |
-
-### Правила
-
-1. **Не копипастить разметку уровней 3–4.** Табы вида — только через `PanelViewTabs`,
-   строка параметров — только через `ViewParamsBar`. Раньше underline-табы были
-   продублированы в 8 панелях и вид расходился.
-2. **Активный выбор = залитый primary** (`bg-primary text-primary-foreground`) —
-   единый язык для табов вида, `ClientTypeToggle` (Все/ФЛ/ЮЛ) и активных чипов фильтра.
-3. **Панели-«шасси» (ур. 1–2) на `bg-card`**, рабочий холст (ур. 5) на `bg-background`.
-   Границы между зонами — сплошной `border-border`, не полупрозрачный.
-4. **Не дублировать метку**, если рядом уже есть контекстный бейдж
-   («Только ЮЛ», «ФЛ · псевдонимы», «Карты + ведомости») — передавать `label={null}`.
-5. **Не дублировать в заголовке то, что видно в меню.** Название активного раздела
-   не выводить отдельной строкой — оно подсвечено в `WorkspaceModeSidebar`.
-6. **Специализированные селекторы вместо общей модалки.** Клик по чипу фильтра
-   открывает только свои функции: период → `PeriodControl` (пресеты + календарь
-   диапазоном), сеть → `WorkspaceScopePopover.tsx` (регионы · станции/точки ·
-   панель «Выбрано»). Общий фильтр — по кнопке «Фильтры».
-   **Выбор ведётся в черновике и применяется по кнопке** (модель диалога
-   «Настройка периода» в 1С), а не на каждый клик. Причина: контур — это
-   несколько параметров сразу, их набирают, а не выбирают по одному. Применение
-   на лету закрывало окно раньше времени, схлопывало диапазон дат (первый клик
-   отдаёт `{from, to: undefined}`) и перезапрашивало данные на каждый чекбокс —
-   при 400+ станциях особенно заметно. «Отмена» обязана возвращать как было.
-   Чип снаружи показывает применённый контур, подвал окна — черновик.
-7. **Не показывать числа без ясной привязки к фильтру.** Счётчики из справочников
-   (`charge-sessions/dimensions`) не зависят от выбранного периода — в селекторах
-   сети их не выводим, чтобы не вводить в заблуждение.
-
-**Статус раскатки ур. 3–4:** `PanelViewTabs` — во всех 8 панелях; `ViewParamsBar` —
-в `ChargeSessionsPanel`, `FuelFillsPanel`, `FuelRetailPanel`, `FuelTariffsPanel`,
-`FuelCorporatePanel`. В `RetailPanel` / `TariffsPanel` / `CorporatePanel` (ЭЗС)
-собственных строк параметров нет — там только табы.
-
-### Взаимодействие верхнего фильтра и параметров таба
-
-Разделение по вопросу, на который отвечает контрол:
-
-| Слой | Вопрос | Что входит | Где живёт | Персист |
-|------|--------|-----------|-----------|---------|
-| **1. КОНТУР** | «какие данные я смотрю» | период · сеть/регионы/станции · типы данных · источник | **только** ур. 2 (`FilterContext`) | по компании |
-| **2. ПРЕДСТАВЛЕНИЕ** | «как я на них смотрю» | разрез · метрика · шаг/нарезка · топ-N · год-к-году | ур. 4 (`useTabParams`) | по компания × пункт |
-| **3. НАВИГАЦИЯ** | «найти строку» | поиск в таблице · сортировка · пагинация | ур. 5, рядом с таблицей | **не персистится** |
-
-**Правила:**
-
-1. **Единственный источник контура.** Период/сеть/типы задаются только наверху.
-   Таб контур *читает*, но не переписывает.
-2. **Сузить можно, расширить — нельзя.** Локальное сужение (3 станции из выбранных)
-   допустимо: это подмножество контура, выводы остаются валидны. Молча выйти за
-   контур — недопустимо: на экране будет не то, что заявлено в шапке.
-3. **Расширение — только именованным параметром «Горизонт анализа»** и только там,
-   где время само является предметом анализа: Динамика (тренд), Нарезка,
-   Сравнение периодов. В видах-срезах (Разрезы, Обзор, Время и загрузка,
-   Надёжность) своего периода нет — они всегда живут в контуре.
-4. **Любое отклонение видно** чипом с ✕ в зоне ПАРАМЕТРЫ (`Горизонт 90 дн ✕`,
-   `Только 3 станции ✕`). Скрытых состояний быть не должно — цифры идут в бухгалтерию.
-5. **Жизненный цикл.** Смена контура сбрасывает то, что теряет смысл в новой
-   выборке — **поиск по таблице и пагинацию** (иначе пользователь остаётся на 5-й
-   странице, которой уже нет, или видит пустоту из-за запроса от прошлого периода).
-   Хук: `useResetOnScopeChange` из `@/hooks/useScopeReset` — он следит за отпечатком
-   контура (период · сеть · типы данных). Сохраняются: **представление** (метрика,
-   разрез, шаг, топ-N) и **сужения по справочникам** (станция, топливо, статус) —
-   они остаются валидными в любом периоде. Смена компании → сбрасывается всё локальное.
-   **Горизонт не персистится между сессиями** (иначе через неделю таб молча покажет
-   старый период).
-6. **Мостик наверх:** локальное сужение поднимается в контур кнопкой
-   «Применить ко всей области» — компонент `ApplyToScope.tsx` (сам прячется,
-   когда поднимать нечего или контур уже равен выбору).
-7. **Экспорт печатает фактический контур** в шапке файла — хук `useScopeSubtitle`
-   из `@/hooks/useScopeReset` (период · область учёта · типы данных · источник).
-   Не собирать подпись выгрузки вручную из `dateFrom`/`dateTo`.
-
-⚠️ **Не класть контурные поля в `useTabParams`** — он персистит в localStorage по
-(компания × пункт) и переживает сессии. Там место только слою «представление».
-Горизонт держать в `useState` + `useEffect` сброса на `[dateFrom, dateTo]`.
-
-### Обязательные правила запросов (из аудита 18.07)
+## Обязательные правила запросов (аудит 18.07)
 
 1. **`companyId` — всегда в `queryKey`.** Запросы скоупятся заголовком `X-Company-Id`,
    а не параметром URL: без companyId в ключе React Query отдаёт кеш прошлой компании.
@@ -339,7 +139,7 @@ lib/            — queryClient, cn() утилита
 6. **Контрол, который ни на что не влияет, — удалять.** Так был убран фильтр
    «Типы данных»: показывался во всех разделах, не применялся ни в одном.
 
-### Достоверность данных (аудит 18.07)
+## Достоверность данных (аудит 18.07)
 
 7. **Скоуп компании — в каждом запросе и в каждом ключе кеша.** Система
    мультитенантная (ГИГ, РусГидро, НПК, РТИ, ТС-94, ОФ ПТК). Проверено больно:
@@ -361,102 +161,31 @@ lib/            — queryClient, cn() утилита
 11. **`VITE_API_URL` обязателен при сборке.** Без него `isApiEnabled()` = false и
     приложение молча собирается в офлайн-контур на демо-данных.
 
-### Ключи и единицы счёта ЭЗС (19.07)
-
-12. **Станция резолвится ТОЛЬКО через `charge_sessions.location_id`.** Прямое
-    сравнение `service_locations.code = charge_sessions.station_code` даёт
-    **90 совпадений из 557**: у CPO код обрастает суффиксами блоков («584-1»)
-    и ведущими пробелами. Запрос «в лоб» по кодам не падает — он молча
-    показывает чушь. Резолв кодов при загрузке делает `build_station_index`.
-13. **Парк ЭЗС — это `type = 'ev_charging'`.** В `service_locations` лежат ещё
-    склады оборудования (`WH-KHV`, `WH-VVO`). Без фильтра они попадают в
-    «станции» и раздувают парк — склад по определению не даёт сессий.
-    Полный критерий боевого парка: `type='ev_charging' AND NOT is_test AND
-    operational_status <> 'decommissioned'`.
-14. **Успех сети считается по ВИЗИТАМ, не по сессиям.** CPO пишет каждое
-    касание разъёма отдельной строкой: клиент, зарядившийся с третьей попытки,
-    даёт 3 сессии (2 «ошибки» + рабочую). Успех визита = **отпущена энергия**,
-    а не `result='Complete'` (12 749 сессий Complete отдали 0 кВтч, а 5 768
-    CompleteError — отпустили). Склейка: `charge_visits.py`, порог 15 мин.
-    Сырой «успех сессий» оставлять можно, но подписывать явно — рядом с
-    «Зарядились 89,3%» цифра 69% читается как ошибка, а не как другая метрика.
-15. **«Без оплаты» — три разные вещи, складывать нельзя:** долг розницы
-    (потеря), постоплата ЮЛ (`paid_at` пуст ШТАТНО — дебиторка) и пробы без
-    энергии (в деньгах ноль). Сумма ЮЛ — из `client_amount`, а не из прайса:
-    `GREATEST(договорная, прайс)` завышает дебиторку клиентов со скидкой.
-16. **`NUMERIC` → `Decimal` → в JSON строка.** `dict(row)` отдаёт «числа»
-    строками, на фронте молча ломается арифметика. Приводить `float()`.
-17. **Оплата сессии — эффективная, не только `charge_sessions.paid_at`.** Канон —
-    `effective_paid_at()` из `services/charge_payment_state.py`: дата сессии или
-    подтверждённый `charge_payments` с непустым `bank_txn_id`. Все витрины,
-    неоплата, реестр и сверка обязаны использовать одну эту модель.
-18. **Ошибка сессии — явный ошибочный исход.** `error_sessions` считается по
-    нормализованному `result`, содержащему `error` или `ошиб`; формула
-    `все − Complete` запрещена, потому что смешивает неизвестные исходы с ошибками.
-19. **Реестр сессий не загружает весь период в браузер.** Эндпоинт
-    `/api/analytics/charge-sessions/rows` выполняет на сервере `limit/offset`,
-    поиск, фильтры и сортировку; отдельно возвращает `total`, `totals`, `facets`.
-    UI по умолчанию показывает 50 строк. Возврат к клиентской фильтрации полного
-    датасета снова раздует DOM и память.
-20. **Все ручки продукта «Продажи» гейтятся продуктом `sales`.** Членства в
-    компании или права `management` недостаточно. Это относится и к overview,
-    справочникам, реестру, корпоративным и розничным витринам.
-21. **Свежесть данных видна пользователю.** `overview.meta` содержит
-    `last_session_at`, `data_lag_days`, `is_stale`; отставание более суток создаёт
-    предупреждение. Не интерпретировать неполный период как падение бизнеса.
-22. **Мобильная приёмка продаж:** viewport 390×844, все видимые интерактивные
-    элементы не меньше 44×44 px, нет горизонтального overflow. Нижняя PWA-плашка
-    резервирует место и не перекрывает навигацию. Для `ResponsiveContainer`
-    задавать положительный `initialDimension`, иначе Edge пишет предупреждение
-    о размере `-1×-1` до первого измерения.
-
-**Статус:** модель раскатана во всех панелях — `PeriodOverride` удалён из кодовой
-базы полностью. В видах-срезах период берётся из контура; в аналитических
-(Динамика, Нарезка) — `HorizonControl.tsx` (бейдж расхождения, без персиста,
-сброс при смене контура). Обзорные дашборды (`FuelOverviewPanel`,
-`OverviewDashboardPanel`) переведены на контур целиком.
+**ЭЗС (правила 12–22)** — `EZS_ANALYTICS_BLUEPRINT.md`, раздел «Правила кода». Три
+ключа, без которых цифры молча врут: станция резолвится только через
+`charge_sessions.location_id`; парк ЭЗС — `type = 'ev_charging'` (без тестовых и
+выведенных); успех сети — по визитам с отпущенной энергией, не по сессиям.
 
 ---
 
-## Цветовая палитра badges
+## Документация
 
-Принцип: **минимум цветового шума**. Цвет несёт семантику (статус), а не декорацию (источник).
-
-### Источники (SourceBadge) — нейтральные
-
-Все источники — единый стиль `border-zinc-600 text-zinc-400`. Источник — вторичная информация, не должен перетягивать внимание от статуса. Определение: `src/components/data/SourceBadge.tsx`.
-
-### Статусы (StatusBadge) — семантические, приглушённые
-
-| Статус | Стиль | Обоснование |
-|--------|-------|-------------|
-| Новый | `border-blue-400/50 text-blue-300/80` | Нейтральный, требует внимания |
-| Распознан | `border-amber-400/50 text-amber-300/80` | Промежуточный, в обработке |
-| Проверен | `border-emerald-400/50 text-emerald-300/80` | Позитивный, outline |
-| Передан | `bg-emerald-600/80 text-white` | Финальный позитивный, filled |
-| Ошибка | destructive (shadcn) | Требует действия |
-| В архиве | `border-zinc-600 text-zinc-500` | Неактивный |
-
-Определения: `src/config/statuses.ts`, `src/components/data/StatusBadge.tsx`.
-
-### Аудиторские статусы — приглушённые
-
-`emerald-400/40`, `amber-400/40`, `red-400/40` с текстом `/70`. Дублируются в DataTable, RegisterTable, InboxTable — при изменении обновлять все три.
-
-### Правила при добавлении новых badges
-
-- **НЕ добавлять яркие неоновые цвета** (`-500`, `-600` без прозрачности)
-- Использовать приглушённые оттенки: `300-400` с прозрачностью `/40-/80`
-- Вспомогательная информация (источники, каналы, типы) → нейтральный `zinc`
-- Семантическая информация (статусы, ошибки, алерты) → цветная, но мягкая
+| Документ | Описание |
+|----------|----------|
+| `docs/LEGACY_DATAENTRY.md` | ранний слой DataEntry, профили, Intake, интеграция 1С раннего UI |
+| `docs/WORKSPACE_CONTROLS.md` | полный свод правил рабочей области |
+| `DESIGN.md` | токены, типографика, палитра бейджей |
+| `EZS_ANALYTICS_BLUEPRINT.md` | метрики, API, правила кода «Продаж» РусГидро |
+| `STORE_BP_EXPORT_CONTRACT.md` | контракт выгрузки «Торгового центра» в БП |
+| `WHAT_IS_DONE.md` | архив фаз v0.2–v0.6.2 (не источник правды) |
+| `../LAYER2_ARCHITECTURE.md` | трёхуровневая архитектура (ADR) |
 
 ---
 
 ## Правила
 
-1. **Кириллица в конфигах** — все лейблы, названия компаний, категорий — на русском
-2. **Не ломать pipeline** — intake pipeline критичен, изменения тестировать через DevPanel
-3. **Dev-only код** — оборачивать в `import.meta.env.DEV`, tree-shaking исключит из production
-4. **Профили immutable** — `profiles.ts` содержит эталонные наборы. Кастомизация — через `CompanyContext.updateCustomization()`
-5. **Base path** — production: `/ClearLedger/` (в `vite.config.ts`)
-6. **Порт** — dev-сервер на `:3010`
+1. **Кириллица в конфигах** — все лейблы, названия компаний, категорий — на русском.
+2. **Base path** — `vite.config.ts`: `VITE_BASE_PATH || '/'`, в `Dockerfile` —
+   `VITE_BASE_PATH=/`: пространства обслуживаются из корня домена. `/ClearLedger/` —
+   только старый `ledger.dataworker.ru` на `miran-services-01` (не эко-стек).
+3. **Порт** — dev-сервер на `:3010`.

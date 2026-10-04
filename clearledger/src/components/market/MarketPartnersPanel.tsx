@@ -112,7 +112,7 @@ export function MarketPartnersPanel() {
             r.name, r.sites, r.alive, r.complementSites, r.complementPct, r.overlapSites,
             r.newCitiesTotal, r.newCities.join(', '), RELATIONS[r.relation] ?? r.relation,
           ]))}>
-          <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+          <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
             <tr>
               <SortTh sortKey="name" sort={sort} onSort={toggle}>Сеть</SortTh>
               <SortTh sortKey="sites" sort={sort} onSort={toggle} align="right">Точек</SortTh>

@@ -35,8 +35,10 @@ import { ChevronDown, ChevronRight, MapPin, Plug, Search, Zap } from 'lucide-rea
 import { useCompany } from '@/contexts/CompanyContext'
 import {
   getOpsBalance, getOpsOverview, getOpsStation,
-  type OpsIssue, type OpsIssueRow, type OpsStationContour,
+  type OpsBalanceRow, type OpsIssue, type OpsIssueRow, type OpsStationContour,
 } from '@/services/opsService'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
 import { PAYMENT_META, ROLE_LABEL, paidThroughLabel, type PaymentStatus, type SettlementRole } from '@/types/settlement'
 import { fmtN } from '@/components/balance/balanceCalc'
 import { formatBucket } from '@/lib/formatDate'
@@ -219,6 +221,17 @@ function IssueListModal({ issue, onClose, onOpenStation }: {
       (r.bu || '').toLowerCase().includes(t) || r.name.toLowerCase().includes(t)
       || (r.region || '').toLowerCase().includes(t) || (r.note || '').toLowerCase().includes(t))
   }, [issue, text])
+
+  // Рабочий список открывают, чтобы решить, с кого начинать: без сортировки
+  // порядок задаёт сервер, и «самый большой долг» приходится искать глазами.
+  const карта = useMemo(() => ({
+    bu: (r: OpsIssueRow) => Number(r.bu) || null,
+    name: (r: OpsIssueRow) => r.name,
+    region: (r: OpsIssueRow) => r.region,
+    value: (r: OpsIssueRow) => r.value,
+    note: (r: OpsIssueRow) => r.note,
+  }), [])
+  const табл = useTableSort(rows, карта)
   return (
     <Dialog open={!!issue} onOpenChange={(v) => { if (!v) { setText(''); onClose() } }}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
@@ -235,11 +248,15 @@ function IssueListModal({ issue, onClose, onOpenStation }: {
             </div>
             <div className="max-h-[52vh] overflow-auto rounded-md border border-border/40">
               <Table><TableHeader className="sticky top-0 bg-card"><TableRow>
-                <TableHead>№ БУ</TableHead><TableHead>ЭЗС</TableHead><TableHead>Регион</TableHead>
-                <TableHead className="text-right">{issue.unit || 'Показатель'}</TableHead>
-                <TableHead>Комментарий</TableHead>
+                <SortTh sortKey="bu" sort={табл.sort} onSort={табл.toggle}>№ БУ</SortTh>
+                <SortTh sortKey="name" sort={табл.sort} onSort={табл.toggle}>ЭЗС</SortTh>
+                <SortTh sortKey="region" sort={табл.sort} onSort={табл.toggle}>Регион</SortTh>
+                <SortTh sortKey="value" sort={табл.sort} onSort={табл.toggle} align="right">
+                  {issue.unit || 'Показатель'}
+                </SortTh>
+                <SortTh sortKey="note" sort={табл.sort} onSort={табл.toggle}>Комментарий</SortTh>
               </TableRow></TableHeader><TableBody>
-                {rows.map((r) => (
+                {табл.rows.map((r) => (
                   <TableRow key={`${r.locationId}-${r.note}`} className="cursor-pointer hover:bg-muted/40"
                     onClick={() => onOpenStation(r.locationId)}>
                     <TableCell className="font-medium tabular-nums whitespace-nowrap">{r.bu || '—'}</TableCell>
@@ -449,7 +466,10 @@ export function OpsOverviewVitrine({ embedded }: {
 }
 
 /* ═════════════ «Баланс (факт)» — пообъектный энергобаланс за месяц ═════════════ */
-type SortKey = 'over' | 'intake' | 'dispensed' | 'margin' | 'bu'
+
+/* Сортировка — кликом по заголовку, как в остальных таблицах пространства.
+   Селект «Сортировка: …» умел только убывание по пяти из одиннадцати столбцов:
+   «у кого маржа хуже всех» он отвечал, «у кого тариф выше всех» — уже нет. */
 
 export function OpsBalanceVitrine() {
   const { companyId } = useCompany()
@@ -458,7 +478,6 @@ export function OpsBalanceVitrine() {
   const [region, setRegion] = useState<string | undefined>(undefined)
   const [qtext, setQtext] = useState('')
   const [flt, setFlt] = useState<'all' | 'over' | 'no_intake' | 'idle' | 'neg_margin'>('all')
-  const [sort, setSort] = useState<SortKey>('over')
   const [drill, setDrill] = useState<string | null>(null)
   const q = useQuery({
     queryKey: ['ops-balance', companyId, period ?? 'last', region ?? 'all'],
@@ -476,18 +495,25 @@ export function OpsBalanceVitrine() {
     if (flt === 'no_intake') r = r.filter((x) => x.intakeKwh == null && x.dispensedKwh > 0)
     if (flt === 'idle') r = r.filter((x) => (x.intakeKwh ?? 0) > 0 && x.dispensedKwh <= 0)
     if (flt === 'neg_margin') r = r.filter((x) => (x.marginEst ?? 0) < 0 && x.marginEst != null)
-    const key: Record<SortKey, (x: typeof r[number]) => number | string> = {
-      over: (x) => -(x.overImbalanceKwh ?? -1),
-      intake: (x) => -(x.intakeKwh ?? -1),
-      dispensed: (x) => -x.dispensedKwh,
-      margin: (x) => (x.marginEst ?? Number.POSITIVE_INFINITY),
-      bu: (x) => Number(x.bu) || 1e9,
-    }
-    return [...r].sort((a, b) => {
-      const ka = key[sort](a), kb = key[sort](b)
-      return ka < kb ? -1 : ka > kb ? 1 : 0
-    })
-  }, [d, qtext, flt, sort])
+    return r
+  }, [d, qtext, flt])
+
+  const карта = useMemo(() => ({
+    bu: (x: OpsBalanceRow) => Number(x.bu) || null,
+    name: (x: OpsBalanceRow) => x.name,
+    region: (x: OpsBalanceRow) => x.region,
+    intake: (x: OpsBalanceRow) => x.intakeKwh,
+    dispensed: (x: OpsBalanceRow) => x.dispensedKwh,
+    sessions: (x: OpsBalanceRow) => x.sessions,
+    ownUse: (x: OpsBalanceRow) => x.ownUseEstKwh,
+    over: (x: OpsBalanceRow) => x.overImbalanceKwh,
+    tariff: (x: OpsBalanceRow) => x.tariff,
+    cost: (x: OpsBalanceRow) => x.costEst,
+    revenue: (x: OpsBalanceRow) => x.revenue,
+    margin: (x: OpsBalanceRow) => x.marginEst,
+  }), [])
+  // По умолчанию сверху — сверхнорматив: экран открывают ради него.
+  const табл = useTableSort(rows, карта, { key: 'over', dir: 'desc' })
 
   if (q.isLoading && !d) return <div className="px-6 py-10 text-sm text-muted-foreground">Загрузка баланса…</div>
   if (!d || !d.period) {
@@ -531,16 +557,6 @@ export function OpsBalanceVitrine() {
             <SelectItem value="neg_margin">Отрицательная маржа э/э</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
-          <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="over">Сортировка: сверхнорматив</SelectItem>
-            <SelectItem value="intake">Сортировка: вход</SelectItem>
-            <SelectItem value="dispensed">Сортировка: отпуск</SelectItem>
-            <SelectItem value="margin">Сортировка: маржа ↑</SelectItem>
-            <SelectItem value="bu">Сортировка: № БУ</SelectItem>
-          </SelectContent>
-        </Select>
         <div className="relative">
           <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
           <Input value={qtext} onChange={(e) => setQtext(e.target.value)} placeholder="Поиск: №, имя, регион"
@@ -555,19 +571,19 @@ export function OpsBalanceVitrine() {
       <Card><CardContent className="pt-4">
         <div className="max-h-[560px] overflow-auto rounded-md border border-border/40">
           <Table><TableHeader className="sticky top-0 z-10 bg-card"><TableRow>
-            <TableHead>№ БУ</TableHead>
-            <TableHead>ЭЗС</TableHead>
-            <TableHead className="text-right">Вход, кВт·ч</TableHead>
-            <TableHead className="text-right">Отпуск, кВт·ч</TableHead>
-            <TableHead className="text-right">Сессий</TableHead>
-            <TableHead className="text-right">СН (оценка)</TableHead>
-            <TableHead className="text-right">Сверхнорматив</TableHead>
-            <TableHead className="text-right">Тариф, ₽</TableHead>
-            <TableHead className="text-right">Затраты, ₽</TableHead>
-            <TableHead className="text-right">Выручка, ₽</TableHead>
-            <TableHead className="text-right">Маржа э/э, ₽</TableHead>
+            <SortTh sortKey="bu" sort={табл.sort} onSort={табл.toggle}>№ БУ</SortTh>
+            <SortTh sortKey="name" sort={табл.sort} onSort={табл.toggle}>ЭЗС</SortTh>
+            <SortTh sortKey="intake" sort={табл.sort} onSort={табл.toggle} align="right">Вход, кВт·ч</SortTh>
+            <SortTh sortKey="dispensed" sort={табл.sort} onSort={табл.toggle} align="right">Отпуск, кВт·ч</SortTh>
+            <SortTh sortKey="sessions" sort={табл.sort} onSort={табл.toggle} align="right">Сессий</SortTh>
+            <SortTh sortKey="ownUse" sort={табл.sort} onSort={табл.toggle} align="right">СН (оценка)</SortTh>
+            <SortTh sortKey="over" sort={табл.sort} onSort={табл.toggle} align="right">Сверхнорматив</SortTh>
+            <SortTh sortKey="tariff" sort={табл.sort} onSort={табл.toggle} align="right">Тариф, ₽</SortTh>
+            <SortTh sortKey="cost" sort={табл.sort} onSort={табл.toggle} align="right">Затраты, ₽</SortTh>
+            <SortTh sortKey="revenue" sort={табл.sort} onSort={табл.toggle} align="right">Выручка, ₽</SortTh>
+            <SortTh sortKey="margin" sort={табл.sort} onSort={табл.toggle} align="right">Маржа э/э, ₽</SortTh>
           </TableRow></TableHeader><TableBody>
-            {rows.map((r) => {
+            {табл.rows.map((r) => {
               const overBad = (r.overImbalanceKwh ?? 0) > 0
               const noIn = r.intakeKwh == null && r.dispensedKwh > 0
               return (

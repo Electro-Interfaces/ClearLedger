@@ -65,6 +65,16 @@ function money(v: number) {
   return v.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// День документа по местному времени для поля <input type="date">.
+// doc_date приходит в UTC: накладная станции от 15.09 (полночь по Москве) —
+// это 14.09 21:00Z, и slice(0, 10) показывал 14.09 (ревизия 23.09.2026).
+function localDayInput(value: string) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value.slice(0, 10)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`
+}
+
 function shortDate(value: string) {
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString('ru-RU')
@@ -634,7 +644,7 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
   const [contract, setContract] = useState(receipt.contract ?? '')
   const [incoming, setIncoming] = useState(receipt.incoming_number ?? '')
   const [incomingDate, setIncomingDate] = useState(receipt.incoming_date?.slice(0, 10) ?? '')
-  const [docDate, setDocDate] = useState(receipt.doc_date.slice(0, 10))
+  const [docDate, setDocDate] = useState(localDayInput(receipt.doc_date))
   const [comment, setComment] = useState(receipt.comment ?? '')
   const [lines, setLines] = useState<StoreReceiptLine[]>(receipt.lines ?? [])
   const [signatureRef, setSignatureRef] = useState(receipt.signature_ref ?? '')
@@ -670,7 +680,7 @@ function ReceiptCard({ receipt, onClose, onlyDiff, setOnlyDiff, stationIds, onRe
     setContract(updated.contract ?? '')
     setIncoming(updated.incoming_number ?? '')
     setIncomingDate(updated.incoming_date?.slice(0, 10) ?? '')
-    setDocDate(updated.doc_date.slice(0, 10))
+    setDocDate(localDayInput(updated.doc_date))
     setComment(updated.comment ?? '')
     setLines(updated.lines)
     setSignatureRef(updated.signature_ref ?? '')

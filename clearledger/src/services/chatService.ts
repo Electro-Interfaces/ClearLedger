@@ -98,6 +98,8 @@ export interface ChatMessage {
   fileUrl: string | null
   fileName: string | null
   fileSize: number | null
+  /** Одной отправкой: все сообщения, посланные одним действием человека. */
+  batchId: string | null
   /** Кадр видео: лента показывает его, пока сам ролик не запросили. */
   posterUrl: string | null
   replyTo: string | null
@@ -169,6 +171,8 @@ export interface SendPayload {
   fileName?: string
   fileSize?: number
   posterUrl?: string
+  /** Общий признак отправки: ставится на все сообщения одной пачки. */
+  batchId?: string
   mentions?: string[]
 }
 

@@ -1,3 +1,4 @@
+import { demoMonitoring } from './demoMonitoring'
 import {
   DEMO_ACCESS_CATALOG,
   DEMO_ACTIVITY,
@@ -159,7 +160,12 @@ function infoContext(params: Params) {
 export async function demoGet<T>(path: string, params: Params = {}): Promise<T> {
   const url = requestUrl(path)
   const urlPath = url.pathname
+  if (new URLSearchParams(window.location.search).get('demo_ops') === '1') sessionStorage.setItem('ops-monitor-demo', '1')
+  const monitoringProfile = sessionStorage.getItem('ops-monitor-demo') === '1'
   const param = (key: string) => params[key] ?? url.searchParams.get(key) ?? undefined
+  const monitoring = demoMonitoring(urlPath, Object.fromEntries(
+    ['days', 'region', 'as_of', 'vendor', 'min_sessions', 'only_problems'].map((key) => [key, param(key)])))
+  if (monitoring !== undefined) return clone(monitoring) as T
 
   if (urlPath === '/api/work-contexts') return clone({ providers: [] }) as T
   if (urlPath === '/api/work-contexts/search') return clone({ items: [] }) as T
@@ -167,7 +173,7 @@ export async function demoGet<T>(path: string, params: Params = {}): Promise<T> 
   if (/^\/api\/work-contexts\/work\/(doc|task)\/[^/]+\/results$/.test(urlPath)
     || /^\/api\/work-contexts\/rooms\/[^/]+\/work$/.test(urlPath)) return clone({ items: [] }) as T
 
-  if (urlPath === '/api/auth/me') return clone(DEMO_AUTH_USER) as T
+  if (urlPath === '/api/auth/me') return clone(monitoringProfile ? { ...DEMO_AUTH_USER, companies: DEMO_AUTH_USER.companies.map((c) => ({ ...c, profile_id: 'energy' })) } : DEMO_AUTH_USER) as T
   if (urlPath === '/api/sso/apps') {
     return clone({ enabled: true, sso_enabled: true, chat_enabled: true, apps: DEMO_SSO_APPS, allowed_apps: null }) as T
   }
@@ -176,7 +182,7 @@ export async function demoGet<T>(path: string, params: Params = {}): Promise<T> 
     const found = DEMO_SSO_APPS.find((item) => item.code === code)
     return clone({ url: found?.route ?? '#catalog', app: code, expires_in: 60 }) as T
   }
-  if (urlPath === '/api/registry/company-apps') return clone({ apps: [...DEMO_COMPANY_APPS, ...DEMO_DISABLED_APPS] }) as T
+  if (urlPath === '/api/registry/company-apps') return clone({ apps: [...DEMO_COMPANY_APPS, ...DEMO_DISABLED_APPS].map((a) => monitoringProfile && a.code === 'ops' ? { ...a, enabled: true } : a) }) as T
   if (urlPath === '/api/registry/access-catalog') return clone({ catalog: DEMO_ACCESS_CATALOG }) as T
   if (urlPath === '/api/registry/apps') return clone({ apps: DEMO_COMPANY_APPS }) as T
   if (urlPath === '/api/registry/space-map') return clone(DEMO_SPACE_MAP) as T

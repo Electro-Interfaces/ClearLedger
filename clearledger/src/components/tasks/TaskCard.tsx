@@ -9,6 +9,7 @@
  * задваивается отдельным комментарием (так сделано на сервере, не ломать).
  */
 import { WorkOriginLink } from '@/components/work/WorkOriginLink'
+import { StationLink } from '@/components/common/StationLink'
 import { WorkResults } from '@/components/work/WorkResults'
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -1007,6 +1008,14 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
             placeholder="Без объекта" emptyLabel="Без объекта"
             searchPlaceholder="Номер, название или адрес…"
             loading={objectsQ.isLoading} width="w-[320px]" />
+          {/* Поручение по станции почти всегда требует посмотреть саму станцию:
+              что там за оборудование, какие заявки и что с реализацией. Раньше
+              за этим уходили в «Объекты» и теряли поручение из виду. */}
+          {task.object_id && (
+            <div className="mt-1 text-xs">
+              <StationLink station={task.object_id}>Открыть карточку станции</StationLink>
+            </div>
+          )}
         </Field>
         )}
         {task.project_id && (

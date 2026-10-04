@@ -64,8 +64,9 @@ CATEGORIES: list[NotifyCategory] = [
         code="load_failures",
         label="Сбои загрузок",
         description="Прогон канала данных упал или прошёл с ошибками: источник "
-                    "недоступен, часть станций не загрузилась.",
-        prefixes=("channel.run.failed", "channel.run.partial"),
+                    "недоступен, часть станций не загрузилась. Сюда же — тишина: "
+                    "ежедневная выгрузка не пришла дольше положенного.",
+        prefixes=("channel.run.failed", "channel.run.partial", "intake."),
     ),
     NotifyCategory(
         code="loads",
@@ -110,6 +111,8 @@ ACTION_LABELS: dict[str, str] = {
     "project.decision": "зафиксировано решение по проекту",
     "project.scenario": "принят результат этапа проекта",
     "project.result": "получен результат из Трека",
+    "intake.stale": "выгрузка данных не приходит",
+    "intake.resumed": "выгрузка данных возобновилась",
 }
 
 

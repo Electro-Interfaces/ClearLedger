@@ -191,12 +191,27 @@ async def context(db: AsyncSession, company_id, *, app_code: str,
     Сначала статьи, привязанные к разделу, потом — к продукту целиком. Если для
     места ничего не заведено, панель не остаётся пустой: отдаём инструкции
     продукта по общему дереву и честно помечаем это как «ничего своего нет».
+
+    `section_key` принимает несколько ключей через запятую — тогда подходит
+    статья, привязанная к любому из них.
     """
     profile = await _profile(db, company_id)
     # Ключ места бывает двухуровневым: «pr_project:work» — раздел рабочей области
     # и вкладка внутри него. Отдаём и статью вкладки, и статью раздела: человек на
     # вкладке «Работа» хочет знать и про неё, и про карточку проекта целиком.
-    keys = [k for k in {(section_key or ""), (section_key or "").split(":")[0]} if k]
+    #
+    # Ключей бывает несколько через запятую: у станции памятка своя
+    # («ops_station:loc:ezs-…»), общая по марке («ops_station:brand:Setec») и по
+    # разделу. Заводить ради этого вторую привязку в модели незачем — привязка и
+    # так адресуется строкой, не хватало только спросить сразу несколькими.
+    keys: list[str] = []
+    for часть in (section_key or "").split(","):
+        часть = часть.strip()
+        if not часть:
+            continue
+        for k in (часть, часть.split(":")[0]):
+            if k and k not in keys:
+                keys.append(k)
     rows = (await db.execute(
         select(InfoArticle, InfoBinding.section_key, InfoBinding.weight)
         .join(InfoBinding, InfoBinding.article_id == InfoArticle.id)

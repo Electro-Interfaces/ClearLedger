@@ -16,3 +16,6 @@ cryptography>=44.0.0
 gunicorn==23.0.0
 aiosmtplib>=3.0.0
 pywebpush>=2.0.0
+# Чтение текста договоров для разбора условий ответственности.
+pypdf==5.1.0
+python-docx==1.1.2

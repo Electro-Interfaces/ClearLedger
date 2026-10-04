@@ -24,6 +24,7 @@ import { type Period, buildMoM, isoLocal } from './analytics/periodPresets'
 import { getPortEfficiency } from '@/services/overviewService'
 import { useTabParams } from '@/hooks/useTabParams'
 import { useFilters } from '@/contexts/FilterContext'
+import { StationLink } from '@/components/common/StationLink'
 import { ExportButton } from './analytics/ExportButton'
 import { useScopeSubtitle } from '@/hooks/useScopeReset'
 import { PanelViewTabs } from './PanelViewTabs'
@@ -1891,7 +1892,9 @@ function UnpaidAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; da
                   <tr key={r.session_ext_id} className="border-b border-border/30 hover:bg-muted/30">
                     <td className="p-2 font-mono text-muted-foreground whitespace-nowrap">{r.started_at.slice(0, 16).replace('T', ' ')}</td>
                     <td className="p-2 font-medium truncate max-w-[200px]" title={`${r.station_name ?? ''} · ${r.region ?? ''}`}>
-                      {r.station_name ?? r.station_code}
+                      <StationLink station={r.station_code}>
+                        {r.station_name ?? r.station_code}
+                      </StationLink>
                     </td>
                     <td className="p-2 font-mono text-muted-foreground whitespace-nowrap">{r.client}</td>
                     <td className="p-2 text-right font-mono">{nf1.format(r.energy_kwh)}</td>
@@ -2425,7 +2428,7 @@ function Reliability({ companyId, dateFrom, dateTo }: { companyId: string; dateF
 const visitSuccTxt = (v: number) => (v >= 90 ? 'text-emerald-600 dark:text-emerald-400' : v >= 80 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400')
 const visitSuccAccent = (v: number): KpiAccent => (v >= 90 ? 'success' : v >= 80 ? 'warning' : 'danger')
 
-type RelSortKey = 'label' | 'brand' | 'visits' | 'visit_success_pct' | 'repeat_sessions' | 'wasted_sessions' | 'avg_attempts' | 'energy_kwh'
+type RelSortKey = 'label' | 'brand' | 'visits' | 'visit_success_pct' | 'left_first_pct' | 'left_after_pct' | 'repeat_sessions' | 'wasted_sessions' | 'avg_attempts' | 'energy_kwh'
 const REL_ASC_DEFAULT: RelSortKey[] = ['label', 'brand']
 type RelSort = { key: RelSortKey; dir: 'asc' | 'desc' }
 
@@ -2439,6 +2442,9 @@ const relPick = (o: object, k: string): unknown => (o as Record<string, unknown>
 /** Итог по бренду: сырые счётчики суммируем, проценты пересчитываем (не усредняем). */
 interface BrandAgg {
   brand: string; stations: number; visits: number; visit_success_pct: number
+  // Картина отказа: один общий процент вендору не предъявишь — он спросит, что
+  // именно не так. «Ушёл сразу» и «долбился и ушёл» — разные беды железа.
+  left_first_pct: number; left_after_pct: number
   repeat_sessions: number; wasted_sessions: number; avg_attempts: number
   energy_kwh: number; risk_stations: number; rows: StationReliabilityRow[]
 }
@@ -2452,6 +2458,8 @@ function aggregateByBrand(stations: StationReliabilityRow[]): BrandAgg[] {
     out.push({
       brand, stations: rows.length, visits,
       visit_success_pct: visits ? +(sum((r) => r.charged_visits) / visits * 100).toFixed(1) : 0,
+      left_first_pct: visits ? +(sum((r) => r.left_first_try) / visits * 100).toFixed(1) : 0,
+      left_after_pct: visits ? +(sum((r) => r.left_after_tries) / visits * 100).toFixed(1) : 0,
       repeat_sessions: sum((r) => r.repeat_sessions), wasted_sessions: sum((r) => r.wasted_sessions),
       avg_attempts: visits ? +(sessions / visits).toFixed(2) : 0,
       energy_kwh: +sum((r) => r.energy_kwh).toFixed(1), risk_stations: rows.filter((r) => r.risk).length, rows,
@@ -2479,11 +2487,13 @@ function SortTh({ label, k, sort, onSort, align = 'right', info }: {
 }
 
 /** Числовые ячейки надёжности — общие для строки станции и итога бренда. */
-function RelNumCells({ r }: { r: { visits: number; visit_success_pct: number; repeat_sessions: number; wasted_sessions: number; avg_attempts: number; energy_kwh: number } }) {
+function RelNumCells({ r }: { r: { visits: number; visit_success_pct: number; left_first_pct: number; left_after_pct: number; repeat_sessions: number; wasted_sessions: number; avg_attempts: number; energy_kwh: number } }) {
   return (
     <>
       <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.visits)}</td>
       <td className={`p-2 text-right font-mono ${visitSuccTxt(r.visit_success_pct)}`}>{nf1.format(r.visit_success_pct)}%</td>
+      <td className={`p-2 text-right font-mono ${r.left_first_pct >= 10 ? 'text-red-500' : 'text-muted-foreground'}`}>{nf1.format(r.left_first_pct)}%</td>
+      <td className={`p-2 text-right font-mono ${r.left_after_pct >= 10 ? 'text-red-500' : 'text-muted-foreground'}`}>{nf1.format(r.left_after_pct)}%</td>
       <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.repeat_sessions)}</td>
       <td className="p-2 text-right font-mono text-muted-foreground">{nf0.format(r.wasted_sessions)}</td>
       <td className="p-2 text-right font-mono text-muted-foreground">{nf1.format(r.avg_attempts)}</td>
@@ -2538,15 +2548,23 @@ function BrandReliability({ companyId, dateFrom, dateTo }: { companyId: string; 
     <>
       <SortTh label="Визитов" k="visits" sort={sort} onSort={onSort} info={HINTS.visitDef} />
       <SortTh label="Успех визита" k="visit_success_pct" sort={sort} onSort={onSort} info={HINTS.visitSuccess} />
+      <SortTh label="Ушёл сразу" k="left_first_pct" sort={sort} onSort={onSort} info={HINTS.leftFirstTry} />
+      <SortTh label="Долбился и ушёл" k="left_after_pct" sort={sort} onSort={onSort} info={HINTS.leftAfterTries} />
       <SortTh label="Повторных" k="repeat_sessions" sort={sort} onSort={onSort} info={HINTS.repeatSessions} />
       <SortTh label="Неудачных" k="wasted_sessions" sort={sort} onSort={onSort} info={HINTS.failedSessions} />
       <SortTh label="Ср. попыток" k="avg_attempts" sort={sort} onSort={onSort} info={HINTS.avgAttempts} />
       <SortTh label="Энергия" k="energy_kwh" sort={sort} onSort={onSort} />
     </>
   )
-  const exportCols = ['Производитель', 'Станция', 'Код', 'Визитов', 'Успех визита, %', 'Повторных сессий', 'Неудачных сессий', 'Ср. попыток', 'Энергия, кВтч', 'Станция риска']
+  const exportCols = ['Производитель', 'Станция', 'Код', 'Визитов', 'Успех визита, %',
+    'Ушёл сразу, %', 'Долбился и ушёл, %', 'Помог другой коннектор', 'Схватилось не сразу',
+    'Пустых мгновенных', 'Пустых затяжных',
+    'Повторных сессий', 'Неудачных сессий', 'Ср. попыток', 'Энергия, кВтч', 'Станция риска']
   const exportData = sortedStations.map((s): (string | number | null)[] =>
-    [s.brand, s.label, s.code, s.visits, s.visit_success_pct, s.repeat_sessions, s.wasted_sessions, s.avg_attempts, s.energy_kwh, s.risk ? 'риск' : ''])
+    [s.brand, s.label, s.code, s.visits, s.visit_success_pct,
+      s.left_first_pct, s.left_after_pct, s.retried_other_connector, s.retried_same_connector,
+      s.wasted_instant, s.wasted_stuck,
+      s.repeat_sessions, s.wasted_sessions, s.avg_attempts, s.energy_kwh, s.risk ? 'риск' : ''])
 
   return (
     <div className="p-4 space-y-4">
@@ -2558,6 +2576,19 @@ function BrandReliability({ companyId, dateFrom, dateTo }: { companyId: string; 
         <KpiCard label="Неудачных сессий" value={nf0.format(t.wasted_sessions)} accent="warning" hint="без отпуска энергии" info={HINTS.failedSessions} />
         <KpiCard label="Станций риска" value={nf0.format(t.risk_stations)} accent={t.risk_stations ? 'danger' : 'success'}
           hint={`≥${risk.min_visits} виз. и успех <${risk.success_pct}%`} info={HINTS.riskStation} />
+      </div>
+
+      {/* Из чего складывается неуспех: те же визиты, разложенные по картинам.
+          Без этой строки «успех 90 %» не о чем разговаривать с поставщиком —
+          она и отвечает, почему клиент втыкал разъём снова. */}
+      <div className="rounded-md border border-border/50 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">Почему пробуют снова: </span>
+        схватилось не с первого раза — <b className="text-foreground">{nf0.format(t.retried_same_connector)}</b> приездов,
+        помог другой коннектор — <b className="text-foreground">{nf0.format(t.retried_other_connector)}</b>,
+        пробовал и уехал ни с чем — <b className="text-red-500">{nf0.format(t.left_after_tries)}</b>,
+        уехал после первой же неудачи — <b className="text-red-500">{nf0.format(t.left_first_try)}</b>.
+        Пустых попыток короче минуты {nf0.format(t.wasted_instant)} (станция не дошла до отпуска тока),
+        дольше пяти минут {nf0.format(t.wasted_stuck)} (держала машину и тока не дала).
       </div>
 
       {/* Глоссарий: чтобы менеджер не гадал, что значит цифра. */}
@@ -2608,7 +2639,7 @@ function BrandReliability({ companyId, dateFrom, dateTo }: { companyId: string; 
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={view.mode === 'flat' ? 8 : 7} className="p-6 text-center text-muted-foreground">Ничего не найдено — смягчите поиск или порог визитов</td></tr>
+                <tr><td colSpan={view.mode === 'flat' ? 10 : 9} className="p-6 text-center text-muted-foreground">Ничего не найдено — смягчите поиск или порог визитов</td></tr>
               )}
               {view.mode === 'flat'
                 ? sortedStations.map((s) => (

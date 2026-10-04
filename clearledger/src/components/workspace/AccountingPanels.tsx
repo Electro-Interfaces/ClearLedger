@@ -18,6 +18,11 @@ import { useWorkspaceSections, ENERGY_MGMT_KEYS, CHARGE_SESSIONS_KEYS, MGMT_MENU
  * работает в одном продукте, а статические импорты приносили все пять сразу.
  */
 const MarketRouter = lazy(() => import('@/components/market/MarketRouter').then((m) => ({ default: m.MarketRouter })))
+const NetworkStatePanel = lazy(() => import('./NetworkStatePanel').then((m) => ({ default: m.NetworkStatePanel })))
+const NetworkReliabilityPanel = lazy(() => import('./NetworkReliabilityPanel').then((m) => ({ default: m.NetworkReliabilityPanel })))
+const NetworkVendorsPanel = lazy(() => import('./NetworkVendorsPanel').then((m) => ({ default: m.NetworkVendorsPanel })))
+const OpsWorklistPanel = lazy(() => import('./OpsWorklistPanel').then((m) => ({ default: m.OpsWorklistPanel })))
+const OpsTicketsPanel = lazy(() => import('./OpsTicketsPanel').then((m) => ({ default: m.OpsTicketsPanel })))
 const EquipmentRouter = lazy(() => import('@/components/equipment/EquipmentRouter').then((m) => ({ default: m.EquipmentRouter })))
 const SitesRouter = lazy(() => import('@/components/sites/SitesRouter').then((m) => ({ default: m.SitesRouter })))
 const ChargeSalesRouter = lazy(() => import('./ChargeSalesRouter').then((m) => ({ default: m.ChargeSalesRouter })))
@@ -187,6 +192,26 @@ export function ManagementPanel({ mode = 'management' }: { mode?: CoreMode } = {
         </div>
       </div>
     )
+  }
+  // Рабочее место инженера эксплуатации: что со станциями и куда ехать первым.
+  if (activeTab === 'ops_state') {
+    return <div className="h-full overflow-y-auto"><L><NetworkStatePanel /></L></div>
+  }
+  // Заявки сети: срез «Поддержки» с привязкой к станциям.
+  if (activeTab === 'ops_tickets') {
+    return <div className="h-full overflow-y-auto"><L><OpsTicketsPanel /></L></div>
+  }
+  // Утренний список: что делать сегодня и что никем не взято.
+  if (activeTab === 'ops_worklist') {
+    return <div className="h-full overflow-y-auto"><L><OpsWorklistPanel /></L></div>
+  }
+  // Качество работы: где клиент уезжает ни с чем, хотя станция на связи.
+  if (activeTab === 'ops_reliability') {
+    return <div className="h-full overflow-y-auto"><L><NetworkReliabilityPanel /></L></div>
+  }
+  // Сеть глазами марки железа: чьё держит нагрузку, а чьё стоит.
+  if (activeTab === 'ops_vendors') {
+    return <div className="h-full overflow-y-auto"><L><NetworkVendorsPanel /></L></div>
   }
   // Кокпит решений (energy): обзор ситуации + пообъектный энергобаланс (факт)
   if (activeTab === 'ops_overview') {

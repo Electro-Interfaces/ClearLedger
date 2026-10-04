@@ -18,6 +18,7 @@ import { ArrowUpRight, MapPin } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+import { StationLink } from '@/components/common/StationLink'
 import { useCompany } from '@/contexts/CompanyContext'
 import { getPulseObjects } from './pulseService'
 import { KpiTile, PulseError, PulseExport, PulseLoading, fmtNum, fmtDate } from './parts'
@@ -78,7 +79,7 @@ export function ObjectsView() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 truncate text-sm font-medium">
                         <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        {p.name}
+                        <StationLink station={p.id}>{p.name}</StationLink>
                         {p.code && (
                           <span className="shrink-0 text-[11px] text-muted-foreground">· {p.code}</span>
                         )}

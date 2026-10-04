@@ -3,7 +3,6 @@
  * Источник: location.sourceBindings (STS/MSTO/TradeCorp/1С) + HubEx-связка из metadata.
  * Имена/статусы источников резолвятся через getSources (если источник заведён в компании).
  */
-import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Plug, Link2, Radio } from 'lucide-react'
 import { getSources } from '@/services/sourceService'
@@ -76,19 +75,21 @@ export function IntegrationsTab({ location, embedded }: {
         const typeLabel = src ? (SOURCE_TYPE_LABEL[src.type] ?? src.type) : null
         const status = src ? STATUS_META[src.status] : null
         return (
-          <Card key={i}>
-            <CardContent className="pt-5">
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <Link2 className="h-4 w-4 text-muted-foreground" />
-                <span className="font-medium">{src?.name ?? b.label ?? `Источник ${b.sourceId.slice(0, 8)}`}</span>
+          <SectionCard
+            key={i}
+            title={src?.name ?? b.label ?? `Источник ${b.sourceId.slice(0, 8)}`}
+            icon={Link2}
+            action={
+              <div className="flex items-center gap-1.5">
                 {typeLabel && <Badge variant="outline" className="text-[10px]">{typeLabel}</Badge>}
                 {status && <Badge variant="secondary" className={`text-[10px] ${status.cls}`}>{status.label}</Badge>}
               </div>
-              {bindingParams(b).length > 0
-                ? bindingParams(b).map((r) => <InfoRow key={r.label} label={r.label} value={<span className="font-mono">{r.value}</span>} />)
-                : <p className="text-sm text-muted-foreground">{b.label ?? 'Параметры привязки не заданы.'}</p>}
-            </CardContent>
-          </Card>
+            }
+          >
+            {bindingParams(b).length > 0
+              ? bindingParams(b).map((r) => <InfoRow key={r.label} label={r.label} value={<span className="font-mono">{r.value}</span>} />)
+              : <p className="text-sm text-muted-foreground">{b.label ?? 'Параметры привязки не заданы.'}</p>}
+          </SectionCard>
         )
       })}
 

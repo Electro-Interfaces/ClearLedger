@@ -4,7 +4,6 @@
  * АЗС: каркас ТРК/контроллера (задел) + резервуары из последней смены (реально).
  * Прочие типы: профильный каркас или мягкая заглушка.
  */
-import { Card, CardContent } from '@/components/ui/card'
 import { Cpu, Fuel, Gauge, Database, Zap, Box, Plug } from 'lucide-react'
 import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { MetadataFieldsReader } from '@/components/manual/MetadataFieldsReader'
@@ -47,19 +46,17 @@ export function EquipmentTab({ location, embedded }: {
     ].filter((f) => has(f.value))
     return (
       <ScrollTab plain={embedded}>
-        <Card>
-          <CardContent className="pt-5 text-sm">
-            {summary.length > 0 ? (
-              <div className="grid grid-cols-2 gap-x-8 gap-y-2">
-                {summary.map((f) => (
-                  <Field key={f.label} label={f.label} value={f.value} mono={f.mono} />
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Характеристики не заполнены.</p>
-            )}
-          </CardContent>
-        </Card>
+        <SectionCard title="Оборудование" icon={Zap}>
+          {summary.length > 0 ? (
+            <div className="grid grid-cols-2 gap-x-8 gap-y-2.5 text-sm">
+              {summary.map((f) => (
+                <Field key={f.label} label={f.label} value={f.value} mono={f.mono} />
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Характеристики не заполнены.</p>
+          )}
+        </SectionCard>
         {connectors.length > 0 && (
           <SectionCard title="Силовые блоки (коннекторы)" icon={Plug}>
             <div className="space-y-1.5">

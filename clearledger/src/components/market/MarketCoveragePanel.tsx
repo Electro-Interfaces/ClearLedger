@@ -132,7 +132,7 @@ export function MarketCoveragePanel() {
             r.region, r.carsKnown ? r.evCars : null, r.evSharePct, r.stations, r.stationsAlive,
             r.deadStations, r.carsPerStation, r.carsPerAlive, r.deadGapRatio, r.ourSites, r.ourWorking,
           ]))}>
-          <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+          <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
             <tr>
               <SortTh sortKey="region" sort={sort} onSort={toggle}>Регион</SortTh>
               <SortTh sortKey="cars" sort={sort} onSort={toggle} align="right">Электромобилей</SortTh>

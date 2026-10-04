@@ -18,6 +18,23 @@
   • ср. попыток      = сессий ÷ визитов (1.0 = всегда с первой);
   • станция риска    = ≥30 визитов И успех визита <80% (кандидат на ТОиР).
 
+КАРТИНА СБОЯ — чем именно оборудование плохо. «Успех 75 %» вендору не предъявишь:
+он спросит, что конкретно не так. Поэтому неудачные и повторные визиты разложены:
+
+  • ушёл после первой неудачи   — отказ сразу, клиент не стал пробовать;
+  • пробовал и уехал ни с чем   — станция вовсе не отдаёт ток;
+  • схватилось не с первого раза — замок/рукопожатие/авторизация через раз;
+  • помог другой коннектор       — беда в конкретном разъёме, а не в станции.
+
+Эти четыре картины разводят марки заметно сильнее, чем один общий процент: у Touch
+16,5 % клиентов уезжают после первой же неудачи при 11 % повторов, у Нартиса
+наоборот — 20 % повторов и 11 % «долбился и уехал» (замер 20.09.2026). Первое —
+отказ в обслуживании, второе — неустойчивый старт зарядки; и разговор с
+поставщиком по ним разный.
+
+Пустые попытки делим по длительности: короче минуты — станция не дошла до отпуска
+тока, дольше пяти — держала машину и тока не дала.
+
 Паспортную мощность станции (`power_kwt`) отдаём как справку для карточки станции,
 но НЕ считаем «факт против паспорта»: сырое отношение шумит на коротких сессиях,
 превышает 100% при простое соседних портов и держится на допущении «power_kwt =
@@ -39,6 +56,7 @@ from app.scope import acl_params, acl_sql
 
 from app.services.charge_grouping import _BRAND_CANON
 from app.services.charge_visits import CHARGED_MIN_KWH, VISIT_GAP_MIN, _as_date
+from app.services.session_scope import station_locations_sql
 
 NO_BRAND = "— (нет бренда)"
 #: Станция риска: заметный поток визитов и низкий успех — не единичный сбой.
@@ -66,7 +84,7 @@ def _scope_fragment(stations: list[str] | None, regions: list[str] | None,
     Скоуп участника (app/scope.py) — та же граница, что в списках объектов."""
     flt = acl_sql("location_id")
     if stations is not None:
-        flt += " AND station_code = ANY(:stations)"
+        flt += f" AND (station_code = ANY(:stations) OR location_id = ANY{station_locations_sql()})"
     if regions is not None:
         flt += (" AND location_id IN (SELECT sl.id FROM service_locations sl"
                 " JOIN regions r ON r.id = sl.region_id"
@@ -87,6 +105,14 @@ WITH v AS (
            -- «сессий», чтобы цифры сходились с вкладкой «Повторные попытки».
            max(visit_size)                       AS attempts,
            count(*) FILTER (WHERE energy_kwh <= :charged_min) AS wasted,
+           -- Пустая попытка короче минуты = не дошло до тока; дольше пяти =
+           -- станция держала машину и тока не дала. Беды разные.
+           count(*) FILTER (WHERE energy_kwh <= :charged_min
+                              AND coalesce(duration_min, 0) < 1) AS wasted_instant,
+           count(*) FILTER (WHERE energy_kwh <= :charged_min
+                              AND coalesce(duration_min, 0) >= 5) AS wasted_stuck,
+           -- Сколько разных разъёмов человек перепробовал за приезд.
+           count(DISTINCT connector_no)          AS used_connectors,
            coalesce(sum(energy_kwh), 0)          AS kwh,
            coalesce(sum(coalesce(client_amount, amount)), 0) AS amount
       FROM charge_sessions
@@ -107,6 +133,13 @@ SELECT v.station_code                              AS code,
        count(*) FILTER (WHERE v.charged)           AS charged_visits,
        count(*) FILTER (WHERE NOT v.charged)       AS failed_visits,
        count(*) FILTER (WHERE v.charged AND v.attempts > 1) AS retried_visits,
+       -- Картины приезда: чем именно плохо оборудование (см. докстроку).
+       count(*) FILTER (WHERE v.charged AND v.attempts > 1
+                          AND v.used_connectors > 1)           AS retried_other,
+       count(*) FILTER (WHERE NOT v.charged AND v.attempts = 1) AS left_first,
+       count(*) FILTER (WHERE NOT v.charged AND v.attempts > 1) AS left_after_tries,
+       coalesce(sum(v.wasted_instant), 0)          AS wasted_instant,
+       coalesce(sum(v.wasted_stuck), 0)            AS wasted_stuck,
        coalesce(sum(v.attempts), 0)                AS sessions,
        coalesce(sum(v.wasted), 0)                  AS wasted_sessions,
        coalesce(sum(v.kwh), 0)                     AS energy,
@@ -146,6 +179,9 @@ async def brand_reliability(
         charged_v = int(r["charged_visits"] or 0)
         failed_v = int(r["failed_visits"] or 0)
         retried_v = int(r["retried_visits"] or 0)
+        retried_other = int(r["retried_other"] or 0)
+        left_first = int(r["left_first"] or 0)
+        left_after = int(r["left_after_tries"] or 0)
         sessions = int(r["sessions"] or 0)
         wasted = int(r["wasted_sessions"] or 0)
         pw = float(r["power_kwt"]) if r["power_kwt"] is not None else None
@@ -161,6 +197,15 @@ async def brand_reliability(
             "charged_visits": charged_v,
             "failed_visits": failed_v,
             "retried_visits": retried_v,
+            # Картина сбоя — предмет разговора с поставщиком.
+            "retried_other_connector": retried_other,
+            "retried_same_connector": max(retried_v - retried_other, 0),
+            "left_first_try": left_first,
+            "left_after_tries": left_after,
+            "wasted_instant": int(r["wasted_instant"] or 0),
+            "wasted_stuck": int(r["wasted_stuck"] or 0),
+            "left_first_pct": round(left_first / visits * 100, 1) if visits else 0.0,
+            "left_after_pct": round(left_after / visits * 100, 1) if visits else 0.0,
             "sessions": sessions,
             # Повторных сессий = лишние переподключения (все касания сверх одного
             # на визит). Неудачных сессий = без отпуска энергии.
@@ -198,6 +243,12 @@ async def brand_reliability(
             "failed_visits": sum(s["failed_visits"] for s in out),
             "repeat_sessions": sum(s["repeat_sessions"] for s in out),
             "wasted_sessions": sum(s["wasted_sessions"] for s in out),
+            "retried_same_connector": sum(s["retried_same_connector"] for s in out),
+            "retried_other_connector": sum(s["retried_other_connector"] for s in out),
+            "left_first_try": sum(s["left_first_try"] for s in out),
+            "left_after_tries": sum(s["left_after_tries"] for s in out),
+            "wasted_instant": sum(s["wasted_instant"] for s in out),
+            "wasted_stuck": sum(s["wasted_stuck"] for s in out),
             "visit_success_pct": round(t_charged / t_visits * 100, 1) if t_visits else 0.0,
             "energy_kwh": round(sum(s["energy_kwh"] for s in out), 1),
             "amount": round(sum(s["amount"] for s in out), 2),

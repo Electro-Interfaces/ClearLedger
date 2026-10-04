@@ -14,6 +14,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { videoHasAudio } from '@/lib/videoAudio'
 import { makeVideoPoster } from '@/lib/videoPoster'
+import { albumCaption, collectAlbums } from '@/lib/chatAlbums'
 import {
   MessageCircle, Send, Search, User as UserIcon, Building2, Users, Plus,
   ChevronLeft, ChevronRight, FileText, MoreVertical, Archive, ArchiveRestore,
@@ -1936,6 +1937,7 @@ function ChatBubble({
 
           {/* Медиа */}
           {album ? (
+            <>
             <div className="mt-1 grid w-[min(240px,60vw)] grid-cols-2 gap-0.5 overflow-hidden rounded-lg">
               {album.slice(0, 4).map((it, k) => (
                 <button key={it.id} type="button" onClick={() => onImageClick?.(it.fileUrl!)}
@@ -1947,6 +1949,16 @@ function ChatBubble({
                 </button>
               ))}
             </div>
+            {/* Подпись принадлежит всей отправке, а не первому снимку. Текст уезжает
+                с первым сообщением пачки и уже показан выше; сюда он попадает, когда
+                достался не первому — так бывает, если файлы догружались. */}
+            {!message.content && albumCaption(album) && (
+              <p className={cn('mt-1 whitespace-pre-wrap break-words leading-[1.5]', textSizeClass)}>
+                {linkifyText(albumCaption(album))}
+                <span className={cn('inline-block', isOwn ? 'w-16' : 'w-11')} />
+              </p>
+            )}
+            </>
           ) : message.fileUrl ? (
             isVideo ? (
               <AuthVideo path={message.fileUrl} poster={message.posterUrl} name={message.fileName}
@@ -2384,8 +2396,14 @@ export function ChatPanel({ compact, scopeProduct }: {
           : /\.(mp4|webm|mov|m4v)$/i.test(name) ? 'video' : 'file'
       const mentions = Array.from(mentionMapRef.current.entries())
         .filter(([name]) => content.includes(`@${name}`)).map(([, id]) => id)
+      // Пять файлов уезжают пятью сообщениями — иначе у каждого не было бы своей
+      // реакции и ответа. Общий признак говорит ленте, что отправка была одна:
+      // прежде она угадывала это по времени и приклеивала к альбому снимок,
+      // посланный отдельно минуту спустя (МАГ, 18.09.2026).
+      const пачка = uploaded.length > 1 ? crypto.randomUUID() : undefined
       const first = await chat.sendMessage(selectedRoom!, {
         content,
+        batchId: пачка,
         type: uploaded[0] ? typeOf(uploaded[0].fileName) : undefined,
         fileUrl: uploaded[0]?.fileUrl,
         fileName: uploaded[0]?.fileName,
@@ -2400,7 +2418,7 @@ export function ChatPanel({ compact, scopeProduct }: {
       const failed: File[] = []
       for (const [i, f] of uploaded.slice(1).entries()) {
         try {
-          await chat.sendMessage(selectedRoom!, { content: '', type: typeOf(f.fileName), fileUrl: f.fileUrl, fileName: f.fileName, fileSize: f.fileSize, posterUrl: f.posterUrl })
+          await chat.sendMessage(selectedRoom!, { content: '', type: typeOf(f.fileName), fileUrl: f.fileUrl, fileName: f.fileName, fileSize: f.fileSize, posterUrl: f.posterUrl, batchId: пачка })
         } catch { failed.push(pendingFiles[i + 1]) }
       }
       return { first, failed }
@@ -3377,21 +3395,7 @@ export function ChatPanel({ compact, scopeProduct }: {
               )}
               {(() => {
                 const grouping = computeGrouping(messages)
-                const items: { msg: ChatMessage; album?: ChatMessage[]; index: number }[] = []
-                const skipped = new Set<number>()
-                for (let i = 0; i < messages.length; i++) {
-                  if (skipped.has(i)) continue
-                  const m = messages[i]
-                  if (isImageMessage(m)) {
-                    const album = [m]
-                    let j = i + 1
-                    while (j < messages.length && isImageMessage(messages[j]) && messages[j].userId === m.userId && !messages[j].content
-                      && new Date(messages[j].createdAt).getTime() - new Date(messages[j - 1].createdAt).getTime() < 120000) {
-                      album.push(messages[j]); skipped.add(j); j++
-                    }
-                    items.push({ msg: m, album: album.length > 1 ? album : undefined, index: i })
-                  } else items.push({ msg: m, index: i })
-                }
+                const items = collectAlbums(messages, isImageMessage)
                 return items.map(({ msg, album, index }) => {
                   const isOwn = msg.userId === user?.id
                   return (

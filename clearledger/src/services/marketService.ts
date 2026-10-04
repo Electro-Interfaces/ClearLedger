@@ -4,7 +4,38 @@
  * Внешний мир вокруг сети: чужие станции, торговые центры, парковки, АЗС и наблюдения
  * по ним. Наши объекты сюда не копируются — карта складывается из двух реестров.
  */
-import { get, post, patch } from './apiClient'
+import { get as httpGet, post, patch } from './apiClient'
+
+/**
+ * Область учёта из шапки пространства — контур раздела «Маркетинг».
+ *
+ * Человек выбирает «Забайкальский край» и ждёт рынок этого края. Прежде раздел
+ * область не читал вовсе: чип висел в шапке, а доли, сети и цены оставались
+ * общероссийскими (замечание РусГидро 18.09.2026). Контур держится здесь, а не
+ * раскладывается по тридцати трём вызовам: иначе следующая ручка появилась бы
+ * снова без него — так это и вышло в прошлый раз.
+ *
+ * Пусто — вся страна: отсутствие выбора не должно прятать рынок.
+ */
+let контур: { regions?: string; cities?: string } = {}
+
+export function setMarketScope(regions: string[], cities: string[] = []): void {
+  контур = {
+    ...(regions.length ? { regions: regions.join(',') } : {}),
+    ...(cities.length ? { cities: cities.join(',') } : {}),
+  }
+}
+
+/** Текущий контур строкой — для журналов и подписи «показано по территории». */
+export function marketScope(): { regions: string[]; cities: string[] } {
+  return {
+    regions: контур.regions ? контур.regions.split(',') : [],
+    cities: контур.cities ? контур.cities.split(',') : [],
+  }
+}
+
+const get = <T,>(path: string, params?: Record<string, unknown>) =>
+  httpGet<T>(path, { ...params, ...контур })
 
 /** Вид точки рынка. Не только ЭЗС: ТЦ и парковки объясняют спрос и служат кандидатами. */
 export type MarketSiteKind = 'ezs' | 'mall' | 'parking' | 'fuel' | 'hotel' | 'office' | 'other'
@@ -239,7 +270,9 @@ export type BreakdownRow = {
 
 export const getSitesBreakdown = (
   companyId: string,
-  params?: { city?: string; region?: string; operator_id?: string },
+  // Территория приходит контуром раздела (см. setMarketScope выше), здесь —
+  // только сужение по компании.
+  params?: { operator_id?: string },
 ) => get<{
   total: number; homeSockets: number; message?: string
   byPower: BreakdownRow[]; byCurrent: BreakdownRow[]; byClass: BreakdownRow[]
@@ -931,7 +964,7 @@ export const getMarketLandscape = (companyId: string) =>
     owners: MarketOwnerRow[]
     platforms: MarketPlatform[]
     totals: {
-      networks: number; networkSites: number; withProfile: number; ownPlatform: number
+      networks: number; networkSites: number; unnamedSites?: number; withProfile: number; ownPlatform: number
       platformKnownSites: number; roamingNetworks: number; roamingSites: number
       closedNetworks: number; closedSites: number; withApp: number; legalTrusted: number
       owners: number; ownerSites: number; ownerUnclear: number
@@ -1106,7 +1139,7 @@ export const ocmImportNetwork = (companyId: string, padding = 0.15) =>
 // Реестр приезжает на экран страницами, и клиентская сводная считала бы по
 // подгруженной части. Здесь группировка идёт по всему рынку сразу.
 
-export const getMarketPivotCatalog = (companyId: string) => (_source: string) =>
+export const getMarketPivotCatalog = (companyId: string) => () =>
   get<{ dims: { key: string; label: string }[]
         metrics: { key: string; label: string; digits: number }[] }>(
     '/api/market/pivot/dims', { company_id: companyId })

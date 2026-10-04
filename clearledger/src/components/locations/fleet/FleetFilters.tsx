@@ -28,6 +28,21 @@ const ATTENTION_ICON: Record<AttentionKey, typeof Wrench> = {
 }
 const ATTENTION_KEYS: AttentionKey[] = ['notWorking', 'onRepair', 'linkConflict', 'noBinding']
 
+/**
+ * Полосы внимания, которые стоит показывать этому парку.
+ *
+ * «Без привязки к источнику» на сети ЭЗС срабатывает у 614 объектов из 619:
+ * станции приезжают суточной выгрузкой витрины, а привязка к источнику —
+ * механизм АЗС (STS/MSTO). Полоса, которая всегда горит, перестаёт значить
+ * «требует внимания» и приучает не смотреть на весь ряд (замечание МАГа
+ * 20.09.2026). Показываем её, только когда без привязки МЕНЬШИНСТВО парка —
+ * тогда это действительно пробел, а не устройство работы.
+ */
+function полосыВнимания(stats: FleetStats, total: number): AttentionKey[] {
+  const массово = total > 0 && stats.attention.noBinding > total * 0.5
+  return ATTENTION_KEYS.filter((k) => k !== 'noBinding' || !массово)
+}
+
 export function FleetFilters({
   filters, onChange, options, stats, filteredCount, totalCount, onAttention,
 }: {
@@ -75,7 +90,7 @@ export function FleetFilters({
           (просил Якушевич 27.08.2026). Включённая залита плотнее и обведена, иначе
           по виду не отличить нажатую от ненажатой. */}
       <div className="flex flex-wrap gap-2">
-        {ATTENTION_KEYS.map((k) => {
+        {полосыВнимания(stats, totalCount).map((k) => {
           const Icon = ATTENTION_ICON[k]
           const count = stats.attention[k]
           if (count === 0) return null

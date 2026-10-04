@@ -164,8 +164,15 @@ function BreakdownCard({ companyId, period, scope, cfg }: {
                 <span className="text-xs text-muted-foreground">станций · работают {nf0.format(o.working)}</span>
               </div>
               <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
-                <Stat label="Простой" value={`${nf0.format(o.silent)} (${o.silent_pct.toFixed(0)}%)`} cls={silentCls(o.silent_pct)} />
-                <Stat label="Активны" value={nf0.format(o.active)} />
+                {/* НЕ «простой сейчас»: это станции без единой зарядки ЗА ВЕСЬ
+                    ПЕРИОД отбора. Станция, работавшая в январе и вставшая в
+                    августе, здесь «активна» — а в «Эксплуатации» она молчит 52
+                    дня. Подпись «Простой» заставляла считать эти цифры
+                    противоречащими (замечание МАГа 20.09.2026). */}
+                <Stat label="Без зарядок за период"
+                  value={`${nf0.format(o.silent)} (${o.silent_pct.toFixed(0)}%)`}
+                  cls={silentCls(o.silent_pct)} />
+                <Stat label="Заряжали хоть раз" value={nf0.format(o.active)} />
                 <Stat label="Надёжность" value={`${o.success_pct.toFixed(0)}%`} cls={succCls(o.success_pct)} />
                 <Stat label="Сессии" value={nf0.format(o.sessions)} />
               </div>
@@ -221,7 +228,8 @@ function BreakdownStationsDialog({ companyId, period, row, scope, queryKey, fetc
       title={<span className="text-sm">{row.label} — {nf0.format(row.stations)} станций</span>}
       subtitle={
         <>
-          активны {nf0.format(q.data?.active ?? row.active)} · простой {nf0.format(q.data?.silent ?? row.silent)}
+          заряжали хоть раз {nf0.format(q.data?.active ?? row.active)}
+          {' · '}без зарядок {nf0.format(q.data?.silent ?? row.silent)}
           {' · '}за период {formatPeriod(period.from, period.to)}
         </>
       }
@@ -286,7 +294,7 @@ function Stat({ label, value, cls }: { label: string; value: string; cls?: strin
 // Разрез парка по владельцу — свои (РусГидро) vs партнёрские (СНК).
 const OWNERS_CFG: BreakdownConfig = {
   title: 'Парк по владельцу',
-  hint: 'Собственные — станции РусГидро (включая бренд «Доступная энергия»). Партнёрские — станции СНК. Простой и надёжность считаются отдельно: партнёрские отрабатывают иначе, и в общей цифре сети это тонет. Клик по владельцу — список его станций.',
+  hint: 'Собственные — станции РусГидро (включая бренд «Доступная энергия»). Партнёрские — станции СНК. «Без зарядок за период» и надёжность считаются отдельно: партнёрские отрабатывают иначе, и в общей цифре сети это тонет. Клик по владельцу — список его станций.',
   queryKey: 'owners-breakdown', stationsHint: 'Показать станции этого владельца',
   dot: { own: 'bg-blue-500', partner: 'bg-violet-500', unknown: 'bg-zinc-500' },
   hover: {
@@ -301,7 +309,7 @@ const OWNERS_CFG: BreakdownConfig = {
 // Разрез парка по скорости — медленные (AC) vs быстрые (DC).
 const SPEED_CFG: BreakdownConfig = {
   title: 'Парк по скорости',
-  hint: 'Медленные — AC-станции (до 50 кВт), быстрые — DC (от 50 кВт). Скорость берётся из паспорта (speed_class), где пусто — по номинальной мощности. Простой и надёжность отдельно: у быстрых DC простой стоит дороже, а износ иной, чем у AC. Клик — список станций.',
+  hint: 'Медленные — AC-станции (до 50 кВт), быстрые — DC (от 50 кВт). Скорость берётся из паспорта (speed_class), где пусто — по номинальной мощности. «Без зарядок за период» — ни одной сессии с начала выбранного периода; это не то же, что «молчит» в «Эксплуатации», где отсчёт идёт от последней загруженной сессии и порог — неделя. Парк здесь без выведенных из эксплуатации. Клик — список станций.',
   queryKey: 'speed-breakdown', stationsHint: 'Показать станции этой скорости',
   dot: { fast: 'bg-amber-500', slow: 'bg-cyan-500', unknown: 'bg-zinc-500' },
   hover: {

@@ -15,6 +15,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCompany } from '@/contexts/CompanyContext'
+import { StationLink } from '@/components/common/StationLink'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { SortTh } from '@/components/workspace/SortableTh'
 import { useTableSort } from '@/hooks/useTableSort'
@@ -315,7 +316,7 @@ function MarketPositionTable() {
             r.name, r.city, r.sessions, r.energyKwh, r.revenue, r.ourPricePerKwh,
             r.marketPricePerKwh, r.priceGapPct, r.rivals, r.rivalsAlive, r.attractors,
           ]))}>
-          <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+          <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
             <tr>
               <SortTh sortKey="name" sort={sort} onSort={toggle}>Наш объект</SortTh>
               <SortTh sortKey="sessions" sort={sort} onSort={toggle} align="right">Сессий</SortTh>
@@ -339,7 +340,9 @@ function MarketPositionTable() {
                       <span className="flex items-center gap-1.5">
                         {expanded ? <ChevronDown className="size-3.5 opacity-60" />
                           : <ChevronRight className="size-3.5 opacity-60" />}
-                        <span className="font-medium text-foreground">{r.name}</span>
+                        <span className="font-medium text-foreground">
+                          <StationLink station={r.locationId}>{r.name}</StationLink>
+                        </span>
                       </span>
                       <div className="pl-5 text-xs text-muted-foreground">
                         {r.city ?? '—'}{!r.hasGeo && ' · без координат'}

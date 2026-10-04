@@ -2765,6 +2765,13 @@ async def create_all() -> None:
             "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS pinned_message_id UUID",
             # Сообщение, пришедшее письмом: источник, Message-ID (идемпотентность
             # повторной доставки) и ссылка на письмо в архиве Поддержки.
+            # Отправка одной пачкой: пять выбранных разом файлов уезжают пятью
+            # сообщениями, и собрать их обратно в альбом можно только по признаку
+            # общей отправки. Догадка по времени приклеивала к альбому чужие
+            # снимки (МАГ, 18.09.2026).
+            "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS batch_id UUID",
+            "CREATE INDEX IF NOT EXISTS ix_chat_messages_batch "
+            "ON chat_messages (batch_id) WHERE batch_id IS NOT NULL",
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_source VARCHAR(20)",
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_id TEXT",
             "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS external_ref VARCHAR(64)",

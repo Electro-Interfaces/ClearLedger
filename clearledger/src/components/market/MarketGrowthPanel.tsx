@@ -376,7 +376,7 @@ export function MarketGrowthPanel() {
                 r.ourSessions, r.ourRevenue,
                 r.suggestedTracks.map((t) => overview.data?.trackLabels?.[t] ?? t).join(', '),
               ]))}>
-              <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+              <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
                 <tr>
                   <SortTh sortKey="name" sort={регионы.sort} onSort={регионы.toggle}>Регион</SortTh>
                   <SortTh sortKey="presence" sort={регионы.sort} onSort={регионы.toggle}>Наше положение</SortTh>

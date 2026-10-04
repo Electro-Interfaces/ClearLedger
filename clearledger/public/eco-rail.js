@@ -258,10 +258,20 @@
       this.render()
       loadApps().then((apps) => {
         const codes = apps.map((a) => a.code)
-        // Страницы Ядра открываются под адресом рабочего места — берём первое доступное.
-        const host = apps.find((a) => WORKPLACES.includes(a.code) && a.route)
+        // Страница Ядра открывается под адресом ТОГО рабочего места, где человек
+        // сейчас находится: по адресу видно, откуда смотрят, и от этого зависят права.
+        //
+        // Первое доступное из списка брать нельзя. Из приложения контейнера
+        // (Поддержка, Монитор) человек в рабочем месте Ledger не находится вообще —
+        // и «Объекты» уводили его в «Проекты» только потому, что тот стоит первым
+        // в каталоге. Он просил показать объекты, а оказывался в чужом приложении.
+        // Снаружи рабочих мест открываем общий путь `/objects` — он существует и
+        // правами покрыт (`accessModules`, код `locations`).
+        const here = WORKPLACES.find((code) => location.pathname.startsWith(`/${code}/`)
+          || location.pathname === `/${code}`)
+        const host = here ? apps.find((a) => a.code === here && a.route) : null
         this.#items = [
-          ...(host ? SPACE_PAGES.map((p) => ({ ...p, href: `${host.route}${p.path}` })) : []),
+          ...SPACE_PAGES.map((p) => ({ ...p, href: host ? `${host.route}${p.path}` : p.path })),
           ...SPACE_LINKS.filter((l) => codes.includes(l.app)),
         ]
         this.render()

@@ -48,6 +48,7 @@ from app.services.charge_payment_state import effective_paid_at
 from app.services.fuel_balance import build_fuel_balance
 from app.services.tz_offsets import shifted_started_at
 from app.utils import msk_day_end, msk_day_start
+from app.services.session_scope import station_match
 
 
 # ─── helpers ─────────────────────────────────────────────────────────
@@ -696,7 +697,7 @@ class AnalyticsService:
                     FuelStation.id == station_id, FuelStation.company_id == company_id)
             ))
         if station_codes:
-            conds.append(S.station_code.in_(station_codes))
+            conds.append(station_match(S.station_code, S.location_id, company_id, station_codes))
         if regions:
             # Регион — из справочника (единый источник). Требует region-join у
             # вызывающего запроса (см. _uses_region/_apply_region_join).

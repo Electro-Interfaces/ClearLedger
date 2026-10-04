@@ -1,6 +1,12 @@
 /**
  * Read-only рендер набора полей MetadataField[] (паспорт станции и т.п.).
- * Показывает только заполненные поля: «подпись → значение [единица]».
+ *
+ * Вид один на все реквизиты объекта: подпись сверху, значение под ней, слева.
+ * Раньше здесь была пара «подпись слева — значение справа», и в карточке
+ * получался разнобой: половина блоков читалась сверху вниз, половина — с
+ * рваным правым краем. Хуже того, длинные значения рвались посреди слова
+ * («CCS Combo 2, CHA deMO»), потому что выравнивание вправо в узкой колонке
+ * требует переноса по любому символу (замечание МАГа 20.09.2026).
  */
 import type { MetadataField } from '@/config/profiles'
 
@@ -19,11 +25,11 @@ export function MetadataFieldsReader({
     return <p className="text-sm text-muted-foreground">Свойства не заполнены.</p>
   }
   return (
-    <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1">
+    <dl className="grid grid-cols-1 gap-x-8 gap-y-2.5 sm:grid-cols-2">
       {rows.map((f) => (
-        <div key={f.key} className="flex justify-between gap-3 border-b border-border/30 py-1.5 text-sm">
-          <dt className="text-muted-foreground shrink-0">{f.label}</dt>
-          <dd className="font-medium text-right break-all">
+        <div key={f.key} className="min-w-0">
+          <dt className="text-xs text-muted-foreground">{f.label}</dt>
+          <dd className="break-words font-medium">
             {String(values[f.key])}{f.unit ? ` ${f.unit}` : ''}
           </dd>
         </div>

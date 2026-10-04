@@ -11,6 +11,7 @@ import { useAppEnabled } from '@/hooks/useCompanyRegistry'
 import { SPACE_PAGES, SPACE_PRODUCTS, isCarvedProfile } from '@/config/spaceProducts'
 import { TabsProvider } from '@/contexts/TabsContext'
 import { FilterProvider } from '@/contexts/FilterContext'
+import { StationCardProvider } from '@/contexts/StationCardContext'
 import { SupportProvider } from '@/contexts/SupportContext'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
@@ -21,6 +22,7 @@ import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { DemoBanner } from '@/components/common/DemoBanner'
 import { isDemoMode, isDemoPath } from '@/services/apiClient'
 import { Loader2 } from 'lucide-react'
+import { SpacePageLayout } from '@/components/layout/SpacePageLayout'
 
 const MainLayout = lazy(() => import('@/components/layout/MainLayout').then((m) => ({ default: m.MainLayout })))
 const InstallApp = lazy(() => import('@/components/common/MobileShell').then((m) => ({ default: m.InstallApp })))
@@ -209,12 +211,20 @@ function CompanyScopedProviders() {
   return (
     <TabsProvider key={companyId}>
       <FilterProvider syncUrl={!isStoreDemo}>
+        {/* Карточка станции одна на пространство: любой экран открывает её поверх
+            себя, не уходя в «Объекты» и не теряя отбор (РусГидро 18.09.2026). */}
         <SupportProvider>
           <TooltipProvider>
+            <StationCardProvider>
             {!isStoreDemo && <TabFilterSync />}
             <DocumentTitle />
             {!isStoreDemo && !isDemoMode() && <Suspense fallback={null}><OneCAutoSync /></Suspense>}
-            <Outlet />
+            {/* Своя граница у рабочей области: падение экрана не должно уносить
+                оболочку, а `key` по маршруту снимает фолбэк при переходе — иначе
+                «Что-то пошло не так» висело бы и на соседнем экране. */}
+            <ErrorBoundary key={pathname} screen={pathname}>
+              <Outlet />
+            </ErrorBoundary>
             <DemoBanner />
             {/* Установка приложением и уведомление о выкатке — здесь, а не в
                 оболочке приложений: рабочий стол и «Управление» рисуются своими
@@ -226,6 +236,7 @@ function CompanyScopedProviders() {
               </Suspense>
             )}
             <Toaster position="bottom-right" richColors closeButton />
+          </StationCardProvider>
           </TooltipProvider>
         </SupportProvider>
       </FilterProvider>
@@ -255,10 +266,13 @@ const storeDemoPath = demoPath ? '/shop' : '/demo/shop'
 
 /** Страницы Ядра (`SPACE_PAGES`) — общий блок левого меню, один и тот же во всех продуктах. */
 const SPACE_PAGE_ELEMENTS: Record<string, React.ReactNode> = {
-  '/objects': <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage>,
-  '/intake': <LazyPage><IntakePage /></LazyPage>,
-  '/files': <LazyPage><FilesPage /></LazyPage>,
-  '/contractors': <LazyPage><ContractorsPage /></LazyPage>,
+  // Каркас с вертикальным меню — и здесь тоже: страница Ядра открывается под
+  // адресом продукта (`/sales/objects`), и второй уровень навигации у неё
+  // должен быть тот же, что при прямом входе.
+  '/objects': <LazyPage><SpacePageLayout><LocationsPage cockpitVariant="full" /></SpacePageLayout></LazyPage>,
+  '/intake': <LazyPage><SpacePageLayout><IntakePage /></SpacePageLayout></LazyPage>,
+  '/files': <LazyPage><SpacePageLayout><FilesPage /></SpacePageLayout></LazyPage>,
+  '/contractors': <LazyPage><SpacePageLayout><ContractorsPage /></SpacePageLayout></LazyPage>,
 }
 
 
@@ -342,8 +356,8 @@ const router = createBrowserRouter([
           // приводить в её раздел, а не в «страница не найдена».
           { path: '/trade', element: <Navigate to="/revenue?mode=rev_sales" replace /> },
           { path: '/services', element: <Navigate to="/revenue?mode=rev_catalog&sub=rev_svc" replace /> },
-          { path: '/objects', element: <LazyPage><LocationsPage cockpitVariant="full" /></LazyPage> },
-          { path: '/files', element: <LazyPage><FilesPage /></LazyPage> },
+          { path: '/objects', element: <LazyPage><SpacePageLayout><LocationsPage cockpitVariant="full" /></SpacePageLayout></LazyPage> },
+          { path: '/files', element: <LazyPage><SpacePageLayout><FilesPage /></SpacePageLayout></LazyPage> },
           // «Конференции»: что идёт сейчас, что назначено и что было. Сама
           // встреча живёт в календаре — второго списка встреч в пространстве нет.
           {
@@ -430,7 +444,7 @@ const router = createBrowserRouter([
             path: '/auditor',
             element: <RequireApp code="auditor"><LazyPage><AuditorPage /></LazyPage></RequireApp>,
           },
-          { path: '/intake', element: <LazyPage><IntakePage /></LazyPage> },
+          { path: '/intake', element: <LazyPage><SpacePageLayout><IntakePage /></SpacePageLayout></LazyPage> },
           { path: '/connectors', element: <LazyPage><ChannelsPage /></LazyPage> },
           { path: '/metrika', element: <LazyPage><MetrikaPage /></LazyPage> },
           { path: '/connectors/:id', element: <LazyPage><ChannelDetailPage /></LazyPage> },
@@ -448,7 +462,7 @@ const router = createBrowserRouter([
           { path: '/admin/company/notify', element: <Navigate to="/notifications" replace /> },
           { path: '/admin/company/apps', element: <Navigate to="/apps" replace /> },
           { path: '/locations', element: <Navigate to="/objects" replace /> },
-          { path: '/contractors', element: <LazyPage><ContractorsPage /></LazyPage> },
+          { path: '/contractors', element: <LazyPage><SpacePageLayout><ContractorsPage /></SpacePageLayout></LazyPage> },
           { path: '/organization', element: <LazyPage><OrganizationPage /></LazyPage> },
           { path: '/1c/connection', element: <RequireFuel><LazyPage><ConnectionPage /></LazyPage></RequireFuel> },
           { path: '/1c/sync', element: <RequireFuel><LazyPage><SyncPage /></LazyPage></RequireFuel> },

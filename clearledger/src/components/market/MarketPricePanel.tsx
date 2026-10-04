@@ -184,7 +184,7 @@ export function MarketPressurePanel() {
             r.name, r.city, r.rivalName, r.rivalOperator, r.distanceKm, r.appearedOn,
             r.sessionsBefore, r.sessionsAfter, r.changePct,
           ]))}>
-          <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+          <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
             <tr>
               <SortTh sortKey="name" sort={sort} onSort={toggle}>Наш объект</SortTh>
               <SortTh sortKey="rival" sort={sort} onSort={toggle}>Кто появился</SortTh>
@@ -278,7 +278,7 @@ export function MarketElasticityPanel() {
           ], cases.map((c) => [
             c.name, c.week, c.priceWas, c.priceNow, c.pricePct, c.sessionsPct, c.elasticity,
           ]))}>
-          <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+          <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
             <tr>
               <SortTh sortKey="name" sort={sort} onSort={toggle}>Объект</SortTh>
               <SortTh sortKey="week" sort={sort} onSort={toggle}>Неделя</SortTh>

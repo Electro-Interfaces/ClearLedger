@@ -20,7 +20,7 @@
 import { CONNECT_MENU } from '@/config/workspaceMenus'
 import { navByPath } from './navigation'
 import {
-  ENERGY_MGMT, EQUIPMENT_MENU, OPS_MONITOR_MENU, SITES_MENU,
+  ENERGY_MGMT, ENERGY_ECONOMY_CORE, EQUIPMENT_MENU, OPS_MONITOR_MENU, SITES_MENU,
   SALES_NETWORK_MENU, SALES_SESSIONS_MENU, SALES_COMMERCE_MENU, MARKET_MENU,
   MARKET_AREA_MENU, MARKET_PRICE_MENU, MARKET_DECISION_MENU,
   FUEL_NETWORK_MENU, FUEL_ANALYTICS_MENU, FUEL_COMMERCE_MENU, FUEL_GOODS_MENU, FUEL_HELP_MENU,
@@ -86,6 +86,7 @@ export const PRODUCT_MODULES: Record<string, ProductModuleDef[]> = {
   ops: [
     ...items(OPS_MONITOR_MENU, 'Мониторинг'),
     ...items(EQUIPMENT_MENU, 'Оборудование'),
+    ...items(ENERGY_ECONOMY_CORE, 'Хозяйство'),
     ...items(ENERGY_MGMT, 'Хозяйство'),
   ],
   // Коммерция (тарифы, ЮЛ, ФЛ), сегментация и веб-аналитика вернулись в «Продажи»

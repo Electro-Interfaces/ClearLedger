@@ -276,10 +276,35 @@ export async function linkCounterparties(
 export interface ObjectTicket {
   id: string
   number: string | number
+  /** Номер, которым заявку называют люди: «SUP-1042». */
+  display_number?: string | null
   title: string
   status: string
   priority?: string | null
+  /** Вид работы: тип заявки и категория, как их завела Поддержка. */
+  type?: string | null
+  category?: string | null
   created_at: string
+  resolved_at?: string | null
+  closed_at?: string | null
+  sla_breached?: boolean | null
+  resolution_notes?: string | null
+  assignee_name?: string | null
+}
+
+/** Сводка работ по объекту — считает Поддержка по всем заявкам, не по странице. */
+export interface ObjectTicketStats {
+  total: number
+  open: number
+  /** Заявок за последние 365 дней: «как часто сюда ездят». */
+  year: number
+  breached: number
+  urgent: number
+  firstAt: string | null
+  lastAt: string | null
+  /** Среднее время до закрытия, часы. null — ещё нечего закрывать. */
+  avgHours: number | null
+  kinds: { kind: string | null; count: number }[]
 }
 
 export interface ObjectTickets {
@@ -287,6 +312,9 @@ export interface ObjectTickets {
   linked: boolean
   total: number
   open: number
+  /** Сколько строк реально пришло: список ограничен, сводка — нет. */
+  shown?: number
+  stats?: ObjectTicketStats | null
   tickets: ObjectTicket[]
 }
 
@@ -308,9 +336,65 @@ export async function getObjectTickets(
  * Граница: работа меняет состав или положение станции — это проект; работа
  * восстанавливает работоспособность — это заявка.
  */
+/** Открытая работа по станции — свёртка заявок приложения на всю сеть. */
+export interface OpenWorkRow {
+  ecoObjectId: string
+  open: number
+  breached: number
+  urgent: number
+  oldestAt: string | null
+  newestAt: string | null
+  lastTitle: string | null
+  lastId: string | null
+  lastNumber: string | null
+}
+
+/**
+ * По каким станциям работа уже идёт. Спрашивается один раз на экран: карточка
+ * объекта отвечает «что было здесь», а списку сети нужен обратный вопрос —
+ * какая беда видна и никем не взята.
+ */
+export async function getNetworkOpenWork(
+  companyId: string, app = 'support',
+): Promise<{ app: string; objects: OpenWorkRow[]; total: number }> {
+  return get('/api/registry/objects/open-tickets', { company_id: companyId, app })
+}
+
+/** Заявки сразу по нескольким станциям: одна беда — много адресов. */
+export async function createObjectTicketsBulk(
+  companyId: string,
+  body: {
+    object_ids: string[]; description: string
+    title?: string; priority?: string; type_code?: string
+  },
+  app = 'support',
+): Promise<{
+  created: { objectId: string; name: string; number: string }[]
+  failed: { objectId: string; name?: string; error: string }[]
+  createdCount: number; failedCount: number
+}> {
+  const qs = new URLSearchParams({ company_id: companyId, app })
+  return post(`/api/registry/objects/tickets-bulk?${qs}`, body)
+}
+
+/** Вид работы из справочника приложения: он решает маршрут заявки. */
+export interface TicketKind {
+  code: string
+  label: string
+  description?: string | null
+  default_priority?: string | null
+}
+
+export async function listTicketKinds(
+  companyId: string, app = 'support',
+): Promise<{ app: string; types: TicketKind[] }> {
+  return get('/api/registry/ticket-types', { company_id: companyId, app })
+}
+
 export async function createObjectTicket(
   companyId: string, objectId: string,
-  body: { description: string; title?: string; priority?: string }, app = 'support',
+  body: { description: string; title?: string; priority?: string; type_code?: string },
+  app = 'support',
 ): Promise<{ display_number: string; number: string | number; status: string }> {
   const qs = new URLSearchParams({ company_id: companyId, app })
   return post(`/api/registry/objects/${encodeURIComponent(objectId)}/tickets?${qs}`, body)

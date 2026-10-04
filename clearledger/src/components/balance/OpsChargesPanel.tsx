@@ -12,6 +12,7 @@
 import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { StationLink } from '@/components/common/StationLink'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -116,7 +117,9 @@ export function OpsChargesPanel() {
               {d.rows.map((r) => (
                 <TableRow key={r.locationId ?? 'company'}>
                   <TableCell className="sticky left-0 max-w-[240px] truncate bg-card font-medium"
-                    title={r.locationName}>{r.locationName}</TableCell>
+                    title={r.locationName}>
+                    <StationLink station={r.locationId}>{r.locationName}</StationLink>
+                  </TableCell>
                   {d.periods.map((p) => {
                     const sum = Object.values(r.byPeriod[p] ?? {}).reduce((a, b) => a + b, 0)
                     const detail = Object.entries(r.byPeriod[p] ?? {})

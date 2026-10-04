@@ -5,7 +5,7 @@
  * системой для привязки документов к местам и фильтрации каналов.
  */
 
-import { useState, useEffect, useMemo } from 'react'
+import { lazy, Suspense, useState, useEffect, useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -56,6 +56,11 @@ import {
   type LocationStatus, type LocationType, type ServiceLocation,
 } from '@/types/location'
 import type { LocationTypeDef } from '@/types/locationType'
+import { useSpacePageSub } from '@/hooks/useSpacePageSub'
+import { LocationsQuality } from '@/components/locations/LocationsQuality'
+import { useFilters } from '@/contexts/FilterContext'
+const ChargeMapPanel = lazy(() => import('@/components/workspace/ChargeMapPanel')
+  .then((m) => ({ default: m.ChargeMapPanel })))
 
 // Реестр иконок по ИМЕНИ (icon из каталога типов), резолв с фолбэком на MapPin.
 const ICON_REGISTRY: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -437,11 +442,30 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
   const onAttention = (k: AttentionKey) => drillTo(ATTENTION_PATCH[k])
 
   // Группировка по типам каталога (для карточного режима) — на текущей выборке.
+  // Раздел страницы — из вертикального меню («Реестр», «Карта», «Полнота»).
+  // Реестр остаётся первым: с него начинают, и адрес без `?sub=` ведёт сюда.
+  const [sub] = useSpacePageSub()
+  const { period } = useFilters()
+
   const groups = types
     .map((t) => ({ type: t, items: filtered.filter((l) => l.type === t.code) }))
     .filter((g) => g.items.length > 0)
   const knownCodes = new Set(types.map((t) => t.code))
   const unknownItems = filtered.filter((l) => !knownCodes.has(l.type))
+
+  if (sub === 'map') {
+    // Карта берёт период из области учёта — та же выборка, что у остальных
+    // экранов пространства: свой период здесь означал бы вторую правду.
+    return (
+      <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка карты…</div>}>
+        <ChargeMapPanel companyId={companyId} dateFrom={period.from} dateTo={period.to} />
+      </Suspense>
+    )
+  }
+
+  if (sub === 'quality') {
+    return <LocationsQuality locations={locations} onOpen={(l) => setCockpit(l)} />
+  }
 
   return (
     <div className="flex-1 min-w-0">
@@ -498,6 +522,7 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
             <FleetKpiBar
               stats={stats}
               fullTotal={locations.length}
+              filteredCount={filtered.length}
               onSlice={(patch) => { sliceTo(patch); setFleetMode('list') }}
               onShowDashboard={() => setFleetMode('dashboard')}
             />
@@ -510,6 +535,14 @@ export function LocationsPage({ cockpitVariant = 'full' }: { cockpitVariant?: Co
                     <span className="h-2 w-2 rounded-full bg-primary" />
                     Паспорт L2 (нормализовано)
                     <Badge variant="secondary" className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">из нормализации станций</Badge>
+                    {/* Здесь считается РЕЕСТР — все станции, включая выведенные
+                        из эксплуатации: паспорт есть и у них. В «Мониторинге» и
+                        «Обзоре» число другое, потому что там сеть, которая
+                        должна работать сегодня. Без этой подписи два верных
+                        числа выглядят как ошибка (20.09.2026). */}
+                    <span className="text-[11px] font-normal text-muted-foreground">
+                        реестр: с выведенными из эксплуатации
+                    </span>
                   </div>
                   {([
                     ['Станций ЭЗС', l2.ezs.toLocaleString('ru-RU')],

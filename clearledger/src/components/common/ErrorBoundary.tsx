@@ -1,10 +1,13 @@
-import { Component, type ReactNode } from 'react'
+import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle } from 'lucide-react'
+import { reportClientError } from '@/lib/reportClientError'
 
 interface Props {
   children: ReactNode
   fallback?: ReactNode
+  /** Где стоит граница: «Чат», «Маркетинг · Расклад сил». Уезжает в журнал сбоев. */
+  screen?: string
 }
 
 interface State {
@@ -17,6 +20,17 @@ export class ErrorBoundary extends Component<Props, State> {
 
   static getDerivedStateFromError(error: Error): State {
     return { hasError: true, error }
+  }
+
+  // Человек видит «Что-то пошло не так», мы — где именно. Прежде падение экрана
+  // не оставляло следа нигде, и разбор начинался с угадывания (МАГ, 18.09.2026).
+  componentDidCatch(error: Error, info: ErrorInfo): void {
+    reportClientError({
+      message: error?.message || String(error),
+      stack: error?.stack,
+      componentStack: info?.componentStack,
+      screen: this.props.screen,
+    })
   }
 
   handleReset = () => {

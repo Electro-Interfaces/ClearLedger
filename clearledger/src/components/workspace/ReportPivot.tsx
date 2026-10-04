@@ -17,7 +17,7 @@
  * группировка по ней даёт дерево из одиночных листьев, то есть тот же список.
  */
 import { useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, GripVertical, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 type Строка = Record<string, unknown>
@@ -139,12 +139,20 @@ export function ReportPivot({ fields, columns, rows }: {
   // Первый разрез включён сразу: пустая сводная выглядит поломкой, а не
   // приглашением выбрать уровень.
   const [уровни, поставить] = useState<string[]>(() => разрезы.slice(0, 1).map((р) => р.поле))
+  // Что тащим и над чем держим. Перетаскивание — основной способ менять порядок
+  // уровней: стрелки остаются для клавиатуры и точной правки, но рукой человек
+  // берёт чип и кладёт куда надо (требование МАГа, повторённое многократно).
+  const [тащим, setТащим] = useState<number | null>(null)
+  const [над, setНад] = useState<number | null>(null)
   const свободные = разрезы.filter((р) => !уровни.includes(р.поле))
   const мерыПоля = меры.map((м) => м.поле)
 
+  // Ключ мер отдельной переменной: правило хуков требует в списке зависимостей
+  // простые выражения, иначе проверку статически не сделать.
+  const ключМер = мерыПоля.join(',')
   const { узлы, итого } = useMemo(
-    () => собрать(rows, уровни, мерыПоля),
-    [rows, уровни, мерыПоля.join(',')])
+    () => собрать(rows, уровни, ключМер ? ключМер.split(',') : []),
+    [rows, уровни, ключМер])
 
   if (разрезы.length === 0) {
     return (
@@ -158,7 +166,9 @@ export function ReportPivot({ fields, columns, rows }: {
     <div className="space-y-3">
       <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
         <div className="text-[11px] text-muted-foreground">
-          Группировка — порядок уровней меняется стрелками, до {МАКСИМУМ} уровней
+          Группировка: нажмите разрез, чтобы добавить уровень; перетащите чип мышью
+          или используйте стрелки, чтобы поменять порядок. До {МАКСИМУМ} уровней,
+          итог каждой группы — в её строке.
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {уровни.length === 0 && (
@@ -170,7 +180,28 @@ export function ReportPivot({ fields, columns, rows }: {
               добавлением ради перестановки двух уровней — работа на ровном месте. */}
           {уровни.map((поле, i) => (
             <span key={поле}
-              className="inline-flex items-center gap-1 rounded border border-primary/40 bg-primary/10 px-2 py-1 text-xs text-primary">
+              draggable
+              onDragStart={(e) => {
+                setТащим(i)
+                e.dataTransfer.effectAllowed = 'move'
+                // Firefox не начинает перетаскивание без данных в буфере.
+                e.dataTransfer.setData('text/plain', поле)
+              }}
+              onDragOver={(e) => { e.preventDefault(); setНад(i) }}
+              onDragLeave={() => setНад((н) => (н === i ? null : н))}
+              onDrop={(e) => {
+                e.preventDefault()
+                if (тащим !== null && тащим !== i) поставить(переставить(уровни, тащим, i))
+                setТащим(null); setНад(null)
+              }}
+              onDragEnd={() => { setТащим(null); setНад(null) }}
+              title="Перетащите, чтобы поменять порядок уровней"
+              className={`inline-flex cursor-grab items-center gap-1 rounded border px-2 py-1 text-xs text-primary transition-colors active:cursor-grabbing ${
+                над === i && тащим !== null && тащим !== i
+                  ? 'border-primary bg-primary/25 ring-1 ring-primary'
+                  : 'border-primary/40 bg-primary/10'
+              } ${тащим === i ? 'opacity-50' : ''}`}>
+              <GripVertical className="size-3 opacity-60" />
               <b>{i + 1}</b>
               {разрезы.find((р) => р.поле === поле)?.имя ?? поле}
               <button type="button" disabled={i === 0}
@@ -221,11 +252,24 @@ export function ReportPivot({ fields, columns, rows }: {
             </tr>
           </thead>
           <tbody>
+            {/* Строка уровня — это и есть итог его группы: суммы мер по всем
+                вложенным строкам. Пока она выглядела как лист, итоги читались
+                как обычные значения, и «где суммарное по группе» спрашивали
+                снова и снова (20.09.2026). Теперь узлы верхних уровней выделены
+                фоном и насыщенностью — чем выше уровень, тем заметнее. */}
             {узлы.map((у) => (
-              <tr key={у.путь} className="border-t border-border/30 hover:bg-accent/20">
+              <tr key={у.путь}
+                className={`border-t border-border/30 hover:bg-accent/20 ${
+                  у.естьДети && у.уровень === 0 ? 'bg-muted/40 font-semibold'
+                    : у.естьДети ? 'bg-muted/20 font-medium' : ''}`}>
                 <td className="px-3 py-1.5" style={{ paddingLeft: 12 + у.уровень * 18 }}>
                   {у.естьДети && <ChevronRight className="mr-1 inline size-3 text-muted-foreground" />}
                   {у.имя}
+                  {у.естьДети && (
+                    <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
+                      итог группы
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{у.строк}</td>
                 {у.меры.map((v, i) => (

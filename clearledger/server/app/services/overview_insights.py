@@ -33,6 +33,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.scope import ACL_PARAM, acl_params, acl_sql, current_object_scope
+from app.services.session_scope import station_locations_sql
 
 # Выручка сессии: у ЮЛ amount=0 (постоплата), фактическая сумма — client_amount.
 _REVENUE = "coalesce(NULLIF(client_amount, 0), amount)"
@@ -63,7 +64,8 @@ def _scope(stations: list[str] | None, regions: list[str] | None) -> str:
     чего не видит поштучно."""
     s = acl_sql("location_id")
     if stations is not None:
-        s += " AND station_code = ANY(:scope_stations)"
+        s += (" AND (station_code = ANY(:scope_stations) OR location_id = ANY"
+              f"{station_locations_sql(':scope_stations')})")
     if regions is not None:
         # Уникальные алиасы sl_sc/r_sc — некоторые запросы (region_extremes) уже
         # джойнят service_locations/regions под sl/r, конфликт имён недопустим.

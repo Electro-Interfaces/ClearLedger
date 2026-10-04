@@ -10,6 +10,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, ChevronRight, ChevronDown, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react'
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { StationLink } from '@/components/common/StationLink'
 import { DualScrollX } from '@/components/common/DualScrollX'
 import {
   getChargeGrouped, getChargeGroupDetail, fmtMoney,
@@ -194,7 +195,11 @@ function GroupRow({ g, groupBy, open, onToggle, companyId, dateFrom, dateTo, fil
                             <span className="ml-1 text-muted-foreground">· попытка {r.visit_seq}/{r.visit_size}</span>
                           )}
                         </td>
-                        <td className="p-1.5">{r.station_name || r.station_code || '—'}</td>
+                        <td className="p-1.5">
+                          <StationLink station={r.station_code}>
+                            {r.station_name || r.station_code || '—'}
+                          </StationLink>
+                        </td>
                         <td className="p-1.5 text-muted-foreground">{r.client_name || r.user_id || '—'}</td>
                         <td className="p-1.5 text-muted-foreground">{r.charge_type ? (CHANNEL_RU[r.charge_type] ?? r.charge_type) : '—'}</td>
                         <td className="p-1.5 text-right tabular-nums">{nf1.format(r.energy_kwh)}</td>

@@ -43,8 +43,14 @@ const WORKSPACE_PATHS = new Set<string>([
   '/auditor',
   '/elsy',
   ...SPACE_PRODUCTS.map((p) => p.route),
-  // Та же страница под адресом продукта (`/finance/files`) — и раскладка та же.
-  ...SPACE_PRODUCTS.map((p) => `${p.route}/files`),
+  // Страницы пространства — такие же рабочие места: своя колонка разделов и
+  // свой скролл внутри (`SpacePageLayout`). Без этих путей внешняя обёртка
+  // кладёт поверх собственный паддинг и второй `overflow-y-auto`, и колонка
+  // меню перестаёт прилегать к рельсе — выглядит островом посреди области
+  // (замечание МАГа 20.09.2026).
+  ...SPACE_PAGES,
+  // Та же страница под адресом продукта (`/finance/objects`) — и раскладка та же.
+  ...SPACE_PRODUCTS.flatMap((p) => SPACE_PAGES.map((path) => `${p.route}${path}`)),
 ])
 
 // Fuel-only разделы (для energy-профиля скрыты; RequireFuel редиректит на `/workspace`).

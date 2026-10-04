@@ -8,7 +8,7 @@
  * Период (от/до, из доступных месяцев наблюдений) и регион — селекты.
  * Данные: /api/ops/completeness (services/ops_dashboard.ops_completeness).
  */
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { Card, CardContent } from '@/components/ui/card'
@@ -21,7 +21,13 @@ import {
 } from '@/components/ui/table'
 import { ChevronDown, ChevronRight, FileWarning } from 'lucide-react'
 import { useCompany } from '@/contexts/CompanyContext'
-import { getOpsCompleteness, type OpsComplKind } from '@/services/opsService'
+import { Input } from '@/components/ui/input'
+import { SortTh } from '@/components/workspace/SortableTh'
+import { useTableSort } from '@/hooks/useTableSort'
+import {
+  getOpsCompleteness, type OpsComplKind, type OpsComplMissingRow,
+} from '@/services/opsService'
+import { IntakeHealthBar } from '@/components/workspace/IntakeHealthBar'
 import { StationDrillModal } from './OpsCockpit'
 import { fmtN } from '@/components/balance/balanceCalc'
 import { formatBucket } from '@/lib/formatDate'
@@ -38,14 +44,44 @@ function heat(pct: number | null): string {
 
 /* ── раскрываемый список недостающего по виду данных ── */
 function KindDetails({ kind, onOpenStation }: { kind: OpsComplKind; onOpenStation: (id: string) => void }) {
+  const [поиск, setПоиск] = useState('')
+
+  const строки = useMemo(() => {
+    const текст = поиск.trim().toLowerCase()
+    if (!текст) return kind.rows
+    return kind.rows.filter((r) => [r.bu, r.name, r.region, r.note]
+      .some((v) => (v ?? '').toLowerCase().includes(текст)))
+  }, [kind.rows, поиск])
+
+  // Сортировка по числу месяцев отвечает на главный вопрос списка: у кого дыра
+  // не разовая, а тянется — с них и начинают запрашивать документы.
+  const карта = useMemo(() => ({
+    bu: (r: OpsComplMissingRow) => Number(r.bu) || null,
+    name: (r: OpsComplMissingRow) => r.name,
+    months: (r: OpsComplMissingRow) => r.months.length || null,
+    note: (r: OpsComplMissingRow) => r.note,
+  }), [])
+  const табл = useTableSort(строки, карта)
+
   return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input value={поиск} onChange={(e) => setПоиск(e.target.value)}
+          placeholder="№, объект, контрагент…" className="h-7 w-60 text-xs" />
+        <span className="text-xs text-muted-foreground">
+          строк: {fmtN(табл.rows.length)}
+        </span>
+      </div>
     <div className="max-h-[340px] overflow-auto rounded-md border border-border/40">
       <Table><TableHeader className="sticky top-0 bg-card"><TableRow>
-        <TableHead>№ БУ</TableHead><TableHead>Объект / контрагент</TableHead>
-        {kind.monthly && <TableHead>Не хватает за месяцы</TableHead>}
-        <TableHead>Комментарий</TableHead>
+        <SortTh sortKey="bu" sort={табл.sort} onSort={табл.toggle}>№ БУ</SortTh>
+        <SortTh sortKey="name" sort={табл.sort} onSort={табл.toggle}>Объект / контрагент</SortTh>
+        {kind.monthly && (
+          <SortTh sortKey="months" sort={табл.sort} onSort={табл.toggle}>Не хватает за месяцы</SortTh>
+        )}
+        <SortTh sortKey="note" sort={табл.sort} onSort={табл.toggle}>Комментарий</SortTh>
       </TableRow></TableHeader><TableBody>
-        {kind.rows.map((r, i) => (
+        {табл.rows.map((r, i) => (
           <TableRow key={`${r.locationId || r.name}-${i}`}
             className={r.locationId ? 'cursor-pointer hover:bg-muted/40' : ''}
             onClick={() => r.locationId && onOpenStation(r.locationId)}>
@@ -66,6 +102,7 @@ function KindDetails({ kind, onOpenStation }: { kind: OpsComplKind; onOpenStatio
         <p className="px-3 py-1.5 text-[11px] text-muted-foreground/70">Показаны {kind.rows.length} из {kind.missingCount}.</p>
       )}
     </div>
+    </div>
   )
 }
 
@@ -83,15 +120,34 @@ export function OpsCompletenessVitrine() {
     enabled: !!companyId, staleTime: 60_000,
   })
   const d = q.data
+
+  // Сортировка видов данных: «где хуже всего с полнотой» — первый вопрос к
+  // этому экрану, и отвечать на него перебором строк не должно быть нужно
+  // (20.09.2026). Хук выше ранних возвратов: порядок вызовов обязан совпадать
+  // в любом состоянии загрузки.
+  const картаВидов = useMemo(() => ({
+    label: (k: OpsComplKind) => k.label,
+    pct: (k: OpsComplKind) => k.pct,
+    missing: (k: OpsComplKind) => k.missingCount,
+  }), [])
+  const сорт = useTableSort(d?.kinds ?? [], картаВидов, { key: 'missing', dir: 'desc' })
+
   if (q.isLoading && !d) return <div className="px-6 py-10 text-sm text-muted-foreground">Загрузка полноты данных…</div>
   if (!d || d.months.length === 0) {
     return <div className="px-6 py-10 text-sm text-muted-foreground">Нет данных наблюдений — загрузите реестры и сессии.</div>
   }
-  const monthly = d.kinds.filter((k) => k.monthly)
-  const statics = d.kinds.filter((k) => !k.monthly)
+  // Виды данных сортируются, как и всё остальное в разделе: «где хуже всего с
+  // полнотой» — первый вопрос к этому экрану, и отвечать на него перебором
+  // строк не должно быть нужно (20.09.2026).
+  const monthly = сорт.rows.filter((k) => k.monthly)
+  const statics = сорт.rows.filter((k) => !k.monthly)
   const missingTotal = d.kinds.reduce((a, k) => a + k.missingCount, 0)
   return (
     <div ref={rootRef} className="space-y-5 px-6 py-6">
+      {/* Полнота начинается с того, доехали ли данные вообще: пустая графа
+          из-за непришедшего файла и пустая графа из-за незаполненного
+          документа лечатся по-разному. */}
+      <IntakeHealthBar />
       <div className="flex flex-wrap items-start gap-3">
         <div className="flex-1">
           <div className="flex items-center gap-2">
@@ -143,10 +199,12 @@ export function OpsCompletenessVitrine() {
         </div>
         <div className="overflow-x-auto">
           <Table><TableHeader><TableRow>
-            <TableHead className="min-w-[240px]">Вид данных / документ</TableHead>
+            <SortTh sortKey="label" sort={сорт.sort} onSort={сорт.toggle} className="min-w-[240px]">
+              Вид данных / документ
+            </SortTh>
             {d.months.map((m) => <TableHead key={m} className="text-center">{formatBucket(m)}</TableHead>)}
-            <TableHead className="text-center">Итого</TableHead>
-            <TableHead className="text-right">Не хватает</TableHead>
+            <SortTh sortKey="pct" sort={сорт.sort} onSort={сорт.toggle} align="right">Итого</SortTh>
+            <SortTh sortKey="missing" sort={сорт.sort} onSort={сорт.toggle} align="right">Не хватает</SortTh>
           </TableRow></TableHeader><TableBody>
             {monthly.map((k) => (
               <TableRow key={k.key} className="cursor-pointer hover:bg-muted/30"
@@ -192,9 +250,11 @@ export function OpsCompletenessVitrine() {
       <Card><CardContent className="space-y-2 pt-5">
         <div className="text-sm font-medium">Договорная база и НСИ (на период)</div>
         <Table><TableHeader><TableRow>
-          <TableHead className="min-w-[240px]">Вид данных / документ</TableHead>
-          <TableHead className="text-center">Полнота</TableHead>
-          <TableHead className="text-right">Не хватает</TableHead>
+          <SortTh sortKey="label" sort={сорт.sort} onSort={сорт.toggle} className="min-w-[240px]">
+            Вид данных / документ
+          </SortTh>
+          <SortTh sortKey="pct" sort={сорт.sort} onSort={сорт.toggle} align="right">Полнота</SortTh>
+          <SortTh sortKey="missing" sort={сорт.sort} onSort={сорт.toggle} align="right">Не хватает</SortTh>
           <TableHead>Что делать</TableHead>
         </TableRow></TableHeader><TableBody>
           {statics.map((k) => (

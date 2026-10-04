@@ -8,13 +8,15 @@ import {
 import type { LocationFilters, FleetStats } from './locationFleetService'
 
 function KpiCard({
-  label, value, icon: Icon, accent, onClick,
+  label, value, icon: Icon, accent, onClick, hint,
 }: {
   label: string
   value: number
   icon: LucideIcon
   accent?: 'default' | 'danger' | 'warn'
   onClick?: () => void
+  /** Чем посчитано число: подпись под названием плитки. */
+  hint?: string
 }) {
   const tone =
     accent === 'danger' ? 'text-red-600 dark:text-red-400 bg-red-500/10'
@@ -29,6 +31,9 @@ function KpiCard({
         <div className="min-w-0">
           <div className="text-lg font-semibold leading-none tabular-nums">{value}</div>
           <div className="mt-0.5 truncate text-xs text-muted-foreground">{label}</div>
+          {/* Чем посчитано — рядом с числом: три экрана показывали три верных
+              числа парка, и без подписи это читалось как ошибка (20.09.2026). */}
+          {hint && <div className="truncate text-[11px] text-muted-foreground/70">{hint}</div>}
         </div>
       </CardContent>
     </Card>
@@ -36,27 +41,38 @@ function KpiCard({
 }
 
 export function FleetKpiBar({
-  stats, fullTotal, onSlice, onShowDashboard,
+  stats, fullTotal, filteredCount, onSlice, onShowDashboard,
 }: {
   stats: FleetStats
   fullTotal: number
+  /** Сколько строк в текущем отборе: остальные плитки считаются по ним. */
+  filteredCount?: number
   /** patch=null → сброс фильтров; иначе срез (replace). */
   onSlice: (patch: Partial<LocationFilters> | null) => void
   onShowDashboard: () => void
 }) {
+  // Первая плитка считает ВЕСЬ реестр, остальные — текущий отбор. Пока это не
+  // было подписано, «619» и «530» стояли рядом и читались как одно целое, хотя
+  // посчитаны на разных наборах (замечание МАГа 20.09.2026).
+  const отбор = filteredCount != null && filteredCount !== fullTotal
+  const поОтбору = отбор ? `по отбору · ${filteredCount} из ${fullTotal}` : undefined
+
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-      <KpiCard label="Всего точек" value={fullTotal} icon={MapPin} onClick={() => onSlice(null)} />
+      <KpiCard label="Всего точек" value={fullTotal} icon={MapPin}
+        hint="весь реестр, кроме тестовых" onClick={() => onSlice(null)} />
       <KpiCard label="Активных" value={stats.active} icon={CheckCircle2}
-        onClick={() => onSlice({ lifeStatuses: ['active'] })} />
+        hint={поОтбору} onClick={() => onSlice({ lifeStatuses: ['active'] })} />
       <KpiCard label="Не работают / ремонт" value={stats.notWorkingOrRepair} icon={AlertTriangle}
         accent={stats.notWorkingOrRepair > 0 ? 'danger' : 'default'}
-        onClick={() => onSlice({ opStatuses: ['not_working', 'on_repair'] })} />
+        hint={поОтбору} onClick={() => onSlice({ opStatuses: ['not_working', 'on_repair'] })} />
       <KpiCard label="Без привязки" value={stats.noBindingCount} icon={Unlink}
         accent={stats.noBindingCount > 0 ? 'warn' : 'default'}
-        onClick={() => onSlice({ sourceBinding: 'unbound' })} />
-      <KpiCard label="Типов" value={stats.byType.length} icon={Layers} onClick={onShowDashboard} />
-      <KpiCard label="Регионов" value={stats.regionCount} icon={Globe} onClick={onShowDashboard} />
+        hint={поОтбору} onClick={() => onSlice({ sourceBinding: 'unbound' })} />
+      <KpiCard label="Типов" value={stats.byType.length} icon={Layers}
+        hint={поОтбору} onClick={onShowDashboard} />
+      <KpiCard label="Регионов" value={stats.regionCount} icon={Globe}
+        hint={поОтбору} onClick={onShowDashboard} />
     </div>
   )
 }

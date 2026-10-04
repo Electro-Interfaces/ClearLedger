@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import and_, case, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import station_scope
 from app.models import ChargeSession
 from app.services.analytics_cache import cached_report
 from app.services.analytics_service import AnalyticsService, PeriodFilter
@@ -581,9 +582,7 @@ class OverviewService:
                    count(*) as stations,
                    count(*) filter (where sl.operational_status = 'working') as working
             from service_locations sl
-            where sl.company_id = :cid and sl.type = 'ev_charging'
-              and coalesce(sl.is_test, false) = false
-              and coalesce(sl.operational_status, '') <> 'decommissioned'
+            where sl.company_id = :cid and {station_scope.кусок_sql('sl')}
             group by 1
         """), {"cid": company_id})).mappings().all()
         act = (await self.db.execute(text(f"""
@@ -724,9 +723,7 @@ class OverviewService:
             from service_locations sl
             left join sess s on s.location_id = sl.id
             left join vis v on v.loc = sl.id
-            where sl.company_id = :cid and sl.type = 'ev_charging'
-              and coalesce(sl.is_test, false) = false
-              and coalesce(sl.operational_status, '') <> 'decommissioned'
+            where sl.company_id = :cid and {station_scope.кусок_sql('sl')}
               and ({class_expr}) = :cls
               {scope_sql}
             order by coalesce(s.sessions, 0) asc, sl.name asc

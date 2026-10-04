@@ -120,7 +120,7 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
         ['Модель', card.class ? `${card.class}${card.classChecked ? '' : ' (не проверено)'}` : null],
         ['Достоверность записи', card.dataLevel != null ? УРОВЕНЬ[card.dataLevel] : null],
         ['Сайт', card.siteUrl],
-        ['База', card.baseCity],
+        ['Штаб-квартира', card.baseCity],
         ['Городов', card.citiesCount],
         ['Округов', card.districts],
         ['Платформа', card.platformCode],
@@ -182,7 +182,7 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
             )}
             {card.baseCity && (
               <span className="text-muted-foreground">
-                база: <span className="text-foreground">{card.baseCity}</span>
+                штаб-квартира: <span className="text-foreground">{card.baseCity}</span>
               </span>
             )}
             {card.citiesCount != null && (
@@ -503,7 +503,7 @@ export function MarketCompaniesPanel({ initialOpen = null, onBack }: {
             o.name, RELATION_LABEL[o.relation] ?? o.relation, o.sites, o.alive, o.ports,
             o.medianPricePerKwh, o.quality, o.rating,
           ]))}>
-          <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+          <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
             <tr>
               <SortTh sortKey="name" sort={sort} onSort={toggle}>Компания</SortTh>
               <SortTh sortKey="relation" sort={sort} onSort={toggle}>Отношение</SortTh>

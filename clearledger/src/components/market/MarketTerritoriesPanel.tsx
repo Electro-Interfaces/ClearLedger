@@ -196,7 +196,7 @@ export function MarketTerritoriesPanel() {
             r.name, r.ourSites, r.ourSessions, r.ourRevenue, r.rivalSites, r.rivalAlive,
             r.sharePct, r.ourPricePerKwh, r.marketPricePerKwh,
           ]))}>
-          <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+          <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
             <tr>
               <SortTh sortKey="name" sort={sort} onSort={toggle}>Территория</SortTh>
               <SortTh sortKey="ourSites" sort={sort} onSort={toggle} align="right">Наши точки</SortTh>
@@ -314,7 +314,7 @@ export function MarketWhitespotsPanel() {
             r.name, r.rivalSites, r.rivalAlive, r.rivalPorts, r.marketPricePerKwh,
             r.homeSockets, r.projectsInWork ?? 0, (r.projectNumbers ?? []).join(', '),
           ]))}>
-          <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+          <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
             <tr>
               <th className="p-2 text-left font-medium">Территория</th>
               <th className="p-2 text-right font-medium">Чужих точек</th>

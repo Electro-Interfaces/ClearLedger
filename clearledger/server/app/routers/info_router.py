@@ -40,7 +40,8 @@ async def tree(
 @router.get("/context")
 async def context(
     app_code: str = Query(..., description="код продукта, например projects"),
-    section_key: str | None = Query(None, description="ключ раздела рабочей области"),
+    section_key: str | None = Query(
+        None, description="ключ раздела рабочей области; несколько — через запятую"),
     company_id: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):

@@ -613,3 +613,78 @@ async def test_declared_total_is_payable_sum_and_tolerates_rounding():
     readiness = await assess_receipt(session, receipt, lock=True)
     assert not readiness.ready
     assert "declared_total" in "; ".join(readiness.errors)
+
+
+@pytest.mark.asyncio
+async def test_line_amount_tolerates_price_step_but_not_typo():
+    """Цена за грамм с четырьмя знаками не обязана точно давать сумму накладной.
+
+    Станция хранит цену за БАЗОВУЮ единицу, а сумму строки берёт с бумаги. На
+    60 000 г переокруглённая цена расходится с накладной на рубли (АЗС 8,
+    П-8-260911-0525: 8 636,36 против 8 634,00) — это потеря точности, а не
+    ошибка ввода. Допуск ровно на шаг цены; перепутанная цифра в него не лезет.
+    """
+    _company_id, receipt, *_rest, session = _ready_fixture()
+    receipt.evidence = {**receipt.evidence, "vat_included": False}
+    базовая = {
+        "line_id": str(uuid.uuid4()), "name": "Тесто для пиццы",
+        "nomenclature_ref": str(uuid.uuid4()), "barcode": "4600000000014",
+        "qty_expected": 60000, "qty_fact": 60000, "price": 0.1439,
+        "vat_rate": "НДС10",
+    }
+    receipt.lines = [{**базовая, "amount": 8636.36, "vat_amount": 863.64}]
+    receipt.total_amount, receipt.vat_amount = 8636.36, 863.64
+    readiness = await assess_receipt(session, receipt, lock=True)
+    assert readiness.ready, readiness.errors
+
+    # Копейки построчного округления НДС — тоже норма: налог считают ОТ суммы,
+    # а она сама гуляет в пределах шага цены (на 60 000 г это 6 ₽ по ставке 10%).
+    receipt.lines = [{**базовая, "amount": 8636.36, "vat_amount": 863.30}]
+    receipt.total_amount, receipt.vat_amount = 8636.36, 863.30
+    readiness = await assess_receipt(session, receipt, lock=True)
+    assert readiness.ready, readiness.errors
+
+    # Ставка мимо (22 % вместо 10 %) — это уже не округление.
+    receipt.lines = [{**базовая, "amount": 8636.36, "vat_amount": 1900.00}]
+    receipt.total_amount, receipt.vat_amount = 8636.36, 1900.00
+    readiness = await assess_receipt(session, receipt, lock=True)
+    assert not readiness.ready
+    assert "сумма НДС не соответствует ставке" in "; ".join(readiness.errors)
+
+    # А лишняя цифра в сумме — ошибка ввода, и её допуск не прячет.
+    receipt.lines = [{**базовая, "amount": 86363.60, "vat_amount": 8636.36}]
+    receipt.total_amount, receipt.vat_amount = 86363.60, 8636.36
+    readiness = await assess_receipt(session, receipt, lock=True)
+    assert not readiness.ready
+    assert "сумма не равна количеству × цене" in "; ".join(readiness.errors)
+
+
+@pytest.mark.asyncio
+async def test_declared_goods_total_is_net_when_prices_include_vat():
+    """Подвал накладной приезжает БЕЗ налога, даже когда цены идут с налогом.
+
+    Поле пакета «ИтогоТоваров» — товары без НДС, так его заполняет оператор с
+    бумаги. Сумма строк при ценах с налогом его уже содержит, поэтому сверять
+    их в лоб нельзя: расхождение выходит ровно на величину НДС и документ не
+    уезжает (АЗС 8, П-8-260908-1648: 1 998,55 против 2 381,52).
+    """
+    _company_id, receipt, *_rest, session = _ready_fixture()
+    receipt.evidence = {**receipt.evidence, "vat_included": True}
+    receipt.lines = [{
+        "line_id": str(uuid.uuid4()), "name": "Сок",
+        "nomenclature_ref": str(uuid.uuid4()), "barcode": "4600000000021",
+        "qty_expected": 10, "qty_fact": 10, "price": 122,
+        "vat_rate": "НДС22", "vat_amount": 220, "amount": 1220,
+    }]
+    receipt.total_amount, receipt.vat_amount = 1220, 220
+    receipt.evidence["declared_goods_total"] = 1000      # товары без налога
+    receipt.evidence["declared_vat_total"] = 220
+    receipt.evidence["declared_total"] = 1220            # к оплате
+    readiness = await assess_receipt(session, receipt, lock=True)
+    assert readiness.ready, readiness.errors
+
+    # Сумма строк на месте товаров без налога — это уже расхождение подвала.
+    receipt.evidence["declared_goods_total"] = 1220
+    readiness = await assess_receipt(session, receipt, lock=True)
+    assert not readiness.ready
+    assert "declared_goods_total" in "; ".join(readiness.errors)

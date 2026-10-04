@@ -136,6 +136,9 @@ export function MarketPlayersPanel() {
             {nf.format(t.assetLight)} из них нет ни одной своей станции.
           </span>
           <span className="text-xs text-muted-foreground">
+            {/* Приложения не привязаны к территории: 123 игрока в срезе Бурятии
+                читались как 123 игрока в Бурятии (замечание РусГидро 23.09.2026). */}
+            по всей России, область учёта здесь не применяется ·{' '}
             смежных игроков {nf.format(t.adjacent)} · медиана оценки приложения{' '}
             {t.medianRating != null ? nf1.format(t.medianRating) : 'нет данных'}
           </span>
@@ -216,7 +219,7 @@ export function MarketPlayersPanel() {
               c.class, c.adjacent ? 'да' : 'нет', c.players, c.assetLight, c.stations,
               c.medianRating, c.withRating, c.examples.join(', '),
             ]))}>
-            <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
               <tr>
                 <SortTh sortKey="class" sort={классы.sort} onSort={классы.toggle}>Класс</SortTh>
                 <SortTh sortKey="players" sort={классы.sort} onSort={классы.toggle} align="right">Игроков</SortTh>
@@ -271,7 +274,7 @@ export function MarketPlayersPanel() {
               p.app, p.isActive ? 'да' : 'нет', p.class, p.ownStations, p.rating, p.reviews,
               p.developer,
             ]))}>
-            <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
               <tr>
                 <SortTh sortKey="app" sort={сортК} onSort={жмиК}>Приложение</SortTh>
                 <SortTh sortKey="class" sort={сортК} onSort={жмиК}>Класс</SortTh>
@@ -325,7 +328,7 @@ export function MarketPlayersPanel() {
               sh.brand, sh.hasShop ? 'есть' : 'не нашли', sh.note, sh.goods, sh.priceMin,
               sh.priceMax, sh.pricesFound, sh.host,
             ]))}>
-            <thead className="sticky top-0 z-10 bg-muted/60 text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
               <tr>
                 <SortTh sortKey="brand" sort={магазины.sort} onSort={магазины.toggle}>Сеть</SortTh>
                 <SortTh sortKey="shop" sort={магазины.sort} onSort={магазины.toggle}>Магазин</SortTh>
@@ -372,16 +375,21 @@ export function MarketPlayersPanel() {
         </div>
       )}
 
-      <Card><CardContent className="p-3 text-xs text-muted-foreground">
-        {q.data?.note}
-        {t.unchecked > 0 && ` Не проверено вручную: ${nf.format(t.unchecked)} записей.`}
-        {t.multiApp?.length > 0 && (
-          <span>
-            {' '}У этих сетей больше одного приложения — точка контакта с водителем
-            раздвоена: {t.multiApp.join(', ')}.
-          </span>
-        )}
-      </CardContent></Card>
+      {/* Методика — справка, а не содержание экрана: развёрнутым абзацем она
+          забирала половину высоты и зажимала карточки моделей до заголовков. */}
+      <details className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground">
+        <summary className="cursor-pointer select-none">Как посчитано и чему не стоит доверять</summary>
+        <p className="mt-2">
+          {q.data?.note}
+          {t.unchecked > 0 && ` Не проверено вручную: ${nf.format(t.unchecked)} записей.`}
+          {t.multiApp?.length > 0 && (
+            <span>
+              {' '}У этих сетей больше одного приложения — точка контакта с водителем
+              раздвоена: {t.multiApp.join(', ')}.
+            </span>
+          )}
+        </p>
+      </details>
     </div>
   )
 }

@@ -18,7 +18,7 @@ from app.database import get_db
 from app.models import ChargePayment, ChargeRejected, ChargeSession, Region, ServiceLocation, User
 from app.services.export_audit import log_export
 from app.services.export_files import xlsx_response
-from app.services.session_scope import session_scope_conds
+from app.services.session_scope import session_scope_conds, station_match
 from app.services.pivot_export import build_sessions_pivot
 
 router = APIRouter(prefix="/charge-sessions", tags=["Зарядные сессии"])
@@ -294,7 +294,7 @@ async def rejected_summary(
     conds = [R.company_id == cid, R.occurred_at >= df, R.occurred_at < dt]
     codes, regs = _csv(stations), _csv(regions)
     if codes:
-        conds.append(R.station_code.in_(codes))
+        conds.append(station_match(R.station_code, R.location_id, cid, codes))
     if regs:
         # Регион у журнала не хранится: он свойство объекта, а не транзакции.
         # Резолвим через объект той же связкой, что и остальные разрезы.

@@ -19,6 +19,7 @@ import { useResetOnScopeChange } from '@/hooks/useScopeReset'
 import { loadXlsx } from '@/utils/xlsxLoader'
 import { getChargeSessionRows, getChargeGroupCatalog, fmtMoney, type ChargeSessionRow } from '@/services/analyticsService'
 import { useFilters } from '@/contexts/FilterContext'
+import { StationLink } from '@/components/common/StationLink'
 import { ChargeGroupedView } from './ChargeGroupedView'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -304,7 +305,9 @@ export function ChargeListPanel({ companyId, dateFrom, dateTo }: {
                     <TableCell className="whitespace-nowrap font-mono text-muted-foreground">{fmtDT(r.started_at)}</TableCell>
                     {/* Канон подписи станции: «Имя (код)» — имена не уникальны и меняются, код стабилен */}
                     <TableCell className="max-w-[220px] truncate font-medium" title={`${r.station_name ?? ''} (${r.station_code ?? '—'})`}>
-                      {r.station_name || 'Станция'}{r.station_code ? ` (${r.station_code})` : ''}
+                      <StationLink station={r.station_code}>
+                        {r.station_name || 'Станция'}{r.station_code ? ` (${r.station_code})` : ''}
+                      </StationLink>
                     </TableCell>
                     <TableCell className="max-w-[160px] truncate">{r.region || '—'}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.connector_type || '—'}</TableCell>

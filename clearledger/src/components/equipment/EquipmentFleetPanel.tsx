@@ -17,6 +17,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
+import { StationLink } from '@/components/common/StationLink'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -64,6 +65,13 @@ function fmtD(iso: string | null | undefined): string {
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10)
+}
+
+/** Место единицы кликом ведёт на станцию, когда единица стоит на объекте. */
+function PlaceCell({ unit }: { unit: EquipmentUnit }) {
+  const текст = placeLabel(unit)
+  if (!unit.location) return <>{текст}</>
+  return <StationLink station={unit.location.id}>{текст}</StationLink>
 }
 
 /** «Где находится»: локация | держатель с меткой | «—». */
@@ -256,7 +264,7 @@ function MovementDialog({ companyId, unit, op, warehouses, sites, onClose }: {
         <div className="space-y-3 pt-1">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             Текущее: {stateBadge(unit.state, unit.stateLabel)}
-            <span>· {placeLabel(unit)}</span>
+            <span>· <PlaceCell unit={unit} /></span>
           </div>
 
           {op === 'transfer' && (
@@ -570,7 +578,7 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
                   <KV label="Стоимость" value={unit.purchaseAmount != null ? `${nf0.format(unit.purchaseAmount)} ₽` : undefined} />
                   <KV label="Дата закупки" value={unit.purchaseDate ? fmtD(unit.purchaseDate) : undefined} />
                   <KV label="Гарантия до" value={unit.warrantyUntil ? fmtD(unit.warrantyUntil) : undefined} />
-                  <KV label="Местонахождение" value={placeLabel(unit)} />
+                  <KV label="Местонахождение" value={<PlaceCell unit={unit} />} />
                   <KV label="Резерв под" value={unit.reservedFor?.name ?? undefined} />
                   <KV label="Склад происхождения" value={unit.originLocation?.name ?? undefined} />
                   <KV label="Заметки" value={unit.notes ?? undefined} />
@@ -1276,7 +1284,7 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
                     <td className="p-2 max-w-[220px] truncate">{u.model ?? '—'}</td>
                     <td className="p-2 text-right font-mono">{u.powerKwt != null ? nf0.format(u.powerKwt) : '—'}</td>
                     <td className="p-2 whitespace-nowrap">{stateBadge(u.state, u.stateLabel)}</td>
-                    <td className="p-2 max-w-[260px] truncate">{placeLabel(u)}</td>
+                    <td className="p-2 max-w-[260px] truncate"><PlaceCell unit={u} /></td>
                     <td className="p-2 font-mono whitespace-nowrap">{u.inventoryNumber ?? '—'}</td>
                     <td className="p-2 text-right font-mono text-muted-foreground whitespace-nowrap">{fmtD(u.updatedAt)}</td>
                   </tr>

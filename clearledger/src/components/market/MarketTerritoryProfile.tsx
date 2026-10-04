@@ -11,6 +11,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { useCompany } from '@/contexts/CompanyContext'
+import { StationLink } from '@/components/common/StationLink'
 import { SortTh } from '@/components/workspace/SortableTh'
 import { useTableSort } from '@/hooks/useTableSort'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
@@ -260,7 +261,9 @@ export function MarketTerritoryProfile({ name, level, onBack }: {
                 <tbody>
                   {объекты.rows.map((r) => (
                     <tr key={r.locationId} className="border-t border-border/40">
-                      <td className="py-1">{r.name}</td>
+                      <td className="py-1">
+                        <StationLink station={r.locationId}>{r.name}</StationLink>
+                      </td>
                       <td className="py-1 text-muted-foreground">{r.city ?? '—'}</td>
                       <td className="py-1 text-right"><Num v={r.powerKwt} digits={1} /></td>
                       <td className="py-1 text-right"><Num v={r.ports} /></td>

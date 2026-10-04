@@ -25,6 +25,7 @@ import {
 import { STORE_SECTIONS, STORE_HELP_MENU, storeMenu } from '@/config/storeCatalog'
 import {
   MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
+  ENERGY_ECONOMY_CORE, ENERGY_ECONOMY_CORE_KEYS,
   EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
   SITES_WORK_MENU, SITES_ANALYTICS_MENU,
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
@@ -51,6 +52,7 @@ import { productForMode, productModuleAllowed } from '@/config/productAccess'
 // Реэкспорт сохранён: внешние импорты продолжают работать.
 export {
   MGMT_MENU, MGMT_MENU_KEYS, ENERGY_MGMT, ENERGY_MGMT_KEYS, OPS_MONITOR_MENU,
+  ENERGY_ECONOMY_CORE, ENERGY_ECONOMY_CORE_KEYS,
   EQUIPMENT_MENU, EQUIPMENT_KEYS, SITES_MENU, SITES_KEYS,
   SITES_WORK_MENU, SITES_ANALYTICS_MENU,
   CHARGE_SESSIONS_MENU, CHARGE_SESSIONS_KEYS,
@@ -171,9 +173,13 @@ export function useWorkspaceSections(): WorkspaceSection[] {
     icon: Gauge, items: opsItems, connected: opsItems.length > 0 }
   const opsEquipment: WorkspaceSection = { mode: 'ops_equipment', label: 'Оборудование',
     icon: Boxes, items: isEnergy ? EQUIPMENT_MENU : [], connected: isEnergy }
-  // «Хозяйство» — подключаемые модули: нет ни одного включённого, раздела нет.
+  // «Хозяйство» = ядро (обзор, баланс, полнота — считаются по данным, которые
+  // есть всегда) + подключаемые модули денежного контура. Раньше раздел исчезал
+  // целиком, когда ни один модуль не включён, и вместе с ним пропадал ответ на
+  // вопрос «сколько сеть стоит» (20.09.2026).
+  const economyItems = isEnergy ? [...ENERGY_ECONOMY_CORE, ...energyOps] : []
   const opsEconomy: WorkspaceSection = { mode: 'ops_economy', label: 'Хозяйство',
-    icon: Receipt, items: isEnergy ? energyOps : [], connected: energyOps.length > 0 }
+    icon: Receipt, items: economyItems, connected: economyItems.length > 0 }
   // Магазин разложен по предметам работы: «Торговля» — сопутка, деньги и спрос,
   // «Общепит» — меню и ТТК, «Склад» — остаток и движение, «Каталог» — карточка
   // товара, «Маркировка» — регуляторика, «Станции» — парк АЗС. Закрытие периода
