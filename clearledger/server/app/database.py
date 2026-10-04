@@ -1079,6 +1079,16 @@ SKU_MIGRATION_DDL = (
         END IF;
     END $$
     """,
+    # Группа и класс, выбранные администратором при заведении: по ним центр
+    # признаёт карточку сам (item_draft_auto), товароведа в центре нет.
+    """
+    DO $$ BEGIN
+        IF to_regclass('edge.item_draft') IS NOT NULL THEN
+            ALTER TABLE edge.item_draft ADD COLUMN IF NOT EXISTS group_path TEXT;
+            ALTER TABLE edge.item_draft ADD COLUMN IF NOT EXISTS sku_class TEXT;
+        END IF;
+    END $$
+    """,
 )
 
 

@@ -384,22 +384,27 @@ async def ingest_station_nsi(db: AsyncSession, company_id, station_id: int,
             await db.execute(text("""
                 INSERT INTO edge.item_draft
                     (company_id, station_id, source_uuid, name, unit, vat_rate, barcodes,
-                     created_at, author, sku)
+                     created_at, author, sku, group_path, sku_class)
                 VALUES (:cid, :st, :key, :name, :unit, :vat, :codes,
                         coalesce(CAST(:at AS timestamptz), now()), :author,
-                        nullif(:sku, ''))
+                        nullif(:sku, ''), nullif(:grp, ''), nullif(:cls, ''))
                 ON CONFLICT (company_id, station_id, source_uuid) DO UPDATE
                    SET name = excluded.name, unit = excluded.unit,
                        vat_rate = excluded.vat_rate, barcodes = excluded.barcodes,
                        author = coalesce(nullif(excluded.author, ''),
                                          edge.item_draft.author),
-                       sku = coalesce(edge.item_draft.sku, excluded.sku)
+                       sku = coalesce(edge.item_draft.sku, excluded.sku),
+                       group_path = coalesce(excluded.group_path, edge.item_draft.group_path),
+                       sku_class = coalesce(excluded.sku_class, edge.item_draft.sku_class)
                  WHERE edge.item_draft.resolved_at IS NULL
             """), {"cid": company_id, "st": station_id, "key": ключ,
                    "name": doc.get("Наименование") or "", "unit": doc.get("Единица") or "шт",
                    "vat": doc.get("СтавкаНДС"), "codes": doc.get("Штрихкоды") or [],
                    "at": _ts(doc.get("Заведена")), "author": doc.get("Автор") or "",
-                   "sku": артикул_станции})
+                   "sku": артикул_станции,
+                   # Группа и класс станции — основание автопризнания.
+                   "grp": str(doc.get("Группа") or "").strip(),
+                   "cls": str(doc.get("Класс") or "").strip()})
             stats["item_drafts"] += 1
 
         elif вид == "partner_draft":

@@ -285,6 +285,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:  # noqa: BLE001 — исполнитель цен не критичен для API
         logger.warning(f"Исполнитель запланированных цен не запущен: {e}")
 
+    # Автопризнание заявок станций на карточки: товароведа в центре нет, а
+    # непризнанная карточка держит станцию на черновике (решение МАГа 04.10.2026).
+    drafts_task: asyncio.Task | None = None
+    try:
+        from app.services.item_draft_auto import run_forever as _drafts
+        drafts_task = asyncio.create_task(_drafts())
+    except Exception as e:  # noqa: BLE001 — автопризнание не критично для API
+        logger.warning(f"Автопризнание заявок на карточки не запущено: {e}")
+
     # Чтение боевой БП: реестр документов 1С не должен устаревать молча. Раз в
     # сутки в тихий час — соединение там одно на всех, днём оно занято людьми.
     onec_read_task: asyncio.Task | None = None
@@ -300,6 +309,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         onec_read_task.cancel()
     if prices_task is not None:
         prices_task.cancel()
+    if drafts_task is not None:
+        drafts_task.cancel()
     if mail_task is not None:
         mail_task.cancel()
     if tasks_task is not None:
