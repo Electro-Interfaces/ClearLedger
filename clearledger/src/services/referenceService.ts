@@ -480,6 +480,14 @@ export async function getCounterpartyLocations(counterpartyId: string): Promise<
 }
 
 /** Договоры точки: адресные + общекомпанейские. */
+export interface ContractTypeRef { code: string; label: string; gkBasis: string | null; direction: string | null }
+export const getContractTypes = () => get<ContractTypeRef[]>('/api/references/contract-types')
+/** Привязать договор к станции (из окна станции); общий договор компании сервер не трогает (409). */
+export const linkContractLocation = (contractId: string, locationId: string) =>
+  post<Contract>(`/api/references/contracts/${contractId}/locations/${encodeURIComponent(locationId)}`, {})
+export const unlinkContractLocation = (contractId: string, locationId: string) =>
+  del<Contract>(`/api/references/contracts/${contractId}/locations/${encodeURIComponent(locationId)}`)
+
 export async function getLocationContracts(locationId: string): Promise<LocationContracts> {
   return get<LocationContracts>(`/api/references/locations/${locationId}/contracts`)
 }

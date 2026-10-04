@@ -439,6 +439,10 @@ export interface Contract {
   raw?: Record<string, unknown>   // полный снимок реквизитов из 1С
   // Ось договор↔точки (Фаза 2)
   scopeType?: ContractScopeType
+  /** Вид из справочника contract_types (основание по ГК). */
+  typeCode?: string | null
+  /** Сколько станций привязано (в списке договоров). */
+  locationsCount?: number | null
   createdAt: string
   updatedAt: string
 }
@@ -453,6 +457,7 @@ export interface LocationBrief {
 
 /** Краткая карточка контрагента (ответы оси). */
 export interface CounterpartyBrief {
+  id?: string | null
   externalRef?: string
   name: string
   inn?: string

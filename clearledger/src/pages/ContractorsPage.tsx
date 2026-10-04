@@ -42,11 +42,13 @@ import {
   useCounterparties, useContracts, useCounterpartyLocations, useCounterpartyActivity,
   useCreateCounterparty, useUpdateCounterparty, useDeleteCounterparty,
   useCreateContract, useDeleteContract, useSettlementsDetail,
+  useContractLocations, useSetContractScope,
 } from '@/hooks/useReferences'
 import * as refs from '@/services/referenceService'
 import { getCorporateClients } from '@/services/corporateService'
 import { ROLE_LABEL, PAYMENT_META, paidThroughLabel } from '@/types/settlement'
 import { ContractScopeDialog, ContractScopeBadgeLabel } from '@/components/reference/ContractScopeDialog'
+import { ContractStationsField, contractStatus, type ContractStationsValue } from '@/components/reference/ContractStationsField'
 import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import type { Counterparty, Contract, CounterpartyType } from '@/types'
@@ -247,7 +249,7 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
             <Req label="Сумма включает НДС" value={c.amountInclVat == null ? ('СуммаВключаетНДС' in raw ? fmtRaw(raw.СуммаВключаетНДС) : undefined) : (c.amountInclVat ? 'Да' : 'Нет')} />
             <Req label="Вид взаиморасчётов" value={c.settlementKind} />
             <Req label="Договор закрыт" value={c.isClosed ? 'Да' : 'Нет'} />
-            {isEnergy && <Req label="Охват точек" value={ContractScopeBadgeLabel(c.scopeType)} />}
+            {isEnergy && <Req label="Охват точек" value={ContractScopeBadgeLabel(c.scopeType, c.locationsCount)} />}
             <Req label="Комментарий" value={c.comment || (raw.Комментарий as string)} span />
           </div>
           {/* Условие — это договор, прочитанный учётом: «5000 ₽ в месяц до 10-го
@@ -752,6 +754,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                     <ContractDetailDialog contract={c}>
                       <button className="font-mono text-sm text-primary hover:underline text-left">{c.number}</button>
                     </ContractDetailDialog>
+                    <div className={`text-[11px] ${contractStatus(c).cls}`}>{contractStatus(c).label}</div>
                   </TableCell>
                   <TableCell className="text-sm">{c.date || '—'}</TableCell>
                   <TableCell><ContractKindBadge contract={c} /></TableCell>
@@ -764,7 +767,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                           variant={c.scopeType === 'company' ? 'secondary' : 'outline'}
                           className={c.scopeType === 'unassigned' || !c.scopeType ? 'text-muted-foreground' : ''}
                         >
-                          {ContractScopeBadgeLabel(c.scopeType)}
+                          {ContractScopeBadgeLabel(c.scopeType, c.locationsCount)}
                         </Badge>
                       </Button>
                     </ContractScopeDialog>
@@ -950,11 +953,23 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
     // Бессрочность хранится отсутствием даты — своей колонки нет и не нужно:
     // пустой `valid_until` уже везде читается как «действует до расторжения».
     perpetual: !edit?.validUntil,
+    typeCode: edit?.typeCode ?? '',
   })
+  // Вид по справочнику (основание по ГК) — рядом со свободным «предметом».
+  const typesQuery = useQuery({ queryKey: ['references', 'contract-types'], queryFn: refs.getContractTypes, staleTime: 3_600_000 })
+  // Станции договора — прямо в форме. При правке охват сохраняется, только если
+  // его меняли: иначе правка суммы сбрасывала бы привязку (старая грабля формы).
+  const currentLocs = useContractLocations(open && edit ? edit.id : null)
+  const setScope = useSetContractScope()
+  const [scope, setScopeValue] = useState<ContractStationsValue>({ scopeType: edit?.scopeType ?? 'locations', locationIds: [] })
+  const [scopeDirty, setScopeDirty] = useState(false)
+  useEffect(() => {
+    if (open && edit && currentLocs.data && !scopeDirty) setScopeValue({ scopeType: edit.scopeType ?? 'unassigned', locationIds: currentLocs.data.map((l) => l.id) })
+  }, [open, edit, currentLocs.data, scopeDirty])
   const orgId = f.organizationId || (orgs[0]?.externalRef || orgs[0]?.id || '')
   const canSave = f.number.trim() !== '' && f.date.trim() !== '' && orgId !== ''
-  const pending = create.isPending || update.isPending
-  function save() {
+  const pending = create.isPending || update.isPending || setScope.isPending
+  async function save() {
     const payload = {
       number: f.number.trim(), date: f.date.trim(), counterpartyId,
       organizationId: orgId, kind: f.kind, type: f.type.trim() || kindLabel(f.kind),
@@ -965,16 +980,25 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
       settlementKind: f.settlementKind.trim() || undefined,
       comment: f.comment.trim() || undefined,
       isClosed: f.isClosed,
+      typeCode: f.typeCode || undefined,
       // Охват правится своим диалогом («Охват договора»). Слать его отсюда нельзя:
       // при правке любого поля привязка к точкам сбрасывалась в «Не распределён».
       ...(edit ? {} : { scopeType: 'unassigned' as const }),
     }
-    const opts = {
-      onSuccess: () => { toast.success(edit ? 'Договор обновлён' : 'Договор добавлен'); setOpen(false) },
-      onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+    if (scope.scopeType === 'locations' && scope.locationIds.length === 0 && (!edit || scopeDirty)) {
+      toast.error('Выберите станции договора или укажите «Общий по компании» / «Не распределён»')
+      return
     }
-    if (edit) update.mutate(payload, opts)
-    else create.mutate(payload, opts)
+    try {
+      const saved = edit ? await update.mutateAsync(payload) : await create.mutateAsync(payload)
+      if (!edit || scopeDirty) {
+        const contractId = saved?.id ?? edit?.id
+        if (contractId) await setScope.mutateAsync({ contractId, scopeType: scope.scopeType,
+          locationIds: scope.scopeType === 'locations' ? scope.locationIds : [] })
+      }
+      toast.success(edit ? 'Договор обновлён' : 'Договор добавлен')
+      setOpen(false)
+    } catch (e) { toast.error(`Ошибка: ${(e as Error).message}`) }
   }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -983,6 +1007,7 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="size-5" /> {edit ? 'Изменить договор' : 'Новый договор'}
+            {edit && <span className={`text-xs font-normal ${contractStatus(edit).cls}`}>{contractStatus(edit).label}</span>}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
@@ -996,6 +1021,14 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
             <Select value={f.kind} onValueChange={(v) => setF((s) => ({ ...s, kind: v }))}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>{Object.entries(KIND_META).map(([k, m]) => <SelectItem key={k} value={k}>{m.label}</SelectItem>)}</SelectContent>
+            </Select></div>
+          <div className="space-y-1.5"><Label>Вид по справочнику</Label>
+            <Select value={f.typeCode || '—'} onValueChange={(v) => setF((s) => ({ ...s, typeCode: v === '—' ? '' : v }))}>
+              <SelectTrigger aria-label="Вид по справочнику"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="—">Не указан</SelectItem>
+                {(typesQuery.data ?? []).map((tp) => <SelectItem key={tp.code} value={tp.code}>{tp.label}{tp.gkBasis ? ` · ${tp.gkBasis}` : ''}</SelectItem>)}
+              </SelectContent>
             </Select></div>
           <div className="space-y-1.5"><Label>Тип / предмет</Label>
             <Input value={f.type} onChange={(e) => setF((s) => ({ ...s, type: e.target.value }))} placeholder="Поставка ГСМ, аренда, услуги…" /></div>
@@ -1047,6 +1080,10 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
             <input type="checkbox" checked={f.isClosed} onChange={(e) => setF((s) => ({ ...s, isClosed: e.target.checked }))} className="size-4 accent-primary" />
             Договор закрыт
           </label>
+          <div className="space-y-1.5 border-t pt-3"><Label>Станции договора</Label>
+            {edit && currentLocs.isLoading ? <p className="text-xs text-muted-foreground">Загрузка станций…</p>
+              : <ContractStationsField value={scope} onChange={(v) => { setScopeValue(v); setScopeDirty(true) }} />}
+          </div>
           {orgs.length === 0 && <p className="text-xs text-amber-600 dark:text-amber-400">Сначала заведите организацию (раздел «Данные → Организация»).</p>}
         </div>
         <DialogFooter>
@@ -1240,6 +1277,7 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
                     <ContractDetailDialog contract={c}>
                       <button className="font-mono text-sm text-primary hover:underline text-left">{c.number}</button>
                     </ContractDetailDialog>
+                    <div className={`text-[11px] ${contractStatus(c).cls}`}>{contractStatus(c).label}</div>
                   </TableCell>
                   <TableCell className="text-sm whitespace-nowrap">{c.date || '—'}</TableCell>
                   <TableCell className="text-sm">{c.type ? typeLabel(c.type) : '—'}</TableCell>
@@ -1248,10 +1286,14 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
                   </TableCell>
                   {isEnergy && (
                   <TableCell>
-                    <Badge variant={c.scopeType === 'company' ? 'secondary' : 'outline'}
-                      className={c.scopeType === 'unassigned' || !c.scopeType ? 'text-muted-foreground' : ''}>
-                      {ContractScopeBadgeLabel(c.scopeType)}
-                    </Badge>
+                    <ContractScopeDialog contract={c}>
+                      <button type="button" className="text-left">
+                        <Badge variant={c.scopeType === 'company' ? 'secondary' : 'outline'}
+                          className={c.scopeType === 'unassigned' || !c.scopeType || (c.scopeType === 'locations' && !c.locationsCount) ? 'text-amber-700 dark:text-amber-400' : ''}>
+                          {ContractScopeBadgeLabel(c.scopeType, c.locationsCount)}
+                        </Badge>
+                      </button>
+                    </ContractScopeDialog>
                   </TableCell>
                   )}
                   <TableCell className="text-right text-sm tabular-nums">

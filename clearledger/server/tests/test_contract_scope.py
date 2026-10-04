@@ -166,3 +166,35 @@ async def test_contract_dimensions(auth_client: AsyncClient):
     d2 = (await auth_client.get(f"/api/references/contracts/{ct['id']}/dimensions")).json()
     assert "nomenclature" not in d2["dimensions"]
     assert d2["dimensions"]["channel"] == ["ch-1"]
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_contract_type_and_station_link(auth_client: AsyncClient):
+    """Вид договора из справочника; привязка и отвязка станции по одной из её карточки."""
+    org_id = await _organization(auth_client)
+    await _post(auth_client, "/api/locations", {
+        "company_id": "gig", "id": "loc-scope-401", "code": "401", "name": "ЭЗС 401", "type": "ev_charging",
+    })
+    cp = await _post(auth_client, "/api/references/counterparties", {
+        "company_id": "gig", "inn": "7800000401", "name": "Арендодатель-4 ООО",
+    })
+    types = (await auth_client.get("/api/references/contract-types")).json()
+    assert "rent" in {t["code"] for t in types}
+    bad = await auth_client.post("/api/references/contracts", json={
+        "company_id": "gig", "number": "АР-4X", "date": "2026-05-01",
+        "counterpartyId": cp["id"], "organizationId": org_id, "typeCode": "нет-такого"})
+    assert bad.status_code == 422, bad.text
+    ct = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "АР-4", "date": "2026-05-01",
+        "counterpartyId": cp["id"], "organizationId": org_id, "typeCode": "rent"})
+    assert ct["typeCode"] == "rent"
+
+    r = await auth_client.post(f"/api/references/contracts/{ct['id']}/locations/loc-scope-401")
+    assert r.status_code == 200, r.text
+    assert r.json()["scopeType"] == "locations"
+    listed = (await auth_client.get("/api/references/contracts", params={"company_id": "gig"})).json()
+    assert next(c for c in listed if c["id"] == ct["id"])["locationsCount"] == 1
+
+    r = await auth_client.delete(f"/api/references/contracts/{ct['id']}/locations/loc-scope-401")
+    assert r.status_code == 200, r.text
+    assert r.json()["scopeType"] == "unassigned"   # последняя станция снята — договор в разбор

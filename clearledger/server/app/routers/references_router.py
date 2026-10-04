@@ -720,6 +720,7 @@ def _contract_resp(c: Contract) -> ContractResponse:
         basis=c.basis,
         isClosed=c.is_closed,
         scopeType=c.scope_type,
+        typeCode=c.type_code,
         externalRef=c.external_ref,
         raw=c.raw,
         createdAt=_ts(c.created_at),
@@ -738,8 +739,39 @@ async def list_contracts(
     stmt = select(Contract).where(Contract.company_id == cid)
     if counterparty_id:
         stmt = stmt.where(Contract.counterparty_id == counterparty_id)
-    result = await db.execute(stmt.order_by(Contract.date.desc()))
-    return [_contract_resp(c) for c in result.scalars().all()]
+    rows = (await db.execute(stmt.order_by(Contract.date.desc()))).scalars().all()
+    counts = dict((await db.execute(
+        select(ContractLocation.contract_id, func.count())
+        .where(ContractLocation.company_id == cid).group_by(ContractLocation.contract_id))).all())
+    out = []
+    for c in rows:
+        r = _contract_resp(c)
+        r.locationsCount = int(counts.get(c.id, 0))
+        out.append(r)
+    return out
+
+
+async def _check_type_code(db: AsyncSession, code: str | None) -> str | None:
+    """Вид договора — только из справочника contract_types."""
+    if not code:
+        return None
+    from sqlalchemy import text as _t
+    ok = (await db.execute(_t("SELECT 1 FROM contract_types WHERE code = :c AND is_active"), {"c": code})).first()
+    if not ok:
+        raise HTTPException(status_code=422, detail=f"Неизвестный вид договора: {code}")
+    return code
+
+
+@router.get("/contract-types")
+async def list_contract_types(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Справочник видов договоров: код, название, основание по ГК, направление."""
+    from sqlalchemy import text as _t
+    rows = (await db.execute(_t(
+        "SELECT code, label, gk_basis, direction FROM contract_types WHERE is_active ORDER BY sort_order"))).mappings().all()
+    return [{"code": r["code"], "label": r["label"], "gkBasis": r["gk_basis"], "direction": r["direction"]} for r in rows]
 
 
 @router.post(
@@ -760,6 +792,7 @@ async def create_contract(
         counterparty_id=body.counterpartyId,
         organization_id=body.organizationId,
         type=body.type,
+        type_code=await _check_type_code(db, body.typeCode),
         amount_limit=body.amountLimit,
         kind=body.kind,
         currency=body.currency,
@@ -797,6 +830,8 @@ async def update_contract(
         c.organization_id = body.organizationId
     if body.type is not None:
         c.type = body.type
+    if body.typeCode is not None:
+        c.type_code = await _check_type_code(db, body.typeCode)
     if body.amountLimit is not None:
         c.amount_limit = body.amountLimit
     if body.kind is not None:
@@ -886,6 +921,56 @@ async def set_contract_scope(
     await db.flush()
     # execute(delete)/insert истекают атрибуты c — освежаем перед сериализацией
     # (иначе lazy-load в async-контексте → MissingGreenlet).
+    await db.refresh(c)
+    return _contract_resp(c)
+
+
+@router.post("/contracts/{item_id}/locations/{loc_id}", response_model=ContractResponse)
+async def link_contract_location(
+    item_id: str, loc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Привязать договор к станции (из окна станции). Общий договор компании уже
+    действует на все станции — его не превращаем в адресный молча."""
+    c = (await db.execute(select(Contract).where(Contract.id == _parse_uuid(item_id)))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_company_member(str(c.company_id), current_user, db)
+    loc = (await db.execute(select(ServiceLocation).where(
+        ServiceLocation.id == loc_id, ServiceLocation.company_id == c.company_id))).scalar_one_or_none()
+    if not loc:
+        raise HTTPException(status_code=404, detail="Станция не найдена в пространстве")
+    if c.scope_type == "company":
+        raise HTTPException(status_code=409, detail=f"Договор № {c.number} общий на компанию — он уже действует на эту станцию")
+    exists = (await db.execute(select(ContractLocation.id).where(
+        ContractLocation.contract_id == c.id, ContractLocation.location_id == loc.id))).first()
+    if not exists:
+        db.add(ContractLocation(company_id=c.company_id, contract_id=c.id, location_id=loc.id))
+    c.scope_type = "locations"
+    await db.flush()
+    await db.refresh(c)
+    return _contract_resp(c)
+
+
+@router.delete("/contracts/{item_id}/locations/{loc_id}", response_model=ContractResponse)
+async def unlink_contract_location(
+    item_id: str, loc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отвязать договор от станции. Последняя станция ушла — договор «не распределён»."""
+    c = (await db.execute(select(Contract).where(Contract.id == _parse_uuid(item_id)))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_company_member(str(c.company_id), current_user, db)
+    await db.execute(delete(ContractLocation).where(
+        ContractLocation.contract_id == c.id, ContractLocation.location_id == loc_id))
+    left = (await db.execute(select(func.count()).select_from(ContractLocation).where(
+        ContractLocation.contract_id == c.id))).scalar_one()
+    if c.scope_type == "locations" and not left:
+        c.scope_type = "unassigned"
+    await db.flush()
     await db.refresh(c)
     return _contract_resp(c)
 
@@ -1086,10 +1171,13 @@ async def get_location_contracts(
         ))
         if c.counterparty_id and c.counterparty_id not in seen:
             seen[c.counterparty_id] = CounterpartyBrief(
+                id=str(cp.id) if cp else None,
                 # У ручного контрагента внешней ссылки нет — тогда ключом идёт
                 # наш идентификатор, и он обязан доехать строкой: схема ответа
-                # объявляет строку, а в поле договора теперь UUID.
-                externalRef=cp.external_ref if cp else str(c.counterparty_id),
+                # объявляет строку, а в поле договора теперь UUID. Пустой ключ
+                # (external_ref NULL у всех 512 контрагентов РусГидро) не находил
+                # имя в окне станции — теперь падаем на наш id.
+                externalRef=(cp.external_ref or str(cp.id)) if cp else str(c.counterparty_id),
                 name=cp.name if cp else "(неизвестный контрагент)",
                 inn=cp.inn if cp else None,
             )
@@ -1134,8 +1222,19 @@ async def list_settlements(
         stmt = stmt.where(StationContractSettlement.location_id == location_id)
     if role:
         stmt = stmt.where(StationContractSettlement.role == role)
-    result = await db.execute(stmt)
-    return [_settlement_resp(s) for s in result.scalars().all()]
+    rows = (await db.execute(stmt)).scalars().all()
+    out = [_settlement_resp(s) for s in rows]
+    # Имя контрагента — в самой записи: окно станции искало его по внешнему коду
+    # 1С среди контрагентов договоров и не находило никогда (у всех записей тут
+    # наш UUID, а внешний код пуст), строка «Платёжная дисциплина» шла без имени.
+    ids = {str(s.counterparty_id) for s in rows if s.counterparty_id}
+    if location_id and ids:
+        names = dict((await db.execute(select(Counterparty.id, Counterparty.name).where(
+            Counterparty.company_id == cid, Counterparty.id.in_([_parse_uuid(i) for i in ids])))).all())
+        for r in out:
+            if r.counterpartyId:
+                r.counterpartyName = names.get(_parse_uuid(str(r.counterpartyId)))
+    return out
 
 
 @router.post("/settlements", response_model=SettlementResponse, status_code=status.HTTP_201_CREATED)

@@ -803,6 +803,7 @@ class ContractCreate(BaseModel):
     counterpartyId: str
     organizationId: str
     type: str
+    typeCode: str | None = None   # вид из справочника contract_types (основание по ГК)
     amountLimit: float | None = None
     kind: str | None = None
     currency: str | None = None
@@ -819,6 +820,7 @@ class ContractCreate(BaseModel):
 class ContractUpdate(BaseModel):
     number: str | None = None
     date: str | None = None
+    typeCode: str | None = None
     counterpartyId: str | None = None
     organizationId: str | None = None
     type: str | None = None
@@ -836,6 +838,9 @@ class ContractUpdate(BaseModel):
 
 
 class ContractResponse(BaseModel):
+    typeCode: str | None = None
+    # Сколько станций у договора (для «Выбранные точки»); в списке договоров.
+    locationsCount: int | None = None
     id: str
     companyId: str
     number: str
@@ -888,6 +893,7 @@ class SettlementResponse(BaseModel):
     role: str
     contractId: str | None = None
     counterpartyId: str | None = None
+    counterpartyName: str | None = None
     paidThrough: str | None = None
     paymentStatus: str
     basis: str | None = None
@@ -1053,6 +1059,7 @@ class LocationBrief(BaseModel):
 
 
 class CounterpartyBrief(BaseModel):
+    id: str | None = None
     externalRef: str | None = None
     name: str
     inn: str | None = None
