@@ -38,7 +38,7 @@ CONTRACT_ROWS = [{
     "Ref_Key": CONTRACT_REF, "DeletionMark": False, "Номер": "Д-1",
     "Дата": "2026-02-01T00:00:00", "Owner_Key": OWNER, "Организация_Key": ORG,
     "ВидДоговора": "СПоставщиком", "СрокДействия": "2027-01-01T00:00:00",
-    "ДоговорЗакрыт": False, "Сумма": 0,
+    "ДоговорЗакрыт": False, "Сумма": 0, "СуммаВключаетНДС": True, "Комментарий": "аренда площадки ",
 }]
 
 
@@ -131,6 +131,7 @@ async def test_sync_counterparties_and_contracts(db):
     assert ct.is_closed is False
     assert ct.scope_type == "unassigned"          # дефолт, наш слой охвата
     assert ct.raw and ct.raw["ВидДоговора"] == "СПоставщиком"
+    assert ct.amount_incl_vat is True and ct.comment == "аренда площадки"   # из выборки — в колонки
 
 
 @pytest.mark.asyncio(loop_scope="session")

@@ -1192,6 +1192,11 @@ class OneCSyncService:
                 is_closed = bool(item.get("ДоговорЗакрыт"))
                 amount = item.get("Сумма")
                 amount_limit = float(amount) if isinstance(amount, (int, float)) else None
+                # Уже приходят в выборке, но лежали только в снимке `raw`: форма договора
+                # и выгрузка в БП читают колонки, и «включает НДС» там было пустым.
+                incl_vat = item.get("СуммаВключаетНДС")
+                incl_vat = incl_vat if isinstance(incl_vat, bool) else None
+                comment = (item.get("Комментарий") or "").strip() or None
                 if existing is None:
                     self.session.add(Contract(
                         id=uuid.uuid4(),
@@ -1206,6 +1211,8 @@ class OneCSyncService:
                         valid_until=valid_until,
                         is_closed=is_closed,
                         amount_limit=amount_limit,
+                        amount_incl_vat=incl_vat,
+                        comment=comment,
                         scope_type="unassigned",
                         raw=item,
                     ))
@@ -1221,6 +1228,10 @@ class OneCSyncService:
                     existing.is_closed = is_closed
                     if amount_limit is not None:
                         existing.amount_limit = amount_limit
+                    if incl_vat is not None:
+                        existing.amount_incl_vat = incl_vat
+                    if comment and not existing.comment:   # свой комментарий пространства не затираем
+                        existing.comment = comment
                     existing.raw = item
                     # scope_type НЕ трогаем — наш слой охвата, не из 1С
                     stats["updated"] += 1
