@@ -1093,7 +1093,9 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
         <div data-zone="Ответственный и следующий шаг" className="text-sm font-semibold">Кто ведёт и что дальше</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           <div>
-            <Label>Ответственный</Label>
+            {/* Это и есть руководитель проекта (пункт 1.4 интеграции): роли регламента в
+                «Кто ведёт проект» — отдельный состав и руководителя не задают. */}
+            <Label>Руководитель проекта (ответственный)</Label>
             <Select value={owner || '__none__'} onValueChange={(v) => setOwner(v === '__none__' ? '' : v)}>
               <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Не назначен" /></SelectTrigger>
               <SelectContent>

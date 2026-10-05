@@ -34,13 +34,24 @@ const PHASES: { key: string; title: string; codes: string[] }[] = [
       'ezs_oco_final', 'ezs_done'] },
   { key: 'stop', title: 'Выходы из маршрута: пауза и отказ',
     codes: ['ezs_hold', 'ezs_rejected'] },
+  // Интеграция с партнёром — свой маршрут. Без своих частей все его стадии падали в
+  // «Прочие», и выходы «Отказ, в архив» / «Отложить» из каждой стадии рисовались
+  // дугами в одну точку — подписи ложились друг на друга (замечание 05.10.2026).
+  // Пауза и отказ — отдельной частью: из стадии они уходят короткой стрелкой вбок,
+  // каждая на своей строке, с именем стадии-цели.
+  { key: 'int_prepare', title: 'Подготовка: заявка, оценка партнёра, переговоры',
+    codes: ['int_lead', 'int_screening', 'int_negotiation', 'int_dd'] },
+  { key: 'int_pilot', title: 'Пилот: решение, соглашение, настройка',
+    codes: ['int_decision', 'int_contracting', 'int_construction'] },
+  { key: 'int_launch', title: 'Договор и запуск', codes: ['int_commissioning', 'int_live'] },
+  { key: 'int_stop', title: 'Выходы из маршрута: пауза и отказ', codes: ['int_hold', 'int_rejected'] },
 ]
 
 const BOX_W = 250
 const BOX_H = 46
 const GAP_Y = 34          // просвет между блоками — в нём живут стрелка и её подпись
 const PAD_L = 170         // слева проходят возвраты на доработку — вместе с подписью
-const PAD_R = 300         // справа — переходы через стадию и выходы вбок с подписями
+const PAD_R = 380         // справа — переходы через стадию и выходы вбок с подписями «куда»
 const PAD_TOP = 10
 
 type Stage = NonNullable<CaseState['stages']>[number]
@@ -179,7 +190,9 @@ function PhaseBlock({ title, codes, byCode, links, walked, current, visits }: {
               : done ? 'text-emerald-600 dark:text-emerald-500'
               : 'text-muted-foreground'
             const full = l.verb
-            const label = full.length > 22 ? full.slice(0, 21) + '…' : full
+            // Прямой стрелке места хватает до правого края схемы; дуге — нет.
+            const max = b === a + 1 ? 48 : 22
+            const label = full.length > max ? full.slice(0, max - 1) + '…' : full
             if (b === a + 1) {
               // Соседи — прямая стрелка вниз, подпись рядом с ней. Между теми же
               // двумя стадиями рёбер бывает несколько («Договор подряда подписан»
@@ -239,8 +252,8 @@ function PhaseBlock({ title, codes, byCode, links, walked, current, visits }: {
                 <line x1={x1} y1={yy} x2={x1 + 26} y2={yy} stroke="currentColor"
                   strokeWidth={done ? 2 : 1.2} markerEnd="url(#fc-arrow)" />
                 <text x={x1 + 30} y={yy + 3} className="fill-current text-[10px]">
-                  {label.length > 46 ? label.slice(0, 45) + '…' : label}
-                  {label.length > 46 && <title>{label}</title>}
+                  {label.length > 62 ? label.slice(0, 61) + '…' : label}
+                  {label.length > 62 && <title>{label}</title>}
                 </text>
               </g>
             )

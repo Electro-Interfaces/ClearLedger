@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { StationScopePicker } from '@/components/workspace/StationScopePicker'
 import { getContracts, getCounterparties } from '@/services/referenceService'
-import { getProjectCase, openProjectCase, getSiteDocs, downloadSiteDoc, uploadSiteDoc, waiveSiteGate, type SiteDetail, type GateItem } from '@/services/sitesService'
+import { getProjectCase, openProjectCase, getSiteDocs, downloadSiteDoc, uploadSiteDoc, waiveSiteGate, getSiteParticipants, getSiteMembers, patchSite, type SiteDetail, type GateItem } from '@/services/sitesService'
 import {
   getIntegration, getIntegrationStations, saveIntegration, confirmIntegration,
   INTEGRATION_DIRECTIONS, INTEGRATION_FORMATS, INTEGRATION_PAYERS, INTEGRATION_MODELS, CONNECT_BASIS, TEST_STATUSES,
@@ -257,13 +257,55 @@ export function IntegrationChecklist(props: Props) {
     })}
     <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}><DialogContent className="sm:max-w-4xl w-[96vw] max-h-[90dvh] overflow-y-auto"><DialogHeader><DialogTitle>{editing?.key} · {editing?.label}</DialogTitle></DialogHeader>
       {editing && <><p className="text-xs text-muted-foreground">Связанные данные сохраняются в паспорте. Их заполнение само по себе не подтверждает пункт.</p>
-        {[editing.section, ...(EXTRA_EDITORS[editing.key] || [])].map((section) => <TaskEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh} />)}
+        {/* 1.3 не повторяет редактор 1.2 (замечание 05.10.2026): сценарии заводятся в 1.2,
+            здесь — сводка их форматов. 1.4 — назначение руководителя, а не тех. параметры. */}
+        {(editing.key === '1.3' || editing.key === '1.4' ? [] : [editing.section, ...(EXTRA_EDITORS[editing.key] || [])]).map((section) => <TaskEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh} />)}
+        {editing.key === '1.3' && <ScenarioFormats data={data} />}
+        {editing.key === '1.4' && <ProjectLeadPicker props={props} onSaved={refresh} />}
         {editing.key === '5.12' && <PartnerSessionsRule key={`match:${data.revision}`} data={data} props={props} onSaved={refresh} />}
         {editing.key === '2.8' && <PhaseDates key={`dates:${data.revision}`} props={props} state={query.data} onSaved={refresh} />}
         {editing.key === '1.4' && <p className="text-sm">Назначьте руководителя в «Работе»; сейчас: {props.site.ownerName || 'не назначен'}.</p>}
         <ResultEditor key={`${editing.key}:${data.revision}`} task={editing} props={props} data={data} onSaved={refresh} />
       </>}
     </DialogContent></Dialog>
+  </section>
+}
+
+/** 1.3 — какие сценарии и в каком формате: сводка того, что заведено в 1.2. */
+function ScenarioFormats({ data }: { data: IntegrationData }) {
+  return <section className="rounded-lg border p-3 space-y-2"><h3 className="font-semibold text-sm">Сценарии интеграции</h3>
+    <p className="text-xs text-muted-foreground">Сценарии, их направление, формат и перечни станций заводятся в пункте 1.2. Здесь проверяется, что у каждого сценария выбран формат: показ на карте, запуск и оплата зарядки, взаимный доступ, обмен данными.</p>
+    {data.scenarios.length === 0 ? <p className="text-sm text-amber-700 dark:text-amber-400">Сценариев нет — заведите их в пункте 1.2.</p>
+      : <ul className="divide-y text-sm">{data.scenarios.map((s) => <li key={s.id} className="py-1.5">
+          <span className="font-medium">{s.name || 'Без названия'}</span>
+          <span className="text-muted-foreground"> · {INTEGRATION_DIRECTIONS[s.direction]} · {INTEGRATION_FORMATS[s.format]} · станций выбрано: {s.selectedIds.length}</span>
+        </li>)}</ul>}
+  </section>
+}
+
+/** 1.4 — руководитель проекта: это «Ответственный» карточки (он отвечает за шаги и получает
+ *  напоминания). Роли регламента в «Кто ведёт проект» — отдельный состав: назначенный там
+ *  ОР руководителем не становится сам, поэтому его предлагаем назначить одной кнопкой. */
+function ProjectLeadPicker({ props, onSaved }: { props: Props; onSaved: () => Promise<void> }) {
+  const parties = useQuery({ queryKey: ['site-parties', props.companyId, props.site.id], queryFn: () => getSiteParticipants(props.companyId, props.site.id) })
+  const members = useQuery({ queryKey: ['site-members', props.companyId], queryFn: () => getSiteMembers(props.companyId) })
+  const [pick, setPick] = useState('')
+  const [busy, setBusy] = useState(false)
+  const assign = async (userId: string) => {
+    setBusy(true)
+    try { await patchSite(props.companyId, props.site.id, { owner_user_id: userId }); await props.onDone(); await onSaved(); toast.success('Руководитель проекта назначен') }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось назначить') }
+    finally { setBusy(false) }
+  }
+  // Один человек бывает на нескольких ролях — кнопка на человека, а не на роль.
+  const leads = [...new Map((parties.data?.participants ?? []).filter((p) => p.userId && p.userId !== props.site.ownerUserId).map((p) => [p.userId, p])).values()]
+  return <section className="rounded-lg border p-3 space-y-2"><h3 className="font-semibold text-sm">Руководитель проекта</h3>
+    <p className="text-sm">Сейчас: {props.site.ownerName ? <b>{props.site.ownerName}</b> : <span className="text-amber-700 dark:text-amber-400">не назначен</span>}</p>
+    <p className="text-xs text-muted-foreground">Руководитель — поле «Руководитель проекта» в «Работе» (блок «Кто ведёт и что дальше»). Роли регламента в «Кто ведёт проект» — отдельное назначение: они распределяют кнопки маршрута, но руководителя не задают.</p>
+    {leads.length > 0 && <div className="flex flex-wrap gap-2">{leads.map((p) => <Button key={p.id} size="sm" variant="outline" disabled={busy} onClick={() => void assign(p.userId!)}>Назначить руководителем: {p.name} ({p.roleCode})</Button>)}</div>}
+    <div className="flex flex-wrap gap-2"><select aria-label="Руководитель проекта" className={`${selectClass} max-w-xs`} value={pick} onChange={(e) => setPick(e.target.value)}>
+      <option value="">Другой сотрудник…</option>{(members.data ?? []).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+      <Button size="sm" disabled={!pick || busy} onClick={() => void assign(pick)}>Назначить</Button></div>
   </section>
 }
 
