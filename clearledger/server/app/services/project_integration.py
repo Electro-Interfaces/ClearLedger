@@ -198,6 +198,16 @@ def confirmation_problem(site, key, data):
         return None if result.get("comment", "").strip() else "Укажите причину неприменимости"
     if not any(result.get(f) for f in ("comment", "workRef", "docId")):
         return "Запишите результат проверки, выберите документ или свяжите поручение"
+    return requirement_problem(site, key, data)
+
+
+def requirement_problem(site, key, data):
+    """Чего не хватает в ДАННЫХ проекта, чтобы пункт можно было подтвердить.
+
+    Отдельно от записи результата: карточка показывает это заранее — у пункта в чек-листе
+    и в его окне. Раньше человек узнавал требование только из отказа при подтверждении
+    (так 1.4 «руководитель не назначен» выглядел поломкой, замечание 05.10.2026).
+    """
     p, t, w, c, st = (data[k] for k in ("partner", "technical", "work", "commercial", "settlement"))
     scenarios = data["scenarios"]
     terms_ok = bool(scenarios) and all(s.get("payer") and (s["payer"] == "none" or (s.get("model") and s.get("rate"))) for s in scenarios)

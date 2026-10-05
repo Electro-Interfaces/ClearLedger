@@ -56,10 +56,14 @@ function QueryStatus({ query }: { query: ReturnType<typeof useIntegration>['quer
   return <p role="status" className="text-sm text-muted-foreground">Загрузка интеграции…</p>
 }
 
-function SectionEditor({ section, data, props, onSaved }: { section: IntegrationSection; data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
+function SectionEditor({ section, data, props, onSaved, only }: { section: IntegrationSection; data: IntegrationData; props: Props; onSaved: () => Promise<void>; only?: string[] }) {
   const [draft, setDraft] = useState(data[section])
   const [busy, setBusy] = useState(false)
+  const [all, setAll] = useState(false)
   const group = GROUPS[section]
+  // Окно пункта показывает поля пункта, а не весь раздел: десять граф «Технических
+  // параметров» под пунктом «Руководитель назначен» читались как ошибка (05.10.2026).
+  const fields = only && !all ? group.fields.filter(([k]) => only.includes(k)) : group.fields
   const save = async () => {
     setBusy(true)
     try { await saveIntegration(props.companyId, props.site.id, { revision: data.revision, [section]: draft }); await onSaved(); toast.success('Данные сохранены. Согласование подтверждается отдельно') }
@@ -67,8 +71,9 @@ function SectionEditor({ section, data, props, onSaved }: { section: Integration
     finally { setBusy(false) }
   }
   return <section className="rounded-lg border p-3 space-y-3">
-    <h3 className="font-semibold text-sm">{group.title}</h3>
-    <div className="grid gap-3 sm:grid-cols-2">{group.fields.map(([key, label]) => <label key={key} className="block space-y-1 text-sm">{label}
+    <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-sm flex-1">{group.title}</h3>
+      {only && <button type="button" className="text-xs underline text-muted-foreground" onClick={() => setAll(!all)}>{all ? 'только поля пункта' : 'все поля раздела'}</button>}</div>
+    <div className="grid gap-3 sm:grid-cols-2">{fields.map(([key, label]) => <label key={key} className="block space-y-1 text-sm">{label}
       {key === 'launchDate' ? <Input type="date" value={draft[key] || ''} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />
         : <Textarea rows={2} value={draft[key] || ''} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />}
     </label>)}</div>
@@ -247,7 +252,7 @@ export function IntegrationChecklist(props: Props) {
     {tasks.filter((t) => showAll || t.stage === props.site.stage).map((t) => {
       const item = items.get(t.key)
       return <div key={t.key} className="border-b py-3 space-y-2 last:border-b-0"><div className="flex flex-wrap gap-2 text-sm"><span className="font-mono">{t.key}</span><span className="flex-1 min-w-40">{t.label}</span><span className="text-muted-foreground">{t.role}</span></div>
-        <p className={`text-xs ${item?.needsConfirmation ? 'text-amber-600' : item?.done ? 'text-emerald-600' : 'text-muted-foreground'}`}>{item?.needsConfirmation ? 'Требует повторного подтверждения' : item?.done ? 'Подтверждено' : item?.waived ? 'Обязательность снята' : t.required ? 'Обязательный пункт: держит переход' : 'Не подтверждено'}{item?.confirmedBy ? ` · ${item.confirmedBy}` : ''}{item?.confirmedAt ? ` · ${new Date(item.confirmedAt).toLocaleString('ru-RU')}` : ''}</p>
+        <p className={`text-xs ${item?.needsConfirmation ? 'text-amber-600' : item?.done ? 'text-emerald-600' : 'text-muted-foreground'}`}>{item?.needsConfirmation ? 'Требует повторного подтверждения' : item?.done ? 'Подтверждено' : item?.waived ? 'Обязательность снята' : `${t.required ? 'Обязательный пункт: держит переход' : 'Не подтверждено'}${t.need ? ` · не хватает: ${t.need}` : ''}`}{item?.confirmedBy ? ` · ${item.confirmedBy}` : ''}{item?.confirmedAt ? ` · ${new Date(item.confirmedAt).toLocaleString('ru-RU')}` : ''}</p>
         {data.results[t.key]?.comment && <p className="text-sm whitespace-pre-wrap">{data.results[t.key].comment}</p>}
         <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => setEditing(t)}>Данные и результат</Button>
           {props.site.mayWaive && item?.waivable && !item.done && <Button className="max-w-full h-auto min-h-9 whitespace-normal text-left" variant="ghost" size="sm" disabled={busy} onClick={() => item.waived ? void waive(t.key, false) : setWaiving(t.key)}>{item.waived ? 'Вернуть обязательность' : 'Снять обязательность под свою ответственность'}</Button>}</div>
@@ -259,7 +264,10 @@ export function IntegrationChecklist(props: Props) {
       {editing && <><p className="text-xs text-muted-foreground">Связанные данные сохраняются в паспорте. Их заполнение само по себе не подтверждает пункт.</p>
         {/* 1.3 не повторяет редактор 1.2 (замечание 05.10.2026): сценарии заводятся в 1.2,
             здесь — сводка их форматов. 1.4 — назначение руководителя, а не тех. параметры. */}
-        {(editing.key === '1.3' || editing.key === '1.4' ? [] : [editing.section, ...(EXTRA_EDITORS[editing.key] || [])]).map((section) => <TaskEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh} />)}
+        <NeedLine task={tasks.find((x) => x.key === editing.key) ?? editing} item={items.get(editing.key)} />
+        {(ITEM_VIEW[editing.key]?.sections ?? [editing.section, ...(EXTRA_EDITORS[editing.key] || [])]).map((section) => <TaskEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh}
+          only={section === (ITEM_VIEW[editing.key]?.sections?.[0] ?? editing.section) ? ITEM_VIEW[editing.key]?.fields : undefined} />)}
+        {ITEM_VIEW[editing.key]?.sections?.length === 0 && !['1.3', '1.4', '2.8'].includes(editing.key) && <p className="text-sm text-muted-foreground">Отдельных данных у пункта нет: он подтверждается результатом ниже — комментарием, документом или поручением «Трека».</p>}
         {editing.key === '1.3' && <ScenarioFormats data={data} />}
         {editing.key === '1.4' && <ProjectLeadPicker props={props} onSaved={refresh} />}
         {editing.key === '5.12' && <PartnerSessionsRule key={`match:${data.revision}`} data={data} props={props} onSaved={refresh} />}
@@ -382,17 +390,52 @@ export function IntegrationAccountingFields(props: Props) {
 type TaskSection = IntegrationTask['section']
 // Пункт чек-листа закрывается данными не одного раздела: комиссию согласуют по
 // сценариям и вместе с порядком расчётов, приёмку — протоколом в документах.
+/**
+ * Что показывать в окне пункта, если раздел по умолчанию ему не подходит.
+ * `sections` — разделы окна (пусто — данных у пункта нет, только результат),
+ * `fields` — поля первого раздела, относящиеся к пункту (остальные — по кнопке).
+ * Карта на фронте: подтверждения пунктов привязаны к разделу на сервере (отпечаток
+ * данных), и менять его значило бы сбросить уже подтверждённые пункты.
+ */
+const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[] }> = {
+  '1.1': { fields: ['name', 'purpose'] }, '1.5': { fields: ['assessment'] }, '4.1': { fields: ['legalEntity'] },
+  '1.3': { sections: [] }, '1.4': { sections: [] }, '2.8': { sections: [] },
+  '2.4': { fields: ['responsibilities', 'support'] }, '3.1': { fields: ['systems', 'protocol', 'version'] },
+  '3.4': { fields: ['access', 'security'] }, '3.5': { fields: ['acceptanceCriteria'] }, '3.6': { fields: ['contacts'] },
+  '5.1': { fields: ['access'] }, '6.5': { fields: ['support'] }, '6.13': { fields: ['productionAccess'] },
+  '2.5': { fields: ['outgoing', 'incoming', 'statisticsUse'] }, '2.6': { fields: ['brand', 'appTransitions'] },
+  '2.7': { fields: ['analytics', 'sessionHistory'] }, '3.2': { fields: ['outgoing', 'incoming'] }, '6.4': { fields: ['statisticsUse'] },
+  '4.2': { fields: ['pilotDecision'] }, '6.12': { fields: ['launchDate'] },
+  // 6.3 требует «Порядок сверки» из расчётов — раньше окно открывало коммерческие условия.
+  '6.3': { sections: ['settlement'], fields: ['disputes'] },
+  // Проверки на пилоте — это испытания, а не технические параметры.
+  '5.6': { sections: ['tests'] }, '5.7': { sections: ['tests'] }, '5.8': { sections: ['tests'] }, '5.9': { sections: ['tests'] },
+  // Своих данных нет — подтверждаются результатом.
+  '3.3': { sections: [] }, '5.2': { sections: [] }, '5.4': { sections: [] }, '6.1': { sections: [] },
+  '6.8': { sections: [] }, '6.9': { sections: [] }, '6.10': { sections: [] }, '6.11': { sections: [] }, '6.15': { sections: [] },
+}
+
+/** Что нужно для подтверждения — видно сразу, а не из отказа после нажатия. */
+function NeedLine({ task, item }: { task: IntegrationTask; item?: GateItem }) {
+  if (item?.done && !item.needsConfirmation) return null
+  // У пункта без своих данных пояснение даёт строка «Отдельных данных у пункта нет».
+  if (!task.need && ITEM_VIEW[task.key]?.sections?.length === 0 && !['1.3', '1.4', '2.8'].includes(task.key)) return null
+  return task.need
+    ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">Чтобы подтвердить пункт: {task.need}.</p>
+    : <p className="text-xs text-muted-foreground">Данных для подтверждения достаточно — запишите результат проверки и подтвердите.</p>
+}
+
 const EXTRA_EDITORS: Record<string, TaskSection[]> = {
   '2.2': ['scenarios', 'settlement'], '2.3': ['scenarios'], '6.2': ['scenarios', 'settlement'],
   '5.10': ['work'], '5.11': ['documents'], '6.6': ['scenarios'],
 }
 
-function TaskEditor({ section, data, props, onSaved }: { section: TaskSection; data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
+function TaskEditor({ section, data, props, onSaved, only }: { section: TaskSection; data: IntegrationData; props: Props; onSaved: () => Promise<void>; only?: string[] }) {
   if (section === 'scenarios') return <ScenariosEditor data={data} props={props} onSaved={onSaved} />
   if (section === 'documents') return <DocumentsEditor data={data} props={props} onSaved={onSaved} />
   if (section === 'tests') return <TestsEditor data={data} props={props} onSaved={onSaved} />
   if (section === 'reconciliations') return <ReconciliationsEditor data={data} props={props} onSaved={onSaved} />
-  return <SectionEditor section={section} data={data} props={props} onSaved={onSaved} />
+  return <SectionEditor section={section} data={data} props={props} onSaved={onSaved} only={only} />
 }
 
 const scenarioLabel = (s: IntegrationScenario) => s.name || `${INTEGRATION_DIRECTIONS[s.direction]} · ${INTEGRATION_FORMATS[s.format]}`

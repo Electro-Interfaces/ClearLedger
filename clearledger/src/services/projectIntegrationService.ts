@@ -46,7 +46,11 @@ export type IntegrationData = Record<IntegrationSection, Record<string, string>>
   tests: IntegrationTest[]; reconciliations: IntegrationReconciliation[]; listVersions: (IntegrationListVersion | Pick<IntegrationListVersion, 'scenarioId' | 'documentId' | 'note'>)[]
   results: Record<string, IntegrationResult>; dates: Record<string, { start: string; end: string }>
 }
-export interface IntegrationTask { key: string; label: string; stage: string; role: string; required?: boolean; section: IntegrationSection | 'scenarios' | 'documents' | 'tests' | 'reconciliations' }
+export interface IntegrationTask {
+  key: string; label: string; stage: string; role: string; required?: boolean; section: IntegrationSection | 'scenarios' | 'documents' | 'tests' | 'reconciliations'
+  /** Чего не хватает в данных проекта для подтверждения (null — данных достаточно). */
+  need?: string | null
+}
 export interface IntegrationState {
   data: IntegrationData; tasks: IntegrationTask[]; gates: GateState[]
   phases: { code: string; label: string; term: string; stages: string[] }[]
