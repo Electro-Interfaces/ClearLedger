@@ -508,6 +508,11 @@ async def create_site(db: AsyncSession, company_id, payload: dict[str, Any],
     for f, v in fields.items():
         setattr(site, f, _coerce(f, v))
     site.manual_fields = sorted(fields.keys())
+    # Руководитель по умолчанию — создатель, пока не назначат другого (решение МАГа
+    # 05.10.2026): без этого ни один из четырёх интеграционных проектов не имел
+    # руководителя, и пункт 1.4 держал каждый новый проект.
+    if not site.owner_user_id and user is not None:
+        site.owner_user_id = user.id
     region_norm, region = resolver.resolve(site.region, site.city)
     site.region_norm, site.region_id = region_norm, (region.id if region else None)
     site.dedup_key = _dedup_key(
