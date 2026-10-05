@@ -542,7 +542,8 @@ export async function getLocationContracts(locationId: string): Promise<Location
 // ---- Контактные лица контрагента ----
 
 export const CONTACT_ROLE_LABEL: Record<string, string> = {
-  contract: 'Договор', tech: 'Техника', comm: 'Взаимодействие', other: 'Прочее',
+  contract: 'Договор', tech: 'Техника', comm: 'Взаимодействие', finance: 'Финансы и сверки',
+  support: 'Поддержка пользователей', other: 'Прочее',
 }
 
 export interface CounterpartyContact {

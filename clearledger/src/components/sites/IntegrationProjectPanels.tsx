@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { StationScopePicker } from '@/components/workspace/StationScopePicker'
-import { getContracts, getCounterparties } from '@/services/referenceService'
+import { getContracts, getCounterparties, getCounterpartyContacts, createCounterpartyContact, updateCounterpartyContact, deleteCounterpartyContact, CONTACT_ROLE_LABEL, type CounterpartyContact } from '@/services/referenceService'
+import { post } from '@/services/apiClient'
 import { getProjectCase, openProjectCase, getSiteDocs, downloadSiteDoc, uploadSiteDoc, waiveSiteGate, getSiteParticipants, getSiteMembers, patchSite, FUNNEL_STAGES, type SiteDetail, type GateItem } from '@/services/sitesService'
 import {
   getIntegration, getIntegrationStations, saveIntegration, confirmIntegration,
@@ -175,6 +176,7 @@ export function IntegrationPassport(props: Props) {
   return <div className="space-y-4">
     <p className="text-sm text-muted-foreground">Поля заполняются по этапам. Заполнение паспорта не подтверждает согласование.</p>
     <SectionEditor key={`partner:${data.revision}`} section="partner" data={data} props={props} onSaved={refresh} />
+    <PartnerContacts data={data} props={props} onSaved={refresh} />
     <LeadEditor key={`lead:${data.revision}`} data={data} props={props} onSaved={refresh} />
     <ScenariosEditor key={`scenarios:${data.revision}`} data={data} props={props} onSaved={refresh} />
     {(['commercial', 'settlement', 'data', 'technical'] as const).map((section) => <SectionEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh} />)}
@@ -193,6 +195,7 @@ export function IntegrationWorkPlan(props: Props) {
   const showTests = at('construction') || d.tests.length > 0
   const showDates = at('negotiation') || Object.keys(d.dates || {}).length > 0
   return <div className="space-y-4">
+    <PartnerContacts data={d} props={props} onSaved={refresh} compact />
     {showWork && <SectionEditor key={d.revision} section="work" data={d} props={props} onSaved={refresh} />}
     {showTests && <TestsEditor key={`tests:${d.revision}`} data={d} props={props} onSaved={refresh} />}
     {showDates && <PhaseDates key={`dates:${d.revision}`} props={props} state={query.data} onSaved={refresh} />}
@@ -311,12 +314,100 @@ export function IntegrationChecklist(props: Props) {
           only={section === 'lead' ? ITEM_VIEW[editing.key]?.leadFields : section === (ITEM_VIEW[editing.key]?.sections?.[0] ?? editing.section) ? ITEM_VIEW[editing.key]?.fields : undefined} />)}
         {ITEM_VIEW[editing.key]?.sections?.length === 0 && !['1.4', '2.8'].includes(editing.key) && <p className="text-sm text-muted-foreground">Отдельных данных у пункта нет: он подтверждается результатом ниже — комментарием, документом или поручением «Трека».</p>}
         {editing.key === '1.4' && <ProjectLeadPicker props={props} onSaved={refresh} />}
+        {editing.key === '1.1' && <PartnerContacts data={data} props={props} onSaved={refresh} />}
         {editing.key === '5.12' && <PartnerSessionsRule key={`match:${data.revision}`} data={data} props={props} onSaved={refresh} />}
         {editing.key === '2.8' && <PhaseDates key={`dates:${data.revision}`} props={props} state={query.data} onSaved={refresh} />}
         {editing.key === '1.4' && <p className="text-sm">Назначьте руководителя в «Работе»; сейчас: {props.site.ownerName || 'не назначен'}.</p>}
         <ResultEditor key={`${editing.key}:${data.revision}`} task={editing} props={props} data={data} onSaved={refresh} />
       </>}
     </DialogContent></Dialog>
+  </section>
+}
+
+/**
+ * Контакты партнёра — люди на его стороне: договор, коммерция, техника/протокол, финансы
+ * и сверки, поддержка пользователей. Хранятся в карточке контрагента, а не в проекте:
+ * тот же человек нужен и в договорах, и в «Контрагентах», и заводить его дважды значит
+ * разойтись в телефоне через месяц. Партнёр ещё не связан с контрагентом — блок
+ * предлагает выбрать карточку или завести её по названию партнёра.
+ */
+const EMPTY_CONTACT = { name: '', position: '', role: 'comm', phone: '', email: '', notes: '' }
+function PartnerContacts({ data, props, onSaved, compact }: { data: IntegrationData; props: Props; onSaved: () => Promise<void>; compact?: boolean }) {
+  const cpId = data.accounting?.counterpartyId || ''
+  const qc = useQueryClient()
+  const contacts = useQuery({ queryKey: ['cp-contacts', cpId], queryFn: () => getCounterpartyContacts(cpId), enabled: !!cpId })
+  const cps = useQuery({ queryKey: ['counterparties', props.companyId], queryFn: () => getCounterparties(props.companyId), enabled: !cpId && !compact })
+  const [pick, setPick] = useState('')
+  const [form, setForm] = useState<typeof EMPTY_CONTACT & { id?: string }>(EMPTY_CONTACT)
+  const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const partner = data.partner?.name || ''
+  const link = async (id: string) => {
+    setBusy(true)
+    try { await saveIntegration(props.companyId, props.site.id, { revision: data.revision, accounting: { ...data.accounting, counterpartyId: id } }); await onSaved(); toast.success('Партнёр связан с контрагентом') }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось связать') } finally { setBusy(false) }
+  }
+  const createAndLink = async () => {
+    setBusy(true)
+    try {
+      const cp = await post<{ id: string }>('/api/references/counterparties', { company_id: props.companyId, name: partner, inn: '', type: 'ЮЛ', aliases: ['integration'] })
+      await qc.invalidateQueries({ queryKey: ['counterparties', props.companyId] })
+      setBusy(false); await link(cp.id)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось завести контрагента'); setBusy(false) }
+  }
+  const save = async () => {
+    setBusy(true)
+    const body = { name: form.name.trim(), position: form.position.trim() || null, role: form.role, phone: form.phone.trim() || null, email: form.email.trim() || null, notes: form.notes.trim() || null }
+    try {
+      if (form.id) await updateCounterpartyContact(cpId, form.id, body); else await createCounterpartyContact(cpId, body)
+      await contacts.refetch(); setForm(EMPTY_CONTACT); setEditing(false); toast.success('Контакт сохранён')
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось сохранить контакт') } finally { setBusy(false) }
+  }
+  const remove = async (c: CounterpartyContact) => {
+    setBusy(true)
+    try { await deleteCounterpartyContact(cpId, c.id); await contacts.refetch() }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось удалить') } finally { setBusy(false) }
+  }
+  const rows = contacts.data ?? []
+  return <section className="rounded-lg border p-3 space-y-2">
+    <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-sm flex-1">Контакты партнёра{rows.length ? ` · ${rows.length}` : ''}</h3>
+      {cpId && !editing && <Button size="sm" variant="outline" onClick={() => { setForm(EMPTY_CONTACT); setEditing(true) }}>Добавить контакт</Button>}</div>
+    {!cpId && (compact
+      ? <p className="text-xs text-muted-foreground">Партнёр не связан с контрагентом — контакты заводятся в «Паспорте» после связи.</p>
+      : <div className="space-y-2 text-sm">
+          <p className="text-xs text-muted-foreground">Контакты хранятся в карточке контрагента партнёра — их видно и здесь, и в «Контрагентах», и в договорах. Сначала свяжите партнёра с контрагентом.</p>
+          <div className="flex flex-wrap gap-2 items-center">
+            <select aria-label="Контрагент партнёра" className={`${selectClass} max-w-sm`} value={pick} onChange={(e) => setPick(e.target.value)}>
+              <option value="">Выбрать контрагента…</option>{(cps.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}{c.inn ? ` · ИНН ${c.inn}` : ''}</option>)}</select>
+            <Button size="sm" variant="outline" disabled={!pick || busy} onClick={() => void link(pick)}>Связать</Button>
+            {partner && <Button size="sm" disabled={busy} onClick={() => void createAndLink()}>Завести контрагента «{partner}»</Button>}
+          </div>
+        </div>)}
+    {cpId && contacts.isLoading && <p className="text-xs text-muted-foreground">Загрузка…</p>}
+    {cpId && !contacts.isLoading && rows.length === 0 && !editing && <p className="text-xs text-muted-foreground">Контактов нет. Обычно нужны: договор, коммерция, техника и протокол, финансы и сверки, поддержка пользователей.</p>}
+    {rows.length > 0 && <ul className="divide-y text-sm">{rows.map((c) => <li key={c.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 py-1.5">
+      <span className="rounded border px-1.5 text-[11px] text-muted-foreground">{CONTACT_ROLE_LABEL[c.role] ?? c.role}</span>
+      <span className="font-medium">{c.name}</span>{c.position && <span className="text-xs text-muted-foreground">{c.position}</span>}
+      {c.phone && <a className="text-xs text-primary hover:underline" href={`tel:${c.phone.replace(/[^\d+]/g, '')}`}>{c.phone}</a>}
+      {c.email && <a className="text-xs text-primary hover:underline" href={`mailto:${c.email}`}>{c.email}</a>}
+      {!compact && c.notes && <span className="text-xs text-muted-foreground">{c.notes}</span>}
+      {!compact && <span className="ml-auto flex gap-1">
+        <Button size="sm" variant="ghost" onClick={() => { setForm({ id: c.id, name: c.name, position: c.position ?? '', role: c.role, phone: c.phone ?? '', email: c.email ?? '', notes: c.notes ?? '' }); setEditing(true) }}>изменить</Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void remove(c)}>удалить</Button></span>}
+    </li>)}</ul>}
+    {editing && <div className="rounded-md border p-2 space-y-2">
+      <div className="grid gap-2 sm:grid-cols-3">
+        <Input aria-label="ФИО контакта" placeholder="ФИО" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        <Input aria-label="Должность контакта" placeholder="Должность" value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} />
+        <select aria-label="Направление контакта" className={selectClass} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+          {Object.entries(CONTACT_ROLE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+        <Input aria-label="Телефон контакта" placeholder="Телефон" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+        <Input aria-label="Почта контакта" placeholder="Почта" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        <Input aria-label="Заметка" placeholder="Заметка: когда звонить, за что отвечает" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+      </div>
+      <div className="flex gap-2"><Button size="sm" disabled={!form.name.trim() || busy} onClick={() => void save()}>Сохранить контакт</Button>
+        <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setForm(EMPTY_CONTACT) }}>Отмена</Button></div>
+    </div>}
   </section>
 }
 
