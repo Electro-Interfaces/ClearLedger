@@ -4,7 +4,7 @@
  * справа — выбранный контрагент с полными реквизитами из 1С, где он работает,
  * и его договоры (с детальной карточкой каждого).
  */
-import { useState, useMemo, useEffect } from 'react'
+import { Fragment, useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { DocumentWindow } from '@/components/books/DocumentWindow'
@@ -46,7 +46,7 @@ import {
 } from '@/hooks/useReferences'
 import * as refs from '@/services/referenceService'
 import { getCorporateClients } from '@/services/corporateService'
-import { ROLE_LABEL, PAYMENT_META, paidThroughLabel } from '@/types/settlement'
+import { ROLE_LABEL, PAYMENT_META, paidThroughLabel, type SettlementDetail } from '@/types/settlement'
 import { ContractScopeDialog, ContractScopeBadgeLabel } from '@/components/reference/ContractScopeDialog'
 import { ContractStationsField, contractStatus, type ContractStationsValue } from '@/components/reference/ContractStationsField'
 import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
@@ -54,6 +54,8 @@ import { getSiteMembers } from '@/services/sitesService'
 import { ContractAppsField, saveContractLinks, useAppLabel, type ContractLinkDraft } from '@/components/reference/ContractAppsField'
 import { useSearchParams } from 'react-router-dom'
 import { ContractDocumentsBlock } from '@/components/reference/ContractDocumentsBlock'
+import { ContractQualityPanel } from '@/components/reference/ContractQualityPanel'
+import { useStationContracts, stationHitLabel } from '@/components/reference/useStationContracts'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import type { Counterparty, Contract, CounterpartyType } from '@/types'
 
@@ -481,13 +483,84 @@ function ContactFormDialog({ counterpartyId, edit, onSaved, children }: {
 }
 
 // ─── Блок «Станции и расчёты» (energy: платёжная дисциплина контрагента) ─────
-function SettlementsBlock({ cp }: { cp: Counterparty }) {
+/** Станции договора по реестру: станция, роль, плата, оплачено по, срок по реестру. */
+function SettlementRows({ rows }: { rows: SettlementDetail[] }) {
+  return (
+    <div className="rounded-md border max-h-72 overflow-y-auto">
+      <Table>
+        <TableHeader className="sticky top-0 bg-card z-10">
+          <TableRow>
+            <TableHead>Станция</TableHead>
+            <TableHead className="w-[120px]">Роль</TableHead>
+            <TableHead className="w-[110px] text-right">Плата, ₽/мес</TableHead>
+            <TableHead className="w-[160px]">Оплачено</TableHead>
+            <TableHead className="w-[190px]">Срок по реестру</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((r, i) => (
+            <TableRow key={`${r.locationId}-${r.role}-${i}`}>
+              <TableCell className="text-sm">
+                <span className="font-medium">{r.buNumber || r.stationCode || '—'}</span>
+                {r.stationName && <span className="text-muted-foreground"> · {r.stationName}</span>}
+              </TableCell>
+              <TableCell className="text-sm">{ROLE_LABEL[r.role] ?? r.role}</TableCell>
+              <TableCell className="text-right text-sm tabular-nums">{r.amountGross ? Math.round(r.amountGross).toLocaleString('ru-RU') : '—'}</TableCell>
+              <TableCell><Badge variant="outline" className={`text-[11px] ${PAYMENT_META[r.paymentStatus]?.cls ?? ''}`}>{paidThroughLabel(r)}</Badge></TableCell>
+              <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                {r.contractStart || r.contractEnd ? `${r.contractStart ?? '…'} — ${r.contractEnd ?? '…'}` : '—'}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+/** Расчёты контрагента по станциям (из реестра аренды и энергоснабжения). */
+function useCpSettlements(cp: Counterparty): SettlementDetail[] {
   const { data: all = [] } = useSettlementsDetail()
-  const rows = useMemo(
+  return useMemo(
     () => all.filter((s) => s.counterpartyId
       && (s.counterpartyId === cp.id || (cp.externalRef && s.counterpartyId === cp.externalRef))),
     [all, cp.id, cp.externalRef],
   )
+}
+
+/** Станции по договору — под строкой договора: к какому договору относится расчёт, видно сразу. */
+function ContractStationsRow({ contract: c, rows, cols }: { contract: Contract; rows: SettlementDetail[]; cols: number }) {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const monthly = rows.reduce((s, r) => s + (r.amountGross ?? 0), 0)
+  // Срок в реестре есть и расходится с договором (или в договоре пуст) — предложить взять,
+  // если по всем станциям договора он один. Решает человек: реестр бывает старше договора.
+  const ends = [...new Set(rows.map((r) => r.contractEnd).filter(Boolean))] as string[]
+  const fill = useMutation({
+    mutationFn: () => refs.updateContract(companyId, c.id, { validUntil: ends[0] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['references', companyId] }); toast.success(`Срок договора: до ${ends[0]}`) },
+    onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
+  return (
+    <TableRow className="hover:bg-transparent">
+      <TableCell colSpan={cols} className="pt-0 pb-3">
+        <div className="flex flex-wrap items-center gap-2 mb-1.5 text-xs text-muted-foreground">
+          <span>Станции по договору: {rows.length}{monthly > 0 ? ` · ${Math.round(monthly).toLocaleString('ru-RU')} ₽/мес` : ''}</span>
+          {ends.length === 1 && c.validUntil !== ends[0] && (
+            <Button size="sm" variant="outline" className="h-6 text-[11px]" disabled={fill.isPending} onClick={() => fill.mutate()}>
+              {c.validUntil ? `В договоре срок до ${c.validUntil}, в реестре — до ${ends[0]}: взять из реестра` : `В договоре срок не указан — взять из реестра: до ${ends[0]}`}
+            </Button>
+          )}
+        </div>
+        <SettlementRows rows={rows} />
+      </TableCell>
+    </TableRow>
+  )
+}
+
+/** Расчёты, у которых не найден договор: строка реестра есть, договора под ней нет. */
+function SettlementsBlock({ cp, contractIds }: { cp: Counterparty; contractIds: Set<string> }) {
+  const rows = useCpSettlements(cp).filter((s) => !s.contractId || !contractIds.has(s.contractId))
   if (rows.length === 0) return null
   const monthly = rows.reduce((sum, r) => sum + (r.amountGross ?? 0), 0)
   const unpaid = rows.filter((r) => r.paymentStatus === 'unpaid').length
@@ -495,7 +568,7 @@ function SettlementsBlock({ cp }: { cp: Counterparty }) {
     <div>
       <div className="flex items-center gap-2 flex-wrap mb-2">
         <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
-          Станции и расчёты ({rows.length})
+          Расчёты по станциям без договора ({rows.length})
         </p>
         {monthly > 0 && (
           <Badge variant="outline" className="text-[11px]">
@@ -508,45 +581,8 @@ function SettlementsBlock({ cp }: { cp: Counterparty }) {
           </Badge>
         )}
       </div>
-      <div className="rounded-md border max-h-72 overflow-y-auto">
-        <Table>
-          <TableHeader className="sticky top-0 bg-card z-10">
-            <TableRow>
-              <TableHead>Станция</TableHead>
-              <TableHead className="w-[130px]">Роль</TableHead>
-              <TableHead className="w-[110px] text-right">Плата, ₽/мес</TableHead>
-              <TableHead className="w-[170px]">Оплата</TableHead>
-              <TableHead className="w-[150px]">Срок договора</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r, i) => (
-              <TableRow key={`${r.locationId}-${r.role}-${i}`}>
-                <TableCell className="text-sm">
-                  <span className="font-medium">{r.buNumber || r.stationCode || '—'}</span>
-                  {r.stationName && (
-                    <span className="text-muted-foreground"> · {r.stationName}</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-sm">{ROLE_LABEL[r.role] ?? r.role}</TableCell>
-                <TableCell className="text-right text-sm tabular-nums">
-                  {r.amountGross ? Math.round(r.amountGross).toLocaleString('ru-RU') : '—'}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className={`text-[11px] ${PAYMENT_META[r.paymentStatus]?.cls ?? ''}`}>
-                    {paidThroughLabel(r)}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                  {r.contractStart || r.contractEnd
-                    ? `${r.contractStart ?? '…'} — ${r.contractEnd ?? '…'}`
-                    : '—'}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <p className="mb-2 text-xs text-muted-foreground">Строки реестра аренды и энергоснабжения по станциям этого контрагента, к которым не найден договор: заведите договор (кнопка «Добавить» выше) или поправьте охват существующего.</p>
+      <SettlementRows rows={rows} />
     </div>
   )
 }
@@ -703,6 +739,12 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
     }
     return [...m.entries()].sort((a, b) => b[1] - a[1])
   }, [contracts, isEnergy])
+  const cpSettlements = useCpSettlements(cp)
+  const settlementsByContract = useMemo(() => {
+    const m = new Map<string, SettlementDetail[]>()
+    for (const s of cpSettlements) if (s.contractId) m.set(s.contractId, [...(m.get(s.contractId) ?? []), s])
+    return m
+  }, [cpSettlements])
 
   return (
     <div className="space-y-5">
@@ -808,7 +850,8 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                 </TableRow>
               )}
               {contracts.map((c) => (
-                <TableRow key={c.id}>
+                <Fragment key={c.id}>
+                <TableRow className={isEnergy && settlementsByContract.get(c.id)?.length ? 'border-b-0' : undefined}>
                   <TableCell>
                     <ContractDetailDialog contract={c}>
                       <button className="font-mono text-sm text-primary hover:underline text-left">{c.number}</button>
@@ -843,6 +886,9 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                     )}
                   </TableCell>
                 </TableRow>
+                {isEnergy && !!settlementsByContract.get(c.id)?.length &&
+                  <ContractStationsRow contract={c} rows={settlementsByContract.get(c.id)!} cols={isEnergy ? 5 : 4} />}
+                </Fragment>
               ))}
             </TableBody>
           </Table>
@@ -851,7 +897,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
 
       {/* Связь со слоем данных: energy — платёжная дисциплина по станциям,
           fuel — документы БП, сопоставленные по ИНН */}
-      {isEnergy ? <SettlementsBlock cp={cp} /> : <ActivityBlock cp={cp} />}
+      {isEnergy ? <SettlementsBlock cp={cp} contractIds={new Set(contracts.map((c) => c.id))} /> : <ActivityBlock cp={cp} />}
 
       {/* Все реквизиты из 1С */}
       {cp.externalRef && (
@@ -1381,6 +1427,10 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
     return [...m.entries()].sort((a, b) => b[1] - a[1])
   }, [bindings.data])
 
+  // Поиск по локации: станция (название, код, № БУ, адрес) или проект → её договоры.
+  const stationSearch = useStationContracts()
+  const stationHit = useMemo(() => stationSearch(search), [stationSearch, search])
+
   const typeCounts = useMemo(() => {
     const m = new Map<string, number>()
     for (const c of allContracts) { const t = c.type || '—'; m.set(t, (m.get(t) ?? 0) + 1) }
@@ -1397,7 +1447,7 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
       if (contractFilter && c.id !== contractFilter) return false
       if (!q) return true
       const name = cpName.get(c.counterpartyId) ?? ''
-      return c.number.toLowerCase().includes(q) || name.toLowerCase().includes(q)
+      return c.number.toLowerCase().includes(q) || name.toLowerCase().includes(q) || !!stationHit?.contractIds.has(c.id)
     })
     const sign = sortDir === 'asc' ? 1 : -1
     return [...list].sort((a, b) => {
@@ -1420,7 +1470,7 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
       if (!bd) return -1
       return sign * ad.localeCompare(bd)
     })
-  }, [allContracts, search, typeFilter, cpName, sortKey, sortDir, grouped, bindings.data, appFilter, projectFilter, contractFilter])
+  }, [allContracts, search, typeFilter, cpName, sortKey, sortDir, grouped, bindings.data, appFilter, projectFilter, contractFilter, stationHit])
   const groupStat = useMemo(() => {
     const m = new Map<string, { n: number; sum: number }>()
     for (const c of filtered) { const s = m.get(c.counterpartyId) ?? { n: 0, sum: 0 }; s.n++; s.sum += c.amountLimit ?? 0; m.set(c.counterpartyId, s) }
@@ -1442,7 +1492,7 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input placeholder="Поиск по номеру или контрагенту..." value={search}
+            <Input placeholder="Номер, контрагент, станция (название, код, № БУ) или проект…" value={search}
               onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" />
           </div>
           <span className="text-[11px] text-muted-foreground whitespace-nowrap">
@@ -1456,6 +1506,7 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
           </ContractFormDialog>
         </div>
 
+        {stationHit && <p className="text-xs text-muted-foreground -mt-1">По локации {stationHitLabel(stationHit)} · договоров {stationHit.contractIds.size}. Общие договоры компании (на все станции) в этот отбор не входят.</p>}
         {/* Приложение и проект: договоры, привязанные к ним или используемые ими */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <select aria-label="Приложение" className="h-8 rounded-md border bg-background px-2" value={appFilter} onChange={(e) => setParam('app', e.target.value)}>
@@ -1709,6 +1760,7 @@ export function ContractorsPage() {
   const { data: counterparties = [], isLoading } = useCounterparties()
   const { data: allContracts = [] } = useContracts()
   const [view, setView] = useState<'counterparties' | 'contracts' | 'corp' | 'quality'>('counterparties')
+  const [, setSearchParams] = useSearchParams()
   // <1024 (порог грида lg): мастер-деталь — карточка шторкой поверх списка.
   const isNarrow = useMaxWidth(1024)
   const [search, setSearch] = useState('')
@@ -1769,6 +1821,15 @@ export function ContractorsPage() {
     return m
   }, [counterparties])
 
+  // Поиск по локации: контрагенты договоров станции и её строк реестра.
+  const stationSearch = useStationContracts()
+  const stationCps = useMemo(() => {
+    const hit = stationSearch(search)
+    if (!hit) return null
+    const ids = new Set(hit.counterpartyIds)
+    for (const c of allContracts) if (hit.contractIds.has(c.id) && c.counterpartyId) ids.add(c.counterpartyId)
+    return { hit, ids }
+  }, [stationSearch, search, allContracts])
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     const list = counterparties.filter((c) => {
@@ -1786,6 +1847,7 @@ export function ContractorsPage() {
       // ИНН, КПП, ОГРН и номер договора этого контрагента.
       const hay = [c.name, c.fullName, c.inn, c.kpp, c.ogrn].filter(Boolean).join(' ').toLowerCase()
       if (hay.includes(q)) return true
+      if (stationCps && (stationCps.ids.has(c.id) || (c.externalRef && stationCps.ids.has(c.externalRef)))) return true
       return contractNumbers(c).some((n) => n.toLowerCase().includes(q))
     })
     const st = (c: Counterparty) => stats.get(c.id)
@@ -1800,7 +1862,7 @@ export function ContractorsPage() {
         (st(b)?.lastDoc ?? '').localeCompare(st(a)?.lastDoc ?? ''))
       default: return list
     }
-  }, [counterparties, search, roleFilter, flag, sortBy, contractCount, stats])
+  }, [counterparties, search, roleFilter, flag, sortBy, contractCount, stats, stationCps])
 
   const selected = counterparties.find((c) => c.id === selectedId) ?? null
   const chip = chipCls
@@ -1845,7 +1907,12 @@ export function ContractorsPage() {
 
       {view === 'quality' ? (
         // Из проверки — сразу в карточку: болезнь показана, чтобы её пошли лечить.
-        <CounterpartyQuality onOpen={(id) => { setSelectedId(id); setView('counterparties') }} />
+        <>
+          <ContractQualityPanel
+            onContract={(id) => { setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('contract', id); return n }); setView('contracts') }}
+            onCounterparty={(id) => { setSelectedId(id); setView('counterparties') }} />
+          <CounterpartyQuality onOpen={(id) => { setSelectedId(id); setView('counterparties') }} />
+        </>
       ) : view === 'corp' ? (
         <CorpClientsView />
       ) : view === 'contracts' ? (
@@ -1859,9 +1926,10 @@ export function ContractorsPage() {
           <CardContent className="p-3 flex flex-col gap-2.5 min-h-0">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input placeholder="Имя, ИНН, КПП, ОГРН или номер договора…" value={search}
+              <Input placeholder="Имя, ИНН, № договора, станция или проект…" value={search}
                 onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" />
             </div>
+            {stationCps && <p className="text-[11px] text-muted-foreground -mt-1">По локации {stationHitLabel(stationCps.hit)} · контрагентов {stationCps.ids.size}</p>}
 
             {/* Фильтр по ролям */}
             <div className="flex flex-wrap gap-1">

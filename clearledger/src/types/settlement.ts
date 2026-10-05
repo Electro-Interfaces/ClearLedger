@@ -29,6 +29,8 @@ export interface StationSettlement {
 
 export interface SettlementDetail {
   locationId: string
+  /** Договор, к которому относится расчёт станции. */
+  contractId?: string | null
   stationCode: string | null
   stationName: string | null
   buNumber: string | null

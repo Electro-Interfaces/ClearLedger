@@ -939,6 +939,8 @@ class SettlementResponse(BaseModel):
 class SettlementDetail(BaseModel):
     """Строка детализации платёжной дисциплины: станция × контрагент × договор × оплата."""
     locationId: str
+    # Ссылка на договор: по ней карточка контрагента кладёт расчёт под свой договор.
+    contractId: str | None = None
     stationCode: str | None = None
     stationName: str | None = None
     buNumber: str | None = None

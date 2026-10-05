@@ -946,8 +946,13 @@ async def contract_bindings(
         if ln.project_ref:
             e["projects"].add(ln.project_ref)
     refs = set().union(*(e["projects"] for e in out.values())) if out else set()
+    # Станции договора — для поиска «все договоры этой локации» по названию, коду, № БУ.
+    locs: dict[str, list[str]] = {}
+    for c_id, l_id in (await db.execute(select(ContractLocation.contract_id, ContractLocation.location_id)
+                                         .where(ContractLocation.company_id == cid))).all():
+        locs.setdefault(str(c_id), []).append(l_id)
     return {"contracts": {k: {kk: sorted(vv) for kk, vv in e.items()} for k, e in out.items()},
-            "projects": await _project_labels(db, cid, refs)}
+            "projects": await _project_labels(db, cid, refs), "locations": locs}
 
 
 @router.get("/contract-projects")
@@ -1550,6 +1555,7 @@ async def settlements_detail(
             counterpartyName=(cp_map.get(str(r.counterparty_id))
                               if r.counterparty_id else None),
             contractNumber=contr_map.get(r.contract_id) if r.contract_id else None,
+            contractId=str(r.contract_id) if r.contract_id else None,
             basis=r.basis,
             paidThrough=r.paid_through,
             paymentStatus=r.payment_status,

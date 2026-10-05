@@ -485,6 +485,8 @@ export interface ContractBindings {
   /** По договору: приложения и проекты (привязанные ∪ используемые), `linked` — только явные (`app` или `app|ref`). */
   contracts: Record<string, { apps: string[]; projects: string[]; linked: string[] }>
   projects: Record<string, string>
+  /** Станции договора (адресный охват): id договора → id станций. */
+  locations?: Record<string, string[]>
 }
 export interface ContractProjectOption { ref: string; label: string; kind: string }
 
