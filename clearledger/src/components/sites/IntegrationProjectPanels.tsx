@@ -250,8 +250,9 @@ export function IntegrationChecklist(props: Props) {
   const [editing, setEditing] = useState<IntegrationTask | null>(null)
   const [showAll, setShowAll] = useState(false)
   // Стадия, которую смотрим: по умолчанию текущая, со схемы — выбранная (?pstage=).
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const focus = params.get('pstage')
+  const focusItem = params.get('pitem')
   const [viewStage, setViewStage] = useState(focus || props.site.stage)
   const top = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -262,6 +263,14 @@ export function IntegrationChecklist(props: Props) {
   const [waiving, setWaiving] = useState<string | null>(null)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
+  // Ссылка «открыть пункт» из шапки хода: открыть окно пункта и убрать метку из адреса,
+  // чтобы закрытое окно не открывалось снова.
+  const linked = focusItem ? query.data?.tasks.find((t) => t.key === focusItem) : undefined
+  useEffect(() => {
+    if (!linked) return
+    setViewStage(linked.stage); setShowAll(false); setEditing(linked)
+    setParams((prev) => { const n = new URLSearchParams(prev); n.delete('pitem'); return n }, { replace: true })
+  }, [linked, setParams])
   if (!query.data) return <QueryStatus query={query} />
   const { data, tasks, gates } = query.data
   const items = new Map<string, GateItem>(gates.flatMap((g) => g.items).map((i) => [i.key, i]))

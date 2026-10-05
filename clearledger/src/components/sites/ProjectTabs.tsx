@@ -16,7 +16,9 @@
  *   История       — стадии, касания, правки, импорт.
  *
  * Правка любого поля помечает его «ручным»: следующий импорт файла его не тронет.
- */
+ */
+import { useSearchParams } from 'react-router-dom'
+import { getIntegration } from '@/services/projectIntegrationService'
 import { ProjectContractsBlock } from './ProjectContractsBlock'
 import { ProjectOverviewTab } from './ProjectOverviewTab'
 import { ProjectDocumentsTrack, PromoteProjectFile } from './ProjectDocumentsTrack'
@@ -125,6 +127,48 @@ export function ProjectTabContent({ tab, site, companyId, onDone, onTab }: {
 /* ── Ход по маршруту ────────────────────────────────────────────────────── */
 
 /**
+ * Что нужно, чтобы перейти дальше — прямо в шапке хода (замечание МАГа 05.10.2026).
+ *
+ * Шаг вперёд держит флаг «обязательные пункты стадии закрыты»; раньше вместо них
+ * печатался его код («отмечено «integration_gate»»), и было непонятно, что делать.
+ * Здесь — куда ведёт шаг, какие обязательные пункты закрыты, чего по каждому не хватает,
+ * и переход в сам пункт (окно пункта в чек-листе ниже).
+ */
+function NextStepCriteria({ site, companyId, actions }: { site: SiteDetail; companyId: string; actions: CaseAction[] }) {
+  const [, setParams] = useSearchParams()
+  const isIntegration = site.kind === 'integration'
+  const integ = useQuery({ queryKey: ['project-integration', companyId, site.id], queryFn: () => getIntegration(companyId, site.id), enabled: isIntegration })
+  const need = new Map((integ.data?.tasks ?? []).map((t) => [t.key, t.need]))
+  const step = actions.find((a) => a.is_positive === true && !a.is_discretionary)
+  const items = (site.gate?.items ?? []).filter((i) => i.required && !i.waived)
+  if (!step || items.length === 0) return null
+  const done = items.filter((i) => i.done).length
+  const all = done === items.length
+  const openItem = (key: string) => setParams((prev) => { const n = new URLSearchParams(prev); n.set('pstage', site.stage); n.set('pitem', key); return n }, { replace: true })
+  return (
+    <div data-zone="Что нужно для перехода дальше" className={`rounded-md border p-2.5 space-y-1.5 ${all ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-amber-500/40 bg-amber-500/5'}`}>
+      <div className="text-sm font-medium">
+        Чтобы перейти к «{step.to_name}» (кнопка «{step.verb}»): закрыто {done} из {items.length} обязательных пунктов
+      </div>
+      <ul className="space-y-1">{items.map((i) => (
+        <li key={i.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
+          {i.done ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            : <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-amber-500" />}
+          <span className="font-mono text-xs text-muted-foreground">{i.key}</span>
+          <span className={i.done ? 'text-muted-foreground' : ''}>{i.label}</span>
+          {!i.done && need.get(i.key) && <span className="text-xs text-amber-700 dark:text-amber-400">— не хватает: {need.get(i.key)}</span>}
+          {!i.done && isIntegration && <button type="button" className="text-xs underline" onClick={() => openItem(i.key)}>открыть пункт</button>}
+        </li>
+      ))}</ul>
+      <div className="text-xs text-muted-foreground">
+        {all ? `Все обязательные пункты закрыты — нажмите «${step.verb}».`
+          : 'Пункт закрывается подтверждением в чек-листе ниже: заполните данные, запишите результат и нажмите «Подтвердить выполнение».'}
+      </div>
+    </div>
+  )
+}
+
+/**
  * Причина недоступности — на языке проекта, а не графа.
  *
  * Координатор называет условие кодом вида проекта («new_build»), потому что
@@ -138,6 +182,9 @@ const PROJECT_KIND_WORDS: Record<string, string> = {
 }
 function humanReason(reason: string | null | undefined): string {
   let out = reason ?? 'недоступно'
+  // Условие ребра «отмечено «integration_gate»» — это флаг «обязательные пункты стадии
+  // закрыты». Код флага человеку ничего не говорит: список пунктов — в блоке выше.
+  out = out.replace(/отмечено «\w*gate»/g, 'закрыты обязательные пункты стадии (список выше)')
   for (const [code, word] of Object.entries(PROJECT_KIND_WORDS)) {
     out = out.replaceAll(`«${code}»`, `«${word}»`)
   }
@@ -442,6 +489,7 @@ function RoutePanel({ site, companyId, onDone }: {
             Сейчас ход за другой службой — доступных вам действий на этой стадии нет.
           </div>
         )}
+        <NextStepCriteria site={site} companyId={companyId} actions={state.actions ?? []} />
         <div data-zone="Действия маршрута: чей сейчас шаг" className="flex flex-wrap gap-2">
           {/* Залит ровно один шаг — тот, которым маршрут идёт вперёд. Когда «ТП
               выполнено» и «Отложить» одинаково синие, экран перестаёт отличать
