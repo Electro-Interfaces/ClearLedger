@@ -62,7 +62,10 @@ function walkedKeys(path: CaseState['path']): Set<string> {
   return new Set((path ?? []).filter((p) => p.from_code).map((p) => `${p.from_code}→${p.to_code}`))
 }
 
-export function ProjectFlowChart({ state }: { state: CaseState }) {
+/** Нажатие на стадию: открыть её работу (чек-лист стадии), а не перевести проект. */
+type OnStage = (code: string) => void
+
+export function ProjectFlowChart({ state, onStage }: { state: CaseState; onStage?: OnStage }) {
   const stages = state.stages ?? []
   const links = state.links ?? []
   const walked = useMemo(() => walkedKeys(state.path), [state.path])
@@ -92,11 +95,11 @@ export function ProjectFlowChart({ state }: { state: CaseState }) {
         const codes = ph.codes.filter((c) => byCode.has(c))
         if (!codes.length) return null
         return <PhaseBlock key={ph.key} title={ph.title} codes={codes} byCode={byCode}
-          links={links} walked={walked} current={current} visits={visits} />
+          links={links} walked={walked} current={current} visits={visits} onStage={onStage} />
       })}
       {orphans.length > 0 && (
         <PhaseBlock title="Прочие стадии маршрута" codes={orphans} byCode={byCode}
-          links={links} walked={walked} current={current} visits={visits} />
+          links={links} walked={walked} current={current} visits={visits} onStage={onStage} />
       )}
     </div>
   )
@@ -131,9 +134,9 @@ function Legend() {
   )
 }
 
-function PhaseBlock({ title, codes, byCode, links, walked, current, visits }: {
+function PhaseBlock({ title, codes, byCode, links, walked, current, visits, onStage }: {
   title: string; codes: string[]; byCode: Map<string, Stage>; links: Link[]
-  walked: Set<string>; current: string | null; visits: Record<string, number>
+  walked: Set<string>; current: string | null; visits: Record<string, number>; onStage?: OnStage
 }) {
   const idx = new Map(codes.map((c, i) => [c, i]))
   const y = (i: number) => PAD_TOP + i * (BOX_H + GAP_Y)
@@ -265,7 +268,11 @@ function PhaseBlock({ title, codes, byCode, links, walked, current, visits }: {
             const isDone = !!s.visited_at && !isCurrent
             const again = (visits[code] ?? 0) > 1
             return (
-              <g key={code}>
+              <g key={code} className={onStage ? 'cursor-pointer hover:opacity-80 focus:outline-none' : undefined}
+                {...(onStage ? { role: 'link', tabIndex: 0, 'aria-label': `${s.name}: открыть работу по стадии`,
+                  onClick: () => onStage(code),
+                  onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onStage(code) } } } : {})}>
+                {onStage && <title>{s.name}: открыть работу по стадии</title>}
                 <rect x={PAD_L} y={y(i)} width={BOX_W} height={BOX_H} rx="6"
                   className={isCurrent ? 'fill-primary/10 stroke-primary'
                     : isDone ? 'fill-emerald-500/10 stroke-emerald-500'

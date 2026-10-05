@@ -16,7 +16,7 @@
  *   История       — стадии, касания, правки, импорт.
  *
  * Правка любого поля помечает его «ручным»: следующий импорт файла его не тронет.
- */
+ */
 import { ProjectContractsBlock } from './ProjectContractsBlock'
 import { ProjectOverviewTab } from './ProjectOverviewTab'
 import { ProjectDocumentsTrack, PromoteProjectFile } from './ProjectDocumentsTrack'
@@ -86,8 +86,11 @@ export function projectTabsFor(kind: string | null | undefined) {
 }
 
 /** Рендер вкладки по ключу — чтобы вызывающий не знал про внутренние компоненты. */
-export function ProjectTabContent({ tab, site, companyId, onDone }: {
+export function ProjectTabContent({ tab, site, companyId, onDone, onTab }: {
   tab: ProjectTabKey; site: SiteDetail; companyId: string; onDone: () => Promise<void>
+  /** Переход на другую вкладку изнутри (схема → «Работа» по стадии). `query` — что
+   *  положить в адрес вместе с вкладкой: одним обновлением, иначе второе затрёт первое. */
+  onTab?: (k: ProjectTabKey, query?: Record<string, string | null>) => void
 }) {
   if (tab === 'overview') return (
     <div className="space-y-4">
@@ -95,7 +98,10 @@ export function ProjectTabContent({ tab, site, companyId, onDone }: {
       <ProjectOverviewTab site={site} companyId={companyId} />
     </div>
   )
-  if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId} />
+  // Стадия маршрута интеграции = стадия воронки с префиксом (int_lead → lead); у
+  // маршрута стройки стадий больше, чем у воронки, — там открывается «Работа» как есть.
+  if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId}
+    onStage={onTab && ((code) => onTab('work', { pstage: code.startsWith('int_') ? code.slice(4) : null }))} />
   if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'passport') return site.kind === 'integration' ? <IntegrationPassport site={site} companyId={companyId} onDone={onDone} /> : <PassportTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'tp') return <TechConnectionTab site={site} companyId={companyId} onDone={onDone} />

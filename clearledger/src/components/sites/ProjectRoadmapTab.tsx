@@ -38,7 +38,7 @@ const PHASE_BLOCKS = [
   { key: 'operate', n: 4, label: 'Эксплуатация' },
 ]
 
-export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; companyId: string }) {
+export function ProjectRoadmapTab({ site, companyId, onStage }: { site: SiteDetail; companyId: string; onStage?: (code: string) => void }) {
   const q = useQuery({
     queryKey: ['site-roadmap', companyId, site.id],
     queryFn: () => getProjectRoadmap(companyId, site.id),
@@ -109,7 +109,8 @@ export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; compa
                 : 'Проект ещё не ведётся по маршруту, поэтому пройденного нет: это весь путь целиком — какие стадии впереди и какими кнопками они проходятся. Начните вести проект на вкладке «Работа», и схема начнёт раскрашиваться.'}
             </div>
           </div>
-          <div className="p-3"><ProjectFlowChart state={qCase.data} /></div>
+          {onStage && <p className="px-3 pt-2 text-xs text-muted-foreground">Нажмите на стадию — откроется её работа: чек-лист и что не закрыто. Стадия проекта при этом не меняется.</p>}
+          <div className="p-3"><ProjectFlowChart state={qCase.data} onStage={onStage} /></div>
         </section>
       )}
 

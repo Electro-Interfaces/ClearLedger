@@ -47,10 +47,11 @@ export function ProjectWorkspacePanel({ companyId }: { companyId: string }) {
   // Вкладка тоже живёт в URL: по ссылке «открыть присоединение» человек попадает
   // на нужную вкладку, а правая панель «Инфо» знает, какой экран сейчас открыт.
   const tab = (params.get('ptab') as ProjectTabKey | null) ?? 'overview'
-  const setTab = (k: ProjectTabKey) => {
+  const setTab = (k: ProjectTabKey, query?: Record<string, string | null>) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev)
       next.set('ptab', k)
+      for (const [key, v] of Object.entries(query ?? {})) { if (v) next.set(key, v); else next.delete(key) }
       return next
     }, { replace: true })
   }
@@ -69,7 +70,7 @@ export function ProjectWorkspacePanel({ companyId }: { companyId: string }) {
 
 function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
   companyId: string; id: string; tab: ProjectTabKey
-  onTab: (k: ProjectTabKey) => void; onBack: () => void
+  onTab: (k: ProjectTabKey, query?: Record<string, string | null>) => void; onBack: () => void
 }) {
   const qc = useQueryClient()
   // staleTime: 0 — шапка обязана быть свежей. Стадию проекта меняют и с соседних
@@ -247,7 +248,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
 
       <Card>
         <CardContent className="p-4">
-          <ProjectTabContent tab={скрытые.includes(tab) ? 'overview' : tab} site={s} companyId={companyId} onDone={refresh} />
+          <ProjectTabContent tab={скрытые.includes(tab) ? 'overview' : tab} site={s} companyId={companyId} onDone={refresh} onTab={onTab} />
         </CardContent>
       </Card>
     </div>

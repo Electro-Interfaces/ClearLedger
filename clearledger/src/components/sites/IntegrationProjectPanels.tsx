@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -248,6 +249,16 @@ export function IntegrationChecklist(props: Props) {
   const { query, refresh } = useIntegration(props)
   const [editing, setEditing] = useState<IntegrationTask | null>(null)
   const [showAll, setShowAll] = useState(false)
+  // Стадия, которую смотрим: по умолчанию текущая, со схемы — выбранная (?pstage=).
+  const [params] = useSearchParams()
+  const focus = params.get('pstage')
+  const [viewStage, setViewStage] = useState(focus || props.site.stage)
+  const top = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!focus) return
+    setViewStage(focus); setShowAll(false)
+    top.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [focus])
   const [waiving, setWaiving] = useState<string | null>(null)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
@@ -263,8 +274,14 @@ export function IntegrationChecklist(props: Props) {
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось изменить обязательность') }
     finally { setBusy(false) }
   }
-  return <section className="rounded-lg border p-3 space-y-3"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-sm">Чек-лист интеграции · {props.site.gate.stageLabel}</h3><Button variant="outline" size="sm" onClick={() => setShowAll(!showAll)}>{showAll ? 'Текущий этап' : 'Все этапы'}</Button></div>
-    {tasks.filter((t) => showAll || t.stage === props.site.stage).map((t) => {
+  const viewLabel = gates.find((g) => g.stage === viewStage)?.stageLabel ?? viewStage
+  return <section ref={top} className="rounded-lg border p-3 space-y-3 scroll-mt-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-sm">Чек-лист интеграции · {showAll ? 'все этапы' : viewLabel}</h3><Button variant="outline" size="sm" onClick={() => setShowAll(!showAll)}>{showAll ? 'По стадиям' : 'Все этапы'}</Button></div>
+    {!showAll && <div className="flex flex-wrap gap-1">{gates.filter((g) => tasks.some((t) => t.stage === g.stage)).map((g) =>
+      <button key={g.stage} type="button" onClick={() => setViewStage(g.stage)}
+        className={`rounded-full border px-2 py-0.5 text-[11px] ${g.stage === viewStage ? 'bg-primary text-primary-foreground border-primary' : g.stage === props.site.stage ? 'border-primary text-primary' : 'text-muted-foreground'}`}>
+        {g.stageLabel}{g.stage === props.site.stage ? ' · сейчас' : ''} {g.done}/{g.total}</button>)}</div>}
+    {!showAll && viewStage !== props.site.stage && <p className="text-xs text-amber-700 dark:text-amber-400">Просмотр стадии «{viewLabel}». Проект сейчас на стадии «{props.site.gate.stageLabel}» — пункты другой стадии можно заполнять заранее, переход делается кнопками маршрута.</p>}
+    {tasks.filter((t) => showAll || t.stage === viewStage).map((t) => {
       const item = items.get(t.key)
       return <div key={t.key} className="border-b py-3 space-y-2 last:border-b-0"><div className="flex flex-wrap gap-2 text-sm"><span className="font-mono">{t.key}</span><span className="flex-1 min-w-40">{t.label}</span><span className="text-muted-foreground">{t.role}</span></div>
         <p className={`text-xs ${item?.needsConfirmation ? 'text-amber-600' : item?.done ? 'text-emerald-600' : 'text-muted-foreground'}`}>{item?.needsConfirmation ? 'Требует повторного подтверждения' : item?.done ? 'Подтверждено' : item?.waived ? 'Обязательность снята' : `${t.required ? 'Обязательный пункт: держит переход' : 'Не подтверждено'}${t.need ? ` · не хватает: ${t.need}` : ''}`}{item?.confirmedBy ? ` · ${item.confirmedBy}` : ''}{item?.confirmedAt ? ` · ${new Date(item.confirmedAt).toLocaleString('ru-RU')}` : ''}</p>
