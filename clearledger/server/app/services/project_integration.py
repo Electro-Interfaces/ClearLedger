@@ -199,13 +199,27 @@ def versions_state(data):
     return True, None
 
 
+# Пункты со своим требованием к данным: когда требование выполнено, подтверждением
+# служат сами данные — комментарий, документ или поручение необязательны (решение МАГа
+# 05.10.2026: под пунктом «Партнёр назван» форма доказательств была лишней). Кто и когда
+# подтвердил — фиксируется как прежде. Состав сверяется тестом с requirement_problem.
+DATA_RULE_KEYS = frozenset({
+    "1.1", "1.2", "1.3", "1.4", "1.4.1", "1.6", "2.2", "2.3", "2.4", "2.8", "3.1", "3.6",
+    "4.1", "4.2", "4.3", "5.3", "5.10", "5.11", "5.12", "5.13", "6.2", "6.3", "6.6", "6.7",
+    "6.12", "6.13", "6.14",
+})
+
+
 def confirmation_problem(site, key, data):
     result = data["results"].get(key) or {}
+    task = next((t for t in TASKS if t["key"] == key), None)
+    if result.get("notApplicable") and task and task.get("required"):
+        return "Обязательный пункт нельзя отметить неприменимым — снимите обязательность под свою ответственность"
     if result.get("notApplicable"):
         if key in {"4.3", "5.11", "6.6"}:
             return "Подписание обязательного документа нельзя заменить неприменимостью; решение об исключении оформляется снятием обязательности"
         return None if result.get("comment", "").strip() else "Укажите причину неприменимости"
-    if not any(result.get(f) for f in ("comment", "workRef", "docId")):
+    if not any(result.get(f) for f in ("comment", "workRef", "docId")) and key not in DATA_RULE_KEYS:
         return "Запишите результат проверки, выберите документ или свяжите поручение"
     return requirement_problem(site, key, data)
 

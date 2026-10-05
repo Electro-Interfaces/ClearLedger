@@ -779,7 +779,8 @@ async def get_integration(
         raise HTTPException(400, "Это не проект интеграции")
     data = project_integration.read(site)
     return {"data": data, "tasks": [{**t, "section": project_integration.section_for(t["key"]),
-                                     "need": project_integration.requirement_problem(site, t["key"], data)}
+                                     "need": project_integration.requirement_problem(site, t["key"], data),
+                                     "dataRule": t["key"] in project_integration.DATA_RULE_KEYS}
                                     for t in ezs_checklist_integration.TASKS],
             "phases": ezs_checklist_integration.PHASES_DOC,
             "gates": [ezs_site_work.gate_state(site, stage=p) for p in ezs_sites.STAGE_ORDER]}

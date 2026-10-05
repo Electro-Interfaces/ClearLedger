@@ -218,33 +218,48 @@ function PhaseDates({ props, state, onSaved }: { props: Props; state: NonNullabl
   </section>
 }
 
+/** Пункты, у которых доказательство — документ (подписанное соглашение, протокол, акт):
+ *  поля документа и поручения раскрыты сразу. У остальных — свёрнуты. */
+const EVIDENCE_KEYS = new Set(['4.3', '5.11', '5.13', '6.6', '6.14'])
+
+/**
+ * Подтверждение пункта: кто и когда подтвердил (при смене данных — подтвердить заново).
+ * Одна кнопка вместо «Сохранить» + «Подтвердить»: черновик результата пункту не нужен.
+ * Пункт с выполненным требованием к данным подтверждается самими данными — комментарий
+ * необязателен; «не применимо» — только у необязательных (замечание МАГа 05.10.2026).
+ */
 function ResultEditor({ task, props, data, onSaved }: { task: IntegrationTask; props: Props; data: IntegrationData; onSaved: () => Promise<void> }) {
   const [result, setResult] = useState<IntegrationResult>(data.results[task.key] || { comment: '', workRef: '', docId: '', notApplicable: false })
   const [busy, setBusy] = useState(false)
-  const docs = useQuery({ queryKey: ['site-docs', props.companyId, props.site.id], queryFn: () => getSiteDocs(props.companyId, props.site.id) })
-  const save = async (confirm: boolean) => {
+  const [more, setMore] = useState(EVIDENCE_KEYS.has(task.key) || !!result.docId || !!result.workRef)
+  const docs = useQuery({ queryKey: ['site-docs', props.companyId, props.site.id], queryFn: () => getSiteDocs(props.companyId, props.site.id), enabled: more })
+  const byData = !!task.dataRule && !task.need
+  const confirm = async () => {
     setBusy(true)
     let saved = false
     try {
-      const next = await saveIntegration(props.companyId, props.site.id, { revision: data.revision, results: { ...data.results, [task.key]: result } })
+      const next = await saveIntegration(props.companyId, props.site.id, { revision: data.revision, results: { ...data.results, [task.key]: { ...result, notApplicable: task.required ? false : result.notApplicable } } })
       saved = true
-      if (confirm) await confirmIntegration(props.companyId, props.site.id, task.key, next.revision)
-      await onSaved(); toast.success(confirm ? 'Выполнение подтверждено с автором и датой' : 'Результат сохранён без подтверждения')
+      await confirmIntegration(props.companyId, props.site.id, task.key, next.revision)
+      await onSaved(); toast.success('Выполнение подтверждено с автором и датой')
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось сохранить результат')
+      toast.error(e instanceof Error ? e.message : 'Не удалось подтвердить')
       // Результат уже записан, отказано только в подтверждении: ревизия на сервере
       // выросла. Без перечитывания следующее действие упрётся в «Карточка изменилась».
       if (saved) await onSaved().catch(() => undefined)
     }
     finally { setBusy(false) }
   }
-  return <section className="rounded-lg border p-3 space-y-3"><h3 className="text-sm font-semibold">Результат пункта {task.key}</h3>
-    <label className="block text-sm">Результат проверки / комментарий / причина неприменимости<Textarea rows={3} value={result.comment} onChange={(e) => setResult({ ...result, comment: e.target.value })} /></label>
-    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={result.notApplicable} onChange={(e) => setResult({ ...result, notApplicable: e.target.checked })} />Не применимо к этому сценарию</label>
-    <label className="block text-sm">Документ результата<select aria-label="Документ результата" className={selectClass} value={result.docId} onChange={(e) => setResult({ ...result, docId: e.target.value })}><option value="">Не выбран</option>{(docs.data || []).map((d) => <option key={d.id} value={d.id}>{d.title || d.fileName}</option>)}</select></label>
-    {docs.isError && <p role="alert">Документы не загрузились: {docs.error.message}</p>}
-    <ProjectEvidencePicker companyId={props.companyId} siteId={props.site.id} value={result.workRef} label="Поручение Трека" onChange={(value) => { if (!value || value.startsWith('task:')) setResult({ ...result, workRef: value }); else toast.warning('Выберите поручение. Файл можно выбрать в поле документа результата') }} />
-    <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy} onClick={() => void save(false)}>Сохранить результат</Button><Button disabled={busy} onClick={() => void save(true)}>Подтвердить выполнение</Button></div>
+  return <section className="rounded-lg border p-3 space-y-3"><h3 className="text-sm font-semibold">Подтверждение пункта {task.key}</h3>
+    <label className="block text-sm">{byData ? 'Комментарий — необязательно: подтверждением служат заполненные данные' : result.notApplicable ? 'Причина неприменимости' : 'Результат проверки'}
+      <Textarea rows={2} value={result.comment} onChange={(e) => setResult({ ...result, comment: e.target.value })} /></label>
+    {!task.required && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={result.notApplicable} onChange={(e) => setResult({ ...result, notApplicable: e.target.checked })} />Не применимо к этому сценарию</label>}
+    {more ? <>
+      <label className="block text-sm">Документ результата<select aria-label="Документ результата" className={selectClass} value={result.docId} onChange={(e) => setResult({ ...result, docId: e.target.value })}><option value="">Не выбран</option>{(docs.data || []).map((d) => <option key={d.id} value={d.id}>{d.title || d.fileName}</option>)}</select></label>
+      {docs.isError && <p role="alert">Документы не загрузились: {docs.error.message}</p>}
+      <ProjectEvidencePicker companyId={props.companyId} siteId={props.site.id} value={result.workRef} label="Поручение Трека" onChange={(value) => { if (!value || value.startsWith('task:')) setResult({ ...result, workRef: value }); else toast.warning('Выберите поручение. Файл можно выбрать в поле документа результата') }} />
+    </> : <button type="button" className="text-xs underline text-muted-foreground" onClick={() => setMore(true)}>приложить документ или поручение</button>}
+    <Button disabled={busy} onClick={() => void confirm()}>Подтвердить выполнение</Button>
   </section>
 }
 

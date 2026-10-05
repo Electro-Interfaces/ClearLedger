@@ -53,6 +53,8 @@ export interface IntegrationTask {
   key: string; label: string; stage: string; role: string; required?: boolean; section: IntegrationSection | 'scenarios' | 'documents' | 'tests' | 'reconciliations'
   /** Чего не хватает в данных проекта для подтверждения (null — данных достаточно). */
   need?: string | null
+  /** У пункта своё требование к данным: выполнено — подтверждается без комментария. */
+  dataRule?: boolean
 }
 export interface IntegrationState {
   data: IntegrationData; tasks: IntegrationTask[]; gates: GateState[]

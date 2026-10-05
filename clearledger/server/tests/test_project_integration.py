@@ -385,3 +385,21 @@ def test_заявка_предполагаемый_договор_и_техни�
             raise AssertionError(bad)
         except ValueError:
             pass
+
+
+def test_подтверждение_данными_и_неприменимость_только_необязательных():
+    """Пункт с выполненным требованием к данным подтверждается без комментария; «не применимо» —
+    только у необязательного. Состав DATA_RULE_KEYS совпадает с пунктами, у которых есть правило."""
+    from app.services.ezs_checklist_integration import TASKS
+    s = site()
+    empty = integration.read(s)
+    with_rule = {t["key"] for t in TASKS if integration.requirement_problem(s, t["key"], empty)}
+    assert with_rule <= integration.DATA_RULE_KEYS
+    s.owner_user_id = uuid.uuid4()
+    data = integration.read(s)
+    assert integration.confirmation_problem(s, "1.4", data) is None            # руководитель есть — без комментария
+    assert integration.confirmation_problem(s, "3.3", data) == "Запишите результат проверки, выберите документ или свяжите поручение"
+    data["results"]["1.4"] = {"notApplicable": True, "comment": "не нужно"}
+    assert "снимите обязательность" in integration.confirmation_problem(s, "1.4", data)
+    data["results"]["3.3"] = {"notApplicable": True, "comment": "доработок нет"}
+    assert integration.confirmation_problem(s, "3.3", data) is None
