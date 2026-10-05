@@ -594,8 +594,13 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
         cp_by_phone[str(o.get("phone") or "")] = cp
         if any(by_cp.get(k) for k in (str(cp.id), cp.external_ref) if k):
             continue
+        start = str(o.get("contract_start") or "").strip()
+        # «28.11.2023» → ISO: договоры живут датами ГГГГ-ММ-ДД, текстовая дата не
+        # сортируется и не видна в поле даты формы.
+        if len(start) == 10 and start[2] == "." and start[5] == ".":
+            start = f"{start[6:]}-{start[3:5]}-{start[:2]}"
         contract = Contract(
-            company_id=company_id, number="б/н", date=str(o.get("contract_start") or ""),
+            company_id=company_id, number="б/н", date=start,
             counterparty_id=str(cp.id), organization_id=str(org_id or cp.id),
             type=CORP_CONTRACT_TYPE, kind="СПокупателем", basis="договор",
             # Зарядка идёт по всей сети, а не по набору станций.

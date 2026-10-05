@@ -985,6 +985,12 @@ function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; child
 }
 
 // ─── Форма договора (создание/правка) ────────────────────────────────────────
+/** «28.11.2023» → «2023-11-28»: поле даты понимает только ISO, иначе дата выглядит пустой. */
+function isoDate(v?: string | null): string {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(v ?? '')
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : (v ?? '')
+}
+
 function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, children }: {
   /** Контрагент задан (карточка контрагента) — или выбирается в форме (раздел «Договоры»). */
   counterpartyId?: string; counterparties?: Counterparty[]; edit?: Contract; children: React.ReactNode
@@ -1003,9 +1009,9 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
   const orgs = orgsQuery.data ?? []
   const [open, setOpen] = useState(false)
   const [f, setF] = useState({
-    number: edit?.number ?? '', date: edit?.date ?? '', kind: edit?.kind ?? 'СПокупателем',
+    number: edit?.number ?? '', date: isoDate(edit?.date), kind: edit?.kind ?? 'СПокупателем',
     type: edit?.type ?? '', organizationId: edit?.organizationId ?? '',
-    currency: edit?.currency ?? 'RUB', validUntil: edit?.validUntil ?? '',
+    currency: edit?.currency ?? 'RUB', validUntil: isoDate(edit?.validUntil),
     amountLimit: edit?.amountLimit != null ? String(edit.amountLimit) : '',
     vatRate: edit?.vatRate ?? '', settlementKind: edit?.settlementKind ?? '', comment: edit?.comment ?? '',
     amountInclVat: edit?.amountInclVat == null ? '' : (edit.amountInclVat ? 'true' : 'false'),
@@ -1099,7 +1105,7 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto [&_input]:bg-muted/60! [&_textarea]:bg-muted/60! [&_[data-slot=select-trigger]]:bg-muted/60!">
+      <DialogContent className="w-[96vw] sm:max-w-4xl max-h-[92dvh] overflow-y-auto [&_input]:bg-muted/60! [&_textarea]:bg-muted/60! [&_[data-slot=select-trigger]]:bg-muted/60!">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="size-5" /> {edit ? 'Изменить договор' : 'Новый договор'}
@@ -1123,14 +1129,15 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
             <div className="space-y-1.5"><Label>Дата <span className="text-destructive">*</span></Label>
               <Input type="date" value={f.date} onChange={(e) => setF((s) => ({ ...s, date: e.target.value }))} /></div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5"><Label>Вид договора</Label>
             <Select value={f.kind} onValueChange={(v) => setF((s) => ({ ...s, kind: v }))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>{Object.entries(KIND_META).map(([k, m]) => <SelectItem key={k} value={k}>{m.label}</SelectItem>)}</SelectContent>
             </Select></div>
           <div className="space-y-1.5"><Label>Вид по справочнику</Label>
             <Select value={f.typeCode || '—'} onValueChange={(v) => setF((s) => ({ ...s, typeCode: v === '—' ? '' : v }))}>
-              <SelectTrigger aria-label="Вид по справочнику"><SelectValue /></SelectTrigger>
+              <SelectTrigger aria-label="Вид по справочнику" className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="—">Не указан</SelectItem>
                 {(typesQuery.data ?? []).map((tp) => <SelectItem key={tp.code} value={tp.code}>{tp.label}{tp.gkBasis ? ` · ${tp.gkBasis}` : ''}</SelectItem>)}
@@ -1140,10 +1147,11 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
             <Input value={f.type} onChange={(e) => setF((s) => ({ ...s, type: e.target.value }))} placeholder="Поставка ГСМ, аренда, услуги…" /></div>
           <div className="space-y-1.5"><Label>Организация</Label>
             <Select value={orgId} onValueChange={(v) => setF((s) => ({ ...s, organizationId: v }))}>
-              <SelectTrigger><SelectValue placeholder={orgs.length ? 'Выберите' : 'Нет организаций'} /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue placeholder={orgs.length ? 'Выберите' : 'Нет организаций'} /></SelectTrigger>
               <SelectContent>{orgs.map((o) => <SelectItem key={o.id} value={o.externalRef || o.id}>{o.name}</SelectItem>)}</SelectContent>
             </Select></div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {/* Валюта почти всегда рублёвая и правится редко — в простом режиме убрана.
                 Ставка НДС и «Сумма включает НДС» ниже остаются всегда: они
                 определяют суммы, которые уйдут в бухгалтерию. */}
@@ -1161,11 +1169,10 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
               </label></div>
             <div className="space-y-1.5"><Label>Сумма</Label>
               <Input value={f.amountLimit} onChange={(e) => setF((s) => ({ ...s, amountLimit: e.target.value.replace(/[^\d.]/g, '') }))} /></div>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {/* срок, сумма и НДС — одной строкой: на широком окне это четыре коротких поля */}
             <div className="space-y-1.5"><Label>Ставка НДС</Label>
               <Input value={f.vatRate} onChange={(e) => setF((s) => ({ ...s, vatRate: e.target.value }))} placeholder="20% / Без НДС" /></div>
-            <div className="space-y-1.5"><Label>Сумма включает НДС</Label>
+            <div className="space-y-1.5"><Label>Включает НДС</Label>
               <Select value={f.amountInclVat || '—'} onValueChange={(v) => setF((s) => ({ ...s, amountInclVat: v === '—' ? '' : v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>

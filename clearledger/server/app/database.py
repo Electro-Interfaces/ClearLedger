@@ -3140,6 +3140,11 @@ async def create_all() -> None:
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_cp VARCHAR(200)",
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_cp_position VARCHAR(200)",
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_cp_basis VARCHAR(200)",
+            # Дата корп-договора приходила текстом «28.11.2023» (дата начала из справочника
+            # организаций): поле даты в форме её не показывало, сортировка и сроки шли по
+            # строке. Приводим к ISO; повторный прогон ничего не находит.
+            r"""UPDATE contracts SET date = substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2)
+                WHERE date ~ '^[0-9]{2}\.[0-9]{2}\.[0-9]{4}$'""",
             # Разбор накопленного текста. Список закрытый: что не опознано, остаётся
             # без кода и видно запросом, а не растворяется в «прочем».
             """
