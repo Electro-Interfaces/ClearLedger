@@ -31,6 +31,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text
 
@@ -45,6 +46,17 @@ LOCK_NAMESPACE = 0x1D7A0
 # после заведения (имя, штрихкод), и правка ещё едет наверх.
 ВЫДЕРЖКА_МИНУТ = 10
 ПОМЕТКА = "авто"
+# Признаём только ночью по Москве. Признанная карточка, приехав на станцию,
+# переклеивает черновик во ВСЕХ документах, в том числе в накладной, которую
+# администратор ещё заполняет: версия документа меняется, и сохранение её формы
+# отклоняется «документ изменил кто-то ещё» (208, 05.10.2026: два отказа подряд,
+# работа после последнего сохранения терялась). Днём черновик подождёт до ночи.
+МСК = timezone(timedelta(hours=3))
+НОЧЬ_С, НОЧЬ_ДО = 2, 5
+
+
+def ночное_окно(момент: datetime) -> bool:
+    return НОЧЬ_С <= момент.astimezone(МСК).hour < НОЧЬ_ДО
 
 
 def штрихкод_годен(код: str) -> bool:
@@ -259,6 +271,9 @@ async def run_forever() -> None:
     """Фоновый цикл — поднимается из lifespan приложения."""
     log.info("Автопризнание заявок на карточки запущено (тик %d с)", TICK_SECONDS)
     while True:
+        if not ночное_окно(datetime.now(timezone.utc)):
+            await asyncio.sleep(TICK_SECONDS)
+            continue
         try:
             счёт = await tick()
             if any(счёт[k] for k in ("link", "create", "split", "error")):

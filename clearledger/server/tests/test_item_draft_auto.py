@@ -76,3 +76,10 @@ def test_похожее_название_не_держит_заявку():
     assert р.действие == "create" and "проверить, не дубль" in р.почему
     assert auto.похожи("Кофе Carte Noire 95 гр.", "Кофе Carte Noire растворимый 95 гр.")
     assert not auto.похожи("Канистра д/ГСМ 10 л.", "Канистра д/ГСМ 20 л.")
+
+
+def test_признание_только_ночью_по_москве():
+    from datetime import datetime, timezone
+    assert auto.ночное_окно(datetime(2026, 10, 5, 23, 30, tzinfo=timezone.utc))      # 02:30 МСК
+    assert not auto.ночное_окно(datetime(2026, 10, 5, 13, 0, tzinfo=timezone.utc))   # 16:00 МСК
+    assert not auto.ночное_окно(datetime(2026, 10, 6, 2, 0, tzinfo=timezone.utc))    # 05:00 МСК
