@@ -301,7 +301,7 @@ function MemberName({ id }: { id: string }) {
   return <>{people.data?.find((p) => p.id === id)?.name ?? 'сотрудник недоступен'}</>
 }
 
-const USAGE_APP: Record<string, string> = { ops: 'Эксплуатация', projects: 'Проекты', docs: 'Трек', shop: 'Магазин', books: 'Бухгалтерия', mail: 'Почта' }
+const USAGE_APP: Record<string, string> = { ops: 'Эксплуатация', projects: 'Проекты', docs: 'Трек', shop: 'Магазин', books: 'Бухгалтерия', mail: 'Почта', support: 'Поддержка' }
 
 /** К каким приложениям и проектам договор привязан человеком. */
 function ContractLinksBlock({ id }: { id: string }) {
@@ -1452,7 +1452,10 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
     const sign = sortDir === 'asc' ? 1 : -1
     return [...list].sort((a, b) => {
       if (grouped) {
+        // Имя, затем карточка: у разных карточек бывает одно имя («разрешение») — без
+        // второго ключа их договоры перемешивались по дате и группа повторялась.
         const g = (cpName.get(a.counterpartyId) ?? '').localeCompare(cpName.get(b.counterpartyId) ?? '', 'ru')
+          || a.counterpartyId.localeCompare(b.counterpartyId)
         if (g) return g
       }
       if (sortKey === 'amount') {

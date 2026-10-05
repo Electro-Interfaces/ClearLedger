@@ -6,6 +6,7 @@
  * Источники: useLocationContracts (ось договор↔точка) + useLocationSettlements (L2).
  */
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { AlertTriangle, Building, FileSignature, KeyRound, Link2, Zap } from 'lucide-react'
@@ -21,12 +22,22 @@ import { PAYMENT_META, ROLE_LABEL, paidThroughLabel, type SettlementRole } from 
 import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
 import { Placeholder, ScrollTab } from './shared'
 
+/** Вид договора 1С кодом («СПоставщиком») → по-русски. */
+const KIND_RU: Record<string, string> = { СПоставщиком: 'с поставщиком', СПокупателем: 'с покупателем', Прочее: 'прочее' }
+
 export function ContractsTab({ location }: { location: ServiceLocation }) {
   const { company } = useCompany()
   const isEnergy = company?.profileId === 'energy'
 
   const contractsQ = useLocationContracts(location.id)
   const contracts = contractsQ.data?.contracts ?? []
+  // Станция видит прежде всего СВОИ договоры (адресные). Общие договоры компании
+  // действуют на все станции сразу — их показываем свёрнуто, а клиентские договоры
+  // сети (корпоративная зарядка: мы продаём, а не платим) — одной строкой: на
+  // проверке 05.10 они составляли 22 из 34 «договоров станции» и прятали её 5 своих.
+  const own = contracts.filter((c) => !c.companyWide)
+  const common = contracts.filter((c) => c.companyWide && c.kind !== 'СПокупателем')
+  const clients = contracts.filter((c) => c.companyWide && c.kind === 'СПокупателем')
   const cpByRef = new Map(
     (contractsQ.data?.counterparties ?? []).map((c) => [c.externalRef, c]),
   )
@@ -113,13 +124,14 @@ export function ContractsTab({ location }: { location: ServiceLocation }) {
               Договоры
             </div>
           )}
-          {contracts.map((c) => (
+          {own.length === 0 && <p className="text-xs text-muted-foreground">Адресных договоров у станции нет — только общие договоры компании ниже.</p>}
+          {own.map((c) => (
             <div key={c.id} className="space-y-2 rounded-md border border-border/50 p-3 text-sm">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-medium">{c.number}</div>
+                  <Link to={`/contractors?sub=contracts&contract=${c.id}`} className="font-medium text-primary hover:underline">{c.number}</Link>
                   <div className="text-xs text-muted-foreground">
-                    {c.counterpartyName || c.counterpartyId}{c.kind && <span> · {c.kind}</span>}
+                    {c.counterpartyName || c.counterpartyId}{c.kind && <span> · {KIND_RU[c.kind] ?? c.kind}</span>}
                     <span className={contractStatus(c).cls}> · {contractStatus(c).label}</span>
                   </div>
                 </div>
@@ -140,6 +152,25 @@ export function ContractsTab({ location }: { location: ServiceLocation }) {
               {isEnergy && <OpsTermsBlock contractId={c.id} />}
             </div>
           ))}
+          {common.length > 0 && (
+            <details className="rounded-md border border-border/50 p-3 text-sm">
+              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Общие договоры компании ({common.length}) — действуют на все станции
+              </summary>
+              <ul className="mt-2 divide-y">{common.map((c) => (
+                <li key={c.id} className="py-1.5">
+                  <Link to={`/contractors?sub=contracts&contract=${c.id}`} className="text-primary hover:underline">{c.number}</Link>
+                  <span className="text-xs text-muted-foreground"> · {c.counterpartyName || c.counterpartyId}
+                    <span className={contractStatus(c).cls}> · {contractStatus(c).label}</span></span>
+                </li>))}</ul>
+            </details>
+          )}
+          {clients.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Клиентские договоры сети: {clients.length} (корпоративная зарядка) — действуют на всех станциях,
+              ведутся в <Link to="/contractors?sub=corp" className="underline">«Корпоративных клиентах»</Link>.
+            </p>
+          )}
         </div>
       )}
     </ScrollTab>
