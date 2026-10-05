@@ -11,6 +11,11 @@ from app.services.ezs_checklist_integration import TASKS, PHASES_DOC
 
 SECTIONS = {
     "partner": ("name", "legalEntity", "purpose", "commercialContact", "assessment"),
+    # Заявка — то, что известно на входе: кто инициатор, какой договор предполагается
+    # (вид и кто кому платит — без ставок, это предмет переговоров), охват в общих чертах
+    # и технический куратор (протоколы, техсогласование, доступы — не обязательно
+    # руководитель проекта). Решение МАГа 05.10.2026: заявка не грузит протоколами.
+    "lead": ("initiator", "contractKind", "payer", "coverage", "curatorUserId"),
     "commercial": ("commission", "calculationBase", "acquiring", "tariffs", "discounts",
                    "discountFunding", "settlements", "reporting"),
     "data": ("outgoing", "incoming", "statisticsUse", "sessionHistory", "analytics", "brand", "appTransitions"),
@@ -32,9 +37,11 @@ TEST_STATUSES = {"pending", "passed", "failed", "na"}
 # договорным аккаунтом юрлица (так сегодня приходят корпоративные клиенты: в сессии
 # `card_owner_ext_id` и `client_name`, сумма — по тарифу клиента) или по выданным
 # партнёру картам. Правило задаётся в паспорте и проверяется на живых сессиях.
+LEAD_INITIATORS = {"", "partner", "us"}     # партнёр пришёл к нам / мы вышли на партнёра
+LEAD_CONTRACT_KINDS = {"", "information", "roaming", "agency", "other"}
 MATCH_KINDS = {"account": "Договорной аккаунт клиента", "client": "Юрлицо клиента в сессии", "card": "Номера карт"}
 DOCUMENT_KINDS = {"nda", "pilot", "contract", "stations", "specification", "test_program", "test_protocol", "instruction", "other"}
-SECTION_LABELS = {"settlement": "порядок расчётов и учёт", "tests": "испытания", "reconciliations": "сверки", "listVersions": "версии перечней", "partner": "партнёр и цель", "commercial": "коммерческие условия", "data": "данные, аналитика и бренд", "technical": "технические параметры и сопровождение", "work": "пилот и проверки", "accounting": "связь с контрагентом", "scenarios": "сценарии и перечни ЭЗС", "documents": "редакции документов", "results": "результаты чек-листа", "dates": "план этапов", "contractIds": "договоры учёта"}
+SECTION_LABELS = {"lead": "заявка", "settlement": "порядок расчётов и учёт", "tests": "испытания", "reconciliations": "сверки", "listVersions": "версии перечней", "partner": "партнёр и цель", "commercial": "коммерческие условия", "data": "данные, аналитика и бренд", "technical": "технические параметры и сопровождение", "work": "пилот и проверки", "accounting": "связь с контрагентом", "scenarios": "сценарии и перечни ЭЗС", "documents": "редакции документов", "results": "результаты чек-листа", "dates": "план этапов", "contractIds": "договоры учёта"}
 
 
 def read(site):
@@ -50,9 +57,11 @@ def read(site):
 
 
 def section_for(key):
+    if key in {"1.3", "1.4.1"}:
+        return "lead"
     if key in {"1.1", "1.5", "4.1"}:
         return "partner"
-    if key in {"1.2", "1.3", "1.6", "2.1", "5.3", "5.5", "6.7"}:
+    if key in {"1.2", "1.6", "2.1", "5.3", "5.5", "6.7"}:
         return "scenarios"
     if key in {"2.2", "2.3", "6.1", "6.2", "6.3"}:
         return "commercial"
@@ -214,7 +223,9 @@ def requirement_problem(site, key, data):
     tests_ok, tests_problem = tests_state(data)
     versions_ok, versions_problem = versions_state(data)
     required = {
-        "1.1": (p.get("name") and p.get("purpose"), "Заполните партнёра и цель в паспорте"),
+        "1.1": (p.get("name") and p.get("purpose") and data["lead"].get("initiator"), "Заполните партнёра, цель и инициатора интеграции"),
+        "1.3": (data["lead"].get("contractKind") and data["lead"].get("payer"), "Укажите вид предполагаемого договора и кто кому платит"),
+        "1.4.1": (data["lead"].get("curatorUserId"), "Назначьте технического куратора интеграции"),
         "1.2": (bool(data["scenarios"]), "Добавьте сценарий подключения"),
         "1.4": (bool(site.owner_user_id), "Назначьте руководителя проекта в Работе"),
         "1.6": (any(s["selectedIds"] for s in data["scenarios"]), "Выберите станции сценария"),
@@ -266,6 +277,12 @@ def normalize(payload, old):
             data[section] = {f: str(source.get(f) or "").strip()[:6000] for f in fields}
     if (data["settlement"].get("matchKind") or "") not in ("", *MATCH_KINDS):
         raise ValueError("Неизвестный способ выделения сессий партнёра")
+    lead = data["lead"]
+    if lead.get("initiator", "") not in LEAD_INITIATORS or lead.get("contractKind", "") not in LEAD_CONTRACT_KINDS \
+            or lead.get("payer", "") not in PAYERS:
+        raise ValueError("Неизвестное значение в заявке: инициатор, вид договора или плательщик")
+    if lead.get("curatorUserId"):
+        lead["curatorUserId"] = str(uuid.UUID(lead["curatorUserId"]))
     if "scenarios" in payload:
         source = payload["scenarios"]
         if not isinstance(source, list) or len(source) > 50:

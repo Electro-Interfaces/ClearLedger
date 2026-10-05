@@ -174,6 +174,7 @@ def test_подтверждение_сохраняет_автора_дату_и_
     s = site()
     data = integration.read(s)
     data["partner"] = {"name": "Сеть партнёра", "purpose": "Показ на карте"}
+    data["lead"] = {"initiator": "partner"}
     data["results"]["1.1"] = {"comment": "Согласовано на встрече"}
     s.workspace_data = {"integration": data, "other": {"kept": True}}
     user = SimpleNamespace(id=uuid.uuid4(), name="Ответственный", email="test@example.test")
@@ -363,3 +364,24 @@ def test_период_сверки_датами():
     with pytest.raises(ValueError):
         integration.normalize({"revision": 0, "reconciliations": [{**row, "from": "2026-12-01"}]}, integration.read(s))
 
+
+
+
+def test_заявка_предполагаемый_договор_и_технический_куратор():
+    """Заявка: 1.3 — вид договора и кто кому платит, 1.4.1 — тех. куратор; значения проверяются."""
+    s = site()
+    data = integration.read(s)
+    assert integration.requirement_problem(s, "1.3", data) == "Укажите вид предполагаемого договора и кто кому платит"
+    assert integration.requirement_problem(s, "1.4.1", data) == "Назначьте технического куратора интеграции"
+    curator = str(uuid.uuid4())
+    data = integration.normalize({"revision": 0, "lead": {"initiator": "us", "contractKind": "roaming", "payer": "partner",
+                                                          "coverage": "Приморье, ~40 ЭЗС", "curatorUserId": curator.upper()}}, data)
+    assert data["lead"]["curatorUserId"] == curator
+    assert integration.requirement_problem(s, "1.3", data) is None and integration.requirement_problem(s, "1.4.1", data) is None
+    assert integration.section_for("1.3") == integration.section_for("1.4.1") == "lead"
+    for bad in ({"contractKind": "лизинг"}, {"initiator": "кто-то"}, {"payer": "все"}):
+        try:
+            integration.normalize({"revision": 0, "lead": bad}, integration.read(s))
+            raise AssertionError(bad)
+        except ValueError:
+            pass

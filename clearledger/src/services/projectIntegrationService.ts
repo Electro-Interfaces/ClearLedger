@@ -4,7 +4,10 @@ import type { GateState } from './sitesService'
 
 export const INTEGRATION_FORMATS = { information: 'Информационная', roaming: 'Роуминг', hybrid: 'Гибридная' }
 export const INTEGRATION_DIRECTIONS = { outgoing: 'Наши ЭЗС в сервисе партнёра', incoming: 'ЭЗС партнёра в нашем приложении', both: 'Двусторонняя' }
-export type IntegrationSection = 'partner' | 'commercial' | 'settlement' | 'data' | 'technical' | 'work' | 'accounting'
+export type IntegrationSection = 'partner' | 'lead' | 'commercial' | 'settlement' | 'data' | 'technical' | 'work' | 'accounting'
+/** Заявка: кто инициатор и какой договор предполагается (без ставок — это переговоры). */
+export const LEAD_INITIATORS = { partner: 'Партнёр пришёл к нам', us: 'Мы вышли на партнёра' }
+export const LEAD_CONTRACT_KINDS = { information: 'Информационный обмен без денег', roaming: 'Роуминг', agency: 'Агентский договор', other: 'Иное' }
 export const INTEGRATION_PAYERS = { partner: 'Партнёр платит нам', us: 'Мы платим партнёру', none: 'Без расчётов' }
 export const INTEGRATION_MODELS = { commission: 'Комиссия, %', fixed: 'Фиксированная плата', margin: 'Наценка к тарифу', none: 'Без оплаты' }
 export const CONNECT_BASIS = { check: 'Проверено у принимающей стороны', session: 'Прошла первая сессия' }

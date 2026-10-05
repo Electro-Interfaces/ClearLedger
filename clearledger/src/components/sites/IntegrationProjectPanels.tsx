@@ -7,9 +7,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { StationScopePicker } from '@/components/workspace/StationScopePicker'
 import { getContracts, getCounterparties } from '@/services/referenceService'
-import { getProjectCase, openProjectCase, getSiteDocs, downloadSiteDoc, uploadSiteDoc, waiveSiteGate, getSiteParticipants, getSiteMembers, patchSite, type SiteDetail, type GateItem } from '@/services/sitesService'
+import { getProjectCase, openProjectCase, getSiteDocs, downloadSiteDoc, uploadSiteDoc, waiveSiteGate, getSiteParticipants, getSiteMembers, patchSite, FUNNEL_STAGES, type SiteDetail, type GateItem } from '@/services/sitesService'
 import {
   getIntegration, getIntegrationStations, saveIntegration, confirmIntegration,
+  LEAD_INITIATORS, LEAD_CONTRACT_KINDS,
   INTEGRATION_DIRECTIONS, INTEGRATION_FORMATS, INTEGRATION_PAYERS, INTEGRATION_MODELS, CONNECT_BASIS, TEST_STATUSES,
   isRetired, reconState, MATCH_KINDS, getPartnerSessions, type PartnerSessions as PartnerSessionsData,
   type IntegrationData, type IntegrationSection, type IntegrationScenario,
@@ -22,6 +23,7 @@ import { ProjectDocumentsTrack } from './ProjectDocumentsTrack'
 type Props = { site: SiteDetail; companyId: string; onDone: () => Promise<void> }
 const selectClass = 'h-10 w-full min-w-0 rounded-md border bg-background px-2 text-sm'
 const GROUPS: Record<IntegrationSection, { title: string; fields: [string, string][] }> = {
+  lead: { title: 'Заявка', fields: [['initiator', 'Инициатор'], ['contractKind', 'Вид предполагаемого договора'], ['payer', 'Кто кому платит'], ['coverage', 'Охват в общих чертах'], ['curatorUserId', 'Технический куратор интеграции']] },
   partner: { title: 'Партнёр и цель', fields: [['name', 'Партнёр'], ['legalEntity', 'Юридическое лицо, ИНН и подписант'], ['purpose', 'Цель интеграции'], ['commercialContact', 'Коммерческий контакт'], ['assessment', 'Масштаб партнёра и пересечение регионов']] },
   settlement: { title: 'Порядок расчётов и учёт', fields: [['period', 'Периодичность расчётов'], ['paymentTerm', 'Срок оплаты'], ['documents', 'Закрывающие документы: отчёт агента, акт, УПД'], ['vat', 'НДС'], ['disputes', 'Порядок сверки и разрешения расхождений'], ['minimums', 'Минимальные платежи и гарантии'], ['penalties', 'Ответственность за просрочку и штрафы'], ['accountingChannel', 'Как сессии партнёра выделяются в учёте: канал оплаты, идентификатор']] },
   commercial: { title: 'Коммерческие условия (общие для сценариев)', fields: [['commission', 'Комиссия / фиксированная плата'], ['calculationBase', 'База расчёта'], ['acquiring', 'Эквайринг'], ['tariffs', 'Правила тарифов'], ['discounts', 'Правила скидок'], ['discountFunding', 'Источник финансирования скидок'], ['settlements', 'Взаиморасчёты и разрешение расхождений'], ['reporting', 'Отчётность']] },
@@ -117,10 +119,11 @@ function StationListPicker({ scenario, stations, field, value, onChange }: {
   </div>
 }
 
-function ScenariosEditor({ data, props, onSaved }: { data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
+function ScenariosEditor({ data, props, onSaved, compact }: { data: IntegrationData; props: Props; onSaved: () => Promise<void>; compact?: boolean }) {
   const [rows, setRows] = useState(data.scenarios)
   const [busy, setBusy] = useState(false)
-  const catalog = useQuery({ queryKey: ['integration-stations', props.companyId, props.site.id], queryFn: () => getIntegrationStations(props.companyId, props.site.id) })
+  // В заявке сценарий — это направление и формат; перечни станций и расчёты — позже.
+  const catalog = useQuery({ queryKey: ['integration-stations', props.companyId, props.site.id], queryFn: () => getIntegrationStations(props.companyId, props.site.id), enabled: !compact })
   const change = (id: string, patch: Partial<IntegrationScenario>) => setRows(rows.map((s) => s.id === id ? { ...s, ...patch } : s))
   const changeList = (row: IntegrationScenario, field: 'selectedIds' | 'agreedIds' | 'connectedIds' | 'pilotIds', ids: string[]) => {
     if (field === 'selectedIds') change(row.id, { selectedIds: ids, agreedIds: row.agreedIds.filter((id) => ids.includes(id)), connectedIds: row.connectedIds.filter((id) => ids.includes(id)), pilotIds: row.pilotIds.filter((id) => ids.includes(id)) })
@@ -142,7 +145,8 @@ function ScenariosEditor({ data, props, onSaved }: { data: IntegrationData; prop
     catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось сохранить перечни') }
     finally { setBusy(false) }
   }
-  return <section className="rounded-lg border p-3 space-y-3"><h3 className="text-sm font-semibold">Сценарии подключения и перечни ЭЗС</h3>
+  return <section className="rounded-lg border p-3 space-y-3"><h3 className="text-sm font-semibold">{compact ? 'Сценарий интеграции' : 'Сценарии подключения и перечни ЭЗС'}</h3>
+    {compact && <p className="text-xs text-muted-foreground">В заявке — направление и формат. Перечни станций выбираются на «Оценке партнёра» (пункт 1.6), расчёты по сценарию — на «Переговорах».</p>}
     <p className="text-xs text-muted-foreground">Для гибридной или двусторонней интеграции заведите отдельные сценарии по каждому формату и направлению. Новые станции автоматически в перечни не добавляются.</p>
     {catalog.isError && <div role="alert">Перечень станций не загрузился: {catalog.error.message}<Button variant="outline" onClick={() => void catalog.refetch()}>Повторить</Button></div>}
     {rows.map((s) => <div key={s.id} className="rounded-md border p-3 space-y-3">
@@ -151,11 +155,11 @@ function ScenariosEditor({ data, props, onSaved }: { data: IntegrationData; prop
         <label className="text-sm">Формат<select className={selectClass} value={s.format} onChange={(e) => change(s.id, { format: e.target.value as IntegrationScenario['format'] })}>{(['information', 'roaming'] as const).map((v) => <option key={v} value={v}>{INTEGRATION_FORMATS[v]}</option>)}</select></label>
         <label className="text-sm">География<Input value={s.geography} onChange={(e) => change(s.id, { geography: e.target.value })} /></label>
         <label className="text-sm">Ограничения<Input value={s.restrictions} onChange={(e) => change(s.id, { restrictions: e.target.value })} /></label></div>
-      <ScenarioTerms scenario={s} onChange={(patch) => change(s.id, patch)} />
-      {catalog.isPending ? <p role="status">Загрузка станций…</p> : (['selectedIds', 'agreedIds', 'connectedIds', 'pilotIds'] as const).map((field) => <StationListPicker key={field} scenario={s} field={field} stations={catalog.data || []} value={s[field]} onChange={(ids) => changeList(s, field, ids)} />)}
-      <RetiredWarning scenario={s} stations={catalog.data || []} />
+      {!compact && <ScenarioTerms scenario={s} onChange={(patch) => change(s.id, patch)} />}
+      {compact ? null : catalog.isPending ? <p role="status">Загрузка станций…</p> : (['selectedIds', 'agreedIds', 'connectedIds', 'pilotIds'] as const).map((field) => <StationListPicker key={field} scenario={s} field={field} stations={catalog.data || []} value={s[field]} onChange={(ids) => changeList(s, field, ids)} />)}
+      {!compact && <><RetiredWarning scenario={s} stations={catalog.data || []} />
       <ConnectionMarks scenario={s} onMark={(at, basis, ref) => markConnected(s, at, basis, ref)} />
-      <ListVersions scenario={s} saved={data.scenarios.find((x) => x.id === s.id)} data={data} props={props} onSaved={onSaved} />
+      <ListVersions scenario={s} saved={data.scenarios.find((x) => x.id === s.id)} data={data} props={props} onSaved={onSaved} /></>}
       <Button variant="ghost" onClick={() => setRows(rows.filter((r) => r.id !== s.id))}>Удалить сценарий</Button>
     </div>)}
     <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setRows([...rows, { id: crypto.randomUUID(), name: '', direction: 'outgoing', format: 'information', geography: '', restrictions: '', partnerNetwork: '', selectedIds: [], agreedIds: [], connectedIds: [], pilotIds: [], payer: '', model: '' }])}>Добавить сценарий</Button>
@@ -170,6 +174,7 @@ export function IntegrationPassport(props: Props) {
   return <div className="space-y-4">
     <p className="text-sm text-muted-foreground">Поля заполняются по этапам. Заполнение паспорта не подтверждает согласование.</p>
     <SectionEditor key={`partner:${data.revision}`} section="partner" data={data} props={props} onSaved={refresh} />
+    <LeadEditor key={`lead:${data.revision}`} data={data} props={props} onSaved={refresh} />
     <ScenariosEditor key={`scenarios:${data.revision}`} data={data} props={props} onSaved={refresh} />
     {(['commercial', 'settlement', 'data', 'technical'] as const).map((section) => <SectionEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh} />)}
     <p className="text-sm">Руководитель: {props.site.ownerName || 'не назначен'}. Руководитель и внутренняя команда назначаются во вкладке «Работа».</p>
@@ -179,9 +184,19 @@ export function IntegrationPassport(props: Props) {
 export function IntegrationWorkPlan(props: Props) {
   const { query, refresh } = useIntegration(props)
   if (!query.data) return <QueryStatus query={query} />
-  return <div className="space-y-4"><SectionEditor key={query.data.data.revision} section="work" data={query.data.data} props={props} onSaved={refresh} />
-    <TestsEditor key={`tests:${query.data.data.revision}`} data={query.data.data} props={props} onSaved={refresh} />
-    <PhaseDates key={`dates:${query.data.data.revision}`} props={props} state={query.data} onSaved={refresh} /></div>
+  // Блоки появляются со своей стадией: в заявке пилот, испытания и даты всех этапов
+  // только перегружали экран (замечание МАГа 05.10.2026). Уже введённое не прячем.
+  const d = query.data.data
+  const at = (stage: string) => FUNNEL_STAGES.indexOf(props.site.stage as never) >= FUNNEL_STAGES.indexOf(stage as never)
+  const showWork = at('decision') || Object.values(d.work || {}).some(Boolean)
+  const showTests = at('construction') || d.tests.length > 0
+  const showDates = at('negotiation') || Object.keys(d.dates || {}).length > 0
+  return <div className="space-y-4">
+    {showWork && <SectionEditor key={d.revision} section="work" data={d} props={props} onSaved={refresh} />}
+    {showTests && <TestsEditor key={`tests:${d.revision}`} data={d} props={props} onSaved={refresh} />}
+    {showDates && <PhaseDates key={`dates:${d.revision}`} props={props} state={query.data} onSaved={refresh} />}
+    {!showWork && !showTests && !showDates && <p className="text-xs text-muted-foreground">Пилот, испытания и план этапов появятся здесь со своими стадиями. На заявке — партнёр, сценарий, предполагаемый договор и ответственные: пункты чек-листа ниже.</p>}
+  </div>
 }
 
 function PhaseDates({ props, state, onSaved }: { props: Props; state: NonNullable<ReturnType<typeof useIntegration>['query']['data']>; onSaved: () => Promise<void> }) {
@@ -266,9 +281,9 @@ export function IntegrationChecklist(props: Props) {
             здесь — сводка их форматов. 1.4 — назначение руководителя, а не тех. параметры. */}
         <NeedLine task={tasks.find((x) => x.key === editing.key) ?? editing} item={items.get(editing.key)} />
         {(ITEM_VIEW[editing.key]?.sections ?? [editing.section, ...(EXTRA_EDITORS[editing.key] || [])]).map((section) => <TaskEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh}
-          only={section === (ITEM_VIEW[editing.key]?.sections?.[0] ?? editing.section) ? ITEM_VIEW[editing.key]?.fields : undefined} />)}
-        {ITEM_VIEW[editing.key]?.sections?.length === 0 && !['1.3', '1.4', '2.8'].includes(editing.key) && <p className="text-sm text-muted-foreground">Отдельных данных у пункта нет: он подтверждается результатом ниже — комментарием, документом или поручением «Трека».</p>}
-        {editing.key === '1.3' && <ScenarioFormats data={data} />}
+          compact={ITEM_VIEW[editing.key]?.compact}
+          only={section === 'lead' ? ITEM_VIEW[editing.key]?.leadFields : section === (ITEM_VIEW[editing.key]?.sections?.[0] ?? editing.section) ? ITEM_VIEW[editing.key]?.fields : undefined} />)}
+        {ITEM_VIEW[editing.key]?.sections?.length === 0 && !['1.4', '2.8'].includes(editing.key) && <p className="text-sm text-muted-foreground">Отдельных данных у пункта нет: он подтверждается результатом ниже — комментарием, документом или поручением «Трека».</p>}
         {editing.key === '1.4' && <ProjectLeadPicker props={props} onSaved={refresh} />}
         {editing.key === '5.12' && <PartnerSessionsRule key={`match:${data.revision}`} data={data} props={props} onSaved={refresh} />}
         {editing.key === '2.8' && <PhaseDates key={`dates:${data.revision}`} props={props} state={query.data} onSaved={refresh} />}
@@ -279,15 +294,38 @@ export function IntegrationChecklist(props: Props) {
   </section>
 }
 
-/** 1.3 — какие сценарии и в каком формате: сводка того, что заведено в 1.2. */
-function ScenarioFormats({ data }: { data: IntegrationData }) {
-  return <section className="rounded-lg border p-3 space-y-2"><h3 className="font-semibold text-sm">Сценарии интеграции</h3>
-    <p className="text-xs text-muted-foreground">Сценарии, их направление, формат и перечни станций заводятся в пункте 1.2. Здесь проверяется, что у каждого сценария выбран формат: показ на карте, запуск и оплата зарядки, взаимный доступ, обмен данными.</p>
-    {data.scenarios.length === 0 ? <p className="text-sm text-amber-700 dark:text-amber-400">Сценариев нет — заведите их в пункте 1.2.</p>
-      : <ul className="divide-y text-sm">{data.scenarios.map((s) => <li key={s.id} className="py-1.5">
-          <span className="font-medium">{s.name || 'Без названия'}</span>
-          <span className="text-muted-foreground"> · {INTEGRATION_DIRECTIONS[s.direction]} · {INTEGRATION_FORMATS[s.format]} · станций выбрано: {s.selectedIds.length}</span>
-        </li>)}</ul>}
+/** Заявка: инициатор, предполагаемый договор (вид, кто кому платит), охват, тех. куратор. */
+function LeadEditor({ data, props, onSaved, only }: { data: IntegrationData; props: Props; onSaved: () => Promise<void>; only?: string[] }) {
+  const [draft, setDraft] = useState<Record<string, string>>(data.lead || {})
+  const [busy, setBusy] = useState(false)
+  const members = useQuery({ queryKey: ['site-members', props.companyId], queryFn: () => getSiteMembers(props.companyId), enabled: !only || only.includes('curatorUserId') })
+  const show = (k: string) => !only || only.includes(k)
+  const set = (k: string, v: string) => setDraft({ ...draft, [k]: v })
+  const save = async () => {
+    setBusy(true)
+    try { await saveIntegration(props.companyId, props.site.id, { revision: data.revision, lead: draft }); await onSaved(); toast.success('Заявка сохранена') }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось сохранить заявку') }
+    finally { setBusy(false) }
+  }
+  const pick = (k: string, label: string, opts: Record<string, string>) => <label className="block space-y-1 text-sm">{label}
+    <select aria-label={label} className={selectClass} value={draft[k] || ''} onChange={(e) => set(k, e.target.value)}>
+      <option value="">Не указано</option>{Object.entries(opts).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
+  return <section className="rounded-lg border p-3 space-y-3"><h3 className="font-semibold text-sm">Заявка</h3>
+    <div className="grid gap-3 sm:grid-cols-2">
+      {show('initiator') && pick('initiator', 'Инициатор', LEAD_INITIATORS)}
+      {show('contractKind') && pick('contractKind', 'Вид предполагаемого договора', LEAD_CONTRACT_KINDS)}
+      {show('payer') && pick('payer', 'Кто кому платит', INTEGRATION_PAYERS)}
+      {show('curatorUserId') && <label className="block space-y-1 text-sm">Технический куратор интеграции
+        <select aria-label="Технический куратор интеграции" className={selectClass} value={draft.curatorUserId || ''} onChange={(e) => set('curatorUserId', e.target.value)}>
+          <option value="">Не назначен</option>
+          {draft.curatorUserId && !members.data?.some((m) => m.id === draft.curatorUserId) && <option value={draft.curatorUserId}>сотрудник недоступен</option>}
+          {(members.data ?? []).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+        <span className="block text-xs text-muted-foreground">Отвечает за протоколы, техническое согласование и доступы — не обязательно руководитель проекта.</span></label>}
+      {show('coverage') && <label className="block space-y-1 text-sm sm:col-span-2">Охват в общих чертах
+        <Textarea rows={2} value={draft.coverage || ''} placeholder="Регионы и примерное число станций — без выбора станций" onChange={(e) => set('coverage', e.target.value)} /></label>}
+    </div>
+    {show('contractKind') && <p className="text-xs text-muted-foreground">Ставки, НДС и сроки оплаты — предмет переговоров (пункты 2.2 и 6.2), в заявке не нужны.</p>}
+    <Button disabled={busy} onClick={() => void save()}>Сохранить заявку</Button>
   </section>
 }
 
@@ -397,9 +435,14 @@ type TaskSection = IntegrationTask['section']
  * Карта на фронте: подтверждения пунктов привязаны к разделу на сервере (отпечаток
  * данных), и менять его значило бы сбросить уже подтверждённые пункты.
  */
-const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[] }> = {
-  '1.1': { fields: ['name', 'purpose'] }, '1.5': { fields: ['assessment'] }, '4.1': { fields: ['legalEntity'] },
-  '1.3': { sections: [] }, '1.4': { sections: [] }, '2.8': { sections: [] },
+const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[]; leadFields?: string[]; compact?: boolean }> = {
+  // Заявка: кто, зачем, что за интеграция, какой договор, кто отвечает — без протоколов и перечней.
+  '1.1': { sections: ['partner', 'lead'], fields: ['name', 'purpose', 'commercialContact'], leadFields: ['initiator'] },
+  '1.2': { sections: ['scenarios', 'lead'], compact: true, leadFields: ['coverage'] },
+  '1.3': { sections: ['lead'], leadFields: ['contractKind', 'payer'] },
+  '1.4.1': { sections: ['lead'], leadFields: ['curatorUserId'] },
+  '1.5': { fields: ['assessment'] }, '4.1': { fields: ['legalEntity'] },
+  '1.4': { sections: [] }, '2.8': { sections: [] },
   '2.4': { fields: ['responsibilities', 'support'] }, '3.1': { fields: ['systems', 'protocol', 'version'] },
   '3.4': { fields: ['access', 'security'] }, '3.5': { fields: ['acceptanceCriteria'] }, '3.6': { fields: ['contacts'] },
   '5.1': { fields: ['access'] }, '6.5': { fields: ['support'] }, '6.13': { fields: ['productionAccess'] },
@@ -419,7 +462,7 @@ const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[] }>
 function NeedLine({ task, item }: { task: IntegrationTask; item?: GateItem }) {
   if (item?.done && !item.needsConfirmation) return null
   // У пункта без своих данных пояснение даёт строка «Отдельных данных у пункта нет».
-  if (!task.need && ITEM_VIEW[task.key]?.sections?.length === 0 && !['1.3', '1.4', '2.8'].includes(task.key)) return null
+  if (!task.need && ITEM_VIEW[task.key]?.sections?.length === 0 && !['1.4', '2.8'].includes(task.key)) return null
   return task.need
     ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">Чтобы подтвердить пункт: {task.need}.</p>
     : <p className="text-xs text-muted-foreground">Данных для подтверждения достаточно — запишите результат проверки и подтвердите.</p>
@@ -430,8 +473,9 @@ const EXTRA_EDITORS: Record<string, TaskSection[]> = {
   '5.10': ['work'], '5.11': ['documents'], '6.6': ['scenarios'],
 }
 
-function TaskEditor({ section, data, props, onSaved, only }: { section: TaskSection; data: IntegrationData; props: Props; onSaved: () => Promise<void>; only?: string[] }) {
-  if (section === 'scenarios') return <ScenariosEditor data={data} props={props} onSaved={onSaved} />
+function TaskEditor({ section, data, props, onSaved, only, compact }: { section: TaskSection; data: IntegrationData; props: Props; onSaved: () => Promise<void>; only?: string[]; compact?: boolean }) {
+  if (section === 'scenarios') return <ScenariosEditor data={data} props={props} onSaved={onSaved} compact={compact} />
+  if (section === 'lead') return <LeadEditor data={data} props={props} onSaved={onSaved} only={only} />
   if (section === 'documents') return <DocumentsEditor data={data} props={props} onSaved={onSaved} />
   if (section === 'tests') return <TestsEditor data={data} props={props} onSaved={onSaved} />
   if (section === 'reconciliations') return <ReconciliationsEditor data={data} props={props} onSaved={onSaved} />
