@@ -35,7 +35,7 @@ const GROUPS: Record<IntegrationSection, { title: string; fields: [string, strin
   accounting: { title: 'Связь с контрагентом', fields: [] },
 }
 /** Кто закрывает пункт по регламенту — словами, а не кодом «ОР» (вопрос МАГа 06.10.2026). */
-const ROLE_NAMES: Record<string, string> = {
+export const ROLE_NAMES: Record<string, string> = {
   'ОР': 'Отдел развития', 'ДР/ГД': 'Директор по развитию / ГД', 'ОЭ': 'Эксплуатация', 'ЮБ': 'Юристы',
   'ФБ': 'Финансы', 'ИТ': 'ИТ-служба', 'Поддержка': 'Поддержка',
 }
