@@ -337,6 +337,11 @@ def confirmation_problem(site, key, data):
     return requirement_problem(site, key, data)
 
 
+def _and(words):
+    """«а», «а и б», «а, б и в»."""
+    return " и ".join([", ".join(words[:-1]), words[-1]]) if len(words) > 1 else "".join(words)
+
+
 def requirement_problem(site, key, data):
     """Чего не хватает в ДАННЫХ проекта, чтобы пункт можно было подтвердить.
 
@@ -351,7 +356,7 @@ def requirement_problem(site, key, data):
     versions_ok, versions_problem = versions_state(data)
     required = {
         "1.1": (p.get("name") and p.get("purpose") and data["lead"].get("initiator"),
-                "Заполните " + ", ".join(n for n, v in (("партнёра", p.get("name")), ("цель", p.get("purpose")), ("инициатора интеграции", data["lead"].get("initiator"))) if not v)),
+                "Заполните " + _and([n for n, v in (("партнёра", p.get("name")), ("цель", p.get("purpose")), ("инициатора интеграции", data["lead"].get("initiator"))) if not v])),
         "1.3": (data["lead"].get("contractKind") and data["lead"].get("payer"), "Укажите вид предполагаемого договора и кто кому платит"),
         "1.4.1": (data["lead"].get("curatorUserId"), "Назначьте технического куратора интеграции"),
         "1.5": (p.get("assessment"), "Опишите масштаб партнёра и пересечение регионов"),

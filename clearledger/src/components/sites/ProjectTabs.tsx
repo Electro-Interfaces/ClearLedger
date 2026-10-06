@@ -378,8 +378,10 @@ function RoutePanel({ site, companyId, onDone }: {
   // работу — не выполнено условие» рядом с работающей кнопкой «Взять в работу».
   // Прячем только такие: кнопка с тем же словом никуда не делась, она под рукой.
   const openVerbs = new Set(open.map((a) => a.verb))
+  // Возврат с паузы доступен только на ту стадию, с которой ушли: остальные семь
+  // «Вернуть в работу: …» с условием «eco_prev_stage = …» — шум (проход 06.10.2026).
   const blockedActions = (state.actions ?? [])
-    .filter((a) => a.allowed === false && !openVerbs.has(a.verb))
+    .filter((a) => a.allowed === false && !openVerbs.has(a.verb) && !/eco_prev_stage/.test(a.deny_reason ?? ''))
   const normal = open.filter((a) => !a.is_discretionary)
   const extra = open.filter((a) => a.is_discretionary)
   // Ведущий шаг стадии — единственный ход вперёд. Их два и больше (развилка формы
@@ -604,12 +606,12 @@ function RoutePanel({ site, companyId, onDone }: {
                       узнает об этом только после нажатия. Деньги — числом, иначе
                       на телефоне открывается буквенная клавиатура. */}
                   {d?.field_type === 'textarea' ? (
-                    <Textarea rows={2} value={form[code] ?? ''}
+                    <Textarea rows={2} aria-label={d?.label ?? code} value={form[code] ?? ''}
                       onChange={(e) => setForm({ ...form, [code]: e.target.value })} />
                   ) : d?.field_type === 'select' && d.options?.length ? (
                     <Select value={form[code] || '__none__'}
                       onValueChange={(v) => setForm({ ...form, [code]: v === '__none__' ? '' : v })}>
-                      <SelectTrigger className="h-10 sm:h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectTrigger aria-label={d?.label ?? code} className="h-10 sm:h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__" className="text-sm">—</SelectItem>
                         {d.options.map((o) => (
@@ -630,6 +632,7 @@ function RoutePanel({ site, companyId, onDone }: {
                       type={d?.field_type === 'date' ? 'date' : 'text'}
                       inputMode={d?.field_type === 'money' || d?.field_type === 'number' ? 'decimal' : undefined}
                       className="h-10 sm:h-9"
+                      aria-label={d?.label ?? code}
                       value={form[code] ?? ''}
                       onChange={(e) => setForm({ ...form, [code]: e.target.value })} />
                   )}

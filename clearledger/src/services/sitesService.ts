@@ -46,7 +46,7 @@ export const STAGE_META: Record<SiteStage, { label: string; hint: string; cls: s
 export const INTEGRATION_STAGE_LABEL: Partial<Record<SiteStage, string>> = {
   lead: 'Заявка', screening: 'Оценка партнёра', negotiation: 'Переговоры', dd: 'Техническое согласование',
   decision: 'Решение о пилоте', contracting: 'Пилотное соглашение', construction: 'Настройка и тесты',
-  commissioning: 'Договор', live: 'Работает',
+  commissioning: 'Договор', live: 'Работает', on_hold: 'На паузе', archive: 'Отклонена',
 }
 /** Название стадии с учётом вида проекта. */
 export const stageLabelOf = (kind: string | null | undefined, st: SiteStage): string =>

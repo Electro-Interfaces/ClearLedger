@@ -278,6 +278,16 @@ function NextStepBar({ site, onGoTab, onPlanStep }: {
 }) {
   const gate = site.gate
   if (!gate) return null
+  // Пауза и отказ: «всё обязательное закрыто — дальше …» на остановленном проекте
+  // читалось как приглашение двигаться (проход 06.10.2026).
+  if (site.stage === 'on_hold' || site.stage === 'archive') {
+    return (
+      <div data-zone="Что делать сейчас" className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+        <span className="font-medium">Сейчас: {site.stageLabel}</span>
+        <span className="text-muted-foreground"> — проект не в работе{site.stage === 'on_hold' ? '; вернуть — кнопкой «Вернуть в работу» в ходе по маршруту' : ''}</span>
+      </div>
+    )
+  }
   const nextStage = FUNNEL_STAGES[FUNNEL_STAGES.indexOf(site.stage as never) + 1]
   const nextLabel = nextStage ? stageLabelOf(site.kind, nextStage) : null
   // Пункт с послаблением не держит переход и не может быть «ближайшим шагом»:
