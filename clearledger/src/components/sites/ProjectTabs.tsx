@@ -246,13 +246,20 @@ function RoutePanel({ site, companyId, onDone }: {
   const [stepParams, setStepParams] = useSearchParams()
   const stepRef = useRef<HTMLDivElement>(null)
   const wantStep = stepParams.get('pstep')
+  // Метку из адреса снимаем не сразу, а когда подтверждение закрыли: смена адреса
+  // перерисовывает карточку, и открытое подтверждение тут же пропадало.
+  const stepTaken = useRef(false)
   useEffect(() => {
-    if (!wantStep || !state?.actions) return
+    if (!wantStep || !state?.actions || stepTaken.current) return
+    stepTaken.current = true
     const fwd = state.actions.filter((a) => a.allowed !== false && !a.is_discretionary && a.is_positive === true)
     if (fwd.length === 1) { setPicked(fwd[0]); setForm({}) }
-    stepRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setTimeout(() => stepRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50)
+  }, [wantStep, state])
+  useEffect(() => {
+    if (picked || !wantStep || !stepTaken.current) return
     setStepParams((prev) => { const n = new URLSearchParams(prev); n.delete('pstep'); return n }, { replace: true })
-  }, [wantStep, state, setStepParams])
+  }, [picked, wantStep, setStepParams])
 
   // Маршруты спрашиваем только пока проект не на рельсах: у идущего выбор уже
   // сделан и менять его нечем — лишний запрос в карточку каждого проекта.
