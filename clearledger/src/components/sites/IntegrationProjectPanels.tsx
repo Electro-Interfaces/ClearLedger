@@ -155,7 +155,7 @@ function ScenariosEditor({ data, props, onSaved, compact }: { data: IntegrationD
   // перечня станция уносит их с собой, иначе сервер отклонит сохранение.
   const pruned = (list: IntegrationScenario[]) => list.map((s) => ({ ...s,
     connectedMeta: Object.fromEntries(Object.entries(s.connectedMeta || {}).filter(([id]) => s.connectedIds.includes(id))) }))
-  usePending('scenarios', rows === data.scenarios ? data.scenarios : pruned(rows), data.scenarios)
+  const inItem = usePending('scenarios', rows === data.scenarios ? data.scenarios : pruned(rows), data.scenarios)
   const markConnected = (row: IntegrationScenario, at: string, basis: keyof typeof CONNECT_BASIS, ref: string) => {
     const meta = { ...(row.connectedMeta || {}) }
     for (const id of row.connectedIds) if (!meta[id]?.at) meta[id] = { at, basis, ref }
@@ -185,7 +185,7 @@ function ScenariosEditor({ data, props, onSaved, compact }: { data: IntegrationD
       <Button variant="ghost" onClick={() => setRows(rows.filter((r) => r.id !== s.id))}>Удалить сценарий</Button>
     </div>)}
     <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setRows([...rows, { id: crypto.randomUUID(), name: '', direction: 'outgoing', format: 'information', geography: '', restrictions: '', partnerNetwork: '', selectedIds: [], agreedIds: [], connectedIds: [], pilotIds: [], payer: '', model: '' }])}>Добавить сценарий</Button>
-      <Button disabled={busy} onClick={() => void save()}>Сохранить сценарии и перечни</Button></div>
+      {!inItem && <Button disabled={busy} onClick={() => void save()}>Сохранить сценарии и перечни</Button>}</div>
   </section>
 }
 
@@ -272,7 +272,7 @@ function ResultEditor({ task, props, data, onSaved, onDone }: { task: Integratio
     }
     finally { setBusy(false) }
   }
-  return <section className="rounded-lg border p-3 space-y-3"><h3 className="text-sm font-semibold">Подтверждение пункта {task.key}</h3>
+  return <><section className="rounded-lg border p-3 space-y-3"><h3 className="text-sm font-semibold">Подтверждение пункта {task.key}</h3>
     <label className="block text-sm">{byData ? 'Комментарий — необязательно: подтверждением служат заполненные данные' : result.notApplicable ? 'Причина неприменимости' : 'Результат проверки'}
       <Textarea rows={2} value={result.comment} onChange={(e) => setResult({ ...result, comment: e.target.value })} /></label>
     {!task.required && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={result.notApplicable} onChange={(e) => setResult({ ...result, notApplicable: e.target.checked })} />Не применимо к этому сценарию</label>}
@@ -281,8 +281,13 @@ function ResultEditor({ task, props, data, onSaved, onDone }: { task: Integratio
       {docs.isError && <p role="alert">Документы не загрузились: {docs.error.message}</p>}
       <ProjectEvidencePicker companyId={props.companyId} siteId={props.site.id} value={result.workRef} label="Поручение Трека" onChange={(value) => { if (!value || value.startsWith('task:')) setResult({ ...result, workRef: value }); else toast.warning('Выберите поручение. Файл можно выбрать в поле документа результата') }} />
     </> : <button type="button" className="text-xs underline text-muted-foreground" onClick={() => setMore(true)}>приложить документ или поручение</button>}
-    <Button disabled={busy} onClick={() => void confirm()}>Подтвердить выполнение</Button>
   </section>
+    {/* Закреплена внизу окна: пункт выполняется только ею, а окно длинное */}
+    <div className="sticky -bottom-6 z-10 -mx-6 -mb-6 flex flex-wrap items-center gap-3 border-t bg-background px-6 py-3">
+      <Button disabled={busy} onClick={() => void confirm()}>Подтвердить выполнение</Button>
+      <span className="text-xs text-muted-foreground">Сохранит заполненное в окне и подтвердит пункт {task.key}</span>
+    </div>
+  </>
 }
 
 export function IntegrationChecklist(props: Props) {
@@ -519,7 +524,7 @@ function ProjectLeadPicker({ props, onSaved }: { props: Props; onSaved: () => Pr
 function DocumentsEditor({ data, props, onSaved }: { data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
   const [rows, setRows] = useState(data.documents)
   const [busy, setBusy] = useState(false)
-  usePending('documents', rows, data.documents)
+  const inItem = usePending('documents', rows, data.documents)
   const input = useRef<HTMLInputElement>(null)
   const docs = useQuery({ queryKey: ['site-docs', props.companyId, props.site.id], queryFn: () => getSiteDocs(props.companyId, props.site.id) })
   const change = (id: string, patch: Partial<IntegrationDocument>) => setRows(rows.map((d) => d.id === id ? { ...d, ...patch } : d))
@@ -543,7 +548,7 @@ function DocumentsEditor({ data, props, onSaved }: { data: IntegrationData; prop
       {([['fileDocId', 'Файл'], ['agreedDocId', 'Согласованная редакция'], ['signedDocId', 'Подписанная версия']] as const).map(([field, label]) => <div key={field} className="flex gap-2 items-end"><label className="flex-1 min-w-0 text-sm">{label}<select className={selectClass} value={d[field]} onChange={(e) => change(d.id, { [field]: e.target.value })}><option value="">Не выбрана</option>{(docs.data || []).map((file) => <option key={file.id} value={file.id}>{file.title || file.fileName}</option>)}</select></label><Button variant="outline" disabled={!d[field]} onClick={() => void downloadSiteDoc(props.companyId, props.site.id, d[field]).catch((e) => toast.error(e.message))}>Скачать</Button></div>)}
       <label className="block text-sm">Подтверждение подписания<Textarea value={d.signingEvidence} onChange={(e) => change(d.id, { signingEvidence: e.target.value })} /></label><Button variant="ghost" onClick={() => setRows(rows.filter((r) => r.id !== d.id))}>Удалить запись документа</Button>
     </div>)}
-    <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setRows([...rows, { id: crypto.randomUUID(), kind: 'other', title: '', edition: '', fileDocId: '', agreedDocId: '', signedDocId: '', signingEvidence: '' }])}>Добавить документ</Button><Button disabled={busy} onClick={() => void save()}>Сохранить редакции документов</Button></div>
+    <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setRows([...rows, { id: crypto.randomUUID(), kind: 'other', title: '', edition: '', fileDocId: '', agreedDocId: '', signedDocId: '', signingEvidence: '' }])}>Добавить документ</Button>{!inItem && <Button disabled={busy} onClick={() => void save()}>Сохранить редакции документов</Button>}</div>
   </section>
 }
 
@@ -627,7 +632,7 @@ function NeedLine({ task, item }: { task: IntegrationTask; item?: GateItem }) {
   if (!task.need && ITEM_VIEW[task.key]?.sections?.length === 0 && !['1.4', '2.8'].includes(task.key)) return null
   return task.need
     ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">Чтобы подтвердить пункт: {task.need}.</p>
-    : <p className="text-xs text-muted-foreground">Данных для подтверждения достаточно — запишите результат проверки и подтвердите.</p>
+    : <p className="text-xs text-muted-foreground">Данных для подтверждения достаточно — нажмите «Подтвердить выполнение» внизу окна.</p>
 }
 
 const EXTRA_EDITORS: Record<string, TaskSection[]> = {
@@ -742,7 +747,7 @@ const TEST_TEMPLATES: Record<'information' | 'roaming', [string, boolean][]> = {
 function TestsEditor({ data, props, onSaved }: { data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
   const [rows, setRows] = useState<IntegrationTest[]>(data.tests)
   const [busy, setBusy] = useState(false)
-  usePending('tests', rows, data.tests)
+  const inItem = usePending('tests', rows, data.tests)
   const change = (id: string, patch: Partial<IntegrationTest>) => setRows(rows.map((x) => x.id === id ? { ...x, ...patch } : x))
   const addTypical = () => {
     const next = [...rows]
@@ -786,7 +791,7 @@ function TestsEditor({ data, props, onSaved }: { data: IntegrationData; props: P
     <div className="flex flex-wrap gap-2">
       <Button variant="outline" disabled={!data.scenarios.length} onClick={addTypical}>Добавить типовые испытания по сценариям</Button>
       <Button variant="outline" onClick={() => setRows([...rows, { id: crypto.randomUUID(), scenarioId: '', title: 'Новое испытание', required: false, status: 'pending', sessionRef: '', comment: '', docId: '' }])}>Своё испытание</Button>
-      <Button disabled={busy} onClick={() => void save()}>Сохранить испытания</Button>
+      {!inItem && <Button disabled={busy} onClick={() => void save()}>Сохранить испытания</Button>}
     </div>
   </section>
 }
@@ -797,7 +802,7 @@ const RECON_STATE = { match: ['Сходится', 'text-emerald-700 dark:text-em
 function ReconciliationsEditor({ data, props, onSaved }: { data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
   const [rows, setRows] = useState<IntegrationReconciliation[]>(data.reconciliations)
   const [busy, setBusy] = useState(false)
-  usePending('reconciliations', rows, data.reconciliations)
+  const inItem = usePending('reconciliations', rows, data.reconciliations)
   const docs = useQuery({ queryKey: ['site-docs', props.companyId, props.site.id], queryFn: () => getSiteDocs(props.companyId, props.site.id) })
   const change = (id: string, patch: Partial<IntegrationReconciliation>) => setRows(rows.map((r) => r.id === id ? { ...r, ...patch } : r))
   const add = (kind: IntegrationReconciliation['kind']) => setRows([...rows, { id: crypto.randomUUID(), kind, period: '', resolution: '', docId: '', ours: { sessions: 0, kwh: 0, amount: 0 }, partner: { sessions: 0, kwh: 0, amount: 0 } }])
@@ -844,7 +849,7 @@ function ReconciliationsEditor({ data, props, onSaved }: { data: IntegrationData
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>{r.byName ? `${r.byName}${r.at ? `, ${new Date(r.at).toLocaleString('ru-RU')}` : ''}` : 'не сохранена'}</span><Button variant="ghost" size="sm" onClick={() => setRows(rows.filter((x) => x.id !== r.id))}>Убрать</Button></div>
       </div>
     })}
-    <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => add('pilot')}>Пробная сверка по пилоту</Button><Button variant="outline" onClick={() => add('monthly')}>Месячная сверка</Button><Button disabled={busy} onClick={() => void save()}>Сохранить сверки</Button></div>
+    <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => add('pilot')}>Пробная сверка по пилоту</Button><Button variant="outline" onClick={() => add('monthly')}>Месячная сверка</Button>{!inItem && <Button disabled={busy} onClick={() => void save()}>Сохранить сверки</Button>}</div>
   </section>
 }
 
