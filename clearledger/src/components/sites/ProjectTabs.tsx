@@ -257,12 +257,6 @@ function RoutePanel({ site, companyId, onDone }: {
   // бы само перевести проект ещё раз.
   const stepFresh = !!wantStep && !consumedSteps.has(wantStep) && Date.now() - Number(wantStep) < 30_000
   useEffect(() => {
-    if (wantStep && !stepFresh && !mStep.isPending && !picked) {
-      setStepParams((prev) => { const n = new URLSearchParams(prev); n.delete('pstep'); return n }, { replace: true })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantStep, stepFresh, picked])
-  useEffect(() => {
     // Проверка набора — здесь, а не только при отрисовке: панель хода стоит в карточке
     // не в одном месте, и обе отрабатывали одну метку — шаг уходил дважды (06.10.2026).
     if (!wantStep || !stepFresh || !state?.actions || stepTaken.current || consumedSteps.has(wantStep)) return
@@ -327,6 +321,12 @@ function RoutePanel({ site, companyId, onDone }: {
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Шаг не выполнен'),
   })
+  useEffect(() => {
+    if (wantStep && !stepFresh && !mStep.isPending && !picked) {
+      setStepParams((prev) => { const n = new URLSearchParams(prev); n.delete('pstep'); return n }, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantStep, stepFresh, picked, mStep.isPending])
   // Отмена последнего шага — «нажал не ту кнопку». Правила держит Координатор
   // (свой шаг, сутки), поэтому здесь только кнопка и честный текст отказа: он
   // объясняет, чей это был шаг и что делать, если срок вышел.
