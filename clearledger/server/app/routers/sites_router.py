@@ -1347,11 +1347,25 @@ async def apply_project_step(
     if not link_id:
         raise HTTPException(400, "Не указано действие (linkId)")
     branch = payload.get("branchCaseId")
+    stage_before = site.stage
     try:
         res = await projects_process.apply_step(
             db, cid, site, link_id, payload.get("payload") or {}, user,
             branch_case_id=str(branch) if branch else None)
     except ProjectionError as e:
+        # Координатор мог выполнить шаг позже нашего тайм-аута (06.10.2026: «Поддержка»
+        # была занята выгрузкой HubEx, шаг прошёл через 30 с, карточка осталась на
+        # прежней стадии, повтор — «действие недоступно»). Перечитываем маршрут: если
+        # стадия уже сменилась, шаг выполнен — сводим карточку и отвечаем успехом.
+        await db.rollback()
+        site = await _owned(db, cid, site_id)
+        try:
+            state = await projects_process.reconcile(db, cid, site, user)
+        except ProjectionError:
+            state = None
+        if state is not None and site.stage != stage_before:
+            await db.commit()
+            return {**state, "recovered": True}
         raise HTTPException(400, str(e)) from e
     await db.commit()
     return res

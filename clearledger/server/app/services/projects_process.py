@@ -206,7 +206,8 @@ async def _call(db: AsyncSession, company_id, method: str, path: str,
                 resp = await client.post(url, json=body,
                                          headers={"Authorization": f"Bearer {token}"})
         except httpx.HTTPError as e:
-            raise ProjectionError(f"Координатор недоступен: {e}") from e
+            # str() у тайм-аута httpx пустой — человек видел «Координатор недоступен: »
+            raise ProjectionError(f"Координатор недоступен: {e or type(e).__name__}") from e
 
     if resp.status_code >= 400:
         data: dict[str, Any] = {}
