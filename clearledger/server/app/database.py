@@ -2844,6 +2844,7 @@ async def create_all() -> None:
         # legacy-стадии: «Согласованные» лежали в prospect, хотя там договоры на
         # подписи — это конец воронки, а не начало (см. docs/SITES_LAND_BANK_BLUEPRINT.md).
         for stmt in (
+            "ALTER TABLE ezs_site_participants ADD COLUMN IF NOT EXISTS position INTEGER",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS stage_since VARCHAR(10)",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS prev_stage VARCHAR(16)",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS archive_reason VARCHAR(200)",

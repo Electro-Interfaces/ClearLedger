@@ -549,6 +549,10 @@ export async function addSiteParticipant(
 }
 
 /** Снять человека с роли в проекте. */
+export async function orderSiteParticipants(companyId: string, id: string, ids: string[]): Promise<{ ok: boolean }> {
+  return put(`/api/sites/${id}/participants/order?company_id=${companyId}`, { ids })
+}
+
 export async function editSiteParticipant(
   companyId: string, id: string, participantId: string, body: { roleCode?: string; note?: string },
 ): Promise<{ ok: boolean }> {

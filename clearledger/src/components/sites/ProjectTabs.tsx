@@ -31,7 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   Loader2, ExternalLink, Check, Circle, Save, MessageSquarePlus, AlertTriangle,
-  Upload, Trash2, Pencil, X as XIcon, Lock, Link as LinkIcon, Plus, Undo2,
+  Upload, Trash2, Pencil, X as XIcon, ArrowUp, ArrowDown, Lock, Link as LinkIcon, Plus, Undo2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import * as chatApi from '@/services/chatService'
@@ -44,7 +44,7 @@ import {
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
   linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
   getProjectCase, openProjectCase, applyProjectStep, undoProjectStep,
-  getSiteParticipants, addSiteParticipant, editSiteParticipant, removeSiteParticipant, registerEquipmentUnit,
+  getSiteParticipants, addSiteParticipant, editSiteParticipant, orderSiteParticipants, removeSiteParticipant, registerEquipmentUnit,
   STAGE_META, FUNNEL_STAGES, CLOSING_STAGES, QUADRANT_META, EXIT_REASONS, PROJECT_OBJECT_TYPES, projectObjectLabel,
   type SiteDetail, type SiteStage, type ProjectContext, type CaseAction,
   type SiteEquipment, stageLabelOf } from '@/services/sitesService'
@@ -776,6 +776,15 @@ function PartiesPanel({ site, companyId, onChanged }: {
   })
 
   const rows = q.data?.participants ?? []
+  // Порядок задаёт человек: стрелки меняют строку с соседней (МАГ 06.10.2026).
+  const mOrder = useMutation({
+    mutationFn: (ids: string[]) => orderSiteParticipants(companyId, site.id, ids),
+    onSuccess: async () => { await q.refetch() },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось переставить'),
+  })
+  const move = (i: number, d: -1 | 1) => {
+    const ids = rows.map((r) => r.id); [ids[i], ids[i + d]] = [ids[i + d], ids[i]]; mOrder.mutate(ids)
+  }
 
   return (
     <section className="rounded-lg border border-border">
@@ -790,7 +799,7 @@ function PartiesPanel({ site, companyId, onChanged }: {
             пространства — назначьте хотя бы ОР и ОКС, и каждый увидит свои.
           </div>
         )}
-        {rows.map((p) => edit?.id === p.id ? (
+        {rows.map((p, i) => edit?.id === p.id ? (
           <div key={p.id} className="flex flex-wrap items-center gap-2 text-sm px-1">
             <span className="w-56 truncate font-medium">{p.name}</span>
             <Select value={edit.role} onValueChange={(v) => setEdit({ ...edit, role: v })}>
@@ -816,6 +825,12 @@ function PartiesPanel({ site, companyId, onChanged }: {
               {p.name}
               {p.note && <span className="text-muted-foreground"> · {p.note}</span>}
             </span>
+            {rows.length > 1 && <>
+              <Button size="icon" variant="ghost" className="h-6 w-6" title="Выше" aria-label="Выше"
+                disabled={i === 0 || mOrder.isPending} onClick={() => move(i, -1)}><ArrowUp className="h-3.5 w-3.5" /></Button>
+              <Button size="icon" variant="ghost" className="h-6 w-6" title="Ниже" aria-label="Ниже"
+                disabled={i === rows.length - 1 || mOrder.isPending} onClick={() => move(i, 1)}><ArrowDown className="h-3.5 w-3.5" /></Button>
+            </>}
             <Button size="icon" variant="ghost" className="h-6 w-6" title="Изменить роль и уточнение"
               onClick={() => setEdit({ id: p.id, role: p.roleCode, note: p.note ?? '' })}>
               <Pencil className="h-3.5 w-3.5" />

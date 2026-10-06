@@ -6804,6 +6804,8 @@ class EzsSiteParticipant(Base):
     # Код службы из ezs_checklist.ROLES: ОР, ДР/ГД, ОКС, ОЭ, ЮБ, ФБ, ОЦО, Подрядчик
     role_code: Mapped[str] = mapped_column(String(40), nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Место в списке «Кто ведёт проект», задаёт человек; пусто — после упорядоченных, по роли.
+    position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (

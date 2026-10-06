@@ -1404,7 +1404,7 @@ async def project_participants(
         select(EzsSiteParticipant, User)
         .join(User, User.id == EzsSiteParticipant.user_id)
         .where(EzsSiteParticipant.site_id == site_id)
-        .order_by(EzsSiteParticipant.role_code, User.name)
+        .order_by(EzsSiteParticipant.position.asc().nullslast(), EzsSiteParticipant.role_code, User.name)
     )).all()
     return {
         "roles": [{"code": c, "label": l} for c, l in ezs_checklist.ROLES.items()],
@@ -1463,6 +1463,26 @@ async def add_project_participant(
     # Состав — часть полномочий маршрута, поэтому уезжает в кейс сразу, а не при
     # следующем шаге: иначе назначенный человек не увидит своей кнопки.
     await _push_participants(db, cid, site, user)
+    return {"ok": True}
+
+
+@router.put("/{site_id}/participants/order")
+async def order_project_participants(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Порядок людей в «Кто ведёт проект». Тело: { ids: [...] } — сверху вниз.
+    Чужие и незнакомые id пропускаются; кого нет в списке — остаются ниже, по роли."""
+    cid = await assert_company_member(company_id, user, db)
+    await _owned(db, cid, site_id)
+    rows = {str(p.id): p for p in (await db.execute(select(EzsSiteParticipant).where(
+        EzsSiteParticipant.site_id == site_id))).scalars()}
+    ids = [i for i in (payload.get("ids") or []) if str(i) in rows]
+    for p in rows.values():
+        p.position = None
+    for n, i in enumerate(ids):
+        rows[str(i)].position = n
+    await db.commit()
     return {"ok": True}
 
 
