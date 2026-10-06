@@ -456,3 +456,13 @@ def test_правки_других_пунктов_не_снимают_подтв
     data["technical"]["protocol"] = "OCPI"
     data["work"]["launchDate"] = "2026-11-01"
     assert {k: integration.snapshot(s, k, data) for k in before} == before
+
+
+def test_внешние_участники_с_ролью_без_дублей():
+    cp = "11111111-2222-3333-4444-555555555555"
+    data = integration.normalize({"revision": 0, "parties": [
+        {"counterpartyId": cp, "side": "vendor", "note": "техническая интеграция"},
+        {"counterpartyId": cp, "side": "other"}]}, integration.read(site()))
+    assert data["parties"] == [{"counterpartyId": cp, "side": "vendor", "note": "техническая интеграция"}]
+    with pytest.raises(ValueError):
+        integration.normalize({"revision": 0, "parties": [{"counterpartyId": cp, "side": "boss"}]}, integration.read(site()))

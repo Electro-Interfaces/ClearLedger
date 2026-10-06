@@ -14,7 +14,7 @@ import {
   getIntegration, getIntegrationStations, saveIntegration, confirmIntegration,
   LEAD_INITIATORS, LEAD_CONTRACT_KINDS,
   INTEGRATION_DIRECTIONS, INTEGRATION_FORMATS, INTEGRATION_PAYERS, INTEGRATION_MODELS, CONNECT_BASIS, TEST_STATUSES,
-  isRetired, reconState, MATCH_KINDS, getPartnerSessions,
+  isRetired, reconState, MATCH_KINDS, getPartnerSessions, PARTY_SIDES, type IntegrationParty,
   type IntegrationData, type IntegrationSection, type IntegrationScenario,
   type IntegrationDocument, type IntegrationStation, type IntegrationTask, type IntegrationResult,
   type IntegrationTest, type IntegrationReconciliation, type IntegrationListVersion,
@@ -229,7 +229,72 @@ export function IntegrationPassport(props: Props) {
 export function IntegrationPartnerContacts(props: Props) {
   const { query, refresh } = useIntegration(props)
   if (!query.data) return <QueryStatus query={query} />
-  return <PartnerContacts data={query.data.data} props={props} onSaved={refresh} />
+  return <div className="space-y-4">
+    <PartnerContacts data={query.data.data} props={props} onSaved={refresh} />
+    <ProjectParties data={query.data.data} props={props} onSaved={refresh} />
+  </div>
+}
+
+/** Другие организации проекта: вендор, подрядчик, консультант — у каждой роль и свои
+ *  контакты (МАГ 06.10.2026: «у нас есть Ondor, который обслуживает техническую интеграцию»).
+ *  Организация — контрагент пространства, поэтому её люди видны и в «Контрагентах». */
+function ProjectParties({ data, props, onSaved }: { data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
+  const qc = useQueryClient()
+  const parties = data.parties ?? []
+  const cps = useQuery({ queryKey: ['counterparties', props.companyId], queryFn: () => getCounterparties(props.companyId) })
+  const nameOf = (id: string) => cps.data?.find((c) => c.id === id)?.name ?? '…'
+  const [adding, setAdding] = useState(false)
+  const [side, setSide] = useState('vendor')
+  const [find, setFind] = useState('')
+  const [pick, setPick] = useState('')
+  const [busy, setBusy] = useState(false)
+  const q = find.trim().toLowerCase()
+  const found = q.length < 2 ? [] : (cps.data ?? []).filter((c) => `${c.name} ${c.inn ?? ''}`.toLowerCase().includes(q)).slice(0, 30)
+  const store = async (next: IntegrationParty[], ok: string) => {
+    setBusy(true)
+    try { await saveIntegration(props.companyId, props.site.id, { revision: data.revision, parties: next }); await onSaved(); toast.success(ok) }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось сохранить') } finally { setBusy(false) }
+  }
+  const close = () => { setAdding(false); setFind(''); setPick('') }
+  const add = async (cpId: string) => { await store([...parties, { counterpartyId: cpId, side }], 'Организация добавлена — заведите её контакты'); close() }
+  const createAndAdd = async () => {
+    setBusy(true)
+    try {
+      const cp = await post<{ id: string }>('/api/references/counterparties', { company_id: props.companyId, name: find.trim(), inn: '', type: 'ЮЛ', aliases: ['integration'] })
+      await qc.invalidateQueries({ queryKey: ['counterparties', props.companyId] })
+      setBusy(false); await add(cp.id)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось завести контрагента'); setBusy(false) }
+  }
+  const choices = found.filter((c) => !parties.some((p) => p.counterpartyId === c.id) && c.id !== data.accounting?.counterpartyId)
+  return <section className="space-y-3">
+    {parties.map((p) => <PartnerContacts key={p.counterpartyId} data={data} props={props} onSaved={onSaved}
+      party={{ cpId: p.counterpartyId, title: `${PARTY_SIDES[p.side] ?? p.side} · ${nameOf(p.counterpartyId)}`, side: p.side,
+        onSide: (s) => void store(parties.map((x) => x.counterpartyId === p.counterpartyId ? { ...x, side: s } : x), 'Роль организации изменена'),
+        onRemove: () => void store(parties.filter((x) => x.counterpartyId !== p.counterpartyId), 'Организация убрана из проекта') }} />)}
+    {!adding
+      ? <Button size="sm" variant="outline" onClick={() => setAdding(true)}>Добавить организацию: вендор, подрядчик…</Button>
+      : <div className="rounded-lg border p-3 space-y-2">
+          <h3 className="font-semibold text-sm">Организация в проекте</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <select aria-label="Роль организации" className={`${selectClass} w-48`} value={side} onChange={(e) => setSide(e.target.value)}>
+              {Object.entries(PARTY_SIDES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+            <Input aria-label="Найти организацию" className="h-9 flex-1 min-w-56" placeholder="Название или ИНН, например Ondor" value={find} autoFocus
+              onChange={(e) => { setFind(e.target.value); setPick('') }} />
+          </div>
+          {choices.length > 0 && <div className="flex flex-wrap items-center gap-2">
+            <select aria-label="Найденная организация" className={`${selectClass} flex-1 min-w-56`} value={pick} onChange={(e) => setPick(e.target.value)}>
+              <option value="">Найдено: {choices.length} — выберите</option>
+              {choices.map((c) => <option key={c.id} value={c.id}>{c.name}{c.inn ? ` · ИНН ${c.inn}` : ''}</option>)}</select>
+            <Button size="sm" disabled={!pick || busy} onClick={() => void add(pick)}>Добавить</Button>
+          </div>}
+          <div className="flex flex-wrap items-center gap-2">
+            {q.length >= 2 && !found.some((c) => c.name.trim().toLowerCase() === q) &&
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => void createAndAdd()}>Завести новую: «{find.trim()}»</Button>}
+            <Button size="sm" variant="ghost" onClick={close}>Отмена</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">Организация заводится контрагентом пространства: её контакты видны в «Контрагентах» и в других проектах, где она участвует.</p>
+        </div>}
+  </section>
 }
 
 export function IntegrationWorkPlan(props: Props) {
@@ -406,8 +471,9 @@ export function IntegrationChecklist(props: Props) {
  * предлагает выбрать карточку или завести её по названию партнёра.
  */
 const EMPTY_CONTACT = { name: '', position: '', role: 'comm', phone: '', email: '', notes: '' }
-function PartnerContacts({ data, props, onSaved, compact }: { data: IntegrationData; props: Props; onSaved: () => Promise<void>; compact?: boolean }) {
-  const cpId = data.accounting?.counterpartyId || ''
+type PartyBlock = { cpId: string; title: string; side: string; onSide: (side: string) => void; onRemove: () => void }
+function PartnerContacts({ data, props, onSaved, compact, party }: { data: IntegrationData; props: Props; onSaved: () => Promise<void>; compact?: boolean; party?: PartyBlock }) {
+  const cpId = party?.cpId || data.accounting?.counterpartyId || ''
   const qc = useQueryClient()
   const contacts = useQuery({ queryKey: ['cp-contacts', cpId], queryFn: () => getCounterpartyContacts(cpId), enabled: !!cpId })
   const cps = useQuery({ queryKey: ['counterparties', props.companyId], queryFn: () => getCounterparties(props.companyId), enabled: !cpId && !compact })
@@ -446,8 +512,12 @@ function PartnerContacts({ data, props, onSaved, compact }: { data: IntegrationD
   }
   const rows = contacts.data ?? []
   return <section className="rounded-lg border p-3 space-y-2">
-    <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-sm flex-1">Контакты партнёра{rows.length ? ` · ${rows.length}` : ''}</h3>
-      {cpId && !editing && <Button size="sm" variant="outline" onClick={() => { setForm(EMPTY_CONTACT); setEditing(true) }}>Добавить контакт</Button>}</div>
+    <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-sm flex-1">
+        {party ? party.title : `Партнёр${partner ? ` · ${partner}` : ''}`}{rows.length > 0 && <span className="font-normal text-muted-foreground"> · контактов {rows.length}</span>}</h3>
+      {party && <select aria-label="Роль организации" className={`${selectClass} w-44`} value={party.side} onChange={(e) => party.onSide(e.target.value)}>
+        {Object.entries(PARTY_SIDES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
+      {cpId && !editing && <Button size="sm" variant="outline" onClick={() => { setForm(EMPTY_CONTACT); setEditing(true) }}>Добавить контакт</Button>}
+      {party && <Button size="sm" variant="ghost" title="Убрать организацию из проекта: контрагент и его контакты остаются" onClick={party.onRemove}>убрать</Button>}</div>
     {!cpId && (compact
       ? <p className="text-xs text-muted-foreground">Партнёр не связан с контрагентом — контакты заводятся в «Паспорте» после связи.</p>
       : <div className="space-y-2 text-sm">

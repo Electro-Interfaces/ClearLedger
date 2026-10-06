@@ -40,15 +40,19 @@ TEST_STATUSES = {"pending", "passed", "failed", "na"}
 LEAD_INITIATORS = {"", "partner", "us"}     # партнёр пришёл к нам / мы вышли на партнёра
 LEAD_CONTRACT_KINDS = {"", "information", "roaming", "agency", "other"}
 MATCH_KINDS = {"account": "Договорной аккаунт клиента", "client": "Юрлицо клиента в сессии", "card": "Номера карт"}
+# Внешние участники проекта, кроме самого партнёра: наш вендор (у РусГидро — Ondor,
+# техническая интеграция и приложение), подрядчик, консультант. Контакты живут в их
+# карточке контрагента, как у партнёра (МАГ 06.10.2026).
+PARTY_SIDES = {"vendor": "Наш вендор", "contractor": "Подрядчик", "consultant": "Консультант", "partner_side": "Со стороны партнёра", "other": "Другое"}
 DOCUMENT_KINDS = {"nda", "pilot", "contract", "stations", "specification", "test_program", "test_protocol", "instruction", "other"}
-SECTION_LABELS = {"lead": "заявка", "settlement": "порядок расчётов и учёт", "tests": "испытания", "reconciliations": "сверки", "listVersions": "версии перечней", "partner": "партнёр и цель", "commercial": "коммерческие условия", "data": "данные, аналитика и бренд", "technical": "технические параметры и сопровождение", "work": "пилот и проверки", "accounting": "связь с контрагентом", "scenarios": "сценарии и перечни ЭЗС", "documents": "редакции документов", "results": "результаты чек-листа", "dates": "план этапов", "contractIds": "договоры учёта"}
+SECTION_LABELS = {"parties": "внешние участники", "lead": "заявка", "settlement": "порядок расчётов и учёт", "tests": "испытания", "reconciliations": "сверки", "listVersions": "версии перечней", "partner": "партнёр и цель", "commercial": "коммерческие условия", "data": "данные, аналитика и бренд", "technical": "технические параметры и сопровождение", "work": "пилот и проверки", "accounting": "связь с контрагентом", "scenarios": "сценарии и перечни ЭЗС", "documents": "редакции документов", "results": "результаты чек-листа", "dates": "план этапов", "contractIds": "договоры учёта"}
 
 
 def read(site):
     stored = deepcopy((site.workspace_data or {}).get("integration") or {})
     for section in SECTIONS:
         stored.setdefault(section, {})
-    for section in ("scenarios", "documents", "contractIds", "tests", "reconciliations", "listVersions"):
+    for section in ("scenarios", "documents", "contractIds", "tests", "reconciliations", "listVersions", "parties"):
         stored.setdefault(section, [])
     for section in ("results", "dates"):
         stored.setdefault(section, {})
@@ -549,6 +553,20 @@ def normalize(payload, old):
                     raise ValueError("Сессии, кВт·ч и суммы сверки должны быть числами")
             recs.append(row)
         data["reconciliations"] = recs
+    if "parties" in payload:
+        source = payload["parties"]
+        if not isinstance(source, list) or len(source) > 30:
+            raise ValueError("Некорректный список внешних участников")
+        parties, seen = [], set()
+        for p in source:
+            cp = str(uuid.UUID(str((p or {}).get("counterpartyId") or "")))
+            if p.get("side") not in PARTY_SIDES:
+                raise ValueError("Укажите роль внешнего участника")
+            if cp in seen:
+                continue
+            seen.add(cp)
+            parties.append({"counterpartyId": cp, "side": p["side"], "note": str(p.get("note") or "").strip()[:500]})
+        data["parties"] = parties
     if "listVersions" in payload:
         source = payload["listVersions"]
         if not isinstance(source, list):
@@ -632,6 +650,12 @@ async def validate_refs(db, site, data):
     cp = data["accounting"].get("counterpartyId")
     if cp and (await db.execute(select(Counterparty.id).where(Counterparty.company_id == site.company_id, Counterparty.id == uuid.UUID(cp)))).scalar_one_or_none() is None:
         raise ValueError("Контрагент не относится к пространству")
+    party_ids = {p["counterpartyId"] for p in data.get("parties") or []}
+    if party_ids:
+        found = {str(i) for i in (await db.execute(select(Counterparty.id).where(
+            Counterparty.company_id == site.company_id, Counterparty.id.in_([uuid.UUID(i) for i in party_ids])))).scalars()}
+        if party_ids - found:
+            raise ValueError("Контрагент участника не относится к пространству")
     ids = set(data.get("contractIds") or [])
     if ids:
         found = {str(i) for i in (await db.execute(select(Contract.id).where(

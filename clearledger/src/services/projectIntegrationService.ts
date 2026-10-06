@@ -44,10 +44,14 @@ export interface IntegrationDocument {
   fileDocId: string; agreedDocId: string; signedDocId: string; signingEvidence: string
 }
 export interface IntegrationResult { comment: string; workRef: string; docId: string; notApplicable: boolean }
+export type IntegrationParty = { counterpartyId: string; side: string; note?: string }
+export const PARTY_SIDES: Record<string, string> = { vendor: 'Наш вендор', contractor: 'Подрядчик', consultant: 'Консультант', partner_side: 'Со стороны партнёра', other: 'Другое' }
 export type IntegrationData = Record<IntegrationSection, Record<string, string>> & {
   revision: number; scenarios: IntegrationScenario[]; documents: IntegrationDocument[]; contractIds: string[]
   tests: IntegrationTest[]; reconciliations: IntegrationReconciliation[]; listVersions: (IntegrationListVersion | Pick<IntegrationListVersion, 'scenarioId' | 'documentId' | 'note'>)[]
   results: Record<string, IntegrationResult>; dates: Record<string, { start: string; end: string }>
+  /** Внешние участники кроме партнёра: наш вендор, подрядчик… — контакты в их карточке контрагента. */
+  parties?: IntegrationParty[]
 }
 export interface IntegrationTask {
   key: string; label: string; stage: string; role: string; required?: boolean; section: IntegrationSection | 'scenarios' | 'documents' | 'tests' | 'reconciliations'
