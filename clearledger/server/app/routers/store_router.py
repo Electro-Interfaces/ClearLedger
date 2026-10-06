@@ -2237,6 +2237,43 @@ async def store_goods_report_print(
         подразделение=подразделение))
 
 
+@router.get("/item-moves/{item_uuid}")
+async def store_item_moves(
+    item_uuid: str,
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую"),
+    format: str = Query("json", description="json | xlsx"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """История товара за период по журналу движений станций (карточка товара)."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    данные = await store_moves_reports.item_history(
+        db, cid, item_uuid, date_from, date_to, коды or None)
+    if format != "xlsx":
+        return данные
+    from fastapi.responses import Response as FileResponse
+    from app.services.export_files import XLSX_MIME, content_disposition
+    имя = (await db.execute(text(
+        "SELECT name FROM edge.item WHERE external_uuid::text = :u LIMIT 1"),
+        {"u": item_uuid})).scalar_one_or_none() or item_uuid
+    строки = [["" if r.get(f) is None else r.get(f) for f in store_moves_reports.ИСТОРИЯ_ПОЛЯ]
+              for r in данные["rows"]]
+    мета = [("Товар", имя), ("С", date_from or "начала учёта"), ("По", date_to or "сегодня"),
+            ("Область", "вся сеть" if not коды else ", ".join(f"АЗС №{c}" for c in коды)),
+            ("Журнал движений в центре по", ", ".join(
+                f"АЗС №{k}: {v}" for k, v in sorted(данные["loaded_through"].items())))]
+    книга = store_reports.xlsx_bytes(
+        store_moves_reports.ИСТОРИЯ_КОЛОНКИ, строки, мета, "История товара", имя,
+        kinds=[str(r.get("kind") or "") for r in данные["rows"]])
+    return FileResponse(content=книга, media_type=XLSX_MIME, headers={
+        "Content-Disposition": content_disposition(
+            f"istoriya-{item_uuid[:8]}-{date_from or 'vse'}_{date_to or 'vse'}.xlsx"),
+        "Cache-Control": "private, no-store"})
+
+
 @router.get("/reports/stock-on-date/print", response_class=HTMLResponse)
 async def store_stock_on_date_print(
     date_to: str | None = Query(None),

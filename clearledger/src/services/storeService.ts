@@ -880,6 +880,40 @@ export const getStoreSkuCard = (guid: string, dateFrom: string, dateTo: string, 
     date_from: dateFrom, date_to: dateTo, stations: stations?.join(',') || undefined,
   })
 
+/** История товара по журналу движений станций (карточка товара). */
+export interface ItemMoveRow {
+  station_id: number; place: string; at: string; barcode?: string
+  doc_kind: string; doc_number?: string; quantity: number | null
+  balance: number; note?: string; kind?: string
+}
+export interface ItemMovesData {
+  rows: ItemMoveRow[]; moves: number; opening: number; closing: number
+  loaded_through: Record<string, string>
+}
+const историяПараметры = (dateFrom: string, dateTo: string, stations?: string[]) => {
+  const q = new URLSearchParams({ date_from: dateFrom, date_to: dateTo })
+  if (stations?.length) q.set('stations', stations.join(','))
+  return q
+}
+export const getStoreItemMoves = (guid: string, dateFrom: string, dateTo: string, stations?: string[]) =>
+  get<ItemMovesData>(`/api/store/item-moves/${encodeURIComponent(guid)}`, {
+    date_from: dateFrom, date_to: dateTo, stations: stations?.join(',') || undefined,
+  })
+export async function скачатьИсториюТовара(guid: string, dateFrom: string, dateTo: string,
+  stations?: string[]): Promise<void> {
+  const q = историяПараметры(dateFrom, dateTo, stations)
+  q.set('format', 'xlsx')
+  const blob = await downloadBlob(`/api/store/item-moves/${encodeURIComponent(guid)}?${q.toString()}`)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `istoriya-tovara-${dateFrom}_${dateTo}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 /* ─────────────────────────── Контроль дублей ──────────────────────────── */
 export interface DedupSummary {
   cardsTotal: number; cardsMarked: number; byPrefix: Record<string, number>

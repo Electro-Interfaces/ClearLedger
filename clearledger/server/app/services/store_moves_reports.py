@@ -251,3 +251,60 @@ tfoot td{{font-weight:bold;background:#f6f6f6}}
 <p class=орг>{e(организация)}</p>
 {''.join(страницы)}
 </body></html>"""
+
+
+async def item_history(db: AsyncSession, cid, item_uuid: str, date_from, date_to,
+                       stations: list[int] | None = None) -> dict:
+    """История товара за период по журналу станций: остаток на начало, каждое
+    движение с остатком после него, остаток на конец — по станции и месту.
+    Тот же ответ, что «История движений» в карточке на станции."""
+    д1 = date.fromisoformat(date_from) if date_from else date(2000, 1, 1)
+    д2, конец = _граница(date_to)
+    начало = datetime.combine(д1, time.min, tzinfo=_МСК)
+    p = {"cid": cid, "u": item_uuid, "d1": начало, "end": конец}
+    ф = _станции(stations, p)
+    стартовые = {(r[0], r[1]): float(r[2]) for r in (await db.execute(text(f"""
+        SELECT m.station_id, m.place, sum(m.quantity) FROM store_stock_moves m
+         WHERE m.company_id = :cid AND m.item_uuid = :u{ф} AND m.event_time < :d1
+         GROUP BY 1, 2
+    """), p)).all()}
+    движения = (await db.execute(text(f"""
+        SELECT m.station_id, m.place, coalesce(pl.name, m.place) AS place_name,
+               m.event_time, m.barcode, m.doc_kind, m.doc_number, m.quantity, m.note
+          FROM store_stock_moves m
+          LEFT JOIN edge.place pl ON pl.station_id = m.station_id AND pl.code = m.place
+         WHERE m.company_id = :cid AND m.item_uuid = :u{ф}
+           AND m.event_time >= :d1 AND m.event_time < :end
+         ORDER BY m.station_id, m.place, m.event_time, m.move_id
+    """), p)).mappings().all()
+    имена = {(r[0], r[1]): r[2] for r in (await db.execute(text("""
+        SELECT station_id, code, name FROM edge.place"""))).all()}
+    остаток = dict(стартовые)
+    строки = []
+    for (ст, место), кол in sorted(стартовые.items()):
+        строки.append({"station_id": ст, "place": имена.get((ст, место), место),
+                       "at": f"{д1:%d.%m.%Y}", "doc_kind": "остаток на начало",
+                       "quantity": None, "balance": round(кол, 3), "kind": "остаток"})
+    for r in движения:
+        k = (r["station_id"], r["place"])
+        остаток[k] = остаток.get(k, 0.0) + float(r["quantity"])
+        строки.append({"station_id": r["station_id"], "place": r["place_name"],
+                       "at": r["event_time"].astimezone(_МСК).strftime("%d.%m.%Y %H:%M"),
+                       "barcode": r["barcode"], "doc_kind": ВИДЫ.get(r["doc_kind"], r["doc_kind"]),
+                       "doc_number": r["doc_number"], "quantity": float(r["quantity"]),
+                       "balance": round(остаток[k], 3), "note": r["note"]})
+    строки.sort(key=lambda s: (s["station_id"], str(s["place"]), s.get("kind") != "остаток"))
+    for (ст, место), кол in sorted(остаток.items()):
+        строки.append({"station_id": ст, "place": имена.get((ст, место), место),
+                       "at": f"{д2:%d.%m.%Y}", "doc_kind": "остаток на конец",
+                       "quantity": None, "balance": round(кол, 3), "kind": "итог"})
+    return {"rows": строки, "moves": len(движения),
+            "opening": round(sum(стартовые.values()), 3),
+            "closing": round(sum(остаток.values()), 3),
+            "loaded_through": await _загружено(db, cid, stations)}
+
+
+ИСТОРИЯ_КОЛОНКИ = ["АЗС", "Место", "Когда", "Штрихкод", "Вид", "Документ",
+                   "Количество", "Остаток после", "Пояснение"]
+ИСТОРИЯ_ПОЛЯ = ["station_id", "place", "at", "barcode", "doc_kind", "doc_number",
+                "quantity", "balance", "note"]
