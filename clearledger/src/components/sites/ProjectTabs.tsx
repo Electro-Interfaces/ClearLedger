@@ -256,8 +256,13 @@ function RoutePanel({ site, companyId, onDone }: {
     if (fwd.length === 1) { setPicked(fwd[0]); setForm({}) }
     setTimeout(() => stepRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50)
   }, [wantStep, state])
+  // Снимаем только когда открытое подтверждение закрыли (было выбрано → стало пусто):
+  // в первой отрисовке шаг ещё не выбран, и снятие там же убивало подтверждение.
+  const hadPicked = useRef(false)
   useEffect(() => {
-    if (picked || !wantStep || !stepTaken.current) return
+    if (picked) { hadPicked.current = true; return }
+    if (!hadPicked.current || !wantStep) return
+    hadPicked.current = false
     setStepParams((prev) => { const n = new URLSearchParams(prev); n.delete('pstep'); return n }, { replace: true })
   }, [picked, wantStep, setStepParams])
 
