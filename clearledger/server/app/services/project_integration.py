@@ -388,6 +388,20 @@ def requirement_problem(site, key, data):
         "6.7": (bool(scenarios) and versions_ok and all(s["agreedIds"] and set(s["agreedIds"]) <= set(s["connectedIds"]) and all((s.get("connectedMeta") or {}).get(i, {}).get("at") for i in s["connectedIds"]) for s in scenarios), "Отметьте подключение всех станций согласованной версии перечня с датой и основанием"),
         "6.12": (w.get("launchDate"), "Зафиксируйте дату коммерческого запуска"),
     }
+    if key == "6.7" and scenarios:
+        # Называем сценарий и чего не хватает: общее «отметьте подключение всех станций»
+        # не объясняло, что держит второй сценарий без перечня (проход 06.10.2026).
+        for s in scenarios:
+            name = f"«{s.get('name') or s['direction']}»"
+            meta = s.get("connectedMeta") or {}
+            if not s["agreedIds"]:
+                return f"Сценарий {name}: нет согласованного перечня — станции выбираются в пункте 1.6 и согласуются в 6.6; ненужный сценарий удалите"
+            missing = [i for i in s["agreedIds"] if i not in s["connectedIds"]]
+            if missing:
+                return f"Сценарий {name}: подключено {len(s['agreedIds']) - len(missing)} из {len(s['agreedIds'])} согласованных станций"
+            undated = [i for i in s["connectedIds"] if not (meta.get(i) or {}).get("at")]
+            if undated:
+                return f"Сценарий {name}: у {len(undated)} подключённых станций нет даты и основания подключения"
     if key in {"4.3", "5.11", "6.6"}:
         kinds = {"4.3": {"nda", "pilot"}, "5.11": {"test_protocol"}, "6.6": {"contract"}}[key]
         signed = [d for d in data["documents"] if d["kind"] in kinds and d.get("signedDocId") and d.get("signingEvidence")]

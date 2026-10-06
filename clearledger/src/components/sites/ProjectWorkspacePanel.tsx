@@ -193,7 +193,8 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
                   title={waived > 0 ? 'С части обязательных пунктов снята обязательность' : undefined}>
                   чек-лист стадии {s.gate.done}/{s.gate.total}
                   {waived > 0 && ` · ${waived} с послаблением`}
-                  {!s.gate.canAdvance && s.gate.blocking.length > 0 && ` · держит: ${s.gate.blocking[0]}`}
+                  {/* На последней стадии переходить некуда — «держит» вводило в заблуждение */}
+                  {!s.gate.canAdvance && s.gate.blocking.length > 0 && ` · ${s.stage === 'live' ? 'не закрыто' : 'держит'}: ${s.gate.blocking[0]}`}
                 </span>
               )
             })()}

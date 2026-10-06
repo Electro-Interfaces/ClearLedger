@@ -739,6 +739,7 @@ function ConnectionMarks({ scenario, onMark }: { scenario: IntegrationScenario; 
   const [at, setAt] = useState(new Date().toISOString().slice(0, 10))
   const [basis, setBasis] = useState<keyof typeof CONNECT_BASIS>('check')
   const [ref, setRef] = useState('')
+  const inItem = !!useContext(PendingCtx)
   if (!scenario.connectedIds.length) return null
   const missing = scenario.connectedIds.filter((id) => !scenario.connectedMeta?.[id]?.at)
   if (!missing.length) return <p className="text-xs text-emerald-700 dark:text-emerald-400">Подключение подтверждено датой и основанием у всех {scenario.connectedIds.length} станций</p>
@@ -749,7 +750,7 @@ function ConnectionMarks({ scenario, onMark }: { scenario: IntegrationScenario; 
       <label className="text-xs">Основание<select aria-label="Основание подключения" className={selectClass} value={basis} onChange={(e) => setBasis(e.target.value as keyof typeof CONNECT_BASIS)}>{Object.entries(CONNECT_BASIS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
       <label className="text-xs">Ссылка: сессия, скриншот, письмо<Input aria-label="Ссылка на подтверждение подключения" value={ref} onChange={(e) => setRef(e.target.value)} /></label>
     </div>
-    <Button variant="outline" size="sm" disabled={!at} onClick={() => onMark(at, basis, ref)}>Отметить подключение ({missing.length}) — затем сохраните перечни</Button>
+    <Button variant="outline" size="sm" disabled={!at} onClick={() => onMark(at, basis, ref)}>Отметить подключение ({missing.length}){inItem ? '' : ' — затем сохраните перечни'}</Button>
   </div>
 }
 
@@ -783,7 +784,7 @@ function ListVersions({ scenario, saved, data, props, onSaved }: { scenario: Int
     {versions.length === 0 ? <p className="text-xs text-muted-foreground">{agreed.length ? 'Версия не зафиксирована — она нужна для договора (пункт 6.6) и запуска (6.7)' : 'Сначала согласуйте перечень станций'}</p>
       : <ul className="text-xs space-y-1">{versions.map((v) => <li key={v.id}>Версия {v.version} · {v.stationIds.length} ЭЗС · {docTitle(v.documentId)}{v.byName ? ` · ${v.byName}` : ''}{v.at ? `, ${new Date(v.at).toLocaleDateString('ru-RU')}` : ''}{v.note ? ` — ${v.note}` : ''}</li>)}</ul>}
     {last && (added > 0 || removed > 0) && <p role="alert" className="text-xs text-amber-700 dark:text-amber-400">Согласованный перечень изменён после версии {last.version}: +{added} / −{removed}. Зафиксируйте новую версию с допсоглашением.</p>}
-    {agreed.length > 0 && <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] items-end">
+    {agreed.length > 0 && (!last || added > 0 || removed > 0) && <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] items-end">
       <label className="text-xs">Документ версии<select aria-label="Документ версии перечня" className={selectClass} value={documentId} onChange={(e) => setDocumentId(e.target.value)}><option value="">Выберите перечень или договор</option>{docs.map((d) => <option key={d.id} value={d.id}>{docTitle(d.id)}</option>)}</select></label>
       <label className="text-xs">Комментарий<Input aria-label="Комментарий к версии перечня" value={note} onChange={(e) => setNote(e.target.value)} placeholder="приложение 1 к договору, допсоглашение №…" /></label>
       <Button size="sm" variant="outline" disabled={busy || unsaved || !documentId} onClick={() => void fix()}>Зафиксировать версию {versions.length + 1} ({agreed.length} ЭЗС)</Button>
