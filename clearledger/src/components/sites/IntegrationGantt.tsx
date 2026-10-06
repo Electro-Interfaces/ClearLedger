@@ -78,7 +78,8 @@ export function IntegrationGantt({ site, companyId, onStage }: { site: SiteDetai
           <div className="grid grid-cols-[230px_1fr] border-b bg-muted/40 text-[11px] text-muted-foreground">
             <div className="px-3 py-1.5 font-medium">Стадия</div>
             <div className="relative h-7">
-              {ticks.map((k) => <span key={k.t} className="absolute top-1.5 -translate-x-1/2 whitespace-nowrap" style={{ left: pct(k.t) }}>{k.label}</span>)}
+              {/* Число под меткой «сегодня» не пишем — они накладывались */}
+              {ticks.filter((k) => Math.abs(k.t - dayStart(now)) >= DAY / 2 || days > 21).map((k) => <span key={k.t} className="absolute top-1.5 -translate-x-1/2 whitespace-nowrap" style={{ left: pct(k.t) }}>{k.label}</span>)}
               <span className="absolute bottom-0 -translate-x-1/2 rounded-t bg-red-500 px-1 text-[10px] text-white" style={{ left: pct(now) }}>сегодня</span>
             </div>
           </div>
