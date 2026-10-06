@@ -440,3 +440,18 @@ def test_пустая_сверка_не_закрывает_пункт():
     assert integration.recon_state(empty) == "empty"
     full = {**empty, "ours": {"sessions": 5, "kwh": 100, "amount": 1500}, "partner": {"sessions": 5, "kwh": 100, "amount": 1500}}
     assert integration.recon_state(full) == "match"
+
+
+def test_правки_других_пунктов_не_снимают_подтверждения():
+    """06.10.2026, проход на боевом: 6.2/6.3 снимали 5.12, месячная сверка — пробную,
+    технические параметры — пункты без своих данных."""
+    s = SimpleNamespace(owner_user_id=None, workspace_data={})
+    data = integration.normalize({"revision": 0, "settlement": {"matchKind": "account", "matchValues": "A1"},
+                                  "reconciliations": [{"kind": "pilot", "period": "пилот", "ours": {"sessions": 5}, "partner": {"sessions": 5}}]},
+                                 integration.read(s))
+    before = {k: integration.snapshot(s, k, data) for k in ("5.12", "5.13", "5.2", "5.10")}
+    data["settlement"]["paymentTerm"] = "10 дней"
+    data["reconciliations"].append({"kind": "monthly", "period": "ноябрь", "ours": {"sessions": 9}, "partner": {"sessions": 9}})
+    data["technical"]["protocol"] = "OCPI"
+    data["work"]["launchDate"] = "2026-11-01"
+    assert {k: integration.snapshot(s, k, data) for k in before} == before

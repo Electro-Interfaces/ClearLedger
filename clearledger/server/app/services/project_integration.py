@@ -85,7 +85,8 @@ def section_for(key):
 # иначе каждая отметка станции сбрасывала бы согласование комиссии.
 DEPENDS = {
     "2.2": ("terms",), "2.3": ("terms",), "6.2": ("terms",),
-    "5.10": ("work",), "5.11": ("documents",), "6.6": ("listVersions",),
+    "5.10": ("tests",), "5.11": ("documents",), "6.6": ("listVersions",),
+    "5.6": ("tests",), "5.7": ("tests",), "5.8": ("tests",), "5.9": ("tests",), "2.8": ("dates",),
     "6.7": ("listVersions",),
 }
 TERM_FIELDS = ("payer", "model", "rate", "base", "clientPrice", "acquiring")
@@ -123,7 +124,16 @@ ITEM_FIELDS = {
     # условия сценариев (terms) — через DEPENDS; из порядка расчётов — только своё
     "2.2": {"commercial": SECTIONS["commercial"], "settlement": ("period",)}, "2.3": {"commercial": ("tariffs",)},
     "6.2": {"settlement": ("period", "paymentTerm", "documents", "vat")},
+    "5.12": {"settlement": ("matchKind", "matchValues")},
+    "5.10": {"work": ("pilotOutcome", "testResults")},
+    # проверки пилота — по испытаниям, план этапов — по датам (не по своему «разделу»)
+    "5.6": {}, "5.7": {}, "5.8": {}, "5.9": {}, "2.8": {},
 }
+# Своих данных нет — подтверждаются результатом: отпечаток только по нему. Иначе любая
+# правка технических параметров снимала 3.3, 5.2, 5.4… (проход на боевом 06.10.2026).
+RESULT_ONLY_KEYS = frozenset({"3.3", "5.2", "5.4", "6.1", "6.8", "6.9", "6.10", "6.11", "6.15"})
+# Сверка пункта — своего вида: месячная (6.14) не снимает пробную (5.13).
+RECON_KIND_BY_KEY = {"5.13": "pilot", "6.14": "monthly"}
 # Пункты сценариев: какие поля каждого сценария они проверяют.
 SCENARIO_FIELDS = {
     "1.2": ("name", "direction", "format", "geography", "restrictions"),
@@ -155,8 +165,17 @@ def _snapshot_v1(site, key, data):
 DOC_KINDS_BY_KEY = {"4.3": ("nda", "pilot"), "5.11": ("test_protocol",), "6.6": ("contract",)}
 
 
+def _v2_keys():
+    return ITEM_FIELDS.keys() | SCENARIO_FIELDS.keys() | DOC_KINDS_BY_KEY.keys() | RESULT_ONLY_KEYS | RECON_KIND_BY_KEY.keys()
+
+
 def snapshot(site, key, data=None):
     data = data or read(site)
+    if key in RESULT_ONLY_KEYS or key in RECON_KIND_BY_KEY:
+        values = {"result": data["results"].get(key)}
+        if key in RECON_KIND_BY_KEY:
+            values["reconciliations"] = [x for x in data["reconciliations"] if x.get("kind") == RECON_KIND_BY_KEY[key]]
+        return SNAPSHOT_V + hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     if key in DOC_KINDS_BY_KEY:
         values = {"result": data["results"].get(key),
                   "documents": [d for d in data["documents"] if d.get("kind") in DOC_KINDS_BY_KEY[key]]}
@@ -185,7 +204,7 @@ def same_snapshot(site, key, stored, data=None):
     Отпечаток v1 (по всему разделу) у пункта с собственными полями не сравниваем:
     он сбивался от правок соседних пунктов. Изменения после него отмечены флагом
     needs_confirmation при сохранении — его и достаточно."""
-    if (key in ITEM_FIELDS or key in SCENARIO_FIELDS or key in DOC_KINDS_BY_KEY) and not stored.startswith(SNAPSHOT_V):
+    if key in _v2_keys() and not stored.startswith(SNAPSHOT_V):
         return True
     return stored == snapshot(site, key, data or read(site))
 
