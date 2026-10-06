@@ -54,6 +54,7 @@ from app.services.store_goods_report_print import лист_товарного_о
 from app.services import recipe_versions, store_receipts as receipt_rules
 from app.services import store_receipt_accounting
 from app.services import matrix
+from app.services import store_moves_reports
 from app.services import item_group_guess
 from app.services import partner_sync
 from app.services.export_audit import log_export
@@ -318,6 +319,7 @@ EXCHANGE_SESSION_GAP_MIN = 15
 PACKET_KIND_LABEL = {
     "shift": "Смена",
     "stock": "Снимок остатков",
+    "stock-moves": "Движения учёта",
     "receipt": "Приёмка",
     "inventory": "Инвентаризация",
     "writeoff": "Списание",
@@ -497,7 +499,7 @@ async def store_exchange(
         # Служебные виды документов учёта не порождают: снимок остатков,
         # черновики НСИ, рецептуры и чеки живут своими таблицами.
         i["projects_docs"] = i["kind"] not in (
-            "stock", "station-nsi", "station-recipes", "cheques")
+            "stock", "stock-moves", "station-nsi", "station-recipes", "cheques")
         i["unprojected"] = max(0, int(i["packets"]) - int(i["projected"])
                                - int(i["empty"] or 0))
 
@@ -2235,6 +2237,22 @@ async def store_goods_report_print(
         подразделение=подразделение))
 
 
+@router.get("/reports/stock-on-date/print", response_class=HTMLResponse)
+async def store_stock_on_date_print(
+    date_to: str | None = Query(None),
+    stations: str | None = Query(None, description="коды АЗС через запятую"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ведомость остатков на конец дня по местам — для печати и PDF."""
+    cid: uuid.UUID = await scope_company_id(user, db)
+    коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
+    данные = await store_moves_reports.stock_on_date(db, cid, None, date_to, коды or None)
+    company = await db.get(Company, cid)
+    return HTMLResponse(store_moves_reports.лист_остатков(
+        данные, организация=getattr(company, "name", "") or ""))
+
+
 @router.get("/reports/{kind}")
 async def store_network_report(
     kind: str,
@@ -2254,6 +2272,9 @@ async def store_network_report(
 
     коды = [int(s) for s in (stations or "").replace(" ", "").split(",") if s.isdigit()]
     данные = await строитель(db, cid, date_from, date_to, коды or None)
+    # Дополнительные листы книги (места хранения, движения) на экран не едут:
+    # движения за месяц — десятки тысяч строк, экрану они не нужны.
+    листы = данные.pop("sheets", None) or []
 
     if format not in ("csv", "xlsx"):
         return {"kind": kind, "title": схема["title"], "about": схема["about"],
@@ -2300,9 +2321,19 @@ async def store_network_report(
         # Вид строки бланка (итог/раздел/остаток/сноска) отдают только
         # отчёты-бланки; выборки его не несут, и книга у них прежняя.
         виды = [str(r.get("kind") or "") for r in данные["rows"]]
+        if данные.get("as_of"):
+            мета.insert(0, ("На момент", str(данные["as_of"])))
+        if данные.get("loaded_through"):
+            мета.append(("Журнал движений в центре по", ", ".join(
+                f"АЗС №{k}: {v}" for k, v in sorted(данные["loaded_through"].items()))))
+        доп = []
+        for л in листы:
+            поля = л.get("fields") or схема["fields"]
+            доп.append((л["title"], л.get("columns") or схема["columns"],
+                        [[ячейка(r, f) for f in поля] for r in л["rows"]]))
         книга = store_reports.xlsx_bytes(схема["columns"], строки, мета,
                                          схема["title"], схема.get("about", ""),
-                                         kinds=виды if any(виды) else None)
+                                         kinds=виды if any(виды) else None, extra=доп)
         имяКниги = f"{kind}-{date_from or 'все'}_{date_to or 'все'}.xlsx"
         return FileResponse(content=книга, media_type=XLSX_MIME,
                             headers={"Content-Disposition": content_disposition(имяКниги),

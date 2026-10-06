@@ -132,8 +132,10 @@ export function NetworkReportPanel({ kind, dateFrom, dateTo, stations }: {
     : все
   const показ = useVisible(строки)
 
+  // Печатный лист есть у товарного отчёта и у остатков на дату (по местам).
+  const естьПечать = kind === 'goods-report' || kind === 'stock-on-date'
   const печатать = () => {
-    открытьЛистТоварногоОтчёта({ dateFrom, dateTo, stations })
+    открытьЛистТоварногоОтчёта({ dateFrom, dateTo, stations }, kind)
   }
 
   const скачать = async () => {
@@ -175,12 +177,20 @@ export function NetworkReportPanel({ kind, dateFrom, dateTo, stations }: {
               видно применёнными. */}
           <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
             <span className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5">
-              {dateFrom && dateTo ? `${dateFrom} — ${dateTo}` : 'период не задан'}
+              {д.as_of ? `на ${д.as_of}`
+                : dateFrom && dateTo ? `${dateFrom} — ${dateTo}` : 'период не задан'}
             </span>
             <span className="rounded border border-border/60 bg-muted/40 px-1.5 py-0.5">
               {!stations?.length ? 'вся сеть'
                 : stations.map((s) => `АЗС №${s}`).join(', ')}
             </span>
+            {/* Журнал станции доезжает в центр по дням: отчёт на день позже
+                загруженного считается по неполным данным — говорим это прямо. */}
+            {д.loaded_through && Object.entries(д.loaded_through).map(([ст, по]) => (
+              <span key={ст} className="rounded border border-border/60 px-1.5 py-0.5 text-muted-foreground">
+                журнал АЗС №{ст} в центре по {по}
+              </span>
+            ))}
             {kind === 'goods-report' && (stations?.length ?? 0) !== 1 && (
               <span className="text-amber-500">
                 лист сдают за одну АЗС — выберите станцию в «Области учёта»,
@@ -192,15 +202,15 @@ export function NetworkReportPanel({ kind, dateFrom, dateTo, stations }: {
         {/* Товарный отчёт сдают листом с подписью, а не таблицей: печать
             стоит первой — в Excel такой отчёт уносят, чтобы посмотреть, а
             печатают, чтобы отчитаться. Лист тот же, что печатает станция. */}
-        {kind === 'goods-report' && (
+        {естьПечать && (
           <Button variant="outline" size="sm" className="ml-auto h-8 gap-1.5 text-xs"
             onClick={печатать}>
             <Printer className="h-3.5 w-3.5" />
-            Печать листа
+            {kind === 'stock-on-date' ? 'Печать / PDF' : 'Печать листа'}
           </Button>
         )}
         <Button variant="outline" size="sm"
-          className={`h-8 gap-1.5 text-xs${kind === 'goods-report' ? '' : ' ml-auto'}`}
+          className={`h-8 gap-1.5 text-xs${естьПечать ? '' : ' ml-auto'}`}
           onClick={скачать} disabled={скачивается}>
           {скачивается
             ? <Loader2 className="h-3.5 w-3.5 animate-spin" />

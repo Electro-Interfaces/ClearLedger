@@ -1259,6 +1259,9 @@ export interface StoreReportData {
   // Товарный отчёт (форма офиса): величины, которыми лист начинается и кончается.
   opening?: number | null; closing?: number | null
   incoming_retail?: number; expense?: number
+  // Отчёты на журнале движений: момент остатка и по какой день журнал станции в центре.
+  as_of?: string
+  loaded_through?: Record<string, string>
 }
 
 export const getStoreNetworkReports = () =>
@@ -1295,11 +1298,11 @@ export const storeNetworkReportCsvUrl = (kind: string, opts: {
  */
 export async function открытьЛистТоварногоОтчёта(opts: {
   dateFrom?: string; dateTo?: string; stations?: number[]
-}): Promise<void> {
+}, kind = 'goods-report'): Promise<void> {
   const target = window.open('', '_blank')
   try {
     const q = отчётПараметры(opts)
-    const blob = await downloadBlob(`/api/store/reports/goods-report/print?${q.toString()}`)
+    const blob = await downloadBlob(`/api/store/reports/${kind}/print?${q.toString()}`)
     const url = URL.createObjectURL(blob)
     if (target) {
       target.location.href = url
