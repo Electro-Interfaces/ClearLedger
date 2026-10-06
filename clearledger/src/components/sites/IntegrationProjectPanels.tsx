@@ -373,7 +373,7 @@ export function IntegrationChecklist(props: Props) {
     {!showAll && viewStage === props.site.stage && props.site.gate?.canAdvance && tasks.some((t) => t.stage === viewStage) &&
       <div className="flex flex-wrap items-center gap-3 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm">
         <span className="flex-1 min-w-48">Все обязательные пункты стадии «{viewLabel}» закрыты — можно переходить дальше.</span>
-        <Button size="sm" onClick={() => setParams((prev) => { const n = new URLSearchParams(prev); n.set('pstep', '1'); return n }, { replace: true })}>Перейти к следующей стадии</Button>
+        <Button size="sm" onClick={() => setParams((prev) => { const n = new URLSearchParams(prev); n.set('pstep', String(Date.now())); return n }, { replace: true })}>Перейти к следующей стадии</Button>
       </div>}
     {!showAll && viewStage !== props.site.stage && <p className="text-xs text-amber-700 dark:text-amber-400">Просмотр стадии «{viewLabel}». Проект сейчас на стадии «{props.site.gate.stageLabel}» — пункты другой стадии можно заполнять заранее, переход делается кнопками маршрута.</p>}
     {tasks.filter((t) => showAll || t.stage === viewStage).map((t) => {

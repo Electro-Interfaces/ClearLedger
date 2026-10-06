@@ -229,6 +229,9 @@ function effectText(a: CaseAction, defs: Record<string, { label?: string }>): st
   return null
 }
 
+/** Отработанные метки «перейти к следующей стадии» (?pstep=) — на время жизни вкладки. */
+const consumedSteps = new Set<string>()
+
 function RoutePanel({ site, companyId, onDone }: {
   site: SiteDetail; companyId: string; onDone: () => Promise<void>
 }) {
@@ -249,9 +252,20 @@ function RoutePanel({ site, companyId, onDone }: {
   // Метку из адреса снимаем не сразу, а когда подтверждение закрыли: смена адреса
   // перерисовывает карточку, и открытое подтверждение тут же пропадало.
   const stepTaken = useRef(false)
+  // Метка одноразовая: значение — момент нажатия. Отработанная или старше 30 с (после
+  // перезагрузки страницы) шаг не делает и снимается — иначе обновление страницы могло
+  // бы само перевести проект ещё раз.
+  const stepFresh = !!wantStep && !consumedSteps.has(wantStep) && Date.now() - Number(wantStep) < 30_000
   useEffect(() => {
-    if (!wantStep || !state?.actions || stepTaken.current) return
+    if (wantStep && !stepFresh && !mStep.isPending && !picked) {
+      setStepParams((prev) => { const n = new URLSearchParams(prev); n.delete('pstep'); return n }, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantStep, stepFresh, picked])
+  useEffect(() => {
+    if (!wantStep || !stepFresh || !state?.actions || stepTaken.current) return
     stepTaken.current = true
+    consumedSteps.add(wantStep)
     const fwd = state.actions.filter((a) => a.allowed !== false && !a.is_discretionary && a.is_positive === true)
     // Кнопка в чек-листе — это и есть решение перейти: шаг без полей выполняем сразу.
     // Второе подтверждение наверху страницы человек не видел и считал, что «ничего не
