@@ -57,6 +57,7 @@ import { ProjectTrackTab } from './ProjectTrackTab'
 import { ProjectRoadmapTab } from './ProjectRoadmapTab'
 import { useOpenProject } from './useOpenProject'
 import { formatDate } from '@/lib/formatDate'
+import { IntegrationGantt } from './IntegrationGantt'
 import { IntegrationPassport, IntegrationChecklist, IntegrationDocuments, IntegrationWorkPlan, IntegrationAccountingFields, IntegrationPartnerContacts } from './IntegrationProjectPanels'
 
 export const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -66,6 +67,8 @@ const CONTROL_FORMS = ['аренда', 'сервитут', 'разрешение
 export const PROJECT_TABS = [
   { k: 'overview', label: 'Обзор' },
   { k: 'roadmap', label: 'Схема' },
+  // Гант — только у интеграции: фактическое время на стадиях (просьба МАГа 06.10.2026)
+  { k: 'gantt', label: 'Гант' },
   { k: 'work', label: 'Работа' },
   // Состав и контакты нужны не на каждом шаге: в «Работе» они занимали полэкрана
   // на каждой стадии (замечание МАГа 06.10.2026).
@@ -86,7 +89,7 @@ export const PROJECT_TABS = [
 ] as const
 export type ProjectTabKey = (typeof PROJECT_TABS)[number]['k']
 export function projectTabsFor(kind: string | null | undefined) {
-  return kind === 'integration' ? PROJECT_TABS.filter((t) => !['tp', 'equipment', 'economics'].includes(t.k)) : PROJECT_TABS
+  return kind === 'integration' ? PROJECT_TABS.filter((t) => !['tp', 'equipment', 'economics'].includes(t.k)) : PROJECT_TABS.filter((t) => t.k !== 'gantt')
 }
 
 /** Рендер вкладки по ключу — чтобы вызывающий не знал про внутренние компоненты. */
@@ -105,6 +108,8 @@ export function ProjectTabContent({ tab, site, companyId, onDone, onTab }: {
   // Стадия маршрута интеграции = стадия воронки с префиксом (int_lead → lead); у
   // маршрута стройки стадий больше, чем у воронки, — там открывается «Работа» как есть.
   if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId}
+    onStage={onTab && ((code) => onTab('work', { pstage: code.startsWith('int_') ? code.slice(4) : null }))} />
+  if (tab === 'gantt') return <IntegrationGantt site={site} companyId={companyId}
     onStage={onTab && ((code) => onTab('work', { pstage: code.startsWith('int_') ? code.slice(4) : null }))} />
   if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} onTeam={onTab && (() => onTab('team'))} />
   if (tab === 'team') return <TeamTab site={site} companyId={companyId} onDone={onDone} />
