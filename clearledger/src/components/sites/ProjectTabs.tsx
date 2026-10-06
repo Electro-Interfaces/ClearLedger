@@ -16,7 +16,7 @@
  *   История       — стадии, касания, правки, импорт.
  *
  * Правка любого поля помечает его «ручным»: следующий импорт файла его не тронет.
- */
+ */
 import { useSearchParams } from 'react-router-dom'
 import { getIntegration } from '@/services/projectIntegrationService'
 import { ProjectContractsBlock } from './ProjectContractsBlock'
@@ -47,8 +47,7 @@ import {
   getSiteParticipants, addSiteParticipant, removeSiteParticipant, registerEquipmentUnit,
   STAGE_META, FUNNEL_STAGES, CLOSING_STAGES, QUADRANT_META, EXIT_REASONS, PROJECT_OBJECT_TYPES, projectObjectLabel,
   type SiteDetail, type SiteStage, type ProjectContext, type CaseAction,
-  type SiteEquipment,
-} from '@/services/sitesService'
+  type SiteEquipment, stageLabelOf } from '@/services/sitesService'
 import { getWarehousesSummary } from '@/services/equipmentService'
 import { getContracts, getCounterparties } from '@/services/referenceService'
 import { loadLocations } from '@/services/locationService'
@@ -162,7 +161,7 @@ function NextStepCriteria({ site, companyId, actions }: { site: SiteDetail; comp
       ))}</ul>
       <div className="text-xs text-muted-foreground">
         {all ? `Все обязательные пункты закрыты — нажмите «${step.verb}».`
-          : 'Пункт закрывается подтверждением в чек-листе ниже: заполните данные, запишите результат и нажмите «Подтвердить выполнение».'}
+          : 'Откройте пункт, заполните данные в его окне и нажмите «Подтвердить выполнение» внизу окна.'}
       </div>
     </div>
   )
@@ -787,8 +786,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
     const d = new Date(); d.setMonth(d.getMonth() + 3); return d.toISOString().slice(0, 10)
   })
   const nextStage = FUNNEL_STAGES[FUNNEL_STAGES.indexOf(site.stage as never) + 1]
-  const integrationLabels: Record<string, string> = { lead: 'Заявка', screening: 'Оценка партнёра', negotiation: 'Переговоры', dd: 'Техническое согласование', decision: 'Решение о пилоте', contracting: 'Пилотное соглашение', construction: 'Настройка и тесты', commissioning: 'Договор', live: 'Работает' }
-  const stageLabel = (st: SiteStage) => site.kind === 'integration' ? integrationLabels[st] || STAGE_META[st].label : STAGE_META[st].label
+  const stageLabel = (st: SiteStage) => stageLabelOf(site.kind, st)
 
   // Стадию передаём аргументом: кнопка «Перевести в …» не может ждать, пока
   // setStage доедет до следующего рендера, иначе уйдёт предыдущее значение.

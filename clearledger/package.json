@@ -1,7 +1,7 @@
 {
   "name": "gig-fuel-ledger",
   "private": true,
-  "version": "1.2.614",
+  "version": "1.2.615",
   "type": "module",
   "scripts": {
     "dev": "vite",

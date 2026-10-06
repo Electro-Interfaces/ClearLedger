@@ -17,8 +17,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Loader2, ArrowLeft, MapPin, User as UserIcon, CalendarClock } from 'lucide-react'
 import {
-  getSite, patchSite, STAGE_META, PHASE_META, FUNNEL_STAGES, type SiteDetail,
-} from '@/services/sitesService'
+  getSite, patchSite, STAGE_META, PHASE_META, FUNNEL_STAGES, type SiteDetail, stageLabelOf } from '@/services/sitesService'
 import { toast } from 'sonner'
 import { PROJECT_TABS, ProjectTabContent, type ProjectTabKey } from './ProjectTabs'
 import { ProjectPhaseStrip } from './ProjectPhaseStrip'
@@ -279,7 +278,7 @@ function NextStepBar({ site, onGoTab, onPlanStep }: {
   const gate = site.gate
   if (!gate) return null
   const nextStage = FUNNEL_STAGES[FUNNEL_STAGES.indexOf(site.stage as never) + 1]
-  const nextLabel = nextStage ? STAGE_META[nextStage]?.label : null
+  const nextLabel = nextStage ? stageLabelOf(site.kind, nextStage) : null
   // Пункт с послаблением не держит переход и не может быть «ближайшим шагом»:
   // отправлять человека делать то, чего он сам решил не ждать, — издевательство.
   // `required` у такого пункта остаётся истиной (по регламенту он обязателен),

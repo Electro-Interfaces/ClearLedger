@@ -292,7 +292,6 @@ function ResultEditor({ task, props, data, onSaved, onDone }: { task: Integratio
 
 export function IntegrationChecklist(props: Props) {
   const { query, refresh } = useIntegration(props)
-  const [editing, setEditing] = useState<IntegrationTask | null>(null)
   const pending = useRef<Record<string, unknown>>({})
   const [showAll, setShowAll] = useState(false)
   // Стадия, которую смотрим: по умолчанию текущая, со схемы — выбранная (?pstage=).
@@ -309,14 +308,18 @@ export function IntegrationChecklist(props: Props) {
   const [waiving, setWaiving] = useState<string | null>(null)
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
-  // Ссылка «открыть пункт» из шапки хода: открыть окно пункта и убрать метку из адреса,
-  // чтобы закрытое окно не открывалось снова.
-  const linked = focusItem ? query.data?.tasks.find((t) => t.key === focusItem) : undefined
-  useEffect(() => {
-    if (!linked) return
-    setViewStage(linked.stage); setShowAll(false); setEditing(linked)
-    setParams((prev) => { const n = new URLSearchParams(prev); n.delete('pitem'); return n }, { replace: true })
-  }, [linked, setParams])
+  // Открытый пункт живёт в адресе (?pitem=), а не в состоянии: карточка перерисовывается
+  // при смене адреса, и окно, открытое ссылкой «открыть пункт» из шапки хода, сразу
+  // закрывалось (проверка на боевом 06.10.2026). Закрытие окна снимает метку.
+  const editing = (focusItem && query.data?.tasks.find((t) => t.key === focusItem)) || null
+  const setEditing = (t: IntegrationTask | null) => setParams((prev) => {
+    const n = new URLSearchParams(prev)
+    if (t) n.set('pitem', t.key); else n.delete('pitem')
+    return n
+  }, { replace: true })
+  const editingStage = editing?.stage
+  // Окно пункта другой стадии (ссылка из шапки хода) — показать его стадию; вид «Все этапы» не сворачиваем.
+  useEffect(() => { if (editingStage) setViewStage(editingStage) }, [editingStage])
   if (!query.data) return <QueryStatus query={query} />
   const { data, tasks, gates } = query.data
   const items = new Map<string, GateItem>(gates.flatMap((g) => g.items).map((i) => [i.key, i]))
@@ -364,7 +367,6 @@ export function IntegrationChecklist(props: Props) {
         {editing.key === '1.1' && <PartnerContacts data={data} props={props} onSaved={refresh} />}
         {editing.key === '5.12' && <PartnerSessionsRule key={`match:${data.revision}`} data={data} props={props} onSaved={refresh} />}
         {editing.key === '2.8' && <PhaseDates key={`dates:${data.revision}`} props={props} state={query.data} onSaved={refresh} />}
-        {editing.key === '1.4' && <p className="text-sm">Назначьте руководителя в «Работе»; сейчас: {props.site.ownerName || 'не назначен'}.</p>}
         <ResultEditor key={`${editing.key}:${data.revision}`} task={editing} props={props} data={data} onSaved={refresh} onDone={() => setEditing(null)} />
       </>}
       </PendingCtx.Provider>
@@ -386,6 +388,8 @@ function PartnerContacts({ data, props, onSaved, compact }: { data: IntegrationD
   const contacts = useQuery({ queryKey: ['cp-contacts', cpId], queryFn: () => getCounterpartyContacts(cpId), enabled: !!cpId })
   const cps = useQuery({ queryKey: ['counterparties', props.companyId], queryFn: () => getCounterparties(props.companyId), enabled: !cpId && !compact })
   const [pick, setPick] = useState('')
+  const [find, setFind] = useState('')
+  const found = find.trim().length < 2 ? [] : (cps.data ?? []).filter((c) => `${c.name} ${c.inn ?? ''}`.toLowerCase().includes(find.trim().toLowerCase())).slice(0, 30)
   const [form, setForm] = useState<typeof EMPTY_CONTACT & { id?: string }>(EMPTY_CONTACT)
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -423,12 +427,13 @@ function PartnerContacts({ data, props, onSaved, compact }: { data: IntegrationD
     {!cpId && (compact
       ? <p className="text-xs text-muted-foreground">Партнёр не связан с контрагентом — контакты заводятся в «Паспорте» после связи.</p>
       : <div className="space-y-2 text-sm">
-          <p className="text-xs text-muted-foreground">Контакты хранятся в карточке контрагента партнёра — их видно и здесь, и в «Контрагентах», и в договорах. Сначала свяжите партнёра с контрагентом.</p>
+          <p className="text-xs text-muted-foreground">Контакты хранятся в карточке контрагента партнёра — их видно и в «Контрагентах», и в договорах. Можно отложить до переговоров.</p>
           <div className="flex flex-wrap gap-2 items-center">
-            <select aria-label="Контрагент партнёра" className={`${selectClass} max-w-sm`} value={pick} onChange={(e) => setPick(e.target.value)}>
-              <option value="">Выбрать контрагента…</option>{(cps.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}{c.inn ? ` · ИНН ${c.inn}` : ''}</option>)}</select>
-            <Button size="sm" variant="outline" disabled={!pick || busy} onClick={() => void link(pick)}>Связать</Button>
             {partner && <Button size="sm" disabled={busy} onClick={() => void createAndLink()}>Завести контрагента «{partner}»</Button>}
+            <Input aria-label="Найти контрагента" className="h-9 max-w-xs" placeholder="или найти существующего: название, ИНН" value={find} onChange={(e) => { setFind(e.target.value); setPick('') }} />
+            {found.length > 0 && <select aria-label="Контрагент партнёра" className={`${selectClass} max-w-sm`} value={pick} onChange={(e) => setPick(e.target.value)}>
+              <option value="">Найдено: {found.length}{found.length === 30 ? '+' : ''}</option>{found.map((c) => <option key={c.id} value={c.id}>{c.name}{c.inn ? ` · ИНН ${c.inn}` : ''}</option>)}</select>}
+            {pick && <Button size="sm" variant="outline" disabled={busy} onClick={() => void link(pick)}>Связать</Button>}
           </div>
         </div>)}
     {cpId && contacts.isLoading && <p className="text-xs text-muted-foreground">Загрузка…</p>}
@@ -604,7 +609,7 @@ type TaskSection = IntegrationTask['section']
  */
 const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[]; leadFields?: string[]; compact?: boolean }> = {
   // Заявка: кто, зачем, что за интеграция, какой договор, кто отвечает — без протоколов и перечней.
-  '1.1': { sections: ['partner', 'lead'], fields: ['name', 'purpose', 'commercialContact'], leadFields: ['initiator'] },
+  '1.1': { sections: ['partner', 'lead'], fields: ['name', 'purpose'], leadFields: ['initiator'] },
   '1.2': { sections: ['scenarios', 'lead'], compact: true, leadFields: ['coverage'] },
   '1.3': { sections: ['lead'], leadFields: ['contractKind', 'payer'] },
   '1.4.1': { sections: ['lead'], leadFields: ['curatorUserId'] },

@@ -95,8 +95,39 @@ def _terms(data):
     return [{"id": s["id"], **{f: s.get(f, "") for f in ("direction", "format", *TERM_FIELDS)}} for s in data["scenarios"]]
 
 
-def snapshot(site, key, data=None):
-    data = data or read(site)
+# Поля, от которых зависит пункт, если раздел общий у нескольких пунктов. Отпечаток
+# по всему разделу сбрасывал соседей: назначение куратора (1.4.1) снимало
+# подтверждение договора (1.3), выбор станций (1.6) — направление (1.2), ставки на
+# переговорах — сценарий заявки (проверка в браузере на боевом 06.10.2026).
+ITEM_FIELDS = {
+    "1.1": {"partner": ("name", "purpose"), "lead": ("initiator",)},
+    "1.3": {"lead": ("contractKind", "payer")},
+    "1.4.1": {"lead": ("curatorUserId",)},
+    "1.5": {"partner": ("assessment",)}, "4.1": {"partner": ("legalEntity",)},
+    "2.4": {"technical": ("responsibilities", "support")},
+    "3.1": {"technical": ("systems", "protocol", "version")},
+    "3.4": {"technical": ("access", "security")}, "3.5": {"technical": ("acceptanceCriteria",)},
+    "3.6": {"technical": ("contacts",)}, "5.1": {"technical": ("access",)},
+    "6.5": {"technical": ("support",)}, "6.13": {"technical": ("productionAccess",)},
+    "2.5": {"data": ("outgoing", "incoming", "statisticsUse")}, "2.6": {"data": ("brand", "appTransitions")},
+    "2.7": {"data": ("analytics", "sessionHistory")}, "3.2": {"data": ("outgoing", "incoming")},
+    "6.4": {"data": ("statisticsUse",)},
+    "4.2": {"work": ("pilotDecision",)}, "6.12": {"work": ("launchDate",)},
+    "6.3": {"settlement": ("disputes",)},
+}
+# Пункты сценариев: какие поля каждого сценария они проверяют.
+SCENARIO_FIELDS = {
+    "1.2": ("name", "direction", "format", "geography", "restrictions"),
+    "2.1": ("name", "direction", "format", "geography", "restrictions"),
+    "1.6": ("selectedIds",), "5.3": ("pilotIds",), "5.5": ("pilotIds",),
+    "6.7": ("agreedIds", "connectedIds", "connectedMeta"),
+}
+SNAPSHOT_V = "v2:"
+
+
+def _snapshot_v1(site, key, data):
+    """Прежний отпечаток — по всему разделу. Нужен, чтобы подтверждения, снятые до
+    перехода на v2, не стали разом «устаревшими»."""
     section = section_for(key)
     values = {section: data.get(section), "result": data["results"].get(key)}
     for dep in DEPENDS.get(key, ()):
@@ -110,9 +141,36 @@ def snapshot(site, key, data=None):
     return hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def snapshot(site, key, data=None):
+    data = data or read(site)
+    if key in ITEM_FIELDS or key in SCENARIO_FIELDS:
+        values = {"result": data["results"].get(key)}
+        for sec, fields in ITEM_FIELDS.get(key, {}).items():
+            values[sec] = {f: (data.get(sec) or {}).get(f) for f in fields}
+        if key in SCENARIO_FIELDS:
+            values["scenarios"] = [{"id": s["id"], **{f: s.get(f) for f in SCENARIO_FIELDS[key]}} for s in data["scenarios"]]
+        if key == "1.2":
+            values["lead"] = {"coverage": data["lead"].get("coverage")}
+        for dep in DEPENDS.get(key, ()):
+            values[dep] = _terms(data) if dep == "terms" else data.get(dep)
+        return SNAPSHOT_V + hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return _snapshot_v1(site, key, data)
+
+
+def same_snapshot(site, key, stored, data=None):
+    """Совпадает ли сохранённый отпечаток с текущими данными.
+
+    Отпечаток v1 (по всему разделу) у пункта с собственными полями не сравниваем:
+    он сбивался от правок соседних пунктов. Изменения после него отмечены флагом
+    needs_confirmation при сохранении — его и достаточно."""
+    if (key in ITEM_FIELDS or key in SCENARIO_FIELDS) and not stored.startswith(SNAPSHOT_V):
+        return True
+    return stored == snapshot(site, key, data or read(site))
+
+
 def stale(site, key, mark):
     return bool(mark.get("needs_confirmation") or
-                (mark.get("snapshot") and mark["snapshot"] != snapshot(site, key)))
+                (mark.get("snapshot") and not same_snapshot(site, key, mark["snapshot"])))
 
 
 # Расхождение сверки: сессии — штука в штуку, энергия и деньги — до округления
@@ -237,7 +295,8 @@ def requirement_problem(site, key, data):
     tests_ok, tests_problem = tests_state(data)
     versions_ok, versions_problem = versions_state(data)
     required = {
-        "1.1": (p.get("name") and p.get("purpose") and data["lead"].get("initiator"), "Заполните партнёра, цель и инициатора интеграции"),
+        "1.1": (p.get("name") and p.get("purpose") and data["lead"].get("initiator"),
+                "Заполните " + ", ".join(n for n, v in (("партнёра", p.get("name")), ("цель", p.get("purpose")), ("инициатора интеграции", data["lead"].get("initiator"))) if not v)),
         "1.3": (data["lead"].get("contractKind") and data["lead"].get("payer"), "Укажите вид предполагаемого договора и кто кому платит"),
         "1.4.1": (data["lead"].get("curatorUserId"), "Назначьте технического куратора интеграции"),
         "1.2": (bool(data["scenarios"]), "Добавьте сценарий подключения"),
@@ -534,7 +593,8 @@ async def save(db, site, payload, user):
     invalidated = []
     for task in TASKS:
         mark = (gates.get(task["stage"]) or {}).get(task["key"]) or {}
-        if (mark.get("done") or mark.get("waived")) and snapshot(site, task["key"], old) != snapshot(site, task["key"], data):
+        if (mark.get("done") or mark.get("waived")) and snapshot(site, task["key"], old) != snapshot(site, task["key"], data) \
+                and not (mark.get("snapshot") and same_snapshot(site, task["key"], mark["snapshot"], data)):
             mark["needs_confirmation"] = True
             gates[task["stage"]][task["key"]] = mark
             invalidated.append(task["key"])

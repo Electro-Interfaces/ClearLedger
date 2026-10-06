@@ -42,6 +42,16 @@ export const STAGE_META: Record<SiteStage, { label: string; hint: string; cls: s
   archive: { label: 'Архив', hint: 'отклонён, с причиной', cls: 'border-zinc-600 text-zinc-500', dot: 'bg-zinc-500' },
 }
 
+/** Названия стадий воронки у проекта интеграции: те же коды, другой смысл. */
+export const INTEGRATION_STAGE_LABEL: Partial<Record<SiteStage, string>> = {
+  lead: 'Заявка', screening: 'Оценка партнёра', negotiation: 'Переговоры', dd: 'Техническое согласование',
+  decision: 'Решение о пилоте', contracting: 'Пилотное соглашение', construction: 'Настройка и тесты',
+  commissioning: 'Договор', live: 'Работает',
+}
+/** Название стадии с учётом вида проекта. */
+export const stageLabelOf = (kind: string | null | undefined, st: SiteStage): string =>
+  (kind === 'integration' && INTEGRATION_STAGE_LABEL[st]) || STAGE_META[st]?.label || st
+
 export interface SiteRow {
   id: string
   /** Вид работы: new_build | retrofit | relocation | decommission. */

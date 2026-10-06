@@ -403,3 +403,20 @@ def test_подтверждение_данными_и_неприменимост
     assert "снимите обязательность" in integration.confirmation_problem(s, "1.4", data)
     data["results"]["3.3"] = {"notApplicable": True, "comment": "доработок нет"}
     assert integration.confirmation_problem(s, "3.3", data) is None
+
+
+def test_подтверждение_пункта_не_сбивают_соседние_поля_раздела():
+    """06.10.2026: назначение куратора (1.4.1) снимало подтверждение договора (1.3),
+    выбор станций (1.6) — направления (1.2)."""
+    s = SimpleNamespace(owner_user_id=None, workspace_data={})
+    data = integration.normalize({"revision": 0, "lead": {"contractKind": "roaming", "payer": "partner"},
+                        "scenarios": [{"id": "a", "direction": "outgoing", "format": "roaming", "selectedIds": []}]}, integration.read(s))
+    s13, s12 = integration.snapshot(s, "1.3", data), integration.snapshot(s, "1.2", data)
+    data["lead"]["curatorUserId"] = "u1"
+    data["scenarios"][0]["selectedIds"] = ["st1"]
+    assert integration.snapshot(s, "1.3", data) == s13 and integration.snapshot(s, "1.2", data) == s12
+    data["lead"]["payer"] = "us"
+    assert integration.snapshot(s, "1.3", data) != s13
+    # подтверждение, снятое до перехода на v2, по чужим полям не устаревает
+    assert integration.same_snapshot(s, "1.3", "старый-отпечаток", data)
+    assert not integration.same_snapshot(s, "1.3", s13, data)
