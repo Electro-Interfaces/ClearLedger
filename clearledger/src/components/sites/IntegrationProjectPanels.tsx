@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -60,6 +60,24 @@ function QueryStatus({ query }: { query: ReturnType<typeof useIntegration>['quer
   return <p role="status" className="text-sm text-muted-foreground">Загрузка интеграции…</p>
 }
 
+/**
+ * Несохранённые правки разделов в окне пункта. Окно пункта — одна кнопка «Подтвердить
+ * выполнение»: она сохраняет всё, что заполнено в окне, и подтверждает пункт. Раньше
+ * у каждого раздела была своя «Сохранить», и заполненное, но не сохранённое отдельно,
+ * терялось — пункт «никак не заполнить» (замечание МАГа 06.10.2026).
+ */
+const PendingCtx = createContext<{ current: Record<string, unknown> } | null>(null)
+/** Регистрирует черновик раздела в окне пункта; true — редактор внутри окна пункта. */
+function usePending(key: string, value: unknown, initial: unknown): boolean {
+  const pending = useContext(PendingCtx)
+  useEffect(() => {
+    if (!pending) return
+    if (JSON.stringify(value) !== JSON.stringify(initial)) pending.current[key] = value
+    else delete pending.current[key]
+  }, [pending, key, value, initial])
+  return !!pending
+}
+
 function SectionEditor({ section, data, props, onSaved, only }: { section: IntegrationSection; data: IntegrationData; props: Props; onSaved: () => Promise<void>; only?: string[] }) {
   const [draft, setDraft] = useState(data[section])
   const [busy, setBusy] = useState(false)
@@ -68,6 +86,7 @@ function SectionEditor({ section, data, props, onSaved, only }: { section: Integ
   // Окно пункта показывает поля пункта, а не весь раздел: десять граф «Технических
   // параметров» под пунктом «Руководитель назначен» читались как ошибка (05.10.2026).
   const fields = only && !all ? group.fields.filter(([k]) => only.includes(k)) : group.fields
+  const inItem = usePending(section, draft, data[section])
   const save = async () => {
     setBusy(true)
     try { await saveIntegration(props.companyId, props.site.id, { revision: data.revision, [section]: draft }); await onSaved(); toast.success('Данные сохранены. Согласование подтверждается отдельно') }
@@ -81,7 +100,7 @@ function SectionEditor({ section, data, props, onSaved, only }: { section: Integ
       {key === 'launchDate' ? <Input type="date" value={draft[key] || ''} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />
         : <Textarea rows={2} value={draft[key] || ''} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />}
     </label>)}</div>
-    <Button disabled={busy} onClick={() => void save()}>Сохранить раздел</Button>
+    {!inItem && <Button disabled={busy} onClick={() => void save()}>Сохранить раздел</Button>}
   </section>
 }
 
@@ -136,6 +155,7 @@ function ScenariosEditor({ data, props, onSaved, compact }: { data: IntegrationD
   // перечня станция уносит их с собой, иначе сервер отклонит сохранение.
   const pruned = (list: IntegrationScenario[]) => list.map((s) => ({ ...s,
     connectedMeta: Object.fromEntries(Object.entries(s.connectedMeta || {}).filter(([id]) => s.connectedIds.includes(id))) }))
+  usePending('scenarios', rows === data.scenarios ? data.scenarios : pruned(rows), data.scenarios)
   const markConnected = (row: IntegrationScenario, at: string, basis: keyof typeof CONNECT_BASIS, ref: string) => {
     const meta = { ...(row.connectedMeta || {}) }
     for (const id of row.connectedIds) if (!meta[id]?.at) meta[id] = { at, basis, ref }
@@ -228,7 +248,8 @@ const EVIDENCE_KEYS = new Set(['4.3', '5.11', '5.13', '6.6', '6.14'])
  * Пункт с выполненным требованием к данным подтверждается самими данными — комментарий
  * необязателен; «не применимо» — только у необязательных (замечание МАГа 05.10.2026).
  */
-function ResultEditor({ task, props, data, onSaved }: { task: IntegrationTask; props: Props; data: IntegrationData; onSaved: () => Promise<void> }) {
+function ResultEditor({ task, props, data, onSaved, onDone }: { task: IntegrationTask; props: Props; data: IntegrationData; onSaved: () => Promise<void>; onDone?: () => void }) {
+  const pending = useContext(PendingCtx)
   const [result, setResult] = useState<IntegrationResult>(data.results[task.key] || { comment: '', workRef: '', docId: '', notApplicable: false })
   const [busy, setBusy] = useState(false)
   const [more, setMore] = useState(EVIDENCE_KEYS.has(task.key) || !!result.docId || !!result.workRef)
@@ -238,10 +259,11 @@ function ResultEditor({ task, props, data, onSaved }: { task: IntegrationTask; p
     setBusy(true)
     let saved = false
     try {
-      const next = await saveIntegration(props.companyId, props.site.id, { revision: data.revision, results: { ...data.results, [task.key]: { ...result, notApplicable: task.required ? false : result.notApplicable } } })
+      const next = await saveIntegration(props.companyId, props.site.id, { revision: data.revision, ...(pending?.current ?? {}), results: { ...data.results, [task.key]: { ...result, notApplicable: task.required ? false : result.notApplicable } } })
       saved = true
+      if (pending) pending.current = {}
       await confirmIntegration(props.companyId, props.site.id, task.key, next.revision)
-      await onSaved(); toast.success('Выполнение подтверждено с автором и датой')
+      await onSaved(); toast.success(`Пункт ${task.key} подтверждён`); onDone?.()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось подтвердить')
       // Результат уже записан, отказано только в подтверждении: ревизия на сервере
@@ -266,6 +288,7 @@ function ResultEditor({ task, props, data, onSaved }: { task: IntegrationTask; p
 export function IntegrationChecklist(props: Props) {
   const { query, refresh } = useIntegration(props)
   const [editing, setEditing] = useState<IntegrationTask | null>(null)
+  const pending = useRef<Record<string, unknown>>({})
   const [showAll, setShowAll] = useState(false)
   // Стадия, которую смотрим: по умолчанию текущая, со схемы — выбранная (?pstage=).
   const [params, setParams] = useSearchParams()
@@ -302,6 +325,7 @@ export function IntegrationChecklist(props: Props) {
     finally { setBusy(false) }
   }
   const viewLabel = gates.find((g) => g.stage === viewStage)?.stageLabel ?? viewStage
+  const editingItem = editing ? items.get(editing.key) : undefined
   return <section ref={top} className="rounded-lg border p-3 space-y-3 scroll-mt-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-sm">Чек-лист интеграции · {showAll ? 'все этапы' : viewLabel}</h3><Button variant="outline" size="sm" onClick={() => setShowAll(!showAll)}>{showAll ? 'По стадиям' : 'Все этапы'}</Button></div>
     {!showAll && <div className="flex flex-wrap gap-1">{gates.filter((g) => tasks.some((t) => t.stage === g.stage)).map((g) =>
       <button key={g.stage} type="button" onClick={() => setViewStage(g.stage)}
@@ -319,8 +343,11 @@ export function IntegrationChecklist(props: Props) {
         {waiving === t.key && <div className="space-y-2"><Textarea aria-label="Обоснование снятия обязательности" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Обоснование: под решением будет ваше имя" /><Button disabled={!reason.trim() || busy} onClick={() => void waive(t.key, true)}>Подтвердить снятие обязательности</Button><Button variant="ghost" onClick={() => setWaiving(null)}>Отмена</Button></div>}
       </div>
     })}
-    <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}><DialogContent className="sm:max-w-4xl w-[96vw] max-h-[90dvh] overflow-y-auto"><DialogHeader><DialogTitle>{editing?.key} · {editing?.label}</DialogTitle></DialogHeader>
-      {editing && <><p className="text-xs text-muted-foreground">Связанные данные сохраняются в паспорте. Их заполнение само по себе не подтверждает пункт.</p>
+    <Dialog open={!!editing} onOpenChange={(open) => { if (!open) { setEditing(null); pending.current = {} } }}><DialogContent className="sm:max-w-4xl w-[96vw] max-h-[90dvh] overflow-y-auto"><DialogHeader><DialogTitle>{editing?.key} · {editing?.label}</DialogTitle></DialogHeader>
+      <PendingCtx.Provider value={pending}>
+      {editing && <>{editingItem?.done && !editingItem.needsConfirmation
+          ? <p className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm">Пункт подтверждён{editingItem.confirmedBy ? ` · ${editingItem.confirmedBy}` : ''}{editingItem.confirmedAt ? ` · ${new Date(editingItem.confirmedAt).toLocaleString('ru-RU')}` : ''}. Изменили данные — подтвердите заново.</p>
+          : <p className="text-xs text-muted-foreground">Заполните данные и нажмите «Подтвердить выполнение» внизу: заполненное сохранится, пункт будет подтверждён с вашим именем и датой.</p>}
         {/* 1.3 не повторяет редактор 1.2 (замечание 05.10.2026): сценарии заводятся в 1.2,
             здесь — сводка их форматов. 1.4 — назначение руководителя, а не тех. параметры. */}
         <NeedLine task={tasks.find((x) => x.key === editing.key) ?? editing} item={items.get(editing.key)} />
@@ -333,8 +360,9 @@ export function IntegrationChecklist(props: Props) {
         {editing.key === '5.12' && <PartnerSessionsRule key={`match:${data.revision}`} data={data} props={props} onSaved={refresh} />}
         {editing.key === '2.8' && <PhaseDates key={`dates:${data.revision}`} props={props} state={query.data} onSaved={refresh} />}
         {editing.key === '1.4' && <p className="text-sm">Назначьте руководителя в «Работе»; сейчас: {props.site.ownerName || 'не назначен'}.</p>}
-        <ResultEditor key={`${editing.key}:${data.revision}`} task={editing} props={props} data={data} onSaved={refresh} />
+        <ResultEditor key={`${editing.key}:${data.revision}`} task={editing} props={props} data={data} onSaved={refresh} onDone={() => setEditing(null)} />
       </>}
+      </PendingCtx.Provider>
     </DialogContent></Dialog>
   </section>
 }
@@ -433,6 +461,7 @@ function LeadEditor({ data, props, onSaved, only }: { data: IntegrationData; pro
   const members = useQuery({ queryKey: ['site-members', props.companyId], queryFn: () => getSiteMembers(props.companyId), enabled: !only || only.includes('curatorUserId') })
   const show = (k: string) => !only || only.includes(k)
   const set = (k: string, v: string) => setDraft({ ...draft, [k]: v })
+  const inItem = usePending('lead', draft, data.lead || {})
   const save = async () => {
     setBusy(true)
     try { await saveIntegration(props.companyId, props.site.id, { revision: data.revision, lead: draft }); await onSaved(); toast.success('Заявка сохранена') }
@@ -457,7 +486,7 @@ function LeadEditor({ data, props, onSaved, only }: { data: IntegrationData; pro
         <Textarea rows={2} value={draft.coverage || ''} placeholder="Регионы и примерное число станций — без выбора станций" onChange={(e) => set('coverage', e.target.value)} /></label>}
     </div>
     {show('contractKind') && <p className="text-xs text-muted-foreground">Ставки, НДС и сроки оплаты — предмет переговоров (пункты 2.2 и 6.2), в заявке не нужны.</p>}
-    <Button disabled={busy} onClick={() => void save()}>Сохранить заявку</Button>
+    {!inItem && <Button disabled={busy} onClick={() => void save()}>Сохранить заявку</Button>}
   </section>
 }
 
@@ -490,6 +519,7 @@ function ProjectLeadPicker({ props, onSaved }: { props: Props; onSaved: () => Pr
 function DocumentsEditor({ data, props, onSaved }: { data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
   const [rows, setRows] = useState(data.documents)
   const [busy, setBusy] = useState(false)
+  usePending('documents', rows, data.documents)
   const input = useRef<HTMLInputElement>(null)
   const docs = useQuery({ queryKey: ['site-docs', props.companyId, props.site.id], queryFn: () => getSiteDocs(props.companyId, props.site.id) })
   const change = (id: string, patch: Partial<IntegrationDocument>) => setRows(rows.map((d) => d.id === id ? { ...d, ...patch } : d))
@@ -712,6 +742,7 @@ const TEST_TEMPLATES: Record<'information' | 'roaming', [string, boolean][]> = {
 function TestsEditor({ data, props, onSaved }: { data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
   const [rows, setRows] = useState<IntegrationTest[]>(data.tests)
   const [busy, setBusy] = useState(false)
+  usePending('tests', rows, data.tests)
   const change = (id: string, patch: Partial<IntegrationTest>) => setRows(rows.map((x) => x.id === id ? { ...x, ...patch } : x))
   const addTypical = () => {
     const next = [...rows]
@@ -766,6 +797,7 @@ const RECON_STATE = { match: ['Сходится', 'text-emerald-700 dark:text-em
 function ReconciliationsEditor({ data, props, onSaved }: { data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
   const [rows, setRows] = useState<IntegrationReconciliation[]>(data.reconciliations)
   const [busy, setBusy] = useState(false)
+  usePending('reconciliations', rows, data.reconciliations)
   const docs = useQuery({ queryKey: ['site-docs', props.companyId, props.site.id], queryFn: () => getSiteDocs(props.companyId, props.site.id) })
   const change = (id: string, patch: Partial<IntegrationReconciliation>) => setRows(rows.map((r) => r.id === id ? { ...r, ...patch } : r))
   const add = (kind: IntegrationReconciliation['kind']) => setRows([...rows, { id: crypto.randomUUID(), kind, period: '', resolution: '', docId: '', ours: { sessions: 0, kwh: 0, amount: 0 }, partner: { sessions: 0, kwh: 0, amount: 0 } }])
