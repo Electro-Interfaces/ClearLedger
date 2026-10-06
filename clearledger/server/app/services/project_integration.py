@@ -385,7 +385,7 @@ def requirement_problem(site, key, data):
         "1.4": (bool(site.owner_user_id), "Назначьте руководителя проекта в Работе"),
         "1.6": (any(s["selectedIds"] for s in data["scenarios"]), "Выберите станции сценария"),
         "2.2": (terms_ok and (no_money or st.get("period")), "Укажите по каждому сценарию, кто кому платит, модель и ставку, и периодичность расчётов"),
-        "2.3": (c.get("tariffs") or all(s.get("clientPrice") for s in scenarios if s["format"] == "roaming"), "Укажите цену для чужого клиента по сценариям роуминга или правила тарифов"),
+        "2.3": (no_money or c.get("tariffs") or all(s.get("clientPrice") for s in scenarios if s["format"] == "roaming"), "Укажите цену для чужого клиента по сценариям роуминга или правила тарифов"),
         "2.4": (t.get("responsibilities") and t.get("support"), "Заполните ответственность и поддержку"),
         "3.1": (t.get("protocol") and t.get("version"), "Укажите протокол и версию"),
         "3.6": (t.get("contacts"), "Укажите технические контакты сторон"),

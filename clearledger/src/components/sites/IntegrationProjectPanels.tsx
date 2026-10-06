@@ -773,7 +773,7 @@ function NeedLine({ task, item }: { task: IntegrationTask; item?: GateItem }) {
 }
 
 /** Пункты о деньгах: при «Без расчётов» во всех сценариях их поля не нужны (сервер согласен). */
-const MONEY_KEYS: Record<string, string> = { '2.2': 'комиссия, отчётность и периодичность расчётов', '6.2': 'порядок расчётов, срок оплаты, документы и НДС', '6.3': 'порядок разрешения расхождений по расчётам' }
+const MONEY_KEYS: Record<string, string> = { '2.2': 'комиссия, отчётность и периодичность расчётов', '2.3': 'цена для чужого клиента и правила тарифов (клиент платит по своему договору)', '6.2': 'порядок расчётов, срок оплаты, документы и НДС', '6.3': 'порядок разрешения расхождений по расчётам' }
 
 const EXTRA_EDITORS: Record<string, TaskSection[]> = {
   '2.2': ['scenarios', 'settlement'], '2.3': ['scenarios'], '6.2': ['scenarios', 'settlement'],
@@ -798,7 +798,7 @@ function ScenarioTerms({ scenario: s, onChange }: { scenario: IntegrationScenari
     {money && <label className="text-sm">Модель расчётов<select aria-label="Модель расчётов" className={selectClass} value={s.model || ''} onChange={(e) => onChange({ model: e.target.value as IntegrationScenario['model'] })}><option value="">Не определена</option>{Object.entries(INTEGRATION_MODELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>}
     {money && <label className="text-sm">Ставка / размер<Input aria-label="Ставка / размер" value={s.rate || ''} onChange={(e) => onChange({ rate: e.target.value })} placeholder="например, 7 % от выручки" /></label>}
     {money && <label className="text-sm">База расчёта<Input aria-label="База расчёта" value={s.base || ''} onChange={(e) => onChange({ base: e.target.value })} placeholder="выручка с НДС, кВт·ч…" /></label>}
-    {s.format === 'roaming' && <label className="text-sm">Цена для чужого клиента<Input aria-label="Цена для чужого клиента" value={s.clientPrice || ''} onChange={(e) => onChange({ clientPrice: e.target.value })} placeholder="наш розничный тариф, наценка…" /></label>}
+    {s.format === 'roaming' && s.payer !== 'none' && <label className="text-sm">Цена для чужого клиента<Input aria-label="Цена для чужого клиента" value={s.clientPrice || ''} onChange={(e) => onChange({ clientPrice: e.target.value })} placeholder="наш розничный тариф, наценка…" /></label>}
     {money && <label className="text-sm">Эквайринг<Input aria-label="Эквайринг" value={s.acquiring || ''} onChange={(e) => onChange({ acquiring: e.target.value })} placeholder="кто принимает оплату и несёт комиссию" /></label>}
   </fieldset>
 }
