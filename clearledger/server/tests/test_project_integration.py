@@ -483,3 +483,19 @@ def test_без_расчётов_денежные_пункты_не_требую
         assert integration.requirement_problem(s, key, data) is None, key
     data = integration.normalize({"revision": 0, "scenarios": [scenario(payer="partner", model="commission", rate="5%")]}, integration.read(s))
     assert integration.requirement_problem(s, "2.2", data)
+
+
+def test_подтверждение_не_блокируется_незаполненным():
+    s = site()
+    db = SimpleNamespace(execute=AsyncMock(), add=lambda *_: None)
+    user = SimpleNamespace(id=uuid.uuid4(), name="Менеджер", email="m@x")
+    import app.services.ezs_site_work as work
+    orig = work.log_event
+    work.log_event = AsyncMock()
+    try:
+        data = asyncio.run(integration.confirm(db, s, "2.4", 0, user))
+    finally:
+        work.log_event = orig
+    mark = s.gates["negotiation"]["2.4"]
+    assert mark["done"] and mark["unfilled"]
+    assert data["revision"] == 1

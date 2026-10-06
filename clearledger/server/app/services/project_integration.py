@@ -732,21 +732,22 @@ async def confirm(db, site, key, revision, user):
         raise ValueError("Неизвестный пункт чек-листа")
     if data["revision"] != revision:
         raise ValueError("Карточка изменилась. Обновите данные перед подтверждением")
+    # Подтверждение — решение менеджера: незаполненное не блокирует, а остаётся в отметке
+    # и журнале — видно, что подтвердили «под свою ответственность» (МАГ 07.10.2026).
     problem = confirmation_problem(site, key, data)
-    if problem:
-        raise ValueError(problem)
     await validate_refs(db, site, data)
     gates = deepcopy(site.gates or {})
     marks = gates.setdefault(task["stage"], {})
     now = datetime.now(timezone.utc).isoformat()
     marks[key] = {**(marks.get(key) or {}), "done": True, "waived": False,
                   "needs_confirmation": False, "snapshot": snapshot(site, key, data),
-                  "by": str(user.id), "by_name": user.name or user.email, "at": now}
+                  "by": str(user.id), "by_name": user.name or user.email, "at": now,
+                  "unfilled": problem or None}
     site.gates = gates
     data["revision"] += 1
     site.workspace_data = {**(site.workspace_data or {}), "integration": data}
     site.last_touch_at = datetime.now(timezone.utc)
-    await log_event(db, site, "gate", user=user, text=f"Подтверждён пункт {key}: {task['label']}",
+    await log_event(db, site, "gate", user=user, text=f"Подтверждён пункт {key}: {task['label']}" + (f" (не заполнено: {problem})" if problem else ""),
                     changes=[{"field": f"integration:confirmation:{key}", "label": task["label"], "category": "decision", "old": None, "new": {"result": data["results"].get(key), "by": str(user.id), "at": now, "snapshot": marks[key]["snapshot"]}}])
     return data
 

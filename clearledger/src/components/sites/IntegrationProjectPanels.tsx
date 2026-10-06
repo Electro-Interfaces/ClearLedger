@@ -348,7 +348,7 @@ function ResultEditor({ task, props, data, onSaved, onDone }: { task: Integratio
     finally { setBusy(false) }
   }
   return <><section className="rounded-lg border p-3 space-y-3"><h3 className="text-sm font-semibold">Подтверждение пункта {task.key}</h3>
-    <label className="block text-sm">{byData ? 'Комментарий — необязательно: подтверждением служат заполненные данные' : result.notApplicable ? 'Причина неприменимости' : task.dataRule ? 'Результат проверки' : 'Результат проверки — обязательно'}
+    <label className="block text-sm">{byData ? 'Комментарий — необязательно: подтверждением служат заполненные данные' : result.notApplicable ? 'Причина неприменимости' : task.dataRule ? 'Результат проверки — необязательно' : 'Результат проверки — необязательно'}
       <Textarea rows={2} value={result.comment} onChange={(e) => setResult({ ...result, comment: e.target.value })} /></label>
     {!task.required && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={result.notApplicable} onChange={(e) => setResult({ ...result, notApplicable: e.target.checked })} />Не применимо к этому сценарию</label>}
     {more ? <>
@@ -436,7 +436,7 @@ export function IntegrationChecklist(props: Props) {
     {tasks.filter((t) => showAll || t.stage === viewStage).map((t) => {
       const item = items.get(t.key)
       return <div key={t.key} className="border-b py-3 space-y-2 last:border-b-0"><div className="flex flex-wrap gap-2 text-sm"><span className="font-mono">{t.key}</span><span className="flex-1 min-w-40">{t.label}</span><span className="text-xs text-muted-foreground" title={`Отвечает по регламенту: ${ROLE_NAMES[t.role] ?? t.role}`}>{ROLE_NAMES[t.role] ?? t.role}</span></div>
-        <p className={`text-xs ${item?.needsConfirmation ? 'text-amber-600' : item?.done ? 'text-emerald-600' : 'text-muted-foreground'}`}>{item?.needsConfirmation ? 'Требует повторного подтверждения' : item?.done ? 'Подтверждено' : item?.waived ? 'Обязательность снята' : `${t.required ? 'Обязательный пункт: держит переход' : 'Не подтверждено'}${t.need ? ` · не хватает: ${t.need}` : ''}`}{item?.confirmedBy ? ` · ${item.confirmedBy}` : ''}{item?.confirmedAt ? ` · ${new Date(item.confirmedAt).toLocaleString('ru-RU')}` : ''}</p>
+        <p className={`text-xs ${item?.needsConfirmation ? 'text-amber-600' : item?.done ? 'text-emerald-600' : 'text-muted-foreground'}`}>{item?.needsConfirmation ? 'Требует повторного подтверждения' : item?.done ? 'Подтверждено' : item?.waived ? 'Обязательность снята' : `${t.required ? 'Обязательный пункт: держит переход' : 'Не подтверждено'}${t.need ? ` · не заполнено: ${t.need.charAt(0).toLowerCase() + t.need.slice(1)}` : ''}`}{item?.confirmedBy ? ` · ${item.confirmedBy}` : ''}{item?.confirmedAt ? ` · ${new Date(item.confirmedAt).toLocaleString('ru-RU')}` : ''}</p>
         {data.results[t.key]?.comment && <p className="text-sm whitespace-pre-wrap">{data.results[t.key].comment}</p>}
         <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => setEditing(t)}>Данные и результат</Button>
           {props.site.mayWaive && item?.waivable && !item.done && <Button className="max-w-full h-auto min-h-9 whitespace-normal text-left" variant="ghost" size="sm" disabled={busy} onClick={() => item.waived ? void waive(t.key, false) : setWaiving(t.key)}>{item.waived ? 'Вернуть обязательность' : 'Снять обязательность под свою ответственность'}</Button>}</div>
@@ -766,10 +766,10 @@ function NeedLine({ task, item }: { task: IntegrationTask; item?: GateItem }) {
   // У пункта без своих данных пояснение даёт строка «Отдельных данных у пункта нет».
   if (!task.need && ITEM_VIEW[task.key]?.sections?.length === 0 && !['1.4', '5.12'].includes(task.key)) return null
   return task.need
-    ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">Чтобы подтвердить пункт: {task.need}.</p>
+    ? <p className="text-xs text-muted-foreground">Подсказка: {task.need.charAt(0).toLowerCase() + task.need.slice(1)}. Подтвердить можно и без этого — решение за вами.</p>
     : task.dataRule
-      ? <p className="text-xs text-muted-foreground">Данных для подтверждения достаточно — нажмите «Подтвердить выполнение» внизу окна.</p>
-      : <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">Пункт подтверждается результатом проверки: запишите его в поле внизу окна (или приложите документ, поручение).</p>
+      ? <p className="text-xs text-muted-foreground">Данные заполнены — нажмите «Подтвердить выполнение» внизу окна.</p>
+      : <p className="text-xs text-muted-foreground">Результат проверки можно записать внизу окна или приложить документ, поручение — по желанию.</p>
 }
 
 /** Пункты о деньгах: при «Без расчётов» во всех сценариях их поля не нужны (сервер согласен). */
