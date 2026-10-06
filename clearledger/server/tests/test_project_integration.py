@@ -466,3 +466,11 @@ def test_внешние_участники_с_ролью_без_дублей():
     assert data["parties"] == [{"counterpartyId": cp, "side": "vendor", "note": "техническая интеграция"}]
     with pytest.raises(ValueError):
         integration.normalize({"revision": 0, "parties": [{"counterpartyId": cp, "side": "boss"}]}, integration.read(site()))
+
+
+def test_21_закрывается_данными_сценария():
+    s = site()
+    data = integration.normalize({"revision": 0, "scenarios": [scenario()]}, integration.read(s))
+    assert integration.confirmation_problem(s, "2.1", data)
+    data["scenarios"][0]["restrictions"] = "только корпоративные клиенты"
+    assert integration.confirmation_problem(s, "2.1", data) is None
