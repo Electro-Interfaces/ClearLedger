@@ -66,14 +66,19 @@ function QueryStatus({ query }: { query: ReturnType<typeof useIntegration>['quer
  * у каждого раздела была своя «Сохранить», и заполненное, но не сохранённое отдельно,
  * терялось — пункт «никак не заполнить» (замечание МАГа 06.10.2026).
  */
-const PendingCtx = createContext<{ current: Record<string, unknown> } | null>(null)
-/** Регистрирует черновик раздела в окне пункта; true — редактор внутри окна пункта. */
+type Pending = { current: Record<string, unknown>; bump?: () => void }
+const PendingCtx = createContext<Pending | null>(null)
+/** Регистрирует черновик раздела в окне пункта; true — редактор внутри окна пункта.
+ *  Соседние блоки окна видят черновик (версия перечня — ещё не сохранённый договор):
+ *  смена черновика перерисовывает окно (bump), одинаковый — нет, иначе зациклится. */
 function usePending(key: string, value: unknown, initial: unknown): boolean {
   const pending = useContext(PendingCtx)
   useEffect(() => {
     if (!pending) return
-    if (JSON.stringify(value) !== JSON.stringify(initial)) pending.current[key] = value
-    else delete pending.current[key]
+    const next = JSON.stringify(value) !== JSON.stringify(initial) ? value : undefined
+    if (JSON.stringify(pending.current[key]) === JSON.stringify(next)) return
+    if (next === undefined) delete pending.current[key]; else pending.current[key] = next
+    pending.bump?.()
   }, [pending, key, value, initial])
   return !!pending
 }
@@ -303,7 +308,9 @@ function ResultEditor({ task, props, data, onSaved, onDone }: { task: Integratio
 
 export function IntegrationChecklist(props: Props) {
   const { query, refresh } = useIntegration(props)
-  const pending = useRef<Record<string, unknown>>({})
+  const pending = useRef<Record<string, unknown>>({}) as Pending
+  const [, setPendingTick] = useState(0)
+  pending.bump = () => setPendingTick((n) => n + 1)
   const [showAll, setShowAll] = useState(false)
   // Стадия, которую смотрим: по умолчанию текущая, со схемы — выбранная (?pstage=).
   const [params, setParams] = useSearchParams()
@@ -747,21 +754,26 @@ function ConnectionMarks({ scenario, onMark }: { scenario: IntegrationScenario; 
 }
 
 function ListVersions({ scenario, saved, data, props, onSaved }: { scenario: IntegrationScenario; saved?: IntegrationScenario; data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
+  // В окне пункта перечень и договор — ещё черновик: фиксация версии сохраняет их вместе
+  // с версией одним запросом (раньше: «сохраните сценарии» — а кнопки сохранения нет).
+  const pending = useContext(PendingCtx)
+  const allDocs = (pending?.current.documents as IntegrationDocument[] | undefined) ?? data.documents
   const [documentId, setDocumentId] = useState('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const versions = (data.listVersions.filter((v) => 'version' in v && v.scenarioId === scenario.id) as IntegrationListVersion[]).sort((a, b) => a.version - b.version)
   const last = versions.at(-1)
-  const agreed = saved?.agreedIds ?? []
-  const unsaved = [...agreed].sort().join() !== [...scenario.agreedIds].sort().join()
+  const agreed = pending ? scenario.agreedIds : saved?.agreedIds ?? []
+  const unsaved = !pending && [...agreed].sort().join() !== [...scenario.agreedIds].sort().join()
   const added = last ? agreed.filter((id) => !last.stationIds.includes(id)).length : 0
   const removed = last ? last.stationIds.filter((id) => !agreed.includes(id)).length : 0
-  const docs = data.documents.filter((d) => d.kind === 'stations' || d.kind === 'contract')
-  const docTitle = (id: string) => { const d = data.documents.find((x) => x.id === id); return d ? `${d.title || DOC_KINDS[d.kind]}${d.edition ? `, ${d.edition}` : ''}${d.signedDocId ? ' · подписан' : ' · не подписан'}` : 'документ удалён' }
+  const docs = allDocs.filter((d) => d.kind === 'stations' || d.kind === 'contract')
+  const docTitle = (id: string) => { const d = allDocs.find((x) => x.id === id); return d ? `${d.title || DOC_KINDS[d.kind]}${d.edition ? `, ${d.edition}` : ''}${d.signedDocId ? ' · подписан' : ' · не подписан'}` : 'документ удалён' }
   const fix = async () => {
     setBusy(true)
     try {
-      await saveIntegration(props.companyId, props.site.id, { revision: data.revision, listVersions: [...data.listVersions, { scenarioId: scenario.id, documentId, note }] })
+      await saveIntegration(props.companyId, props.site.id, { revision: data.revision, ...(pending?.current ?? {}), listVersions: [...data.listVersions, { scenarioId: scenario.id, documentId, note }] })
+      if (pending) pending.current = {}
       await onSaved(); toast.success('Версия перечня зафиксирована')
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось зафиксировать версию') }
     finally { setBusy(false) }
