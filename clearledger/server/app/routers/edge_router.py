@@ -38,7 +38,7 @@ from app.models import (
 
 log = logging.getLogger(__name__)
 from app.services.store_document_sync import сверить_документы
-from app.services import (edge_nsi, edge_projection, edge_service, edge_stock,
+from app.services import (edge_moves, edge_nsi, edge_projection, edge_service, edge_stock,
                           edge_transfers, recipe_versions, store_receipts as receipt_rules)
 from app.services import store_receipt_accounting
 from app.services import sku as sku_pool
@@ -1129,6 +1129,9 @@ async def _replay_edge_derived(
         await edge_nsi.ingest_station_nsi(db, company_id, station_id, docs)
     if packet_kind == "stock":
         await _sync_stock_packet(db, company_id, station_id, payload)
+    if packet_kind == "stock-moves":
+        await edge_moves.ingest_stock_moves(
+            db, company_id, station_id, payload, packet_uuid)
     await edge_projection.project_packet(
         db, company_id, packet_uuid, station_id, payload)
 
@@ -1253,6 +1256,9 @@ async def receive_packet(
                 if packet_kind == "stock":
                     await _sync_stock_packet(
                         db, company_id, int(station_id), existing_payload)
+                if packet_kind == "stock-moves":
+                    await edge_moves.ingest_stock_moves(
+                        db, company_id, int(station_id), existing_payload, str(packet_uuid))
                 уже_есть = (await db.execute(
                     select(func.count(DataEntry.id)).where(
                         DataEntry.company_id == company_id,
@@ -1367,6 +1373,9 @@ async def receive_packet(
         # ведёт к revision_error и повтору, как у чеков.
         if packet_kind == "cash_state":
             await edge_nsi.ingest_cash_check(db, company_id, int(station_id), docs)
+        if packet_kind == "stock-moves":
+            await edge_moves.ingest_stock_moves(
+                db, company_id, int(station_id), payload, str(packet_uuid))
         projection = await edge_projection.project_packet(
             db, company_id, str(packet_uuid), int(station_id), payload)
         await db.commit()

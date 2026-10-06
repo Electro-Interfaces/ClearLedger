@@ -3468,6 +3468,12 @@ async def create_all() -> None:
             for stmt in LOCAL_BARCODE_MIGRATION_DDL:
                 await conn.execute(_sa.text(stmt))
 
+        # v2.51: журнал движений учёта станций по дням — для остатков на дату,
+        # истории товара и оборотки сети (07.10.2026).
+        from app.services.edge_moves import DDL as STOCK_MOVES_DDL
+        for stmt in STOCK_MOVES_DDL:
+            await conn.execute(_sa.text(stmt))
+
         # v2.43: BusinessShift identity, collision-safe backfill и current group.
         for stmt in BUSINESS_SHIFT_MIGRATION_DDL:
             if stmt in {
