@@ -20,7 +20,7 @@ import {
   getSite, patchSite, STAGE_META, PHASE_META, FUNNEL_STAGES, type SiteDetail, stageLabelOf } from '@/services/sitesService'
 import { toast } from 'sonner'
 import { PROJECT_TABS, ProjectTabContent, type ProjectTabKey } from './ProjectTabs'
-import { ProjectPhaseStrip } from './ProjectPhaseStrip'
+import { ProjectPhaseStrip, INTEGRATION_PHASES } from './ProjectPhaseStrip'
 import { ProjectsListPanel } from './ProjectsListPanel'
 import { ProjectScenarioSettings } from './ProjectScenarioSettings'
 import { plural } from '@/lib/textUtils'
@@ -170,9 +170,10 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
             )}
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground mt-0.5">
-            <span className="inline-flex items-center gap-1">
+            {/* У интеграции адреса нет — пустое «📍 —» только сбивало (06.10.2026) */}
+            {s.kind !== 'integration' && <span className="inline-flex items-center gap-1">
               <MapPin className="h-3 w-3" />{[s.region, s.city, s.address].filter(Boolean).join(', ') || '—'}
-            </span>
+            </span>}
             <span className="inline-flex items-center gap-1">
               <UserIcon className="h-3 w-3" />{s.ownerName ?? 'ответственный не назначен'}
             </span>
@@ -205,8 +206,10 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
 
       {/* Где проект в жизненном цикле — видно на любой вкладке */}
       {!specialized && <ProjectPhaseStrip current={s.phase ?? undefined} kind={s.kind}
+        // У интеграции — что делается на текущем этапе. Было «площадки нет, путь идёт от
+        // сценария…» — сравнение со стройкой, которое человеку ничего не говорит (МАГ 06.10.2026).
         note={s.kind === 'integration'
-          ? 'Интеграция с партнёром: площадки нет, путь идёт от сценария к коммерческому запуску.'
+          ? (() => { const ph = INTEGRATION_PHASES.find((p) => p.key === s.phase); return ph ? `Сейчас этап «${ph.label}»: ${ph.hint}.` : undefined })()
           : s.kind && s.kind !== 'new_build'
             ? 'Работа на действующем объекте: место известно, подбор площадки не нужен.'
             : 'Подбор места — первый этап этого же проекта, дальше земля, реализация и ввод.'} />}
