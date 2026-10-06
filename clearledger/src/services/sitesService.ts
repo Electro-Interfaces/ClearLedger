@@ -142,6 +142,8 @@ export interface GateState {
   stage: SiteStage; stageLabel: string; items: GateItem[]; done: number; total: number
   /** Обязательные незакрытые пункты — они держат переход вперёд. */
   blocking: string[]
+  /** Пункты прошлых стадий, требующие повторного подтверждения (держат переход). */
+  staleBefore?: { key: string; label: string; stage: string }[]
   /** Пункты, прошедшие с послаблением: кто снял, когда и почему. */
   waived?: {
     key: string; label: string; by: string | null; at: string | null; reason: string | null

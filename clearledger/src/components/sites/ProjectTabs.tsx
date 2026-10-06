@@ -16,7 +16,7 @@
  *   История       — стадии, касания, правки, импорт.
  *
  * Правка любого поля помечает его «ручным»: следующий импорт файла его не тронет.
- */
+ */
 import { useSearchParams } from 'react-router-dom'
 import { getIntegration } from '@/services/projectIntegrationService'
 import { ProjectContractsBlock } from './ProjectContractsBlock'
@@ -140,10 +140,11 @@ function NextStepCriteria({ site, companyId, actions }: { site: SiteDetail; comp
   const need = new Map((integ.data?.tasks ?? []).map((t) => [t.key, t.need]))
   const step = actions.find((a) => a.is_positive === true && !a.is_discretionary)
   const items = (site.gate?.items ?? []).filter((i) => i.required && !i.waived)
-  if (!step || items.length === 0) return null
+  const stale = site.gate?.staleBefore ?? []
+  if (!step || (items.length === 0 && stale.length === 0)) return null
   const done = items.filter((i) => i.done).length
-  const all = done === items.length
-  const openItem = (key: string) => setParams((prev) => { const n = new URLSearchParams(prev); n.set('pstage', site.stage); n.set('pitem', key); return n }, { replace: true })
+  const all = done === items.length && stale.length === 0
+  const openItem = (key: string, stage: string = site.stage) => setParams((prev) => { const n = new URLSearchParams(prev); n.set('pstage', stage); n.set('pitem', key); return n }, { replace: true })
   return (
     <div data-zone="Что нужно для перехода дальше" className={`rounded-md border p-2.5 space-y-1.5 ${all ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-amber-500/40 bg-amber-500/5'}`}>
       <div className="text-sm font-medium">
@@ -159,6 +160,15 @@ function NextStepCriteria({ site, companyId, actions }: { site: SiteDetail; comp
           {!i.done && isIntegration && <button type="button" className="text-xs underline" onClick={() => openItem(i.key)}>открыть пункт</button>}
         </li>
       ))}</ul>
+      {stale.length > 0 && <div className="space-y-1">
+        <div className="text-sm text-amber-700 dark:text-amber-400">Держат и пункты прошлых стадий — их данные изменились после подтверждения, подтвердите заново:</div>
+        <ul className="space-y-1">{stale.map((i) => (
+          <li key={i.key} className="flex flex-wrap items-center gap-x-2 text-sm">
+            <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-amber-500" />
+            <span className="font-mono text-xs text-muted-foreground">{i.key}</span><span>{i.label}</span>
+            {isIntegration && <button type="button" className="text-xs underline" onClick={() => openItem(i.key, i.stage)}>открыть пункт</button>}
+          </li>))}</ul>
+      </div>}
       <div className="text-xs text-muted-foreground">
         {all ? `Все обязательные пункты закрыты — нажмите «${step.verb}».`
           : 'Откройте пункт, заполните данные в его окне и нажмите «Подтвердить выполнение» внизу окна.'}

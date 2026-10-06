@@ -198,6 +198,7 @@ def gate_state(site: EzsSite, stage: str | None = None,
                     "phase": it.get("phase"),
                     "phaseLabel": phase_labels.get(it.get("phase", ""), "")})
     blocking = [i["label"] for i in out if i["required"] and not i["done"] and not i["waived"]]
+    stale_before = []
     if site.kind == "integration" and st in STAGE_ORDER:
         from app.services.ezs_checklist_integration import TASKS
         from app.services.project_integration import stale
@@ -206,6 +207,7 @@ def gate_state(site: EzsSite, stage: str | None = None,
             mark = (site.gates or {}).get(task["stage"], {}).get(task["key"], {})
             if task["stage"] in previous and task.get("required") and stale(site, task["key"], mark):
                 blocking.append(f"Требует повторного подтверждения: {task['label']}")
+                stale_before.append({"key": task["key"], "label": task["label"], "stage": task["stage"]})
     waived = [{"key": i["key"], "label": i["label"], "by": i["waivedBy"],
                "at": i["waivedAt"], "reason": i["waiveReason"]}
               for i in out if i["waived"]]
@@ -215,6 +217,9 @@ def gate_state(site: EzsSite, stage: str | None = None,
         "done": sum(1 for i in out if i["done"]),
         "total": len(out),
         "blocking": blocking,          # что держит переход вперёд
+        # пункты прошлых стадий, у которых изменились данные после подтверждения: держат
+        # переход, хотя пункты текущей стадии закрыты — шапка хода называет их (06.10.2026)
+        "staleBefore": stale_before,
         # Пройденное с послаблением называется вслух: иначе «переход открыт»
         # выглядит как «всё собрано», а собрано не всё.
         "waived": waived,

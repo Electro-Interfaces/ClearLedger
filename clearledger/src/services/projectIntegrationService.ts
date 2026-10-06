@@ -64,7 +64,8 @@ export interface IntegrationStation extends ChargeDimensionStation { id: string;
 /** Станция выведена из работы: закрыта или выведена из эксплуатации. В новый выбор не предлагается, в перечнях подсвечивается. */
 export const isRetired = (s?: IntegrationStation) => !!s && (s.lifecycle === 'closed' || s.opStatus === 'decommissioned')
 /** Расхождение сверки — то же правило, что на сервере (`recon_state`). */
-export function reconState(r: IntegrationReconciliation): 'match' | 'resolved' | 'diff' {
+export function reconState(r: IntegrationReconciliation): 'match' | 'resolved' | 'diff' | 'empty' {
+  if (!(+r.ours.sessions || 0) && !(+r.partner.sessions || 0)) return 'empty'
   const tol = { sessions: 0, kwh: 0.1, amount: 1 } as const
   const diff = (Object.keys(tol) as (keyof typeof tol)[]).some((k) => Math.abs((+r.ours[k] || 0) - (+r.partner[k] || 0)) > tol[k])
   return !diff ? 'match' : r.resolution && r.docId ? 'resolved' : 'diff'

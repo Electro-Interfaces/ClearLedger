@@ -14,7 +14,7 @@ import {
   getIntegration, getIntegrationStations, saveIntegration, confirmIntegration,
   LEAD_INITIATORS, LEAD_CONTRACT_KINDS,
   INTEGRATION_DIRECTIONS, INTEGRATION_FORMATS, INTEGRATION_PAYERS, INTEGRATION_MODELS, CONNECT_BASIS, TEST_STATUSES,
-  isRetired, reconState, MATCH_KINDS, getPartnerSessions, type PartnerSessions as PartnerSessionsData,
+  isRetired, reconState, MATCH_KINDS, getPartnerSessions,
   type IntegrationData, type IntegrationSection, type IntegrationScenario,
   type IntegrationDocument, type IntegrationStation, type IntegrationTask, type IntegrationResult,
   type IntegrationTest, type IntegrationReconciliation, type IntegrationListVersion,
@@ -251,7 +251,7 @@ function PhaseDates({ props, state, onSaved }: { props: Props; state: NonNullabl
 
 /** Пункты, у которых доказательство — документ (подписанное соглашение, протокол, акт):
  *  поля документа и поручения раскрыты сразу. У остальных — свёрнуты. */
-const EVIDENCE_KEYS = new Set(['4.3', '5.11', '5.13', '6.6', '6.14'])
+const EVIDENCE_KEYS = new Set(['5.13', '6.14'])
 
 /**
  * Подтверждение пункта: кто и когда подтвердил (при смене данных — подтвердить заново).
@@ -379,9 +379,9 @@ export function IntegrationChecklist(props: Props) {
             здесь — сводка их форматов. 1.4 — назначение руководителя, а не тех. параметры. */}
         <NeedLine task={tasks.find((x) => x.key === editing.key) ?? editing} item={items.get(editing.key)} />
         {(ITEM_VIEW[editing.key]?.sections ?? [editing.section, ...(EXTRA_EDITORS[editing.key] || [])]).map((section) => <TaskEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh}
-          compact={ITEM_VIEW[editing.key]?.compact} scenarioView={ITEM_VIEW[editing.key]?.scenarios}
-          only={section === 'lead' ? ITEM_VIEW[editing.key]?.leadFields : section === (ITEM_VIEW[editing.key]?.sections?.[0] ?? editing.section) ? ITEM_VIEW[editing.key]?.fields : undefined} />)}
-        {ITEM_VIEW[editing.key]?.sections?.length === 0 && !['1.4', '2.8'].includes(editing.key) && <p className="text-sm text-muted-foreground">Отдельных данных у пункта нет: он подтверждается результатом ниже — комментарием, документом или поручением «Трека».</p>}
+          compact={ITEM_VIEW[editing.key]?.compact} scenarioView={ITEM_VIEW[editing.key]?.scenarios} signing={SIGNING_KINDS[editing.key]}
+          only={ITEM_VIEW[editing.key]?.fieldsBy?.[section] ?? (section === 'lead' ? ITEM_VIEW[editing.key]?.leadFields : section === (ITEM_VIEW[editing.key]?.sections?.[0] ?? editing.section) ? ITEM_VIEW[editing.key]?.fields : undefined)} />)}
+        {ITEM_VIEW[editing.key]?.sections?.length === 0 && !['1.4', '2.8', '5.12'].includes(editing.key) && <p className="text-sm text-muted-foreground">Отдельных данных у пункта нет: он подтверждается результатом ниже — комментарием, документом или поручением «Трека».</p>}
         {editing.key === '1.4' && <ProjectLeadPicker props={props} onSaved={refresh} />}
         {editing.key === '1.1' && <PartnerContacts data={data} props={props} onSaved={refresh} />}
         {editing.key === '5.12' && <PartnerSessionsRule key={`match:${data.revision}`} data={data} props={props} onSaved={refresh} />}
@@ -545,7 +545,16 @@ function ProjectLeadPicker({ props, onSaved }: { props: Props; onSaved: () => Pr
   </section>
 }
 
-function DocumentsEditor({ data, props, onSaved }: { data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
+/** Какой подписанный документ закрывает пункт — те же виды, что проверяет сервер. */
+const SIGNING_KINDS: Record<string, string[]> = { '4.3': ['pilot', 'nda'], '5.11': ['test_protocol'], '6.6': ['contract'] }
+
+/**
+ * Документы интеграции. В окне пункта с подписанием (signing) — только то, что пункт
+ * проверяет: вид, название, подписанная версия и подтверждение подписания. Приложенный
+ * файл сразу становится подписанной версией новой записи. Раньше было «Приложить файл»,
+ * потом «Добавить документ», потом выбор файла в трёх списках — проход 06.10.2026.
+ */
+function DocumentsEditor({ data, props, onSaved, signing }: { data: IntegrationData; props: Props; onSaved: () => Promise<void>; signing?: string[] }) {
   const [rows, setRows] = useState(data.documents)
   const [busy, setBusy] = useState(false)
   const inItem = usePending('documents', rows, data.documents)
@@ -561,18 +570,26 @@ function DocumentsEditor({ data, props, onSaved }: { data: IntegrationData; prop
   const upload = async (file?: File) => {
     if (!file) return
     setBusy(true)
-    try { await uploadSiteDoc(props.companyId, props.site.id, file, 'other', file.name); await docs.refetch(); toast.success('Файл приложен. Выберите его в нужной редакции документа') }
+    try {
+      const doc = await uploadSiteDoc(props.companyId, props.site.id, file, 'other', file.name); await docs.refetch()
+      if (signing) {
+        setRows([...rows, { id: crypto.randomUUID(), kind: signing[0], title: file.name.replace(/\.[^.]+$/, ''), edition: '', fileDocId: doc.id, agreedDocId: '', signedDocId: doc.id, signingEvidence: '' }])
+        toast.success('Файл приложен как подписанная версия. Укажите подтверждение подписания')
+      } else toast.success('Файл приложен. Выберите его в нужной редакции документа')
+    }
     catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось приложить файл') }
     finally { setBusy(false); if (input.current) input.current.value = '' }
   }
-  return <section className="rounded-lg border p-3 space-y-3"><h3 className="font-semibold text-sm">Документы интеграции</h3><p className="text-xs text-muted-foreground">Файл, согласованная редакция и подписанная версия учитываются отдельно. При подписании укажите дату, подписантов и основание подтверждения.</p>
-    <input ref={input} className="hidden" type="file" onChange={(e) => void upload(e.target.files?.[0])} /><Button variant="outline" disabled={busy} onClick={() => input.current?.click()}>Приложить файл</Button>
+  const kinds = signing ? Object.entries(DOC_KINDS).filter(([k]) => signing.includes(k)) : Object.entries(DOC_KINDS)
+  const shown = signing ? rows.filter((d) => signing.includes(d.kind)) : rows
+  return <section className="rounded-lg border p-3 space-y-3"><h3 className="font-semibold text-sm">{signing ? 'Подписанный документ' : 'Документы интеграции'}</h3><p className="text-xs text-muted-foreground">{signing ? `Нужна подписанная версия (${kinds.map(([, v]) => v).join(' или ')}) и подтверждение подписания: дата, подписанты, основание.` : 'Файл, согласованная редакция и подписанная версия учитываются отдельно. При подписании укажите дату, подписантов и основание подтверждения.'}</p>
+    <input ref={input} className="hidden" type="file" onChange={(e) => void upload(e.target.files?.[0])} /><Button variant="outline" disabled={busy} onClick={() => input.current?.click()}>{signing ? 'Приложить подписанный файл' : 'Приложить файл'}</Button>
     {docs.isError && <div role="alert">Файлы не загрузились: {docs.error.message}<Button onClick={() => void docs.refetch()}>Повторить</Button></div>}
-    {rows.map((d) => <div key={d.id} className="rounded border p-3 space-y-3"><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">Вид документа<select className={selectClass} value={d.kind} onChange={(e) => change(d.id, { kind: e.target.value })}>{Object.entries(DOC_KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label><label className="text-sm">Название<Input value={d.title} onChange={(e) => change(d.id, { title: e.target.value })} /></label><label className="text-sm">Редакция / номер<Input value={d.edition} onChange={(e) => change(d.id, { edition: e.target.value })} /></label></div>
-      {([['fileDocId', 'Файл'], ['agreedDocId', 'Согласованная редакция'], ['signedDocId', 'Подписанная версия']] as const).map(([field, label]) => <div key={field} className="flex gap-2 items-end"><label className="flex-1 min-w-0 text-sm">{label}<select className={selectClass} value={d[field]} onChange={(e) => change(d.id, { [field]: e.target.value })}><option value="">Не выбрана</option>{(docs.data || []).map((file) => <option key={file.id} value={file.id}>{file.title || file.fileName}</option>)}</select></label><Button variant="outline" disabled={!d[field]} onClick={() => void downloadSiteDoc(props.companyId, props.site.id, d[field]).catch((e) => toast.error(e.message))}>Скачать</Button></div>)}
+    {shown.map((d) => <div key={d.id} className="rounded border p-3 space-y-3"><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">Вид документа<select className={selectClass} value={d.kind} onChange={(e) => change(d.id, { kind: e.target.value })}>{kinds.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label><label className="text-sm">Название<Input value={d.title} onChange={(e) => change(d.id, { title: e.target.value })} /></label>{!signing && <label className="text-sm">Редакция / номер<Input value={d.edition} onChange={(e) => change(d.id, { edition: e.target.value })} /></label>}</div>
+      {(signing ? [['signedDocId', 'Подписанная версия']] as const : [['fileDocId', 'Файл'], ['agreedDocId', 'Согласованная редакция'], ['signedDocId', 'Подписанная версия']] as const).map(([field, label]) => <div key={field} className="flex gap-2 items-end"><label className="flex-1 min-w-0 text-sm">{label}<select className={selectClass} value={d[field]} onChange={(e) => change(d.id, { [field]: e.target.value })}><option value="">Не выбрана</option>{(docs.data || []).map((file) => <option key={file.id} value={file.id}>{file.title || file.fileName}</option>)}</select></label><Button variant="outline" disabled={!d[field]} onClick={() => void downloadSiteDoc(props.companyId, props.site.id, d[field]).catch((e) => toast.error(e.message))}>Скачать</Button></div>)}
       <label className="block text-sm">Подтверждение подписания<Textarea value={d.signingEvidence} onChange={(e) => change(d.id, { signingEvidence: e.target.value })} /></label><Button variant="ghost" onClick={() => setRows(rows.filter((r) => r.id !== d.id))}>Удалить запись документа</Button>
     </div>)}
-    <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setRows([...rows, { id: crypto.randomUUID(), kind: 'other', title: '', edition: '', fileDocId: '', agreedDocId: '', signedDocId: '', signingEvidence: '' }])}>Добавить документ</Button>{!inItem && <Button disabled={busy} onClick={() => void save()}>Сохранить редакции документов</Button>}</div>
+    <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setRows([...rows, { id: crypto.randomUUID(), kind: signing?.[0] ?? 'other', title: '', edition: '', fileDocId: '', agreedDocId: '', signedDocId: '', signingEvidence: '' }])}>{signing ? 'Выбрать уже приложенный файл' : 'Добавить документ'}</Button>{!inItem && <Button disabled={busy} onClick={() => void save()}>Сохранить редакции документов</Button>}</div>
   </section>
 }
 
@@ -626,11 +643,13 @@ type TaskSection = IntegrationTask['section']
  * Карта на фронте: подтверждения пунктов привязаны к разделу на сервере (отпечаток
  * данных), и менять его значило бы сбросить уже подтверждённые пункты.
  */
-const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[]; leadFields?: string[]; compact?: boolean; scenarios?: ScenarioView }> = {
+const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[]; leadFields?: string[]; compact?: boolean; scenarios?: ScenarioView; fieldsBy?: Partial<Record<TaskSection, string[]>> }> = {
   '1.6': { scenarios: { lists: ['selectedIds'], lockHeader: true } },
   '2.1': { scenarios: { lists: [] } },
-  '2.2': { scenarios: { lists: [], terms: true, lockHeader: true } }, '2.3': { scenarios: { lists: [], terms: true, lockHeader: true } },
-  '6.2': { scenarios: { lists: [], terms: true, lockHeader: true } },
+  // 2.2 было ~18 полей трёх разделов: нужны расчёты по сценариям и периодичность (06.10.2026)
+  '2.2': { sections: ['scenarios', 'commercial', 'settlement'], fieldsBy: { commercial: ['commission', 'reporting'], settlement: ['period'] }, scenarios: { lists: [], terms: true, lockHeader: true } },
+  '2.3': { sections: ['scenarios', 'commercial'], fieldsBy: { commercial: ['tariffs'] }, scenarios: { lists: [], terms: true, lockHeader: true } },
+  '6.2': { sections: ['scenarios', 'settlement'], fieldsBy: { settlement: ['period', 'paymentTerm', 'documents', 'vat'] }, scenarios: { lists: [], terms: true, lockHeader: true } },
   '5.3': { scenarios: { lists: ['pilotIds'], lockHeader: true } }, '5.5': { scenarios: { lists: ['pilotIds'], lockHeader: true } },
   '6.6': { scenarios: { lists: ['agreedIds'], versions: true, lockHeader: true } },
   '6.7': { scenarios: { lists: ['agreedIds', 'connectedIds'], versions: true, marks: true, lockHeader: true } },
@@ -650,6 +669,10 @@ const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[]; l
   // 6.3 требует «Порядок сверки» из расчётов — раньше окно открывало коммерческие условия.
   '6.3': { sections: ['settlement'], fields: ['disputes'] },
   // Проверки на пилоте — это испытания, а не технические параметры.
+  // 5.12: правило сессий — свой блок; 8 полей порядка расчётов и дубль «как выделяются» не нужны
+  '5.12': { sections: [] },
+  // 5.10: из пилота — итог и результаты проверок (решение о пилоте и дата запуска — другие пункты)
+  '5.10': { sections: ['tests', 'work'], fieldsBy: { work: ['pilotOutcome', 'testResults'] } },
   '5.6': { sections: ['tests'] }, '5.7': { sections: ['tests'] }, '5.8': { sections: ['tests'] }, '5.9': { sections: ['tests'] },
   // Своих данных нет — подтверждаются результатом.
   '3.3': { sections: [] }, '5.2': { sections: [] }, '5.4': { sections: [] }, '6.1': { sections: [] },
@@ -660,7 +683,7 @@ const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[]; l
 function NeedLine({ task, item }: { task: IntegrationTask; item?: GateItem }) {
   if (item?.done && !item.needsConfirmation) return null
   // У пункта без своих данных пояснение даёт строка «Отдельных данных у пункта нет».
-  if (!task.need && ITEM_VIEW[task.key]?.sections?.length === 0 && !['1.4', '2.8'].includes(task.key)) return null
+  if (!task.need && ITEM_VIEW[task.key]?.sections?.length === 0 && !['1.4', '2.8', '5.12'].includes(task.key)) return null
   return task.need
     ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">Чтобы подтвердить пункт: {task.need}.</p>
     : task.dataRule
@@ -673,10 +696,10 @@ const EXTRA_EDITORS: Record<string, TaskSection[]> = {
   '5.10': ['work'], '5.11': ['documents'], '6.6': ['scenarios'],
 }
 
-function TaskEditor({ section, data, props, onSaved, only, compact, scenarioView }: { section: TaskSection; data: IntegrationData; props: Props; onSaved: () => Promise<void>; only?: string[]; compact?: boolean; scenarioView?: ScenarioView }) {
+function TaskEditor({ section, data, props, onSaved, only, compact, scenarioView, signing }: { section: TaskSection; data: IntegrationData; props: Props; onSaved: () => Promise<void>; only?: string[]; compact?: boolean; scenarioView?: ScenarioView; signing?: string[] }) {
   if (section === 'scenarios') return <ScenariosEditor data={data} props={props} onSaved={onSaved} compact={compact} view={scenarioView} />
   if (section === 'lead') return <LeadEditor data={data} props={props} onSaved={onSaved} only={only} />
-  if (section === 'documents') return <DocumentsEditor data={data} props={props} onSaved={onSaved} />
+  if (section === 'documents') return <DocumentsEditor data={data} props={props} onSaved={onSaved} signing={signing} />
   if (section === 'tests') return <TestsEditor data={data} props={props} onSaved={onSaved} />
   if (section === 'reconciliations') return <ReconciliationsEditor data={data} props={props} onSaved={onSaved} />
   return <SectionEditor section={section} data={data} props={props} onSaved={onSaved} only={only} />
@@ -803,7 +826,7 @@ function TestsEditor({ data, props, onSaved }: { data: IntegrationData; props: P
   return <section className="rounded-lg border p-3 space-y-3">
     <div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="font-semibold text-sm">Испытания</h3>
       <span className="text-xs text-muted-foreground">обязательных пройдено {passed} из {req.length}{rows.some((x) => x.status === 'failed') ? ' · есть замечания' : ''}</span></div>
-    <p className="text-xs text-muted-foreground">Каждая проверка — статус, тестовая сессия и автор. Пункт 5.10 закрывается, когда обязательные пройдены; 5.11 — подписанным протоколом испытаний во вкладке «Документы».</p>
+    <p className="text-xs text-muted-foreground">Каждая проверка — статус, тестовая сессия и автор. Пункт 5.10 закрывается, когда обязательные пройдены; 5.11 — подписанным протоколом испытаний (в окне пункта 5.11).</p>
     {data.scenarios.length === 0 && <p className="text-xs">Сначала задайте сценарии подключения в паспорте.</p>}
     {rows.map((x) => {
       const scenario = data.scenarios.find((s) => s.id === x.scenarioId)
@@ -830,7 +853,7 @@ function TestsEditor({ data, props, onSaved }: { data: IntegrationData; props: P
 }
 
 const RECON_KINDS = { pilot: 'Пробная по пилоту', monthly: 'Месячная' }
-const RECON_STATE = { match: ['Сходится', 'text-emerald-700 dark:text-emerald-400'], resolved: ['Расхождение урегулировано', 'text-sky-700 dark:text-sky-400'], diff: ['Расхождение', 'text-red-600 dark:text-red-400'] } as const
+const RECON_STATE = { empty: ['Нет цифр — внесите сессии, кВт·ч и суммы', 'text-muted-foreground'], match: ['Сходится', 'text-emerald-700 dark:text-emerald-400'], resolved: ['Расхождение урегулировано', 'text-sky-700 dark:text-sky-400'], diff: ['Расхождение', 'text-red-600 dark:text-red-400'] } as const
 
 function ReconciliationsEditor({ data, props, onSaved }: { data: IntegrationData; props: Props; onSaved: () => Promise<void> }) {
   const [rows, setRows] = useState<IntegrationReconciliation[]>(data.reconciliations)
@@ -891,18 +914,21 @@ function PartnerSessionsRule({ data, props, onSaved }: { data: IntegrationData; 
   const [kind, setKind] = useState(data.settlement.matchKind || '')
   const [values, setValues] = useState(data.settlement.matchValues || '')
   const [busy, setBusy] = useState(false)
-  const [check, setCheck] = useState<PartnerSessionsData | null>(null)
+  // Результат проверки — в кэше запросов: сохранение правила меняет ревизию, и блок
+  // перерисовывается заново; локальное состояние терялось вместе с найденными сессиями.
+  const qc = useQueryClient()
+  const checkKey = ['partner-sessions-check', props.companyId, props.site.id]
+  const check = useQuery({ queryKey: checkKey, queryFn: () => getPartnerSessions(props.companyId, props.site.id), enabled: false }).data ?? null
   const dirty = kind !== (data.settlement.matchKind || '') || values !== (data.settlement.matchValues || '')
-  const save = async () => {
-    setBusy(true)
-    try { await saveIntegration(props.companyId, props.site.id, { revision: data.revision, settlement: { ...data.settlement, matchKind: kind, matchValues: values } }); await onSaved(); toast.success('Правило сохранено') }
-    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось сохранить правило') }
-    finally { setBusy(false) }
-  }
+  usePending('settlement', dirty ? { ...data.settlement, matchKind: kind, matchValues: values } : data.settlement, data.settlement)
+  // Проверка идёт по сохранённому правилу: несохранённое сохраняем тут же, одной кнопкой.
   const run = async () => {
     setBusy(true)
-    try { setCheck(await getPartnerSessions(props.companyId, props.site.id)) }
-    catch (e) { setCheck(null); toast.error(e instanceof Error ? e.message : 'Проверка не удалась') }
+    try {
+      if (dirty) { await saveIntegration(props.companyId, props.site.id, { revision: data.revision, settlement: { ...data.settlement, matchKind: kind, matchValues: values } }); await onSaved() }
+      await qc.fetchQuery({ queryKey: checkKey, queryFn: () => getPartnerSessions(props.companyId, props.site.id), staleTime: 0 })
+    }
+    catch (e) { qc.removeQueries({ queryKey: checkKey }); toast.error(e instanceof Error ? e.message : 'Проверка не удалась') }
     finally { setBusy(false) }
   }
   const nf = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -913,9 +939,7 @@ function PartnerSessionsRule({ data, props, onSaved }: { data: IntegrationData; 
       <label className="text-xs">Как находить<select aria-label="Как находить сессии партнёра" className={selectClass} value={kind} onChange={(e) => setKind(e.target.value)}><option value="">Не задано</option>{Object.entries(MATCH_KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
       <label className="text-xs">Значения — по одному в строке или через запятую<Textarea aria-label="Значения правила сессий партнёра" rows={2} value={values} onChange={(e) => setValues(e.target.value)} placeholder={kind === 'client' ? 'ООО «Партнёр»' : kind === 'card' ? '0123456789' : 'номер аккаунта в АСУиМ'} /></label>
     </div>
-    <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || !dirty} onClick={() => void save()}>Сохранить правило</Button>
-      <Button variant="outline" disabled={busy || dirty || !data.settlement.matchKind} onClick={() => void run()}>Проверить за 90 дней</Button></div>
-    {dirty && <p className="text-xs text-muted-foreground">Проверка идёт по сохранённому правилу.</p>}
+    <div className="flex flex-wrap gap-2"><Button variant="outline" disabled={busy || !kind || !values.trim()} onClick={() => void run()}>{dirty ? 'Сохранить и проверить за 90 дней' : 'Проверить за 90 дней'}</Button></div>
     {check && <div className="space-y-1 text-xs" role="status">
       <p className="font-medium">{check.total.sessions ? `Найдено ${nf.format(check.total.sessions)} сессий · ${nf.format(check.total.kwh)} кВт·ч · ${nf.format(check.total.amount)} ₽ (${check.from} — ${check.to})` : `За ${check.from} — ${check.to} сессий по правилу нет: проведите тестовую сессию и проверьте снова`}</p>
       {check.byMonth.length > 0 && <p className="text-muted-foreground">{check.byMonth.map((m) => `${m.month}: ${m.sessions}`).join(' · ')}</p>}

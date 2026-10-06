@@ -84,15 +84,21 @@ def section_for(key):
 # данные — подтверждение устарело. Условия сценария — без перечней станций:
 # иначе каждая отметка станции сбрасывала бы согласование комиссии.
 DEPENDS = {
-    "2.2": ("terms", "settlement"), "2.3": ("terms",), "6.2": ("terms", "settlement"),
+    "2.2": ("terms",), "2.3": ("terms",), "6.2": ("terms",),
     "5.10": ("work",), "5.11": ("documents",), "6.6": ("listVersions",),
     "6.7": ("listVersions",),
 }
 TERM_FIELDS = ("payer", "model", "rate", "base", "clientPrice", "acquiring")
 
 
-def _terms(data):
-    return [{"id": s["id"], **{f: s.get(f, "") for f in ("direction", "format", *TERM_FIELDS)}} for s in data["scenarios"]]
+# Какие условия сценария проверяет пункт: цена для чужого клиента — предмет 2.3, её
+# правка не должна снимать согласование комиссии 2.2 (проход на боевом 06.10.2026).
+TERMS_BY_KEY = {"2.2": ("payer", "model", "rate", "base", "acquiring"), "2.3": ("clientPrice",)}
+
+
+def _terms(data, key=None):
+    fields = TERMS_BY_KEY.get(key, TERM_FIELDS)
+    return [{"id": s["id"], **{f: s.get(f, "") for f in ("direction", "format", *fields)}} for s in data["scenarios"]]
 
 
 # Поля, от которых зависит пункт, если раздел общий у нескольких пунктов. Отпечаток
@@ -114,6 +120,9 @@ ITEM_FIELDS = {
     "6.4": {"data": ("statisticsUse",)},
     "4.2": {"work": ("pilotDecision",)}, "6.12": {"work": ("launchDate",)},
     "6.3": {"settlement": ("disputes",)},
+    # условия сценариев (terms) — через DEPENDS; из порядка расчётов — только своё
+    "2.2": {"commercial": SECTIONS["commercial"], "settlement": ("period",)}, "2.3": {"commercial": ("tariffs",)},
+    "6.2": {"settlement": ("period", "paymentTerm", "documents", "vat")},
 }
 # Пункты сценариев: какие поля каждого сценария они проверяют.
 SCENARIO_FIELDS = {
@@ -141,8 +150,21 @@ def _snapshot_v1(site, key, data):
     return hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+# Документ подписания пункта: его подтверждение зависит только от документов своего вида
+# (протокол испытаний 5.11 снимал подписание пилотного соглашения 4.3 — проход 06.10.2026).
+DOC_KINDS_BY_KEY = {"4.3": ("nda", "pilot"), "5.11": ("test_protocol",), "6.6": ("contract",)}
+
+
 def snapshot(site, key, data=None):
     data = data or read(site)
+    if key in DOC_KINDS_BY_KEY:
+        values = {"result": data["results"].get(key),
+                  "documents": [d for d in data["documents"] if d.get("kind") in DOC_KINDS_BY_KEY[key]]}
+        if key == "5.11":
+            values["tests"] = data.get("tests")
+        if key == "6.6":
+            values["listVersions"] = data.get("listVersions")
+        return SNAPSHOT_V + hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     if key in ITEM_FIELDS or key in SCENARIO_FIELDS:
         values = {"result": data["results"].get(key)}
         for sec, fields in ITEM_FIELDS.get(key, {}).items():
@@ -152,7 +174,7 @@ def snapshot(site, key, data=None):
         if key == "1.2":
             values["lead"] = {"coverage": data["lead"].get("coverage")}
         for dep in DEPENDS.get(key, ()):
-            values[dep] = _terms(data) if dep == "terms" else data.get(dep)
+            values[dep] = _terms(data, key) if dep == "terms" else data.get(dep)
         return SNAPSHOT_V + hashlib.sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     return _snapshot_v1(site, key, data)
 
@@ -163,7 +185,7 @@ def same_snapshot(site, key, stored, data=None):
     Отпечаток v1 (по всему разделу) у пункта с собственными полями не сравниваем:
     он сбивался от правок соседних пунктов. Изменения после него отмечены флагом
     needs_confirmation при сохранении — его и достаточно."""
-    if (key in ITEM_FIELDS or key in SCENARIO_FIELDS) and not stored.startswith(SNAPSHOT_V):
+    if (key in ITEM_FIELDS or key in SCENARIO_FIELDS or key in DOC_KINDS_BY_KEY) and not stored.startswith(SNAPSHOT_V):
         return True
     return stored == snapshot(site, key, data or read(site))
 
@@ -180,6 +202,10 @@ RECON_TOLERANCE = {"sessions": 0, "kwh": 0.1, "amount": 1.0}
 
 
 def recon_state(r):
+    # Ноль сессий у обеих сторон — сверки не было, а не «сходится»: пустая строка
+    # закрывала 5.13 (проход на боевом 06.10.2026).
+    if not float(r["ours"].get("sessions") or 0) and not float(r["partner"].get("sessions") or 0):
+        return "empty"
     diff = any(abs(float(r["ours"].get(k) or 0) - float(r["partner"].get(k) or 0)) > tol
                for k, tol in RECON_TOLERANCE.items())
     if not diff:
@@ -263,7 +289,9 @@ def versions_state(data):
 # подтвердил — фиксируется как прежде. Состав сверяется тестом с requirement_problem.
 DATA_RULE_KEYS = frozenset({
     "1.1", "1.2", "1.3", "1.4", "1.4.1", "1.6", "2.2", "2.3", "2.4", "2.8", "3.1", "3.6",
-    "4.1", "4.2", "4.3", "5.3", "5.10", "5.11", "5.12", "5.13", "6.2", "6.3", "6.6", "6.7",
+    # 5.12 — не здесь: правило задано ещё не значит «проверено на тестовой сессии»,
+    # результат (номер сессии) обязателен (проход 06.10.2026: 0 сессий, а пункт закрывался)
+    "4.1", "4.2", "4.3", "5.3", "5.10", "5.11", "5.13", "6.2", "6.3", "6.6", "6.7",
     "6.12", "6.13", "6.14",
     *("1.5", "2.5", "2.6", "2.7", "3.2", "3.4", "3.5", "5.1", "6.4", "6.5"),
 })
@@ -332,12 +360,12 @@ def requirement_problem(site, key, data):
         "5.10": (tests_ok and w.get("pilotOutcome"), tests_problem or "Зафиксируйте итог пилота"),
         "5.11": (tests_ok, tests_problem),
         "5.12": (st.get("matchKind") and match_values(st), "Задайте правило, по которому сессии партнёра находятся в учёте, и проверьте его на тестовой сессии"),
-        "5.13": (any(r["kind"] == "pilot" and recon_state(r) != "diff" for r in data["reconciliations"]), "Внесите пробную сверку по пилоту: без расхождений или с урегулированием и актом"),
+        "5.13": (any(r["kind"] == "pilot" and recon_state(r) in ("match", "resolved") for r in data["reconciliations"]), "Внесите пробную сверку по пилоту: без расхождений или с урегулированием и актом"),
         "6.2": (terms_ok and all(st.get(f) for f in ("period", "paymentTerm", "documents", "vat")), "Заполните условия по сценариям и порядок расчётов: периодичность, срок оплаты, документы, НДС"),
         "6.3": (st.get("disputes"), "Опишите порядок сверки и разрешения расхождений"),
         "6.6": (versions_ok, versions_problem),
         "6.13": (t.get("productionAccess"), "Зафиксируйте выдачу боевых доступов и отзыв тестовых"),
-        "6.14": (any(r["kind"] == "monthly" and recon_state(r) != "diff" and r.get("docId") for r in data["reconciliations"]), "Внесите месячную сверку без расхождений (или урегулированную) с подписанным актом"),
+        "6.14": (any(r["kind"] == "monthly" and recon_state(r) in ("match", "resolved") and r.get("docId") for r in data["reconciliations"]), "Внесите месячную сверку без расхождений (или урегулированную) с подписанным актом"),
         "6.7": (bool(scenarios) and versions_ok and all(s["agreedIds"] and set(s["agreedIds"]) <= set(s["connectedIds"]) and all((s.get("connectedMeta") or {}).get(i, {}).get("at") for i in s["connectedIds"]) for s in scenarios), "Отметьте подключение всех станций согласованной версии перечня с датой и основанием"),
         "6.12": (w.get("launchDate"), "Зафиксируйте дату коммерческого запуска"),
     }

@@ -289,7 +289,7 @@ async def integration_part(db, company_id, site) -> dict[str, Any]:
                              "ourSessions": r["ours"]["sessions"], "partnerSessions": r["partner"]["sessions"],
                              "ourKwh": r["ours"]["kwh"], "partnerKwh": r["partner"]["kwh"],
                              "ourAmount": r["ours"]["amount"], "partnerAmount": r["partner"]["amount"],
-                             "state": {"match": "сходится", "resolved": "урегулировано", "diff": "расхождение"}[I.recon_state(r)],
+                             "state": {"empty": "нет цифр", "match": "сходится", "resolved": "урегулировано", "diff": "расхождение"}[I.recon_state(r)],
                              "resolution": r.get("resolution") or "", "by": r.get("byName") or ""} for r in data["reconciliations"]],
         "listVersions": [{"version": v.get("version"), "stations": len(v.get("stationIds") or []), "note": v.get("note") or "",
                           "by": v.get("byName") or "", "at": _when(v.get("at"))} for v in data["listVersions"]],

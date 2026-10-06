@@ -394,7 +394,8 @@ def test_подтверждение_данными_и_неприменимост
     s = site()
     empty = integration.read(s)
     with_rule = {t["key"] for t in TASKS if integration.requirement_problem(s, t["key"], empty)}
-    assert with_rule <= integration.DATA_RULE_KEYS
+    # 5.12: правило есть, но нужен и результат — номер тестовой сессии
+    assert with_rule - {"5.12"} <= integration.DATA_RULE_KEYS
     s.owner_user_id = uuid.uuid4()
     data = integration.read(s)
     assert integration.confirmation_problem(s, "1.4", data) is None            # руководитель есть — без комментария
@@ -420,3 +421,22 @@ def test_подтверждение_пункта_не_сбивают_сосед�
     # подтверждение, снятое до перехода на v2, по чужим полям не устаревает
     assert integration.same_snapshot(s, "1.3", "старый-отпечаток", data)
     assert not integration.same_snapshot(s, "1.3", s13, data)
+
+
+def test_цена_для_чужого_клиента_не_снимает_согласование_комиссии():
+    """06.10.2026: цена в 2.3 снимала подтверждение 2.2."""
+    s = SimpleNamespace(owner_user_id=None, workspace_data={})
+    data = integration.normalize({"revision": 0, "scenarios": [{"id": "a", "direction": "outgoing", "format": "roaming", "payer": "partner", "model": "commission", "rate": "7 %"}]}, integration.read(s))
+    s22, s23 = integration.snapshot(s, "2.2", data), integration.snapshot(s, "2.3", data)
+    data["scenarios"][0]["clientPrice"] = "розничный тариф"
+    assert integration.snapshot(s, "2.2", data) == s22 and integration.snapshot(s, "2.3", data) != s23
+    data["scenarios"][0]["rate"] = "8 %"
+    assert integration.snapshot(s, "2.2", data) != s22
+
+
+def test_пустая_сверка_не_закрывает_пункт():
+    """06.10.2026: нули у обеих сторон считались «сходится» и закрывали 5.13."""
+    empty = {"kind": "pilot", "ours": {"sessions": 0, "kwh": 0, "amount": 0}, "partner": {"sessions": 0, "kwh": 0, "amount": 0}}
+    assert integration.recon_state(empty) == "empty"
+    full = {**empty, "ours": {"sessions": 5, "kwh": 100, "amount": 1500}, "partner": {"sessions": 5, "kwh": 100, "amount": 1500}}
+    assert integration.recon_state(full) == "match"
