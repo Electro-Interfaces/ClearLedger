@@ -106,7 +106,7 @@ function SectionEditor({ section, data, props, onSaved, only }: { section: Integ
   return <section className="rounded-lg border p-3 space-y-3">
     <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-sm flex-1">{group.title}</h3>
       {only && <button type="button" className="text-xs underline text-muted-foreground" onClick={() => setAll(!all)}>{all ? 'только поля пункта' : 'все поля раздела'}</button>}</div>
-    <div className="grid gap-3 sm:grid-cols-2">{fields.map(([key, label]) => <label key={key} className="block space-y-1 text-sm">{label}
+    <div className={`grid gap-3 ${fields.length > 1 ? 'sm:grid-cols-2' : ''}`}>{fields.map(([key, label]) => <label key={key} className="block space-y-1 text-sm">{label}
       {key === 'launchDate' ? <Input type="date" value={draft[key] || ''} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />
         : <Textarea rows={2} value={draft[key] || ''} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />}
     </label>)}</div>
@@ -518,7 +518,7 @@ function LeadEditor({ data, props, onSaved, only }: { data: IntegrationData; pro
     <select aria-label={label} className={selectClass} value={draft[k] || ''} onChange={(e) => set(k, e.target.value)}>
       <option value="">Не указано</option>{Object.entries(opts).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
   return <section className="rounded-lg border p-3 space-y-3"><h3 className="font-semibold text-sm">Заявка</h3>
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className={`grid gap-3 ${!only || only.length > 1 ? 'sm:grid-cols-2' : ''}`}>
       {show('initiator') && pick('initiator', 'Инициатор', LEAD_INITIATORS)}
       {show('contractKind') && pick('contractKind', 'Вид предполагаемого договора', LEAD_CONTRACT_KINDS)}
       {show('payer') && pick('payer', 'Кто кому платит', INTEGRATION_PAYERS)}
