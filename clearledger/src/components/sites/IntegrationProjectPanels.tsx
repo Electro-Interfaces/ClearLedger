@@ -370,6 +370,11 @@ export function IntegrationChecklist(props: Props) {
       <button key={g.stage} type="button" onClick={() => setViewStage(g.stage)}
         className={`rounded-full border px-2 py-0.5 text-[11px] ${g.stage === viewStage ? 'bg-primary text-primary-foreground border-primary' : g.stage === props.site.stage ? 'border-primary text-primary' : 'text-muted-foreground'}`}>
         {g.stageLabel}{g.stage === props.site.stage ? ' · сейчас' : ''} {g.done}/{g.total}</button>)}</div>}
+    {!showAll && viewStage === props.site.stage && props.site.gate?.canAdvance && tasks.some((t) => t.stage === viewStage) &&
+      <div className="flex flex-wrap items-center gap-3 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm">
+        <span className="flex-1 min-w-48">Все обязательные пункты стадии «{viewLabel}» закрыты — можно переходить дальше.</span>
+        <Button size="sm" onClick={() => setParams((prev) => { const n = new URLSearchParams(prev); n.set('pstep', '1'); return n }, { replace: true })}>Перейти к следующей стадии</Button>
+      </div>}
     {!showAll && viewStage !== props.site.stage && <p className="text-xs text-amber-700 dark:text-amber-400">Просмотр стадии «{viewLabel}». Проект сейчас на стадии «{props.site.gate.stageLabel}» — пункты другой стадии можно заполнять заранее, переход делается кнопками маршрута.</p>}
     {tasks.filter((t) => showAll || t.stage === viewStage).map((t) => {
       const item = items.get(t.key)

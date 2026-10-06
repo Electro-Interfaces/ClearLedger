@@ -240,6 +240,19 @@ function RoutePanel({ site, companyId, onDone }: {
     queryFn: () => getProjectCase(companyId, site.id),
   })
   const state = q.data
+  // «Перейти к следующей стадии» из чек-листа (?pstep=): открыть подтверждение ведущего
+  // шага здесь и прокрутить к нему — кнопка жила только наверху карточки, и закрывший
+  // последний пункт внизу не находил, как идти дальше (вопрос МАГа 06.10.2026).
+  const [stepParams, setStepParams] = useSearchParams()
+  const stepRef = useRef<HTMLDivElement>(null)
+  const wantStep = stepParams.get('pstep')
+  useEffect(() => {
+    if (!wantStep || !state?.actions) return
+    const fwd = state.actions.filter((a) => a.allowed !== false && !a.is_discretionary && a.is_positive === true)
+    if (fwd.length === 1) { setPicked(fwd[0]); setForm({}) }
+    stepRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setStepParams((prev) => { const n = new URLSearchParams(prev); n.delete('pstep'); return n }, { replace: true })
+  }, [wantStep, state, setStepParams])
 
   // Маршруты спрашиваем только пока проект не на рельсах: у идущего выбор уже
   // сделан и менять его нечем — лишний запрос в карточку каждого проекта.
@@ -501,7 +514,7 @@ function RoutePanel({ site, companyId, onDone }: {
           </div>
         )}
         <NextStepCriteria site={site} companyId={companyId} actions={state.actions ?? []} />
-        <div data-zone="Действия маршрута: чей сейчас шаг" className="flex flex-wrap gap-2">
+        <div ref={stepRef} data-zone="Действия маршрута: чей сейчас шаг" className="flex flex-wrap gap-2 scroll-mt-24">
           {/* Залит ровно один шаг — тот, которым маршрут идёт вперёд. Когда «ТП
               выполнено» и «Отложить» одинаково синие, экран перестаёт отличать
               обычный ход от исключения. На развилке (ДА / ДоРНО / РНР — все ходы
