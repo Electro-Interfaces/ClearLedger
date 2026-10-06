@@ -225,6 +225,13 @@ export function IntegrationPassport(props: Props) {
   </div>
 }
 
+/** Контакты партнёра для вкладки «Команда». */
+export function IntegrationPartnerContacts(props: Props) {
+  const { query, refresh } = useIntegration(props)
+  if (!query.data) return <QueryStatus query={query} />
+  return <PartnerContacts data={query.data.data} props={props} onSaved={refresh} />
+}
+
 export function IntegrationWorkPlan(props: Props) {
   const { query, refresh } = useIntegration(props)
   if (!query.data) return <QueryStatus query={query} />
@@ -236,7 +243,6 @@ export function IntegrationWorkPlan(props: Props) {
   const showTests = at('construction') || d.tests.length > 0
   const showDates = at('negotiation') || Object.keys(d.dates || {}).length > 0
   return <div className="space-y-4">
-    <PartnerContacts data={d} props={props} onSaved={refresh} compact />
     {showWork && <SectionEditor key={d.revision} section="work" data={d} props={props} onSaved={refresh} />}
     {showTests && <TestsEditor key={`tests:${d.revision}`} data={d} props={props} onSaved={refresh} />}
     {showDates && <PhaseDates key={`dates:${d.revision}`} props={props} state={query.data} onSaved={refresh} />}

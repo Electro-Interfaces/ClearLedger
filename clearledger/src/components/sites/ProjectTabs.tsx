@@ -57,7 +57,7 @@ import { ProjectTrackTab } from './ProjectTrackTab'
 import { ProjectRoadmapTab } from './ProjectRoadmapTab'
 import { useOpenProject } from './useOpenProject'
 import { formatDate } from '@/lib/formatDate'
-import { IntegrationPassport, IntegrationChecklist, IntegrationDocuments, IntegrationWorkPlan, IntegrationAccountingFields } from './IntegrationProjectPanels'
+import { IntegrationPassport, IntegrationChecklist, IntegrationDocuments, IntegrationWorkPlan, IntegrationAccountingFields, IntegrationPartnerContacts } from './IntegrationProjectPanels'
 
 export const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const CONTROL_FORMS = ['аренда', 'сервитут', 'разрешение на размещение', 'собственность', 'соглашение с ТЦ']
@@ -67,6 +67,9 @@ export const PROJECT_TABS = [
   { k: 'overview', label: 'Обзор' },
   { k: 'roadmap', label: 'Схема' },
   { k: 'work', label: 'Работа' },
+  // Состав и контакты нужны не на каждом шаге: в «Работе» они занимали полэкрана
+  // на каждой стадии (замечание МАГа 06.10.2026).
+  { k: 'team', label: 'Команда' },
   { k: 'passport', label: 'Паспорт' },
   { k: 'tp', label: 'Присоединение' },
   { k: 'equipment', label: 'Оборудование' },
@@ -103,7 +106,8 @@ export function ProjectTabContent({ tab, site, companyId, onDone, onTab }: {
   // маршрута стройки стадий больше, чем у воронки, — там открывается «Работа» как есть.
   if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId}
     onStage={onTab && ((code) => onTab('work', { pstage: code.startsWith('int_') ? code.slice(4) : null }))} />
-  if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} />
+  if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} onTeam={onTab && (() => onTab('team'))} />
+  if (tab === 'team') return <TeamTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'passport') return site.kind === 'integration' ? <IntegrationPassport site={site} companyId={companyId} onDone={onDone} /> : <PassportTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'tp') return <TechConnectionTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'equipment') return <EquipmentTab site={site} companyId={companyId} onDone={onDone} />
@@ -232,8 +236,10 @@ function effectText(a: CaseAction, defs: Record<string, { label?: string }>): st
 /** Отработанные метки «перейти к следующей стадии» (?pstep=) — на время жизни вкладки. */
 const consumedSteps = new Set<string>()
 
-function RoutePanel({ site, companyId, onDone }: {
+function RoutePanel({ site, companyId, onDone, onTeam }: {
   site: SiteDetail; companyId: string; onDone: () => Promise<void>
+  /** Перейти во вкладку «Команда» — состав и контакты живут там. */
+  onTeam?: () => void
 }) {
   const [picked, setPicked] = useState<CaseAction | null>(null)
   const [form, setForm] = useState<Record<string, string>>({})
@@ -634,6 +640,7 @@ function RoutePanel({ site, companyId, onDone }: {
             ? 'Роли регламента на проект не назначены — действия открыты всем участникам пространства.'
             : <>Ведут проект: {(state.participants ?? [])
                 .map((p) => `${p.role_code} — ${p.name}`).join(' · ')}</>}
+          {onTeam && <button type="button" className="ml-2 underline hover:text-foreground" onClick={onTeam}>состав и контакты →</button>}
         </div>
 
         {picked && (
@@ -815,8 +822,19 @@ function PartiesPanel({ site, companyId, onChanged }: {
 
 /* ── Вкладка «Работа» ───────────────────────────────────────────────────── */
 
-export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
+/** «Команда»: кто ведёт проект в ролях регламента и, у интеграции, контакты партнёра. */
+function TeamTab({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
   const qc = useQueryClient()
+  return (
+    <div className="space-y-4">
+      <PartiesPanel site={site} companyId={companyId}
+        onChanged={() => qc.invalidateQueries({ queryKey: ['site-case', companyId, site.id] })} />
+      {site.kind === 'integration' && <IntegrationPartnerContacts site={site} companyId={companyId} onDone={onDone} />}
+    </div>
+  )
+}
+
+export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail; companyId: string; onDone: () => Promise<void>; onTeam?: () => void }) {
   const [stage, setStage] = useState<SiteStage>(site.stage)
   const [reason, setReason] = useState('')
   const [owner, setOwner] = useState(site.ownerUserId ?? '')
@@ -923,10 +941,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
 
   return (
     <div className="space-y-4">
-      <RoutePanel site={site} companyId={companyId} onDone={onDone} />
-
-      <PartiesPanel site={site} companyId={companyId}
-        onChanged={() => qc.invalidateQueries({ queryKey: ['site-case', companyId, site.id] })} />
+      <RoutePanel site={site} companyId={companyId} onDone={onDone} onTeam={onTeam} />
 
       {site.kind === 'integration' && <><IntegrationWorkPlan site={site} companyId={companyId} onDone={onDone} /><IntegrationChecklist site={site} companyId={companyId} onDone={onDone} /></>}
 
