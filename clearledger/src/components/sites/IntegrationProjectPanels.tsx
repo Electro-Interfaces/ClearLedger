@@ -408,6 +408,9 @@ export function IntegrationChecklist(props: Props) {
   if (!query.data) return <QueryStatus query={query} />
   const { data, tasks, gates } = query.data
   const items = new Map<string, GateItem>(gates.flatMap((g) => g.items).map((i) => [i.key, i]))
+  // Сценарии окна — с черновиком: выбрали «Без расчётов» — денежные поля исчезают сразу.
+  const winScenarios = (pending.current.scenarios as IntegrationScenario[] | undefined) ?? data.scenarios
+  const noMoney = winScenarios.length > 0 && winScenarios.every((s) => s.payer === 'none')
   const waive = async (key: string, waived: boolean) => {
     setBusy(true)
     try {
@@ -448,8 +451,11 @@ export function IntegrationChecklist(props: Props) {
           : <p className="text-xs text-muted-foreground">Заполните данные и нажмите «Подтвердить выполнение» внизу: заполненное сохранится, пункт будет подтверждён с вашим именем и датой.</p>}
         {/* 1.3 не повторяет редактор 1.2 (замечание 05.10.2026): сценарии заводятся в 1.2,
             здесь — сводка их форматов. 1.4 — назначение руководителя, а не тех. параметры. */}
-        <NeedLine task={tasks.find((x) => x.key === editing.key) ?? editing} item={items.get(editing.key)} />
-        {(ITEM_VIEW[editing.key]?.sections ?? [editing.section, ...(EXTRA_EDITORS[editing.key] || [])]).map((section) => <TaskEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh}
+        {noMoney && MONEY_KEYS[editing.key]
+          ? <p className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm">Во всех сценариях «Без расчётов» — {MONEY_KEYS[editing.key]} не нужны. Нажмите «Подтвердить выполнение» внизу окна.</p>
+          : <NeedLine task={tasks.find((x) => x.key === editing.key) ?? editing} item={items.get(editing.key)} />}
+        {(ITEM_VIEW[editing.key]?.sections ?? [editing.section, ...(EXTRA_EDITORS[editing.key] || [])])
+          .filter((section) => !(noMoney && MONEY_KEYS[editing.key] && section !== 'scenarios')).map((section) => <TaskEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh}
           compact={ITEM_VIEW[editing.key]?.compact} scenarioView={ITEM_VIEW[editing.key]?.scenarios} signing={SIGNING_KINDS[editing.key]}
           only={ITEM_VIEW[editing.key]?.fieldsBy?.[section] ?? (section === 'lead' ? ITEM_VIEW[editing.key]?.leadFields : section === (ITEM_VIEW[editing.key]?.sections?.[0] ?? editing.section) ? ITEM_VIEW[editing.key]?.fields : undefined)} />)}
         {ITEM_VIEW[editing.key]?.sections?.length === 0 && !['1.4', '5.12'].includes(editing.key) && <p className="text-sm text-muted-foreground">Отдельных данных у пункта нет: он подтверждается результатом ниже — комментарием, документом или поручением «Трека».</p>}
@@ -765,6 +771,9 @@ function NeedLine({ task, item }: { task: IntegrationTask; item?: GateItem }) {
       ? <p className="text-xs text-muted-foreground">Данных для подтверждения достаточно — нажмите «Подтвердить выполнение» внизу окна.</p>
       : <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">Пункт подтверждается результатом проверки: запишите его в поле внизу окна (или приложите документ, поручение).</p>
 }
+
+/** Пункты о деньгах: при «Без расчётов» во всех сценариях их поля не нужны (сервер согласен). */
+const MONEY_KEYS: Record<string, string> = { '2.2': 'комиссия, отчётность и периодичность расчётов', '6.2': 'порядок расчётов, срок оплаты, документы и НДС', '6.3': 'порядок разрешения расхождений по расчётам' }
 
 const EXTRA_EDITORS: Record<string, TaskSection[]> = {
   '2.2': ['scenarios', 'settlement'], '2.3': ['scenarios'], '6.2': ['scenarios', 'settlement'],

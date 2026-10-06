@@ -359,6 +359,9 @@ def requirement_problem(site, key, data):
     p, t, w, c, st, d = (data[k] for k in ("partner", "technical", "work", "commercial", "settlement", "data"))
     scenarios = data["scenarios"]
     terms_ok = bool(scenarios) and all(s.get("payer") and (s["payer"] == "none" or (s.get("model") and s.get("rate"))) for s in scenarios)
+    # Во всех сценариях «Без расчётов» — комиссии, порядка расчётов и споров о деньгах нет;
+    # требовать их значило бы противоречить выбранному (МАГ 07.10.2026).
+    no_money = bool(scenarios) and all(s.get("payer") == "none" for s in scenarios)
     tests_ok, tests_problem = tests_state(data)
     versions_ok, versions_problem = versions_state(data)
     required = {
@@ -381,7 +384,7 @@ def requirement_problem(site, key, data):
                 "Опишите ограничения в каждом сценарии (если их нет — напишите «нет»)" if scenarios else "Добавьте сценарий подключения"),
         "1.4": (bool(site.owner_user_id), "Назначьте руководителя проекта в Работе"),
         "1.6": (any(s["selectedIds"] for s in data["scenarios"]), "Выберите станции сценария"),
-        "2.2": (terms_ok and st.get("period"), "Укажите по каждому сценарию, кто кому платит, модель и ставку, и периодичность расчётов"),
+        "2.2": (terms_ok and (no_money or st.get("period")), "Укажите по каждому сценарию, кто кому платит, модель и ставку, и периодичность расчётов"),
         "2.3": (c.get("tariffs") or all(s.get("clientPrice") for s in scenarios if s["format"] == "roaming"), "Укажите цену для чужого клиента по сценариям роуминга или правила тарифов"),
         "2.4": (t.get("responsibilities") and t.get("support"), "Заполните ответственность и поддержку"),
         "3.1": (t.get("protocol") and t.get("version"), "Укажите протокол и версию"),
@@ -393,11 +396,11 @@ def requirement_problem(site, key, data):
         "5.11": (tests_ok, tests_problem),
         "5.12": (st.get("matchKind") and match_values(st), "Задайте правило, по которому сессии партнёра находятся в учёте, и проверьте его на тестовой сессии"),
         "5.13": (any(r["kind"] == "pilot" and recon_state(r) in ("match", "resolved") for r in data["reconciliations"]), "Внесите пробную сверку по пилоту: без расхождений или с урегулированием и актом"),
-        "6.2": (terms_ok and all(st.get(f) for f in ("period", "paymentTerm", "documents", "vat")), "Заполните условия по сценариям и порядок расчётов: периодичность, срок оплаты, документы, НДС"),
-        "6.3": (st.get("disputes"), "Опишите порядок сверки и разрешения расхождений"),
+        "6.2": (terms_ok and (no_money or all(st.get(f) for f in ("period", "paymentTerm", "documents", "vat"))), "Заполните условия по сценариям и порядок расчётов: периодичность, срок оплаты, документы, НДС"),
+        "6.3": (no_money or st.get("disputes"), "Опишите порядок сверки и разрешения расхождений"),
         "6.6": (versions_ok, versions_problem),
         "6.13": (t.get("productionAccess"), "Зафиксируйте выдачу боевых доступов и отзыв тестовых"),
-        "6.14": (any(r["kind"] == "monthly" and recon_state(r) in ("match", "resolved") and r.get("docId") for r in data["reconciliations"]), "Внесите месячную сверку без расхождений (или урегулированную) с подписанным актом"),
+        "6.14": (any(r["kind"] == "monthly" and recon_state(r) in ("match", "resolved") and (no_money or r.get("docId")) for r in data["reconciliations"]), "Внесите месячную сверку без расхождений (или урегулированную) с подписанным актом"),
         "6.7": (bool(scenarios) and versions_ok and all(s["agreedIds"] and set(s["agreedIds"]) <= set(s["connectedIds"]) and all((s.get("connectedMeta") or {}).get(i, {}).get("at") for i in s["connectedIds"]) for s in scenarios), "Отметьте подключение всех станций согласованной версии перечня с датой и основанием"),
         "6.12": (w.get("launchDate"), "Зафиксируйте дату коммерческого запуска"),
     }

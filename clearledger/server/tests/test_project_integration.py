@@ -474,3 +474,12 @@ def test_21_закрывается_данными_сценария():
     assert integration.confirmation_problem(s, "2.1", data)
     data["scenarios"][0]["restrictions"] = "только корпоративные клиенты"
     assert integration.confirmation_problem(s, "2.1", data) is None
+
+
+def test_без_расчётов_денежные_пункты_не_требуют_порядка_расчётов():
+    s = site()
+    data = integration.normalize({"revision": 0, "scenarios": [scenario(payer="none")]}, integration.read(s))
+    for key in ("2.2", "6.2", "6.3"):
+        assert integration.requirement_problem(s, key, data) is None, key
+    data = integration.normalize({"revision": 0, "scenarios": [scenario(payer="partner", model="commission", rate="5%")]}, integration.read(s))
+    assert integration.requirement_problem(s, "2.2", data)
