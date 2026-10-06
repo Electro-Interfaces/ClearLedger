@@ -263,7 +263,9 @@ function RoutePanel({ site, companyId, onDone }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantStep, stepFresh, picked])
   useEffect(() => {
-    if (!wantStep || !stepFresh || !state?.actions || stepTaken.current) return
+    // Проверка набора — здесь, а не только при отрисовке: панель хода стоит в карточке
+    // не в одном месте, и обе отрабатывали одну метку — шаг уходил дважды (06.10.2026).
+    if (!wantStep || !stepFresh || !state?.actions || stepTaken.current || consumedSteps.has(wantStep)) return
     stepTaken.current = true
     consumedSteps.add(wantStep)
     const fwd = state.actions.filter((a) => a.allowed !== false && !a.is_discretionary && a.is_positive === true)

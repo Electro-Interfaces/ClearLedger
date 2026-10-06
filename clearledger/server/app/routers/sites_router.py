@@ -1358,7 +1358,9 @@ async def apply_project_step(
         # прежней стадии, повтор — «действие недоступно»). Перечитываем маршрут: если
         # стадия уже сменилась, шаг выполнен — сводим карточку и отвечаем успехом.
         await db.rollback()
-        site = await _owned(db, cid, site_id)
+        # После отката атрибуты сброшены: ленивое чтение в async-сессии падает
+        # MissingGreenlet (500 на боевом 06.10.2026) — перечитываем явно.
+        await db.refresh(site)
         try:
             state = await projects_process.reconcile(db, cid, site, user)
         except ProjectionError:
