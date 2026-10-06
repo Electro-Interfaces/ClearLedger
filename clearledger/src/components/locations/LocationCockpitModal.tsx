@@ -2,14 +2,27 @@
  * «Окно станции» (cockpit) — панель по точке обслуживания, открывается ВНУТРИ
  * рабочей области (правее сайдбара, под шапкой), не на весь вьюпорт.
  *
- * Тонкая оболочка: шапка (идентификация + статусы) + группированные вкладки.
- * Содержимое каждой вкладки — отдельный компонент в ./cockpit/*. IA: 9 вкладок в
- * 4 группах (Объект · Подключение · Сервис · Коммерция), контент адаптивен по типу.
+ * Тонкая оболочка: шапка (идентификация · статусы · действия) + четыре раздела,
+ * внутри каждого — виды. Состав и причина именно такой группировки —
+ * `./cockpit/tabsConfig.ts`; содержимое каждого вида — отдельный компонент в
+ * `./cockpit/*`.
+ *
+ * Два уровня вместо одиннадцати вкладок (20.09.2026). Раздел отвечает на вопрос
+ * «с какой стороны смотрим на станцию» — паспорт, право, работа, сервис; вид
+ * внутри — «какой именно срез». Одиннадцать равноправных вкладок не помещались
+ * в ряд и обрывались молча: половину разделов человек просто не находил.
+ *
+ * Действия (заявка, поручение, обсуждение) живут в шапке, а не внутри раздела:
+ * они относятся к станции целиком. Инженер, нашедший беду в «Работе», заводит
+ * заявку не уходя в «Сервис».
  */
 import { useEffect, useState, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useCompany } from '@/contexts/CompanyContext'
+import { getStationVisits } from '@/services/opsService'
 import { AskSupportButton } from '@/components/support/AskSupportButton'
 import { Dialog as DialogPrimitive } from 'radix-ui'
-import { Tabs, TabsContent } from '@/components/ui/tabs'
+import { Tabs } from '@/components/ui/tabs'
 import { Tabs as TabsPrimitive } from 'radix-ui'
 import { Badge } from '@/components/ui/badge'
 import { X } from 'lucide-react'
@@ -17,17 +30,58 @@ import { useLocationTypes } from '@/hooks/useLocationTypes'
 import { useLocationContracts } from '@/hooks/useReferences'
 import { resolveLocationIcon } from '@/components/locationTypes/locationIcons'
 import { LOCATION_STATUS_META, locationValues, type ServiceLocation } from '@/types/location'
-import { cockpitTabsFor, type CockpitGroup, type CockpitVariant } from './cockpit/tabsConfig'
+import {
+  cockpitSectionsFor, resolveLegacyTab, type CockpitVariant,
+} from './cockpit/tabsConfig'
+import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { MappingTab } from './cockpit/MappingTab'
+import { StationActions } from '@/components/locations/StationActions'
 import { OP_META } from './cockpit/shared'
 import { PassportTab } from './cockpit/PassportTab'
 import { EnergyTab } from './cockpit/EnergyTab'
 import { StatusDiagnosticsTab } from './cockpit/StatusDiagnosticsTab'
+import { WorkTab } from './cockpit/WorkTab'
 import { ServiceTab } from './cockpit/ServiceTab'
+import { CheckTab } from './cockpit/CheckTab'
 import { TrackTab } from './cockpit/TrackTab'
 import { ChatsTab } from './cockpit/ChatsTab'
 import { ContractsTab } from './cockpit/ContractsTab'
+import { ObligationsTab } from './cockpit/ObligationsTab'
 import { SalesTab } from './cockpit/SalesTab'
 import { SupplyTab } from './cockpit/SupplyTab'
+
+/**
+ * Успех приездов рядом с состоянием станции.
+ *
+ * «Работает» отвечает на вопрос, включена ли станция, а инженеру нужен второй:
+ * уезжают ли от неё заряженными. Станция, у которой каждый пятый клиент уехал
+ * ни с чем, числится работающей и в глаза не бросается — пока не посмотришь
+ * раздел «Работа». Поэтому цифра стоит в шапке, у статуса.
+ *
+ * Считаем не здесь: те же визиты, что и во вкладке «Работа», и тот же ключ
+ * кеша — при открытой вкладке запрос один на двоих.
+ */
+function УспехПриездов({ locationId }: { locationId: string }) {
+  const { companyId } = useCompany()
+  const { data } = useQuery({
+    queryKey: ['station-visits', companyId, locationId, 90, false],
+    queryFn: () => getStationVisits(companyId, locationId, { days: 90 }),
+    enabled: !!companyId,
+    staleTime: 60_000,
+  })
+  if (!data || !data.totals.visits) return null
+  const успех = Math.round((100 - data.totals.failedPct) * 10) / 10
+  return (
+    <Badge variant="secondary" className={`text-[11px] ${
+      успех >= 90 ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+        : успех >= 80 ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
+          : 'bg-red-500/15 text-red-700 dark:text-red-400'}`}
+      title={`За 90 дней приездов ${data.totals.visits}, уехали ни с чем ${data.totals.failed}. `
+        + `Попыток на приезд ${data.totals.attemptsPerVisit}`}>
+      зарядились {успех} %
+    </Badge>
+  )
+}
 
 export function LocationCockpitModal({
   location,
@@ -35,14 +89,17 @@ export function LocationCockpitModal({
   onChanged,
   renderEdit,
   variant = 'full',
+  initialTab,
 }: {
   location: ServiceLocation | null
   onClose: () => void
   onChanged?: () => void
   /** Триггер редактирования паспорта (оборачивает кнопку в LocationEditDialog). */
   renderEdit?: (location: ServiceLocation, child: ReactNode) => ReactNode
-  /** intake = 4 таба (сырой ввод, левое меню), full = все табы (модуль «Объекты»). */
+  /** intake = сырой ввод (левое меню), full = все разделы (модуль «Объекты»). */
   variant?: CockpitVariant
+  /** С какого места открыть: прежний ключ вкладки («contracts», «work»…). */
+  initialTab?: string | null
 }) {
   const types = useLocationTypes()
   // Карточка станции не режется по продукту (решение МАГа 12.08.2026): станция —
@@ -50,6 +107,16 @@ export function LocationCockpitModal({
   // обслуживание, договоры, реализация, снабжение — открываются из любого
   // рабочего места. Раньше разрез продукта прятал направления: из «Продаж» не
   // было видно ни оборудования, ни заявок, и человек считал, что их нет вовсе.
+
+  // Куда открыть: прежние ключи вкладок продолжают работать — ссылки на
+  // карточку живут в чужих экранах и в закладках людей.
+  const начало = resolveLegacyTab(initialTab)
+  const [раздел, setРаздел] = useState(начало.section)
+  // Вид помним по каждому разделу: вернувшись в «Работу», человек попадает туда,
+  // где был, а не на первый сегмент.
+  const [виды, setВиды] = useState<Record<string, string>>({
+    [начало.section]: начало.view,
+  })
 
   // Портал направляем в рабочую область (SidebarInset), а не в body.
   const [container, setContainer] = useState<HTMLElement | null>(null)
@@ -69,34 +136,33 @@ export function LocationCockpitModal({
   const curOp = location.operationalStatus ?? 'unknown'
   const lifeMeta = LOCATION_STATUS_META[location.status]
 
-  // Сборка ряда вкладок с разделителями и подписями групп.
-  const triggers: ReactNode[] = []
-  let prevGroup: CockpitGroup | null = null
-  for (const tab of cockpitTabsFor(variant, location.type)) {
-    if (tab.group !== prevGroup) {
-      if (prevGroup !== null) {
-        triggers.push(<span key={`sep-${tab.group}`} aria-hidden className="mx-1.5 h-5 w-px shrink-0 self-center bg-border/60" />)
-      }
-      prevGroup = tab.group
-    }
-    const TabIcon = tab.icon
-    triggers.push(
+  const разделы = cockpitSectionsFor(variant, location.type)
+  const текущий = разделы.find((s) => s.value === раздел) ?? разделы[0]
+  const вид = виды[текущий.value] ?? текущий.views[0].k
+  const видЕсть = текущий.views.some((v) => v.k === вид)
+  const активныйВид = видЕсть ? вид : текущий.views[0].k
+
+  const triggers: ReactNode[] = разделы.map((sec) => {
+    const TabIcon = sec.icon
+    return (
       <TabsPrimitive.Trigger
-        key={tab.value}
-        value={tab.value}
-        className="group/tab relative -mb-px inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-t-md border border-b-0 border-transparent px-3.5 py-2 text-sm font-medium text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:border-border/60 data-[state=active]:bg-background data-[state=active]:text-primary"
+        key={sec.value}
+        value={sec.value}
+        className="group/tab relative -mb-px inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-t-md border border-b-0 border-transparent px-4 py-2 text-sm font-medium text-muted-foreground outline-none transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:border-border/60 data-[state=active]:bg-background data-[state=active]:text-primary"
       >
         <span aria-hidden className="absolute inset-x-0 top-[-1px] h-0.5 rounded-full bg-primary opacity-0 transition-opacity group-data-[state=active]/tab:opacity-100" />
         <TabIcon className="h-4 w-4 opacity-60 transition-opacity group-data-[state=active]/tab:opacity-100" />
-        {tab.label}
-        {tab.value === 'contracts' && contractsCount > 0 && (
+        {sec.label}
+        {/* Счётчик договоров — на разделе, где они лежат: «29» на «Праве»
+            отвечает, есть ли вообще договорная обвязка, до открытия. */}
+        {sec.value === 'legal' && contractsCount > 0 && (
           <Badge variant="secondary" className="ml-0.5 h-4 min-w-4 justify-center px-1 text-[10px] tabular-nums">
             {contractsCount}
           </Badge>
         )}
-      </TabsPrimitive.Trigger>,
+      </TabsPrimitive.Trigger>
     )
-  }
+  })
 
   return (
     <DialogPrimitive.Root open={!!location} modal={false} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -121,11 +187,22 @@ export function LocationCockpitModal({
               <Badge variant="secondary" className={`text-[11px] ${OP_META[curOp]?.cls ?? ''}`}>
                 {OP_META[curOp]?.label ?? curOp}
               </Badge>
+              {(location.type === 'ev_charging' || location.type === 'ezs') && (
+                <УспехПриездов locationId={location.id} />
+              )}
             </DialogPrimitive.Title>
             {/* Вопрос по объекту — поставщику программы, отсюда же: предметом
                 уезжает номер и название, данные объекта остаются здесь
                 (docs/BRIDGE.md §4.2). */}
-            <span className="ml-auto shrink-0">
+            {/* Действия по станции целиком: завести заявку, поставить
+                поручение, позвать людей в чат. В шапке, а не внутри раздела —
+                беда находится в «Работе», а чинится в «Сервисе», и ходить между
+                ними ради кнопки человек не станет. */}
+            <span className="ml-auto flex shrink-0 items-center gap-2">
+              <StationActions compact station={{
+                id: location.id, name: location.name, code: location.code,
+                number: String(meta.number ?? '') || null,
+              }} />
               <AskSupportButton variant="ghost" subject={{
                 kind: 'object', ref: String(location.id),
                 label: `${location.name} · ${String(meta.number ?? location.code)}`,
@@ -139,47 +216,73 @@ export function LocationCockpitModal({
             </DialogPrimitive.Close>
           </div>
 
-          <Tabs defaultValue="passport" className="flex flex-1 flex-col gap-0 overflow-hidden">
-            {/* Затухание у правого края: вкладок девять, в узком окне ряд
-                обрывается молча, и «Договоры» кажутся отсутствующими — так и
-                спросили («в „Объектах“ нет условий договоров»). Полосу прокрутки
-                macOS прячет, поэтому подсказка своя. */}
+          <Tabs value={текущий.value} onValueChange={setРаздел}
+            className="flex flex-1 flex-col gap-0 overflow-hidden">
             <div className="relative shrink-0">
               <TabsPrimitive.List className="flex items-end gap-1 overflow-x-auto border-b border-border/50 bg-muted/20 px-2 pt-1.5">
                 {triggers}
               </TabsPrimitive.List>
-              <span aria-hidden
-                className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-background to-transparent" />
             </div>
 
+            {/* Виды раздела — второй уровень (канон рабочей области §1): один и
+                тот же предмет с разных сторон, поэтому сегменты, а не вкладки. */}
+            {текущий.views.length > 1 && (
+              <div className="shrink-0 border-b border-border/50 bg-muted/10 px-3">
+                <PanelViewTabs
+                  value={активныйВид}
+                  onChange={(k) => setВиды((было) => ({ ...было, [текущий.value]: k }))}
+                  label={null}
+                  ariaLabel={`Виды раздела «${текущий.label}»`}
+                  tabs={текущий.views.map((v) => ({ k: v.k, label: v.label }))} />
+              </div>
+            )}
+
             <div className="flex-1 overflow-hidden">
-              <TabsContent value="passport" className="m-0 h-full">
+              {/* Паспорт */}
+              {текущий.value === 'passport' && активныйВид === 'about' && (
                 <PassportTab location={location} renderEdit={renderEdit} />
-              </TabsContent>
-              <TabsContent value="energy" className="m-0 h-full">
-                <EnergyTab location={location} />
-              </TabsContent>
-              <TabsContent value="diagnostics" className="m-0 h-full">
-                <StatusDiagnosticsTab location={location} onChanged={onChanged} />
-              </TabsContent>
-              <TabsContent value="service" className="m-0 h-full">
-                <ServiceTab location={location} />
-              </TabsContent>
-              <TabsContent value="track" className="m-0 h-full">
-                <TrackTab location={location} />
-              </TabsContent>
-              <TabsContent value="contracts" className="m-0 h-full">
+              )}
+              {/* Маппинг */}
+              {текущий.value === 'mapping' && <MappingTab location={location} />}
+
+              {/* Право */}
+              {текущий.value === 'legal' && активныйВид === 'obligations' && (
+                <ObligationsTab location={location} />
+              )}
+              {текущий.value === 'legal' && активныйВид === 'contracts' && (
                 <ContractsTab location={location} />
-              </TabsContent>
-              <TabsContent value="sales" className="m-0 h-full">
-                <SalesTab location={location} />
-              </TabsContent>
-              <TabsContent value="supply" className="m-0 h-full">
+              )}
+              {текущий.value === 'legal' && активныйВид === 'supply' && (
                 <SupplyTab location={location} />
-              </TabsContent>
-              <TabsContent value="chats" className="m-0 h-full">
+              )}
+
+              {/* Работа */}
+              {текущий.value === 'work' && активныйВид === 'diagnostics' && (
+                <StatusDiagnosticsTab location={location} onChanged={onChanged} />
+              )}
+              {текущий.value === 'work' && активныйВид === 'visits' && (
+                <WorkTab location={location} />
+              )}
+              {текущий.value === 'work' && активныйВид === 'energy' && (
+                <EnergyTab location={location} />
+              )}
+              {текущий.value === 'work' && активныйВид === 'sales' && (
+                <SalesTab location={location} />
+              )}
+
+              {/* Сервис */}
+              {текущий.value === 'service' && активныйВид === 'tickets' && (
+                <ServiceTab location={location} />
+              )}
+              {текущий.value === 'service' && активныйВид === 'check' && (
+                <CheckTab location={location} />
+              )}
+              {текущий.value === 'service' && активныйВид === 'track' && (
+                <TrackTab location={location} />
+              )}
+              {текущий.value === 'service' && активныйВид === 'chats' && (
                 <ChatsTab location={location} />
-              </TabsContent>
+              )}
             </div>
           </Tabs>
         </DialogPrimitive.Content>
