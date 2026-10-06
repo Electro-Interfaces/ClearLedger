@@ -493,22 +493,27 @@ function RoutePanel({ site, companyId, onDone, onTeam }: {
           {(state.stages ?? []).map((s) => {
             const here = s.code === state.stage?.code
             const seen = !!s.visited_at
-            return (
-              <span key={s.code}
-                title={s.visited_at ? `Пройдена ${new Date(s.visited_at).toLocaleDateString('ru-RU')}` : 'Ещё не проходили'}
-                className={`text-[11px] px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
-                  here ? 'bg-primary text-primary-foreground'
-                    : seen ? 'bg-muted text-foreground'
-                    : 'border border-dashed border-border text-muted-foreground'}`}>
-                {seen && !here && <Check className="h-2.5 w-2.5" />}
-                {s.name}
-              </span>
-            )
+            // У интеграции стадия открывает свой чек-лист: пункты не обязаны идти по
+            // порядку, впереди лежащие заполняют заранее (МАГ 06.10.2026). Пауза и
+            // отказ — не стадии работы, у них пунктов нет.
+            const own = site.kind === 'integration' && s.code.startsWith('int_') && !['int_hold', 'int_rejected'].includes(s.code)
+              ? s.code.slice(4) : null
+            const viewed = own != null && own === (stepParams.get('pstage') || site.stage)
+            const cls = `text-[11px] px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
+              here ? 'bg-primary text-primary-foreground'
+                : seen ? 'bg-muted text-foreground'
+                : 'border border-dashed border-border text-muted-foreground'} ${viewed ? 'ring-2 ring-primary ring-offset-1 ring-offset-background' : ''}`
+            const title = s.visited_at ? `Пройдена ${new Date(s.visited_at).toLocaleDateString('ru-RU')}` : 'Ещё не проходили'
+            const body = <>{seen && !here && <Check className="h-2.5 w-2.5" />}{s.name}</>
+            return own
+              ? <button key={s.code} type="button" title={`${title} · открыть пункты стадии`} className={`${cls} hover:opacity-80`}
+                  onClick={() => setStepParams((prev) => { const n = new URLSearchParams(prev); n.set('pstage', own); n.delete('pitem'); return n }, { replace: true })}>{body}</button>
+              : <span key={s.code} title={title} className={cls}>{body}</span>
           })}
         </div>
         {/* Признак не только цветом: сплошное — были, пунктир — впереди. */}
         <div className="mt-1 text-[10px] text-muted-foreground">
-          Заливка — стадия пройдена, пунктир — впереди, синим — где стоим сейчас.
+          Заливка — стадия пройдена, пунктир — впереди, синим — где стоим сейчас.{site.kind === 'integration' && ' Нажатие на стадию открывает её пункты в чек-листе ниже — их можно выполнять в любом порядке.'}
         </div>
       </div>
 
