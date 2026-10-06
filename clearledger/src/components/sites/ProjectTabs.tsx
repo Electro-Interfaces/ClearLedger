@@ -253,8 +253,17 @@ function RoutePanel({ site, companyId, onDone }: {
     if (!wantStep || !state?.actions || stepTaken.current) return
     stepTaken.current = true
     const fwd = state.actions.filter((a) => a.allowed !== false && !a.is_discretionary && a.is_positive === true)
+    // Кнопка в чек-листе — это и есть решение перейти: шаг без полей выполняем сразу.
+    // Второе подтверждение наверху страницы человек не видел и считал, что «ничего не
+    // происходит» (МАГ 06.10.2026). Поля нужны — открываем их и прокручиваем к ним.
+    if (fwd.length === 1 && !(fwd[0].requirements?.require ?? []).length) {
+      // Метку снимаем после ответа: смена адреса раньше перерисовала бы карточку посреди шага.
+      mStep.mutate(fwd[0], { onSettled: () => setStepParams((prev) => { const n = new URLSearchParams(prev); n.delete('pstep'); return n }, { replace: true }) })
+      return
+    }
     if (fwd.length === 1) { setPicked(fwd[0]); setForm({}) }
     setTimeout(() => stepRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantStep, state])
   // Снимаем только когда открытое подтверждение закрыли (было выбрано → стало пусто):
   // в первой отрисовке шаг ещё не выбран, и снятие там же убивало подтверждение.
