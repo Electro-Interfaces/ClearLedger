@@ -146,9 +146,10 @@ export function IntegrationGantt({ site, companyId, onStage }: { site: SiteDetai
                   const len = r.start != null && r.end != null ? r.end - r.start : null
                   const slot = slotOf(r.stage)
                   return (
-                    <div key={r.stage} className="grid grid-cols-[240px_1fr] border-b last:border-b-0 hover:bg-muted/30">
-                      <button type="button" disabled={!onStage} onClick={() => onStage?.(`int_${r.stage}`)}
-                        className="px-3 py-2 text-left text-sm disabled:cursor-default" title={onStage ? 'Открыть работу стадии' : undefined}>
+                    // Вся строка — и название, и полоса — открывает работу стадии (МАГ 06.10.2026).
+                    <div key={r.stage} onClick={() => onStage?.(`int_${r.stage}`)} title={onStage ? 'Открыть работу стадии' : undefined}
+                      className={`grid grid-cols-[240px_1fr] border-b last:border-b-0 hover:bg-muted/40 ${onStage ? 'cursor-pointer' : ''}`}>
+                      <button type="button" disabled={!onStage} className="px-3 py-2 text-left text-sm disabled:cursor-default">
                         <div className={r.state === 'future' ? 'text-muted-foreground' : r.state === 'current' ? 'font-semibold' : ''}>{r.label}</div>
                         <div className="text-[11px] text-muted-foreground">
                           {r.state === 'future' ? 'впереди' : `${r.start ? ru(r.start) : '?'} — ${r.state === 'current' ? 'сейчас' : r.end ? ru(r.end) : '?'}${len != null ? ` · ${dur(len)}` : ''}`}
@@ -183,7 +184,7 @@ export function IntegrationGantt({ site, companyId, onStage }: { site: SiteDetai
       </div>
       <p className="text-xs text-muted-foreground">
         Слева — факт: сколько проект простоял на каждой стадии (зелёная — пройдена, синяя — текущая), ◆ — подтверждённый пункт, наведите для подробностей.
-        Справа — что впереди, по порядку маршрута; ширина условная: плановых сроков в проекте нет. Нажатие на стадию открывает её работу.
+        Справа — что впереди, по порядку маршрута; ширина условная: плановых сроков в проекте нет. Нажатие на строку стадии открывает её работу.
       </p>
     </div>
   )
