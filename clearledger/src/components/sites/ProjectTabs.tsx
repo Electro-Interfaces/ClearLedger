@@ -31,7 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   Loader2, ExternalLink, Check, Circle, Save, MessageSquarePlus, AlertTriangle,
-  Upload, Trash2, Lock, Link as LinkIcon, Plus, Undo2,
+  Upload, Trash2, Pencil, X as XIcon, Lock, Link as LinkIcon, Plus, Undo2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import * as chatApi from '@/services/chatService'
@@ -44,7 +44,7 @@ import {
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
   linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
   getProjectCase, openProjectCase, applyProjectStep, undoProjectStep,
-  getSiteParticipants, addSiteParticipant, removeSiteParticipant, registerEquipmentUnit,
+  getSiteParticipants, addSiteParticipant, editSiteParticipant, removeSiteParticipant, registerEquipmentUnit,
   STAGE_META, FUNNEL_STAGES, CLOSING_STAGES, QUADRANT_META, EXIT_REASONS, PROJECT_OBJECT_TYPES, projectObjectLabel,
   type SiteDetail, type SiteStage, type ProjectContext, type CaseAction,
   type SiteEquipment, stageLabelOf } from '@/services/sitesService'
@@ -766,6 +766,15 @@ function PartiesPanel({ site, companyId, onChanged }: {
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось снять'),
   })
 
+  // Правка строки: роль и уточнение. Человека не меняем — другой человек это новое
+  // назначение со своим письмом (замечание МАГа 06.10.2026: «а как отредактировать»).
+  const [edit, setEdit] = useState<{ id: string; role: string; note: string } | null>(null)
+  const mEdit = useMutation({
+    mutationFn: () => editSiteParticipant(companyId, site.id, edit!.id, { roleCode: edit!.role, note: edit!.note }),
+    onSuccess: async () => { setEdit(null); toast.success('Сохранено'); await q.refetch(); await onChanged() },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось сохранить'),
+  })
+
   const rows = q.data?.participants ?? []
 
   return (
@@ -781,13 +790,36 @@ function PartiesPanel({ site, companyId, onChanged }: {
             пространства — назначьте хотя бы ОР и ОКС, и каждый увидит свои.
           </div>
         )}
-        {rows.map((p) => (
+        {rows.map((p) => edit?.id === p.id ? (
+          <div key={p.id} className="flex flex-wrap items-center gap-2 text-sm px-1">
+            <span className="w-56 truncate font-medium">{p.name}</span>
+            <Select value={edit.role} onValueChange={(v) => setEdit({ ...edit, role: v })}>
+              <SelectTrigger className="h-8 w-64 text-xs" aria-label="Роль по регламенту"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(q.data?.roles ?? []).map((r) => <SelectItem key={r.code} value={r.code}>{r.code} — {r.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Input value={edit.note} onChange={(e) => setEdit({ ...edit, note: e.target.value })} autoFocus
+              onKeyDown={(e) => { if (e.key === 'Enter') mEdit.mutate(); if (e.key === 'Escape') setEdit(null) }}
+              placeholder="Уточнение" aria-label="Уточнение" className="h-8 flex-1 min-w-48 text-xs" />
+            <Button size="icon" variant="ghost" className="h-7 w-7" title="Сохранить" onClick={() => mEdit.mutate()} disabled={mEdit.isPending}>
+              <Check className="h-4 w-4" />
+            </Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7" title="Отмена" onClick={() => setEdit(null)}>
+              <XIcon className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
           <div key={p.id} className="flex items-center gap-2 text-sm px-1">
             <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-muted">{p.roleCode}</span>
             <span className="flex-1 truncate">
               {p.name}
               {p.note && <span className="text-muted-foreground"> · {p.note}</span>}
             </span>
+            <Button size="icon" variant="ghost" className="h-6 w-6" title="Изменить роль и уточнение"
+              onClick={() => setEdit({ id: p.id, role: p.roleCode, note: p.note ?? '' })}>
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
             <Button size="icon" variant="ghost" className="h-6 w-6"
               onClick={() => mDrop.mutate(p.id)} disabled={mDrop.isPending} title="Снять с роли">
               <Trash2 className="h-3.5 w-3.5" />

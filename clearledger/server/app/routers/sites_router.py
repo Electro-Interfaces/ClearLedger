@@ -1466,6 +1466,36 @@ async def add_project_participant(
     return {"ok": True}
 
 
+@router.patch("/{site_id}/participants/{participant_id}")
+async def edit_project_participant(
+    site_id: uuid.UUID, participant_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Поправить роль и уточнение участника. Тело: { roleCode?, note? }.
+    Человека не меняем: другой человек — новое назначение со своим письмом."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    row = (await db.execute(select(EzsSiteParticipant).where(
+        EzsSiteParticipant.id == participant_id,
+        EzsSiteParticipant.site_id == site_id))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Участник не найден")
+    if "roleCode" in payload:
+        role_code = (payload.get("roleCode") or "").strip()
+        if role_code not in ezs_checklist.ROLES:
+            raise HTTPException(400, f"Неизвестная роль регламента: {role_code}")
+        if role_code != row.role_code and (await db.execute(select(EzsSiteParticipant.id).where(
+                EzsSiteParticipant.site_id == site_id, EzsSiteParticipant.user_id == row.user_id,
+                EzsSiteParticipant.role_code == role_code))).first():
+            raise HTTPException(409, "У этого человека уже есть такая роль в проекте")
+        row.role_code = role_code
+    if "note" in payload:
+        row.note = (payload.get("note") or "").strip() or None
+    await db.commit()
+    await _push_participants(db, cid, site, user)
+    return {"ok": True}
+
+
 @router.delete("/{site_id}/participants/{participant_id}")
 async def drop_project_participant(
     site_id: uuid.UUID, participant_id: uuid.UUID, company_id: str = Query(...),
