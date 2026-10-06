@@ -34,6 +34,11 @@ const GROUPS: Record<IntegrationSection, { title: string; fields: [string, strin
   work: { title: 'Пилот и проверки', fields: [['pilotDecision', 'Решение о пилоте'], ['pilotOutcome', 'Итог пилота'], ['testResults', 'Результаты проверок'], ['launchDate', 'Дата коммерческого запуска']] },
   accounting: { title: 'Связь с контрагентом', fields: [] },
 }
+/** Кто закрывает пункт по регламенту — словами, а не кодом «ОР» (вопрос МАГа 06.10.2026). */
+const ROLE_NAMES: Record<string, string> = {
+  'ОР': 'Отдел развития', 'ДР/ГД': 'Директор по развитию / ГД', 'ОЭ': 'Эксплуатация', 'ЮБ': 'Юристы',
+  'ФБ': 'Финансы', 'ИТ': 'ИТ-служба', 'Поддержка': 'Поддержка',
+}
 const DOC_KINDS: Record<string, string> = { nda: 'NDA', pilot: 'Пилотное соглашение', contract: 'Договор и приложения', stations: 'Перечень ЭЗС', specification: 'Техническое задание', test_program: 'Программа тестирования', test_protocol: 'Протокол тестирования', instruction: 'Инструкция', other: 'Другой документ' }
 
 function useIntegration(props: Props) {
@@ -368,7 +373,7 @@ export function IntegrationChecklist(props: Props) {
     {!showAll && viewStage !== props.site.stage && <p className="text-xs text-amber-700 dark:text-amber-400">Просмотр стадии «{viewLabel}». Проект сейчас на стадии «{props.site.gate.stageLabel}» — пункты другой стадии можно заполнять заранее, переход делается кнопками маршрута.</p>}
     {tasks.filter((t) => showAll || t.stage === viewStage).map((t) => {
       const item = items.get(t.key)
-      return <div key={t.key} className="border-b py-3 space-y-2 last:border-b-0"><div className="flex flex-wrap gap-2 text-sm"><span className="font-mono">{t.key}</span><span className="flex-1 min-w-40">{t.label}</span><span className="text-muted-foreground">{t.role}</span></div>
+      return <div key={t.key} className="border-b py-3 space-y-2 last:border-b-0"><div className="flex flex-wrap gap-2 text-sm"><span className="font-mono">{t.key}</span><span className="flex-1 min-w-40">{t.label}</span><span className="text-xs text-muted-foreground" title={`Отвечает по регламенту: ${ROLE_NAMES[t.role] ?? t.role}`}>{ROLE_NAMES[t.role] ?? t.role}</span></div>
         <p className={`text-xs ${item?.needsConfirmation ? 'text-amber-600' : item?.done ? 'text-emerald-600' : 'text-muted-foreground'}`}>{item?.needsConfirmation ? 'Требует повторного подтверждения' : item?.done ? 'Подтверждено' : item?.waived ? 'Обязательность снята' : `${t.required ? 'Обязательный пункт: держит переход' : 'Не подтверждено'}${t.need ? ` · не хватает: ${t.need}` : ''}`}{item?.confirmedBy ? ` · ${item.confirmedBy}` : ''}{item?.confirmedAt ? ` · ${new Date(item.confirmedAt).toLocaleString('ru-RU')}` : ''}</p>
         {data.results[t.key]?.comment && <p className="text-sm whitespace-pre-wrap">{data.results[t.key].comment}</p>}
         <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => setEditing(t)}>Данные и результат</Button>
