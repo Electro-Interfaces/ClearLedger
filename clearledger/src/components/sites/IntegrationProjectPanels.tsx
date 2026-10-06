@@ -241,28 +241,11 @@ export function IntegrationWorkPlan(props: Props) {
   const at = (stage: string) => FUNNEL_STAGES.indexOf(props.site.stage as never) >= FUNNEL_STAGES.indexOf(stage as never)
   const showWork = at('decision') || Object.values(d.work || {}).some(Boolean)
   const showTests = at('construction') || d.tests.length > 0
-  const showDates = at('negotiation') || Object.keys(d.dates || {}).length > 0
   return <div className="space-y-4">
     {showWork && <SectionEditor key={d.revision} section="work" data={d} props={props} onSaved={refresh} />}
     {showTests && <TestsEditor key={`tests:${d.revision}`} data={d} props={props} onSaved={refresh} />}
-    {showDates && <PhaseDates key={`dates:${d.revision}`} props={props} state={query.data} onSaved={refresh} />}
-    {!showWork && !showTests && !showDates && <p className="text-xs text-muted-foreground">Пилот, испытания и план этапов появятся здесь со своими стадиями. На заявке — партнёр, сценарий, предполагаемый договор и ответственные: пункты чек-листа ниже.</p>}
+    {!showWork && !showTests && <p className="text-xs text-muted-foreground">Пилот и испытания появятся здесь со своими стадиями.</p>}
   </div>
-}
-
-function PhaseDates({ props, state, onSaved }: { props: Props; state: NonNullable<ReturnType<typeof useIntegration>['query']['data']>; onSaved: () => Promise<void> }) {
-  const [dates, setDates] = useState(state.data.dates)
-  const [busy, setBusy] = useState(false)
-  const save = async () => {
-    setBusy(true)
-    try { await saveIntegration(props.companyId, props.site.id, { revision: state.data.revision, dates }); await onSaved(); toast.success('Плановые даты сохранены') }
-    catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось сохранить даты') }
-    finally { setBusy(false) }
-  }
-  return <section className="rounded-lg border p-3 space-y-3"><h3 className="font-semibold text-sm">Плановые даты этапов</h3>
-    {state.phases.map((p) => <div key={p.code} className="grid gap-2 sm:grid-cols-3 items-end"><span className="text-sm">{p.label}</span>{(['start', 'end'] as const).map((f) => <label key={f} className="text-xs">{f === 'start' ? 'Начало' : 'Окончание'}<Input aria-label={`${p.label}: ${f === 'start' ? 'начало' : 'окончание'}`} type="date" value={dates[p.code]?.[f] || ''} onChange={(e) => setDates({ ...dates, [p.code]: { ...(dates[p.code] || { start: '', end: '' }), [f]: e.target.value } })} /></label>)}</div>)}
-    <Button disabled={busy} onClick={() => void save()}>Сохранить план этапов</Button>
-  </section>
 }
 
 /** Пункты, у которых доказательство — документ (подписанное соглашение, протокол, акт):
@@ -404,11 +387,10 @@ export function IntegrationChecklist(props: Props) {
         {(ITEM_VIEW[editing.key]?.sections ?? [editing.section, ...(EXTRA_EDITORS[editing.key] || [])]).map((section) => <TaskEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh}
           compact={ITEM_VIEW[editing.key]?.compact} scenarioView={ITEM_VIEW[editing.key]?.scenarios} signing={SIGNING_KINDS[editing.key]}
           only={ITEM_VIEW[editing.key]?.fieldsBy?.[section] ?? (section === 'lead' ? ITEM_VIEW[editing.key]?.leadFields : section === (ITEM_VIEW[editing.key]?.sections?.[0] ?? editing.section) ? ITEM_VIEW[editing.key]?.fields : undefined)} />)}
-        {ITEM_VIEW[editing.key]?.sections?.length === 0 && !['1.4', '2.8', '5.12'].includes(editing.key) && <p className="text-sm text-muted-foreground">Отдельных данных у пункта нет: он подтверждается результатом ниже — комментарием, документом или поручением «Трека».</p>}
+        {ITEM_VIEW[editing.key]?.sections?.length === 0 && !['1.4', '5.12'].includes(editing.key) && <p className="text-sm text-muted-foreground">Отдельных данных у пункта нет: он подтверждается результатом ниже — комментарием, документом или поручением «Трека».</p>}
         {editing.key === '1.4' && <ProjectLeadPicker props={props} onSaved={refresh} />}
         {editing.key === '1.1' && <PartnerContacts data={data} props={props} onSaved={refresh} />}
         {editing.key === '5.12' && <PartnerSessionsRule key={`match:${data.revision}`} data={data} props={props} onSaved={refresh} />}
-        {editing.key === '2.8' && <PhaseDates key={`dates:${data.revision}`} props={props} state={query.data} onSaved={refresh} />}
         <ResultEditor key={`${editing.key}:${data.revision}`} task={editing} props={props} data={data} onSaved={refresh} onDone={() => setEditing(null)} />
       </>}
       </PendingCtx.Provider>
@@ -706,7 +688,7 @@ const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[]; l
 function NeedLine({ task, item }: { task: IntegrationTask; item?: GateItem }) {
   if (item?.done && !item.needsConfirmation) return null
   // У пункта без своих данных пояснение даёт строка «Отдельных данных у пункта нет».
-  if (!task.need && ITEM_VIEW[task.key]?.sections?.length === 0 && !['1.4', '2.8', '5.12'].includes(task.key)) return null
+  if (!task.need && ITEM_VIEW[task.key]?.sections?.length === 0 && !['1.4', '5.12'].includes(task.key)) return null
   return task.need
     ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">Чтобы подтвердить пункт: {task.need}.</p>
     : task.dataRule

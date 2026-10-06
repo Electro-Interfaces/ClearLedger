@@ -342,7 +342,8 @@ def test_сроки_держит_пункт_2_8_а_не_бренд():
     data["results"]["2.6"] = {"comment": "ок"}
     data["results"]["2.8"] = {"comment": "ок"}
     assert integration.confirmation_problem(s, "2.6", data) is None
-    assert integration.confirmation_problem(s, "2.8", data)
+    # с 06.10.2026 сетки дат нет: 2.8 подтверждается результатом
+    assert integration.confirmation_problem(s, "2.8", data) is None
 
 def test_правило_сессий_партнёра_держит_5_12():
     s = site("construction")
