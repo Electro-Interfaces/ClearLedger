@@ -191,7 +191,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
                   waived > 0 ? 'text-amber-600 dark:text-amber-400'
                     : s.gate.canAdvance ? 'text-emerald-600 dark:text-emerald-400' : ''}
                   title={waived > 0 ? 'С части обязательных пунктов снята обязательность' : undefined}>
-                  гейт {s.gate.done}/{s.gate.total}
+                  чек-лист стадии {s.gate.done}/{s.gate.total}
                   {waived > 0 && ` · ${waived} с послаблением`}
                   {!s.gate.canAdvance && s.gate.blocking.length > 0 && ` · держит: ${s.gate.blocking[0]}`}
                 </span>

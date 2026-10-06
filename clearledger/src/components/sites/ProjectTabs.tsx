@@ -991,7 +991,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
           лежали «Заморожен» и «Архив»: рабочее действие и отказ от проекта выглядели
           одинаково. Теперь вперёд — кнопкой, а прыжок через стадию, пауза и отказ —
           отдельно, по явному запросу. */}
-      <section className="rounded-lg border border-border p-3 space-y-2">
+      <section className={`rounded-lg border border-border p-3 space-y-2${site.kind === 'integration' ? ' hidden' : ''}`}>
         <div data-zone="Перевод на следующую стадию" className="text-sm font-semibold">Стадия</div>
         {!otherStage && nextStage ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -1136,7 +1136,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
         )}
         <div className="text-xs text-muted-foreground">
           В стадии с {site.stageSince ?? '—'}
-          {site.prevStage ? ` · до этого «${STAGE_META[site.prevStage]?.label ?? site.prevStage}»` : ''}
+          {site.prevStage ? ` · до этого «${stageLabelOf(site.kind, site.prevStage)}»` : ''}
         </div>
       </section>
 

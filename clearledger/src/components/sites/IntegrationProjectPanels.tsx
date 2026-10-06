@@ -104,6 +104,9 @@ function SectionEditor({ section, data, props, onSaved, only }: { section: Integ
   </section>
 }
 
+/** Код станции для человека: у станций чужих сетей кода нет, вместо него UUID — его не показываем. */
+const humanCode = (code: string | null | undefined) => (code && !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(code) ? code : '')
+
 function StationListPicker({ scenario, stations, field, value, onChange }: {
   scenario: IntegrationScenario; stations: IntegrationStation[]; field: 'selectedIds' | 'agreedIds' | 'connectedIds' | 'pilotIds'; value: string[]; onChange: (ids: string[]) => void
 }) {
@@ -117,7 +120,7 @@ function StationListPicker({ scenario, stations, field, value, onChange }: {
     .filter((s) => field === 'selectedIds' || (field === 'connectedIds' ? scenario.agreedIds : scenario.selectedIds).includes(s.id)), [stations, scenario, field, value])
   const groups = [...new Set(available.map((s) => s.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'))
   const filtered = useMemo(() => available.filter((s) => !group || s.group === group)
-    .map((s) => ({ ...s, code: s.id, displayCode: s.code, name: `${s.name} · ${s.code}` })), [available, group])
+    .map((s) => { const code = humanCode(s.code); return { ...s, code: s.id, displayCode: code, name: code ? `${s.name} · ${code}` : s.name } }), [available, group])
   const exportList = () => {
     const rows = [['ID', 'Код', 'Станция', 'Регион', 'Город'], ...value.map((id) => {
       const s = stations.find((item) => item.id === id)
@@ -140,11 +143,18 @@ function StationListPicker({ scenario, stations, field, value, onChange }: {
   </div>
 }
 
-function ScenariosEditor({ data, props, onSaved, compact }: { data: IntegrationData; props: Props; onSaved: () => Promise<void>; compact?: boolean }) {
+/** Что из сценария показывает окно пункта. На 1.6 «Станции определены» были видны все
+ *  четыре перечня, расчёты и версии договора — предмет других стадий (06.10.2026). */
+type ScenarioListField = 'selectedIds' | 'agreedIds' | 'connectedIds' | 'pilotIds'
+type ScenarioView = { lists: ScenarioListField[]; terms?: boolean; versions?: boolean; marks?: boolean; lockHeader?: boolean }
+const FULL_SCENARIO_VIEW: ScenarioView = { lists: ['selectedIds', 'agreedIds', 'connectedIds', 'pilotIds'], terms: true, versions: true, marks: true }
+
+function ScenariosEditor({ data, props, onSaved, compact, view: viewProp }: { data: IntegrationData; props: Props; onSaved: () => Promise<void>; compact?: boolean; view?: ScenarioView }) {
+  const view = viewProp ?? (compact ? { lists: [] } : FULL_SCENARIO_VIEW)
   const [rows, setRows] = useState(data.scenarios)
   const [busy, setBusy] = useState(false)
   // В заявке сценарий — это направление и формат; перечни станций и расчёты — позже.
-  const catalog = useQuery({ queryKey: ['integration-stations', props.companyId, props.site.id], queryFn: () => getIntegrationStations(props.companyId, props.site.id), enabled: !compact })
+  const catalog = useQuery({ queryKey: ['integration-stations', props.companyId, props.site.id], queryFn: () => getIntegrationStations(props.companyId, props.site.id), enabled: view.lists.length > 0 })
   const change = (id: string, patch: Partial<IntegrationScenario>) => setRows(rows.map((s) => s.id === id ? { ...s, ...patch } : s))
   const changeList = (row: IntegrationScenario, field: 'selectedIds' | 'agreedIds' | 'connectedIds' | 'pilotIds', ids: string[]) => {
     if (field === 'selectedIds') change(row.id, { selectedIds: ids, agreedIds: row.agreedIds.filter((id) => ids.includes(id)), connectedIds: row.connectedIds.filter((id) => ids.includes(id)), pilotIds: row.pilotIds.filter((id) => ids.includes(id)) })
@@ -172,19 +182,20 @@ function ScenariosEditor({ data, props, onSaved, compact }: { data: IntegrationD
     <p className="text-xs text-muted-foreground">Для гибридной или двусторонней интеграции заведите отдельные сценарии по каждому формату и направлению. Новые станции автоматически в перечни не добавляются.</p>
     {catalog.isError && <div role="alert">Перечень станций не загрузился: {catalog.error.message}<Button variant="outline" onClick={() => void catalog.refetch()}>Повторить</Button></div>}
     {rows.map((s) => <div key={s.id} className="rounded-md border p-3 space-y-3">
+      {view.lockHeader ? <p className="text-sm font-medium">{scenarioLabel(s)}{s.geography ? <span className="font-normal text-muted-foreground"> · {s.geography}</span> : null}</p> : <>
       <label className="block text-sm">Название сценария<Input value={s.name} onChange={(e) => change(s.id, { name: e.target.value })} /></label>
       <div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">Направление<select className={selectClass} value={s.direction} onChange={(e) => change(s.id, { direction: e.target.value as IntegrationScenario['direction'], selectedIds: [], agreedIds: [], connectedIds: [], pilotIds: [] })}>{(['outgoing', 'incoming'] as const).map((v) => <option key={v} value={v}>{INTEGRATION_DIRECTIONS[v]}</option>)}</select></label>
         <label className="text-sm">Формат<select className={selectClass} value={s.format} onChange={(e) => change(s.id, { format: e.target.value as IntegrationScenario['format'] })}>{(['information', 'roaming'] as const).map((v) => <option key={v} value={v}>{INTEGRATION_FORMATS[v]}</option>)}</select></label>
         <label className="text-sm">География<Input value={s.geography} onChange={(e) => change(s.id, { geography: e.target.value })} /></label>
-        <label className="text-sm">Ограничения<Input value={s.restrictions} onChange={(e) => change(s.id, { restrictions: e.target.value })} /></label></div>
-      {!compact && <ScenarioTerms scenario={s} onChange={(patch) => change(s.id, patch)} />}
-      {compact ? null : catalog.isPending ? <p role="status">Загрузка станций…</p> : (['selectedIds', 'agreedIds', 'connectedIds', 'pilotIds'] as const).map((field) => <StationListPicker key={field} scenario={s} field={field} stations={catalog.data || []} value={s[field]} onChange={(ids) => changeList(s, field, ids)} />)}
-      {!compact && <><RetiredWarning scenario={s} stations={catalog.data || []} />
-      <ConnectionMarks scenario={s} onMark={(at, basis, ref) => markConnected(s, at, basis, ref)} />
-      <ListVersions scenario={s} saved={data.scenarios.find((x) => x.id === s.id)} data={data} props={props} onSaved={onSaved} /></>}
-      <Button variant="ghost" onClick={() => setRows(rows.filter((r) => r.id !== s.id))}>Удалить сценарий</Button>
+        <label className="text-sm">Ограничения<Input value={s.restrictions} onChange={(e) => change(s.id, { restrictions: e.target.value })} /></label></div></>}
+      {view.terms && <ScenarioTerms scenario={s} onChange={(patch) => change(s.id, patch)} />}
+      {view.lists.length === 0 ? null : catalog.isPending ? <p role="status">Загрузка станций…</p> : view.lists.map((field) => <StationListPicker key={field} scenario={s} field={field} stations={catalog.data || []} value={s[field]} onChange={(ids) => changeList(s, field, ids)} />)}
+      {view.lists.length > 0 && <RetiredWarning scenario={s} stations={catalog.data || []} />}
+      {view.marks && <ConnectionMarks scenario={s} onMark={(at, basis, ref) => markConnected(s, at, basis, ref)} />}
+      {view.versions && <ListVersions scenario={s} saved={data.scenarios.find((x) => x.id === s.id)} data={data} props={props} onSaved={onSaved} />}
+      {!view.lockHeader && <Button variant="ghost" onClick={() => setRows(rows.filter((r) => r.id !== s.id))}>Удалить сценарий</Button>}
     </div>)}
-    <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setRows([...rows, { id: crypto.randomUUID(), name: '', direction: 'outgoing', format: 'information', geography: '', restrictions: '', partnerNetwork: '', selectedIds: [], agreedIds: [], connectedIds: [], pilotIds: [], payer: '', model: '' }])}>Добавить сценарий</Button>
+    <div className="flex flex-wrap gap-2">{!view.lockHeader && <Button variant="outline" onClick={() => setRows([...rows, { id: crypto.randomUUID(), name: '', direction: 'outgoing', format: 'information', geography: '', restrictions: '', partnerNetwork: '', selectedIds: [], agreedIds: [], connectedIds: [], pilotIds: [], payer: '', model: '' }])}>Добавить сценарий</Button>}
       {!inItem && <Button disabled={busy} onClick={() => void save()}>Сохранить сценарии и перечни</Button>}</div>
   </section>
 }
@@ -273,7 +284,7 @@ function ResultEditor({ task, props, data, onSaved, onDone }: { task: Integratio
     finally { setBusy(false) }
   }
   return <><section className="rounded-lg border p-3 space-y-3"><h3 className="text-sm font-semibold">Подтверждение пункта {task.key}</h3>
-    <label className="block text-sm">{byData ? 'Комментарий — необязательно: подтверждением служат заполненные данные' : result.notApplicable ? 'Причина неприменимости' : 'Результат проверки'}
+    <label className="block text-sm">{byData ? 'Комментарий — необязательно: подтверждением служат заполненные данные' : result.notApplicable ? 'Причина неприменимости' : task.dataRule ? 'Результат проверки' : 'Результат проверки — обязательно'}
       <Textarea rows={2} value={result.comment} onChange={(e) => setResult({ ...result, comment: e.target.value })} /></label>
     {!task.required && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={result.notApplicable} onChange={(e) => setResult({ ...result, notApplicable: e.target.checked })} />Не применимо к этому сценарию</label>}
     {more ? <>
@@ -299,6 +310,14 @@ export function IntegrationChecklist(props: Props) {
   const focus = params.get('pstage')
   const focusItem = params.get('pitem')
   const [viewStage, setViewStage] = useState(focus || props.site.stage)
+  // Проект перешёл на следующую стадию — показать её, метку просмотра прежней снять.
+  const seenStage = useRef(props.site.stage)
+  useEffect(() => {
+    if (seenStage.current === props.site.stage) return
+    seenStage.current = props.site.stage
+    setViewStage(props.site.stage)
+    setParams((prev) => { const n = new URLSearchParams(prev); n.delete('pstage'); return n }, { replace: true })
+  }, [props.site.stage, setParams])
   const top = useRef<HTMLElement>(null)
   useEffect(() => {
     if (!focus) return
@@ -360,7 +379,7 @@ export function IntegrationChecklist(props: Props) {
             здесь — сводка их форматов. 1.4 — назначение руководителя, а не тех. параметры. */}
         <NeedLine task={tasks.find((x) => x.key === editing.key) ?? editing} item={items.get(editing.key)} />
         {(ITEM_VIEW[editing.key]?.sections ?? [editing.section, ...(EXTRA_EDITORS[editing.key] || [])]).map((section) => <TaskEditor key={`${section}:${data.revision}`} section={section} data={data} props={props} onSaved={refresh}
-          compact={ITEM_VIEW[editing.key]?.compact}
+          compact={ITEM_VIEW[editing.key]?.compact} scenarioView={ITEM_VIEW[editing.key]?.scenarios}
           only={section === 'lead' ? ITEM_VIEW[editing.key]?.leadFields : section === (ITEM_VIEW[editing.key]?.sections?.[0] ?? editing.section) ? ITEM_VIEW[editing.key]?.fields : undefined} />)}
         {ITEM_VIEW[editing.key]?.sections?.length === 0 && !['1.4', '2.8'].includes(editing.key) && <p className="text-sm text-muted-foreground">Отдельных данных у пункта нет: он подтверждается результатом ниже — комментарием, документом или поручением «Трека».</p>}
         {editing.key === '1.4' && <ProjectLeadPicker props={props} onSaved={refresh} />}
@@ -607,7 +626,14 @@ type TaskSection = IntegrationTask['section']
  * Карта на фронте: подтверждения пунктов привязаны к разделу на сервере (отпечаток
  * данных), и менять его значило бы сбросить уже подтверждённые пункты.
  */
-const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[]; leadFields?: string[]; compact?: boolean }> = {
+const ITEM_VIEW: Record<string, { sections?: TaskSection[]; fields?: string[]; leadFields?: string[]; compact?: boolean; scenarios?: ScenarioView }> = {
+  '1.6': { scenarios: { lists: ['selectedIds'], lockHeader: true } },
+  '2.1': { scenarios: { lists: [] } },
+  '2.2': { scenarios: { lists: [], terms: true, lockHeader: true } }, '2.3': { scenarios: { lists: [], terms: true, lockHeader: true } },
+  '6.2': { scenarios: { lists: [], terms: true, lockHeader: true } },
+  '5.3': { scenarios: { lists: ['pilotIds'], lockHeader: true } }, '5.5': { scenarios: { lists: ['pilotIds'], lockHeader: true } },
+  '6.6': { scenarios: { lists: ['agreedIds'], versions: true, lockHeader: true } },
+  '6.7': { scenarios: { lists: ['agreedIds', 'connectedIds'], versions: true, marks: true, lockHeader: true } },
   // Заявка: кто, зачем, что за интеграция, какой договор, кто отвечает — без протоколов и перечней.
   '1.1': { sections: ['partner', 'lead'], fields: ['name', 'purpose'], leadFields: ['initiator'] },
   '1.2': { sections: ['scenarios', 'lead'], compact: true, leadFields: ['coverage'] },
@@ -637,7 +663,9 @@ function NeedLine({ task, item }: { task: IntegrationTask; item?: GateItem }) {
   if (!task.need && ITEM_VIEW[task.key]?.sections?.length === 0 && !['1.4', '2.8'].includes(task.key)) return null
   return task.need
     ? <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">Чтобы подтвердить пункт: {task.need}.</p>
-    : <p className="text-xs text-muted-foreground">Данных для подтверждения достаточно — нажмите «Подтвердить выполнение» внизу окна.</p>
+    : task.dataRule
+      ? <p className="text-xs text-muted-foreground">Данных для подтверждения достаточно — нажмите «Подтвердить выполнение» внизу окна.</p>
+      : <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">Пункт подтверждается результатом проверки: запишите его в поле внизу окна (или приложите документ, поручение).</p>
 }
 
 const EXTRA_EDITORS: Record<string, TaskSection[]> = {
@@ -645,8 +673,8 @@ const EXTRA_EDITORS: Record<string, TaskSection[]> = {
   '5.10': ['work'], '5.11': ['documents'], '6.6': ['scenarios'],
 }
 
-function TaskEditor({ section, data, props, onSaved, only, compact }: { section: TaskSection; data: IntegrationData; props: Props; onSaved: () => Promise<void>; only?: string[]; compact?: boolean }) {
-  if (section === 'scenarios') return <ScenariosEditor data={data} props={props} onSaved={onSaved} compact={compact} />
+function TaskEditor({ section, data, props, onSaved, only, compact, scenarioView }: { section: TaskSection; data: IntegrationData; props: Props; onSaved: () => Promise<void>; only?: string[]; compact?: boolean; scenarioView?: ScenarioView }) {
+  if (section === 'scenarios') return <ScenariosEditor data={data} props={props} onSaved={onSaved} compact={compact} view={scenarioView} />
   if (section === 'lead') return <LeadEditor data={data} props={props} onSaved={onSaved} only={only} />
   if (section === 'documents') return <DocumentsEditor data={data} props={props} onSaved={onSaved} />
   if (section === 'tests') return <TestsEditor data={data} props={props} onSaved={onSaved} />

@@ -146,7 +146,7 @@ export function ProjectRoadmapTab({ site, companyId, onStage }: { site: SiteDeta
                       <span className={`text-sm ${['waiting', 'unknown'].includes(s.state) ? 'text-muted-foreground' : 'font-medium'}`}>
                         {s.label}
                       </span>
-                      <span className="text-xs text-muted-foreground">гейт {s.gateDone}/{s.gateTotal}</span>
+                      <span className="text-xs text-muted-foreground">чек-лист {s.gateDone}/{s.gateTotal}</span>
                       {s.date && <span className="text-xs text-muted-foreground">с {s.date}</span>}
                     </div>
                     {s.state === 'current' && s.items.length > 0 && (

@@ -265,7 +265,12 @@ DATA_RULE_KEYS = frozenset({
     "1.1", "1.2", "1.3", "1.4", "1.4.1", "1.6", "2.2", "2.3", "2.4", "2.8", "3.1", "3.6",
     "4.1", "4.2", "4.3", "5.3", "5.10", "5.11", "5.12", "5.13", "6.2", "6.3", "6.6", "6.7",
     "6.12", "6.13", "6.14",
+    *("1.5", "2.5", "2.6", "2.7", "3.2", "3.4", "3.5", "5.1", "6.4", "6.5"),
 })
+# 06.10.2026: у этих пунктов были свои поля, но не было правила — окно говорило «данных
+# достаточно», сервер отказывал «запишите результат». Подтверждает любое из двух:
+# заполненное поле пункта или записанный результат (бренда у партнёра может и не быть).
+FIELD_OR_RESULT_KEYS = frozenset({"1.5", "2.5", "2.6", "2.7", "3.2", "3.4", "3.5", "5.1", "6.4", "6.5"})
 
 
 def confirmation_problem(site, key, data):
@@ -277,8 +282,11 @@ def confirmation_problem(site, key, data):
         if key in {"4.3", "5.11", "6.6"}:
             return "Подписание обязательного документа нельзя заменить неприменимостью; решение об исключении оформляется снятием обязательности"
         return None if result.get("comment", "").strip() else "Укажите причину неприменимости"
-    if not any(result.get(f) for f in ("comment", "workRef", "docId")) and key not in DATA_RULE_KEYS:
+    has_result = any(result.get(f) for f in ("comment", "workRef", "docId"))
+    if not has_result and key not in DATA_RULE_KEYS:
         return "Запишите результат проверки, выберите документ или свяжите поручение"
+    if has_result and key in FIELD_OR_RESULT_KEYS:
+        return None
     return requirement_problem(site, key, data)
 
 
@@ -289,7 +297,7 @@ def requirement_problem(site, key, data):
     и в его окне. Раньше человек узнавал требование только из отказа при подтверждении
     (так 1.4 «руководитель не назначен» выглядел поломкой, замечание 05.10.2026).
     """
-    p, t, w, c, st = (data[k] for k in ("partner", "technical", "work", "commercial", "settlement"))
+    p, t, w, c, st, d = (data[k] for k in ("partner", "technical", "work", "commercial", "settlement", "data"))
     scenarios = data["scenarios"]
     terms_ok = bool(scenarios) and all(s.get("payer") and (s["payer"] == "none" or (s.get("model") and s.get("rate"))) for s in scenarios)
     tests_ok, tests_problem = tests_state(data)
@@ -299,6 +307,16 @@ def requirement_problem(site, key, data):
                 "Заполните " + ", ".join(n for n, v in (("партнёра", p.get("name")), ("цель", p.get("purpose")), ("инициатора интеграции", data["lead"].get("initiator"))) if not v)),
         "1.3": (data["lead"].get("contractKind") and data["lead"].get("payer"), "Укажите вид предполагаемого договора и кто кому платит"),
         "1.4.1": (data["lead"].get("curatorUserId"), "Назначьте технического куратора интеграции"),
+        "1.5": (p.get("assessment"), "Опишите масштаб партнёра и пересечение регионов"),
+        "2.5": (d.get("outgoing") or d.get("incoming"), "Опишите, какие данные передаём партнёру или получаем от него"),
+        "2.6": (d.get("brand"), "Опишите, как показывается наш бренд у партнёра"),
+        "2.7": (d.get("analytics") or d.get("sessionHistory"), "Опишите доступ к аналитике или истории сессий"),
+        "3.2": (d.get("outgoing") or d.get("incoming"), "Опишите состав передаваемых данных"),
+        "3.4": (t.get("access") or t.get("security"), "Опишите доступы и требования безопасности"),
+        "3.5": (t.get("acceptanceCriteria"), "Опишите критерии приёмки"),
+        "5.1": (t.get("access"), "Зафиксируйте выданные тестовые доступы"),
+        "6.4": (d.get("statisticsUse"), "Опишите порядок использования статистики"),
+        "6.5": (t.get("support"), "Опишите порядок поддержки пользователей"),
         "1.2": (bool(data["scenarios"]), "Добавьте сценарий подключения"),
         "1.4": (bool(site.owner_user_id), "Назначьте руководителя проекта в Работе"),
         "1.6": (any(s["selectedIds"] for s in data["scenarios"]), "Выберите станции сценария"),
@@ -329,7 +347,7 @@ def requirement_problem(site, key, data):
         if not signed:
             return "Выберите подписанную версию нужного документа и подтверждение подписания"
     if key in required and not required[key][0]:
-        return required[key][1]
+        return required[key][1] + (" — или запишите результат проверки" if key in FIELD_OR_RESULT_KEYS else "")
     return None
 
 
