@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import {
   Building2, Check, ChevronDown, ChevronRight, History, KeyRound, LifeBuoy, Loader2,
-  Mail, Search, ShieldCheck, SlidersHorizontal, Trash2, Undo2, Users2, X,
+  LogOut, Mail, Search, ShieldCheck, SlidersHorizontal, Trash2, Undo2, Users2, X,
 } from 'lucide-react'
 import * as userService from '@/services/userService'
 import type { AdminUser } from '@/services/userService'
@@ -854,6 +854,12 @@ function MemberCard({
     },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
+  // Пароль утёк или телефон потерян: все входы человека гаснут, удалять его не нужно.
+  const resetSessions = useMutation({
+    mutationFn: () => userService.resetSessions(u.id, companyId),
+    onSuccess: () => toast.success('Все входы сброшены — человеку нужно войти заново'),
+    onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
   // Та же ссылка, но письмом: человеку, чью учётку завели за него, приглашение
   // выписать нельзя — он уже член компании, и API отвечает 409.
   const sendAccess = useMutation({
@@ -951,6 +957,13 @@ function MemberCard({
                   ? <Loader2 className="h-3 w-3 animate-spin" />
                   : <Mail className="h-3 w-3" />}
                 Выслать доступ письмом
+              </Button>
+              <Button variant="outline" size="sm" className="h-7 gap-1 text-xs"
+                title="Если пароль мог утечь: все выданные входы гаснут, человек входит заново"
+                disabled={resetSessions.isPending}
+                onClick={() => { if (window.confirm(`Сбросить все входы ${u.email}? Работа в открытых окнах прервётся.`)) resetSessions.mutate() }}>
+                {resetSessions.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <LogOut className="h-3 w-3" />}
+                Сбросить все входы
               </Button>
               <p className="text-[11px] text-muted-foreground">
                 Одноразовая ссылка установки пароля. «Ссылка для входа» — скопировать и

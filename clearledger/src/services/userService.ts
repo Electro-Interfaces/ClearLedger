@@ -122,6 +122,11 @@ export async function setMemberModules(
  *  Одноразовая, 24 часа; выдаётся админом компании, попадает в журнал.
  *  `send` — выслать ту же ссылку письмом «вам открыт доступ» (тогда неделя):
  *  приглашение для человека, чью учётку завели за него. */
+/** Сбросить все входы сотрудника: его токены гаснут, войти — заново паролем. */
+export async function resetSessions(id: string, companyId: string): Promise<{ ok: boolean }> {
+  return post(`/api/users/${id}/sessions/reset?company_id=${encodeURIComponent(companyId)}`)
+}
+
 export async function issueResetLink(
   id: string, companyId: string, send = false,
 ): Promise<{ reset_url: string; expires_at: string; email_sent?: boolean }> {

@@ -600,6 +600,33 @@ async def set_member_contracts(
     return await _resp(target, db, scope_cid=cid)
 
 
+@router.post("/{user_id}/sessions/reset")
+async def reset_sessions(
+    user_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сбросить все входы человека: выданные ему токены гаснут, войти — заново паролем.
+
+    Для случая «пароль утёк» или «потерял телефон»: удалять из компании не нужно.
+    """
+    cid = await require_company_admin(company_id, current_user, db)
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    user = await db.get(User, uid)
+    if user is None or not await _is_member(uid, cid, db):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+    if user.is_superadmin and not current_user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Сессии суперадмина сбрасывает только суперадмин")
+    user.token_version = (user.token_version or 0) + 1
+    await log_audit(db, actor=current_user, company_id=cid, action="auth.sessions_reset", target=user.email)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.post("/{user_id}/reset-link")
 async def issue_reset_link(
     user_id: str,
@@ -635,9 +662,10 @@ async def issue_reset_link(
     raw = secrets.token_urlsafe(32)
     user.reset_token_hash = hashlib.sha256(raw.encode()).hexdigest()
     # Сутки, а не час письменного потока: ссылку передают мессенджером,
-    # и открывают её не сразу. Письмом — неделя: сменщик читает почту после
-    # смены, а не в час, когда администратор нажал кнопку.
-    expires = datetime.now(timezone.utc) + (timedelta(days=7) if send else timedelta(hours=24))
+    # и открывают её не сразу. Письмом — двое суток (было неделю): сменщик читает
+    # почту после смены, но неиспользованная ссылка — открытый вход в учётку, и
+    # держать его неделю нельзя (аудит 07.10.2026).
+    expires = datetime.now(timezone.utc) + (timedelta(days=2) if send else timedelta(hours=24))
     user.reset_token_expires = expires
     await log_audit(db, actor=current_user, company_id=cid,
                     action="auth.reset_link_issued", target=user.email)

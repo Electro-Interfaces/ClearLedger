@@ -177,6 +177,10 @@ async def update_company(
         )
 
     update_data = body.model_dump(exclude_unset=True)
+    if update_data.get("cloud_api_key"):
+        # Общий ключ хранится хешем: в базе его не прочитать (аудит 07.10.2026).
+        from app.auth import legacy_key_value
+        update_data["cloud_api_key"] = legacy_key_value(update_data["cloud_api_key"])
     for field, value in update_data.items():
         setattr(company, field, value)
 

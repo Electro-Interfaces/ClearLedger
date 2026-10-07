@@ -131,8 +131,14 @@ class Settings(BaseSettings):
 
     @property
     def secret_is_insecure(self) -> bool:
-        """Секрет не задан в окружении (используется небезопасный дефолт)?"""
-        return self.secret_key == DEFAULT_INSECURE_SECRET
+        """Секрет подписи слабый: дефолт кода, дефолт из compose-файлов или короче 32 символов.
+
+        Дефолты compose (`clearledger-dev-secret` и т.п.) раньше проверку не задевали
+        вовсе — JWT подделывался известным ключом (аудит 07.10.2026).
+        """
+        return (self.secret_key in (DEFAULT_INSECURE_SECRET, "clearledger-dev-secret",
+                                    "clearledger-demo-secret-change-in-production")
+                or len(self.secret_key) < 32)
 
     # CORS — список origin через запятую
     cors_origins: str = "http://localhost:3000,http://localhost:5173"

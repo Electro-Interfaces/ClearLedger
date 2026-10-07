@@ -228,6 +228,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "SECRET_KEY не задан — используется небезопасный дефолт! "
             "JWT можно подделать. Задайте SECRET_KEY (или JWT_SECRET) в окружении."
         )
+        # На проде со слабым секретом не стартуем вовсе: предупреждение в журнале
+        # никто не читает, а токены подделываются известным ключом (аудит 07.10.2026).
+        if settings.app_env == "prod":
+            raise RuntimeError("Слабый SECRET_KEY на проде — запуск остановлен")
+    if os.environ.get("DEMO_SPACE_USER") and not os.environ.get("DEMO_SPACE_SECRET"):
+        # Демо-стенд (stack demo) снаружи закрыт, вход — только через кромку ai-core;
+        # без общего секрета демо-вход держится на одном этом. Не роняем, но кричим.
+        logger.critical("DEMO_SPACE_USER задан без DEMO_SPACE_SECRET: демо-вход по одному заголовку")
 
     # Gunicorn запускает два процесса. Без общего лока оба одновременно меняют
     # схему и делают check-then-insert seed, что даёт гонки на DDL и unique.
@@ -324,6 +332,8 @@ app = FastAPI(
     description="Бэкенд системы приёма, классификации и верификации документов",
     version=APP_VERSION,
     lifespan=lifespan,
+    # Описание API наружу не отдаём: карта всех ручек — подарок тому, кто ищет дыры.
+    docs_url=None, redoc_url=None, openapi_url=None,
 )
 
 # CORS
@@ -549,11 +559,8 @@ app.include_router(security_router.router, prefix=API_PREFIX)
 @app.get("/api/health")
 async def health_check():
     """Liveness: процесс отвечает; зависимости проверяет /api/ready."""
-    return {
-        "status": "ok",
-        "version": APP_VERSION,
-        "service": "TradeLedger API",
-    }
+    # Без версии и имени сервиса: по ним подбирают известные уязвимости.
+    return {"status": "ok"}
 
 
 @app.get("/api/live")
@@ -678,13 +685,7 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="База, схема или файловое хранилище не готовы",
         ) from exc
-    return {
-        "status": "ready",
-        "version": APP_VERSION,
-        "service": "TradeLedger API",
-        "database": "ok",
-        "storage": "ok",
-    }
+    return {"status": "ready", "database": "ok", "storage": "ok"}
 
 
 def _git_sha_local() -> str:
@@ -704,6 +705,11 @@ def _git_sha_local() -> str:
 
 @app.get("/api/_debug/state")
 async def debug_state(current_user=Depends(get_current_user)):
+    # Счётчики и названия ВСЕХ компаний стека, имя базы — только суперадмину: обычному
+    # вошедшему это утечка между арендаторами (аудит 07.10.2026).
+    if not current_user.is_superadmin:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Только суперадминистратору")
     """«Отпечаток среды»: env, git-SHA, БД и счётчики по компаниям.
 
     Назначение — мгновенно отличать dev от прода и видеть расхождение данных

@@ -2845,7 +2845,6 @@ async def create_all() -> None:
         # подписи — это конец воронки, а не начало (см. docs/SITES_LAND_BANK_BLUEPRINT.md).
         for stmt in (
             "ALTER TABLE ezs_site_participants ADD COLUMN IF NOT EXISTS position INTEGER",
-            "ALTER TABLE security_events ADD COLUMN IF NOT EXISTS detail TEXT",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS stage_since VARCHAR(10)",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS prev_stage VARCHAR(16)",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS archive_reason VARCHAR(200)",
@@ -5030,6 +5029,10 @@ async def create_all() -> None:
             "ALTER TABLE conf_presence ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ",
             "ALTER TABLE conf_presence ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
             "ALTER TABLE market_players ADD COLUMN IF NOT EXISTS status_note TEXT",
+            "ALTER TABLE security_events ADD COLUMN IF NOT EXISTS detail TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0",
+            "UPDATE companies SET cloud_api_key = 'sha256:' || encode(sha256(cloud_api_key::bytea), 'hex') WHERE cloud_api_key IS NOT NULL AND cloud_api_key NOT LIKE 'sha256:%'",
+            "UPDATE pulse_view_links SET token = encode(sha256(token::bytea), 'hex') WHERE length(token) <> 64",
         ):
             await conn.execute(_sa.text(stmt))
 

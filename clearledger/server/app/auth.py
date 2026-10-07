@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from fastapi import Depends, Header, HTTPException, Query, status
+from fastapi import Depends, Header, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.context import CryptContext
 from sqlalchemy import select
@@ -36,18 +36,44 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
-def create_access_token(user_id: str, email: str) -> str:
-    """Создаёт JWT access-токен."""
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.access_token_expire_minutes
-    )
+# Сколько можно продлевать вход без пароля. Продление без предела давало токену вечную
+# жизнь: однажды полученный (утёкший) токен обновлялся сам (аудит 07.10.2026).
+MAX_SESSION_DAYS = 7
+
+
+def create_access_token(user_id: str, email: str, tv: int = 0, auth_time: int | None = None) -> str:
+    """Создаёт JWT access-токен.
+
+    `tv` — версия входа учётной записи (`User.token_version`): смена пароля, «выйти со
+    всех устройств» и сброс сессий админом поднимают её, и все выданные токены гаснут.
+    `at` — момент входа по паролю: продление его сохраняет, и сессия живёт не дольше
+    `MAX_SESSION_DAYS` от настоящего входа.
+    """
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
         "email": email,
-        "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "exp": now + timedelta(minutes=settings.access_token_expire_minutes),
+        "iat": now,
+        "tv": int(tv or 0),
+        "at": int(auth_time or now.timestamp()),
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
+
+def token_for(user: "User", auth_time: int | None = None) -> str:
+    """Токен для учётной записи с её текущей версией входа."""
+    return create_access_token(str(user.id), user.email, user.token_version or 0, auth_time)
+
+
+def session_valid(payload: dict, user: "User") -> bool:
+    """Токен выпущен для текущей версии входа и не старше предела сессии."""
+    if int(payload.get("tv") or 0) != int(user.token_version or 0):
+        return False
+    at = payload.get("at")
+    if at is not None and datetime.now(timezone.utc).timestamp() - float(at) > MAX_SESSION_DAYS * 86400:
+        return False
+    return True
 
 
 def decode_token(token: str) -> dict:
@@ -105,6 +131,11 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Пользователь не найден",
+        )
+    if not session_valid(payload, user):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Сессия завершена — войдите заново",
         )
 
     await _touch_presence(user, db)
@@ -347,7 +378,20 @@ def CompanyModuleScope(module_key: str, query_param: str = "company_id"):
     return _dep
 
 
+# Ключ, привязанный к станции, — это ключ её агента: ему открыт только обмен агента
+# (`/api/edge/*`, `/api/dedup-ingest/*`). Раньше ключ одной АЗС проходил все ручки
+# по внешнему ключу компании, включая данные всех станций (аудит 07.10.2026).
+STATION_KEY_PATHS = ("/api/edge/", "/api/dedup-ingest/")
+
+
+def legacy_key_value(raw: str) -> str:
+    """Как общий ключ компании хранится в `companies.cloud_api_key`: хешем, не текстом."""
+    import hashlib
+    return "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
+
+
 async def get_company_by_api_key(
+    request: Request,
     x_cloud_api_key: str = Header(..., alias="X-Cloud-API-Key"),
     db: AsyncSession = Depends(get_db),
 ) -> Company:
@@ -377,13 +421,17 @@ async def get_company_by_api_key(
         )
     )).scalar_one_or_none()
     if named is not None:
+        if named.station_id is not None and not request.url.path.startswith(STATION_KEY_PATHS):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Ключ станции не даёт доступа к этой ручке")
         named.last_used_at = datetime.now(timezone.utc)
         company = await db.get(Company, named.company_id)
         if company is not None:
             return company
 
+    # Общий ключ компании — хешем; открытым текстом он лежал до 07.10.2026 и
+    # переводится в хеш при запуске (database.py).
     result = await db.execute(
-        select(Company).where(Company.cloud_api_key == x_cloud_api_key)
+        select(Company).where(Company.cloud_api_key == legacy_key_value(x_cloud_api_key))
     )
     company = result.scalar_one_or_none()
     if company is None:

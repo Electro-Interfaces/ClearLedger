@@ -3127,13 +3127,16 @@ async def presence(
 # ── WebSocket ────────────────────────────────────────────────────────────────
 async def _ws_user(token: str) -> User | None:
     """Аутентификация WS по JWT из query (WS не шлёт заголовки)."""
+    from app.auth import session_valid
     try:
         payload = decode_token(token)
         uid = uuid.UUID(payload.get("sub"))
     except Exception:  # noqa: BLE001
         return None
     async with async_session_factory() as db:
-        return (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+        user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+    # Отозванный вход (смена пароля, «выйти со всех устройств») гасит и чат.
+    return user if user is not None and session_valid(payload, user) else None
 
 
 async def _ws_can_subscribe(user: User, channel: str, db: AsyncSession) -> bool:

@@ -127,6 +127,11 @@ class User(Base):
     mail_only: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # Версия входа: кладётся в JWT и сверяется на каждом запросе. Смена пароля, «выйти
+    # со всех устройств» и сброс сессий админом поднимают её — выданные токены гаснут.
+    token_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
     # Когда человека можно трогать. Пространство растянуто от Владивостока до
     # Москвы, и регламентное напоминание не бывает срочнее сна: в тишину оно не
     # пропускается, а сдвигается на начало ближайшего окна. Пояс — имя IANA, а

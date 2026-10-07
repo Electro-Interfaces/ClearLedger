@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import json
 import secrets
 import uuid
@@ -34,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
 from app.auth import (
-    assert_company_member, create_access_token, get_company_by_api_key, get_current_user,
+    assert_company_member, get_company_by_api_key, get_current_user, token_for,
     hash_password,
 )
 from app.database import get_db
@@ -44,6 +45,7 @@ from app.models import (
 )
 from app.services import file_store, partner_bridge, sso, support_mirror
 
+logger = logging.getLogger("clearledger.bridge")
 router = APIRouter(tags=["Пространства-партнёры"])
 
 
@@ -677,24 +679,36 @@ async def accept_visit(
     """
     code = payload.space.strip()
     if not code:
-        raise HTTPException(400, "Не указано пространство, выдавшее пропуск")
+        raise HTTPException(403, VISIT_REFUSED)
 
     partner = (await db.execute(select(PartnerSpace).where(
         PartnerSpace.code == code, PartnerSpace.role == "vendor",
         PartnerSpace.is_active.is_(True),
     ))).scalars().first()
     if partner is None:
-        raise HTTPException(403, f"Пространство «{code}» здесь не заведено как поставщик")
+        raise HTTPException(403, VISIT_REFUSED)
 
     company = await db.get(Company, partner.company_id)
-    keys = await partner_bridge.partner_jwks(partner)
+    try:
+        keys = await _jwks_cached(partner)
+    except partner_bridge.BridgeError:
+        raise HTTPException(403, VISIT_REFUSED)
     claims = _verify_visit(payload.token, keys, audience=f"space:{company.slug}")
+    # Пропуск выписан именно этим пространством, а не другим нашим поставщиком.
+    if str(claims.get("space") or "") != code:
+        raise HTTPException(403, VISIT_REFUSED)
 
     email = str(claims.get("email") or "").strip().lower()
     if not email:
-        raise HTTPException(400, "В пропуске нет адреса сотрудника")
+        raise HTTPException(403, VISIT_REFUSED)
 
     guest = (await db.execute(select(User).where(User.email == email))).scalars().first()
+    if guest is not None and not await _bridge_guest(guest, db):
+        # Адрес совпал с ЗДЕШНЕЙ учёткой (сотрудник клиента, админ, суперадмин). Пропуск
+        # поставщика не даёт входа под ней: иначе пространство поставщика (или кто
+        # захватил его ключ) входило бы под любым местным человеком (аудит 07.10.2026).
+        logger.warning("Пропуск %s отклонён: адрес совпал со здешней учёткой", code)
+        raise HTTPException(409, VISIT_REFUSED)
     if guest is None:
         # Пароля у такой учётки нет по смыслу: входят по пропуску, а не паролем.
         # Случайный хеш вместо пустого — чтобы «войти никак» не значило «войти без пароля».
@@ -717,7 +731,7 @@ async def accept_visit(
                     target=partner.code)
     await db.commit()
     return {
-        "access_token": create_access_token(str(guest.id), guest.email),
+        "access_token": token_for(guest),
         "token_type": "bearer",
         "company_id": str(company.id),
         "space": company.slug,
@@ -725,26 +739,75 @@ async def accept_visit(
     }
 
 
+# Один ответ на любой отказ: подробности (какого пространства нет, что не так с
+# подписью) помогают подбирать пропуск, а человеку всё равно нужен новый.
+VISIT_REFUSED = "Пропуск не принят — запросите новый в своём пространстве"
+VISIT_MAX_TTL = 300          # пропуск живёт минуты: выписан — сразу предъявлен
+_seen_visits: dict[str, float] = {}
+_jwks_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+async def _bridge_guest(user: User, db: AsyncSession) -> bool:
+    """Учётку завёл вход по пропуску: не суперадмин и во всех компаниях — поставщик."""
+    if user.is_superadmin:
+        return False
+    kinds = (await db.execute(select(UserCompany.party_type).where(UserCompany.user_id == user.id))).scalars().all()
+    return all(k == "vendor" for k in kinds)
+
+
+async def _jwks_cached(partner: PartnerSpace) -> dict[str, Any]:
+    """Ключи партнёра — с кэшем на 10 минут: анонимная ручка не должна по каждому
+    запросу ходить к партнёру (это и нагрузка, и усилитель для перебора)."""
+    import time
+    hit = _jwks_cache.get(partner.code)
+    if hit and time.monotonic() - hit[0] < 600:
+        return hit[1]
+    keys = await partner_bridge.partner_jwks(partner)
+    _jwks_cache[partner.code] = (time.monotonic(), keys)
+    return keys
+
+
 def _verify_visit(token: str, jwks: dict[str, Any], *, audience: str) -> dict[str, Any]:
-    """Проверить пропуск публичным ключом выдавшего пространства."""
+    """Проверить пропуск публичным ключом выдавшего пространства.
+
+    Обязательны срок и момент выписки, срок — не больше `VISIT_MAX_TTL`; один пропуск
+    предъявляется один раз (по `jti`, а у пропусков без него — по отпечатку самого
+    пропуска): перехваченный пропуск повторно не войдёт.
+    """
+    import hashlib
+    import time
     from jwt import PyJWTError, decode, get_unverified_header
     from jwt.algorithms import RSAAlgorithm
 
     try:
         kid = get_unverified_header(token).get("kid")
-    except PyJWTError as e:
-        raise HTTPException(400, f"Пропуск не читается: {e}") from e
+    except PyJWTError:
+        raise HTTPException(403, VISIT_REFUSED)
     keys = jwks.get("keys") or []
     # Ключ по kid, а при единственном — он же: `kid` у стеков совпадает по
     # соглашению имени, и упереться в него значило бы не пустить никого.
     jwk = next((k for k in keys if k.get("kid") == kid), keys[0] if len(keys) == 1 else None)
     if jwk is None:
-        raise HTTPException(403, "Ключ, которым подписан пропуск, у пространства не найден")
+        raise HTTPException(403, VISIT_REFUSED)
     try:
-        return decode(token, RSAAlgorithm.from_jwk(json.dumps(jwk)),
-                      algorithms=["RS256"], audience=audience)
+        claims = decode(token, RSAAlgorithm.from_jwk(json.dumps(jwk)), algorithms=["RS256"],
+                        audience=audience, options={"require": ["exp", "iat", "aud"]})
     except PyJWTError as e:
-        raise HTTPException(403, f"Пропуск отклонён: {e}") from e
+        logger.info("Пропуск отклонён: %s", e)
+        raise HTTPException(403, VISIT_REFUSED)
+    if int(claims["exp"]) - int(claims["iat"]) > VISIT_MAX_TTL:
+        raise HTTPException(403, VISIT_REFUSED)
+    now = time.time()
+    for k, until in list(_seen_visits.items()):
+        if until < now:
+            _seen_visits.pop(k, None)
+    key = str(claims.get("jti") or hashlib.sha256(token.encode()).hexdigest())
+    if key in _seen_visits:
+        raise HTTPException(403, VISIT_REFUSED)
+    # ponytail: память воркера — при нескольких воркерах повтор возможен на соседнем
+    # в пределах срока пропуска (минуты); общий журнал jti в базе, если станет важно.
+    _seen_visits[key] = float(claims["exp"]) + 60
+    return claims
 
 
 @router.post("/eco/support/mail-reply")

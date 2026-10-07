@@ -15,6 +15,7 @@
  */
 import { useState } from 'react'
 import { Bell, Bot, LogOut, Moon, RefreshCw, Sun, User, Video } from 'lucide-react'
+import { logoutAll } from '@/services/authService'
 import { toast } from 'sonner'
 import { startMeeting } from '@/services/conferenceService'
 import { isDemoMode } from '@/services/apiClient'
@@ -104,6 +105,14 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
     navigate('/login')
   }
 
+  // Пароль мог утечь или вход остался на чужом компьютере: гасим все входы сразу.
+  async function handleLogoutAll() {
+    if (!window.confirm('Выйти на всех устройствах? Входить придётся заново везде, включая это окно.')) return
+    try { await logoutAll() } catch { /* токен уже снят — уходим на вход */ }
+    logout()
+    navigate('/login')
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -183,6 +192,8 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
         <div className="border-t border-border/40 p-2">
           <MenuRow icon={LogOut} title="Выйти" note="Завершить сеанс" danger
             onSelect={handleLogout} />
+          <MenuRow icon={LogOut} title="Выйти на всех устройствах" note="Если пароль мог утечь" danger
+            onSelect={() => void handleLogoutAll()} />
         </div>
       </DropdownMenuContent>
     </DropdownMenu>

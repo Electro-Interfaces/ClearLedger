@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import io
+import hashlib
 import secrets
 import json
 import uuid
@@ -5347,13 +5348,14 @@ async def pulse_view_links(
         PulseViewLink.view_id == v.id).order_by(PulseViewLink.created_at.desc()))).scalars().all()
     now = datetime.now(timezone.utc)
     return {"links": [{
-        "id": str(r.id), "token": r.token, "label": r.label,
+        "id": str(r.id), "token": r.token[:6] + "…", "label": r.label,
         "expiresAt": r.expires_at.isoformat() if r.expires_at else None,
         "revoked": r.revoked,
         "expired": bool(r.expires_at and r.expires_at < now),
         "opened": r.opened_count,
         "lastOpenedAt": r.last_opened_at.isoformat() if r.last_opened_at else None,
-        "url": f"/showcase/{r.token}",
+        # Хеш ссылку не восстанавливает: адрес виден только при выдаче.
+        "url": None if len(r.token) == 64 else f"/showcase/{r.token}",
     } for r in rows]}
 
 
@@ -5372,13 +5374,14 @@ async def pulse_view_link_create(
     if v.status != "published":
         raise HTTPException(status_code=400,
                             detail="Витрина не опубликована — показывать нечего")
+    raw = secrets.token_urlsafe(24)
     row = PulseViewLink(
-        view_id=v.id, token=secrets.token_urlsafe(24), label=label.strip(),
+        view_id=v.id, token=hashlib.sha256(raw.encode()).hexdigest(), label=label.strip(),
         expires_at=datetime.now(timezone.utc) + timedelta(days=days),
         created_by=current_user.email)
     db.add(row)
     await db.commit()
-    return {"id": str(row.id), "token": row.token, "url": f"/showcase/{row.token}",
+    return {"id": str(row.id), "token": raw, "url": f"/showcase/{raw}",
             "expiresAt": row.expires_at.isoformat()}
 
 
@@ -5420,7 +5423,7 @@ async def showcase_by_link(token: str, db: AsyncSession = Depends(get_db)) -> di
     собой. Аноним с ссылкой смотрит, но не действует.
     """
     row = (await db.execute(select(PulseViewLink).where(
-        PulseViewLink.token == token))).scalar_one_or_none()
+        PulseViewLink.token == hashlib.sha256(token.encode()).hexdigest()))).scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if row is None or row.revoked or (row.expires_at and row.expires_at < now):
         # Одинаковый ответ на «нет», «отозвана» и «истекла»: подсказывать, что

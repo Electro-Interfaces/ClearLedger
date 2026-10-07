@@ -9,13 +9,16 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
 from app.auth import (
-    create_access_token,
+    bearer_scheme,
+    decode_token,
+    token_for,
     get_current_user,
     hash_password,
     resolve_member_modules,
@@ -115,7 +118,7 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
                         action="auth.login", target=_client_ip(request))
     await db.commit()
 
-    token = create_access_token(str(user.id), user.email)
+    token = token_for(user)
     return TokenResponse(
         access_token=token,
         user=_user_response(user),
@@ -144,6 +147,11 @@ async def demo_session(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Демо-вход не включён")
     if request.headers.get("X-Demo-Context") != "cabinet":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Демо-вход — только из кабинета")
+    # Заголовок подделывается, поэтому при заданном общем секрете кромка кабинета
+    # обязана прислать и его (аудит 07.10.2026).
+    secret = os.environ.get("DEMO_SPACE_SECRET") or ""
+    if secret and not secrets.compare_digest(request.headers.get("X-Demo-Secret") or "", secret):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Демо-вход — только из кабинета")
 
     user = (await db.execute(select(User).where(
         func.lower(User.email) == email))).scalar_one_or_none()
@@ -153,7 +161,7 @@ async def demo_session(
     user.last_seen_at = datetime.now(timezone.utc)
     await db.commit()
     return TokenResponse(
-        access_token=create_access_token(str(user.id), user.email),
+        access_token=token_for(user),
         user=_user_response(user),
     )
 
@@ -247,6 +255,9 @@ async def reset_password(
     user.password_hash = hash_password(body.password)
     user.reset_token_hash = None
     user.reset_token_expires = None
+    # Новый пароль гасит все прежние входы: кто вошёл со старым (утёкшим) паролем,
+    # остаётся без сессии.
+    user.token_version = (user.token_version or 0) + 1
     if user.company_id is not None:
         await log_audit(db, actor=user, company_id=user.company_id,
                         action="auth.password_reset")
@@ -296,7 +307,7 @@ async def register(
     db.add(UserCompany(user_id=user.id, company_id=company_uuid))
     await db.flush()
 
-    token = create_access_token(str(user.id), user.email)
+    token = token_for(user)
     return TokenResponse(
         access_token=token,
         user=_user_response(user),
@@ -304,13 +315,28 @@ async def register(
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(current_user: User = Depends(get_current_user)):
-    """Продлить сессию — выдаёт новый JWT на основе текущего валидного."""
-    token = create_access_token(str(current_user.id), current_user.email)
+async def refresh_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    current_user: User = Depends(get_current_user),
+):
+    """Продлить сессию — новый JWT с тем же моментом входа по паролю: продление не
+    тянет сессию дальше `MAX_SESSION_DAYS` от настоящего входа (аудит 07.10.2026)."""
+    payload = decode_token(credentials.credentials) if credentials else {}
+    token = token_for(current_user, payload.get("at"))
     return TokenResponse(
         access_token=token,
         user=_user_response(current_user),
     )
+
+
+@router.post("/logout-all")
+async def logout_all(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Выйти со всех устройств: все выданные токены этой учётной записи гаснут."""
+    current_user.token_version = (current_user.token_version or 0) + 1
+    if current_user.company_id is not None:
+        await log_audit(db, actor=current_user, company_id=current_user.company_id, action="auth.logout_all")
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/me", response_model=MeResponse)

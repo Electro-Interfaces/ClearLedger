@@ -119,6 +119,11 @@ export function logout(): void {
   api.clearToken()
 }
 
+/** Выйти со всех устройств: все выданные токены учётной записи гаснут (и этот). */
+export async function logoutAll(): Promise<void> {
+  try { await api.post('/api/auth/logout-all') } finally { api.clearToken() }
+}
+
 /** Запросить восстановление пароля — письмо со ссылкой на email. */
 export async function forgotPassword(email: string): Promise<void> {
   await api.post('/api/auth/forgot-password', { email })

@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -729,7 +730,8 @@ async def recording_ingest(
     """
     from app.services import file_store
 
-    if not settings.conf_ingest_token or token != settings.conf_ingest_token:
+    # Сравнение за постоянное время: по времени ответа `!=` секрет подбирается посимвольно.
+    if not settings.conf_ingest_token or len(settings.conf_ingest_token) < 16             or not secrets.compare_digest(str(token or ""), settings.conf_ingest_token):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Ключ приёма не подошёл")
     сессия = (await db.execute(select(ConfSession).where(ConfSession.room == room)
                                .order_by(ConfSession.started_at.desc()))).scalars().first()
