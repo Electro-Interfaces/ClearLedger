@@ -12,6 +12,8 @@ import { getProjectCase, FUNNEL_STAGES, type SiteDetail, type GateState } from '
 import { getIntegration } from '@/services/projectIntegrationService'
 import { GanttChart, type GanttGroup } from './GanttChart'
 import { ruDate, dur } from './ganttTime'
+import { itemRows } from './ganttItems'
+import { ROLE_NAMES } from './IntegrationProjectPanels'
 
 const PHASES = [
   { key: 'scenario', label: 'Сценарий', stages: ['lead', 'screening'] },
@@ -63,6 +65,7 @@ export function IntegrationGantt({ site, companyId, onStage }: { site: SiteDetai
         slot: slot >= 0 ? slot : undefined,
         slotTitle: state === 'future' ? `${g.stageLabel}: впереди, пунктов ${req.length}` : `${g.stageLabel}: осталось ${req.length - reqDone} из ${req.length}`,
         onOpen: onStage && (() => onStage(`int_${st}`)),
+        children: itemRows(st, g.items, state, start, now, (r) => ROLE_NAMES[r] ?? r, onStage && (() => onStage(`int_${st}`))),
       }
     }),
   }))

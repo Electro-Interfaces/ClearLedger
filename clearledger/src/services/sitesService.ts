@@ -1005,8 +1005,9 @@ export interface ProjectRoadmap {
     phase: string | null; phaseLabel: string
     state: 'done' | 'current' | 'stopped' | 'waiting' | 'unknown'
     date: string | null
-    gateDone: number; gateTotal: number; blocking: string[]
-    items: { label: string; done: boolean; required: boolean; waived?: boolean }[]
+    gateDone: number; gateTotal: number; blocking: string[]; normDays?: number
+    items: { key?: string; label: string; done: boolean; required: boolean; waived?: boolean
+      confirmedAt?: string | null; confirmedBy?: string | null; role?: string | null; needsConfirmation?: boolean }[]
   }[]
   tracks: {
     key: string; kind: 'track'; phase: string; label: string

@@ -1655,11 +1655,15 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
             "state": st,
             "date": site.stage_since if st == "current" else None,
             "gateDone": g["done"], "gateTotal": g["total"], "blocking": blocking,
+            "normDays": norm_days(stage),
             # `waived` — обязательный пункт, с которого сняли обязательность. Без
             # него схема продолжала бы писать «держит переход» там, где переход
             # уже открыт под чью-то подпись.
-            "items": [{"label": i["label"], "done": i["done"], "required": i["required"],
-                       "waived": i["waived"]}
+            # Дата и автор подтверждения, служба — для подэтапов на Ганте (МАГ 07.10.2026).
+            "items": [{"key": i["key"], "label": i["label"], "done": i["done"], "required": i["required"],
+                       "waived": i["waived"], "confirmedAt": i.get("confirmedAt"),
+                       "confirmedBy": i.get("confirmedBy"), "role": i.get("role"),
+                       "needsConfirmation": i.get("needsConfirmation")}
                       for i in g["items"]],
         })
 

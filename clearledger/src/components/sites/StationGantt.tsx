@@ -15,7 +15,8 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getProjectRoadmap, getSiteEvents, type SiteDetail } from '@/services/sitesService'
 import { GanttChart, type GanttGroup, type GanttRow, type GanttState } from './GanttChart'
-import { ruDate, dur } from './ganttTime'
+import { ruDate, dur, DAY } from './ganttTime'
+import { itemRows } from './ganttItems'
 
 const TRACK_MARK: Record<string, string> = {
   done: 'bg-emerald-500', current: 'bg-primary', overdue: 'bg-red-500', failed: 'bg-red-500', waiting: 'bg-muted-foreground',
@@ -72,6 +73,8 @@ export function StationGantt({ site, companyId, onStage }: { site: SiteDetail; c
         slot: slot >= 0 ? slot : undefined,
         slotTitle: `${s.label}: ${state === 'future' ? 'впереди' : 'текущая'}, чек-лист ${s.gateDone}/${s.gateTotal}`,
         onOpen: onStage && (() => onStage(s.key)),
+        normMs: s.normDays ? s.normDays * DAY : undefined,
+        children: itemRows(s.key, s.items, state, list[0]?.start ?? null, now, (r) => r, onStage && (() => onStage(s.key))),
       }
     })
     const tracks: GanttRow[] = d.tracks.filter((t) => t.phase === ph.key && t.state !== 'empty').map((t) => {
