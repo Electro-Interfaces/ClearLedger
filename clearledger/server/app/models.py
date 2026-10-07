@@ -857,6 +857,26 @@ class SecurityEvent(Base):
     path: Mapped[str] = mapped_column(String(200), nullable=False)
     user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
     hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Что именно было: учётная запись при подборе пароля, объём выкачки (07.10.2026).
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SecurityBlock(Base):
+    """Адрес, закрытый для API после враждебного действия (`app/guard.py`).
+
+    Блок временный (`until`) и снимается руками с экрана «Безопасность» — тогда
+    `lifted_at` и кто снял: запись остаётся, чтобы был виден весь эпизод.
+    """
+
+    __tablename__ = "security_blocks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ip: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str] = mapped_column(String(300), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    lifted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lifted_by_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 # ---------------------------------------------------------------------------

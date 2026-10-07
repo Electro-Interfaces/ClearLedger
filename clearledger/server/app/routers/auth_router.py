@@ -90,6 +90,11 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
         )
 
     if user is None or not verify_password(body.password, user.password_hash):
+        # Подбор пароля к одной учётной записи — эпизод журнала безопасности и тревога,
+        # даже если адреса меняются (лимит по адресу такой подбор не видит).
+        from app import guard
+        if guard.note_login_failed(body.email, guard.client_ip(request)) >= guard.LOGIN_ALERT:
+            await guard.record("login_failed", request, detail=f"учётная запись {body.email[:120]}")
         # Неудачную попытку по СУЩЕСТВУЮЩЕМУ email пишем в журнал его компании:
         # админ должен видеть, что в учётку ломятся. Несуществующие email не пишем —
         # журнал не место для перебора чужих адресов.

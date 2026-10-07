@@ -341,14 +341,39 @@ async def rate_limit_public(request, call_next):
 
     Стоит перед остальными обработчиками намеренно: смысл лимита в том, чтобы
     перебор не доходил до проверки пароля и до выборки по токену."""
+    from fastapi.responses import JSONResponse
+    from app import guard
     from app.rate_limit import check
+
+    # Враждебные действия снаружи (`app/guard.py`): заблокированный адрес, инструмент
+    # взлома, ловушка — до всякой работы. Ловушка не своя ручка: её адрес nginx отдаёт
+    # сюда только для путей сканеров вне API.
+    path = request.url.path
+    if path.startswith("/api/") and path != "/api/security/trap":
+        if await guard.blocked(guard.client_ip(request)):
+            return JSONResponse(status_code=403, content={"detail": "Доступ с этого адреса временно закрыт"})
+        if guard.is_bad_ua(request.headers.get("user-agent")):
+            await guard.record("bad_ua", request, block=True)
+            return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+        if guard.is_trap(path):
+            await guard.record("trap", request, block=True)
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
     blocked, event = check(request)
     if blocked is not None:
         if event is not None:
             await _log_security_event(event)
+            await guard.record("rate_limited", request, hits=int(event.get("hits") or 0),
+                               detail=str(event.get("scope") or ""))
         return blocked
-    return await call_next(request)
+    response = await call_next(request)
+    if path.startswith("/api/"):
+        episode = guard.note_response(request, response.status_code)
+        if episode is not None:
+            kind, hits = episode
+            await guard.record("probe" if kind.startswith("probe") else kind, request, hits=hits,
+                               detail=f"{hits} запросов за минуту", block=kind == "probe_block")
+    return response
 
 
 async def _log_security_event(event: dict) -> None:
@@ -517,6 +542,8 @@ app.include_router(mail_router.router, prefix=API_PREFIX)
 # Канал ОРП в бухгалтерию: расширение TradeLedger забирает пакеты по HTTP,
 # без каталога обмена на сервере 1С.
 app.include_router(tl_channel_router.router, prefix=API_PREFIX)
+from app.routers import security_router  # noqa: E402 — журнал безопасности и ловушка
+app.include_router(security_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")

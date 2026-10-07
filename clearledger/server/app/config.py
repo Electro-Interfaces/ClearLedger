@@ -147,6 +147,10 @@ class Settings(BaseSettings):
     # На проде SMTP_HOST=10.10.70.51 (внутренний IP хоста), 587 STARTTLS,
     # SMTP_SERVERNAME=mail.dataworker.ru для проверки TLS-сертификата.
     # Пусто → dev-режим: ссылка приглашения печатается в лог.
+    # Тревоги безопасности в Telegram (бот алертов инфраструктуры, через прокси сети).
+    security_tg_token: str = ""
+    security_tg_chat: str = ""
+    security_tg_proxy: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
