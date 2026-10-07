@@ -200,8 +200,11 @@ async def _alert(text: str) -> None:
         try:
             import httpx
             async with httpx.AsyncClient(proxy=settings.security_tg_proxy or None, timeout=15) as c:
-                await c.post(f"https://api.telegram.org/bot{settings.security_tg_token}/sendMessage",
-                             json={"chat_id": settings.security_tg_chat, "text": full})
+                r = await c.post(f"https://api.telegram.org/bot{settings.security_tg_token}/sendMessage",
+                                 json={"chat_id": settings.security_tg_chat, "text": full})
+                # Telegram отвечает 200 только на доставку: 401 (токен сменили) и 400 (чат
+                # не тот) без этой проверки проходили бы молча, как «ушло».
+                r.raise_for_status()
         except Exception:  # noqa: BLE001
             logger.warning("Тревога в Telegram не ушла", exc_info=True)
 
