@@ -970,13 +970,14 @@ function MemberCard({
                 {resetSessions.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <LogOut className="h-3 w-3" />}
                 Сбросить все входы
               </Button>
-              <Button variant="outline" size="sm" className="h-7 gap-1 text-xs"
+              {/* «Снять второй фактор» — когда двухэтапный вход включат (МАГ 07.10.2026: пока нет). */}
+              {import.meta.env.VITE_TWOFA === '1' && <Button variant="outline" size="sm" className="h-7 gap-1 text-xs"
                 title="Телефон с приложением-аутентификатором потерян: снять двухэтапный вход"
                 disabled={reset2fa.isPending}
                 onClick={() => { if (window.confirm(`Снять двухэтапный вход у ${u.email}? Его входы тоже будут сброшены.`)) reset2fa.mutate() }}>
                 {reset2fa.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
                 Снять второй фактор
-              </Button>
+              </Button>}
               <p className="text-[11px] text-muted-foreground">
                 Одноразовая ссылка установки пароля. «Ссылка для входа» — скопировать и
                 передать мессенджером, действует 24 часа. «Выслать доступ письмом» —

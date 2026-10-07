@@ -17,6 +17,9 @@ import { useState } from 'react'
 import { Bell, Bot, LogOut, Moon, RefreshCw, ShieldCheck, Sun, User, Video } from 'lucide-react'
 import { logoutAll } from '@/services/authService'
 import { TwoFactorDialog } from './TwoFactorDialog'
+
+/** Двухэтапный вход в меню пользователя — выключено до решения МАГа. */
+const TWOFA_IN_MENU = import.meta.env.VITE_TWOFA === '1'
 import { toast } from 'sonner'
 import { startMeeting } from '@/services/conferenceService'
 import { isDemoMode } from '@/services/apiClient'
@@ -187,7 +190,9 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
           )}
           {/* Версия здесь, а не мелкой строкой в подвале: это первое, что
               спрашивают, когда «у меня выглядит иначе». Рядом — способ обновиться. */}
-          {!isDemoMode() && (
+          {/* «Двухэтапный вход» (TOTP) готов в коде, в меню не выводим — решение МАГа
+              07.10.2026: пока не включаем. Вернуть: показать MenuRow с ShieldCheck → setTwofaOpen. */}
+          {TWOFA_IN_MENU && !isDemoMode() && (
             <MenuRow icon={ShieldCheck} title="Двухэтапный вход" note="Код из приложения при входе"
               onSelect={() => setTwofaOpen(true)} />
           )}
