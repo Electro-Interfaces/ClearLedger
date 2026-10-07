@@ -44,7 +44,11 @@ export function GanttChart({ groups, legend, now }: { groups: GanttGroup[]; lege
   const rows = groups.flatMap((g) => g.rows)
   const times = rows.flatMap((r) => [...r.segments.flatMap((s) => [s.start, s.end]), ...(r.marks ?? []).map((m) => m.at)])
   const t0 = Math.min(...(times.length ? times : [now - DAY]), now)
-  const t1 = Math.max(...times, now)
+  // Будущая дата (срок договора через полгода) не растягивает шкалу: иначе месяцы
+  // факта сжимаются в полоску у края (проверка на «Томилино» 07.10.2026). Вперёд —
+  // не дальше четверти прожитого, дальние даты — стрелкой у края с подписью.
+  const reach = now + Math.max((now - t0) * 0.25, DAY)
+  const t1 = Math.max(...times.filter((t) => t <= reach), now)
   const pad = Math.max((t1 - t0) * 0.04, 0.5 * H)
   const from = t0 - pad
   const to = t1 + pad
@@ -135,7 +139,13 @@ export function GanttChart({ groups, legend, now }: { groups: GanttGroup[]; lege
                         <div className={`absolute top-1/2 h-6 -translate-y-1/2 rounded border border-dashed ${r.state === 'future' ? 'border-muted-foreground/40' : 'border-primary/60 bg-primary/10'}`}
                           style={{ left: `calc(${past * 100 + r.slot * slotW}% + 2px)`, width: `calc(${slotW}% - 4px)` }} title={r.slotTitle} />
                       )}
-                      {(r.marks ?? []).map((m) => (
+                      {(r.marks ?? []).filter((m) => m.at > to).map((m) => (
+                        <span key={m.key} className="absolute top-1/2 -translate-x-full -translate-y-1/2 whitespace-nowrap rounded border bg-background px-1 text-[10px] text-muted-foreground"
+                          style={{ left: `${past * 100}%` }} title={m.title}>
+                          <span className={`mr-1 inline-block h-2 w-2 rotate-45 ${m.cls ?? 'bg-foreground'}`} />{ruDate(m.at)}.{String(new Date(m.at).getFullYear()).slice(2)} →
+                        </span>
+                      ))}
+                      {(r.marks ?? []).filter((m) => m.at <= to).map((m) => (
                         <span key={m.key} className={`absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 border border-background shadow ${m.cls ?? 'bg-white'}`}
                           style={{ left: pct(m.at) }} title={m.title} />
                       ))}
