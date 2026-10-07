@@ -95,6 +95,14 @@ def _window(store: dict[str, deque[float]], key: str, now: float, span: int) -> 
     return hits
 
 
+def _internal(ip: str) -> bool:
+    import ipaddress
+    try:
+        return ipaddress.ip_address(ip).is_private or ipaddress.ip_address(ip).is_loopback
+    except ValueError:
+        return True  # непонятный адрес — не блокируем вслепую
+
+
 def is_trap(path: str) -> bool:
     if path.startswith("/api/"):
         return bool(API_TRAP_RE.match(path))
@@ -143,6 +151,10 @@ async def record(kind: str, request: Request | None = None, *, ip: str | None = 
         async with async_session_factory() as db:
             db.add(SecurityEvent(kind=kind, scope="guard", ip=ip, path=path, user_agent=ua or None,
                                  hits=hits, detail=(detail or "")[:1000] or None))
+            # Внутренние адреса не блокируем: за 10.10.70.50 (VPN) — вся команда, за
+            # rproxy — весь внешний трафик при сбое заголовка. Эпизод и тревога остаются.
+            if block and _internal(ip):
+                block = False
             if block and ip not in _blocks:
                 until = datetime.now(timezone.utc) + timedelta(seconds=BLOCK_SECONDS)
                 db.add(SecurityBlock(ip=ip, until=until, reason=f"{kind}: {path}"[:300]))

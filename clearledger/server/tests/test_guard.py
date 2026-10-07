@@ -41,3 +41,8 @@ def test_подбор_пароля_по_учётной_записи():
     guard._login.clear()
     n = [guard.note_login_failed("A@x.ru", f"1.1.1.{i}") for i in range(guard.LOGIN_ALERT)]
     assert n[-1] == guard.LOGIN_ALERT  # адреса меняются — счёт по учётной записи
+
+
+def test_внутренние_адреса_не_блокируются():
+    assert guard._internal("10.10.70.50") and guard._internal("172.18.0.1") and guard._internal("127.0.0.1")
+    assert not guard._internal("92.100.2.253") and guard._internal("мусор")
