@@ -13,7 +13,10 @@ import { Boxes, Loader2, CheckCircle2 } from 'lucide-react'
 export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const backTo = safeBackTo((location.state as { from?: unknown } | null)?.from)
+  // Возврат: из состояния роутера, а из публичной сборки — параметром ?next= (туда
+  // она отправляет с закрытого адреса основного приложения).
+  const backTo = safeBackTo((location.state as { from?: unknown } | null)?.from
+    ?? new URLSearchParams(location.search).get('next'))
   const { login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')

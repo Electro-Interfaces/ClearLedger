@@ -10,13 +10,17 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi.security import HTTPAuthorizationCredentials
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
 from app.auth import (
+    GATE_COOKIE,
+    clear_gate_cookie,
+    gate_ok,
+    set_gate_cookie,
     bearer_scheme,
     decode_token,
     token_for,
@@ -403,9 +407,40 @@ async def refresh_token(
     )
 
 
+@router.post("/gate", status_code=204)
+async def gate_issue(
+    response: Response,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    current_user: User = Depends(get_current_user),
+):
+    """Поставить метку входа по действующему токену — после входа и у тех, кто вошёл
+    до введения меток: им не нужно входить заново."""
+    set_gate_cookie(response, credentials.credentials)
+    response.status_code = 204
+    return response
+
+
+@router.get("/gate-check", status_code=204)
+async def gate_check(request: Request, db: AsyncSession = Depends(get_db)):
+    """Для nginx стека (auth_request): 204 — отдать приложение, 401 — публичную сборку."""
+    if not await gate_ok(request.cookies.get(GATE_COOKIE), db):
+        return Response(status_code=401)
+    return Response(status_code=204)
+
+
+@router.post("/logout", status_code=204)
+async def logout(response: Response):
+    """Снять метку входа (токен в браузере снимает само приложение)."""
+    clear_gate_cookie(response)
+    response.status_code = 204
+    return response
+
+
 @router.post("/logout-all")
-async def logout_all(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def logout_all(response: Response, current_user: User = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)):
     """Выйти со всех устройств: все выданные токены этой учётной записи гаснут."""
+    clear_gate_cookie(response)
     current_user.token_version = (current_user.token_version or 0) + 1
     if current_user.company_id is not None:
         await log_audit(db, actor=current_user, company_id=current_user.company_id, action="auth.logout_all")

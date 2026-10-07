@@ -61,6 +61,37 @@ def create_access_token(user_id: str, email: str, tv: int = 0, auth_time: int | 
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
+# Метка входа для выдачи кода приложения (пункт 6 аудита 07.10.2026): nginx стека
+# отдаёт основное приложение только с действующей меткой, остальным — публичную
+# сборку (вход, ссылки). HttpOnly — скрипт страницы её не читает; для API она не
+# годится (API по-прежнему по заголовку Authorization), поэтому подделка запросов
+# с чужого сайта через неё невозможна.
+GATE_COOKIE = "cl_gate"
+
+
+def set_gate_cookie(response, token: str) -> None:
+    response.set_cookie(
+        GATE_COOKIE, token, max_age=settings.access_token_expire_minutes * 60,
+        httponly=True, secure=settings.app_env == "prod", samesite="lax", path="/")
+
+
+def clear_gate_cookie(response) -> None:
+    response.delete_cookie(GATE_COOKIE, path="/")
+
+
+async def gate_ok(token: str | None, db: AsyncSession) -> bool:
+    """Метка входа действительна: подпись, срок, учётка есть, вход не отозван."""
+    if not token:
+        return False
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        uid = uuid.UUID(str(payload.get("sub")))
+    except Exception:  # noqa: BLE001 — любая порча метки = «нет входа»
+        return False
+    user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+    return user is not None and session_valid(payload, user)
+
+
 def token_for(user: "User", auth_time: int | None = None) -> str:
     """Токен для учётной записи с её текущей версией входа."""
     return create_access_token(str(user.id), user.email, user.token_version or 0, auth_time)

@@ -1,11 +1,11 @@
 {
   "name": "gig-fuel-ledger",
   "private": true,
-  "version": "1.2.653",
+  "version": "1.2.654",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build -c vite.public.config.ts",
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "preview": "vite preview",

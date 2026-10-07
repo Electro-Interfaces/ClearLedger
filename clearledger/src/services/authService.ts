@@ -114,9 +114,10 @@ export async function refreshToken(): Promise<TokenResponse> {
   return result
 }
 
-/** Выход */
+/** Выход: токен из браузера и метка входа (HttpOnly cookie — её снимает только сервер). */
 export function logout(): void {
   api.clearToken()
+  void fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => { /* метка истечёт сама */ })
 }
 
 /** Второй фактор входа (TOTP): состояние, начало настройки, включение, отключение. */

@@ -146,3 +146,21 @@ def test_второй_фактор_rfc6238():
     assert not totp.verify(rfc, "abc", at=59) and not totp.verify("", "287082", at=59)
     s = totp.new_secret()
     assert len(s) == 32 and totp.uri(s, "a@x.ru", "rushydro.dataworker.ru").startswith("otpauth://totp/")
+
+
+@pytest.mark.asyncio
+async def test_метка_входа_для_выдачи_кода():
+    from app import auth
+
+    class DB:
+        def __init__(self, user):
+            self.user = user
+
+        async def execute(self, _q):
+            return SimpleNamespace(scalar_one_or_none=lambda: self.user)
+    u = SimpleNamespace(id="00000000-0000-0000-0000-000000000001", email="a@x.ru", token_version=0)
+    tok = auth.create_access_token(u.id, u.email, tv=0)
+    assert await auth.gate_ok(tok, DB(u))
+    assert not await auth.gate_ok(tok, DB(SimpleNamespace(**{**u.__dict__, "token_version": 1})))  # вход отозван
+    assert not await auth.gate_ok(tok, DB(None))                                                 # учётки нет
+    assert not await auth.gate_ok(None, DB(u)) and not await auth.gate_ok("мусор", DB(u))

@@ -235,7 +235,9 @@ def note_response(request: Request, status: int) -> tuple[str, int] | None:
     """Учесть ответ: шквал отказов с адреса и объём чтения по токену. Возвращает эпизод."""
     now = time.monotonic()
     ip = client_ip(request)
-    if status in (401, 403, 404) and request.url.path.startswith("/api/"):
+    # Проверку метки входа nginx зовёт на каждую страницу — её 401 не перебор.
+    if status in (401, 403, 404) and request.url.path.startswith("/api/") \
+            and request.url.path != "/api/auth/gate-check":
         hits = _window(_probe, ip, now, PROBE_WINDOW)
         hits.append(now)
         if len(hits) >= PROBE_BLOCK:
