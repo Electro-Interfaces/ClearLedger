@@ -58,6 +58,7 @@ import { ProjectRoadmapTab } from './ProjectRoadmapTab'
 import { useOpenProject } from './useOpenProject'
 import { formatDate } from '@/lib/formatDate'
 import { IntegrationGantt } from './IntegrationGantt'
+import { StationGantt } from './StationGantt'
 import { IntegrationPassport, IntegrationChecklist, IntegrationDocuments, IntegrationWorkPlan, IntegrationAccountingFields, IntegrationPartnerContacts } from './IntegrationProjectPanels'
 
 export const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -89,7 +90,7 @@ export const PROJECT_TABS = [
 ] as const
 export type ProjectTabKey = (typeof PROJECT_TABS)[number]['k']
 export function projectTabsFor(kind: string | null | undefined) {
-  return kind === 'integration' ? PROJECT_TABS.filter((t) => !['tp', 'equipment', 'economics'].includes(t.k)) : PROJECT_TABS.filter((t) => t.k !== 'gantt')
+  return kind === 'integration' ? PROJECT_TABS.filter((t) => !['tp', 'equipment', 'economics'].includes(t.k)) : PROJECT_TABS
 }
 
 /** Рендер вкладки по ключу — чтобы вызывающий не знал про внутренние компоненты. */
@@ -109,6 +110,8 @@ export function ProjectTabContent({ tab, site, companyId, onDone, onTab }: {
   // маршрута стройки стадий больше, чем у воронки, — там открывается «Работа» как есть.
   if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId}
     onStage={onTab && ((code) => onTab('work', { pstage: code.startsWith('int_') ? code.slice(4) : null }))} />
+  if (tab === 'gantt' && site.kind !== 'integration') return <StationGantt site={site} companyId={companyId}
+    onStage={onTab && (() => onTab('work'))} />
   if (tab === 'gantt') return <IntegrationGantt site={site} companyId={companyId}
     onStage={onTab && ((code) => onTab('work', { pstage: code.startsWith('int_') ? code.slice(4) : null }))} />
   if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} onTeam={onTab && (() => onTab('team'))} />

@@ -585,8 +585,8 @@ export async function waiveSiteGate(
   return post(`/api/sites/${id}/gate/waive?company_id=${companyId}`, { key, waived, reason })
 }
 
-export async function getSiteEvents(companyId: string, id: string): Promise<SiteEvent[]> {
-  return get(`/api/sites/${id}/events`, { company_id: companyId })
+export async function getSiteEvents(companyId: string, id: string, kind?: SiteEvent['kind']): Promise<SiteEvent[]> {
+  return get(`/api/sites/${id}/events`, kind ? { company_id: companyId, kind } : { company_id: companyId })
 }
 
 export async function addSiteEvent(

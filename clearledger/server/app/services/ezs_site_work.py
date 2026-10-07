@@ -941,13 +941,17 @@ def relabel_stage_text(text: str | None, from_stage: str | None, to_stage: str |
     return f"{stage_label(from_stage, kind)} → {stage_label(to_stage, kind)}" + text[len(old):]
 
 
-async def site_events(db: AsyncSession, company_id, site_id, limit: int = 200) -> list[dict[str, Any]]:
+async def site_events(db: AsyncSession, company_id, site_id, limit: int = 200,
+                      only_kind: str | None = None) -> list[dict[str, Any]]:
+    """История проекта. `only_kind` — один вид событий без общего лимита в 200: Ганту
+    нужны ВСЕ смены стадии, а у живого проекта их вытесняют касания и правки."""
     kind = (await db.execute(select(EzsSite.kind).where(EzsSite.id == site_id))).scalar_one_or_none()
-    rows = (await db.execute(
-        select(EzsSiteEvent, User.name, User.email)
-        .outerjoin(User, User.id == EzsSiteEvent.author_user_id)
-        .where(EzsSiteEvent.company_id == company_id, EzsSiteEvent.site_id == site_id)
-        .order_by(EzsSiteEvent.created_at.desc()).limit(limit))).all()
+    q = (select(EzsSiteEvent, User.name, User.email)
+         .outerjoin(User, User.id == EzsSiteEvent.author_user_id)
+         .where(EzsSiteEvent.company_id == company_id, EzsSiteEvent.site_id == site_id))
+    if only_kind:
+        q, limit = q.where(EzsSiteEvent.kind == only_kind), 2000
+    rows = (await db.execute(q.order_by(EzsSiteEvent.created_at.desc()).limit(limit))).all()
     return [{
         "id": str(e.id), "kind": e.kind,
         "text": relabel_stage_text(e.text, e.from_stage, e.to_stage, kind) if e.kind == "stage" else e.text,

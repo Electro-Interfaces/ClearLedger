@@ -88,7 +88,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
   // оборудования и экономики площадки. Пустые вкладки читались бы как пробел в
   // данных (замечание Маркова 11.09.2026).
   const скрытые = specialized ? ['roadmap', 'gantt', 'work', 'tp', 'equipment', 'economics']
-    : s?.kind === 'integration' ? ['tp', 'equipment', 'economics'] : ['gantt']
+    : s?.kind === 'integration' ? ['tp', 'equipment', 'economics'] : []
 
   const refresh = async () => {
     // `site-roadmap` — вкладка «Схема»: без неё схема маршрута обновится, а

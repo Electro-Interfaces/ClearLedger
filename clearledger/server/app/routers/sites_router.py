@@ -1221,13 +1221,13 @@ async def waive_gate(
 
 @router.get("/{site_id}/events")
 async def get_events(
-    site_id: uuid.UUID, company_id: str = Query(...),
+    site_id: uuid.UUID, company_id: str = Query(...), kind: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """История площадки: стадии, касания, заметки, правки, импорт."""
+    """История площадки: стадии, касания, заметки, правки, импорт. `kind` — только этот вид."""
     cid = await assert_company_member(company_id, user, db)
     await _owned(db, cid, site_id)
-    return await ezs_site_work.site_events(db, cid, site_id)
+    return await ezs_site_work.site_events(db, cid, site_id, only_kind=kind)
 
 
 @router.post("/{site_id}/events", status_code=201)
