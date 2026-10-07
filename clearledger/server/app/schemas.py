@@ -62,6 +62,8 @@ Password = Annotated[str, AfterValidator(check_password)]
 class LoginRequest(BaseModel):
     email: NormEmail
     password: str = Field(min_length=4)
+    # Код из приложения-аутентификатора — если у учётки включён второй фактор.
+    otp: str | None = Field(None, max_length=12)
 
 
 class ForgotPasswordRequest(BaseModel):

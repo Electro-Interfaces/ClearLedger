@@ -854,6 +854,11 @@ function MemberCard({
     },
     onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
+  const reset2fa = useMutation({
+    mutationFn: () => userService.reset2fa(u.id, companyId),
+    onSuccess: () => toast.success('Второй фактор снят — человек входит паролем и настраивает его заново'),
+    onError: (e) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
   // Пароль утёк или телефон потерян: все входы человека гаснут, удалять его не нужно.
   const resetSessions = useMutation({
     mutationFn: () => userService.resetSessions(u.id, companyId),
@@ -964,6 +969,13 @@ function MemberCard({
                 onClick={() => { if (window.confirm(`Сбросить все входы ${u.email}? Работа в открытых окнах прервётся.`)) resetSessions.mutate() }}>
                 {resetSessions.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <LogOut className="h-3 w-3" />}
                 Сбросить все входы
+              </Button>
+              <Button variant="outline" size="sm" className="h-7 gap-1 text-xs"
+                title="Телефон с приложением-аутентификатором потерян: снять двухэтапный вход"
+                disabled={reset2fa.isPending}
+                onClick={() => { if (window.confirm(`Снять двухэтапный вход у ${u.email}? Его входы тоже будут сброшены.`)) reset2fa.mutate() }}>
+                {reset2fa.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
+                Снять второй фактор
               </Button>
               <p className="text-[11px] text-muted-foreground">
                 Одноразовая ссылка установки пароля. «Ссылка для входа» — скопировать и

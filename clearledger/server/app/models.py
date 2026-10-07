@@ -137,6 +137,12 @@ class User(Base):
         Integer, nullable=False, default=0, server_default=text("0")
     )
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Второй фактор: секрет TOTP (зашифрован) и включён ли он. Секрет без флага —
+    # настройка начата, но код ещё не подтверждён.
+    totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     # Когда человека можно трогать. Пространство растянуто от Владивостока до
     # Москвы, и регламентное напоминание не бывает срочнее сна: в тишину оно не
     # пропускается, а сдвигается на начало ближайшего окна. Пояс — имя IANA, а

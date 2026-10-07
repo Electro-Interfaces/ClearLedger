@@ -76,6 +76,14 @@ async def create_audit_event(
     return _audit_response(event)
 
 
+async def _is_admin(user: User, cid: uuid.UUID, db: AsyncSession) -> bool:
+    if user.is_superadmin:
+        return True
+    role = (await db.execute(select(UserCompany.role).where(
+        UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
+    return role == "admin"
+
+
 @router.get("", response_model=list[AuditEventResponse])
 async def list_audit_events(
     company_id: str | None = Query(None),
@@ -101,6 +109,12 @@ async def list_audit_events(
         if cid is None:
             raise HTTPException(status_code=400, detail="Укажите company_id")
     query = query.where(AuditEvent.company_id == cid)
+
+    # Полный журнал (входы с адресами, действия коллег) — только админу компании.
+    # Сотрудник видит свои события и историю конкретной записи, которую ему
+    # показывает карточка (аудит 07.10.2026: с чужой учёткой журнал был разведкой).
+    if not await _is_admin(current_user, cid, db) and not entry_id:
+        user_id = str(current_user.id)
 
     if action:
         query = query.where(AuditEvent.action == action)
@@ -143,6 +157,8 @@ async def activity_summary(
     человека (доля дней с действиями за окно)."""
     from sqlalchemy import text as _sql
     cid = await assert_company_member(company_id, current_user, db)
+    if not await _is_admin(current_user, cid, db):
+        raise HTTPException(status_code=403, detail="Сводка активности доступна администратору компании")
     p = {"cid": str(cid), "days": days}
     totals = (await db.execute(_sql("""
         select count(*) filter (where action='auth.login') as logins,

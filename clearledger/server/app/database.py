@@ -5029,6 +5029,8 @@ async def create_all() -> None:
             "ALTER TABLE conf_presence ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ",
             "ALTER TABLE conf_presence ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
             "ALTER TABLE market_players ADD COLUMN IF NOT EXISTS status_note TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_logins INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ",
             "ALTER TABLE security_events ADD COLUMN IF NOT EXISTS detail TEXT",

@@ -627,6 +627,33 @@ async def reset_sessions(
     return {"ok": True}
 
 
+@router.post("/{user_id}/2fa/reset")
+async def reset_2fa(
+    user_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Снять второй фактор (потерян телефон). Входы при этом тоже гаснут: войти —
+    паролем, а второй фактор человек настроит заново."""
+    cid = await require_company_admin(company_id, current_user, db)
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
+    user = await db.get(User, uid)
+    if user is None or not await _is_member(uid, cid, db):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+    if user.is_superadmin and not current_user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Второй фактор суперадмина снимает только суперадмин")
+    user.totp_enabled = False
+    user.totp_secret = None
+    user.token_version = (user.token_version or 0) + 1
+    await log_audit(db, actor=current_user, company_id=cid, action="auth.2fa_reset", target=user.email)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.post("/{user_id}/reset-link")
 async def issue_reset_link(
     user_id: str,

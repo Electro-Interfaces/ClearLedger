@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +25,7 @@ from app.auth import (
     resolve_member_modules,
     verify_password,
 )
+from app import totp
 from app.database import get_db
 from app.services import oversight
 from app.models import Company, Counterparty, User, UserCompany
@@ -66,6 +68,8 @@ async def _pending_invite(email: str, db: AsyncSession):
         return None
     return inv
 
+
+OTP_REQUIRED = "Введите код из приложения-аутентификатора"
 
 # Блокировка учётки после серии неудачных входов (аудит 07.10.2026).
 LOCK_AFTER_FAILURES = 10
@@ -138,7 +142,15 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     # Учётка под блокировкой после серии неудач: пароль даже не проверяем, а ответ —
     # тот же, что на неверный пароль, чтобы не подсказывать подбирающему (аудит 07.10.2026).
     locked = user is not None and user.locked_until is not None and user.locked_until > now
-    if locked or user is None or not verify_password(body.password, user.password_hash):
+    password_ok = (not locked and user is not None and verify_password(body.password, user.password_hash))
+    # Второй фактор: пароль верен, но кода нет — просим код, попытку неудачей не считаем
+    # (это обычный первый шаг входа). Неверный код — неудача, как неверный пароль.
+    if password_ok and user.totp_enabled and not body.otp:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=OTP_REQUIRED,
+                            headers={"X-Need-OTP": "1"})
+    otp_ok = (not password_ok or not user.totp_enabled
+              or totp.verify(totp.unseal(user.totp_secret), body.otp or ""))
+    if not password_ok or not otp_ok:
         # Подбор пароля к одной учётной записи — эпизод журнала безопасности и тревога,
         # даже если адреса меняются (лимит по адресу такой подбор не видит).
         if guard.note_login_failed(body.email, guard.client_ip(request)) >= guard.LOGIN_ALERT:
@@ -399,6 +411,57 @@ async def logout_all(current_user: User = Depends(get_current_user), db: AsyncSe
         await log_audit(db, actor=current_user, company_id=current_user.company_id, action="auth.logout_all")
     await db.commit()
     return {"ok": True}
+
+
+class OtpCode(BaseModel):
+    code: str = Field(min_length=6, max_length=12)
+
+
+@router.get("/2fa")
+async def twofa_status(current_user: User = Depends(get_current_user)):
+    """Включён ли второй фактор входа у текущего пользователя."""
+    return {"enabled": bool(current_user.totp_enabled)}
+
+
+@router.post("/2fa/setup")
+async def twofa_setup(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Начать настройку: новый секрет. Включится только после подтверждения кодом."""
+    if current_user.totp_enabled:
+        raise HTTPException(409, "Второй фактор уже включён — сначала отключите его")
+    secret = totp.new_secret()
+    current_user.totp_secret = totp.seal(secret)
+    await db.commit()
+    from app.config import get_settings
+    issuer = get_settings().app_public_url.replace("https://", "").split("/")[0] or "Пространство"
+    return {"secret": secret, "uri": totp.uri(secret, current_user.email, issuer)}
+
+
+@router.post("/2fa/enable")
+async def twofa_enable(body: OtpCode, current_user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
+    """Подтвердить настройку кодом из приложения — с этого момента вход требует код."""
+    if not current_user.totp_secret or not totp.verify(totp.unseal(current_user.totp_secret), body.code):
+        raise HTTPException(400, "Код не подошёл — проверьте время на телефоне и введите свежий")
+    current_user.totp_enabled = True
+    if current_user.company_id is not None:
+        await log_audit(db, actor=current_user, company_id=current_user.company_id, action="auth.2fa_enabled")
+    await db.commit()
+    return {"enabled": True}
+
+
+@router.post("/2fa/disable")
+async def twofa_disable(body: OtpCode, current_user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
+    """Отключить второй фактор — только с действующим кодом: с одного украденного токена
+    защиту не снять."""
+    if not current_user.totp_enabled or not totp.verify(totp.unseal(current_user.totp_secret), body.code):
+        raise HTTPException(400, "Код не подошёл")
+    current_user.totp_enabled = False
+    current_user.totp_secret = None
+    if current_user.company_id is not None:
+        await log_audit(db, actor=current_user, company_id=current_user.company_id, action="auth.2fa_disabled")
+    await db.commit()
+    return {"enabled": False}
 
 
 @router.get("/me", response_model=MeResponse)

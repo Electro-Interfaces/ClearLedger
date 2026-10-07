@@ -134,3 +134,15 @@ def test_объём_выгрузок_копится_по_пользовател�
     assert cnt == 4 and total == 40000
     cnt, total = guard.note_export("u1", 20000)
     assert cnt == 5 and total == 60000  # перевалило EXPORT_ROWS — будет тревога
+
+
+def test_второй_фактор_rfc6238():
+    import base64
+    from app import totp
+    rfc = base64.b32encode(b"12345678901234567890").decode()
+    assert totp.verify(rfc, "287082", at=59)
+    assert totp.verify(rfc, "287082", at=59 + 30)  # соседний шаг — допуск часов телефона
+    assert not totp.verify(rfc, "287082", at=59 + 120)
+    assert not totp.verify(rfc, "abc", at=59) and not totp.verify("", "287082", at=59)
+    s = totp.new_secret()
+    assert len(s) == 32 and totp.uri(s, "a@x.ru", "rushydro.dataworker.ru").startswith("otpauth://totp/")

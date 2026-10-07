@@ -122,6 +122,11 @@ export async function setMemberModules(
  *  Одноразовая, 24 часа; выдаётся админом компании, попадает в журнал.
  *  `send` — выслать ту же ссылку письмом «вам открыт доступ» (тогда неделя):
  *  приглашение для человека, чью учётку завели за него. */
+/** Снять второй фактор сотрудника (потерян телефон); входы при этом тоже гаснут. */
+export async function reset2fa(id: string, companyId: string): Promise<{ ok: boolean }> {
+  return post(`/api/users/${id}/2fa/reset?company_id=${encodeURIComponent(companyId)}`)
+}
+
 /** Сбросить все входы сотрудника: его токены гаснут, войти — заново паролем. */
 export async function resetSessions(id: string, companyId: string): Promise<{ ok: boolean }> {
   return post(`/api/users/${id}/sessions/reset?company_id=${encodeURIComponent(companyId)}`)

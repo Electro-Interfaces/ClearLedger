@@ -72,8 +72,8 @@ export interface TokenResponse {
 }
 
 /** Логин по email + пароль */
-export async function login(email: string, password: string): Promise<TokenResponse> {
-  const result = await api.post<TokenResponse>('/api/auth/login', { email, password })
+export async function login(email: string, password: string, otp?: string): Promise<TokenResponse> {
+  const result = await api.post<TokenResponse>('/api/auth/login', otp ? { email, password, otp } : { email, password })
   api.setToken(result.access_token)
   return result
 }
@@ -118,6 +118,14 @@ export async function refreshToken(): Promise<TokenResponse> {
 export function logout(): void {
   api.clearToken()
 }
+
+/** Второй фактор входа (TOTP): состояние, начало настройки, включение, отключение. */
+export const twofaStatus = () => api.get<{ enabled: boolean }>('/api/auth/2fa')
+export const twofaSetup = () => api.post<{ secret: string; uri: string }>('/api/auth/2fa/setup')
+export const twofaEnable = (code: string) => api.post<{ enabled: boolean }>('/api/auth/2fa/enable', { code })
+export const twofaDisable = (code: string) => api.post<{ enabled: boolean }>('/api/auth/2fa/disable', { code })
+/** Сервер просит код второго фактора: пароль верен, нужен код из приложения. */
+export const OTP_REQUIRED = 'Введите код из приложения-аутентификатора'
 
 /** Выйти со всех устройств: все выданные токены учётной записи гаснут (и этот). */
 export async function logoutAll(): Promise<void> {
