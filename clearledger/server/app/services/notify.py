@@ -137,7 +137,10 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
     try:
         from app.services import web_push
 
-        web_push.push_room_async(room.id, SECRETARY_NAME, text, secretary.id,
+        # В push разметки ссылок нет: «[№68 «…»](/docs/…)» → «№68 «…»».
+        import re
+        plain = re.sub(r"\[([^\]]+)\]\([^)\s]+\)", r"\1", text)
+        web_push.push_room_async(room.id, SECRETARY_NAME, plain, secretary.id,
                                  ttl=ttl, urgency=urgency)
     except Exception as e:  # noqa: BLE001
         logger.debug("Напоминание не ушло в push: %s", e)

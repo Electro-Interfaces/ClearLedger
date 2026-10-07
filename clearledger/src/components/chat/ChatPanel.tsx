@@ -137,8 +137,19 @@ function highlightMentions(text: string, keyPrefix: number): React.ReactNode {
       ? <span key={`${keyPrefix}-${j}`} className="font-semibold text-blue-400">{part}</span>
       : part)
 }
-/** Ссылки + @упоминания */
+/** Ссылки + @упоминания. `[текст](/путь)` — ссылка внутри пространства (так «Секретарь»
+ *  называет задачу в сводке): открывается в этом же окне без перезагрузки. */
 function linkifyText(text: string): React.ReactNode {
+  const md = text.split(/(\[[^\]]+\]\((?:\/|https?:\/\/)[^)\s]+\))/g)
+  if (md.length > 1) return md.map((chunk, k) => {
+    const m = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(chunk)
+    if (!m) return <span key={k}>{linkifyText(chunk)}</span>
+    const [, label, href] = m
+    return href.startsWith('/')
+      ? <a key={k} href={href} className="text-blue-400 underline"
+          onClick={(e) => { e.preventDefault(); window.history.pushState({}, '', href); window.dispatchEvent(new PopStateEvent('popstate')) }}>{label}</a>
+      : <a key={k} href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">{label}</a>
+  })
   const parts = text.split(/(https?:\/\/[^\s]+)/g)
   return parts.map((part, i) =>
     /^https?:\/\//.test(part)
