@@ -23,6 +23,40 @@ def _normalize_email(value: str) -> str:
 NormEmail = Annotated[EmailStr, AfterValidator(_normalize_email)]
 
 
+# Пароль человека: единое правило для регистрации, сброса и приглашения
+# (аудит 07.10.2026 — было 4–6 символов без проверок, пароль мог совпасть с email).
+MIN_PASSWORD_LEN = 10
+_COMMON_PASSWORDS: set[str] = set()
+
+
+def _load_common_passwords() -> set[str]:
+    global _COMMON_PASSWORDS
+    if _COMMON_PASSWORDS:
+        return _COMMON_PASSWORDS
+    import os
+    path = os.path.join(os.path.dirname(__file__), "common_passwords.txt")
+    try:
+        with open(path, encoding="utf-8") as f:
+            _COMMON_PASSWORDS = {line.strip().lower() for line in f if line.strip()}
+    except OSError:
+        _COMMON_PASSWORDS = set()
+    return _COMMON_PASSWORDS
+
+
+def check_password(password: str) -> str:
+    """Проверить пароль на длину, предел bcrypt и частоту. Бросает ValueError."""
+    if len(password) < MIN_PASSWORD_LEN:
+        raise ValueError(f"Пароль должен быть не короче {MIN_PASSWORD_LEN} символов")
+    if len(password.encode("utf-8")) > 200:
+        raise ValueError("Пароль слишком длинный")
+    if password.lower() in _load_common_passwords():
+        raise ValueError("Этот пароль слишком распространён — выберите другой")
+    return password
+
+
+Password = Annotated[str, AfterValidator(check_password)]
+
+
 # ===== Auth =====
 
 class LoginRequest(BaseModel):
@@ -36,12 +70,12 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    password: str = Field(min_length=6)
+    password: Password
 
 
 class RegisterRequest(BaseModel):
     email: NormEmail
-    password: str = Field(min_length=6)
+    password: Password
     name: str = Field(min_length=1, max_length=255)
     company_id: str
 
@@ -125,7 +159,7 @@ class UserCreate(BaseModel):
     company_id: str
     email: NormEmail
     name: str = Field(min_length=1, max_length=255)   # ФИО
-    password: str = Field(min_length=6)
+    password: Password
     role: Literal["user", "admin"] = "user"
     position: str | None = Field(None, max_length=150)  # должность
     # Кем человек заводится: свой сотрудник (по умолчанию), представитель
@@ -343,7 +377,7 @@ class AcceptPreview(BaseModel):
 
 class AcceptInvite(BaseModel):
     name: str | None = Field(None, max_length=255)
-    password: str | None = Field(None, min_length=6)
+    password: Password | None = None
     # Уточнённая приглашённым должность; пусто — остаётся из приглашения.
     position: str | None = Field(None, max_length=150)
 

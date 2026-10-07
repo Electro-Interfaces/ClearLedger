@@ -123,10 +123,10 @@ export function RegisterPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={6}
+              minLength={10}
               autoComplete="new-password"
               className={inputClass}
-              placeholder="Минимум 6 символов"
+              placeholder="Минимум 10 символов"
             />
           </div>
 

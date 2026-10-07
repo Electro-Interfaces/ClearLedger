@@ -67,6 +67,47 @@ async def _pending_invite(email: str, db: AsyncSession):
     return inv
 
 
+# Блокировка учётки после серии неудачных входов (аудит 07.10.2026).
+LOCK_AFTER_FAILURES = 10
+LOCK_MINUTES = 30
+
+
+async def _is_new_place(db: AsyncSession, user: User, ip: str | None) -> bool:
+    """Вход с адреса, с которого этот человек за 90 дней не входил. Первый вход — не «новый»."""
+    from app.models import AuditEvent
+    since = datetime.now(timezone.utc) - timedelta(days=90)
+    q = select(AuditEvent.details).where(
+        AuditEvent.user_id == str(user.id), AuditEvent.action.in_(("auth.login", "auth.login_new_ip")),
+        AuditEvent.timestamp >= since).limit(500)
+    seen = [d or "" for d in (await db.execute(q)).scalars().all()]
+    if not seen:
+        return False
+    return not any((ip or "-") == d.split(" ", 1)[0] for d in seen)
+
+
+async def _notify_new_login(db: AsyncSession, user: User, ip: str | None, ua: str) -> None:
+    """Письмо владельцу: вход с нового адреса. «Это не я» — ссылка смены пароля: новый
+    пароль гасит все прежние входы (версия токена)."""
+    raw = secrets.token_urlsafe(32)
+    user.reset_token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=24)
+    from app.config import get_settings
+    base = get_settings().app_public_url.rstrip("/")
+    when = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    text = chr(10).join([
+        "В ваше пространство выполнен вход с нового адреса.", "",
+        f"Когда: {when}", f"Адрес: {ip or '—'}", f"Браузер: {ua[:200] or '—'}", "",
+        "Если это были вы — ничего делать не нужно.",
+        "Если НЕ вы — смените пароль по ссылке (действует сутки), все входы в учётную запись "
+        "при этом будут сброшены:",
+        f"{base}/reset-password/{raw}",
+    ])
+    try:
+        await email_service.send_notice([user.email], "Вход в пространство с нового адреса", text)
+    except Exception:  # noqa: BLE001 — письмо не должно ронять вход
+        logging.getLogger("clearledger.auth").warning("Письмо о новом входе не ушло: %s", user.email, exc_info=True)
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Вход по email + пароль. Возвращает JWT."""
@@ -92,12 +133,25 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
                    "приходят вам от участников.",
         )
 
-    if user is None or not verify_password(body.password, user.password_hash):
+    from app import guard
+    now = datetime.now(timezone.utc)
+    # Учётка под блокировкой после серии неудач: пароль даже не проверяем, а ответ —
+    # тот же, что на неверный пароль, чтобы не подсказывать подбирающему (аудит 07.10.2026).
+    locked = user is not None and user.locked_until is not None and user.locked_until > now
+    if locked or user is None or not verify_password(body.password, user.password_hash):
         # Подбор пароля к одной учётной записи — эпизод журнала безопасности и тревога,
         # даже если адреса меняются (лимит по адресу такой подбор не видит).
-        from app import guard
         if guard.note_login_failed(body.email, guard.client_ip(request)) >= guard.LOGIN_ALERT:
-            await guard.record("login_failed", request, detail=f"учётная запись {body.email[:120]}")
+            await guard.record("login_failed", request, detail=f"учётная запись {body.email[:120]}",
+                               who=body.email[:120], company_id=user.company_id if user else None)
+        if user is not None and not locked:
+            user.failed_logins = (user.failed_logins or 0) + 1
+            if user.failed_logins >= LOCK_AFTER_FAILURES:
+                user.failed_logins = 0
+                user.locked_until = now + timedelta(minutes=LOCK_MINUTES)
+                await guard.record("account_locked", request, who=user.email, company_id=user.company_id,
+                                   detail=f"{LOCK_AFTER_FAILURES} неудачных входов подряд — вход закрыт на {LOCK_MINUTES} мин.")
+            await db.commit()
         # Неудачную попытку по СУЩЕСТВУЮЩЕМУ email пишем в журнал его компании:
         # админ должен видеть, что в учётку ломятся. Несуществующие email не пишем —
         # журнал не место для перебора чужих адресов.
@@ -113,9 +167,15 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     # Отметка входа: без неё карта пространства показывала «не заходили» даже у тех, кто
     # работает каждый день — раньше last_seen_at обновлял только веб-сокет чата.
     user.last_seen_at = datetime.now(timezone.utc)
+    user.failed_logins = 0
+    user.locked_until = None
+    ip = _client_ip(request)
     if user.company_id is not None:
+        new_place = await _is_new_place(db, user, ip)
         await log_audit(db, actor=user, company_id=user.company_id,
-                        action="auth.login", target=_client_ip(request))
+                        action="auth.login_new_ip" if new_place else "auth.login", target=ip)
+        if new_place:
+            await _notify_new_login(db, user, ip, request.headers.get("user-agent") or "")
     await db.commit()
 
     token = token_for(user)
@@ -255,6 +315,8 @@ async def reset_password(
     user.password_hash = hash_password(body.password)
     user.reset_token_hash = None
     user.reset_token_expires = None
+    user.failed_logins = 0
+    user.locked_until = None
     # Новый пароль гасит все прежние входы: кто вошёл со старым (утёкшим) паролем,
     # остаётся без сессии.
     user.token_version = (user.token_version or 0) + 1

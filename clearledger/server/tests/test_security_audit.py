@@ -107,3 +107,30 @@ async def test_пропуск_не_входит_под_здешней_учётк
     assert await space_bridge_router._bridge_guest(guest, DB(["vendor"]))
     assert not await space_bridge_router._bridge_guest(guest, DB(["vendor", "staff"]))
     assert not await space_bridge_router._bridge_guest(SimpleNamespace(id="s", is_superadmin=True), DB(["vendor"]))
+
+
+def test_политика_паролей():
+    from app import schemas
+    for ok in ("Корова2026!", "long-enough-pass", "x" * 10):
+        assert schemas.check_password(ok) == ok
+    for bad in ("short", "1234", "password123", "qwerty123", ""):
+        with pytest.raises(ValueError):
+            schemas.check_password(bad)
+
+
+def test_схемы_требуют_надёжный_пароль():
+    from app.schemas import RegisterRequest
+    with pytest.raises(Exception):
+        RegisterRequest(email="a@x.ru", password="123456", name="A", company_id="c")
+    r = RegisterRequest(email="a@x.ru", password="Надёжный-2026", name="A", company_id="c")
+    assert r.password == "Надёжный-2026"
+
+
+def test_объём_выгрузок_копится_по_пользователю():
+    from app import guard
+    guard._exports.clear()
+    for _ in range(4):
+        cnt, total = guard.note_export("u1", 10000)
+    assert cnt == 4 and total == 40000
+    cnt, total = guard.note_export("u1", 20000)
+    assert cnt == 5 and total == 60000  # перевалило EXPORT_ROWS — будет тревога

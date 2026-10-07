@@ -2371,7 +2371,7 @@ async def export_report(
     """
     from openpyxl import Workbook
 
-    await assert_company_product(company_id, current_user, db, "docs")
+    cid = await assert_company_product(company_id, current_user, db, "docs")
     wb = Workbook()
     wb.remove(wb.active)
 
@@ -2386,6 +2386,9 @@ async def export_report(
     _лист_шапка(wb, название, date_from, date_to, current_user,
                 примечание=примечание)
     период = f"{date_from:%d.%m.%Y} — {date_to:%d.%m.%Y}"
+    # След выгрузки: отчёт по документам за период — тоже выгрузка (аудит 07.10.2026).
+    from app.services.export_audit import log_export
+    log_export(db, cid, current_user, f"Отчёт «{название}» за {период}")
     return xlsx_response(wb, f"{название} {период}.xlsx")
 
 
@@ -2582,6 +2585,11 @@ async def export_docs(
     truncated = len(rows) > _EXPORT_LIMIT
     rows = rows[:_EXPORT_LIMIT]
     stamp = datetime.now(_BUSINESS_TIMEZONE).strftime("%Y%m%d-%H%M")
+    # След выгрузки реестра документов: до 10 000 строк уходили без следа (аудит 07.10.2026).
+    from app.services.export_audit import log_export
+    from app.utils import resolve_company_id
+    log_export(db, await resolve_company_id(company_id, db), current_user,
+               f"Реестр документов ({fmt}): {len(rows)} строк", rows=len(rows))
 
     if fmt == "xlsx":
         # Excel открывает и CSV, но склеивать из него сводную неудобно, а

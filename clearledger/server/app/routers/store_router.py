@@ -3213,6 +3213,12 @@ async def store_doc_files_archive(
                              .order_by(StoreDocFile.uploaded_at))).scalars().all()
     if not rows:
         raise HTTPException(404, "За период образов нет")
+    # Потолок архива: больше — это выкачка всего архива, а не работа с периодом.
+    if len(rows) > 2000 or sum(r.size_bytes or 0 for r in rows) > 1_500_000_000:
+        raise HTTPException(413, "Слишком большой архив — сузьте период или выберите АЗС")
+    from app.services.export_audit import log_export
+    log_export(db, cid, user, f"Архив первички {date_from or 'все'}—{date_to or 'все'}"
+               f"{f', АЗС {station_id}' if station_id else ''}: {len(rows)} файлов", rows=len(rows))
 
     upload_dir = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
     буфер = _io.BytesIO()
@@ -8906,7 +8912,10 @@ async def dedup_set_status(
 
 @router.get("/dedup/export")
 async def dedup_export(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    return await dedup_service.export_plan(db, await scope_company_id(user, db))
+    cid = await scope_company_id(user, db)
+    from app.services.export_audit import log_export
+    log_export(db, cid, user, "План устранения дублей номенклатуры")
+    return await dedup_service.export_plan(db, cid)
 
 
 # ── корректировки по команде менеджера ───────────────────────────────────────

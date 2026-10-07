@@ -33,14 +33,21 @@ async def _export_company_id(
 ) -> uuid.UUID:
     """Компания выгрузки. Обязательна: user.company_id nullable, а раньше при NULL
     фильтр не ставился вовсе и выгружались DataEntry ВСЕХ тенантов."""
+    # Выгрузка ВСЕХ записей компании — дело админа, а не любого сотрудника (аудит
+    # 07.10.2026): с чужой учёткой рядового это был готовый способ выкачки.
+    from app.routers.users_router import require_company_admin
     if company_id:
-        return await assert_company_member(company_id, current_user, db)
+        return await require_company_admin(company_id, current_user, db)
     if current_user.company_id is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail="Компания не определена: укажите company_id для выгрузки",
         )
-    return current_user.company_id
+    return await require_company_admin(str(current_user.company_id), current_user, db)
+
+
+# Потолок одной выгрузки: больше — значит выкачка, а не работа.
+EXPORT_MAX_ROWS = 100_000
 
 
 async def _fetch_entries(
@@ -53,7 +60,7 @@ async def _fetch_entries(
     if status_filter and status_filter != "all":
         query = query.where(DataEntry.status == status_filter)
 
-    query = query.order_by(DataEntry.created_at.desc())
+    query = query.order_by(DataEntry.created_at.desc()).limit(EXPORT_MAX_ROWS)
     result = await db.execute(query)
     return list(result.scalars().all())
 
@@ -117,7 +124,7 @@ async def export_json(
     cid = await _export_company_id(db, current_user, company_id)
     entries = await _fetch_entries(db, cid, status)
     data = [_entry_to_dict(e) for e in entries]
-    log_export(db, cid, current_user, f"Экспорт JSON: {len(data)} записей")
+    log_export(db, cid, current_user, f"Экспорт JSON: {len(data)} записей", rows=len(data))
     return data
 
 
@@ -167,7 +174,7 @@ async def export_excel(
     wb.save(buffer)
     buffer.seek(0)
 
-    log_export(db, cid, current_user, f"Экспорт Excel: {len(entries)} записей")
+    log_export(db, cid, current_user, f"Экспорт Excel: {len(entries)} записей", rows=len(entries))
 
     timestamp = datetime.now().strftime("%d.%m.%Y %H-%M")
     return StreamingResponse(
@@ -208,7 +215,7 @@ async def export_csv(
     for entry in entries:
         writer.writerow(_entry_to_dict(entry))
 
-    log_export(db, cid, current_user, f"Экспорт CSV: {len(entries)} записей")
+    log_export(db, cid, current_user, f"Экспорт CSV: {len(entries)} записей", rows=len(entries))
 
     timestamp = datetime.now().strftime("%d.%m.%Y %H-%M")
     content = buffer.getvalue().encode("utf-8")

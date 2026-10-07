@@ -75,6 +75,8 @@ KIND_LABEL = {
     "login_failed": "подбор пароля к учётной записи",
     "mass_read": "массовая выкачка данных пользователем",
     "rate_limited": "упор в лимит публичных ручек",
+    "mass_export": "массовая выгрузка данных пользователем",
+    "account_locked": "учётная запись заблокирована после серии неудачных входов",
 }
 
 
@@ -135,12 +137,18 @@ async def blocked(ip: str) -> bool:
 
 
 async def record(kind: str, request: Request | None = None, *, ip: str | None = None, path: str = "",
-                 hits: int = 1, detail: str | None = None, block: bool = False) -> None:
-    """Записать эпизод, при необходимости заблокировать адрес и поднять тревогу."""
+                 hits: int = 1, detail: str | None = None, block: bool = False,
+                 who: str | None = None, company_id=None) -> None:
+    """Записать эпизод, при необходимости заблокировать адрес и поднять тревогу.
+
+    `who` — учётная запись (выгрузка, подбор пароля): эпизоды склеиваются по ней, а не
+    по адресу. `company_id` — тревога уходит и админам этой компании, а не только
+    суперадминам: своих людей они знают лучше (аудит 07.10.2026).
+    """
     ip = ip or (client_ip(request) if request else "-")
     path = (path or (request.url.path if request else ""))[:200]
     ua = (request.headers.get("user-agent") or "")[:300] if request else None
-    key = f"{kind}|{ip}"
+    key = f"{kind}|{who or ip}"
     now = time.monotonic()
     if now - _said.get(key, -1e9) < EVENT_EVERY:
         return
@@ -164,13 +172,14 @@ async def record(kind: str, request: Request | None = None, *, ip: str | None = 
         logger.warning("Эпизод не записан: %s %s", kind, ip, exc_info=True)
     if now - _alerted.get(key, -1e9) >= ALERT_EVERY:
         _alerted[key] = now
-        text = (f"Безопасность: {KIND_LABEL.get(kind, kind)}\nАдрес: {ip}\nПуть: {path or '—'}"
+        text = (f"Безопасность: {KIND_LABEL.get(kind, kind)}{f'\nУчётная запись: {who}' if who else ''}"
+                f"\nАдрес: {ip}\nПуть: {path or '—'}"
                 f"{f'\nПодробно: {detail}' if detail else ''}{f'\nБраузер: {ua}' if ua else ''}"
                 f"{f'\nАдрес заблокирован на {BLOCK_SECONDS // 60} мин.' if block else ''}")
-        asyncio.create_task(_alert(text))
+        asyncio.create_task(_alert(text, company_id))
 
 
-async def _alert(text: str) -> None:
+async def _alert(text: str, company_id=None) -> None:
     """Тревога суперадминистраторам: письмо, чат «Секретаря», Telegram. Каждый канал сам по себе."""
     from app.config import get_settings
     settings = get_settings()
@@ -182,15 +191,23 @@ async def _alert(text: str) -> None:
         from app.models import User
         from app.services import email_service, notify
         async with async_session_factory() as db:
-            admins = (await db.execute(select(User).where(User.is_superadmin.is_(True),
-                                                          User.mail_only.is_(False)))).scalars().all()
+            admins = list((await db.execute(select(User).where(User.is_superadmin.is_(True),
+                                                               User.mail_only.is_(False)))).scalars().all())
+            if company_id is not None:
+                from app.models import UserCompany
+                seen = {u.id for u in admins}
+                admins += [u for u in (await db.execute(select(User).join(
+                    UserCompany, UserCompany.user_id == User.id).where(
+                    UserCompany.company_id == company_id, UserCompany.role == "admin",
+                    User.mail_only.is_(False)))).scalars().all() if u.id not in seen]
             emails = [u.email for u in admins if u.email]
             if emails:
                 await email_service.send_notice(emails, "Тревога безопасности пространства", full)
             for u in admins:
-                if u.company_id is not None:
+                cid = company_id if (company_id is not None and not u.is_superadmin) else u.company_id
+                if cid is not None:
                     try:
-                        await notify.notify_person(db, u.company_id, u, full)
+                        await notify.notify_person(db, cid, u, full)
                     except Exception:  # noqa: BLE001
                         logger.warning("Тревога в чат не ушла: %s", u.id, exc_info=True)
             await db.commit()
@@ -233,6 +250,31 @@ def note_response(request: Request, status: int) -> tuple[str, int] | None:
         if len(hits) >= READ_ALERT:
             return "mass_read", len(hits)
     return None
+
+
+EXPORT_WINDOW, EXPORT_COUNT, EXPORT_ROWS = 3600, 5, 50_000
+_exports: dict[str, deque[tuple[float, int]]] = defaultdict(deque)
+
+
+def note_export(user_id: str, rows: int) -> tuple[int, int]:
+    """Выгрузка пользователя: (выгрузок, строк) за последний час."""
+    now = time.monotonic()
+    q = _exports[user_id]
+    while q and now - q[0][0] > EXPORT_WINDOW:
+        q.popleft()
+    q.append((now, max(0, int(rows or 0))))
+    return len(q), sum(n for _, n in q)
+
+
+def token_email(auth_header: str | None) -> str | None:
+    """Чей токен (для эпизода выкачки) — по подписи, без похода в базу."""
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        return None
+    try:
+        from app.auth import decode_token
+        return str(decode_token(auth_header.split(" ", 1)[1]).get("email") or "") or None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def note_login_failed(email: str, ip: str) -> int:

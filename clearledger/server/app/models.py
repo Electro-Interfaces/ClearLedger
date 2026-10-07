@@ -132,6 +132,11 @@ class User(Base):
     token_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )
+    # Неудачные входы подряд и блокировка: после серии вход закрывается на время.
+    failed_logins: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Когда человека можно трогать. Пространство растянуто от Владивостока до
     # Москвы, и регламентное напоминание не бывает срочнее сна: в тишину оно не
     # пропускается, а сдвигается на начало ближайшего окна. Пояс — имя IANA, а

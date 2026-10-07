@@ -2324,6 +2324,9 @@ async def pulse_export(
     buf = io.StringIO()
     csv.writer(buf, delimiter=";", lineterminator=CRLF).writerows(rows)
     body = "\ufeff" + buf.getvalue()
+    from app.services.export_audit import log_export
+    log_export(db, uuid.UUID(cid), current_user, f"«Пульс», разрез {view}: {max(len(rows) - 1, 0)} строк",
+               rows=max(len(rows) - 1, 0))
     return Response(
         content=body.encode("utf-8"),
         media_type="text/csv; charset=utf-8",

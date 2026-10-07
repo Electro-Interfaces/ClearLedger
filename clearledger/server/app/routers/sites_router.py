@@ -539,6 +539,9 @@ async def export_report(
         data = await fn(db, cid, user=user, history_days=history_days)
     else:
         data = await fn(db, cid)
+    # След выгрузки реестров проектов (аудит 07.10.2026).
+    from app.services.export_audit import log_export
+    log_export(db, cid, user, f"Реестр проектов «{report}»{' (с отбором)' if filtered else ''}")
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -763,6 +766,8 @@ async def project_report_xlsx(
     site = await _owned(db, cid, site_id)
     data = project_report.project_xlsx(await project_report.project_report(db, cid, user, site))
     name = f"project_{site.project_no or site.id}.xlsx".replace(" ", "_")
+    from app.services.export_audit import log_export
+    log_export(db, cid, user, f"Отчёт по проекту {site.project_no or site.id}")
     return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f"attachment; filename=\"{quote(name)}\"; filename*=UTF-8''{quote(name)}"})
 

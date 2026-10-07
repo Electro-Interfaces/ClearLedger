@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import AuditEvent, User
 
 
-def log_export(db: AsyncSession, company_id: uuid.UUID, user: User, details: str) -> None:
+def log_export(db: AsyncSession, company_id: uuid.UUID, user: User, details: str, rows: int = 0) -> None:
     """Записать факт выгрузки.
 
     details пишем так, чтобы след читался без раскопок в коде: что выгружено,
@@ -32,3 +32,20 @@ def log_export(db: AsyncSession, company_id: uuid.UUID, user: User, details: str
         action="exported",
         details=details,
     ))
+    # Объём выгрузок человека за час: одна большая выгрузка (xlsx, zip) — один запрос,
+    # счётчик запросов её не видит. Порог — эпизод журнала безопасности и тревога
+    # суперадминам и админам компании, с именем (аудит 07.10.2026).
+    from app import guard
+    count, total = guard.note_export(str(user.id), rows or _rows_in(details))
+    if count > guard.EXPORT_COUNT or total > guard.EXPORT_ROWS:
+        import asyncio
+        asyncio.create_task(guard.record(
+            "mass_export", who=user.email, company_id=company_id, path=details[:200], hits=count,
+            detail=f"{count} выгрузок, {total} строк за час; последняя: {details}"[:900]))
+
+
+def _rows_in(details: str) -> int:
+    """Число строк из текста следа («…, 1234 строк»), если вызывающий его не передал."""
+    import re
+    m = re.search(r"(\d[\d\s]*)\s*(строк|записей|файл)", details or "")
+    return int(re.sub(r"\s", "", m.group(1))) if m else 0
