@@ -728,6 +728,42 @@ async def test_operational_edge_document_needs_no_vat_but_rejects_unknown_lines(
 
 
 @pytest.mark.asyncio
+async def test_fresh_packet_revision_raises_projection_revision(monkeypatch):
+    """Правка станции (поздняя версия пакета) поднимает ревизию записи реестра.
+
+    09.10.2026: ревизия считалась от первой доставки, и новая версия давала
+    «тот же revision с другим hash» — реестр компании не пересобирался с 24.09.
+    """
+    from app.models import EdgePacketRevision
+    monkeypatch.setattr(store_documents, "_АВТО_РЕВИЗИИ", True)
+    company_id = uuid.uuid4()
+    packet_uuid = str(uuid.uuid4())
+    document_id = str(uuid.uuid4())
+    first = datetime(2026, 9, 17, 20, 51, tzinfo=timezone.utc)
+    later = datetime(2026, 9, 24, 12, 45, tzinfo=timezone.utc)
+
+    def payload(qty):
+        return {"Документы": [{
+            "Тип": "transfer", "ИдентификаторДокумента": document_id,
+            "Товары": [{"Номенклатура": str(uuid.uuid4()), "Наименование": "Кофе",
+                        "Количество": qty}],
+        }]}
+
+    packet = SimpleNamespace(packet_uuid=packet_uuid, station_id=8, received_at=first,
+                             kind="shift", payload=payload(1))
+    revision = SimpleNamespace(packet_uuid=packet_uuid, received_at=later, payload=payload(3))
+    before = await store_documents._edge_adapter(
+        Session({EdgePacket: [packet], StoreReceipt: []}), company_id)
+    after = await store_documents._edge_adapter(
+        Session({EdgePacket: [packet], StoreReceipt: [], EdgePacketRevision: [revision]}),
+        company_id)
+    assert len(before) == len(after) == 1
+    assert before[0].revision == store_documents._revision(first)
+    assert after[0].revision == store_documents._revision(later)
+    assert after[0].content_hash != before[0].content_hash
+
+
+@pytest.mark.asyncio
 async def test_station_price_change_projects_as_revaluation():
     company_id = uuid.uuid4()
     source_uuid = str(uuid.uuid4())
