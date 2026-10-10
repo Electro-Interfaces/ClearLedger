@@ -2991,6 +2991,8 @@ async def create_all() -> None:
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS works_cost NUMERIC(16,2)",
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS total_cost NUMERIC(16,2)",
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS applicant_term_months DOUBLE PRECISION",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS method VARCHAR(16)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS steps JSONB",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

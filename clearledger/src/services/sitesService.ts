@@ -740,7 +740,13 @@ export interface SiteDoc {
   uploadedBy: string | null; createdAt: string | null
 }
 
+/** Шаг хода присоединения: дата факта, срок по Правилам ТП и просрочка. */
+export interface TpStep {
+  key: string; no: string; label: string; hint: string | null; branch: 'main' | 'supply'
+  date: string | null; plannedDate: string | null; normDays: number | null; overdue: boolean
+}
 export interface TechConnection {
+  method?: string | null; methodLabel?: string | null; steps?: TpStep[]
   id: string; siteId: string; status: string; statusLabel: string
   gridOperator: string | null
   applicationNo: string | null; applicationDate: string | null
@@ -801,6 +807,7 @@ export interface ProjectContext {
   location: { id: string; name: string; code: string; status: string | null } | null
   docKinds: { key: string; label: string }[]
   tcStatuses: { key: string; label: string }[]
+  tcMethods?: { key: string; label: string }[]
   eqStatuses: { key: string; label: string }[]
   costKinds: { key: string; label: string; capital?: boolean }[]
 }

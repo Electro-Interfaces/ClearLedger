@@ -1639,7 +1639,9 @@ export function TechConnectionTab({ site, companyId, onDone }: {
     queryFn: () => getProjectContext(companyId, site.id),
   })
   const [draft, setDraft] = useState<Record<string, string | boolean>>({})
-  useEffect(() => setDraft({}), [ctx.data])
+  // Даты шагов хода — отдельно: сервер ждёт их вложенным `steps`.
+  const [stepDraft, setStepDraft] = useState<Record<string, string>>({})
+  useEffect(() => { setDraft({}); setStepDraft({}) }, [ctx.data])
   // Справочник для подсказки по сетевой организации: разрез аналитики строится
   // по её имени, поэтому его нужно писать одинаково.
   const counterparties = useQuery({
@@ -1648,8 +1650,9 @@ export function TechConnectionTab({ site, companyId, onDone }: {
   })
 
   const m = useMutation({
-    mutationFn: () => saveTechConnection(companyId, site.id, draft),
-    onSuccess: async () => { setDraft({}); toast.success('Сохранено'); await onDone() },
+    mutationFn: () => saveTechConnection(companyId, site.id,
+      Object.keys(stepDraft).length ? { ...draft, steps: stepDraft } : draft),
+    onSuccess: async () => { setDraft({}); setStepDraft({}); toast.success('Сохранено'); await onDone() },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось сохранить'),
   })
 
@@ -1660,7 +1663,9 @@ export function TechConnectionTab({ site, companyId, onDone }: {
   const val = (k: string, fallback: unknown) =>
     (k in draft ? draft[k] : (fallback ?? '')) as string
   const set = (k: string, v: string | boolean) => setDraft((d) => ({ ...d, [k]: v }))
-  const dirty = Object.keys(draft).length > 0
+  const dirty = Object.keys(draft).length > 0 || Object.keys(stepDraft).length > 0
+  const method = val('method', tc?.method)
+  const steps = 'method' in draft ? [] : (tc?.steps ?? [])
 
   return (
     <div className="space-y-3">
@@ -1681,6 +1686,58 @@ export function TechConnectionTab({ site, companyId, onDone }: {
           Срок мероприятий сетевой ({tc.dueDate}) прошёл, отметки об исполнении нет.
         </div>
       )}
+
+      {/* Ход присоединения — порядок энергетика (блок-схема 07.10.2026): способ
+          определяет шаги, шаг закрывается датой, срок считается по Правилам ТП. */}
+      <section className="rounded-lg border border-border p-3 space-y-2">
+        <div className="max-w-xl">
+          <Label>Способ присоединения</Label>
+          <Select value={method || '__none__'} onValueChange={(v) => set('method', v === '__none__' ? '' : v)}>
+            <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__" className="text-sm">— не выбран —</SelectItem>
+              {(ctx.data.tcMethods ?? []).map((o) => (
+                <SelectItem key={o.key} value={o.key} className="text-sm">{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {!method && <p className="text-xs text-muted-foreground">От способа зависят шаги и комплект документов — выберите его первым.</p>}
+        {'method' in draft && method && <p className="text-xs text-muted-foreground">Сохраните — появятся шаги этого способа.</p>}
+        {!('method' in draft) && method === 'landlord' && (
+          <p className="text-sm text-muted-foreground">Электроэнергия оплачивается арендодателю — заявка в сетевую организацию не подаётся.</p>
+        )}
+        {(['main', 'supply'] as const).map((branch) => {
+          const list = steps.filter((s) => s.branch === branch)
+          if (!list.length) return null
+          return (
+            <div key={branch} className="space-y-1">
+              <div className="pt-1 text-sm font-semibold">
+                {branch === 'main' ? 'Ход присоединения' : 'Договор электроснабжения — отдельной веткой'}
+              </div>
+              {list.map((s) => {
+                const d = stepDraft[s.key] ?? s.date ?? ''
+                return (
+                  <div key={s.key} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" title={s.hint ?? undefined}>
+                    <span className="w-7 shrink-0 font-mono text-xs text-muted-foreground">{s.no}</span>
+                    <span className={`min-w-0 flex-1 basis-64 ${d ? '' : 'text-muted-foreground'}`}>
+                      {d ? <span className="mr-1 text-emerald-600 dark:text-emerald-400">✓</span> : null}{s.label}
+                      {s.hint ? <span className="block text-xs text-muted-foreground">{s.hint}</span> : null}
+                    </span>
+                    {!d && s.plannedDate && (
+                      <span className={`text-xs ${s.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                        {s.overdue ? 'просрочено, срок' : 'срок'} {s.plannedDate}
+                      </span>
+                    )}
+                    <Input type="date" className="h-8 w-40 text-sm" value={d} aria-label={`Дата: ${s.label}`}
+                      onChange={(e) => setStepDraft((p) => ({ ...p, [s.key]: e.target.value }))} />
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
+      </section>
 
       <section className="rounded-lg border border-border p-3 grid grid-cols-1 md:grid-cols-3 gap-2">
         <div>

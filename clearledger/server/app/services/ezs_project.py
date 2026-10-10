@@ -31,6 +31,7 @@ from app.models import (
 from app.services.ezs_changes import make_change
 from app.services.ezs_site_work import log_event
 from app.services.ezs_checklist import norm_days
+from app.services import ezs_tp_steps
 from app.services.ezs_sites import (
     PHASE_LABELS, PHASES, STAGE_LABELS, STAGE_ORDER, STAGE_PHASE, next_step_overdue_sql, phases_for,
     project_reporting_stage, stage_label, stage_phase,
@@ -171,6 +172,8 @@ def _tc_out(tc: EzsTechConnection) -> dict[str, Any]:
         "worksCost": float(tc.works_cost) if tc.works_cost is not None else None,
         "totalCost": float(tc.total_cost) if tc.total_cost is not None else None,
         "applicantTermMonths": tc.applicant_term_months,
+        "method": tc.method, "methodLabel": ezs_tp_steps.METHOD_LABELS.get(tc.method or ""),
+        "steps": ezs_tp_steps.steps_out(tc),
         "overdue": overdue,
     }
 
@@ -214,6 +217,49 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
                 old_display=TC_LABELS.get(old, old) if f == "status" and old else None,
                 new_display=TC_LABELS.get(new, new) if f == "status" and new else None,
             ))
+    # Способ и шаги хода (блок-схема энергетика, `ezs_tp_steps`): шаг — дата факта.
+    if "method" in patch:
+        method = patch["method"] if patch["method"] in ezs_tp_steps.METHOD_LABELS else None
+        if method != tc.method:
+            changes.append(make_change(
+                "tc.method", tc.method, method, label="Способ присоединения", category="technical",
+                old_display=ezs_tp_steps.METHOD_LABELS.get(tc.method or ""),
+                new_display=ezs_tp_steps.METHOD_LABELS.get(method or "")))
+            tc.method = method
+    for key, value in (patch.get("steps") or {}).items():
+        step = ezs_tp_steps.STEP_BY_KEY.get(key)
+        if step is None:
+            continue
+        new_date = str(value)[:10] if value else None
+        if new_date:
+            try:
+                date.fromisoformat(new_date)
+            except ValueError:
+                continue
+        old_date = ezs_tp_steps.step_date(tc, step)
+        if new_date == old_date:
+            continue
+        if step.get("field"):
+            setattr(tc, step["field"], new_date)
+        else:
+            marks = dict(tc.steps or {})
+            if new_date:
+                marks[key] = {"date": new_date,
+                              "by_name": getattr(user, "name", None) or getattr(user, "email", None)}
+            else:
+                marks.pop(key, None)
+            tc.steps = marks
+        changes.append(make_change(f"tc.step.{key}", old_date, new_date,
+                                   label=f"Шаг {step['no']}: {step['label']}", category="deadline"))
+    # Статус идёт за шагами, но только когда правят шаги: выбранный руками статус
+    # («ТУ получены», «Отказ сетевой») сохранение заметки перетирать не должно.
+    if "steps" in patch and "status" not in patch and tc.status != "rejected":
+        status = ezs_tp_steps.derived_status(tc)
+        if status and status != tc.status:
+            changes.append(make_change("tc.status", tc.status, status,
+                                       old_display=TC_LABELS.get(tc.status or ""),
+                                       new_display=TC_LABELS.get(status)))
+            tc.status = status
     tc.updated_at = datetime.now(timezone.utc)
     # Пункт 5.6 гейта («фиксация сроков мероприятий ТУ») смотрит в графу площадки,
     # а срок задают здесь — месяцами заявителя или датой мероприятий. Без зеркала
@@ -1784,6 +1830,7 @@ async def project_context(db: AsyncSession, company_id, site: EzsSite) -> dict[s
         "location": location,
         "docKinds": DOC_KINDS,
         "tcStatuses": TC_STATUSES,
+        "tcMethods": ezs_tp_steps.METHODS,
         "eqStatuses": EQ_STATUSES,
         "costKinds": COST_KINDS,
     }
