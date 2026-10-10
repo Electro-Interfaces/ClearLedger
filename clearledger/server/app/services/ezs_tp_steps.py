@@ -32,17 +32,18 @@ METHOD_LABELS = {m["key"]: m["label"] for m in METHODS}
 # `after` + `norm` — срок по Правилам: дней от даты шага `after`.
 # `status` — в какой статус присоединения переводит закрытый шаг.
 # `branch: supply` — договор электроснабжения: идёт своей веткой, статус не двигает.
+# `gate` — пункт чек-листа проекта, который этот шаг закрывает своей датой.
 STEPS: list[dict[str, Any]] = [
     {"key": "indirect_agreement", "no": "2.1", "only": "indirect",
      "label": "Получено соглашение об опосредованном присоединении (перераспределении мощности)"},
     {"key": "docs_ready", "no": "2.2", "label": "Комплект документов для заявки собран"},
-    {"key": "applied", "no": "3.2", "field": "application_date", "status": "applied",
+    {"key": "applied", "no": "3.2", "field": "application_date", "status": "applied", "gate": "5.1",
      "label": "Заявка на ТП направлена в сетевую организацию"},
     {"key": "accepted", "no": "3.3", "after": "applied", "norm": 3, "status": "applied",
      "label": "Заявка принята сетевой: замечаний нет или они сняты",
      "hint": "О недостающих документах сетевая сообщает за 3 дня; на досылку — 20 дней."},
     {"key": "contract", "no": "4.2", "field": "contract_date", "after": "accepted", "norm": 30,
-     "status": "contract", "label": "Получены договор ТП и технические условия"},
+     "status": "contract", "gate": "5.2", "label": "Получены договор ТП и технические условия"},
     {"key": "works_done", "no": "5.2", "status": "in_progress",
      "label": "ТУ выполнены — полностью или этап"},
     {"key": "notified", "no": "6.2", "status": "in_progress",
@@ -55,10 +56,35 @@ STEPS: list[dict[str, Any]] = [
      "status": "done", "label": "Получен акт о техприсоединении, договор ТП закрыт"},
     {"key": "supply_applied", "no": "8.3", "branch": "supply",
      "label": "Заявка на договор электроснабжения направлена в сбытовую организацию"},
-    {"key": "supply_contract", "no": "9.3", "branch": "supply",
+    {"key": "supply_contract", "no": "9.3", "branch": "supply", "gate": "5.4",
      "label": "Договор электроснабжения заключён"},
 ]
 STEP_BY_KEY = {s["key"]: s for s in STEPS}
+
+# Комплект к заявке — перечень энергетика для юрлица до 150 кВт (п. 10 Правил ТП).
+# `kind` — вид документа проекта (`ezs_project.DOC_KINDS`); `optional` — по обстоятельствам.
+# ponytail: выписка и доверенность общие для компании, но прикладываются в проект;
+# общее хранилище — когда появятся реквизиты организации для шаблона заявки.
+KIT: list[dict[str, Any]] = [
+    {"kind": "tp_indirect", "only": "indirect", "label": "Соглашение об опосредованном присоединении"},
+    {"kind": "contract", "label": "Право на участок — как правило, договор аренды"},
+    {"kind": "egrul", "label": "Выписка из ЕГРЮЛ"},
+    {"kind": "poa", "optional": True, "label": "Доверенность — если заявку подаёт представитель"},
+    {"kind": "tp_power_share", "optional": True, "label": "Соглашение о перераспределении мощности"},
+]
+
+# Обоснование послабления пункта 5.1, когда присоединения нет: по нему же послабление
+# находят, чтобы снять при смене способа, — чужую подпись под другим текстом не трогаем.
+LANDLORD_WAIVE_REASON = "Электроэнергия оплачивается арендодателю — заявка на техприсоединение не подаётся"
+
+
+def kit_for(method: str | None, doc_kinds: set[str]) -> list[dict[str, Any]]:
+    """Комплект к заявке для способа: что приложено к проекту, чего не хватает."""
+    if method not in ("direct", "indirect"):
+        return []
+    return [{"kind": d["kind"], "label": d["label"], "optional": bool(d.get("optional")),
+             "present": d["kind"] in doc_kinds}
+            for d in KIT if d.get("only") in (None, method)]
 
 
 def steps_for(method: str | None) -> list[dict[str, Any]]:

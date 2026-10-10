@@ -747,6 +747,8 @@ export interface TpStep {
 }
 export interface TechConnection {
   method?: string | null; methodLabel?: string | null; steps?: TpStep[]
+  /** Комплект документов к заявке для выбранного способа: что уже приложено к проекту. */
+  kit?: { kind: string; label: string; optional: boolean; present: boolean }[]
   id: string; siteId: string; status: string; statusLabel: string
   gridOperator: string | null
   applicationNo: string | null; applicationDate: string | null

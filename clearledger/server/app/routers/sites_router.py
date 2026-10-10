@@ -1070,7 +1070,8 @@ async def put_tech_connection(
     """Завести или обновить техприсоединение проекта (заявка → ТУ → договор → факт)."""
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
-    res = await ezs_project.upsert_tech_connection(db, cid, site, payload, user)
+    res = await ezs_project.upsert_tech_connection(
+        db, cid, site, payload, user, may_waive=await _may_waive_gate(db, cid, site, user))
     await db.commit()
     return res
 

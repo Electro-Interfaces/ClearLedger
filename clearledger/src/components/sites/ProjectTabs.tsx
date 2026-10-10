@@ -1705,7 +1705,27 @@ export function TechConnectionTab({ site, companyId, onDone }: {
         {!method && <p className="text-xs text-muted-foreground">От способа зависят шаги и комплект документов — выберите его первым.</p>}
         {'method' in draft && method && <p className="text-xs text-muted-foreground">Сохраните — появятся шаги этого способа.</p>}
         {!('method' in draft) && method === 'landlord' && (
-          <p className="text-sm text-muted-foreground">Электроэнергия оплачивается арендодателю — заявка в сетевую организацию не подаётся.</p>
+          <p className="text-sm text-muted-foreground">
+            Электроэнергия оплачивается арендодателю — заявка в сетевую организацию не подаётся. Пункт 5.1 чек-листа
+            переход не держит: обязательность снимается при сохранении способа ответственным за проект или отделом развития.
+          </p>
+        )}
+        {!('method' in draft) && (tc?.kit?.length ?? 0) > 0 && (
+          <div className="space-y-1">
+            <div className="pt-1 text-sm font-semibold">Комплект документов к заявке</div>
+            {tc!.kit!.map((d) => (
+              <div key={d.kind} className="flex items-baseline gap-2 text-sm">
+                <span className={`w-4 shrink-0 ${d.present ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>{d.present ? '✓' : '—'}</span>
+                <span className={d.present ? '' : 'text-muted-foreground'}>{d.label}</span>
+                {!d.present && <span className="text-xs text-muted-foreground">{d.optional ? 'по обстоятельствам' : 'не приложен'}</span>}
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              {tc!.kit!.every((d) => d.present || d.optional)
+                ? 'Комплект собран — можно подавать заявку.'
+                : 'Документы прикладываются на вкладке «Документы» с этим же видом.'}
+            </p>
+          </div>
         )}
         {(['main', 'supply'] as const).map((branch) => {
           const list = steps.filter((s) => s.branch === branch)

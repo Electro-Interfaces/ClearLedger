@@ -29,7 +29,7 @@ from app.models import (
     ServiceLocation, User,
 )
 from app.services.ezs_changes import make_change
-from app.services.ezs_site_work import log_event
+from app.services.ezs_site_work import _item_by_key, log_event, set_gate_waiver, site_doc_kinds
 from app.services.ezs_checklist import norm_days
 from app.services import ezs_tp_steps
 from app.services.ezs_sites import (
@@ -62,6 +62,13 @@ DOC_KINDS = [
     {"key": "contract", "label": "Договор на землю"},
     {"key": "tu", "label": "Технические условия"},
     {"key": "tp_contract", "label": "Договор техприсоединения"},
+    {"key": "tp_indirect", "label": "Соглашение об опосредованном присоединении"},
+    {"key": "tp_power_share", "label": "Соглашение о перераспределении мощности"},
+    {"key": "tp_avtu", "label": "Акт о выполнении ТУ, акт допуска узла учёта"},
+    {"key": "tp_act", "label": "Акт о техприсоединении"},
+    {"key": "supply_contract", "label": "Договор электроснабжения"},
+    {"key": "egrul", "label": "Выписка из ЕГРЮЛ"},
+    {"key": "poa", "label": "Доверенность"},
     {"key": "project", "label": "Проектная документация"},
     {"key": "act_mount", "label": "Акт монтажа"},
     {"key": "act", "label": "Акт приёмки / ввода"},
@@ -182,11 +189,45 @@ async def get_tech_connection(db: AsyncSession, company_id, site_id) -> dict[str
     tc = (await db.execute(select(EzsTechConnection).where(
         EzsTechConnection.company_id == company_id,
         EzsTechConnection.site_id == site_id))).scalars().first()
-    return _tc_out(tc) if tc else None
+    if tc is None:
+        return None
+    out = _tc_out(tc)
+    out["kit"] = ezs_tp_steps.kit_for(tc.method, await site_doc_kinds(db, site_id))
+    return out
+
+
+def _gate_from_step(site: EzsSite, key: str, done: bool, user: User | None) -> dict[str, Any] | None:
+    """Шаг хода закрывает ручной пункт чек-листа: дату заявки не подтверждают дважды.
+
+    Снимается только отметка, поставленная шагом: галочку человека стёртая дата не трогает.
+    """
+    found = None if site.kind == "integration" else _item_by_key(site.kind, key)
+    if found is None or not found[1].get("manual"):
+        return None
+    stage, item = found
+    gates = dict(site.gates or {})
+    marks = dict(gates.get(stage) or {})
+    mark = dict(marks.get(key) or {})
+    if done and not mark.get("done"):
+        mark.update(done=True, source="tp_step", at=datetime.now(timezone.utc).isoformat(),
+                    by=str(user.id) if user is not None else None,
+                    by_name=getattr(user, "name", None) or getattr(user, "email", None))
+    elif not done and mark.get("done") and mark.get("source") == "tp_step":
+        mark.update(done=False)
+        mark.pop("source")
+    else:
+        return None
+    marks[key] = mark
+    gates[stage] = marks
+    site.gates = gates
+    return make_change(f"gate:{key}", not done, done, label=item["label"], category="decision",
+                       old_display="не выполнено" if done else "выполнено",
+                       new_display="выполнено" if done else "не выполнено")
 
 
 async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
-                                 patch: dict[str, Any], user: User | None) -> dict[str, Any]:
+                                 patch: dict[str, Any], user: User | None,
+                                 may_waive: bool = False) -> dict[str, Any]:
     tc = (await db.execute(select(EzsTechConnection).where(
         EzsTechConnection.company_id == company_id,
         EzsTechConnection.site_id == site.id))).scalars().first()
@@ -225,6 +266,14 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
                 "tc.method", tc.method, method, label="Способ присоединения", category="technical",
                 old_display=ezs_tp_steps.METHOD_LABELS.get(tc.method or ""),
                 new_display=ezs_tp_steps.METHOD_LABELS.get(method or "")))
+            # Присоединения нет — заявка (5.1) не должна держать переход. Послабление
+            # ставится подписью того, кто имеет на него право; остальным — подсказка.
+            if may_waive and site.kind != "integration" and "landlord" in (method, tc.method):
+                mark = ((site.gates or {}).get("construction") or {}).get("5.1") or {}
+                if method == "landlord":
+                    await set_gate_waiver(db, site, "5.1", True, ezs_tp_steps.LANDLORD_WAIVE_REASON, user)
+                elif mark.get("waive_reason") == ezs_tp_steps.LANDLORD_WAIVE_REASON:
+                    await set_gate_waiver(db, site, "5.1", False, "", user)
             tc.method = method
     for key, value in (patch.get("steps") or {}).items():
         step = ezs_tp_steps.STEP_BY_KEY.get(key)
@@ -251,6 +300,10 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
             tc.steps = marks
         changes.append(make_change(f"tc.step.{key}", old_date, new_date,
                                    label=f"Шаг {step['no']}: {step['label']}", category="deadline"))
+        if step.get("gate"):
+            gate_change = _gate_from_step(site, step["gate"], bool(new_date), user)
+            if gate_change:
+                changes.append(gate_change)
     # Статус идёт за шагами, но только когда правят шаги: выбранный руками статус
     # («ТУ получены», «Отказ сетевой») сохранение заметки перетирать не должно.
     if "steps" in patch and "status" not in patch and tc.status != "rejected":
