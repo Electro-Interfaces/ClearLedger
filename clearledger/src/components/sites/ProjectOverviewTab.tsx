@@ -40,7 +40,10 @@ export function ProjectOverviewTab({ site, companyId }: { site: SiteDetail; comp
             : <p className="text-sm text-muted-foreground">{site.nextAction || 'Выберите работу ниже как следующий результат или укажите внешнее ожидание.'}{site.nextActionDue ? ` · ${site.nextActionDue}` : ''}</p>}
       {(data.next_work || data.external_wait) && <Button className="mt-2" variant="ghost" size="sm" disabled={clear.isPending} onClick={() => clear.mutate()}>Снять следующий шаг</Button>}
       <p className="mt-3 text-sm">{data.work.waiting ? `Обязательных работ, удерживающих маршрут: ${data.work.waiting}` : 'В Треке нет незавершённых работ, удерживающих маршрут.'}</p>
-      {site.gate?.blocking.length ? <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">Незакрытые требования этапа: {site.gate.blocking.length}</p> : null}
+      {site.gate?.blocking.length ? <div className="mt-1 text-sm"><p className="text-amber-700 dark:text-amber-300">Незакрытые требования этапа «{site.stageLabel}»: {site.gate.blocking.length}</p>
+        <ul className="mt-1 space-y-0.5">{site.gate.items.filter((i) => i.required && !i.done && !i.waived).map((i) => <li key={i.key}>
+          <Link className="text-primary underline underline-offset-4" to={`?mode=projects&sub=pr_project&project=${site.id}&ptab=${i.doc ? 'docs' : i.equipment ? 'equipment' : i.manual ? 'work' : 'passport'}`}>{i.key} {i.label}</Link>
+          {i.role ? <span className="text-muted-foreground"> · {i.role}</span> : null}</li>)}</ul></div> : null}
     </section>
     {!!data.pending_results?.total && <section className="space-y-3"><h3 className="font-medium">Результаты ожидают доставки · {data.pending_results.total}</h3>
       <p className="text-sm text-muted-foreground">Работа завершена в Треке. Обновление приложения обрабатывается отдельно.</p>

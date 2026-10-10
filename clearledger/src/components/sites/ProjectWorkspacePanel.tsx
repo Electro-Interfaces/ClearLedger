@@ -263,7 +263,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
 // Куда идти закрывать пункт: гейт называет задачу, но не место, где её закрывают.
 // Человек читал «держит: Акт о техприсоединении» и искал, куда его положить.
 const GATE_TAB: Record<string, ProjectTabKey> = {
-  doc: 'docs', equipment: 'equipment', manual: 'work',
+  doc: 'docs', equipment: 'equipment', manual: 'work', field: 'passport',
 }
 
 /**
@@ -330,17 +330,11 @@ function NextStepBar({ site, onGoTab, onPlanStep }: {
           <span>Ближайший шаг: {lead.label}</span>
           <button type="button"
             onClick={() => onGoTab(leadTab ?? 'work')}
-            className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-primary/60 hover:text-foreground">
+            className="rounded border border-primary bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-primary/20">
             {lead.doc ? 'Приложить документ'
               : lead.equipment ? 'Открыть оборудование'
               : lead.manual ? 'Отметить в чек-листе' : 'Заполнить в паспорте'}
           </button>
-          {!lead.manual && !lead.doc && !lead.equipment && (
-            <button type="button" onClick={() => onGoTab('passport')}
-              className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-primary/60 hover:text-foreground">
-              Открыть паспорт
-            </button>
-          )}
           {/* Мост «регламент → план»: ближайший шаг известен, а в план он попадал
               только перепечаткой руками. Кнопка кладёт его в «Следующий шаг»
               карточки, откуда его берёт план работы по датам. */}

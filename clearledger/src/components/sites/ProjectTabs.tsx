@@ -66,27 +66,27 @@ const CONTROL_FORMS = ['аренда', 'сервитут', 'разрешение
 
 /** Набор вкладок карточки — один и тот же в диалоге и в полноэкранном режиме. */
 export const PROJECT_TABS = [
+  // Порядок — по частоте в работе: сначала то, что заполняют и закрывают, справа
+  // — то, куда заглядывают посмотреть (замечания Ступина 09.10.2026).
   { k: 'overview', label: 'Обзор' },
-  { k: 'roadmap', label: 'Схема' },
-  // Гант — только у интеграции: фактическое время на стадиях (просьба МАГа 06.10.2026)
-  { k: 'gantt', label: 'Гант' },
   { k: 'work', label: 'Работа' },
-  // Состав и контакты нужны не на каждом шаге: в «Работе» они занимали полэкрана
-  // на каждой стадии (замечание МАГа 06.10.2026).
-  { k: 'team', label: 'Команда' },
   { k: 'passport', label: 'Паспорт' },
   { k: 'tp', label: 'Присоединение' },
   { k: 'equipment', label: 'Оборудование' },
   { k: 'docs', label: 'Документы' },
-  // «Трек» отдельной вкладкой, а не внутри «Документов»: там файлы, приложенные
-  // к площадке (ЕГРН, ТУ, договор), здесь — работа, которая по ней идёт.
-  { k: 'track', label: 'Трек' },
-  // Разговор стоит рядом с работой: по проекту сначала договариваются с
-  // собственником и сетевой, и только потом это становится документом.
-  { k: 'chats', label: 'Чаты' },
   { k: 'economics', label: 'Экономика' },
   { k: 'accounting', label: 'Учёт' },
+  // «Трек» отдельной вкладкой, а не внутри «Документов»: там файлы, приложенные
+  // к площадке (ЕГРН, ТУ, договор), здесь — работа, которая по ней идёт.
+  // «Обзор» показывает сводку и ссылается сюда и в «Чаты» — убирать их нельзя.
+  { k: 'track', label: 'Трек' },
+  { k: 'chats', label: 'Чаты' },
   { k: 'history', label: 'История' },
+  { k: 'gantt', label: 'Гант' },
+  // Состав и контакты нужны не на каждом шаге: в «Работе» они занимали полэкрана
+  // на каждой стадии (замечание МАГа 06.10.2026).
+  { k: 'team', label: 'Команда' },
+  { k: 'roadmap', label: 'Схема' },
 ] as const
 export type ProjectTabKey = (typeof PROJECT_TABS)[number]['k']
 export function projectTabsFor(kind: string | null | undefined) {
@@ -1356,6 +1356,8 @@ const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: st
     title: 'Право на землю',
     fields: [
       { k: 'owner', label: 'Собственник' },
+      // Графа пункта 2.6: без поля в паспорте пункт нельзя было закрыть руками.
+      { k: 'ownership', label: 'Форма владения (собственность / аренда)' },
       { k: 'controlForm', label: 'Форма контроля', type: 'select', options: CONTROL_FORMS },
       { k: 'landCategory', label: 'Категория земель' },
       { k: 'permittedUse', label: 'Вид разрешённого использования' },
@@ -1511,7 +1513,12 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
     }
     return map
   }, [site.gate])
-  const wantedCount = wanted.size
+  // Подсвечиваются только пустые графы: пункт из трёх граф красил жёлтым все три,
+  // и заполненная выглядела непринятой («ввёл 0 — осталась жёлтой»).
+  const needs = (key: string) => (val(key) === '' ? wanted.get(API_FIELD[key] ?? key) : undefined)
+  const wantedCount = groups.flatMap((g) => g.fields).filter((f) => needs(String(f.k))).length
+  // Из «Сейчас» сюда приходят заполнять конкретную графу — показываем её сразу.
+  useEffect(() => { document.querySelector('[data-wanted]')?.scrollIntoView({ block: 'center' }) }, [])
 
   return (
     <div className="space-y-3">
@@ -1536,9 +1543,9 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
               const key = String(f.k)
               const apiKey = API_FIELD[key] ?? key
               const isManual = manual.has(apiKey)
-              const needFor = wanted.get(apiKey)
+              const needFor = needs(key)
               return (
-                <div key={key} className={`${f.type === 'area' ? 'md:col-span-3' : ''} ${
+                <div key={key} data-wanted={needFor ? '' : undefined} className={`${f.type === 'area' ? 'md:col-span-3' : ''} ${
                   needFor ? '-mx-1 rounded-md bg-amber-400/10 px-1 py-0.5 ring-1 ring-amber-400/40' : ''}`}>
                   <Label>
                     {f.label}
