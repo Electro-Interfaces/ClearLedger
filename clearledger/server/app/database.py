@@ -2993,6 +2993,10 @@ async def create_all() -> None:
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS applicant_term_months DOUBLE PRECISION",
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS method VARCHAR(16)",
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS steps JSONB",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS reliability_category VARCHAR(8)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS load_kind VARCHAR(120)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS existing_power_kwt DOUBLE PRECISION",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS energy_supplier VARCHAR(300)",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 

@@ -6977,6 +6977,11 @@ class EzsTechConnection(Base):
     # Способ присоединения и даты шагов хода — см. services/ezs_tp_steps.py.
     method: Mapped[str | None] = mapped_column(String(16), nullable=True)
     steps: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Сведения заявки на ТП (п. 12.1 Правил), которых не было в графах банка ЗУ.
+    reliability_category: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    load_kind: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    existing_power_kwt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    energy_supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

@@ -23,6 +23,22 @@ def test_steps_refer_to_real_columns_and_steps():
             assert next(t for t in TASKS if t["key"] == s["gate"]).get("manual"), s["key"]
 
 
+def test_application_shows_gaps_and_escapes():
+    from app.services.ezs_tp_application import BLANK, render
+    site = SimpleNamespace(full_address="г. Чита, <ул.> Ленина, 1", address=None, install_place=None,
+                           planned_power_kwt=120, title=None)
+    tc = SimpleNamespace(grid_operator="ПАО Сети", power_kwt=None, existing_power_kwt=15, voltage=None,
+                         reliability_category=None, load_kind=None, energy_supplier=None)
+    page = render(None, site, tc, [{"label": "Выписка из ЕГРЮЛ", "present": False, "optional": False}])
+    assert "&lt;ул.&gt;" in page and "<ул.>" not in page
+    assert "135 кВт" in page and "120 кВт" in page and "0,4 кВ" in page and "III" in page
+    assert BLANK in page and "ИНН" in page and "не приложены: Выписка из ЕГРЮЛ" in page
+    org = SimpleNamespace(full_name="АО «Тест»", name="Тест", ogrn="1", inn="2", kpp="3", legal_address="а",
+                          postal_address=None, director_name="Иванов", director_position=None, phone="1", email=None)
+    tc.energy_supplier = "Сбыт"
+    assert "Не заполнено" not in render(org, site, tc, [])
+
+
 def test_kit_follows_method_and_docs():
     from app.services.ezs_project import DOC_LABELS
     assert all(d["kind"] in DOC_LABELS for d in KIT)

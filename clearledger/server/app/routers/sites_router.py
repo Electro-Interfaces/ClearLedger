@@ -1062,6 +1062,21 @@ async def project_roadmap(
     return await ezs_project.project_roadmap(db, cid, site)
 
 
+@router.get("/{site_id}/tech-connection/application")
+async def tech_connection_application(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Заявка на ТП печатной формой: HTML, печатает браузер."""
+    from fastapi.responses import HTMLResponse
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    page = await ezs_project.tech_connection_application(db, cid, site)
+    if page is None:
+        raise HTTPException(404, "Присоединение не заведено")
+    return HTMLResponse(page, headers={"Cache-Control": "private, no-store"})
+
+
 @router.put("/{site_id}/tech-connection")
 async def put_tech_connection(
     site_id: uuid.UUID, payload: dict, company_id: str = Query(...),

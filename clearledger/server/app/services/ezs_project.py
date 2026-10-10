@@ -153,8 +153,10 @@ TC_FIELDS = {"status", "grid_operator", "application_no", "application_date", "s
              # паспорт питающей сети и деньги ТУ (графы AQ–BA банка ЗУ)
              "substation_owner", "line_owner", "transformer_kva", "line_type",
              "extra_power_possible", "transformer_swap_possible",
-             "works_cost", "total_cost", "applicant_term_months"}
-_TC_NUM = {"power_kwt", "cost", "works_cost", "total_cost", "applicant_term_months"}
+             "works_cost", "total_cost", "applicant_term_months",
+             # сведения заявки на ТП (`ezs_tp_application`)
+             "reliability_category", "load_kind", "existing_power_kwt", "energy_supplier"}
+_TC_NUM = {"power_kwt", "cost", "works_cost", "total_cost", "applicant_term_months", "existing_power_kwt"}
 _TC_BOOL_FIELDS = {"needs_reconstruction", "extra_power_possible", "transformer_swap_possible"}
 
 
@@ -179,6 +181,8 @@ def _tc_out(tc: EzsTechConnection) -> dict[str, Any]:
         "worksCost": float(tc.works_cost) if tc.works_cost is not None else None,
         "totalCost": float(tc.total_cost) if tc.total_cost is not None else None,
         "applicantTermMonths": tc.applicant_term_months,
+        "reliabilityCategory": tc.reliability_category, "loadKind": tc.load_kind,
+        "existingPowerKwt": tc.existing_power_kwt, "energySupplier": tc.energy_supplier,
         "method": tc.method, "methodLabel": ezs_tp_steps.METHOD_LABELS.get(tc.method or ""),
         "steps": ezs_tp_steps.steps_out(tc),
         "overdue": overdue,
@@ -194,6 +198,22 @@ async def get_tech_connection(db: AsyncSession, company_id, site_id) -> dict[str
     out = _tc_out(tc)
     out["kit"] = ezs_tp_steps.kit_for(tc.method, await site_doc_kinds(db, site_id))
     return out
+
+
+async def tech_connection_application(db: AsyncSession, company_id, site: EzsSite) -> str | None:
+    """Заявка на ТП печатной формой; None — присоединение не заведено."""
+    from app.models import Organization
+    from app.services import ezs_tp_application
+    tc = (await db.execute(select(EzsTechConnection).where(
+        EzsTechConnection.company_id == company_id,
+        EzsTechConnection.site_id == site.id))).scalars().first()
+    if tc is None:
+        return None
+    # ponytail: заявитель — первое юрлицо компании; выбор в проекте — когда юрлиц станет несколько.
+    org = (await db.execute(select(Organization).where(
+        Organization.company_id == company_id).order_by(Organization.created_at).limit(1))).scalars().first()
+    kit = ezs_tp_steps.kit_for(tc.method, await site_doc_kinds(db, site.id))
+    return ezs_tp_application.render(org, site, tc, kit)
 
 
 def _gate_from_step(site: EzsSite, key: str, done: bool, user: User | None) -> dict[str, Any] | None:

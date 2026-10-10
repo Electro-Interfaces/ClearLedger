@@ -23,6 +23,7 @@ import { ProjectContractsBlock } from './ProjectContractsBlock'
 import { ProjectOverviewTab } from './ProjectOverviewTab'
 import { ProjectDocumentsTrack, PromoteProjectFile } from './ProjectDocumentsTrack'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { openAuthAttachment } from '@/lib/authFiles'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -1725,6 +1726,13 @@ export function TechConnectionTab({ site, companyId, onDone }: {
                 ? 'Комплект собран — можно подавать заявку.'
                 : 'Документы прикладываются на вкладке «Документы» с этим же видом.'}
             </p>
+            <Button size="sm" variant="outline" className="h-8 text-sm" disabled={dirty}
+              title={dirty ? 'Сначала сохраните изменения' : 'Откроется в новой вкладке — печать или «Сохранить как PDF»'}
+              onClick={() => openAuthAttachment(
+                `/api/sites/${site.id}/tech-connection/application?company_id=${companyId}`, { cache: false },
+              ).catch((error) => toast.error(`Заявка не открыта: ${error.message}`))}>
+              Заявка на ТП — печатная форма
+            </Button>
           </div>
         )}
         {(['main', 'supply'] as const).map((branch) => {
@@ -1789,6 +1797,10 @@ export function TechConnectionTab({ site, companyId, onDone }: {
         <Field2 label="№ ТУ" v={val('specs_no', tc?.specsNo)} on={(v) => set('specs_no', v)} />
         <Field2 label="Дата ТУ" type="date" v={val('specs_date', tc?.specsDate)} on={(v) => set('specs_date', v)} />
         <Field2 label="Класс напряжения" v={val('voltage', tc?.voltage)} on={(v) => set('voltage', v)} />
+        <Field2 label="Ранее присоединённая мощность, кВт" v={val('existing_power_kwt', tc?.existingPowerKwt)} on={(v) => set('existing_power_kwt', v)} />
+        <Field2 label="Категория надёжности (по умолчанию III)" v={val('reliability_category', tc?.reliabilityCategory)} on={(v) => set('reliability_category', v)} />
+        <Field2 label="Вид нагрузки (по умолчанию ЭЗС)" v={val('load_kind', tc?.loadKind)} on={(v) => set('load_kind', v)} />
+        <Field2 label="Сбытовая организация" v={val('energy_supplier', tc?.energySupplier)} on={(v) => set('energy_supplier', v)} />
         <Field2 label="№ договора ТП" v={val('contract_no', tc?.contractNo)} on={(v) => set('contract_no', v)} />
         <Field2 label="Дата договора ТП" type="date" v={val('contract_date', tc?.contractDate)} on={(v) => set('contract_date', v)} />
         <Field2 label="Стоимость, ₽" v={val('cost', tc?.cost)} on={(v) => set('cost', v)} />

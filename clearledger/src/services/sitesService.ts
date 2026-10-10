@@ -755,6 +755,9 @@ export interface TechConnection {
   specsNo: string | null; specsDate: string | null
   contractNo: string | null; contractDate: string | null
   powerKwt: number | null; voltage: string | null; cost: number | null
+  /** Сведения заявки на ТП: категория надёжности, вид нагрузки, ранее присоединённая мощность, сбыт. */
+  reliabilityCategory?: string | null; loadKind?: string | null
+  existingPowerKwt?: number | null; energySupplier?: string | null
   dueDate: string | null; doneDate: string | null
   needsReconstruction: boolean | null; note: string | null; overdue: boolean
   // паспорт питающей сети и деньги ТУ — графы AQ–BA банка ЗУ
