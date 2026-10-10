@@ -12119,7 +12119,7 @@ class DocKind(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     # Какой пункт чек-листа проекта закрывает согласованный документ этого вида
-    # (`contract`, `tp_contract`, `project`, `act` — ключи `ezs_checklist`).
+    # (`contract`, `tp_act`, `project`, `act` — ключи `ezs_checklist`).
     #
     # Связь данными, а не кодом: какой именно вид считается «договором аренды
     # ЗУ», решает делопроизводство компании, и зашивать это в наш перечень

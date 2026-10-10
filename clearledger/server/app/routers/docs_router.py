@@ -121,7 +121,7 @@ STARTER_KINDS_ENERGY: list[dict[str, Any]] = [
      "desc": "Аренда, сервитут или разрешение на размещение — право на участок "
              "(пункт 4.7: получение разрешения / подписанного договора)"},
     {"code": "tp_act", "name": "Акт о техприсоединении", "family": "internal",
-     "direction": "none", "number_prefix": "ТП", "gate_key": "tp_contract",
+     "direction": "none", "number_prefix": "ТП", "gate_key": "tp_act",
      "desc": "Акт о ТП и акт разграничения балансовой принадлежности "
              "(пункт 5.3)"},
     {"code": "work_docs", "name": "Рабочая документация", "family": "internal",

@@ -4661,6 +4661,8 @@ async def create_all() -> None:
         # существующих: связь задаёт делопроизводитель, а не наш перечень.
         for stmt in (
             "ALTER TABLE doc_kinds ADD COLUMN IF NOT EXISTS gate_key VARCHAR(40)",
+            # 5.3 — акт о ТП, а ключ назывался по договору: вид «Трека» едет за пунктом.
+            "UPDATE doc_kinds SET gate_key = 'tp_act' WHERE gate_key = 'tp_contract'",
         ):
             await conn.execute(_sa.text(stmt))
 
