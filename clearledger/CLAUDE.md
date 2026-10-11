@@ -40,6 +40,9 @@
 | `routers/analytics_router.py`, `charge_sessions_router.py`, `services/charge_*` | «Продажи» ЭЗС (РусГидро) |
 | `models.py` | модели SQLAlchemy; таблицы создаются `create_all` при старте, Alembic нет |
 
+⚠ **Поправка 11.10.2026 (ревизия) — текст выше неточен:** (строка таблицы «`routers/export_packets_router.py`, `services/accounting_egr») Для канала пространства TradeLedger 7.0.4 проверять выдачу /api/tl/packages → BpPackageEmitter → DataEntry/станционные факты → регистр и документы БП. ExportPacket относится к отдельному механизму L3; отсутствие строк в нём не означает, что смена не выдана расширению.
+
+
 Фронт: `src/App.tsx` (маршруты), `src/config/spaceProducts.ts` (продукты и режимы),
 `src/config/storeCatalog.ts` (разделы «Торгового центра», единственный источник),
 `src/components/workspace/` (панели рабочей области).
