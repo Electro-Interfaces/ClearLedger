@@ -33,14 +33,13 @@
 | `routers/edge_router.py` | **приёмник станций** `/api/edge/*`: пакеты смен (`/packets`, идемпотентно, повтор → 409), `heartbeat`, `downlink` + `ack` (задания вниз: НСИ, цены), сверка, остатки. Аутентификация — `X-Cloud-API-Key` компании |
 | `services/edge_service.py` | теневая сверка пакета агента против пакета ЦБ; рядом `edge_nsi`, `edge_stock`, `edge_transfers`, `edge_projection` |
 | `routers/store_router.py`, `services/store_*` | «Торговый центр» (`/api/store`): карточки, штрихкоды, цены, документы сети; правка НСИ — только через функции роутера |
-| `routers/export_packets_router.py`, `services/accounting_egress.py`, `models.py: ExportPacket` | очередь L3 в бухгалтерию, её разбирает `TradeLedger.cfe` |
+| `routers/tl_channel_router.py`, `services/bp_export.py: BpPackageEmitter` | рабочий канал в бухгалтерию: расширение TradeLedger 7.0.4 забирает пакеты смен (`/api/tl/shifts`, `/api/tl/package`, `/api/tl/packages`), пакет строится из записей станции (`DataEntry`) |
+| `routers/export_packets_router.py`, `services/accounting_egress.py`, `models.py: ExportPacket` | отдельный механизм L3 (очередь и guarded sender); в рабочей выдаче расширению не участвует — пустая очередь не значит «смена не выдана» |
 | `services/onec_accounting_read.py`, `services/onec/` | чтение БП через COM-агента (одно соединение на всех) |
 | `routers/sso_router.py`, `services/sso.py` | SSO: лаунчер, handoff, JWKS |
 | `routers/core_router.py`, `space_registry_router.py`, `app_registry_router.py` | состояние Ядра, реестр пространства и приложений |
 | `routers/analytics_router.py`, `charge_sessions_router.py`, `services/charge_*` | «Продажи» ЭЗС (РусГидро) |
 | `models.py` | модели SQLAlchemy; таблицы создаются `create_all` при старте, Alembic нет |
-
-⚠ **Поправка 11.10.2026 (ревизия) — текст выше неточен:** (строка таблицы «`routers/export_packets_router.py`, `services/accounting_egr») Для канала пространства TradeLedger 7.0.4 проверять выдачу /api/tl/packages → BpPackageEmitter → DataEntry/станционные факты → регистр и документы БП. ExportPacket относится к отдельному механизму L3; отсутствие строк в нём не означает, что смена не выдана расширению.
 
 
 Фронт: `src/App.tsx` (маршруты), `src/config/spaceProducts.ts` (продукты и режимы),
