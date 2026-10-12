@@ -29,7 +29,7 @@ export const DEMO_SPACE_CONNECTORS = {
   problems: [{ app: 'network', app_name: 'Шлюзы АЗС', error: 'АЗС Лесная: основной Ethernet недоступен, резервный LTE активен' }],
   connectors: [
     {
-      key: 'core-chat', app: 'core', app_name: 'Ядро', provider: 'Matrix', kind: 'Платформенный сервис',
+      key: 'core-chat', app: 'core', app_name: 'Ядро', provider: 'Ядро', kind: 'Платформенный сервис',
       label: 'Чаты пространства', brings: 'Сообщения, каналы, группы и уведомления', direction: 'both',
       initiator: 'both', status: 'up', enabled: true, last_sync_at: ago(1), last_test_at: ago(1),
       last_error: null, records: 148, files: 7, settings_route: '/messages',

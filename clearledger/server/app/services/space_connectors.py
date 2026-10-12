@@ -112,24 +112,6 @@ def _service_entry(code: str, name: str, brings: str, enabled: bool,
     }
 
 
-async def _chat_alive() -> str | None:
-    """Живой ли Matrix: «настроен в стеке» и «отвечает» — разные ответы.
-
-    Проверку раньше делало только `/core/status`, а оно закрыто суперадмином:
-    администратор компании видел на «Состоянии» пустую карточку сервисов и решал,
-    что раздел показывает подключения выборочно. Витрине проверка нужнее — она
-    и так ходит по HTTP к приложениям.
-    """
-    if not settings.synapse_url:
-        return None
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as c:
-            r = await c.get(settings.synapse_url.rstrip("/") + "/health")
-            return "active" if r.status_code == 200 else "error"
-    except httpx.HTTPError:
-        return "error"
-
-
 async def _app_connectors(
     app_row: App, link: AppCompanyLink, app_code: str, app_name: str,
 ) -> tuple[list[dict[str, Any]], str | None]:
@@ -283,9 +265,6 @@ async def list_connectors(db: AsyncSession, company_id: uuid.UUID) -> dict[str, 
     )).scalars().all()
     items.extend(_channel_entry(c) for c in channels)
 
-    items.append(_service_entry(
-        "chat", "Чат (Matrix)", "Переписка и темы пространства", settings.chat_enabled,
-        status=await _chat_alive() if settings.chat_enabled else None))
     # Конференции были только в карточке «Каналы связи пространства» и в витрину не
     # попадали: на одном экране получалось два разных состава платформенных сервисов.
     items.append(_service_entry(
