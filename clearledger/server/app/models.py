@@ -6982,6 +6982,7 @@ class EzsTechConnection(Base):
     load_kind: Mapped[str | None] = mapped_column(String(120), nullable=True)
     existing_power_kwt: Mapped[float | None] = mapped_column(Float, nullable=True)
     energy_supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    tp_coords: Mapped[str | None] = mapped_column(String(60), nullable=True)  # координаты ТП, «широта, долгота»
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

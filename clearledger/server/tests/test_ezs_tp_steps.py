@@ -76,6 +76,19 @@ def test_status_follows_furthest_closed_step():
     assert derived_status(_tc(method="landlord", done_date="2026-12-01")) is None
 
 
+def test_new_doc_kinds_and_tp_coords_are_wired():
+    from app.services.ezs_project import DOC_KINDS, TC_FIELDS
+    keys = [d["key"] for d in DOC_KINDS]
+    assert len(keys) == len(set(keys))
+    assert {"scheme_install", "scheme_cables", "scheme_lan", "scheme_parking", "scheme_navigation",
+            "counterparty_card", "geo_survey", "site_design", "master_plan", "networks_plan",
+            "landlord_power_project"} <= set(keys)
+    # всё, что принимает запись, существует графой и не длиннее её
+    for f in TC_FIELDS:
+        assert f in EzsTechConnection.__table__.c, f
+    assert EzsTechConnection.__table__.c["tp_coords"].type.length == 60
+
+
 def test_step_marks_manual_checklist_item_and_keeps_human_tick():
     from app.services.ezs_project import _gate_from_step
     site = SimpleNamespace(kind=None, gates={})

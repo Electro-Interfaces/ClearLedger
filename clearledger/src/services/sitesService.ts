@@ -758,6 +758,8 @@ export interface TechConnection {
   /** Сведения заявки на ТП: категория надёжности, вид нагрузки, ранее присоединённая мощность, сбыт. */
   reliabilityCategory?: string | null; loadKind?: string | null
   existingPowerKwt?: number | null; energySupplier?: string | null
+  /** Координаты трансформаторной подстанции, «широта, долгота». */
+  tpCoords?: string | null
   dueDate: string | null; doneDate: string | null
   needsReconstruction: boolean | null; note: string | null; overdue: boolean
   // паспорт питающей сети и деньги ТУ — графы AQ–BA банка ЗУ
@@ -1019,7 +1021,9 @@ export interface ProjectRoadmap {
     date: string | null
     gateDone: number; gateTotal: number; blocking: string[]; normDays?: number
     items: { key?: string; label: string; done: boolean; required: boolean; waived?: boolean
-      confirmedAt?: string | null; confirmedBy?: string | null; role?: string | null; needsConfirmation?: boolean }[]
+      confirmedAt?: string | null; confirmedBy?: string | null; role?: string | null; needsConfirmation?: boolean
+      /** Вкладка, где пункт закрывается. */
+      target?: 'docs' | 'equipment' | 'work' | 'passport' }[]
   }[]
   tracks: {
     key: string; kind: 'track'; phase: string; label: string

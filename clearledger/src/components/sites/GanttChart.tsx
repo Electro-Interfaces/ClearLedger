@@ -75,6 +75,8 @@ const STEPS = [H, 2 * H, 3 * H, 6 * H, 12 * H, DAY, 2 * DAY, 7 * DAY, 14 * DAY, 
 const dayStart = (t: number) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime() }
 /** Доля ширины под «впереди», если есть очередь. */
 const AHEAD = 0.32
+// Закрытое видно и без полосы: у проектов без истории смен стадии полос нет вовсе.
+const DONE_TEXT = 'text-emerald-700 dark:text-emerald-400'
 const BAR: Partial<Record<GanttState, string>> = { done: 'bg-emerald-500', current: 'bg-primary', stopped: 'bg-amber-500' }
 
 /** `now` — момент отрисовки, его держит вызывающий (тот же, что у полос «до сейчас»). */
@@ -160,7 +162,7 @@ export function GanttChart({ groups, legend, now }: { groups: GanttGroup[]; lege
   const SUB_BAR: Partial<Record<GanttState, string>> = { done: 'bg-emerald-500/80', current: 'bg-primary/70', stopped: 'bg-amber-500/80' }
   const renderRow = (r: GanttRow, sub = false) => (
     // Вся строка — и название, и полоса — открывает работу стадии.
-    <div key={r.key} onClick={r.onOpen} title={r.onOpen ? (sub ? 'Открыть пункт в работе стадии' : 'Открыть работу стадии') : undefined}
+    <div key={r.key} onClick={r.onOpen} title={r.onOpen ? (sub ? 'Открыть место, где пункт закрывается' : 'Открыть работу стадии') : undefined}
       className={`grid grid-cols-[240px_1fr] border-b last:border-b-0 hover:bg-muted/40 ${r.onOpen ? 'cursor-pointer' : ''} ${sub ? 'bg-muted/10' : ''}`}>
       <div className={`sticky left-0 z-10 flex items-start gap-1 border-r bg-card text-left ${sub ? 'py-1 pl-7 pr-2' : 'px-3 py-2'}`}>
         {!sub && (r.children?.length && (filter === 'all' || filter === 'overdue')
@@ -171,7 +173,7 @@ export function GanttChart({ groups, legend, now }: { groups: GanttGroup[]; lege
             </button>
           : <span className="w-4.5 shrink-0" />)}
         <div className="min-w-0 flex-1">
-          <div title={sub ? r.label : undefined} className={sub ? `truncate text-xs ${r.state === 'done' ? '' : 'text-muted-foreground'}` : `text-sm ${r.state === 'future' ? 'text-muted-foreground' : r.state === 'current' ? 'font-semibold' : r.state === 'track' ? 'text-[13px]' : ''}`}>
+          <div title={sub ? r.label : undefined} className={sub ? `truncate text-xs ${r.state === 'done' ? DONE_TEXT : 'text-muted-foreground'}` : `text-sm ${r.state === 'done' ? DONE_TEXT : r.state === 'future' ? 'text-muted-foreground' : r.state === 'current' ? 'font-semibold' : r.state === 'track' ? 'text-[13px]' : ''}`}>
             {sub && r.required && <span className="mr-1 text-primary" title="Критичный: держит переход">●</span>}{r.label}
           </div>
           <div className={`text-[11px] text-muted-foreground ${sub ? 'truncate' : ''}`} title={sub ? r.sub : undefined}>{r.sub}

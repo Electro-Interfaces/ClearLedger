@@ -58,6 +58,13 @@ DOC_KINDS = [
     {"key": "egrn", "label": "Выписка ЕГРН"},
     {"key": "site_plan", "label": "Схема участка"},
     {"key": "photo", "label": "Фото места"},
+    # Схемы переговоров с собственником — пункты 3.2–3.6 чек-листа (Ступин, 09.10.2026).
+    {"key": "scheme_install", "label": "Схема места установки ЭЗС и точки подключения"},
+    {"key": "scheme_cables", "label": "Схема прокладки кабельных трасс"},
+    {"key": "scheme_lan", "label": "Схема прокладки LAN"},
+    {"key": "scheme_parking", "label": "Схема парковочных мест и знаков"},
+    {"key": "scheme_navigation", "label": "Схема размещения навигации и информационных материалов"},
+    {"key": "counterparty_card", "label": "Карточка контрагента"},
     {"key": "offer", "label": "Коммерческое предложение"},
     {"key": "contract", "label": "Договор на землю"},
     {"key": "tu", "label": "Технические условия"},
@@ -70,6 +77,12 @@ DOC_KINDS = [
     {"key": "egrul", "label": "Выписка из ЕГРЮЛ"},
     {"key": "poa", "label": "Доверенность"},
     {"key": "project", "label": "Проектная документация"},
+    # Документы площадки для техприсоединения — показываются и на вкладке «Присоединение».
+    {"key": "geo_survey", "label": "Геологические изыскания"},
+    {"key": "site_design", "label": "Проектная документация места аренды"},
+    {"key": "master_plan", "label": "Генеральный план места аренды"},
+    {"key": "networks_plan", "label": "Сводный план сетей места аренды"},
+    {"key": "landlord_power_project", "label": "Проект по электроснабжению арендодателя"},
     {"key": "act_mount", "label": "Акт монтажа"},
     {"key": "act", "label": "Акт приёмки / ввода"},
     {"key": "equipment_doc", "label": "Документы на оборудование"},
@@ -155,7 +168,8 @@ TC_FIELDS = {"status", "grid_operator", "application_no", "application_date", "s
              "extra_power_possible", "transformer_swap_possible",
              "works_cost", "total_cost", "applicant_term_months",
              # сведения заявки на ТП (`ezs_tp_application`)
-             "reliability_category", "load_kind", "existing_power_kwt", "energy_supplier"}
+             "reliability_category", "load_kind", "existing_power_kwt", "energy_supplier",
+             "tp_coords"}
 _TC_NUM = {"power_kwt", "cost", "works_cost", "total_cost", "applicant_term_months", "existing_power_kwt"}
 _TC_BOOL_FIELDS = {"needs_reconstruction", "extra_power_possible", "transformer_swap_possible"}
 
@@ -183,6 +197,7 @@ def _tc_out(tc: EzsTechConnection) -> dict[str, Any]:
         "applicantTermMonths": tc.applicant_term_months,
         "reliabilityCategory": tc.reliability_category, "loadKind": tc.load_kind,
         "existingPowerKwt": tc.existing_power_kwt, "energySupplier": tc.energy_supplier,
+        "tpCoords": tc.tp_coords,
         "method": tc.method, "methodLabel": ezs_tp_steps.METHOD_LABELS.get(tc.method or ""),
         "steps": ezs_tp_steps.steps_out(tc),
         "overdue": overdue,
@@ -270,7 +285,9 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
         elif f in _TC_BOOL_FIELDS:
             setattr(tc, f, bool(v))
         else:
-            setattr(tc, f, str(v))
+            # Строка длиннее графы роняла сохранение целиком («III категория» в VARCHAR(8)).
+            limit = getattr(EzsTechConnection.__table__.c[f].type, "length", None)
+            setattr(tc, f, str(v).strip()[:limit] if limit else str(v))
         new = getattr(tc, f, None)
         if old != new:
             changes.append(make_change(
@@ -1782,7 +1799,10 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
             "items": [{"key": i["key"], "label": i["label"], "done": i["done"], "required": i["required"],
                        "waived": i["waived"], "confirmedAt": i.get("confirmedAt"),
                        "confirmedBy": i.get("confirmedBy"), "role": i.get("role"),
-                       "needsConfirmation": i.get("needsConfirmation")}
+                       "needsConfirmation": i.get("needsConfirmation"),
+                       # Где пункт закрывается — туда и ведёт нажатие на Ганте.
+                       "target": ("docs" if i.get("doc") else "equipment" if i.get("equipment")
+                                  else "work" if i.get("manual") else "passport")}
                       for i in g["items"]],
         })
 

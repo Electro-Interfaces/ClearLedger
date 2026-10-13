@@ -13,10 +13,11 @@ import { ruDate } from './ganttTime'
 export interface GanttItem {
   key?: string; label: string; done: boolean; required: boolean; waived?: boolean
   needsConfirmation?: boolean; confirmedAt?: string | null; confirmedBy?: string | null; role?: string | null
+  target?: string
 }
 
 export function itemRows(stageKey: string, items: GanttItem[], stage: GanttState, stageStart: number | null,
-  now: number, roleName: (role: string) => string, onOpen?: () => void): GanttRow[] {
+  now: number, roleName: (role: string) => string, onOpen?: (item: GanttItem) => void): GanttRow[] {
   return items.map((it, i) => {
     const status = it.needsConfirmation ? 'reconfirm' as const : it.done ? 'done' as const : it.waived ? 'waived' as const : 'open' as const
     const at = it.confirmedAt ? new Date(it.confirmedAt).getTime() : null
@@ -33,7 +34,7 @@ export function itemRows(stageKey: string, items: GanttItem[], stage: GanttState
       sub: who ? `${sub} · ${who}` : sub, state, segments, status, required: it.required,
       blocking: status === 'reconfirm' || (status === 'open' && it.required && stage === 'current'),
       marks: at != null && status === 'done' ? [{ key: 'at', at, title: `${it.label}\nвыполнен ${new Date(at).toLocaleString('ru-RU')}${it.confirmedBy ? ` · ${it.confirmedBy}` : ''}` }] : [],
-      onOpen,
+      onOpen: onOpen && (() => onOpen(it)),
     }
   })
 }

@@ -27,7 +27,11 @@ const parse = (s: string | null | undefined) => {
   return Number.isNaN(t) ? null : t
 }
 
-export function StationGantt({ site, companyId, onStage }: { site: SiteDetail; companyId: string; onStage?: (code: string) => void }) {
+export function StationGantt({ site, companyId, onStage, onItem }: {
+  site: SiteDetail; companyId: string; onStage?: (code: string) => void
+  /** Нажатие на пункт: вкладка, где он закрывается, и его номер. */
+  onItem?: (target: string, key?: string) => void
+}) {
   const road = useQuery({ queryKey: ['site-roadmap', companyId, site.id], queryFn: () => getProjectRoadmap(companyId, site.id) })
   const ev = useQuery({ queryKey: ['site-events', companyId, site.id, 'stage'], queryFn: () => getSiteEvents(companyId, site.id, 'stage') })
   const [now] = useState(() => Date.now())
@@ -74,7 +78,7 @@ export function StationGantt({ site, companyId, onStage }: { site: SiteDetail; c
         slotTitle: `${s.label}: ${state === 'future' ? 'впереди' : 'текущая'}, чек-лист ${s.gateDone}/${s.gateTotal}`,
         onOpen: onStage && (() => onStage(s.key)),
         normMs: s.normDays ? s.normDays * DAY : undefined,
-        children: itemRows(s.key, s.items, state, list[0]?.start ?? null, now, (r) => r, onStage && (() => onStage(s.key))),
+        children: itemRows(s.key, s.items, state, list[0]?.start ?? null, now, (r) => r, onItem ? (it) => onItem(it.target ?? 'work', it.key) : onStage && (() => onStage(s.key))),
       }
     })
     const tracks: GanttRow[] = d.tracks.filter((t) => t.phase === ph.key && t.state !== 'empty').map((t) => {
@@ -91,6 +95,6 @@ export function StationGantt({ site, companyId, onStage }: { site: SiteDetail; c
   return <GanttChart now={now} groups={groups} legend={<>
     Слева — факт по истории смен стадии (зелёная — пройдена, синяя — текущая, жёлтая — остановлена); у проектов, заведённых до 31.07.2026, история смен не велась — там «дата не записана», а текущая стадия считается с начала учёта.
     ∥ — параллельные треки этапа (право, ТП, оборудование, договор, ввод): ромб — их дата (зелёный — выполнено, красный — просрочено), голубой ромб — поступление заявки.
-    Справа — что впереди, по порядку стадий; ширина условная. Нажатие на строку стадии открывает «Работу».{!tracked && !untracked && ' Истории смен стадии у проекта нет.'}
+    Справа — что впереди, по порядку стадий; ширина условная. Нажатие на строку стадии открывает «Работу», на пункт — вкладку, где он закрывается.{!tracked && !untracked && ' Истории смен стадии у проекта нет.'}
   </>} />
 }

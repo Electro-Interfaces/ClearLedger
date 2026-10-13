@@ -17,7 +17,7 @@
  *
  * Правка любого поля помечает его «ручным»: следующий импорт файла его не тронет.
  */
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { getIntegration } from '@/services/projectIntegrationService'
 import { ProjectContractsBlock } from './ProjectContractsBlock'
 import { ProjectOverviewTab } from './ProjectOverviewTab'
@@ -103,8 +103,8 @@ export function ProjectTabContent({ tab, site, companyId, onDone, onTab }: {
 }) {
   if (tab === 'overview') return (
     <div className="space-y-4">
-      {site.kind !== 'integration' && <DecisionBlock site={site} companyId={companyId} onDone={onDone} />}
       <ProjectOverviewTab site={site} companyId={companyId} />
+      {site.kind !== 'integration' && <DecisionBlock site={site} companyId={companyId} onDone={onDone} />}
     </div>
   )
   // Стадия маршрута интеграции = стадия воронки с префиксом (int_lead → lead); у
@@ -112,7 +112,8 @@ export function ProjectTabContent({ tab, site, companyId, onDone, onTab }: {
   if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId}
     onStage={onTab && ((code) => onTab('work', { pstage: code.startsWith('int_') ? code.slice(4) : null }))} />
   if (tab === 'gantt' && site.kind !== 'integration') return <StationGantt site={site} companyId={companyId}
-    onStage={onTab && (() => onTab('work'))} />
+    onStage={onTab && (() => onTab('work'))}
+    onItem={onTab && ((target, key) => onTab(target as ProjectTabKey, { pitem: key ?? null }))} />
   if (tab === 'gantt') return <IntegrationGantt site={site} companyId={companyId}
     onStage={onTab && ((code) => onTab('work', { pstage: code.startsWith('int_') ? code.slice(4) : null }))} />
   if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} onTeam={onTab && (() => onTab('team'))} />
@@ -910,6 +911,12 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
 
   const members = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId) })
   const gate = site.gate
+  // С Ганта сюда приходят к конкретному пункту — показываем его, а не верх вкладки.
+  const [workParams] = useSearchParams()
+  const focusItem = workParams.get('pitem')
+  useEffect(() => {
+    if (focusItem) document.querySelector(`[data-gate-item="${CSS.escape(focusItem)}"]`)?.scrollIntoView({ block: 'center' })
+  }, [focusItem])
   const missing = gate.items.filter((i) => !i.done)
 
   const [override, setOverride] = useState(false)
@@ -1037,7 +1044,7 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
             const canOfferWaive = !!site.mayWaive && !!it.waivable && it.required
               && !it.done && !it.waived
             return (
-              <div key={it.key}>
+              <div key={it.key} data-gate-item={it.key} className={it.key === focusItem ? 'rounded ring-1 ring-primary/50' : undefined}>
                 <Row type={it.manual ? 'button' : undefined}
                   disabled={it.manual ? mGate.isPending : undefined}
                   onClick={it.manual ? () => mGate.mutate({ key: it.key, done: !it.done }) : undefined}
@@ -1797,6 +1804,7 @@ export function TechConnectionTab({ site, companyId, onDone }: {
         <Field2 label="№ ТУ" v={val('specs_no', tc?.specsNo)} on={(v) => set('specs_no', v)} />
         <Field2 label="Дата ТУ" type="date" v={val('specs_date', tc?.specsDate)} on={(v) => set('specs_date', v)} />
         <Field2 label="Класс напряжения" v={val('voltage', tc?.voltage)} on={(v) => set('voltage', v)} />
+        <Field2 label="Координаты ТП (широта, долгота)" v={val('tp_coords', tc?.tpCoords)} on={(v) => set('tp_coords', v)} />
         <Field2 label="Ранее присоединённая мощность, кВт" v={val('existing_power_kwt', tc?.existingPowerKwt)} on={(v) => set('existing_power_kwt', v)} />
         <Field2 label="Категория надёжности (по умолчанию III)" v={val('reliability_category', tc?.reliabilityCategory)} on={(v) => set('reliability_category', v)} />
         <Field2 label="Вид нагрузки (по умолчанию ЭЗС)" v={val('load_kind', tc?.loadKind)} on={(v) => set('load_kind', v)} />
@@ -1820,6 +1828,8 @@ export function TechConnectionTab({ site, companyId, onDone }: {
             onChange={(e) => set('note', e.target.value)} />
         </div>
       </section>
+
+      <TpSiteDocs site={site} companyId={companyId} kinds={ctx.data.docKinds ?? []} />
 
       {/* Паспорт питающей сети — графы AQ–BA банка ЗУ. Приезжают из файла отдела
           развития и до сих пор нигде не показывались: без владельца ТП и запаса
@@ -1852,6 +1862,41 @@ export function TechConnectionTab({ site, companyId, onDone }: {
         </div>
       </section>
     </div>
+  )
+}
+
+/** Документы площадки на «Присоединении» (Ступин, 09.10.2026): что приложено и ссылка на файл.
+ *  Сами файлы прикладываются на вкладке «Документы» с тем же видом. */
+const TP_SITE_DOCS = ['geo_survey', 'site_design', 'master_plan', 'networks_plan', 'landlord_power_project']
+
+function TpSiteDocs({ site, companyId, kinds }: { site: SiteDetail; companyId: string; kinds: { key: string; label: string }[] }) {
+  const docs = useQuery({ queryKey: ['site-docs', companyId, site.id], queryFn: () => getSiteDocs(companyId, site.id) })
+  const rows = kinds.filter((k) => TP_SITE_DOCS.includes(k.key))
+  if (!rows.length) return null
+  return (
+    <section className="rounded-lg border border-border p-3 space-y-1">
+      <div className="text-sm font-semibold">Документы площадки</div>
+      {rows.map((k) => {
+        const found = (docs.data ?? []).filter((d) => d.kind === k.key)
+        return (
+          <div key={k.key} className="flex flex-wrap items-baseline gap-x-2 text-sm">
+            <span className={`w-4 shrink-0 ${found.length ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>{found.length ? '✓' : '—'}</span>
+            <span className={found.length ? '' : 'text-muted-foreground'}>{k.label}</span>
+            {found.map((d) => (
+              <button key={d.id} type="button" disabled={!d.fileId} className="text-primary underline underline-offset-4 disabled:no-underline"
+                onClick={() => downloadSiteDoc(companyId, site.id, d.id, d.fileName ?? d.title ?? undefined)
+                  .catch((e) => toast.error(e instanceof Error ? e.message : 'Не удалось открыть файл'))}>
+                {d.title || d.fileName || 'файл'}
+              </button>
+            ))}
+            {!found.length && <span className="text-xs text-muted-foreground">{docs.isLoading ? 'проверяем…' : 'не приложен'}</span>}
+          </div>
+        )
+      })}
+      <p className="text-xs text-muted-foreground">
+        Прикладываются на вкладке <Link className="text-primary underline underline-offset-4" to={`?mode=projects&sub=pr_project&project=${site.id}&ptab=docs`}>«Документы»</Link> с этим же видом.
+      </p>
+    </section>
   )
 }
 
@@ -3063,15 +3108,28 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 export function HistoryTab({ site, companyId }: { site: SiteDetail; companyId: string }) {
+  const [kind, setKind] = useState<string | null>(null)
   const q = useQuery({
     queryKey: ['site-events', companyId, site.id],
     queryFn: () => getSiteEvents(companyId, site.id),
   })
   if (q.isLoading) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-  const rows = q.data ?? []
-  if (rows.length === 0) return <div className="py-8 text-center text-sm text-muted-foreground">Событий пока нет.</div>
+  const all = q.data ?? []
+  if (all.length === 0) return <div className="py-8 text-center text-sm text-muted-foreground">Событий пока нет.</div>
+  const kinds = [...new Set(all.map((e) => e.kind))]
+  const rows = kind ? all.filter((e) => e.kind === kind) : all
   return (
     <div className="space-y-1.5">
+      {kinds.length > 1 && (
+        <div className="flex flex-wrap gap-1.5 pb-1 text-xs" role="group" aria-label="Тип события">
+          {[null, ...kinds].map((k) => (
+            <button key={k ?? 'all'} type="button" aria-pressed={kind === k} onClick={() => setKind(k)}
+              className={`rounded border px-2 py-1 ${kind === k ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+              {k ? KIND_LABEL[k] ?? k : 'Все'} <span className="tabular-nums opacity-70">{k ? all.filter((e) => e.kind === k).length : all.length}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {rows.map((e) => (
         <div key={e.id} className="flex gap-2 text-sm border-b border-border/30 pb-1.5">
           <span className="text-xs uppercase tracking-wide text-muted-foreground w-16 shrink-0 pt-0.5">
