@@ -116,19 +116,19 @@ TASKS: list[dict[str, Any]] = [
     # Закрываются схемой во вкладке «Документы» либо отметкой ОКС «не требуется».
     {"key": "3.2", "stage": "negotiation", "role": "ОР и ОКС",
      "label": "Согласование места установки ЭЗС и точки подключения",
-     "doc": "scheme_install", "required": True, "not_needed": True},
+     "doc": "scheme_install", "document_state": "file", "required": True, "not_needed": True},
     {"key": "3.3", "stage": "negotiation", "role": "ОР и ОКС",
      "label": "Согласование схемы прокладки кабельных трасс",
-     "doc": "scheme_cables", "required": True, "not_needed": True},
+     "doc": "scheme_cables", "document_state": "file", "required": True, "not_needed": True},
     {"key": "3.4", "stage": "negotiation", "role": "ОР и ОКС",
      "label": "Согласование прокладки LAN и точки ввода интернета",
-     "doc": "scheme_lan", "required": True, "not_needed": True},
+     "doc": "scheme_lan", "document_state": "file", "required": True, "not_needed": True},
     {"key": "3.5", "stage": "negotiation", "role": "ОР",
      "label": "Парковочные места и знак «Парковка для электромобилей»",
-     "doc": "scheme_parking", "required": True, "not_needed": True},
+     "doc": "scheme_parking", "document_state": "file", "required": True, "not_needed": True},
     {"key": "3.6", "stage": "negotiation", "role": "ОР",
      "label": "Согласование навигации, информационных материалов и брендирования",
-     "doc": "scheme_navigation", "required": True, "not_needed": True},
+     "doc": "scheme_navigation", "document_state": "file", "required": True, "not_needed": True},
     {"key": "3.7", "stage": "negotiation", "role": "ОР",
      "label": "Согласование коммерческих условий (аренда, срок договора)",
      "fields": ["rent_cost_month", "contract_term_months"], "required": True},
@@ -296,7 +296,7 @@ def gates_by_stage() -> dict[str, list[dict[str, Any]]]:
         item = {k: v for k, v in t.items() if k != "stage"}
         item["phase"] = PHASE_BY_TASK[t["key"]]
         if item.get("doc"):
-            item["document_state"] = "approved" if item["doc"] == "project" else "signed"
+            item.setdefault("document_state", "approved" if item["doc"] == "project" else "signed")
         out.setdefault(t["stage"], []).append(item)
     return out
 
