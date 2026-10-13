@@ -32,8 +32,13 @@ export function TalkRow({ meeting, companyId, onChanged }: {
   onChanged: () => void
 }) {
   const [итог, setИтог] = useState(meeting.session?.note ?? '')
-  const прошла = new Date(meeting.ends_at) < new Date()
   const сессия = meeting.session
+  // Прошла — по факту, а не по часам календаря: закрытая в своё время
+  // конференция окончена, даже если её час ещё идёт. Иначе в «Истории» у неё
+  // стояла кнопка входа и не было поля итога (проверка 13.10.2026). Вход до
+  // срока встречу не закрывает — как и на сервере.
+  const прошла = new Date(meeting.ends_at) < new Date()
+    || (!!сессия?.ended_at && new Date(сессия.ended_at) >= new Date(meeting.starts_at))
   const пред = предмет(meeting.subject_ref)
 
   const войти = useMutation({

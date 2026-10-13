@@ -1,7 +1,7 @@
 // Приложение «Конференции»: журнал конференций поверх календаря пространства.
 // Встречу заводит и хранит календарь, здесь — свой экран, вход ведущим и то,
 // что осталось после конференции: кто пришёл, сколько шло, о чём договорились.
-import { downloadBlob, get, post } from './apiClient'
+import { downloadBlob, get, getToken, post } from './apiClient'
 import type { MeetingUrls } from './conferenceService'
 
 export interface ConfAttendee {
@@ -132,12 +132,22 @@ function следитьЗаВкладкой(companyId: string, sessionId: string
   const адрес = (действие: string) =>
     `/api/conf/sessions/${sessionId}/${действие}?company_id=${encodeURIComponent(companyId)}`
 
+  // Выход шлём запросом с `keepalive`, а не `sendBeacon`: пропуск лежит в
+  // заголовке, а маячок заголовков не несёт — сервер отвечал ему 401, и человек
+  // числился в комнате после ухода (проверка 13.10.2026). `keepalive` так же
+  // доживает до отправки, когда вкладка закрывается следом.
+  const выйти = () => {
+    const пропуск = getToken()
+    void fetch(`${import.meta.env.VITE_API_URL ?? ''}${адрес('leave')}`, {
+      method: 'POST', keepalive: true,
+      headers: пропуск ? { Authorization: `Bearer ${пропуск}` } : {},
+    }).catch(() => {})
+  }
+
   const таймер = window.setInterval(() => {
     if (!вкладка || вкладка.closed) {
       window.clearInterval(таймер)
-      // `sendBeacon` доживает до отправки, даже если наша вкладка закрывается
-      // следом; обычный запрос в этот момент браузер отменяет.
-      if (!navigator.sendBeacon?.(адрес('leave'))) void post(адрес('leave')).catch(() => {})
+      выйти()
       return
     }
     void post(адрес('ping')).catch(() => {})
@@ -147,7 +157,7 @@ function следитьЗаВкладкой(companyId: string, sessionId: string
   // иначе человек числился бы в комнате ещё полторы минуты.
   window.addEventListener('pagehide', () => {
     window.clearInterval(таймер)
-    navigator.sendBeacon?.(адрес('leave'))
+    выйти()
   }, { once: true })
 }
 

@@ -13,7 +13,7 @@ from app.config import get_settings
 from app.models import Company, ConfSession, User, UserCompany
 from app.routers.conf_router import (
     MeetingIn, _сессия_записи, conf_stats, meeting_create, meeting_join,
-    meetings_list, meetings_live, session_end,
+    meetings_list, meetings_live, room_join, rooms_list, session_end,
 )
 
 pytestmark = pytest.mark.asyncio(loop_scope='session')
@@ -211,3 +211,116 @@ async def test_запись_ложится_на_свой_созыв(db):
     # Имя без времени — как раньше, последний созыв.
     assert (await _сессия_записи(db, room, 'запись.mp4')).id == новый.id
     assert await _сессия_записи(db, 'ledger-чужая', None) is None
+
+
+async def _списки(db, company, кто):
+    """Номера встреч в «Назначены» и в «Истории»."""
+    def ids(ответ):
+        return {в['id'] for в in ответ['meetings']}
+    return (ids(await meetings_list(company_id=str(company.id), scope='upcoming',
+                                    q='', limit=200, db=db, current_user=кто)),
+            ids(await meetings_list(company_id=str(company.id), scope='past',
+                                    q='', limit=200, db=db, current_user=кто)))
+
+
+async def test_отменённая_не_висит_в_назначенных(db, jitsi_key):
+    from app.models import CalendarEvent
+
+    company, хозяин, _, _ = await люди(db)
+    завтра = datetime.now(timezone.utc) + timedelta(days=1)
+    встреча = await созвать(db, company, хозяин, starts_at=завтра)
+    assert встреча['id'] in (await _списки(db, company, хозяин))[0]
+
+    (await db.get(CalendarEvent, uuid.UUID(встреча['id']))).status = 'cancelled'
+    await db.flush()
+    assert встреча['id'] not in (await _списки(db, company, хозяин))[0]
+
+
+async def test_вход_до_срока_не_уводит_встречу_в_историю(db, jitsi_key):
+    """Зашли проверить комнату за день до встречи и нажали «Завершить» —
+    встреча остаётся назначенной."""
+    company, хозяин, _, _ = await люди(db)
+    завтра = datetime.now(timezone.utc) + timedelta(days=1)
+    встреча = await созвать(db, company, хозяин, starts_at=завтра)
+    вход = await meeting_join(встреча['id'], company_id=str(company.id),
+                              db=db, current_user=хозяин)
+    await session_end(вход['session_id'], company_id=str(company.id),
+                      db=db, current_user=хозяин)
+
+    назначены, история = await _списки(db, company, хозяин)
+    assert встреча['id'] in назначены
+    assert встреча['id'] not in история
+
+
+async def test_тема_едет_в_ссылке_входа(db, jitsi_key):
+    company, хозяин, _, _ = await люди(db)
+    встреча = await созвать(db, company, хозяин, title='Разбор «смены» №5')
+    вход = await meeting_join(встреча['id'], company_id=str(company.id),
+                              db=db, current_user=хозяин)
+    from urllib.parse import unquote
+    assert unquote(вход['moderator_url']).endswith(
+        '#config.subject="Разбор «смены» №5"')
+    # Гостевая — голый адрес комнаты: по нему её узнают календарь и журнал.
+    assert '#' not in вход['guest_url'] and вход['guest_url'] == встреча['guest_url']
+
+
+async def test_пустая_постоянная_комната_закрывается(db, jitsi_key):
+    """Все вышли — разговор окончен без кнопки и без четырёхчасового срока."""
+    from app.models import ConfPresence, ConfRoom
+
+    company, хозяин, зван, _ = await люди(db)
+    комната = ConfRoom(company_id=company.id, name='Переговорная', created_by=хозяин.id)
+    db.add(комната)
+    await db.flush()
+
+    async def карточка():
+        ответ = await rooms_list(company_id=str(company.id), db=db, current_user=хозяин)
+        return next(к for к in ответ['rooms'] if к['id'] == str(комната.id))
+
+    вход = await room_join(str(комната.id), company_id=str(company.id),
+                           db=db, current_user=хозяин)
+    await room_join(str(комната.id), company_id=str(company.id), db=db, current_user=зван)
+    assert '#config.subject=' in вход['moderator_url']
+    к = await карточка()
+    assert к['live'] and len(к['inside']) == 2, 'вошедший виден сразу, до первого сигнала'
+
+    сессия = await db.get(ConfSession, uuid.UUID(вход['session_id']))
+    отметки = (await db.execute(select(ConfPresence).where(
+        ConfPresence.session_id == сессия.id))).scalars().all()
+    сейчас = datetime.now(timezone.utc)
+    сессия.started_at = сейчас - timedelta(minutes=20)
+    # Один вышел давно, второй только что: комната ещё живая.
+    отметки[0].left_at = сейчас - timedelta(minutes=10)
+    отметки[1].left_at = сейчас - timedelta(seconds=20)
+    await db.flush()
+    assert (await карточка())['live']
+
+    # Вернулся за забытым вопросом — тот же разговор, отметка о выходе снята.
+    await room_join(str(комната.id), company_id=str(company.id), db=db, current_user=зван)
+    await db.refresh(отметки[1])
+    к = await карточка()
+    assert к['live'] and len(к['inside']) == 1
+
+    ушёл = сейчас - timedelta(minutes=3)
+    for p in отметки:
+        await db.refresh(p)
+        p.left_at = ушёл
+    await db.flush()
+    к = await карточка()
+    assert not к['live'] and not к['inside']
+    await db.refresh(сессия)
+    assert сессия.close_reason == 'empty' and сессия.ended_at == ушёл
+
+    # Вкладки замолчали, никто не вышел: ждём дольше, но тоже закрываем.
+    вход = await room_join(str(комната.id), company_id=str(company.id),
+                           db=db, current_user=хозяин)
+    новая = await db.get(ConfSession, uuid.UUID(вход['session_id']))
+    assert новая.id != сессия.id
+    p = (await db.execute(select(ConfPresence).where(
+        ConfPresence.session_id == новая.id))).scalar_one()
+    p.last_seen_at = сейчас - timedelta(minutes=3)
+    await db.flush()
+    assert (await карточка())['live']
+    p.last_seen_at = сейчас - timedelta(minutes=6)
+    await db.flush()
+    assert not (await карточка())['live']

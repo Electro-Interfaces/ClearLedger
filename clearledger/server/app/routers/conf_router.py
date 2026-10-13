@@ -23,6 +23,7 @@ from fastapi import (
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.auth import get_current_user
 from app.config import settings
@@ -216,12 +217,21 @@ async def meetings_list(
     # времени, завершённая конференция висела в «Назначены» до конца её часа, и
     # человек видел в списке то, что сам только что закончил (замечание МАГа
     # 10.09.2026).
-    закрытые = select(ConfSession.event_id).where(
+    # Закрытой считается конференция, которую закончили В ЕЁ ВРЕМЯ. Вход за
+    # неделю до срока (проверить комнату, ссылку) и «Завершить» после него
+    # встречу не отменяют: иначе назначенная на 20-е пропадала из «Назначены»
+    # тринадцатого (проверка 13.10.2026).
+    своё = aliased(CalendarEvent)
+    закрытые = select(ConfSession.event_id).join(
+        своё, своё.id == ConfSession.event_id).where(
         ConfSession.company_id == cid, ConfSession.ended_at.isnot(None),
-        ConfSession.event_id.isnot(None))
+        ConfSession.ended_at >= своё.starts_at)
     if scope == "upcoming":
         условия.append(CalendarEvent.ends_at >= сейчас)
         условия.append(CalendarEvent.id.not_in(закрытые))
+        # Отменённая — не назначенная: серия после отмены висела в списке
+        # строкой «отменена» на каждое повторение (69 строк, 13.10.2026).
+        условия.append(CalendarEvent.status != "cancelled")
     elif scope == "past":
         условия.append(or_(CalendarEvent.ends_at < сейчас,
                            CalendarEvent.id.in_(закрытые)))
@@ -350,6 +360,32 @@ async def _закрыть_комнату(room: str) -> bool:
         return False
 
 
+# Сколько постоянная комната стоит пустой, прежде чем разговор в ней считается
+# оконченным: минута, если все вышли сами (вернуться за забытым вопросом —
+# тот же разговор), и пять, если вкладки просто замолчали — человек мог
+# закрыть пространство, не выходя из комнаты.
+ROOM_EMPTY_SEC = 60
+ROOM_SILENT_SEC = 300
+
+
+async def _отметить_приход(db: AsyncSession, сессия: ConfSession, user: User) -> None:
+    """Человек вошёл в комнату — впервые или вернулся.
+
+    Сигнал «я здесь» ставим сразу: без него вошедший и закрывший вкладку в
+    первые полминуты числился в комнате до её закрытия по сроку.
+    """
+    сейчас = datetime.now(timezone.utc)
+    p = (await db.execute(select(ConfPresence).where(
+        ConfPresence.session_id == сессия.id,
+        ConfPresence.user_id == user.id))).scalar_one_or_none()
+    if p is None:
+        db.add(ConfPresence(session_id=сессия.id, user_id=user.id,
+                            last_seen_at=сейчас))
+    else:
+        p.last_seen_at = сейчас
+        p.left_at = None
+
+
 async def _закрыть_брошенные(db: AsyncSession, cid: uuid.UUID) -> None:
     """Закрыть конференции, которые давно кончились.
 
@@ -373,7 +409,31 @@ async def _закрыть_брошенные(db: AsyncSession, cid: uuid.UUID) -
         события = {e.id: e for e in (await db.execute(select(CalendarEvent).where(
             CalendarEvent.id.in_(ids)))).scalars().all()}
     изменили = False
+    # Постоянная комната пустеет без «Завершить»: кнопки у места нет, люди
+    # просто выходят. Пока её закрывал только четырёхчасовой срок, пустая
+    # комната всё это время стояла в «Идут сейчас» (проверка 13.10.2026).
+    # Комнату на сервере не гасим: гость по ссылке нам не виден и мог остаться.
+    комнатные = [s for s in живые if s.conf_room_id is not None]
+    if комнатные:
+        отметки: dict[uuid.UUID, list[ConfPresence]] = {}
+        for p in (await db.execute(select(ConfPresence).where(
+                ConfPresence.session_id.in_([s.id for s in комнатные])))).scalars():
+            отметки.setdefault(p.session_id, []).append(p)
+        for s in комнатные:
+            виделись = [p.left_at or p.last_seen_at or p.joined_at
+                        for p in отметки.get(s.id, [])]
+            последний = max(виделись, default=s.started_at)
+            if all(p.left_at for p in отметки.get(s.id, [])):
+                тишина = ROOM_EMPTY_SEC          # все вышли сами
+            else:
+                тишина = ROOM_SILENT_SEC         # вкладка замолчала — ждём дольше
+            if (сейчас - последний).total_seconds() > тишина:
+                s.ended_at = max(последний, s.started_at)
+                s.close_reason = "empty"
+                изменили = True
     for s in живые:
+        if s.ended_at is not None:
+            continue
         ev = события.get(s.event_id) if s.event_id else None
         предел = s.started_at + timedelta(hours=4)
         if ev:
@@ -591,7 +651,8 @@ async def meeting_join(
     # иначе опоздание организатора отменяет совещание, и люди расходятся.
     некому_открыть = сессия is None and datetime.now(timezone.utc) >= ev.starts_at
     ведущий = ev.organizer_id == current_user.id or некому_открыть
-    urls = jitsi.meeting_urls(room, current_user.name, moderator=ведущий)
+    urls = jitsi.meeting_urls(room, current_user.name, moderator=ведущий,
+                              subject=ev.title)
     if not ev.conference_url:
         ev.conference_url = urls["guest_url"]
         await jitsi.share_series_url(db, ev)
@@ -601,11 +662,7 @@ async def meeting_join(
                              started_by=current_user.id)
         db.add(сессия)
         await db.flush()
-    есть = (await db.execute(select(ConfPresence.id).where(
-        ConfPresence.session_id == сессия.id,
-        ConfPresence.user_id == current_user.id))).scalar_one_or_none()
-    if есть is None:
-        db.add(ConfPresence(session_id=сессия.id, user_id=current_user.id))
+    await _отметить_приход(db, сессия, current_user)
     await db.commit()
     return {**urls, "session_id": str(сессия.id), "moderator": ведущий}
 
@@ -1061,7 +1118,7 @@ async def room_join(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Комната не найдена")
 
     room = jitsi.room_for(f"room:{к.id}")
-    urls = jitsi.meeting_urls(room, current_user.name)
+    urls = jitsi.meeting_urls(room, current_user.name, subject=к.name)
     сессия = (await db.execute(select(ConfSession).where(
         ConfSession.conf_room_id == к.id,
         ConfSession.ended_at.is_(None)))).scalar_one_or_none()
@@ -1070,10 +1127,6 @@ async def room_join(
                              title=к.name, started_by=current_user.id)
         db.add(сессия)
         await db.flush()
-    есть = (await db.execute(select(ConfPresence.id).where(
-        ConfPresence.session_id == сессия.id,
-        ConfPresence.user_id == current_user.id))).scalar_one_or_none()
-    if есть is None:
-        db.add(ConfPresence(session_id=сессия.id, user_id=current_user.id))
+    await _отметить_приход(db, сессия, current_user)
     await db.commit()
     return {**urls, "session_id": str(сессия.id), "moderator": True}

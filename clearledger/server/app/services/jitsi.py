@@ -9,6 +9,7 @@ env `JITSI_SIGNING_KEY` (PEM в base64), НЕ в git; публичный леж�
 import base64
 import hashlib
 import hmac
+import json
 import secrets
 import time
 from urllib.parse import quote
@@ -98,17 +99,27 @@ def sign_token(room: str, display_name: str, *, moderator: bool = True, hours: i
 
 
 def meeting_urls(room: str, display_name: str, hours: int = 4,
-                 moderator: bool = True) -> dict:
+                 moderator: bool = True, subject: str | None = None) -> dict:
     """Ссылка входа (с токеном) + гостевая (без токена) на ту же комнату.
 
     `moderator=False` — вход обычным участником: в чужой конференции
     распоряжается тот, кто её собрал, и раздавать права ведущего каждому
     вошедшему нельзя (решение МАГа 10.09.2026).
+
+    `subject` — тема в заголовке комнаты вместо «Ledger F 8637 E 8 B…». Едет
+    только в ссылке входа: тему комнате ставит ведущий, остальные видят её уже
+    выставленной, а гостевая ссылка остаётся голым адресом комнаты — по нему
+    её узнают календарь и журнал.
     """
     token = sign_token(room, display_name, moderator=moderator, hours=hours)
     base = f"https://{settings.jitsi_domain}/{quote(room)}"
+    вход = f"{base}?jwt={token}" if token else base
+    if subject and subject.strip():
+        # Значение параметра Jitsi разбирает как JSON — отсюда кавычки.
+        вход += "#config.subject=" + quote(json.dumps(subject.strip()[:120],
+                                                      ensure_ascii=False))
     return {
         "room": room,
-        "moderator_url": f"{base}?jwt={token}" if token else base,
+        "moderator_url": вход,
         "guest_url": base,
     }
