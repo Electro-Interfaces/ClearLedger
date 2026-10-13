@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
-  CheckCircle2, ChevronRight, Circle, Copy, FileText, Link2, Loader2, Paperclip, UserPlus, Video,
+  CheckCircle2, ChevronRight, Circle, Clock, Copy, FileText, Link2, Loader2, Paperclip, UserPlus, Video,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -25,7 +25,7 @@ import * as tasksService from '@/services/tasksService'
 import * as workService from '@/services/workService'
 import { EventDialog } from '@/components/calendar/EventDialog'
 import { cn } from '@/lib/utils'
-import { длительность, когда, копировать, предмет } from './format'
+import { длительность, доНачала, когда, копировать, предмет, скороНачало, useСейчас } from './format'
 
 /**
  * Назначенные конференции, сложенные по сериям: у серии комната одна, по ней и
@@ -78,6 +78,11 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
   onToggle?: () => void
 }) {
   const [итог, setИтог] = useState(meeting.session?.note ?? '')
+  // Отсчёт до начала: «назначена на 15 октября в 10:30» заставляет считать в
+  // уме, сколько осталось. За четверть часа строка меняет вид — человек,
+  // открывший раздел, должен увидеть, что его ждут прямо сейчас (МАГ, 14.10.2026).
+  const сейчас = useСейчас()
+  const скоро = скороНачало(meeting, сейчас)
   // Карточка — та же, что у встречи в календаре: конференция и есть встреча
   // календаря, и второй экран с её участниками, повесткой и повтором расходился
   // бы с первым. Раньше из строки можно было только войти: кто позван, что в
@@ -145,7 +150,9 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
       if ((e.target as HTMLElement).closest('button, a, input, textarea, select, label, [role="dialog"]')) return
       setКарточка(true)
     }}
-      className="-mx-2 cursor-pointer rounded-md border-b border-border/60 px-2 py-3 transition-colors last:border-0 hover:bg-accent/40">
+      className={cn('-mx-2 cursor-pointer rounded-md px-2 py-3 transition-colors',
+        скоро ? 'my-1 border border-warning/60 bg-warning/10 hover:bg-warning/15'
+          : 'border-b border-border/60 last:border-0 hover:bg-accent/40')}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         {meeting.live && (
           <span className="flex items-center gap-1.5 text-xs font-medium text-success">
@@ -157,6 +164,15 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
           className="rounded-sm text-left font-medium underline-offset-4 hover:underline">
           {meeting.title}
         </button>
+        {!прошла && !meeting.live && meeting.status !== 'cancelled' && (
+          // Цвет не единственный признак: близкое начало названо словами.
+          <span className={cn('flex items-center gap-1 text-xs',
+            скоро ? 'font-medium text-foreground' : 'text-muted-foreground')}>
+            <Clock className={cn('h-3.5 w-3.5', скоро && 'text-warning')} />
+            {скоро && new Date(meeting.starts_at).getTime() > сейчас ? 'скоро начало — ' : ''}
+            {доНачала(meeting.starts_at, сейчас)}
+          </span>
+        )}
         {!!meeting.papers && (
           <span className="flex items-center gap-1 text-xs text-muted-foreground"
             title="Материалы к встрече — в карточке">

@@ -11,16 +11,16 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarPlus, Copy, Loader2, Radio, Square, UserPlus, Users, Video } from 'lucide-react'
+import { CalendarPlus, Clock, Copy, Loader2, Radio, Square, UserPlus, Users, Video } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as conf from '@/services/confService'
-import { NewTalkDialog, SeriesRow, посериям } from './parts'
+import { NewTalkDialog, SeriesRow, TalkRow, посериям } from './parts'
 import { RoomCards } from './RoomCards'
 import { EmptyBlock } from './EmptyBlock'
-import { длительность, когда, копировать } from './format'
+import { длительность, когда, копировать, скороНачало, useСейчас } from './format'
 
 export default function ConfTalksPage() {
   const { companyId } = useCompany()
@@ -78,15 +78,21 @@ export default function ConfTalksPage() {
   const все = впереди.data?.meetings ?? []
   // Приглашения без ответа — наверх: это единственное, что здесь требует
   // ответа именно от вас, и искать его среди чужих встреч не должно.
-  const зовут = все.filter(в => в.my_response === 'pending' && !в.organizer_is_me && !в.live)
-  const встречи = все.filter(в => !зовут.includes(в) && !в.live)
+  // Те, до которых четверть часа или меньше, встают наверх отдельным блоком:
+  // открыв раздел, человек первым делом видит, куда ему пора. В остальных
+  // списках их уже нет — одна конференция в двух местах читается как две.
+  const сейчас = useСейчас()
+  const скоро = все.filter(в => скороНачало(в, сейчас))
+  const зовут = все.filter(в => в.my_response === 'pending' && !в.organizer_is_me && !в.live
+    && !скоро.includes(в))
+  const встречи = все.filter(в => !зовут.includes(в) && !в.live && !скоро.includes(в))
   // Приглашения на уже идущие конференции: ответить на них можно прямо в
   // карточке «Идут сейчас», второй строкой их не дублируем.
   const ответить = new Map(все.filter(в => в.live && в.my_response === 'pending'
     && !в.organizer_is_me).map(в => [в.id, в]))
   const выключено = впереди.data?.enabled === false
   const грузим = live.isLoading || впереди.isLoading
-  const пусто = !грузим && !идут.length && !встречи.length && !зовут.length
+  const пусто = !грузим && !идут.length && !встречи.length && !зовут.length && !скоро.length
 
   return (
     <div className="space-y-5 p-4">
@@ -110,6 +116,18 @@ export default function ConfTalksPage() {
         <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
           Видеоконференции в этом пространстве не настроены — обратитесь к администратору.
         </p>
+      )}
+
+      {скоро.length > 0 && (
+        <section aria-live="polite">
+          <h2 className="mb-1 flex items-center gap-2 text-sm font-medium">
+            <Clock className="h-4 w-4 text-warning" />Скоро начало
+            <span className="text-muted-foreground">· {скоро.length}</span>
+          </h2>
+          {скоро.map(в => (
+            <TalkRow key={в.id} meeting={в} companyId={companyId} onChanged={обновить} />
+          ))}
+        </section>
       )}
 
       <RoomCards />

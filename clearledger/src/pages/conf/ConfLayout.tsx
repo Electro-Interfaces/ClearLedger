@@ -20,6 +20,7 @@ import { useMaxWidth } from '@/hooks/use-mobile'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
 import * as conf from '@/services/confService'
+import { скороНачало, useСейчас } from './format'
 
 export interface ConfView {
   key: string
@@ -62,9 +63,12 @@ export function ConfLayout() {
   // В счётчике — идущие плюс приглашения без ответа: и то, и другое требует
   // от человека действия сейчас. Число, которое ничего не требует, перестают
   // замечать через день.
+  // Туда же — конференции, до которых четверть часа: пора идти.
+  const сейчас = useСейчас()
   const идут = (live.data?.live.length ?? 0)
     // Серия — одно приглашение, сколько бы повторений в ней ни стояло.
-    + new Set(зовут.data?.meetings.filter(в => в.my_response === 'pending' && !в.organizer_is_me)
+    + new Set(зовут.data?.meetings.filter(в => скороНачало(в, сейчас)
+      || (в.my_response === 'pending' && !в.organizer_is_me))
       .map(в => в.room ?? в.id)).size
 
   const активный = [...CONF_VIEWS].reverse()
