@@ -44,3 +44,16 @@ def test_tekst_bez_knopki_1s():
     out["available"] = True
     тексты = " ".join(a["text"] for a in build_alerts(out))
     assert "нет строки кассы" in тексты and "ККМ" not in тексты
+
+
+def test_obshchiy_shk_dvuh_kartochek_ne_gasit_raznicu():
+    doc = {"Касса": [_касса("a", 5, шк="123"), _касса("b", 15, код=501, шк="123")],
+           "Учет": [_книга("a", 10, шк="123"), _книга("b", 10, шк="123")]}
+    out = analyze_stock(doc, hall="208")
+    assert sorted((r["item"], r["delta"]) for r in out["qty_mismatch"]) == [("a", -5.0), ("b", 5.0)]
+    doc["Касса"] = [_касса("a", 10, шк="123"), _касса("b", 10, код=501, шк="123")]
+    assert analyze_stock(doc, hall="208")["totals"]["qty_mismatch"] == 0
+    # служебный запас карточки s не прячет расхождение карточки b с тем же ШК
+    doc = {"Касса": [_касса("s", 1000, шк="123", СлужебныйЗапас=True), _касса("b", 5, код=501, шк="123")],
+           "Учет": [_книга("s", 3, шк="123"), _книга("b", 10, шк="123")]}
+    assert [(r["item"], r["delta"]) for r in analyze_stock(doc, hall="208")["qty_mismatch"]] == [("b", -5.0)]

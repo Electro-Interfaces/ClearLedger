@@ -413,6 +413,7 @@ def analyze_stock(doc: dict, hall: str | None = None,
 
     # Учёт ведётся по (номенклатура, ШК, цена) — для кассы важен ШК.
     book_by_barcode: dict[str, float] = defaultdict(float)
+    book_by_pair: dict[tuple[str, str], float] = defaultdict(float)
     book_by_item: dict[str, float] = defaultdict(float)
     book_name: dict[str, str] = {}
     # Минус — по карточке на месте хранения, а не по строке: у карточки бывает
@@ -433,6 +434,7 @@ def analyze_stock(doc: dict, hall: str | None = None,
         if hall is not None and место and место != hall:
             continue
         book_by_barcode[bc] += qty
+        book_by_pair[(uid, bc)] += qty
         book_by_item[uid] += qty
     negatives = [dict(поз, qty=round(поз["qty"], 3))
                  for поз in по_месту.values() if поз["qty"] < -0.0005]
@@ -446,9 +448,11 @@ def analyze_stock(doc: dict, hall: str | None = None,
     # и на одном и том же снимке они выдавали 1 и 9 проблемных позиций.
     # Правда — по карточке: продаётся товар, а не строка таблицы.
     cash_by_barcode: dict[str, float] = defaultdict(float)
+    cash_by_pair: dict[tuple[str, str], float] = defaultdict(float)
     cash_by_item: dict[str, float] = defaultdict(float)
     for r in cash_rows:
         cash_by_barcode[str(r.get("ШтрихКод") or "")] += float(r.get("Остаток") or 0)
+        cash_by_pair[(str(r.get("Номенклатура") or ""), str(r.get("ШтрихКод") or ""))] += float(r.get("Остаток") or 0)
         cash_by_item[str(r.get("Номенклатура") or "")] += float(r.get("Остаток") or 0)
 
     cannot_sell, no_price, stale_vat = [], [], []
@@ -460,8 +464,10 @@ def analyze_stock(doc: dict, hall: str | None = None,
     # без пометки соус приезжал бы сюда «расхождением» на сто тысяч граммов и
     # заслонял настоящие. Старые пакеты пометки не несут — там поведение
     # прежнее.
-    служебные_шк = {str(r.get("ШтрихКод") or "") for r in cash_rows if r.get("СлужебныйЗапас")}
-    служебные_шк.discard("")
+    # Пометка действует на пару (карточка, ШК): служебная строка одной карточки
+    # не должна прятать расхождение другой карточки с тем же штрихкодом.
+    служебные = {(str(r.get("Номенклатура") or ""), str(r.get("ШтрихКод") or ""))
+                 for r in cash_rows if r.get("СлужебныйЗапас")}
     for r in cash_rows:
         bc = str(r.get("ШтрихКод") or "")
         uid = str(r.get("Номенклатура") or "")
@@ -490,17 +496,23 @@ def analyze_stock(doc: dict, hall: str | None = None,
             missing_in_cash.append({"item": uid, "name": book_name.get(uid, ""),
                                     "qty": round(qty, 3)})
 
-    # Расхождение количеств по общим ШК.
+    # Расхождение количеств по общим ШК — по паре (карточка, ШК): один штрихкод
+    # бывает у двух карточек, и сумма по штрихкоду гасит их разницы друг о друга
+    # (учёт 10 и 10, касса 5 и 15 — «сходится»).
     qty_diff = []
+    пары_шк: dict[str, set[str]] = defaultdict(set)
+    for uid, bc in list(cash_by_pair) + list(book_by_pair):
+        пары_шк[bc].add(uid)
     for bc, cash_qty in cash_by_barcode.items():
         if not bc or bc not in book_by_barcode:
             continue
-        if bc in служебные_шк:
-            continue
-        delta = cash_qty - book_by_barcode[bc]
-        if abs(delta) > 0.001:
-            qty_diff.append({"barcode": bc, "cash": round(cash_qty, 3),
-                             "book": round(book_by_barcode[bc], 3), "delta": round(delta, 3)})
+        for uid in sorted(пары_шк[bc]):
+            if (uid, bc) in служебные:
+                continue
+            c, b = cash_by_pair.get((uid, bc), 0.0), book_by_pair.get((uid, bc), 0.0)
+            if abs(c - b) > 0.001:
+                qty_diff.append({"barcode": bc, "item": uid, "cash": round(c, 3),
+                                 "book": round(b, 3), "delta": round(c - b, 3)})
     qty_diff.sort(key=lambda x: -abs(x["delta"]))
 
     return {
