@@ -2280,8 +2280,11 @@ async def paper_file(
     sf = await db.get(SourceFile, p.file_id)
     if sf is None or not Path(sf.storage_path).exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл потерян в хранилище")
+    # no-store: иначе браузер отдаёт файл из своего кэша и запросу без пропуска —
+    # на общем компьютере его открыл бы следующий человек (проверка 14.10.2026).
     return FileResponse(sf.storage_path, media_type=sf.mime_type or "application/octet-stream",
-                        filename=sf.file_name)
+                        filename=sf.file_name,
+                        headers={"Cache-Control": "private, no-store"})
 
 
 @router.post("/calendar/{event_id}/papers/{paper_id}/remove")
