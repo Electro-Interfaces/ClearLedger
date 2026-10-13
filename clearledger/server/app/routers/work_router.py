@@ -30,7 +30,8 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import (
+    APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status)
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     Integer, String, Uuid, and_, cast, delete, func, literal, or_, select)
@@ -2122,6 +2123,190 @@ async def material_close(
     await db.delete(row)
     await db.commit()
     return {"closed": True}
+
+# ── Материалы к встрече для её участников ────────────────────────────────────
+class PaperIn(BaseModel):
+    company_id: str
+    # Либо документ «Трека», либо ссылка. Файл едет отдельной ручкой.
+    target_ref: str | None = Field(None, pattern="^doc:[0-9a-fA-F-]{36}$")
+    url: str | None = Field(None, max_length=2000)
+    title: str | None = Field(None, max_length=500)
+
+
+async def _event_of_member(db: AsyncSession, cid: uuid.UUID, event_id: str, user: User):
+    """Встреча, карточку которой этот человек вправе открыть: общая, своя или та,
+    куда его позвали. Тот же круг видит и материалы — отдельного списка доступа
+    у повестки нет."""
+    from app.models import CalendarAttendee, CalendarEvent
+
+    ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
+    if ev is None or ev.company_id != cid:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
+    if ev.visibility != 'company' and ev.organizer_id != user.id:
+        зван = (await db.execute(select(CalendarAttendee.id).where(
+            CalendarAttendee.event_id == ev.id,
+            CalendarAttendee.user_id == user.id))).scalar_one_or_none()
+        if зван is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша встреча")
+    return ev
+
+
+def _paper_out(p, ev, me: uuid.UUID, имена: dict, размеры: dict) -> dict[str, Any]:
+    return {
+        "id": str(p.id), "kind": p.kind, "title": p.title,
+        "target_ref": p.target_ref, "url": p.url,
+        "size": размеры.get(p.file_id),
+        "added_by": имена.get(p.added_by), "created_at": p.created_at,
+        # Убрать может тот, кто приложил, и организатор встречи.
+        "can_remove": p.added_by == me or ev.organizer_id == me,
+    }
+
+
+@router.get("/calendar/{event_id}/papers")
+async def papers_list(
+    event_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Материалы к встрече: что прочитать до неё и что осталось после."""
+    from app.models import CalendarPaper, SourceFile
+
+    cid = await _assert_work(company_id, current_user, db)
+    ev = await _event_of_member(db, cid, event_id, current_user)
+    rows = (await db.execute(select(CalendarPaper).where(
+        CalendarPaper.event_id == ev.id).order_by(CalendarPaper.created_at))).scalars().all()
+    авторы = {p.added_by for p in rows if p.added_by}
+    имена = {i: n for i, n in (await db.execute(select(User.id, User.name).where(
+        User.id.in_(авторы)))).all()} if авторы else {}
+    файлы = {p.file_id for p in rows if p.file_id}
+    размеры = {i: s for i, s in (await db.execute(select(SourceFile.id, SourceFile.size).where(
+        SourceFile.id.in_(файлы)))).all()} if файлы else {}
+    return {"papers": [_paper_out(p, ev, current_user.id, имена, размеры) for p in rows]}
+
+
+@router.post("/calendar/{event_id}/papers", status_code=status.HTTP_201_CREATED)
+async def paper_add(
+    event_id: str,
+    payload: PaperIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Приложить к встрече документ «Трека» или ссылку."""
+    from app.models import CalendarPaper
+    from app.routers import docs_router
+
+    cid = await _assert_work(payload.company_id, current_user, db)
+    ev = await _event_of_member(db, cid, event_id, current_user)
+    if ev.status == "cancelled":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Встреча отменена")
+    if bool(payload.target_ref) == bool(payload.url):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нужен документ либо ссылка")
+    if payload.target_ref:
+        d = await docs_router._doc_or_404(db, cid, payload.target_ref.split(":", 1)[1])
+        # Приложить можно то, что сам вправе читать. Остальным участникам
+        # документ откроется по ЕГО правам — встреча их не расширяет.
+        await docs_router._assert_doc_permission(db, cid, d, current_user, "read")
+        row = CalendarPaper(event_id=ev.id, kind="doc", target_ref=payload.target_ref,
+                            title=" · ".join(x for x in (d.reg_number, d.title) if x),
+                            added_by=current_user.id)
+    else:
+        адрес = payload.url.strip()
+        if not адрес.lower().startswith(("http://", "https://")):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Ссылка должна начинаться с http:// или https://")
+        row = CalendarPaper(event_id=ev.id, kind="link", url=адрес,
+                            title=(payload.title or "").strip() or адрес,
+                            added_by=current_user.id)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _paper_out(row, ev, current_user.id, {current_user.id: current_user.name}, {})
+
+
+@router.post("/calendar/{event_id}/papers/file", status_code=status.HTTP_201_CREATED)
+async def paper_upload(
+    event_id: str,
+    company_id: str = Query(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Приложить к встрече файл. Хранение общее с остальными файлами Ядра."""
+    from app.models import CalendarPaper
+    from app.services import file_store
+
+    cid = await _assert_work(company_id, current_user, db)
+    ev = await _event_of_member(db, cid, event_id, current_user)
+    if ev.status == "cancelled":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Встреча отменена")
+    данные = await file.read()
+    if not данные:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пустой файл")
+    имя = (file.filename or "файл")[:500]
+    строка = file_store.put(db, cid, данные, file_name=имя,
+                            mime=file.content_type, purpose="attachment")
+    await db.flush()
+    row = CalendarPaper(event_id=ev.id, kind="file", file_id=строка.id, title=имя,
+                        added_by=current_user.id)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return _paper_out(row, ev, current_user.id, {current_user.id: current_user.name},
+                      {строка.id: len(данные)})
+
+
+@router.get("/calendar/{event_id}/papers/{paper_id}/file")
+async def paper_file(
+    event_id: str,
+    paper_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отдать файл материала. Доступ — это доступ к встрече, а не к файлу:
+    прямая ссылка на хранилище постороннему ничего не даёт."""
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+
+    from app.models import CalendarPaper, SourceFile
+
+    cid = await _assert_work(company_id, current_user, db)
+    ev = await _event_of_member(db, cid, event_id, current_user)
+    p = await db.get(CalendarPaper, _uuid_or_400(paper_id, "paper_id"))
+    if p is None or p.event_id != ev.id or p.file_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Материал не найден")
+    sf = await db.get(SourceFile, p.file_id)
+    if sf is None or not Path(sf.storage_path).exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл потерян в хранилище")
+    return FileResponse(sf.storage_path, media_type=sf.mime_type or "application/octet-stream",
+                        filename=sf.file_name)
+
+
+@router.post("/calendar/{event_id}/papers/{paper_id}/remove")
+async def paper_remove(
+    event_id: str,
+    paper_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Убрать материал со встречи. Файл в хранилище остаётся, документ и ссылка
+    никуда не деваются — снимается только привязка."""
+    from app.models import CalendarPaper
+
+    cid = await _assert_work(company_id, current_user, db)
+    ev = await _event_of_member(db, cid, event_id, current_user)
+    p = await db.get(CalendarPaper, _uuid_or_400(paper_id, "paper_id"))
+    if p is None or p.event_id != ev.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Материал не найден")
+    if p.added_by != current_user.id and ev.organizer_id != current_user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Убрать материал может тот, кто его приложил, или организатор")
+    await db.delete(p)
+    await db.commit()
+    return {"removed": paper_id}
 
 
 class PollIn(BaseModel):

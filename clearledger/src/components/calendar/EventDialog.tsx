@@ -19,6 +19,7 @@ import { Bell, BookmarkPlus, ChevronDown, ListPlus, Loader2, Repeat, Video, X } 
 import { findSlots } from '@/lib/slots'
 import { GuestPanel } from '@/components/calendar/GuestPanel'
 import { PollPanel } from '@/components/calendar/PollPanel'
+import { PapersPanel } from '@/components/calendar/PapersPanel'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -702,6 +703,15 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             <PollPanel companyId={companyId} eventId={event!.id}
               isOrganizer={мой} durationMinutes={длительность}
               onChanged={() => void refreshEvent()} />
+          </div>
+        )}
+
+        {/* Материалы видит каждый, кто открыл карточку, а не только организатор:
+            повестку читают участники. Право приложить проверяет сервер. */}
+        {!новая && (
+          <div className="mt-3">
+            <PapersPanel companyId={companyId} eventId={event!.id}
+              readOnly={event!.status === 'cancelled'} />
           </div>
         )}
 

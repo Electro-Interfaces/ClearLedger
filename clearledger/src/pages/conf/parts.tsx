@@ -208,7 +208,8 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
         {' · '}
         <button type="button" onClick={() => setКарточка(true)}
           className="text-primary underline-offset-2 hover:underline">
-          {событие.isFetching ? 'открываем…' : 'карточка'}
+          {событие.isFetching ? 'открываем…'
+            : meeting.papers ? `карточка и материалы: ${meeting.papers}` : 'карточка'}
         </button>
         {rest.length > 0 && (
           <>

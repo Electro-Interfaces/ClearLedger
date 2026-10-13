@@ -5,7 +5,7 @@
  * ручка и своя проекция, и приписать её к одному из контуров значило бы сказать,
  * что она принадлежит ему, — а она общая.
  */
-import { get, post } from './apiClient'
+import { downloadBlob, get, post, upload } from './apiClient'
 
 /** Колонка общей оси состояния. Порядок — порядок движения работы. */
 export type WorkState = 'new' | 'in_work' | 'approval' | 'external' | 'done'
@@ -710,4 +710,58 @@ export async function eventAction(companyId: string, id: string, data: {
     recurrence_until: data.recurrenceUntil,
     response: data.response, comment: data.comment,
   })
+}
+
+/** Материал к встрече для её участников: файл, документ «Трека» или ссылка. */
+export interface EventPaper {
+  id: string
+  kind: 'file' | 'doc' | 'link'
+  title: string
+  target_ref?: string | null
+  url?: string | null
+  size?: number | null
+  added_by?: string | null
+  created_at: string
+  /** Убрать может тот, кто приложил, и организатор встречи. */
+  can_remove: boolean
+}
+
+export async function listPapers(companyId: string, eventId: string) {
+  return get<{ papers: EventPaper[] }>(
+    `/api/work/calendar/${eventId}/papers`, { company_id: companyId })
+}
+
+export async function addPaper(companyId: string, eventId: string,
+                               data: { targetRef?: string; url?: string; title?: string }) {
+  return post<EventPaper>(`/api/work/calendar/${eventId}/papers`, {
+    company_id: companyId, target_ref: data.targetRef ?? null,
+    url: data.url ?? null, title: data.title ?? null,
+  })
+}
+
+export async function uploadPaper(companyId: string, eventId: string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return upload<EventPaper>(
+    `/api/work/calendar/${eventId}/papers/file?company_id=${encodeURIComponent(companyId)}`, form)
+}
+
+export async function removePaper(companyId: string, eventId: string, id: string) {
+  return post(`/api/work/calendar/${eventId}/papers/${id}/remove`
+    + `?company_id=${encodeURIComponent(companyId)}`, {})
+}
+
+/** Открыть файл материала. Качаем с пропуском: новая вкладка пришла бы к
+ *  серверу без него — пропуск лежит в браузере, а не в куках. */
+export async function openPaperFile(companyId: string, eventId: string, id: string, name: string) {
+  const blob = await downloadBlob(`/api/work/calendar/${eventId}/papers/${id}/file`
+    + `?company_id=${encodeURIComponent(companyId)}`)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }

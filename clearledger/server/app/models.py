@@ -10860,6 +10860,36 @@ class CalendarGuest(Base):
     )
 
 
+class CalendarPaper(Base):
+    """Материал к встрече ДЛЯ ЕЁ УЧАСТНИКОВ: повестка, документ, файл, ссылка.
+
+    Не путать с `CalendarMaterial` — тот открывает документ внешним гостям и
+    заводит гостевую ссылку. Здесь ничего наружу не уходит: строку видит тот же
+    круг, что и карточку встречи. Документ «Трека» лежит ссылкой и сохраняет
+    собственные права — приложить его не значит открыть.
+
+    У серии материалы свои на каждую встречу: повестка у четвергов разная.
+    """
+    __tablename__ = "calendar_papers"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("calendar_events.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    # file | doc | link
+    kind: Mapped[str] = mapped_column(String(10), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="CASCADE"), nullable=True)
+    target_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    added_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
 class CalendarMaterial(Base):
     """Материал, ОТКРЫТЫЙ гостям этой встречи.
 

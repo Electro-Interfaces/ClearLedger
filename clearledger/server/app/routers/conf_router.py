@@ -21,7 +21,7 @@ from fastapi import (
     APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status,
 )
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -181,14 +181,21 @@ async def _load(db: AsyncSession, события: list[CalendarEvent],
     по_событию: dict[uuid.UUID, ConfSession] = {}
     for s in сессии:
         по_событию.setdefault(s.event_id, s)
+    # Сколько материалов приложено: повестку читают ДО входа, и строка должна
+    # сказать, что она есть.
+    from app.models import CalendarPaper
+    материалов = {i: n for i, n in (await db.execute(select(
+        CalendarPaper.event_id, func.count()).where(
+            CalendarPaper.event_id.in_(ids)).group_by(CalendarPaper.event_id))).all()}
 
     люди = await _people(db, ({e.organizer_id for e in события}
                               | {a.user_id for a in участники}
                               | {p.user_id for p in присутствие}))
-    return [_event_dto(e,
-                       [a for a in участники if a.event_id == e.id],
-                       [g for g in гости if g.event_id == e.id],
-                       по_событию.get(e.id), люди, me)
+    return [{**_event_dto(e,
+                          [a for a in участники if a.event_id == e.id],
+                          [g for g in гости if g.event_id == e.id],
+                          по_событию.get(e.id), люди, me),
+             "papers": материалов.get(e.id, 0)}
             for e in события]
 
 

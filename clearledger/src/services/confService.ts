@@ -50,6 +50,8 @@ export interface ConfMeeting {
   guests: ConfGuest[]
   live: boolean
   session?: ConfSession | null
+  /** Сколько материалов приложено к встрече: повестка, документы, файлы. */
+  papers?: number
 }
 
 export interface LiveConf extends ConfSession {
