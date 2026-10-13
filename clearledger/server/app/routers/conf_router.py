@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -725,6 +726,30 @@ async def session_note(
 
 
 # ── Записи ──────────────────────────────────────────────────────────────────
+async def _сессия_записи(db: AsyncSession, room: str, имя: str | None) -> ConfSession | None:
+    """Сессия, которой принадлежит запись: последняя, начатая до начала записи.
+
+    Комната у постоянной конференции одна на все созывы, и запись, доставленная
+    с опозданием, ложилась на последний созыв, а не на свой («Оперативка»
+    06.10.2026 оказалась у входа от 13.10). Начало записи jibri пишет в имя
+    файла: `<комната>_ГГГГ-ММ-ДД-ЧЧ-ММ-СС.mp4`.
+    """
+    запрос = select(ConfSession).where(ConfSession.room == room).order_by(
+        ConfSession.started_at.desc())
+    m = re.search(r"_(\d{4}-\d\d-\d\d-\d\d-\d\d-\d\d)\.mp4$", имя or "")
+    if m:
+        from zoneinfo import ZoneInfo
+        # ponytail: часы сервера записи — московские (он у нас один). Появится
+        # сервер в другом поясе — передавать начало записи полем из finalize.sh.
+        начало = datetime.strptime(m[1], "%Y-%m-%d-%H-%M-%S").replace(
+            tzinfo=ZoneInfo("Europe/Moscow"))
+        своя = (await db.execute(запрос.where(
+            ConfSession.started_at <= начало + timedelta(minutes=5)))).scalars().first()
+        if своя:
+            return своя
+    return (await db.execute(запрос)).scalars().first()
+
+
 @router.post("/recordings/ingest", status_code=status.HTTP_201_CREATED)
 async def recording_ingest(
     room: str = Form(...),
@@ -745,8 +770,7 @@ async def recording_ingest(
 
     if not settings.conf_ingest_token or token != settings.conf_ingest_token:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Ключ приёма не подошёл")
-    сессия = (await db.execute(select(ConfSession).where(ConfSession.room == room)
-                               .order_by(ConfSession.started_at.desc()))).scalars().first()
+    сессия = await _сессия_записи(db, room, file.filename)
     if сессия is None:
         # Не наша комната — пусть скрипт спросит следующее пространство.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Комната не найдена")

@@ -12,8 +12,8 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.models import Company, ConfSession, User, UserCompany
 from app.routers.conf_router import (
-    MeetingIn, conf_stats, meeting_create, meeting_join, meetings_list,
-    meetings_live, session_end,
+    MeetingIn, _сессия_записи, conf_stats, meeting_create, meeting_join,
+    meetings_list, meetings_live, session_end,
 )
 
 pytestmark = pytest.mark.asyncio(loop_scope='session')
@@ -188,3 +188,26 @@ async def test_серия_одна_комната_и_ссылка_у_повто�
     await db.flush()
     идут = await meetings_live(company_id=str(company.id), db=db, current_user=хозяин)
     assert вход['session_id'] not in [с['id'] for с in идут['live']]
+
+
+async def test_запись_ложится_на_свой_созыв(db):
+    """Опоздавшая запись постоянной комнаты — созыву, в который писалась."""
+    from zoneinfo import ZoneInfo
+
+    company, хозяин, _, _ = await люди(db)
+    room = f'ledger-{uuid.uuid4().hex[:16]}'
+    мск = ZoneInfo('Europe/Moscow')
+    старый = ConfSession(company_id=company.id, room=room, title='Оперативка',
+                         started_by=хозяин.id,
+                         started_at=datetime(2026, 10, 6, 17, 9, tzinfo=мск))
+    новый = ConfSession(company_id=company.id, room=room, title='Оперативка',
+                        started_by=хозяин.id,
+                        started_at=datetime(2026, 10, 13, 10, 7, tzinfo=мск))
+    db.add_all([старый, новый])
+    await db.flush()
+
+    своя = await _сессия_записи(db, room, f'{room}_2026-10-06-17-48-38.mp4')
+    assert своя.id == старый.id
+    # Имя без времени — как раньше, последний созыв.
+    assert (await _сессия_записи(db, room, 'запись.mp4')).id == новый.id
+    assert await _сессия_записи(db, 'ledger-чужая', None) is None
