@@ -641,6 +641,15 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
               placeholder="Что обсуждаем, что принести" />
           </div>
 
+          {/* Материалы — сразу под описанием: это та же повестка, только
+              бумагами. Ниже, под списком людей и опросом времени, участник до
+              них не долистывал. Видит каждый, кто открыл карточку, а не только
+              организатор; право приложить проверяет сервер. */}
+          {!новая && (
+            <PapersPanel companyId={companyId} eventId={event!.id}
+              readOnly={event!.status === 'cancelled'} />
+          )}
+
           <div className="space-y-1.5">
             <Label>Кто видит встречу</Label>
             <div className="flex flex-wrap gap-1.5">
@@ -703,15 +712,6 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             <PollPanel companyId={companyId} eventId={event!.id}
               isOrganizer={мой} durationMinutes={длительность}
               onChanged={() => void refreshEvent()} />
-          </div>
-        )}
-
-        {/* Материалы видит каждый, кто открыл карточку, а не только организатор:
-            повестку читают участники. Право приложить проверяет сервер. */}
-        {!новая && (
-          <div className="mt-3">
-            <PapersPanel companyId={companyId} eventId={event!.id}
-              readOnly={event!.status === 'cancelled'} />
           </div>
         )}
 

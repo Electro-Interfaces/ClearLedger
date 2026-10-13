@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
-  CheckCircle2, Circle, Copy, FileText, Link2, Loader2, UserPlus, Video,
+  CheckCircle2, ChevronRight, Circle, Copy, FileText, Link2, Loader2, Paperclip, UserPlus, Video,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -136,7 +136,16 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
   const звано = meeting.attendees.length + meeting.guests.length
 
   return (
-    <div className="border-b border-border/60 py-3 last:border-0">
+    // Карточку открывает вся строка, а не слово в мета-строке: искать ссылку
+    // «карточка» среди дат и фамилий неудобно (замечание МАГа 14.10.2026).
+    // Кнопки, ссылки и поля внутри строки делают своё — их нажатие карточку не
+    // открывает. Окно карточки рисуется порталом, но события React всплывают и
+    // через него, поэтому нажатия внутри окна тоже отсекаем.
+    <div onClick={(e) => {
+      if ((e.target as HTMLElement).closest('button, a, input, textarea, select, label, [role="dialog"]')) return
+      setКарточка(true)
+    }}
+      className="-mx-2 cursor-pointer rounded-md border-b border-border/60 px-2 py-3 transition-colors last:border-0 hover:bg-accent/40">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         {meeting.live && (
           <span className="flex items-center gap-1.5 text-xs font-medium text-success">
@@ -144,10 +153,16 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
           </span>
         )}
         <button type="button" onClick={() => setКарточка(true)}
-          title="Открыть карточку: участники, повестка, время"
+          title="Открыть карточку: участники, повестка, материалы"
           className="rounded-sm text-left font-medium underline-offset-4 hover:underline">
           {meeting.title}
         </button>
+        {!!meeting.papers && (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground"
+            title="Материалы к встрече — в карточке">
+            <Paperclip className="h-3.5 w-3.5" />материалы: {meeting.papers}
+          </span>
+        )}
         {meeting.status === 'cancelled' && (
           <span className="text-xs text-destructive">отменена</span>
         )}
@@ -171,6 +186,12 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
                 : meeting.organizer_is_me ? 'Войти ведущим' : 'Присоединиться'}
             </Button>
           )}
+          <Button variant="ghost" size="sm" className="h-8 px-1.5"
+            title="Открыть карточку" aria-label={`Открыть карточку: ${meeting.title}`}
+            onClick={() => setКарточка(true)}>
+            {событие.isFetching ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <ChevronRight className="h-4 w-4" />}
+          </Button>
         </div>
       </div>
 
@@ -205,12 +226,6 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
               <Link2 className="mr-0.5 inline h-3 w-3" />{пред.имя}
             </Link>
           : пред.имя)}
-        {' · '}
-        <button type="button" onClick={() => setКарточка(true)}
-          className="text-primary underline-offset-2 hover:underline">
-          {событие.isFetching ? 'открываем…'
-            : meeting.papers ? `карточка и материалы: ${meeting.papers}` : 'карточка'}
-        </button>
         {rest.length > 0 && (
           <>
             {' · '}

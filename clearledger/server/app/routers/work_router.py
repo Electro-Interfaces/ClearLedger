@@ -2151,6 +2151,33 @@ async def _event_of_member(db: AsyncSession, cid: uuid.UUID, event_id: str, user
     return ev
 
 
+async def _сообщить_о_материале(db: AsyncSession, cid: uuid.UUID, ev, кто: User,
+                                 название: str) -> None:
+    """Сказать участникам, что к встрече приложили материал.
+
+    Повестку, о которой никто не узнал, не читают. Пишем каждому лично — тем же
+    путём, что напоминания: в чат пространства. Сбой доставки приложенному
+    материалу не мешает.
+    """
+    from app.models import CalendarAttendee
+    from app.services import notify
+
+    try:
+        кому = set((await db.execute(select(CalendarAttendee.user_id).where(
+            CalendarAttendee.event_id == ev.id))).scalars()) | {ev.organizer_id}
+        кому.discard(кто.id)
+        когда = space_time.as_utc(ev.starts_at).astimezone(
+            space_time.zone(ev.tz)).strftime("%d.%m в %H:%M")
+        for человек in (await db.execute(select(User).where(User.id.in_(кому)))).scalars():
+            await notify.notify_person(
+                db, cid, человек,
+                f"{кто.name} приложил к встрече «{ev.title}» ({когда}): {название}")
+        await db.commit()
+    except Exception:  # noqa: BLE001 — материал уже приложен
+        log.exception("Материал встречи: сообщение участникам не ушло")
+        await db.rollback()
+
+
 def _paper_out(p, ev, me: uuid.UUID, имена: dict, размеры: dict) -> dict[str, Any]:
     return {
         "id": str(p.id), "kind": p.kind, "title": p.title,
@@ -2221,7 +2248,9 @@ async def paper_add(
     db.add(row)
     await db.commit()
     await db.refresh(row)
-    return _paper_out(row, ev, current_user.id, {current_user.id: current_user.name}, {})
+    итог = _paper_out(row, ev, current_user.id, {current_user.id: current_user.name}, {})
+    await _сообщить_о_материале(db, cid, ev, current_user, row.title)
+    return итог
 
 
 @router.post("/calendar/{event_id}/papers/file", status_code=status.HTTP_201_CREATED)
@@ -2252,8 +2281,10 @@ async def paper_upload(
     db.add(row)
     await db.commit()
     await db.refresh(row)
-    return _paper_out(row, ev, current_user.id, {current_user.id: current_user.name},
+    итог = _paper_out(row, ev, current_user.id, {current_user.id: current_user.name},
                       {строка.id: len(данные)})
+    await _сообщить_о_материале(db, cid, ev, current_user, row.title)
+    return итог
 
 
 @router.get("/calendar/{event_id}/papers/{paper_id}/file")

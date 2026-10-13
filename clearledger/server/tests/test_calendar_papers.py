@@ -46,6 +46,14 @@ async def test_материалы_встречи(db, tmp_path, monkeypatch):
     ссылка = await paper_add(eid, PaperIn(company_id=cid, url='https://example.test/agenda',
                                           title='Повестка'), db=db, current_user=зван)
     assert ссылка['kind'] == 'link' and ссылка['title'] == 'Повестка'
+    # Организатору пришло личное сообщение о материале; приложившему — нет.
+    from app.models import ChatMessage, ChatParticipant
+    сказано = (await db.execute(select(ChatMessage).where(
+        ChatMessage.content.like('%приложил к встрече «Планёрка»%Повестка')))).scalars().all()
+    assert len(сказано) == 1
+    читают = set((await db.execute(select(ChatParticipant.user_id).where(
+        ChatParticipant.room_id == сказано[0].room_id))).scalars())
+    assert хозяин.id in читают and зван.id not in читают
     файл = await paper_upload(
         eid, company_id=cid,
         file=UploadFile(file=io.BytesIO(b'%PDF-test'), filename='Смета.pdf'),
