@@ -89,6 +89,26 @@ def test_new_doc_kinds_and_tp_coords_are_wired():
     assert EzsTechConnection.__table__.c["tp_coords"].type.length == 60
 
 
+def test_passport_lease_fields_are_wired():
+    from app.models import EzsSite
+    from app.services import ezs_site_work as w
+    new = {'contract_kind', 'rent_variable', 'rent_revenue_pct', 'rent_indexation_pct',
+           'contract_term_months', 'contract_registration', 'contract_registration_by', 'rent_comment',
+           'free_access', 'access_hours', 'internet_kind', 'parking_kind', 'parking_floor',
+           'conditions_comment'}
+    assert new <= w.EDITABLE_FIELDS and all(f in EzsSite.__table__.c for f in new)
+    assert w._coerce('contract_term_months', '36') == 36 and w._coerce('rent_revenue_pct', '7,5') == 7.5
+    assert w._coerce('contract_registration', 'да') is True and w._coerce('free_access', 'нет') is False
+    # пункт 3.7: срок числом (и ноль) закрывает графу, прежняя «Долгосрочный договор» — тоже
+    site = SimpleNamespace(contract_term_months=None, long_term_contract=None)
+    assert not w._field_filled(site, 'contract_term_months')
+    site.long_term_contract = False
+    assert w._field_filled(site, 'contract_term_months')
+    assert w._field_filled(SimpleNamespace(contract_term_months=0, long_term_contract=None),
+                           'contract_term_months')
+    assert any(i.get('fields') == ['rent_cost_month', 'contract_term_months'] for i in TASKS)
+
+
 def test_step_marks_manual_checklist_item_and_keeps_human_tick():
     from app.services.ezs_project import _gate_from_step
     site = SimpleNamespace(kind=None, gates={})

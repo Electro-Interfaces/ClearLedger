@@ -6774,6 +6774,21 @@ class EzsSite(Base):
     access_24x7: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     has_lighting: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     has_internet: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # ── условия аренды и площадки, уточнённые отделом развития (10.2026) ──
+    contract_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    rent_variable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    rent_revenue_pct: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    rent_indexation_pct: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    contract_term_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    contract_registration: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    contract_registration_by: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    rent_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    free_access: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    access_hours: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    internet_kind: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    parking_kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    parking_floor: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    conditions_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     subsidy_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
     commissioned_on: Mapped[str | None] = mapped_column(String(10), nullable=True)  # дата ввода
     # ── замыкание цикла: построенная площадка = объект сети + договор в учёте ──

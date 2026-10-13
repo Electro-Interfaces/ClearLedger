@@ -123,8 +123,8 @@ TASKS: list[dict[str, Any]] = [
     {"key": "3.6", "stage": "negotiation", "role": "ОР",
      "label": "Согласование навигации, информационных материалов и брендирования", "manual": True},
     {"key": "3.7", "stage": "negotiation", "role": "ОР",
-     "label": "Согласование коммерческих условий (аренда, долгосрочный договор)",
-     "fields": ["rent_cost_month", "long_term_contract"], "required": True},
+     "label": "Согласование коммерческих условий (аренда, срок договора)",
+     "fields": ["rent_cost_month", "contract_term_months"], "required": True},
     {"key": "3.8", "stage": "negotiation", "role": "ОР / Гл. эксперт (поиск)",
      "label": "Фиксация контактов собственника и предоставившего ЗУ", "field": "owner_contact"},
 

@@ -45,6 +45,8 @@ BENCHMARK_MONTHS = 6
 MIN_REGION_STATIONS = 3
 # Ориентир мощности площадки, если план не задан (типовая быстрая ЭЗС сети).
 DEFAULT_POWER_KWT = 150.0
+# Госпошлина за регистрацию договора аренды, если регистрирует арендатор (сумма от отдела развития, 10.2026).
+CONTRACT_REGISTRATION_FEE = 44_000
 
 
 # ── Спрос сети: сколько реально возит станция в этом регионе ────────────────
@@ -332,6 +334,10 @@ def economics(site: EzsSite, bench: dict[str, Any],
         assumptions.append("капитальные затраты — из бюджета проекта (все статьи капвложений)")
     else:
         capex = _num(site.connection_cost) or _num(site.tp_cost)
+        if capex is not None and site.contract_registration and site.contract_registration_by == "арендатор":
+            capex += CONTRACT_REGISTRATION_FEE
+            assumptions.append(f"регистрация договора за наш счёт — {CONTRACT_REGISTRATION_FEE:,} ₽ в затратах"
+                               .replace(",", " "))
         if capex is None:
             assumptions.append("капитальные затраты не посчитаны — срок окупаемости не считается")
         assumptions.append("стоимость оборудования и СМР в расчёт не входит — только подключение: "

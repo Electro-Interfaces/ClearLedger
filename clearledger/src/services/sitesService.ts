@@ -198,6 +198,21 @@ export interface SiteDetail extends SiteRow {
   inputPriceKwth: number | null
   smrCost: number | null
   longTermContract: boolean | null
+  // условия аренды и площадки (предложения отдела развития 09.10.2026)
+  contractKind: string | null
+  rentVariable: boolean | null
+  rentRevenuePct: number | null
+  rentIndexationPct: number | null
+  contractTermMonths: number | null
+  contractRegistration: boolean | null
+  contractRegistrationBy: string | null
+  rentComment: string | null
+  freeAccess: boolean | null
+  accessHours: string | null
+  internetKind: string | null
+  parkingKind: string | null
+  parkingFloor: string | null
+  conditionsComment: string | null
   hasVideo: boolean | null
   hasMobile: boolean | null
   ownerContact: string | null

@@ -1345,7 +1345,9 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
 
 /* ── Вкладка «Паспорт» ──────────────────────────────────────────────────── */
 
-const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: string; type?: 'number' | 'date' | 'text' | 'area' | 'select' | 'bool'; options?: string[] }[] }[] = [
+const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: string; type?: 'number' | 'date' | 'text' | 'area' | 'select' | 'bool'; options?: string[];
+  /** Графа-уточнение: видна, пока другая графа блока даёт для неё повод. */
+  when?: (val: (k: string) => string) => boolean }[] }[] = [
   {
     title: 'Объект',
     fields: [
@@ -1408,21 +1410,41 @@ const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: st
     // программы субсидирования — по ним площадка либо проходит, либо нет.
     title: 'Условия площадки',
     fields: [
-      { k: 'access24x7', label: 'Свободный доступ (24/7)', type: 'bool' },
+      { k: 'freeAccess', label: 'Свободный доступ', type: 'bool' },
+      { k: 'access24x7', label: 'Круглосуточный доступ', type: 'bool' },
+      { k: 'accessHours', label: 'Время доступа', when: (v) => v('access24x7') === 'нет' },
       { k: 'hasVideo', label: 'Видеонаблюдение', type: 'bool' },
       { k: 'hasMobile', label: 'Сотовая связь', type: 'bool' },
-      { k: 'hasInternet', label: 'Проводной интернет (LAN)', type: 'bool' },
+      { k: 'hasInternet', label: 'Интернет', type: 'bool' },
+      { k: 'internetKind', label: 'Интернет: LAN / WiFi', type: 'select', options: ['LAN', 'WiFi'] },
       { k: 'hasLighting', label: 'Освещение', type: 'bool' },
       { k: 'parkingSpots', label: 'Парковочных мест', type: 'number' },
+      { k: 'parkingKind', label: 'Тип парковки', type: 'select',
+        options: ['наземный', 'подземный', 'наземный многоуровневый', 'подземный многоуровневый'] },
+      { k: 'parkingFloor', label: 'Этаж парковки', when: (v) => v('parkingKind').includes('многоуровневый') },
       { k: 'dopService', label: 'Доп. сервис (магазин, кафе, WC)' },
+      { k: 'conditionsComment', label: 'Комментарий', type: 'area' },
     ],
   },
   {
     // Этап 3 чек-листа: о чём договорились и с кем разговаривали.
-    title: 'Условия аренды и контакты',
+    title: 'Условия аренды',
     fields: [
-      { k: 'rentCostMonth', label: 'Аренда, ₽/мес', type: 'number' },
-      { k: 'longTermContract', label: 'Долгосрочный договор', type: 'bool' },
+      { k: 'contractKind', label: 'Тип договора', type: 'select', options: ['аренда', 'субаренда', 'агентский', 'РНР'] },
+      { k: 'rentCostMonth', label: 'Постоянная аренда, ₽/мес', type: 'number' },
+      { k: 'rentVariable', label: 'Переменная аренда', type: 'bool' },
+      { k: 'rentRevenuePct', label: '% от выручки', type: 'number' },
+      { k: 'rentIndexationPct', label: 'Индексация, %', type: 'number' },
+      { k: 'contractTermMonths', label: 'Срок договора, мес.', type: 'number' },
+      { k: 'contractRegistration', label: 'Регистрация договора', type: 'bool' },
+      { k: 'contractRegistrationBy', label: 'Регистрирует договор', type: 'select',
+        options: ['арендатор', 'арендодатель'], when: (v) => v('contractRegistration') === 'да' },
+      { k: 'rentComment', label: 'Комментарий', type: 'area' },
+    ],
+  },
+  {
+    title: 'Контакты',
+    fields: [
       { k: 'ownerContact', label: 'Контакт представителя собственника', type: 'area' },
       { k: 'sourceCompany', label: 'Предоставивший ЗУ — компания' },
       { k: 'sourcePerson', label: 'Предоставивший ЗУ — ФИО' },
@@ -1448,6 +1470,12 @@ const API_FIELD: Record<string, string> = {
   subsidyPlanned: 'subsidy_planned', subsidyAmount: 'subsidy_amount',
   commissionedOn: 'commissioned_on', ownerContact: 'owner_contact',
   sourceCompany: 'source_company', sourcePerson: 'source_person',
+  contractKind: 'contract_kind', rentVariable: 'rent_variable', rentRevenuePct: 'rent_revenue_pct',
+  rentIndexationPct: 'rent_indexation_pct', contractTermMonths: 'contract_term_months',
+  contractRegistration: 'contract_registration', contractRegistrationBy: 'contract_registration_by',
+  rentComment: 'rent_comment', freeAccess: 'free_access', accessHours: 'access_hours',
+  internetKind: 'internet_kind', parkingKind: 'parking_kind', parkingFloor: 'parking_floor',
+  conditionsComment: 'conditions_comment',
 }
 
 // Булево поле в паспорте: сервер принимает «да»/«нет», хранит true/false.
@@ -1555,6 +1583,7 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
               const apiKey = API_FIELD[key] ?? key
               const isManual = manual.has(apiKey)
               const needFor = needs(key)
+              if (f.when && !f.when(val)) return null
               return (
                 <div key={key} data-wanted={needFor ? '' : undefined} className={`${f.type === 'area' ? 'md:col-span-3' : ''} ${
                   needFor ? '-mx-1 rounded-md bg-amber-400/10 px-1 py-0.5 ring-1 ring-amber-400/40' : ''}`}>
