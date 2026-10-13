@@ -329,7 +329,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
         {/* На широком экране — две колонки: слева о чём, когда и кому видно, справа
             кого зовём. Одной колонкой окно не помещалось по высоте, и кнопка «Начать»
             с настройками видимости уезжала под прокрутку. Список людей тянется на
-            высоту левой колонки (h-0 + flex-1), а не задаёт её. На телефоне порядок
+            высоту левой колонки, а не задаёт её: basis-0, не flex-1 — у того основа 0%, и при неопределённой высоте она считается по содержимому. На телефоне порядок
             прежний: расстановка по строкам действует только с md. */}
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-4 md:grid md:grid-cols-2 md:gap-x-8 md:gap-y-5 md:space-y-0">
           <div className="space-y-1.5 md:col-start-1 md:row-start-1">
@@ -395,7 +395,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
             </div>
             <Input id="conf-people" value={поиск} onChange={e => setПоиск(e.target.value)}
               placeholder="Имя сотрудника" className="text-base sm:text-sm" />
-            <div className="max-h-44 overflow-y-auto rounded-md border border-border px-2 md:h-0 md:max-h-none md:min-h-44 md:flex-1">
+            <div className="max-h-44 overflow-y-auto rounded-md border border-border px-2 md:h-0 md:max-h-none md:min-h-44 md:grow md:basis-0">
               {люди.isLoading && <p role="status" className="py-2 text-sm">Загружаются сотрудники…</p>}
               {!люди.isLoading && !видимые.length && (
                 <p className="py-2 text-sm text-muted-foreground">Никого не нашли</p>
