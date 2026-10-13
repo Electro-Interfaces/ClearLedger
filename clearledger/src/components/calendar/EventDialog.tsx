@@ -399,7 +399,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
-      <DialogContent className="max-h-[90dvh] w-[94vw] max-w-2xl overflow-y-auto p-4 sm:max-w-2xl sm:p-6">
+      <DialogContent className="max-h-[90dvh] w-[94vw] max-w-2xl overflow-y-auto p-4 sm:max-w-2xl sm:p-6 lg:max-w-5xl">
         <DialogHeader>
           <DialogTitle>{новая ? (companyDay ? 'Событие компании' : 'Новая встреча') : мой ? 'Встреча' : title}</DialogTitle>
         </DialogHeader>
@@ -410,6 +410,11 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
           </p>
         )}
 
+        {/* На широком экране карточка в две колонки: слева — что и когда, справа —
+            с чем и кто (материалы, круг, участники, опрос, гости). Одной колонкой
+            она уходила в три экрана прокрутки, и до участников не долистывали.
+            На телефоне порядок прежний — правая колонка встаёт под левую. */}
+        <div className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-8">
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor={fieldId + "-title"}>О чём</Label>
@@ -640,7 +645,11 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Что обсуждаем, что принести" />
           </div>
+          </>}
+        </div>
 
+        <div className="mt-3 space-y-3 lg:mt-0">
+          {(!phone || more) && <>
           {/* Материалы — сразу под описанием: это та же повестка, только
               бумагами. Ниже, под списком людей и опросом времени, участник до
               них не долистывал. Видит каждый, кто открыл карточку, а не только
@@ -678,7 +687,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
                 <Input aria-label="Найти участника" placeholder="Имя сотрудника" value={peopleSearch} onChange={e => setPeopleSearch(e.target.value)} className="text-base sm:text-sm" />
                 <p className="text-sm text-muted-foreground">Организатор участвует обязательно. Остальных можно позвать для сведения.</p>
                 {peopleQ.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить сотрудников. <button className="underline" onClick={() => void peopleQ.refetch()}>Повторить</button></p>}
-                <div className="max-h-48 overflow-y-auto rounded-md border border-border px-2">
+                <div className="max-h-48 overflow-y-auto rounded-md border border-border px-2 lg:max-h-64">
                   {peopleQ.isLoading && <p role="status" className="py-2 text-sm">Загружаются сотрудники…</p>}
                   {!peopleQ.isLoading && !peopleQ.isError && !люди.length && <p className="py-2 text-sm text-muted-foreground">Сотрудники не найдены</p>}
                   {люди.map(person => <div key={person.id} className="flex min-h-11 items-center gap-2 border-b border-border/60 py-1 last:border-0">
@@ -705,7 +714,6 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             </p>
           )}
           </>}
-        </div>
 
         {!новая && (мой || canRespond) && event!.status !== 'cancelled' && (
           <div className="mt-3">
@@ -751,6 +759,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             </p>
           </div>
         )}
+        </div>
+        </div>
 
         {/* По итогам встречи — поручение. Исполнителя здесь не спрашиваем: на
             совещании решают ЧТО, а кто — часто позже. Работа без исполнителя не
