@@ -133,6 +133,8 @@ export interface GateItem {
   waiveReason?: string | null
   /** Можно ли снимать обязательность с этого пункта вообще. */
   waivable?: boolean
+  /** Пункт снимается кнопкой «не требуется» — её нажимает ОКС (схемы 3.2–3.6). */
+  notNeeded?: boolean
   documentState?: 'file' | 'approved' | 'signed'
   needsConfirmation?: boolean
   confirmedBy?: string | null
@@ -222,6 +224,7 @@ export interface SiteDetail extends SiteRow {
   routeCode: string | null
   /** Вправе ли ЭТОТ человек снимать обязательность с пунктов чек-листа. */
   mayWaive?: boolean
+  mayNotNeeded?: boolean
 }
 
 export interface SiteEvent {

@@ -89,6 +89,21 @@ def test_new_doc_kinds_and_tp_coords_are_wired():
     assert EzsTechConnection.__table__.c["tp_coords"].type.length == 60
 
 
+def test_schemes_3_2_to_3_6_are_required_docs_with_not_needed():
+    from app.services.ezs_project import DOC_KINDS
+    from app.services.ezs_site_work import gate_state
+    kinds = {d['key'] for d in DOC_KINDS}
+    schemes = {t['key']: t for t in TASKS if t['key'] in ('3.2', '3.3', '3.4', '3.5', '3.6')}
+    assert len(schemes) == 5
+    assert all(t['doc'] in kinds and t['required'] and t['not_needed'] for t in schemes.values())
+    site = SimpleNamespace(kind=None, stage='negotiation', gates={'negotiation': {'3.3': {'done': True}}},
+                           project_no=None)
+    items = {i['key']: i for i in gate_state(site, doc_kinds={'scheme_install'})['items']}
+    # документ закрывает, прежняя галочка остаётся в силе, остальное держит переход
+    assert items['3.2']['done'] and items['3.3']['done'] and not items['3.4']['done']
+    assert items['3.4']['notNeeded'] and items['3.4']['waivable'] and not items['3.1']['notNeeded']
+
+
 def test_passport_lease_fields_are_wired():
     from app.models import EzsSite
     from app.services import ezs_site_work as w

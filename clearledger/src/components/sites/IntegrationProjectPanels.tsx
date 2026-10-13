@@ -618,7 +618,7 @@ function ProjectLeadPicker({ props, onSaved }: { props: Props; onSaved: () => Pr
   const leads = [...new Map((parties.data?.participants ?? []).filter((p) => p.userId && p.userId !== props.site.ownerUserId).map((p) => [p.userId, p])).values()]
   return <section className="rounded-lg border p-3 space-y-2"><h3 className="font-semibold text-sm">Руководитель проекта</h3>
     <p className="text-sm">Сейчас: {props.site.ownerName ? <b>{props.site.ownerName}</b> : <span className="text-amber-700 dark:text-amber-400">не назначен</span>}</p>
-    <p className="text-xs text-muted-foreground">Руководитель — поле «Руководитель проекта» в «Работе» (блок «Кто ведёт и что дальше»). Роли регламента в «Кто ведёт проект» — отдельное назначение: они распределяют кнопки маршрута, но руководителя не задают.</p>
+    <p className="text-xs text-muted-foreground">Руководитель — поле «Руководитель проекта» в «Работе» (блок «Руководитель проекта»). Роли регламента в «Кто ведёт проект» — отдельное назначение: они распределяют кнопки маршрута, но руководителя не задают.</p>
     {leads.length > 0 && <div className="flex flex-wrap gap-2">{leads.map((p) => <Button key={p.id} size="sm" variant="outline" disabled={busy} onClick={() => void assign(p.userId!)}>Назначить руководителем: {p.name} ({p.roleCode})</Button>)}</div>}
     <div className="flex flex-wrap gap-2"><select aria-label="Руководитель проекта" className={`${selectClass} max-w-xs`} value={pick} onChange={(e) => setPick(e.target.value)}>
       <option value="">Другой сотрудник…</option>{(members.data ?? []).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>

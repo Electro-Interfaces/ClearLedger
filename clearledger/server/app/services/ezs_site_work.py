@@ -176,7 +176,9 @@ def gate_state(site: EzsSite, stage: str | None = None,
             done = bool(marks.get(it["key"], {}).get("done"))
         elif it.get("doc"):
             requirement = it.get("document_state", "file")
-            done = (it["doc"] if requirement == "file" else f"{requirement}:{it['doc']}") in docs
+            # Галочка, поставленная до того, как пункт стал закрываться документом, остаётся в силе.
+            done = ((it["doc"] if requirement == "file" else f"{requirement}:{it['doc']}") in docs
+                    or bool(mark.get("done")))
         elif it.get("equipment"):
             # Закрывается не галочкой, а фактом: все нужные позиции поставлены.
             done = bool(equipment_supplied)
@@ -201,6 +203,7 @@ def gate_state(site: EzsSite, stage: str | None = None,
                     # Снимать обязательность имеет смысл только с того, что её имеет
                     # и не выполнено; три пункта не снимаются вовсе (WAIVE_FORBIDDEN).
                     "waivable": bool(it.get("required")) and it["key"] not in WAIVE_FORBIDDEN,
+                    "notNeeded": bool(it.get("not_needed")),
                     "role": it.get("role"),
                     # Какие графы закрывают пункт: карточка подсвечивает их в паспорте.
                     # Из 55 граф иначе не понять, какие нужны прямо сейчас.

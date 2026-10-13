@@ -900,13 +900,10 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
   const [stage, setStage] = useState<SiteStage>(site.stage)
   const [reason, setReason] = useState('')
   const [owner, setOwner] = useState(site.ownerUserId ?? '')
-  const [next, setNext] = useState(site.nextAction ?? '')
-  const [due, setDue] = useState(site.nextActionDue ?? '')
   const [touch, setTouch] = useState('')
 
   useEffect(() => {
     setStage(site.stage); setOwner(site.ownerUserId ?? '')
-    setNext(site.nextAction ?? ''); setDue(site.nextActionDue ?? '')
   }, [site])
 
   const members = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId) })
@@ -968,9 +965,7 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось сменить стадию'),
   })
   const mSave = useMutation({
-    mutationFn: () => patchSite(companyId, site.id, {
-      owner_user_id: owner || null, next_action: next || null, next_action_due: due || null,
-    }),
+    mutationFn: () => patchSite(companyId, site.id, { owner_user_id: owner || null }),
     onSuccess: async () => { toast.success('Сохранено'); await onDone() },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось сохранить'),
   })
@@ -1004,8 +999,6 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
     mutationFn: () => addSiteEvent(companyId, site.id, touch, 'touch'),
     onSuccess: async () => { setTouch(''); toast.success('Записано'); await onDone() },
   })
-
-  const overdue = !!due && due < new Date().toISOString().slice(0, 10)
 
   return (
     <div className="space-y-4">
@@ -1041,7 +1034,9 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
               : 'заполняется в паспорте'
             // Предложить снятие обязательности есть смысл только там, где она есть
             // и мешает: пункт обязателен, не закрыт и не из числа неснимаемых.
-            const canOfferWaive = !!site.mayWaive && !!it.waivable && it.required
+            // «Не требуется» по схемам решает ОКС, остальные послабления — ответственный за проект.
+            const mayRelax = it.notNeeded ? !!site.mayNotNeeded : !!site.mayWaive
+            const canOfferWaive = mayRelax && !!it.waivable && it.required
               && !it.done && !it.waived
             return (
               <div key={it.key} data-gate-item={it.key} className={it.key === focusItem ? 'rounded ring-1 ring-primary/50' : undefined}>
@@ -1080,7 +1075,7 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
                       {it.waivedAt ? `, ${formatDate(it.waivedAt)}` : ''}
                       {it.waiveReason ? `: ${it.waiveReason}` : ''}
                     </span>
-                    {site.mayWaive && (
+                    {mayRelax && (
                       <button type="button"
                         className="underline hover:no-underline max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
                         disabled={mWaive.isPending}
@@ -1091,7 +1086,18 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
                   </div>
                 )}
 
-                {canOfferWaive && waiveFor !== it.key && (
+                {canOfferWaive && it.notNeeded && (
+                  <div className="ml-6 sm:ml-11 mb-1">
+                    <button type="button" disabled={mWaive.isPending}
+                      className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-primary/60 max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
+                      title="Схема этому проекту не нужна — пункт перестанет держать переход, под решением встанет ваше имя"
+                      onClick={() => mWaive.mutate({ key: it.key, waived: true, reason: 'не требуется' })}>
+                      не требуется
+                    </button>
+                  </div>
+                )}
+
+                {canOfferWaive && !it.notNeeded && waiveFor !== it.key && (
                   <div className="ml-6 sm:ml-11 mb-1">
                     <button type="button"
                       className="text-xs text-muted-foreground underline hover:no-underline max-sm:inline-flex max-sm:min-h-11 max-sm:items-center"
@@ -1137,8 +1143,16 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
           лежали «Заморожен» и «Архив»: рабочее действие и отказ от проекта выглядели
           одинаково. Теперь вперёд — кнопкой, а прыжок через стадию, пауза и отказ —
           отдельно, по явному запросу. */}
-      <section className={`rounded-lg border border-border p-3 space-y-2${site.kind === 'integration' ? ' hidden' : ''}`}>
+      <section className={`rounded-lg border p-3 space-y-2${site.kind === 'integration' ? ' hidden' : ''} ${
+        gate.canAdvance && nextStage ? 'border-emerald-500/60 bg-emerald-500/5' : 'border-border'}`}>
         <div data-zone="Перевод на следующую стадию" className="text-sm font-semibold">Стадия</div>
+        {/* Сам проект стадию не меняет: переход — решение человека, и в истории под ним стоит имя.
+            Но готовность видна сразу, а не после поиска кнопки (решение МАГа 13.10.2026). */}
+        {gate.canAdvance && nextStage && (
+          <div className="text-sm text-emerald-700 dark:text-emerald-400">
+            Обязательные пункты стадии закрыты — проект можно переводить дальше.
+          </div>
+        )}
         {!otherStage && nextStage ? (
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" className="h-8 text-sm"
@@ -1286,9 +1300,10 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
         </div>
       </section>
 
-      {/* Ответственный и следующий шаг */}
+      {/* Руководитель проекта. Следующий шаг и срок отсюда убраны: они ведутся в «Обзоре»
+          («Работа на сегодня»), второе место ввода было дублем (Ступин 09.10, решение МАГа 13.10.2026). */}
       <section className="rounded-lg border border-border p-3 space-y-2">
-        <div data-zone="Ответственный и следующий шаг" className="text-sm font-semibold">Кто ведёт и что дальше</div>
+        <div data-zone="Руководитель проекта" className="text-sm font-semibold">Руководитель проекта</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           <div>
             {/* Это и есть руководитель проекта (пункт 1.4 интеграции): роли регламента в
@@ -1303,16 +1318,6 @@ export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail;
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="md:col-span-2">
-            <Label>Следующий шаг</Label>
-            <Input value={next} onChange={(e) => setNext(e.target.value)} className="h-8 text-sm"
-              placeholder="Например: запросить ТУ у сетевой организации" />
-          </div>
-          <div>
-            <Label>Срок</Label>
-            <Input type="date" value={due} onChange={(e) => setDue(e.target.value)}
-              className={`h-8 text-sm ${overdue ? 'border-red-400/60' : ''}`} />
           </div>
           <div className="flex items-end">
             <Button size="sm" variant="outline" className="h-8 text-sm" disabled={mSave.isPending}
