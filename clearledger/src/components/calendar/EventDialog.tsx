@@ -428,7 +428,9 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
               в девять тридцать»), крутил к нему колесо — и не мог просто напечатать
               цифры (претензия МАГа 16.09.2026). Теперь в каждом поле печатают ИЛИ
               выбирают: дату — сеткой месяца, время — списком получаса. */}
-          <div className="grid gap-3 sm:grid-cols-2">
+          {/* В колонке широкого экрана начало и конец стоят друг под другом: рядом
+              поле даты сжималось до «14.10.20». */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
             <div className="space-y-1.5">
               <Label htmlFor={fieldId + "-start"}>Начало</Label>
               <div className="flex gap-2">
@@ -645,11 +647,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Что обсуждаем, что принести" />
           </div>
-          </>}
-        </div>
 
-        <div className="mt-3 space-y-3 lg:mt-0">
-          {(!phone || more) && <>
           {/* Материалы — сразу под описанием: это та же повестка, только
               бумагами. Ниже, под списком людей и опросом времени, участник до
               них не долистывал. Видит каждый, кто открыл карточку, а не только
@@ -658,7 +656,20 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             <PapersPanel companyId={companyId} eventId={event!.id}
               readOnly={event!.status === 'cancelled'} />
           )}
+          </>}
 
+          {/* Опрос времени — в левой колонке: он про «когда», а не про «кто». */}
+        {!новая && (мой || canRespond) && event!.status !== 'cancelled' && (
+          <div>
+            <PollPanel companyId={companyId} eventId={event!.id}
+              isOrganizer={мой} durationMinutes={длительность}
+              onChanged={() => void refreshEvent()} />
+          </div>
+        )}
+        </div>
+
+        <div className="mt-3 space-y-3 lg:mt-0">
+          {(!phone || more) && <>
           <div className="space-y-1.5">
             <Label>Кто видит встречу</Label>
             <div className="flex flex-wrap gap-1.5">
@@ -714,14 +725,6 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             </p>
           )}
           </>}
-
-        {!новая && (мой || canRespond) && event!.status !== 'cancelled' && (
-          <div className="mt-3">
-            <PollPanel companyId={companyId} eventId={event!.id}
-              isOrganizer={мой} durationMinutes={длительность}
-              onChanged={() => void refreshEvent()} />
-          </div>
-        )}
 
         {!новая && мой && event!.status !== 'cancelled' && (
           <div className="mt-3">
