@@ -317,7 +317,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent aria-describedby="conf-help"
-        className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+        className="flex max-h-[90dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-lg md:max-w-4xl">
         <DialogHeader className="shrink-0 border-b border-border px-6 py-4">
           <DialogTitle>{сейчас ? 'Начать конференцию' : 'Назначить конференцию'}</DialogTitle>
           <DialogDescription id="conf-help">
@@ -326,8 +326,13 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-4">
-          <div className="space-y-1.5">
+        {/* На широком экране — две колонки: слева о чём, когда и кому видно, справа
+            кого зовём. Одной колонкой окно не помещалось по высоте, и кнопка «Начать»
+            с настройками видимости уезжала под прокрутку. Список людей тянется на
+            высоту левой колонки (h-0 + flex-1), а не задаёт её. На телефоне порядок
+            прежний: расстановка по строкам действует только с md. */}
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-4 md:grid md:grid-cols-2 md:gap-x-8 md:gap-y-5 md:space-y-0">
+          <div className="space-y-1.5 md:col-start-1 md:row-start-1">
             <Label htmlFor="conf-title">О чём</Label>
             <Input id="conf-title" value={тема} onChange={e => setТема(e.target.value)}
               placeholder="Разбор смены, приёмка работ, планёрка"
@@ -338,7 +343,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
             </p>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2 md:col-start-1 md:row-start-2">
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" onClick={() => setСейчас(true)}
                 className={cn('min-h-9 rounded-md border px-3 text-sm transition-colors',
@@ -381,7 +386,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
             </p>
           </div>
 
-          <div className="space-y-2">
+          <div className="flex min-h-0 flex-col gap-2 md:col-start-2 md:row-span-3 md:row-start-1">
             <div className="flex items-baseline justify-between">
               <Label htmlFor="conf-people">Кого зовём</Label>
               {кого.length > 0 && (
@@ -390,7 +395,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
             </div>
             <Input id="conf-people" value={поиск} onChange={e => setПоиск(e.target.value)}
               placeholder="Имя сотрудника" className="text-base sm:text-sm" />
-            <div className="max-h-44 overflow-y-auto rounded-md border border-border px-2">
+            <div className="max-h-44 overflow-y-auto rounded-md border border-border px-2 md:h-0 md:max-h-none md:min-h-44 md:flex-1">
               {люди.isLoading && <p role="status" className="py-2 text-sm">Загружаются сотрудники…</p>}
               {!люди.isLoading && !видимые.length && (
                 <p className="py-2 text-sm text-muted-foreground">Никого не нашли</p>
@@ -407,7 +412,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
             </div>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 md:col-start-2 md:row-start-4">
             <Label htmlFor="conf-guests">Внешние участники</Label>
             <Textarea id="conf-guests" value={внешние} onChange={e => setВнешние(e.target.value)}
               placeholder="почта через запятую" rows={2} className="text-base sm:text-sm" />
@@ -417,7 +422,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
             </p>
           </div>
 
-          <div className="space-y-1.5 rounded-md border border-border p-3">
+          <div className="space-y-1.5 rounded-md border border-border p-3 md:col-start-1 md:row-start-3">
             <p className="text-sm font-medium">Кто увидит</p>
             <p className="text-xs text-muted-foreground">
               По умолчанию конференцию видят только те, кого позвали. Открытую
@@ -430,7 +435,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
             </label>
           </div>
 
-          <div className="space-y-1.5 rounded-md border border-border p-3">
+          <div className="space-y-1.5 rounded-md border border-border p-3 md:col-start-1 md:row-start-4">
             <p className="text-sm font-medium">Чем зовём</p>
             <p className="text-xs text-muted-foreground">
               Сообщение в чат пространства уходит всегда — оно приходит туда, где
