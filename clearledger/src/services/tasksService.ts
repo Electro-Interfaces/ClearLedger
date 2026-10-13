@@ -724,6 +724,8 @@ export interface TemplateProcessLaunch {
 
 export interface TaskRecurrence {
   id: string; template_id: string; template: string
+  /** Шаблон ставит дело мне. Старый сервер поля не отдаёт. */
+  mine?: boolean
   rule: { mode?: string; at?: string; weekday?: number; day?: number; tz?: string }
   enabled: boolean; next_run_at: string | null; last_run_at: string | null
 }

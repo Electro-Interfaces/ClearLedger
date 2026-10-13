@@ -38,6 +38,11 @@ import { useIsMobile } from '@/hooks/use-mobile'
 /** Date → значение datetime-local в местном поясе браузера. */
 const local = (d: Date) =>
   new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+const началоДня = (d: Date | null) => {
+  const day = new Date(d ?? new Date())
+  day.setHours(0, 0, 0, 0)
+  return day
+}
 
 const ОТВЕТЫ: { key: Exclude<EventResponse, 'pending'>; label: string }[] = [
   { key: 'accepted', label: 'Буду' },
@@ -85,7 +90,7 @@ function ключПовтора(r: Recurrence | null): КлючПовтора {
 }
 
 export function EventDialog({ companyId, event: initialEvent, startAt, subjectRef, initialTitle,
-  onClose, onChanged }: {
+  companyDay, onClose, onChanged }: {
   companyId: string
   /** Существующая встреча — правим её; иначе собираем новую. */
   event: CalendarEvent | null
@@ -97,6 +102,9 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   subjectRef?: string
   /** Заготовка названия: обсуждение приходит с именем своего предмета. */
   initialTitle?: string
+  /** Событие компании: дата на весь день для всех, без созыва — день компании,
+   *  выездная проверка, отключение площадки. Та же встреча, другая заготовка. */
+  companyDay?: boolean
   onClose: () => void
   onChanged: () => void
 }) {
@@ -108,7 +116,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const мой = (event?.is_organizer ?? true) && event?.status !== 'cancelled'
   const canRespond = !!event && !event.is_organizer && event.my_response !== null && event.status !== 'cancelled'
   const eventHref = useHref(event ? workService.refHref('event:' + event.id)! : '/')
-  const [allDay, setAllDay] = useState(event?.all_day ?? false)
+  const [allDay, setAllDay] = useState(event?.all_day ?? !!companyDay)
   const [peopleSearch, setPeopleSearch] = useState('')
   const [cancelConfirm, setCancelConfirm] = useState(false)
   // Телефон открывает встречу простой: тема, время, место. Остальное — за
@@ -155,10 +163,11 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const [title, setTitle] = useState(event?.title ?? initialTitle ?? '')
   const [description, setDescription] = useState(event?.description ?? '')
   const [starts, setStarts] = useState(() => local(
-    event ? new Date(event.starts_at) : (startAt ?? new Date())))
+    event ? new Date(event.starts_at) : companyDay ? началоДня(startAt) : (startAt ?? new Date())))
   const [ends, setEnds] = useState(() => local(
     event ? new Date(event.ends_at)
-      : new Date((startAt ?? new Date()).getTime() + 60 * 60_000)))
+      : companyDay ? new Date(началоДня(startAt).getTime() + 24 * 60 * 60_000)
+        : new Date((startAt ?? new Date()).getTime() + 60 * 60_000)))
   const [location, setLocation] = useState(event?.location ?? '')
   const [conference, setConference] = useState(event?.conference_url ?? '')
   const [attendees, setAttendees] = useState<string[]>(
@@ -391,7 +400,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
       <DialogContent className="max-h-[90dvh] w-[94vw] max-w-2xl overflow-y-auto p-4 sm:max-w-2xl sm:p-6">
         <DialogHeader>
-          <DialogTitle>{новая ? 'Новая встреча' : мой ? 'Встреча' : title}</DialogTitle>
+          <DialogTitle>{новая ? (companyDay ? 'Событие компании' : 'Новая встреча') : мой ? 'Встреча' : title}</DialogTitle>
         </DialogHeader>
 
         {event?.status === 'cancelled' && (

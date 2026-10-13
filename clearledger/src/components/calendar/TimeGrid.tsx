@@ -14,10 +14,10 @@
  * Всёдневное (командировка, отпуск) живёт в той же верхней полосе: в сетке оно
  * заняло бы сутки высотой и вытеснило всё остальное.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { format, isSameDay, isToday } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import { NotebookPen, Video } from 'lucide-react'
+import { NotebookPen, Repeat, Video } from 'lucide-react'
 import type { CalendarEvent } from '@/services/workService'
 import type { SpaceTask } from '@/services/tasksService'
 import { cn } from '@/lib/utils'
@@ -28,10 +28,14 @@ import { layoutDayEvents } from '@/lib/calendarLayout'
 const ЧАС_PX = 44
 const ЧАСЫ = Array.from({ length: 24 }, (_, i) => i)
 
-export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
+export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, onAdd, onDay }: {
   days: Date[]
   events: CalendarEvent[]
   tasks: SpaceTask[]
+  /** Встречи общего календаря компании, в которых человека нет: рамкой, не заливкой. */
+  foreign?: Set<string>
+  /** Повторяющиеся дела вперёд: расписание ещё не поставило их поручением. */
+  repeats?: { id: string; title: string; at: Date }[]
   onEvent: (e: CalendarEvent) => void
   onAdd: (at: Date) => void
   onDay?: (day: Date) => void
@@ -43,6 +47,12 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
   useEffect(() => {
     if (прокрутка.current) прокрутка.current.scrollTop = 8 * ЧАС_PX
   }, [])
+  // Линия «сейчас» едет сама: неделя открыта часами, и застывшая линия врёт.
+  const [сейчас, setСейчас] = useState(() => new Date())
+  useEffect(() => {
+    const timer = setInterval(() => setСейчас(new Date()), 60_000)
+    return () => clearInterval(timer)
+  }, [])
 
   const вСетке = events.filter((e) => !e.all_day)
   const сверху = events.filter((e) => e.all_day)
@@ -52,7 +62,7 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
       {/* Шапка дней. В режиме одного дня её нет: дата уже стоит заголовком в шапке
           календаря, и строка «ПН 7» под «7 сентября 2026» повторяла то же самое
           (замечание МАГа 07.09.2026). */}
-      {days.length > 1 && <div className="flex border-b border-border bg-muted/40">
+      {days.length > 1 && <div className="flex overflow-y-hidden border-b border-border bg-muted/40 [scrollbar-gutter:stable]">
         <div className="w-12 shrink-0" />
         {days.map((d) => (
           <div key={d.toISOString()}
@@ -69,7 +79,7 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
 
       {/* Всёдневная полоса: командировки и СРОКИ. Срок здесь точкой — у него нет
           длительности, и место ему не в сетке часов. */}
-      <div className="flex border-b border-border">
+      <div className="flex overflow-y-hidden border-b border-border [scrollbar-gutter:stable]">
         <div className="w-12 shrink-0 py-1 pr-1 text-right text-[12px] text-muted-foreground">
           весь день
         </div>
@@ -78,6 +88,7 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
           const сроки = tasks.filter((t) => t.due_at && isSameDay(new Date(t.due_at), d))
           const записи = сроки.filter((t) => t.visibility === 'personal')
           const рабочие = сроки.filter((t) => t.visibility !== 'personal')
+          const повторы = repeats.filter((r) => isSameDay(r.at, d))
           return (
             <div key={d.toISOString()}
               className="min-h-[1.75rem] flex-1 space-y-0.5 border-l border-border p-0.5">
@@ -86,7 +97,8 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
                   className={cn('block w-full truncate rounded px-1 text-[12px]',
                     e.status === 'cancelled'
                       ? 'text-muted-foreground line-through'
-                      : 'bg-primary/15 text-foreground hover:bg-primary/25')}>
+                      : foreign?.has(e.id) ? 'border border-border bg-background text-foreground hover:bg-accent'
+                        : 'bg-primary/15 text-foreground hover:bg-primary/25')}>
                   {e.title}
                 </button>
               ))}
@@ -97,6 +109,12 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
                   {рабочие.length} срок{рабочие.length > 1 ? 'ов' : ''}
                 </button>
               )}
+              {повторы.map((r) => (
+                <span key={r.id} title={`Повторяющееся дело: поставится в ${format(r.at, 'HH:mm')}`}
+                  className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground">
+                  <Repeat className="h-3 w-3 shrink-0" /><span className="truncate">{r.title}</span>
+                </span>
+              ))}
               {записи.length > 0 && (
                 <span className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground/70">
                   <NotebookPen className="h-3 w-3 shrink-0" />{записи.length}
@@ -108,7 +126,7 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
       </div>
 
       {/* Сетка часов */}
-      <div ref={прокрутка} className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={прокрутка} className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <div className="flex" style={{ height: 24 * ЧАС_PX }}>
           <div className="w-12 shrink-0">
             {ЧАСЫ.map((h) => (
@@ -121,7 +139,10 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
             ))}
           </div>
           {days.map((d) => (
-            <div key={d.toISOString()} className="relative flex-1 border-l border-border">
+            <div key={d.toISOString()} className={cn('relative flex-1 border-l border-border',
+              isToday(d) ? 'bg-primary/5' : d.getDay() % 6 === 0 && 'bg-muted/30')}>
+              {isToday(d) && <div aria-hidden className="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-destructive"
+                style={{ top: (сейчас.getHours() * 60 + сейчас.getMinutes()) / 60 * ЧАС_PX }} />}
               {ЧАСЫ.map((h) => (
                 <div key={h} style={{ height: ЧАС_PX }}
                   onClick={() => {
@@ -152,6 +173,7 @@ export function TimeGrid({ days, events, tasks, onEvent, onAdd, onDay }: {
                           ? 'border-border bg-muted/60 text-muted-foreground line-through'
                           : e.my_response === 'declined'
                             ? 'border-border bg-muted/40 text-muted-foreground line-through'
+                            : foreign?.has(e.id) ? 'border-border bg-background text-foreground hover:bg-accent'
                             : 'border-primary/40 bg-primary/15 text-foreground hover:bg-primary/25')}>
                       <span className="tabular-nums text-muted-foreground">
                         {continues ? 'Продолжение' : format(н, 'HH:mm')}

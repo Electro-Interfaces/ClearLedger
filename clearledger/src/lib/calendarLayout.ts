@@ -43,3 +43,26 @@ export function layoutDayEvents<T extends TimedEvent>(events: T[], day: Date) {
   finish()
   return segments
 }
+
+/**
+ * Когда расписание «Трека» поставит дело в этих днях — только будущие моменты:
+ * прошедшие уже стали настоящими поручениями со сроком.
+ * ponytail: час берётся как местный, `rule.tz` не учитывается — расписание
+ * заводят в своём поясе; считать по поясу правила, когда появятся чужие.
+ */
+export function recurrenceTimes(
+  rule: { mode?: string; at?: string; weekday?: number; day?: number },
+  days: Date[], after: Date,
+) {
+  const [hour, minute] = (rule.at ?? '09:00').split(':').map(Number)
+  return days
+    .filter(day => rule.mode === 'daily'
+      || (rule.mode === 'weekly' && (day.getDay() + 6) % 7 === rule.weekday)
+      || (rule.mode === 'monthly' && day.getDate() === rule.day))
+    .map(day => {
+      const at = new Date(day)
+      at.setHours(hour || 0, minute || 0, 0, 0)
+      return at
+    })
+    .filter(at => at > after)
+}

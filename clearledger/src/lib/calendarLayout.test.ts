@@ -33,3 +33,15 @@ test('Цепочка пересечений сохраняет колонки, �
     ['a', 0, 2], ['b', 1, 2], ['c', 1, 2], ['d', 0, 1],
   ])
 })
+
+test('повторяющееся дело раскладывается вперёд и не дублирует прошедшее', async () => {
+  const { recurrenceTimes } = await import('./calendarLayout.ts')
+  // 12–18 октября 2026, понедельник — воскресенье.
+  const days = Array.from({ length: 7 }, (_, i) => new Date(2026, 9, 12 + i))
+  const after = new Date(2026, 9, 13, 12, 0)
+  assert.equal(recurrenceTimes({ mode: 'daily', at: '09:00' }, days, after).length, 5)
+  const weekly = recurrenceTimes({ mode: 'weekly', at: '15:30', weekday: 4 }, days, after)
+  assert.deepEqual(weekly.map(d => [d.getDate(), d.getHours(), d.getMinutes()]), [[16, 15, 30]])
+  assert.equal(recurrenceTimes({ mode: 'monthly', day: 12 }, days, after).length, 0)
+  assert.equal(recurrenceTimes({ mode: 'monthly', day: 18 }, days, after).length, 1)
+})

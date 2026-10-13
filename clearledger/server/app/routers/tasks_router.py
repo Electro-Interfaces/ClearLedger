@@ -2136,16 +2136,18 @@ async def list_recurrences(
 ):
     cid = await _assert_work(company_id, current_user, db)
     rows = (await db.execute(
-        select(TaskRecurrence, TaskTemplate.name)
+        select(TaskRecurrence, TaskTemplate.name, TaskTemplate.assignee_id)
         .join(TaskTemplate, TaskTemplate.id == TaskRecurrence.template_id)
         .where(TaskRecurrence.company_id == cid)
         .order_by(TaskTemplate.name))).all()
     return {"recurrences": [{
         "id": str(r.id), "template_id": str(r.template_id), "template": name,
+        # Календарь показывает человеку вперёд только то, что поставят ему.
+        "mine": assignee_id == current_user.id,
         "rule": r.rule or {}, "enabled": r.enabled,
         "next_run_at": r.next_run_at.isoformat() if r.next_run_at else None,
         "last_run_at": r.last_run_at.isoformat() if r.last_run_at else None,
-    } for r, name in rows]}
+    } for r, name, assignee_id in rows]}
 
 
 @router.post("/recurrences", status_code=status.HTTP_201_CREATED)
