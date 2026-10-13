@@ -25,11 +25,55 @@ import * as tasksService from '@/services/tasksService'
 import { cn } from '@/lib/utils'
 import { длительность, когда, копировать, предмет } from './format'
 
+/**
+ * Назначенные конференции, сложенные по сериям: у серии комната одна, по ней и
+ * складываем. Еженедельная планёрка на два месяца вперёд давала девять
+ * одинаковых строк с одним и тем же вопросом «Придёте?» и занимала весь экран
+ * (РусГидро, серия «Интеграция», 14.10.2026). Список приходит по времени,
+ * поэтому первая в группе — ближайшая.
+ */
+export function посериям(список: conf.ConfMeeting[]): conf.ConfMeeting[][] {
+  const группы = new Map<string, conf.ConfMeeting[]>()
+  for (const в of список) {
+    const ключ = в.room ?? в.id
+    const группа = группы.get(ключ)
+    if (группа) группа.push(в)
+    else группы.set(ключ, [в])
+  }
+  return [...группы.values()]
+}
+
+/** Серия одной строкой: ближайшая встреча, остальные — по нажатию. */
+export function SeriesRow({ meetings, companyId, onChanged }: {
+  meetings: conf.ConfMeeting[]
+  companyId: string
+  onChanged: () => void
+}) {
+  const [раскрыта, setРаскрыта] = useState(false)
+  const [первая, ...остальные] = meetings
+  if (!остальные.length) {
+    return <TalkRow meeting={первая} companyId={companyId} onChanged={onChanged} />
+  }
+  return (
+    <>
+      <TalkRow meeting={первая} companyId={companyId} onChanged={onChanged}
+        rest={остальные} expanded={раскрыта} onToggle={() => setРаскрыта(р => !р)} />
+      {раскрыта && остальные.map(в => (
+        <TalkRow key={в.id} meeting={в} companyId={companyId} onChanged={onChanged} />
+      ))}
+    </>
+  )
+}
+
 /** Строка конференции: название, мета под ним, действие справа. */
-export function TalkRow({ meeting, companyId, onChanged }: {
+export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = false, onToggle }: {
   meeting: conf.ConfMeeting
   companyId: string
   onChanged: () => void
+  /** Остальные встречи той же серии, свёрнутые под эту строку. */
+  rest?: conf.ConfMeeting[]
+  expanded?: boolean
+  onToggle?: () => void
 }) {
   const [итог, setИтог] = useState(meeting.session?.note ?? '')
   const сессия = meeting.session
@@ -50,10 +94,15 @@ export function TalkRow({ meeting, companyId, onChanged }: {
     onError: (e: Error) => toast.error(/503|не настроен/i.test(e.message || '')
       ? 'Конференции не настроены' : 'Не удалось войти в конференцию'),
   })
+  // Свёрнутая серия отвечает разом: на планёрку по четвергам ходят или не ходят,
+  // а не решают про каждый четверг отдельно. Раскрыл — отвечаешь по одной.
+  const разом = expanded ? [] : rest.filter(в => в.my_response === 'pending' && !в.organizer_is_me)
   const ответ = useMutation({
-    mutationFn: (что: 'accepted' | 'declined') => conf.respond(companyId, meeting.id, что),
+    mutationFn: (что: 'accepted' | 'declined') => Promise.all(
+      [meeting, ...разом].map(в => conf.respond(companyId, в.id, что))),
     onSuccess: (_д, что) => {
-      toast.success(что === 'accepted' ? 'Записал: будете' : 'Записал: не сможете')
+      toast.success(что === 'accepted' ? 'Записал: будете' : 'Записал: не сможете',
+        разом.length ? { description: `На все встречи серии: ${разом.length + 1}` } : undefined)
       onChanged()
     },
     onError: () => toast.error('Не удалось ответить на приглашение'),
@@ -112,7 +161,10 @@ export function TalkRow({ meeting, companyId, onChanged }: {
       {зовут && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5">
           <UserPlus className="h-3.5 w-3.5 text-primary" />
-          <span className="text-xs">Вас позвали. Придёте?</span>
+          <span className="text-xs">
+            {разом.length ? `Вас позвали на серию встреч: ${разом.length + 1}. Придёте?`
+              : 'Вас позвали. Придёте?'}
+          </span>
           <div className="ml-auto flex gap-1.5">
             <Button size="sm" variant="outline" className="h-8"
               disabled={ответ.isPending} onClick={() => ответ.mutate('accepted')}>Буду</Button>
@@ -137,6 +189,17 @@ export function TalkRow({ meeting, companyId, onChanged }: {
               <Link2 className="mr-0.5 inline h-3 w-3" />{пред.имя}
             </Link>
           : пред.имя)}
+        {rest.length > 0 && (
+          <>
+            {' · '}
+            <button type="button" onClick={onToggle} aria-expanded={expanded}
+              className="text-primary underline-offset-2 hover:underline">
+              {expanded ? 'свернуть серию'
+                : `и ещё ${rest.length} до ${new Date(rest[rest.length - 1].starts_at)
+                  .toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`}
+            </button>
+          </>
+        )}
       </p>
 
       {сессия && пришли > 0 && (

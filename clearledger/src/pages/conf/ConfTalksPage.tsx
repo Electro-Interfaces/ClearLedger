@@ -17,7 +17,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as conf from '@/services/confService'
-import { NewTalkDialog, TalkRow } from './parts'
+import { NewTalkDialog, SeriesRow, посериям } from './parts'
 import { RoomCards } from './RoomCards'
 import { EmptyBlock } from './EmptyBlock'
 import { длительность, когда, копировать } from './format'
@@ -203,10 +203,10 @@ export default function ConfTalksPage() {
         <section>
           <h2 className="mb-1 flex items-center gap-2 text-sm font-medium">
             <UserPlus className="h-4 w-4 text-primary" />Вас зовут
-            <span className="text-muted-foreground">· {зовут.length}</span>
+            <span className="text-muted-foreground">· {посериям(зовут).length}</span>
           </h2>
-          {зовут.map(в => (
-            <TalkRow key={в.id} meeting={в} companyId={companyId} onChanged={обновить} />
+          {посериям(зовут).map(с => (
+            <SeriesRow key={с[0].id} meetings={с} companyId={companyId} onChanged={обновить} />
           ))}
         </section>
       )}
@@ -214,8 +214,8 @@ export default function ConfTalksPage() {
       {встречи.length > 0 && (
         <section>
           <h2 className="mb-1 text-sm font-medium">Назначены</h2>
-          {встречи.map(в => (
-            <TalkRow key={в.id} meeting={в} companyId={companyId} onChanged={обновить} />
+          {посериям(встречи).map(с => (
+            <SeriesRow key={с[0].id} meetings={с} companyId={companyId} onChanged={обновить} />
           ))}
         </section>
       )}

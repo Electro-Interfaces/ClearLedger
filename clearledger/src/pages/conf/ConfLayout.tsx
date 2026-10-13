@@ -63,7 +63,9 @@ export function ConfLayout() {
   // от человека действия сейчас. Число, которое ничего не требует, перестают
   // замечать через день.
   const идут = (live.data?.live.length ?? 0)
-    + (зовут.data?.meetings.filter(в => в.my_response === 'pending' && !в.organizer_is_me).length ?? 0)
+    // Серия — одно приглашение, сколько бы повторений в ней ни стояло.
+    + new Set(зовут.data?.meetings.filter(в => в.my_response === 'pending' && !в.organizer_is_me)
+      .map(в => в.room ?? в.id)).size
 
   const активный = [...CONF_VIEWS].reverse()
     .find(v => pathname === v.path || pathname.startsWith(`${v.path}/`)) ?? CONF_VIEWS[0]
