@@ -21,6 +21,8 @@ from app.models import InfoArticle, InfoBinding, InfoCategory
 from app.services.info_seed_projects import ARTICLES as PROJECT_ARTICLES
 from app.services.info_seed_projects import CATEGORY as PROJECTS_CATEGORY
 from app.services.info_seed_projects import ENERGY_CATEGORY as PROJECTS_ENERGY_CATEGORY
+from app.services.info_seed_equipment import ARTICLES as EQUIPMENT_ARTICLES
+from app.services.info_seed_equipment import CATEGORIES as EQUIPMENT_CATEGORIES
 from app.services.info_seed_fuel import ARTICLES as FUEL_ARTICLES
 from app.services.info_seed_fuel import CATEGORIES as FUEL_CATEGORIES
 from app.services.info_seed_fuel import PROFILE as FUEL_PROFILE
@@ -55,6 +57,7 @@ APP_CATEGORIES = [
     {"title": "Поддержка", "sort": 8},
     {"title": "Трек", "sort": 11},
     {"title": "Проекты", "sort": 20},
+    {"title": "Эксплуатация", "sort": 25},
     {"title": "Топливо", "sort": 30},
     {"title": "Магазин", "sort": 40},
     {"title": "Станция", "sort": 50},
@@ -728,13 +731,17 @@ ARTICLES: list[dict[str, Any]] = [
         "doc_number": "ФСБУ 26/2020",
         "source_url": "https://www.consultant.ru/document/cons_doc_LAW_365338/",
         "summary": "Почему затраты проекта делятся на капитализируемые и расходы периода.",
-        "bindings": [("projects", "pr_budget", 100), ("finance", None, 60)],
+        "bindings": [("projects", "pr_budget", 100), ("finance", None, 60), ("ops", "eq_movements", 60)],
         "body": """
 Затраты проекта живут по-разному, и это не оформление, а развилка учёта.
 
 **Капвложения** (счёт 08) - то, что приводит объект в состояние, пригодное к
 использованию: присоединение, оборудование, СМР, проектирование, изыскания. При вводе
 они переходят в стоимость основного средства (Дт 01 Кт 08), оформляется акт ОС-1.
+
+Акт ОС-1 оформляется в «Эксплуатации», раздел «Оборудование»: операция «Запуск в
+эксплуатацию» проводится актом о вводе в эксплуатацию (ОС-1), и дата этого акта
+становится датой ввода станции.
 
 **Расходы периода** - управленческие расходы, сопровождение, потери от простоев
 (п. 16 ФСБУ 26/2020). В стоимость объекта они не входят и списываются сразу.
@@ -754,7 +761,7 @@ ARTICLES: list[dict[str, Any]] = [
         "kind": "norm", "category": "Учёт капвложений", "sort": 20,
         "doc_number": "ФСБУ 6/2020, ФСБУ 26/2020",
         "summary": "Ретрофит - новое капвложение на существующий объект, а не продолжение старого проекта.",
-        "bindings": [("projects", None, 40), ("ops", None, 40)],
+        "bindings": [("projects", None, 40), ("ops", None, 20)],
         "body": """
 Затраты на улучшение и восстановление существующего объекта - тоже капвложения
 (ФСБУ 26/2020). Если модернизация улучшает нормативные показатели функционирования,
@@ -822,6 +829,11 @@ COMMON_ARTICLES += [{**a, "category": PROJECTS_CATEGORY}
                     for a in PROJECT_ARTICLES if a.get("common")]
 ARTICLES += [{**a, "category": PROJECTS_ENERGY_CATEGORY}
              for a in PROJECT_ARTICLES if not a.get("common")]
+# Складской учёт оборудования - свой раздел приложения «Эксплуатация». Раздел
+# объявляется вместе со статьями: статья с разделом, которого нет в пакете, роняет
+# сид всех пакетов (KeyError в `_seed_pack`).
+CATEGORIES += EQUIPMENT_CATEGORIES
+ARTICLES += EQUIPMENT_ARTICLES
 
 
 async def _seed_pack(db: AsyncSession, profile: str | None,

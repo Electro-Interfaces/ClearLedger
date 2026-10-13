@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { getWarehouseCard, updateWarehouse, type WarehouseCard } from '@/services/equipmentService'
 import { CounterpartyContractPicker } from './CounterpartyContractPicker'
+import { invalidateEquipment } from './useEquipmentScope'
 
 const selectClass = 'h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm'
 const OWNERSHIP = { own: 'Собственный', rent: 'Арендованный', custody: 'Ответственное хранение у контрагента' }
@@ -37,7 +38,7 @@ function Form({ companyId, card, onClose }: { companyId: string; card: Warehouse
     setBusy(true)
     try {
       await updateWarehouse(companyId, card.id, { ...f, counterpartyId: foreign ? party.counterpartyId || null : null, contractId: foreign ? party.contractId || null : null })
-      for (const k of ['equipment-warehouses', 'eq-warehouses', 'eq-warehouse-card']) await qc.invalidateQueries({ queryKey: [k] })
+      await invalidateEquipment(qc)
       toast.success('Карточка склада сохранена'); onClose()
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось сохранить склад') }
     finally { setBusy(false) }
@@ -53,7 +54,8 @@ function Form({ companyId, card, onClose }: { companyId: string; card: Warehouse
       <label className="text-xs">Телефон<Input aria-label="Телефон склада" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} className="h-9" /></label>
     </div>
     {foreign && <CounterpartyContractPicker companyId={companyId} value={party} onChange={setParty} required
-      label={f.ownership === 'rent' ? 'Арендодатель' : 'Хранитель'} preferredTypes={f.ownership === 'rent' ? ['Аренда'] : ['Ответственное хранение', 'Хранение']} />}
+      label={f.ownership === 'rent' ? 'Арендодатель' : 'Хранитель'} preferredTypes={f.ownership === 'rent' ? ['Аренда'] : ['Ответственное хранение', 'Хранение']}
+      preferredTypeCodes={f.ownership === 'rent' ? ['rent'] : ['storage']} />}
     <label className="text-xs block">Примечание<Textarea aria-label="Примечание к складу" rows={2} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></label>
     <div className="flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Отмена</Button>
       <Button disabled={busy || !f.name.trim() || (foreign && !party.counterpartyId)} onClick={() => void save()}>
@@ -62,7 +64,7 @@ function Form({ companyId, card, onClose }: { companyId: string; card: Warehouse
 }
 
 export function WarehouseCardDialog({ companyId, warehouseId, onClose }: { companyId: string; warehouseId: string; onClose: () => void }) {
-  const q = useQuery({ queryKey: ['eq-warehouse-card', companyId, warehouseId], queryFn: () => getWarehouseCard(companyId, warehouseId) })
+  const q = useQuery({ queryKey: ['equipment', 'warehouse-card', companyId, warehouseId], queryFn: () => getWarehouseCard(companyId, warehouseId) })
   return <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
     <DialogContent className="sm:max-w-2xl w-[96vw] max-h-[92dvh] overflow-y-auto">
       <DialogHeader><DialogTitle>Карточка склада</DialogTitle></DialogHeader>

@@ -30,6 +30,7 @@ export function equipmentDocHtml(d: EquipmentDocument, orgName: string): string 
 </style></head><body>
 <div style="text-align:right"><small>${esc(orgName)}</small></div>
 <h1>${esc(d.title)}</h1>
+${d.status === 'cancelled' ? `<div class="sub"><b>ДОКУМЕНТ ОТМЕНЁН</b> ${esc(ru(d.cancelledAt))}${d.cancelReason ? ' · ' + esc(d.cancelReason) : ''}</div>` : ''}
 <div class="sub">№ ${esc(d.number)} от ${esc(ru(d.docDate))}</div>
 <table class="head">
 ${field('Операция', d.opLabel)}${field('Откуда', d.fromLocation)}${field('Куда', d.toLocation)}
@@ -45,6 +46,24 @@ ${field('Заявка Поддержки', d.details?.ticketRef ? '№ ' + d.det
 </div>
 <p style="margin-top:24px"><small>Документ оформлен в пространстве ${esc(orgName)} · ${esc(d.createdBy)} · ${esc(ru(d.createdAt))}</small></p>
 </body></html>`
+}
+
+export interface ExportSheet { name: string; columns: string[]; rows: (string | number | null | undefined)[][] }
+
+/**
+ * Выгрузка в Excel тем же оформителем, что у аналитики (шапка, автофильтр, ширины):
+ * он читает таблицы с `data-export-rows`, поэтому строки отдаём ему таблицей вне экрана.
+ */
+export async function exportEquipmentXlsx(title: string, sheets: ExportSheet[]) {
+  const el = document.createElement('div')
+  for (const s of sheets) {
+    const t = document.createElement('table')
+    t.setAttribute('data-export-name', s.name)
+    t.setAttribute('data-export-rows', JSON.stringify({ columns: s.columns, rows: s.rows }))
+    el.appendChild(t)
+  }
+  const { exportChargeExcel } = await import('@/services/chargeExport')
+  await exportChargeExcel(el, title)
 }
 
 export function printEquipmentDocument(d: EquipmentDocument, orgName: string) {

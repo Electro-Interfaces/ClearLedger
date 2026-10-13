@@ -2127,7 +2127,7 @@ function RegisterUnitDialog({ site, companyId, item, onClose, onDone }: {
   const [busy, setBusy] = useState(false)
 
   const wh = useQuery({
-    queryKey: ['equipment-warehouses', companyId],
+    queryKey: ['equipment', 'warehouses-summary', companyId],
     queryFn: () => getWarehousesSummary(companyId),
   })
   const rows = wh.data?.warehouses ?? []
@@ -2176,7 +2176,7 @@ function RegisterUnitDialog({ site, companyId, item, onClose, onDone }: {
             </Select>
             {rows.length === 0 && !wh.isLoading && (
               <p className="mt-1 text-xs text-muted-foreground">
-                Складов нет — их заводят в разделе «Оборудование», вкладка «Склады».
+                Складов нет — их заводят в разделе «Оборудование», вкладка «Склады и остатки».
               </p>
             )}
           </div>

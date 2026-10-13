@@ -33,7 +33,7 @@ from app.models import (AccountingDoc, App, AppCompanyLink, CbMovementDoc, CbNom
                         CompanyRole, Contract, CorporateClient, Counterparty, EzsEquipmentUnit,
                         FuelShift, FuelShiftSale, StockOnHand,
                         EzsProject, EzsSite, InfoArticle, MarketObservation, MarketSite,
-                        MatrixGroupRoom, MetrikaConnection, ServiceLocation, SourceFile, User,
+                        ChatRoom, MetrikaConnection, ServiceLocation, SourceFile, User,
                         UserCompany)
 from app.services import sso
 from app.services.space_projection import _internal_base_url
@@ -180,7 +180,10 @@ async def _info(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
 
 
 async def _chat(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
-    rooms = await _count(db, MatrixGroupRoom, cid)
+    rooms = int((await db.execute(
+        select(func.count()).select_from(ChatRoom).where(
+            ChatRoom.company_id == cid, ChatRoom.type.in_(("channel", "group")),
+            ChatRoom.is_active.is_(True)))).scalar() or 0)
     return {"metrics": [_m("каналов", _n(rooms))]}
 
 

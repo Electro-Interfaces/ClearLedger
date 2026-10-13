@@ -30,6 +30,11 @@ _SOURCES: list[tuple[str, str, str]] = [
     ("ops", "Приборы учёта", _col("ops_meters")),
     ("ops", "Документы оборудования", _col("ezs_equipment_documents")),
     ("ops", "Поставки оборудования", _col("ezs_supply_documents")),
+    ("ops", "Документы ЗИП и материалов", _col("ezs_spare_documents")),
+    # Договор аренды или хранения склада лежит в карточке склада (реквизиты точки).
+    ("ops", "Склады оборудования",
+     "SELECT c.id AS cid FROM service_locations l JOIN contracts c"
+     " ON c.id::text = l.extra_metadata->'warehouse'->>'contractId' WHERE l.type = 'warehouse'"),
     ("projects", "Площадки и проекты", _col("ezs_sites")),
     ("projects", "Проекты площадок", _col("ezs_projects")),
     ("projects", "Интеграции",

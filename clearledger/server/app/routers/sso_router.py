@@ -109,7 +109,7 @@ async def list_apps(
       * `sso`      — переход по handoff-токену (Координатор);
       * `link`     — согласованный мост на своём домене (Заявки, Конференции).
 
-    `chat_enabled` — включён ли движок чата в стеке (Matrix); `allowed_apps` — коды,
+    `chat_enabled` — подключён ли чат компании в реестре; `allowed_apps` — коды,
     доступные роли (null = без ограничений).
     """
     apps = sso.launcher_apps()
@@ -126,7 +126,7 @@ async def list_apps(
     # Реестр решает, что подключено компании: отключённый в «Управлении» продукт не
     # должен появляться на столе. Раньше реестр гейтил только внутренние модули Ledger,
     # а мосты (Заявки, Конференции) показывались всегда — выключить их было нечем.
-    chat_enabled = settings.chat_enabled
+    chat_enabled = True
     # Продукты, которые компании НЕ подключены, но предлагаются: у клиента они стоят
     # отдельной строкой стола — «можно подключить», с показом из «Элси+». Раньше такой
     # продукт просто исчезал, и человек не знал, что он вообще есть.
@@ -162,7 +162,7 @@ async def list_apps(
                 and (reg["code"] in INTERNAL_ROUTES or reg["code"] in by_manifest)
                 and INTERNAL_LAYERS.get(reg["code"]) != "admin"]
             apps = [a for a in apps if registry.get(a["code"], True)]
-            chat_enabled = chat_enabled and registry.get("chat", True)
+            chat_enabled = registry.get("chat", True)
             # Описание из реестра — и мостам тоже. Раньше оно доезжало только до внутренних
             # продуктов, поэтому плитки внешних объясняли лишь способ входа («Открывается
             # по ссылке»), а что за продуктом стоит — нет. У «Конференций» так терялось
@@ -172,14 +172,11 @@ async def list_apps(
                 if not a.get("description"):
                     a["description"] = desc_by_code.get(a["code"], "")
             # Внутренние продукты пространства — из реестра: у них нет манифеста, потому
-            # что жить им негде, кроме этого же SPA. Чат добавляем только если движок
-            # поднят в стеке: плитка без Matrix вела бы в пустоту.
+            # что жить им негде, кроме этого же SPA.
             for reg in reg_apps:
                 code = reg["code"]
                 route = INTERNAL_ROUTES.get(code)
                 if route is None or not reg["enabled"]:
-                    continue
-                if code == "chat" and not chat_enabled:
                     continue
                 apps.append({
                     "code": code, "name": reg["name"], "base_url": "", "callback": "",

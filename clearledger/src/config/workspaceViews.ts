@@ -168,7 +168,8 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   ops_equipment: {
     eq_fleet: 'Парк оборудования', eq_warehouses: 'Склады и остатки',
     eq_supplies: 'Поставки и возвраты',
-    eq_movements: 'Движения', eq_spares: 'ЗИП и запчасти',
+    eq_movements: 'Движения', eq_spares: 'ЗИП и материалы', eq_audit: 'Разбор данных',
+    eq_reports: 'Отчёты',
   },
   ops_economy: { procurement: 'Энергозакупка', rent: 'Аренда', ops_payments: 'Оплаты' },
   marketing: {

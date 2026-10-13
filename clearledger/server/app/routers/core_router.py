@@ -30,20 +30,6 @@ def _require_super(user: User) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Нужны права суперадминистратора экосистемы")
 
 
-async def _chat_status() -> str:
-    """Пинг Matrix homeserver: up/down/not_configured."""
-    url = settings.synapse_url
-    if not url:
-        return "not_configured"
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=3) as c:
-            r = await c.get(url.rstrip("/") + "/health")
-            return "up" if r.status_code == 200 else "down"
-    except Exception:  # noqa: BLE001 — недоступность = down, не роняем статус
-        return "down"
-
-
 @router.get("/status")
 async def core_status(
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
@@ -63,8 +49,6 @@ async def core_status(
     user_n = await _count(User)
 
     services = [
-        {"code": "chat", "name": "Чат (Matrix)",
-         "configured": bool(settings.synapse_url), "status": await _chat_status()},
         {"code": "conf", "name": "Конференции (Jitsi)",
          "configured": bool(settings.jitsi_signing_key),
          "status": "configured" if settings.jitsi_signing_key else "not_configured"},

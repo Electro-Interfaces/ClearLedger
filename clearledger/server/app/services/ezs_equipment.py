@@ -21,18 +21,18 @@ import io
 import re
 import json
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    AuditEvent, EzsEquipmentMovement, EzsEquipmentUnit,
+    AuditEvent, EzsEquipmentDocument, EzsEquipmentMovement, EzsEquipmentUnit,
     EzsSparePart, EzsSparePartMovement, EzsSparePartStock,
-    ServiceLocation, User,
+    ObjectLink, ServiceLocation, User,
 )
 
 # ─── состояния и переходы ───────────────────────────────────────────────────
@@ -68,7 +68,12 @@ OP_LABELS = {
     "to_vendor": "Возврат производителю",
     "write_off": "Списание",
     "correction": "Корректировка",
+    "cancel": "Отмена документа",
 }
+
+# Поля единицы, которые меняет движение: их снимок до движения лежит в `prev`.
+_PREV_FIELDS = ("state", "current_location_id", "custodian", "custodian_name", "is_used",
+                "reserved_for_location_id", "commissioned_on", "decommissioned_on")
 
 
 def _back_to_stock(unit: EzsEquipmentUnit) -> str:
@@ -157,11 +162,11 @@ async def _get_location(db: AsyncSession, company_id, loc_id: str,
                         want_type: str | None = None) -> ServiceLocation:
     loc = await db.get(ServiceLocation, loc_id)
     if loc is None or loc.company_id != company_id:
-        raise HTTPException(404, "Локация не найдена")
+        raise HTTPException(404, "Склад или станция не найдены")
     if want_type == "warehouse" and loc.type != "warehouse":
-        raise HTTPException(400, f"«{loc.name}» — не склад (тип {loc.type})")
+        raise HTTPException(400, f"«{loc.name}» — не склад")
     if want_type == "site" and loc.type != "ev_charging":
-        raise HTTPException(400, f"«{loc.name}» — не площадка ЭЗС (тип {loc.type})")
+        raise HTTPException(400, f"«{loc.name}» — не станция")
     return loc
 
 
@@ -224,7 +229,17 @@ def _movement(company_id, unit: EzsEquipmentUnit, op: str, *, user: User | None,
         supply_id=supply_id, supply_line_id=supply_line_id,
         created_by_id=str(user.id) if user else None,
         created_by_name=(user.name or user.email) if user else None,
+        # Время по часам, а не время транзакции: два движения одного запроса (приход и
+        # сразу монтаж) иначе неразличимы по порядку.
+        created_at=datetime.now(timezone.utc),
     )
+
+
+def live_moves() -> list:
+    """Условие «движение в силе»: не сторно и не из отменённого документа."""
+    M = EzsEquipmentMovement
+    return [M.op != "cancel", or_(M.document_id.is_(None), M.document_id.notin_(
+        select(EzsEquipmentDocument.id).where(EzsEquipmentDocument.status == "cancelled")))]
 
 
 async def _create_receipt_unit(
@@ -311,8 +326,25 @@ async def apply_movement(db: AsyncSession, company_id, user: User | None,
             400, f"Из состояния «{STATE_LABELS.get(unit.state, unit.state)}» "
                  f"операция «{OP_LABELS.get(op, op)}» недоступна")
 
+    occurred_on = (payload.get("occurred_on") or "").strip() or date.today().isoformat()
+    try:
+        occurred_on = date.fromisoformat(occurred_on).isoformat()
+    except ValueError:
+        raise HTTPException(400, "Дата операции указана неверно")
+    # Документ раньше уже проведённого ломает порядок: состояние единицы хранится
+    # только текущее, а остатки на дату читают движения по дате. Движения разового
+    # импорта (без документа и поставки) не в счёт — у них дата загрузки файла.
+    M = EzsEquipmentMovement
+    last = (await db.execute(select(func.max(M.occurred_on)).where(
+        M.unit_id == unit.id, or_(M.document_id.isnot(None), M.supply_id.isnot(None)), *live_moves()))).scalar()
+    if last and occurred_on < last:
+        raise HTTPException(
+            409, f"По единице {unit.serial_number or ''} уже проведён документ от {last} — дата не может быть раньше. "
+                 "Отмените более поздний документ или исправьте дату")
+
     from_state = unit.state
     from_loc = unit.current_location_id
+    prev = {f: getattr(unit, f) for f in _PREV_FIELDS}
     to_loc_id = payload.get("to_location_id")
     counterparty = (payload.get("counterparty") or "").strip() or None
 
@@ -325,12 +357,20 @@ async def apply_movement(db: AsyncSession, company_id, user: User | None,
         await _get_location(db, company_id, to_loc_id, want_type="warehouse")
     elif rule["loc"] == "site":
         if not to_loc_id:
-            raise HTTPException(400, "Укажите площадку ЭЗС")
+            raise HTTPException(400, "Укажите станцию установки")
         await _get_location(db, company_id, to_loc_id, want_type="site")
     elif rule["loc"] == "same_site":
         to_loc_id = unit.current_location_id  # запуск там, где смонтирована
+        busy = (await db.execute(select(EzsEquipmentUnit.serial_number).where(
+            EzsEquipmentUnit.company_id == company_id, EzsEquipmentUnit.current_location_id == to_loc_id,
+            EzsEquipmentUnit.id != unit.id, EzsEquipmentUnit.state == "in_operation").limit(1))).first()
+        if busy:
+            raise HTTPException(409, f"На этой станции уже работает оборудование ({busy[0] or 'без серийного номера'}) — "
+                                     "сначала оформите его демонтаж")
     else:
         to_loc_id = payload.get("to_location_id") if op == "correction" else None
+        if to_loc_id:
+            await _get_location(db, company_id, to_loc_id)  # место корректировки — этой компании
 
     # целевое состояние
     if op == "correction":
@@ -355,14 +395,14 @@ async def apply_movement(db: AsyncSession, company_id, user: User | None,
     # ровно та ошибка, из-за которой дата ввода равнялась дню просмотра карточки.
     if op in ("commissioning", "write_off", "to_vendor"):
         occurred = (payload.get("occurred_on") or "").strip()
-        if len(occurred) != 10:
+        if not occurred:
             raise HTTPException(
                 400, "Укажите дату операции: она становится датой "
                      + ("ввода в эксплуатацию" if op == "commissioning" else "вывода"))
         if op == "commissioning":
-            unit.commissioned_on = occurred
+            unit.commissioned_on = occurred_on
         else:
-            unit.decommissioned_on = occurred
+            unit.decommissioned_on = occurred_on
 
     # применяем к юниту
     unit.state = to_state
@@ -405,17 +445,60 @@ async def apply_movement(db: AsyncSession, company_id, user: User | None,
         company_id, unit, op, user=user,
         from_location_id=from_loc, to_location_id=to_loc_id,
         from_state=from_state, to_state=to_state, counterparty=counterparty,
-        occurred_on=payload.get("occurred_on"), basis=payload.get("basis"),
+        occurred_on=occurred_on, basis=(payload.get("basis") or "")[:300] or None,
         comment=payload.get("comment"),
         supply_id=payload.get("supply_id"), supply_line_id=payload.get("supply_line_id"),
     )
+    move.prev = prev
     db.add(move)
+    # Связь трогаем, только когда единица действительно пришла на станцию или ушла с
+    # неё: корректировка реквизитов не должна переоткрывать связь, закрытую раньше.
+    if (prev["state"], prev["current_location_id"]) != (unit.state, unit.current_location_id):
+        await sync_placement(db, company_id, user, unit, move.occurred_on, move.basis)
 
     # commissioning: опционально синхронизировать паспорт площадки из карточки
     if op == "commissioning" and payload.get("sync_passport") and to_loc_id:
         await _sync_passport(db, company_id, user, unit, to_loc_id)
 
     return unit, move
+
+
+async def sync_placement(db: AsyncSession, company_id, user: User | None, unit: EzsEquipmentUnit,
+                         on: str | None, basis: str | None = None) -> None:
+    """Связь «станция стоит в точке» (`object_links.placed_at`) идёт за складом.
+
+    Работающая единица размещена в своей точке, любая другая — нигде. До 13.10.2026
+    движение меняло только `current_location_id`, а связь по СТО вели одни скрипты
+    бэкфилла: после первого же документа паспорт точки показывал прежнюю станцию
+    (`docs/OBJECTS.md`, дефекты 26.08.2026).
+    """
+    day = date.fromisoformat(on) if on else date.today()
+    want = unit.current_location_id if unit.state == "in_operation" else None
+    if want:  # размещение бывает только на станции: «в эксплуатации» на складе — ошибка учёта
+        place = await db.get(ServiceLocation, want)
+        want = want if place is not None and place.type == "ev_charging" else None
+    L = ObjectLink
+    links = (await db.execute(select(L).where(
+        L.company_id == company_id, L.relation == "placed_at",
+        L.child_type == "station", L.child_id == str(unit.id)).order_by(L.valid_from))).scalars().all()
+    current = next((l for l in links if l.valid_to is None), None)
+    if (current.parent_id if current else None) == want:
+        return
+    if current is not None:
+        # Период не бывает отрицательным: закрытие раньше начала схлопывает связь в пустую.
+        current.valid_to = max(day, current.valid_from)
+        current.closed_reason = (basis or "Снята с точки")[:300]
+    if want is None:
+        return
+    # Ввод задним числом не может начаться раньше, чем закрыта прежняя связь.
+    start = max([day] + [l.valid_to for l in links if l.valid_to is not None])
+    db.add(ObjectLink(
+        company_id=company_id, parent_type="point_of_service", parent_id=want,
+        child_type="station", child_id=str(unit.id), relation="placed_at",
+        valid_from=start, basis_note=(basis or "Складской документ")[:300],
+        recorded_by_id=str(user.id) if user else None,
+        recorded_by_name=(user.name or user.email) if user else None,
+    ))
 
 
 async def _sync_passport(db: AsyncSession, company_id, user: User | None,
@@ -483,7 +566,7 @@ async def dismantle_from_site(db: AsyncSession, company_id, user: User | None,
     site_id = payload.get("site_location_id")
     wh_id = payload.get("warehouse_id")
     if not site_id or not wh_id:
-        raise HTTPException(400, "Укажите площадку и склад-приёмник")
+        raise HTTPException(400, "Укажите станцию и склад-приёмник")
     site = await _get_location(db, company_id, site_id, want_type="site")
     await _get_location(db, company_id, wh_id, want_type="warehouse")
 
@@ -918,7 +1001,10 @@ async def _stock_row(db: AsyncSession, company_id, part_id, location_id,
 
 async def spare_apply_movement(db: AsyncSession, company_id, user: User | None,
                                part_id, payload: dict[str, Any]) -> EzsSparePartMovement:
-    """Движение ЗИП с транзакционной корректировкой материализованных остатков."""
+    """Движение ЗИП с транзакционной корректировкой материализованных остатков.
+
+    Одиночное движение осталось приходу и возврату по поставке (`ezs_supply.py`);
+    остальные операции проводятся документом — `ezs_spare_docs.py`."""
     op = payload.get("op")
     if op not in SPARE_OPS:
         raise HTTPException(400, f"Неизвестная операция ЗИП: {op}")
@@ -929,8 +1015,9 @@ async def spare_apply_movement(db: AsyncSession, company_id, user: User | None,
         qty = Decimal(str(payload.get("qty") or 0))
     except Exception:  # noqa: BLE001
         raise HTTPException(400, "Некорректное количество")
-    if qty <= 0:
+    if qty < 0 or (qty == 0 and op != "correction"):
         raise HTTPException(400, "Количество должно быть больше нуля")
+    delta = None
 
     from_id = payload.get("from_location_id")
     to_id = payload.get("to_location_id")
@@ -963,14 +1050,19 @@ async def spare_apply_movement(db: AsyncSession, company_id, user: User | None,
         await debit(from_id)
         await credit(to_id)
     elif op == "correction":
-        # корректировка = установка фактического остатка на складе
+        # корректировка = установка фактического остатка на складе (ноль допустим);
+        # в журнал идёт изменение: delta = факт − учёт, qty = |delta|
         if not to_id:
             raise HTTPException(400, "Укажите склад корректировки")
         if not (payload.get("comment") or "").strip():
             raise HTTPException(400, "Для корректировки обязателен комментарий")
+        await _get_location(db, company_id, to_id, want_type="warehouse")
         row = await _stock_row(db, company_id, part_id, to_id, create=True)
-        row.qty = qty
+        delta = qty - Decimal(str(row.qty))
+        row.qty, qty = qty, abs(delta)
 
+    if payload.get("target_location_id"):
+        await _get_location(db, company_id, payload["target_location_id"])
     target_unit_id = payload.get("target_unit_id")
     if target_unit_id:
         tu = await db.get(EzsEquipmentUnit, target_unit_id)
@@ -978,7 +1070,7 @@ async def spare_apply_movement(db: AsyncSession, company_id, user: User | None,
             raise HTTPException(404, "Станция-получатель не найдена")
 
     move = EzsSparePartMovement(
-        company_id=company_id, part_id=part_id, op=op, qty=qty,
+        company_id=company_id, part_id=part_id, op=op, qty=qty, delta=delta,
         from_location_id=from_id, to_location_id=to_id,
         target_unit_id=target_unit_id,
         target_location_id=payload.get("target_location_id"),

@@ -2821,11 +2821,23 @@ async def create_all() -> None:
             "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS supply_line_id UUID",
             "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS supply_id UUID",
             "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS supply_line_id UUID",
+            # 13.10.2026: движение ЗИП проводится документом (ezs_spare_documents — через
+            # create_all); delta — знаковое изменение остатка у корректировки и описи.
+            "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS document_id UUID",
+            "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS delta NUMERIC(14,3)",
+            "CREATE INDEX IF NOT EXISTS ix_ezs_spare_part_movements_document_id "
+            "ON ezs_spare_part_movements (document_id)",
             # 04.10.2026: движение проводится документом (накладная, акт).
             "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS document_id UUID",
             "CREATE INDEX IF NOT EXISTS ix_ezs_equipment_movements_document_id "
             "ON ezs_equipment_movements (document_id)",
             "ALTER TABLE IF EXISTS ezs_equipment_documents ADD COLUMN IF NOT EXISTS details JSONB",
+            # 13.10.2026: отмена документа движения — статус и снимок единицы до движения.
+            "ALTER TABLE IF EXISTS ezs_equipment_documents ADD COLUMN IF NOT EXISTS status VARCHAR(12) NOT NULL DEFAULT 'posted'",
+            "ALTER TABLE IF EXISTS ezs_equipment_documents ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ",
+            "ALTER TABLE IF EXISTS ezs_equipment_documents ADD COLUMN IF NOT EXISTS cancelled_by_name VARCHAR(255)",
+            "ALTER TABLE IF EXISTS ezs_equipment_documents ADD COLUMN IF NOT EXISTS cancel_reason VARCHAR(500)",
+            "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS prev JSONB",
             "CREATE INDEX IF NOT EXISTS ix_ezs_unit_supply "
             "ON ezs_equipment_units (company_id, supply_id)",
         ):
@@ -3129,6 +3141,7 @@ async def create_all() -> None:
               ('agency',           'Агентский договор',         'гл. 52 ГК РФ',     'any', 80),
               ('sale',             'Купля-продажа',             'гл. 30 ГК РФ',     'any', 90),
               ('charging_service', 'Зарядка электромобилей',    'гл. 39 ГК РФ',     'out', 100),
+              ('storage',          'Хранение',                  'гл. 47 ГК РФ',     'in',  45),
               ('other',            'Иное',                       NULL,              'any', 200)
             ON CONFLICT (code) DO UPDATE
               SET label = EXCLUDED.label, gk_basis = EXCLUDED.gk_basis,

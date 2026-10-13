@@ -92,3 +92,30 @@ def test_детали_ремонта():
         with pytest.raises(HTTPException):
             D.repair_details("to_repair", bad)
 
+
+
+def test_автономер_идёт_от_наибольшего_хвоста():
+    # Номер, введённый руками впереди счётчика, раньше навсегда останавливал автонумерацию.
+    assert D._next_after(["ПМ-2026-0001", "ПМ-2026-0005", "ПМ-2026-А"], "ПМ-2026-") == "ПМ-2026-0006"
+    assert D._next_after([], "ПМ-2026-") == "ПМ-2026-0001"
+
+
+def test_срок_договора_сверяется_с_датой_документа():
+    c = contract(valid_until="2026-03-31")
+    # Акт задним числом по действовавшему тогда договору — без предупреждения.
+    assert run(D.check_contract(FakeDB(c), CID, c.id, CP.id, "2026-03-01"))[1] == []
+    assert "истёк" in run(D.check_contract(FakeDB(c), CID, c.id, CP.id, "2026-04-01"))[1][0]
+    assert "позже даты документа" in run(D.check_contract(FakeDB(c), CID, c.id, CP.id, "2025-12-01"))[1][0]
+
+
+def test_хранение_оформляется_своей_формой():
+    assert D.doc_kind("transfer") == D.DOC_KINDS["transfer"]
+    assert D.doc_kind("transfer", {"form": "mh1"})[0] == "ХР"
+    assert "МХ-3" in D.doc_kind("transfer", {"form": "mh3"})[1]
+    assert not {p for p, _ in D.STORAGE_FORMS.values()} & {p for p, _ in D.DOC_KINDS.values()}
+
+
+def test_приход_оформляется_документом_но_не_проводится_формой_движения():
+    assert D.DOC_KINDS["receipt"][0] == "ПР"
+    with pytest.raises(HTTPException, match="Неизвестная операция"):
+        run(D.post_document(FakeDB(), CID, None, {"op": "receipt", "unit_ids": ["x"], "doc_date": "2026-10-13"}))

@@ -2,16 +2,15 @@
  * «Склады и остатки» — сводка складского учёта оборудования ЭЗС.
  *
  * KPI (склады · единицы · внешние держатели · ЗИП) + таблица складов с
- * разбивкой единиц по состояниям + карточка внешних держателей (подрядчики,
- * производитель). Создание склада — через справочник точек обслуживания
- * (createLocation, type='warehouse'); свежесозданный склад показывается
- * сразу (merge локального справочника с бэкенд-сводкой).
+ * разбивкой единиц по складским состояниям + единицы вне складов (у подрядчика,
+ * у производителя). Любое число раскрывается в список единиц, строка списка —
+ * в карточку единицы. Склад заводится на сервере, без локального справочника.
  */
 
 import { useMemo, useState } from 'react'
 import { SortTh } from '@/components/workspace/SortableTh'
 import { useTableSort } from '@/hooks/useTableSort'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2, Plus, Warehouse } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -22,61 +21,62 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
 import { Kpi } from '@/components/workspace/analytics/Kpi'
-import { getWarehousesSummary, type UnitState, type WarehouseSummaryRow } from '@/services/equipmentService'
-import { createLocation, loadLocations } from '@/services/locationService'
+import { ApiError } from '@/services/apiClient'
+import {
+  createWarehouse, getWarehousesSummary, listUnits, UNIT_STATE_META,
+  type UnitState, type WarehouseSummaryRow,
+} from '@/services/equipmentService'
+import { loadLocations } from '@/services/locationService'
+import { UnitDetailsDialog } from './EquipmentFleetPanel'
+import { eqName } from './equipmentDocPrint'
+import { ExportXlsxButton, LoadError } from './equipmentShared'
+import { invalidateEquipment } from './useEquipmentScope'
 import { CONTRACT_STATUS, WarehouseCardDialog } from './WarehouseCardDialog'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 
-/** Колонки-состояния таблицы складов (порядок фиксирован). */
+/** Колонки-состояния таблицы складов (порядок фиксирован) — только складские. */
 const STATE_COLS: { state: UnitState; label: string }[] = [
   { state: 'in_stock_new', label: 'Новые' },
   { state: 'in_stock_used', label: 'Б/у' },
   { state: 'reserved', label: 'Резерв' },
   { state: 'in_repair', label: 'В ремонте' },
 ]
+/** Единица ещё у держателя: не списана и не возвращена поставщику. */
+const HELD_STATES = (Object.keys(UNIT_STATE_META) as UnitState[])
+  .filter((s) => s !== 'written_off' && s !== 'returned_to_vendor').join(',')
+const LIST_LIMIT = 200
 
-function Num({ v, dim }: { v: number; dim?: boolean }) {
+type Drill = { title: string; locationId?: string; state?: string; custodian?: string }
+
+/** Число, которое раскрывается в список единиц. */
+function Num({ v, dim, onOpen }: { v: number; dim?: boolean; onOpen?: () => void }) {
   if (!v) return <span className="text-muted-foreground/40">—</span>
-  return <span className={dim ? 'text-muted-foreground' : undefined}>{nf0.format(v)}</span>
+  if (!onOpen) return <span className={dim ? 'text-muted-foreground' : undefined}>{nf0.format(v)}</span>
+  return (
+    <button type="button" title="Показать единицы" onClick={onOpen}
+      className="underline decoration-dotted underline-offset-2 hover:text-primary">
+      {nf0.format(v)}
+    </button>
+  )
 }
 
-/** Следующий свободный код склада вида SKL-N (по существующим кодам). */
-function nextWarehouseCode(existing: string[]): string {
-  let max = 0
-  for (const c of existing) {
-    const m = /^SKL-(\d+)$/i.exec(c.trim())
-    if (m) max = Math.max(max, Number(m[1]))
-  }
-  return `SKL-${max + 1}`
-}
-
-function NewWarehouseDialog({ existingCodes, onCreated }: {
-  existingCodes: string[]
-  onCreated: () => void
-}) {
+function NewWarehouseDialog({ companyId }: { companyId: string }) {
+  const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
-
-  function handleCreate() {
-    if (!name.trim()) {
-      toast.error('Укажите название склада')
-      return
-    }
-    createLocation({
-      code: nextWarehouseCode(existingCodes),
-      name: name.trim(),
-      type: 'warehouse',
-      status: 'active',
-      address: address.trim() || undefined,
-    })
-    toast.success(`Создан склад «${name.trim()}»`)
-    setName('')
-    setAddress('')
-    setOpen(false)
-    onCreated()
-  }
+  const mut = useMutation({
+    mutationFn: () => createWarehouse(companyId, { name: name.trim(), address: address.trim() || null }),
+    onSuccess: (w) => {
+      toast.success(`Создан склад «${w.name}»`)
+      setName('')
+      setAddress('')
+      setOpen(false)
+      void invalidateEquipment(qc)
+    },
+    onError: (e) => toast.error('Склад не создан', { description: e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e) }),
+  })
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -101,45 +101,96 @@ function NewWarehouseDialog({ existingCodes, onCreated }: {
             <Input id="wh-address" value={address} onChange={(e) => setAddress(e.target.value)}
               placeholder="г. Хабаровск, ул. Промышленная, 5" />
           </div>
+          <p className="text-xs text-muted-foreground">
+            Чей склад, договор и ответственный заполняются в карточке склада после создания.
+          </p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Отмена</Button>
-          <Button onClick={handleCreate}>Создать</Button>
+          <Button onClick={() => mut.mutate()} disabled={!name.trim() || mut.isPending}>
+            {mut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+            Создать
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
+/** Содержимое склада или внешнего держателя: список единиц, строка открывает карточку. */
+function UnitsListDialog({ companyId, drill, onOpenUnit, onClose }: {
+  companyId: string; drill: Drill; onOpenUnit: (id: string) => void; onClose: () => void
+}) {
+  const q = useQuery({
+    queryKey: ['equipment', 'units', companyId, 'drill', drill.locationId, drill.state, drill.custodian],
+    queryFn: () => listUnits({
+      companyId, locationId: drill.locationId, state: drill.state, custodian: drill.custodian,
+      sort: 'serialNumber', dir: 'asc', pageSize: LIST_LIMIT,
+    }),
+  })
+  const items = q.data?.items ?? []
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="sm:max-w-3xl w-[96vw] max-h-[90dvh] overflow-y-auto">
+        <DialogHeader><DialogTitle>{drill.title}</DialogTitle></DialogHeader>
+        {q.isLoading ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          : q.isError ? <LoadError what="список единиц" error={q.error} onRetry={() => void q.refetch()} />
+          : items.length === 0 ? <p className="text-sm text-muted-foreground">Единиц нет.</p>
+          : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-left text-muted-foreground">
+                    <th className="p-2 font-medium">Серийный №</th>
+                    <th className="p-2 font-medium">Инв. №</th>
+                    <th className="p-2 font-medium">Оборудование</th>
+                    <th className="p-2 font-medium">Состояние</th>
+                    <th className="p-2 font-medium">{drill.custodian ? 'У кого' : 'Резерв под станцию'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((u) => (
+                    <tr key={u.id} className="cursor-pointer border-b border-border/30 hover:bg-muted/30"
+                      title="Открыть карточку единицы" onClick={() => onOpenUnit(u.id)}>
+                      <td className="p-2 font-mono">{u.serialNumber ?? '—'}</td>
+                      <td className="p-2 font-mono">{u.inventoryNumber ?? '—'}</td>
+                      <td className="p-2">{eqName(u.vendor ?? u.vendorRaw, u.model) || '—'}</td>
+                      <td className="p-2 whitespace-nowrap">{u.stateLabel}</td>
+                      <td className="p-2">{(drill.custodian ? u.custodianName : u.reservedFor?.name) ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {(q.data?.total ?? 0) > items.length && (
+                <p className="p-2 text-xs text-muted-foreground">
+                  Показаны первые {items.length} из {nf0.format(q.data?.total ?? 0)} — полный список в «Парке оборудования» с отбором по складу.
+                </p>
+              )}
+            </div>
+          )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
-  const qc = useQueryClient()
   const [cardId, setCardId] = useState<string | null>(null)
-  const { data, isLoading } = useQuery({
-    queryKey: ['equipment-warehouses', companyId],
+  const [drill, setDrill] = useState<Drill | null>(null)
+  const [unitId, setUnitId] = useState<string | null>(null)
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['equipment', 'warehouses', companyId],
     queryFn: () => getWarehousesSummary(companyId),
   })
+  // Склады и станции нужны карточке единицы (операции из неё).
   const locationsQ = useQuery({
-    queryKey: ['equipment-locations', companyId],
+    queryKey: ['equipment', 'locations', companyId],
     queryFn: () => loadLocations(companyId),
+    staleTime: 60_000,
   })
+  const warehouses = useMemo(() => (locationsQ.data ?? []).filter((l) => l.type === 'warehouse'), [locationsQ.data])
+  const sites = useMemo(() => (locationsQ.data ?? []).filter((l) => l.type === 'ev_charging'), [locationsQ.data])
 
-  // Сводка бэкенда + локальные склады, которых в ней ещё нет (свежесозданные,
-  // зеркало в бэкенд асинхронное) — нулевыми строками.
-  const rows = useMemo<WarehouseSummaryRow[]>(() => {
-    const summary = data?.warehouses ?? []
-    const known = new Set(summary.map((w) => w.location.id))
-    const extra = (locationsQ.data ?? [])
-      .filter((l) => l.type === 'warehouse' && !known.has(l.id))
-      .map((l): WarehouseSummaryRow => ({
-        location: { id: l.id, name: l.name, type: l.type, address: l.address ?? null },
-        unitsByState: {},
-        unitsTotal: 0,
-        sparePositions: 0,
-        spareQty: 0,
-      }))
-      .sort((a, b) => a.location.name.localeCompare(b.location.name, 'ru'))
-    return [...summary, ...extra]
-  }, [data, locationsQ.data])
+  const rows = useMemo(() => data?.warehouses ?? [], [data])
 
   // Склады сравнивают по загруженности: где скопились единицы, где пусто.
   const сортировка = useMemo(() => ({
@@ -150,21 +201,7 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
   }), [])
   const склады = useTableSort(rows, сортировка)
 
-  const external = data?.external ?? []
-  const existingCodes = useMemo(
-    () => (locationsQ.data ?? []).map((l) => l.code),
-    [locationsQ.data],
-  )
-
-  const refresh = () => {
-    const invalidate = () => {
-      void qc.invalidateQueries({ queryKey: ['equipment-warehouses', companyId] })
-      void qc.invalidateQueries({ queryKey: ['equipment-locations', companyId] })
-    }
-    invalidate()
-    // Зеркало createLocation в бэкенд — fire-and-forget: перечитываем ещё раз.
-    setTimeout(invalidate, 900)
-  }
+  const external = useMemo(() => data?.external ?? [], [data])
 
   const kpi = useMemo(() => ({
     warehouses: rows.length,
@@ -188,12 +225,35 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
       </div>
     )
   }
+  // Сбой — не «складов нет» и не нули в плитках.
+  if (isError) {
+    return <div className="p-4"><LoadError what="склады и остатки" error={error} onRetry={() => void refetch()} /></div>
+  }
+
+  const exportAll = async () => [
+    {
+      name: 'Склады и остатки',
+      columns: ['Склад', 'Адрес', 'Вид владения', 'Контрагент', 'Договор', 'Ответственный',
+        ...STATE_COLS.map((c) => c.label), 'Всего единиц', 'Позиций ЗИП', 'Кол-во ЗИП'],
+      rows: rows.map((w) => [w.location.name, w.location.address, w.card?.ownershipLabel, w.card?.counterpartyName,
+        w.card?.contractLabel, w.card?.responsible, ...STATE_COLS.map((c) => w.unitsByState[c.state] ?? 0),
+        w.unitsTotal, w.sparePositions, w.spareQty]),
+    },
+    {
+      name: 'Вне складов',
+      columns: ['Держатель', 'Единиц', 'Кто именно'],
+      rows: external.map((e) => [e.custodianLabel, e.unitsTotal, e.names.join(', ')]),
+    },
+  ]
 
   return (
     <div className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs uppercase tracking-wider text-muted-foreground">Склады и остатки оборудования</div>
-        <NewWarehouseDialog existingCodes={existingCodes} onCreated={refresh} />
+        <div className="flex flex-wrap gap-2">
+          <ExportXlsxButton title="Склады и остатки оборудования" load={exportAll} />
+          <NewWarehouseDialog companyId={companyId} />
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -251,10 +311,13 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
                     </td>
                     {STATE_COLS.map((c) => (
                       <td key={c.state} className="p-2 text-right font-mono">
-                        <Num v={w.unitsByState[c.state] ?? 0} />
+                        <Num v={w.unitsByState[c.state] ?? 0} onOpen={() => setDrill({
+                          title: `${w.location.name} · ${c.label}`, locationId: w.location.id, state: c.state })} />
                       </td>
                     ))}
-                    <td className="p-2 text-right font-mono font-semibold"><Num v={w.unitsTotal} /></td>
+                    <td className="p-2 text-right font-mono font-semibold">
+                      <Num v={w.unitsTotal} onOpen={() => setDrill({ title: w.location.name, locationId: w.location.id })} />
+                    </td>
                     <td className="p-2 text-right font-mono"><Num v={w.sparePositions} dim /></td>
                     <td className="p-2 text-right font-mono"><Num v={w.spareQty} dim /></td>
                   </tr>
@@ -276,10 +339,10 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
 
       {external.length > 0 && (
         <Card>
-          <CardContent className="p-0">
+          <CardContent className="overflow-x-auto p-0">
             <div className="border-b bg-muted/20 px-3 py-1.5 text-[11px] font-medium">
-              Вне наших локаций
-              <span className="ml-2 font-normal text-muted-foreground">единицы у внешних держателей</span>
+              Вне складов
+              <span className="ml-2 font-normal text-muted-foreground">единицы у подрядчика и у производителя</span>
             </div>
             <table className="w-full text-xs">
               <thead>
@@ -293,7 +356,10 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
                 {external.map((e) => (
                   <tr key={e.custodian} className="border-b border-border/30 hover:bg-muted/30">
                     <td className="p-2 font-medium whitespace-nowrap">{e.custodianLabel}</td>
-                    <td className="p-2 text-right font-mono">{nf0.format(e.unitsTotal)}</td>
+                    <td className="p-2 text-right font-mono">
+                      <Num v={e.unitsTotal} onOpen={() => setDrill({
+                        title: `Вне складов · ${e.custodianLabel}`, custodian: e.custodian, state: HELD_STATES })} />
+                    </td>
                     <td className="p-2 text-muted-foreground">{e.names.length > 0 ? e.names.join(', ') : '—'}</td>
                   </tr>
                 ))}
@@ -303,6 +369,11 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
         </Card>
       )}
       {cardId && <WarehouseCardDialog companyId={companyId} warehouseId={cardId} onClose={() => setCardId(null)} />}
+      {drill && <UnitsListDialog companyId={companyId} drill={drill} onOpenUnit={setUnitId} onClose={() => setDrill(null)} />}
+      {unitId && (
+        <UnitDetailsDialog companyId={companyId} unitId={unitId}
+          warehouses={warehouses} sites={sites} onClose={() => setUnitId(null)} />
+      )}
     </div>
   )
 }

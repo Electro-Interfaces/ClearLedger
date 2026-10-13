@@ -6189,6 +6189,9 @@ class EzsEquipmentMovement(Base):
 
     # Документ движения (накладная, акт), которым проведено движение (04.10.2026).
     document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # Единица до движения (состояние, место, держатель, даты): по этому снимку
+    # отмена документа возвращает её назад, не угадывая прежние значения.
+    prev: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         Index("ix_ezs_move_company_date", "company_id", "occurred_on"),
@@ -6222,6 +6225,12 @@ class EzsEquipmentDocument(Base):
     # Детали вида документа: ремонт — заявка Поддержки, гарантия/платный, плановый
     # возврат, стоимость, результат.
     details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # posted | cancelled. Проведённый документ не правится: ошибку исправляет
+    # отмена (сторно движений) и новый документ — номер отменённого остаётся занят.
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="posted", server_default="posted")
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -6482,9 +6491,63 @@ class EzsSparePartMovement(Base):
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Документ ЗИП, которым проведено движение (13.10.2026); у прихода по поставке
+    # документом служит сама поставка (supply_id).
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # Знаковое изменение остатка на складе to_location_id — у корректировки,
+    # инвентаризации и сторно отменённого документа; qty у них = |delta|. У старых
+    # корректировок (до 13.10.2026) delta пуст, а qty — установленный остаток.
+    delta: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+
     __table_args__ = (
         Index("ix_ezs_spmove_company_date", "company_id", "occurred_on"),
         Index("ix_ezs_spmove_part_created", "part_id", "created_at"),
+    )
+
+
+class EzsSpareDocument(Base):
+    """Документ ЗИП: приходный ордер, требование-накладная на отпуск, накладная на
+    перемещение, акт на списание, инвентаризационная опись. Проводит несколько
+    строк номенклатуры атомарно; не правится — исправление через отмену (сторно
+    движений) и новый документ (services/ezs_spare_docs.py)."""
+    __tablename__ = "ezs_spare_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    op: Mapped[str] = mapped_column(String(20), nullable=False)  # receipt|issue|transfer|write_off|inventory
+    number: Mapped[str] = mapped_column(String(60), nullable=False)
+    doc_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="posted", server_default="posted")
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    counterparty_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    contract_label: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    from_location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    to_location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # На что ушёл расход: станция (единица оборудования) либо объект без привязки
+    # к станции — текстом; акт ремонта — по желанию.
+    target_unit_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    target_location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    target_note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    repair_document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    responsible_from: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    responsible_to: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    basis: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Строки как проведены: [{partId, qty}], у описи — [{partId, book, fact}]. Опись
+    # хранит и строки без расхождения, по которым движения нет.
+    lines: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "number", name="uq_ezs_spare_doc_number"),
+        Index("ix_ezs_spare_doc_company_date", "company_id", "doc_date"),
     )
 
 
@@ -7972,24 +8035,6 @@ class AppCompanyLink(Base):
     )
 
 
-# ===========================================================================
-# Чат экосистемы (Matrix) — модель «как в Ангаре»: плоская. Группы = именованные
-# приватные Matrix-комнаты + своя таблица; папки = клиентская группировка. Провижининг
-# через Synapse Admin API сервисным аккаунтом. Скоуп по компании (Ур. 2): группы/личка/
-# папки принадлежат компании; идентичность user→mxid — глобальная на пользователя.
-# Темы (Matrix threads) живут В комнатах (m.thread) — отдельной таблицы не требуют.
-# ===========================================================================
-class MatrixIdentity(Base):
-    """Привязка пользователя Ledger к Matrix-пользователю (mxid). Токен НЕ храним — минтим на сессию."""
-    __tablename__ = "chat_matrix_identity"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
-    mxid: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
 class NotificationRule(Base):
     """О чём и куда оповещать в пространстве компании: категория событий × каналы.
 
@@ -8021,49 +8066,6 @@ class NotificationRule(Base):
     __table_args__ = (
         Index("uq_notification_rule", "company_id", "category", unique=True),
     )
-
-
-class MatrixGroupRoom(Base):
-    """Групповой чат = именованная приватная Matrix-комната + метаданные (скоуп компании)."""
-    __tablename__ = "chat_group_room"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
-    room_id: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
-    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    title: Mapped[str] = mapped_column(String(120), nullable=False)
-    is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class MatrixDmRoom(Base):
-    """Личный чат: упорядоченная пара пользователей → одна комната (скоуп компании)."""
-    __tablename__ = "chat_dm_room"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_a_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    user_b_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    room_id: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
-
-    __table_args__ = (Index("uq_chat_dm_pair", "company_id", "user_a_id", "user_b_id", unique=True),)
-
-
-class MatrixChatFolder(Base):
-    """Папка чатов Matrix (Telegram-style) — клиентская группировка комнат, per-user×компания.
-    Отдельно от TSupport-ChatFolder (другой чат): таблица chat_mx_folder."""
-    __tablename__ = "chat_mx_folder"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(40), nullable=False)
-    room_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # ===========================================================================

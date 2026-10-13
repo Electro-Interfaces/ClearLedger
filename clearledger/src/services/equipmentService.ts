@@ -18,7 +18,7 @@ export type UnitState =
 export type UnitOp =
   | 'receipt' | 'transfer' | 'reserve' | 'unreserve' | 'to_installation'
   | 'commissioning' | 'dismantle' | 'to_repair' | 'from_repair'
-  | 'to_vendor' | 'write_off' | 'correction'
+  | 'to_vendor' | 'write_off' | 'correction' | 'cancel'
 
 export const UNIT_STATE_META: Record<UnitState, { label: string; cls: string }> = {
   in_stock_new: { label: 'На складе (новая)', cls: 'border-emerald-400/50 text-emerald-600 dark:text-emerald-300/80' },
@@ -27,7 +27,7 @@ export const UNIT_STATE_META: Record<UnitState, { label: string; cls: string }> 
   in_installation: { label: 'В монтаже', cls: 'border-sky-400/50 text-sky-600 dark:text-sky-300/80' },
   in_operation: { label: 'В эксплуатации', cls: 'border-sky-500/50 text-sky-700 dark:text-sky-300' },
   in_repair: { label: 'В ремонте', cls: 'border-amber-400/50 text-amber-600 dark:text-amber-300/80' },
-  returned_to_vendor: { label: 'Возврат производителю', cls: 'border-zinc-500/60 text-zinc-500' },
+  returned_to_vendor: { label: 'Возвращена производителю', cls: 'border-zinc-500/60 text-zinc-500' },
   written_off: { label: 'Списана', cls: 'border-zinc-600 text-zinc-500' },
 }
 
@@ -44,17 +44,27 @@ export const UNIT_OP_META: Record<UnitOp, { label: string }> = {
   to_vendor: { label: 'Возврат производителю' },
   write_off: { label: 'Списание' },
   correction: { label: 'Корректировка' },
+  cancel: { label: 'Отмена документа' },
 }
 
+/** Виды единиц учёта — единственное место, где они названы. Основной предмет — станция. */
+export const UNIT_KIND_LABELS: Record<string, string> = {
+  station: 'Зарядная станция', cabinet: 'Шкаф', transformer: 'Трансформатор', other: 'Прочее оборудование',
+}
+export const unitKindLabel = (kind?: string | null) => UNIT_KIND_LABELS[kind || 'station'] ?? kind ?? '—'
+
 export const CUSTODIAN_LABELS: Record<string, string> = {
-  warehouse: 'Склад', site: 'Площадка', contractor: 'Подрядчик',
+  warehouse: 'Склад', site: 'Станция', contractor: 'Подрядчик',
   vendor: 'Производитель', none: '—',
 }
 
 export const SPARE_CATEGORY_META: Record<string, string> = {
   power_module: 'Силовой модуль', controller: 'Контроллер', connector: 'Коннектор',
-  cable: 'Кабель', display: 'Дисплей', board: 'Плата', other: 'Прочее',
+  cable: 'Кабель', display: 'Дисплей', board: 'Плата',
+  tool: 'Инструмент', consumable: 'Расходные материалы', other: 'Прочее',
 }
+/** Запчасти к станциям; остальные категории — прочие предметы склада. */
+export const SPARE_STATION_CATEGORIES = ['power_module', 'controller', 'connector', 'display', 'board']
 
 // ─── типы ───────────────────────────────────────────────────────────────────
 
@@ -93,6 +103,7 @@ export interface EquipmentUnit {
   accountingNo: string | null
   externalNo: string | null
   speedClass: string | null
+  ownerName?: string | null
   /** Поставщик подтвердил количество и порты. Ложь — позиция ждёт уточнения. */
   dataConfirmed: boolean
   unconfirmedReason: string | null
@@ -123,6 +134,8 @@ export interface EquipmentMovement {
   supplyNumber: string | null
   createdBy: string | null
   createdAt: string | null
+  documentId?: string | null
+  documentNumber?: string | null
   unit?: { serialNumber: string | null; vendor: string | null; model: string | null; inventoryNumber: string | null }
 }
 
@@ -232,6 +245,12 @@ export interface SpareMovementRow {
   part: { id: string; name: string; unitLabel: string }
   op: string
   qty: number
+  /** Знаковое изменение остатка — у корректировки, инвентаризации и отмены документа. */
+  delta?: number | null
+  documentId?: string | null
+  documentNumber?: string | null
+  targetUnit?: SpareTargetUnit | null
+  targetNote?: string | null
   fromLocation: LocBrief | null
   toLocation: LocBrief | null
   targetUnitId: string | null
@@ -271,10 +290,17 @@ export async function listUnits(p: {
   vendor?: string
   custodian?: string
   q?: string
+  kind?: string
+  sort?: string
+  dir?: 'asc' | 'desc'
   scope?: EquipmentScope
   page?: number
   pageSize?: number
-}): Promise<{ items: EquipmentUnit[]; total: number }> {
+}): Promise<{
+  items: EquipmentUnit[]; total: number
+  /** По всему отбору, а не по странице; состояния — без учёта отбора по состоянию. */
+  counts?: { byState: Partial<Record<UnitState, number>>; unconfirmed: number }
+}> {
   return get('/api/equipment/units', {
     company_id: p.companyId,
     ...(p.state ? { state: p.state } : {}),
@@ -282,12 +308,14 @@ export async function listUnits(p: {
     ...(p.vendor ? { vendor: p.vendor } : {}),
     ...(p.custodian ? { custodian: p.custodian } : {}),
     ...(p.q ? { q: p.q } : {}),
+    ...(p.kind ? { kind: p.kind } : {}),
+    ...(p.sort ? { sort: p.sort, dir: p.dir ?? 'desc' } : {}),
     ...scopeParams(p.scope),
-    page: p.page ?? 1, page_size: p.pageSize ?? 500,
+    page: p.page ?? 1, page_size: p.pageSize ?? 100,
   })
 }
 
-export async function createUnit(companyId: string, body: UnitInPayload): Promise<EquipmentUnit> {
+export async function createUnit(companyId: string, body: UnitInPayload): Promise<EquipmentUnit & { documentNumber?: string | null }> {
   return post(`/api/equipment/units?company_id=${companyId}`, body)
 }
 
@@ -305,7 +333,7 @@ export async function deleteUnit(companyId: string, unitId: string): Promise<{ d
 
 export async function applyUnitMovement(
   companyId: string, unitId: string, body: MovementPayload,
-): Promise<{ unit: EquipmentUnit; movement: EquipmentMovement }> {
+): Promise<{ unit: EquipmentUnit; movement: EquipmentMovement; documentNumber?: string | null }> {
   return post(`/api/equipment/units/${unitId}/movements?company_id=${companyId}`, body)
 }
 
@@ -316,7 +344,7 @@ export async function dismantleFromSite(companyId: string, body: {
   basis?: string
   comment?: string
   setDecommissioned?: boolean
-}): Promise<{ unit: EquipmentUnit; movement: EquipmentMovement; unitCreated: boolean }> {
+}): Promise<{ unit: EquipmentUnit; movement: EquipmentMovement; unitCreated: boolean; documentNumber?: string | null }> {
   return post(`/api/equipment/dismantle?company_id=${companyId}`, body)
 }
 
@@ -394,7 +422,7 @@ export async function deleteSparePart(companyId: string, partId: string): Promis
 
 export async function applySpareMovement(
   companyId: string, partId: string, body: SpareMovementPayload,
-): Promise<{ movementId: string; stock: { locationId: string; locationName: string; qty: number }[] }> {
+): Promise<{ movementId: string | null; documentId: string; documentNumber: string; stock: { locationId: string; locationName: string; qty: number }[] }> {
   return post(`/api/equipment/spare-parts/${partId}/movements?company_id=${companyId}`, body)
 }
 
@@ -402,6 +430,7 @@ export async function listSpareMovements(p: {
   companyId: string
   partId?: string
   locationId?: string
+  op?: string
   dateFrom?: string
   dateTo?: string
   page?: number
@@ -411,11 +440,71 @@ export async function listSpareMovements(p: {
     company_id: p.companyId,
     ...(p.partId ? { part_id: p.partId } : {}),
     ...(p.locationId ? { location_id: p.locationId } : {}),
+    ...(p.op ? { op: p.op } : {}),
     ...(p.dateFrom ? { date_from: p.dateFrom } : {}),
     ...(p.dateTo ? { date_to: p.dateTo } : {}),
     page: p.page ?? 1, page_size: p.pageSize ?? 200,
   })
 }
+
+// Документы ЗИП: операция оформляется документом на несколько строк и проводится
+// целиком; исправление — отменой и новым документом.
+
+export type SpareDocOp = 'receipt' | 'issue' | 'transfer' | 'write_off' | 'inventory'
+export const SPARE_DOC_META: Record<SpareDocOp, { label: string; title: string; prefix: string }> = {
+  receipt: { label: 'Приход', title: 'Приходный ордер (М-4)', prefix: 'ПЗ' },
+  issue: { label: 'Отпуск на станцию', title: 'Требование-накладная на отпуск (М-11)', prefix: 'РЗП' },
+  transfer: { label: 'Перемещение', title: 'Накладная на перемещение', prefix: 'ПЗП' },
+  write_off: { label: 'Списание', title: 'Акт на списание', prefix: 'СЗП' },
+  inventory: { label: 'Инвентаризация', title: 'Инвентаризационная опись (ИНВ-3)', prefix: 'ИНВ' },
+}
+/** Станция-получатель: в эксплуатации — название станции, иначе модель единицы. */
+export interface SpareTargetUnit { id: string; serialNumber: string | null; name: string }
+export interface SpareDocLine {
+  partId: string; name: string; article: string | null; category: string | null; unitLabel: string
+  qty?: number; book?: number; fact?: number; delta?: number
+}
+export interface SpareDocument {
+  id: string; op: SpareDocOp; opLabel: string; title: string; number: string; docDate: string
+  status: 'posted' | 'cancelled'
+  counterpartyId: string | null; counterpartyName: string | null; contractId: string | null; contractLabel: string | null
+  fromLocationId: string | null; fromLocation: string | null; toLocationId: string | null; toLocation: string | null
+  targetUnit: SpareTargetUnit | null; targetLocation: string | null; targetNote: string | null
+  repairDocument: { id: string; number: string | null } | null
+  responsibleFrom: string | null; responsibleTo: string | null; basis: string | null; comment: string | null
+  createdBy: string | null; createdAt: string | null
+  cancelledAt: string | null; cancelledBy: string | null; cancelReason: string | null
+  positions: number; lines?: SpareDocLine[]; warnings?: string[]
+}
+export interface SpareDocPayload {
+  /** Ключ документа от формы: повторная отправка не проводит документ дважды. */
+  id: string; op: SpareDocOp; docDate: string; number?: string
+  lines: { partId: string; qty?: number; fact?: number }[]
+  fromLocationId?: string; toLocationId?: string; targetUnitId?: string; targetNote?: string
+  repairDocumentId?: string; counterpartyId?: string; contractId?: string
+  responsibleFrom?: string; responsibleTo?: string; basis?: string; comment?: string
+}
+export interface SpareCountSheet {
+  location: { id: string; name: string }
+  lines: { partId: string; name: string; article: string | null; category: string; unitLabel: string; book: number }[]
+}
+
+export const listSpareDocuments = (p: {
+  companyId: string; op?: string; status?: string; locationId?: string; counterpartyId?: string; contractId?: string
+  partId?: string; dateFrom?: string; dateTo?: string; q?: string; limit?: number; offset?: number
+}) => get<{ items: SpareDocument[]; total: number }>('/api/equipment/spare-documents', {
+  company_id: p.companyId, op: p.op || undefined, status: p.status || undefined, location_id: p.locationId || undefined,
+  counterparty_id: p.counterpartyId || undefined, contract_id: p.contractId || undefined, part_id: p.partId || undefined,
+  date_from: p.dateFrom || undefined, date_to: p.dateTo || undefined, q: p.q || undefined,
+  limit: p.limit ?? 50, offset: p.offset ?? 0 })
+export const getSpareDocument = (companyId: string, id: string) =>
+  get<SpareDocument>(`/api/equipment/spare-documents/${id}`, { company_id: companyId })
+export const postSpareDocument = (companyId: string, body: SpareDocPayload) =>
+  post<SpareDocument>(`/api/equipment/spare-documents?company_id=${companyId}`, body)
+export const cancelSpareDocument = (companyId: string, id: string, reason: string) =>
+  post<SpareDocument>(`/api/equipment/spare-documents/${id}/cancel?company_id=${companyId}`, { reason })
+export const getSpareCountSheet = (companyId: string, locationId: string) =>
+  get<SpareCountSheet>('/api/equipment/spare-documents/count-sheet', { company_id: companyId, location_id: locationId })
 
 // ─── документы поставки/возврата (слой оснований поверх движений) ────────────
 
@@ -629,6 +718,8 @@ export interface EquipmentDocument {
   counterpartyId: string | null; counterpartyName: string | null; contractId: string | null; contractLabel: string | null
   fromLocation: string | null; toLocation: string | null; responsibleFrom: string | null; responsibleTo: string | null
   basis: string | null; comment: string | null; createdBy: string | null; createdAt: string | null; units: number | null
+  status?: 'posted' | 'cancelled'; cancelledAt?: string | null; cancelledBy?: string | null; cancelReason?: string | null
+  fromLocationId?: string | null; toLocationId?: string | null
   lines?: EquipmentDocLine[]; warnings?: string[]
   details?: RepairDetails
 }
@@ -653,10 +744,17 @@ export interface WarehouseCard {
 export type WarehousePayload = Partial<Pick<WarehouseCard, 'name' | 'address' | 'ownership' | 'counterpartyId' | 'contractId' | 'responsible' | 'phone' | 'note'>>
 
 export const getEquipmentDocsMeta = () => get<EquipmentDocsMeta>('/api/equipment/documents/meta')
-export const listEquipmentDocuments = (p: { companyId: string; op?: string; q?: string; dateFrom?: string; dateTo?: string; limit?: number; offset?: number }) =>
+export const listEquipmentDocuments = (p: {
+  companyId: string; op?: string; q?: string; dateFrom?: string; dateTo?: string; status?: string
+  contractId?: string; counterpartyId?: string; locationId?: string; unitId?: string; limit?: number; offset?: number
+}) =>
   get<{ items: EquipmentDocument[]; total: number }>('/api/equipment/documents', {
     company_id: p.companyId, op: p.op || undefined, q: p.q || undefined, date_from: p.dateFrom || undefined,
-    date_to: p.dateTo || undefined, limit: p.limit ?? 50, offset: p.offset ?? 0 })
+    date_to: p.dateTo || undefined, status: p.status || undefined, contract_id: p.contractId || undefined,
+    counterparty_id: p.counterpartyId || undefined, location_id: p.locationId || undefined,
+    unit_id: p.unitId || undefined, limit: p.limit ?? 50, offset: p.offset ?? 0 })
+export const cancelEquipmentDocument = (companyId: string, id: string, reason: string) =>
+  post<EquipmentDocument>(`/api/equipment/documents/${id}/cancel?company_id=${companyId}`, { reason })
 export const getEquipmentDocument = (companyId: string, id: string) =>
   get<EquipmentDocument>(`/api/equipment/documents/${id}`, { company_id: companyId })
 export const postEquipmentDocument = (companyId: string, body: EquipmentDocPayload) =>
@@ -675,13 +773,64 @@ export interface AuditUnit {
   keeper?: string | null; supplier?: string | null; region?: string | null
   group?: string; due?: string; document?: string; reason?: string | null
 }
-export interface AuditSite { id: string; name: string; address: string | null; brand: string | null; model: string | null; serialNumber: string | null }
 export interface AuditSection {
-  key: 'stock_no_place' | 'operating_at_closed' | 'terminal_no_doc' | 'keeper_text' | 'repair_overdue' | 'unconfirmed' | 'sites_no_card'
-  title: string; hint: string; action: string; count: number; items: (AuditUnit | AuditSite)[]
+  key: 'stock_no_place' | 'terminal_no_doc' | 'keeper_text' | 'warehouse_contract' | 'repair_overdue' | 'unconfirmed'
+  title: string; hint: string; action: string; count: number; items: AuditUnit[]
 }
 export const getEquipmentAudit = (companyId: string) =>
   get<{ sections: AuditSection[]; units: number; noCost: number }>('/api/equipment/audit', { company_id: companyId })
-export const createCardsFromSites = (companyId: string, body: { siteIds: string[]; docDate?: string; basis?: string }) =>
-  post<EquipmentDocument>(`/api/equipment/units/from-sites?company_id=${companyId}`, body)
+
+// ─── отчёты складского учёта ────────────────────────────────────────────────
+/** Единица в отчёте: где и в каком состоянии она была на дату отчёта. */
+export interface ReportUnitRow {
+  id: string; serialNumber: string | null; inventoryNumber: string | null; vendor: string | null; model: string | null
+  state: UnitState; stateLabel: string; placeKey: string; placeKind: 'warehouse' | 'unknown' | 'installation' | 'repair' | 'vendor' | 'written_off'
+  place: string; since: string | null; noHistory: boolean; docId: string | null; docNumber: string | null; basis: string | null
+  counterpartyId: string | null; counterpartyName: string | null; contractId: string | null; contractLabel: string | null
+  keeper: string | null
+}
+export interface ReportSpareRow { partId: string; name: string; article: string | null; unitLabel: string; locationId: string; location: string }
+export interface StockReport {
+  date: string; total: number; noHistory: number; units: ReportUnitRow[]
+  /** Работающие станции со складского учёта выбыли — в отчёте одним числом. */
+  inOperation: number
+  /** section: stock — складской остаток, out — на учёте вне складов, gone — выбыло (справочно). */
+  groups: { key: string; kind: string; section: 'stock' | 'out' | 'gone'; name: string; total: number; noHistory: number; byState: Record<string, number> }[]
+  states: { key: UnitState; label: string }[]
+  spares: (ReportSpareRow & { qty: number })[]; spareCorrectionsUnknown: number
+  counterparties: { id: string; name: string }[]
+}
+export interface TurnoverFigures {
+  opening: number; income: number; outcome: number; closing: number; noHistory: number
+  incomeByOp: { label: string; qty: number }[]; outcomeByOp: { label: string; qty: number }[]
+}
+export interface TurnoverReport {
+  dateFrom: string; dateTo: string; spareCorrectionsUnknown: number
+  warehouses: ({ locationId: string; location: string } & TurnoverFigures)[]
+  spares: (ReportSpareRow & TurnoverFigures)[]
+}
+export interface HolderGroup {
+  key: string; counterpartyId: string | null; name: string; linked: boolean; total: number; units: ReportUnitRow[]
+  warehouses: {
+    id: string; name: string; ownership: string | null; ownershipLabel: string; responsible: string | null; units: ReportUnitRow[]
+    contract: { id: string | null; number: string | null; date: string | null; validUntil: string | null
+      status: 'active' | 'expired' | 'closed' | 'missing'; statusLabel: string }
+  }[]
+}
+export interface RepairRow {
+  id: string; serialNumber: string | null; inventoryNumber: string | null; vendor: string | null; model: string | null
+  noHistory: boolean; holder: string | null; counterpartyId: string | null; contractLabel: string | null
+  docId: string | null; docNumber: string | null; sentOn: string | null; plannedReturn: string | null
+  days: number | null; overdueDays: number; repairKind: string | null; ticketRef: string | null
+}
+export const getStockReport = (p: { companyId: string; date: string; locationId?: string; counterpartyId?: string }) =>
+  get<StockReport>('/api/equipment/reports/stock', {
+    company_id: p.companyId, date: p.date, location_id: p.locationId, counterparty_id: p.counterpartyId })
+export const getTurnoverReport = (p: { companyId: string; dateFrom: string; dateTo: string; locationId?: string }) =>
+  get<TurnoverReport>('/api/equipment/reports/turnover', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, location_id: p.locationId })
+export const getHoldersReport = (companyId: string, date: string) =>
+  get<{ date: string; holders: HolderGroup[] }>('/api/equipment/reports/holders', { company_id: companyId, date })
+export const getRepairsReport = (companyId: string) =>
+  get<{ date: string; items: RepairRow[]; overdue: number }>('/api/equipment/reports/repairs', { company_id: companyId })
 

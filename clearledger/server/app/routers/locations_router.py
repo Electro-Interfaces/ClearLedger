@@ -368,6 +368,24 @@ async def delete_location(
     current_user: User = Depends(get_current_user),
 ):
     loc = await get_owned(ServiceLocation, location_id, current_user, db)
+    if loc.type == "warehouse":
+        # Удаление склада каскадом стирало остатки запчастей и обнуляло место у единиц
+        # и в истории движений — без единого документа.
+        from sqlalchemy import func
+        from app.models import EzsEquipmentUnit, EzsSparePartStock
+        units = (await db.execute(select(func.count()).select_from(EzsEquipmentUnit).where(
+            EzsEquipmentUnit.current_location_id == loc.id))).scalar_one()
+        stock = (await db.execute(select(func.count()).select_from(EzsSparePartStock).where(
+            EzsSparePartStock.location_id == loc.id, EzsSparePartStock.qty > 0))).scalar_one()
+        if units or stock:
+            raise HTTPException(409, f"На складе числится оборудование ({units} ед.) и запчасти ({stock} поз.) — "
+                                     "сначала переместите или спишите их документами")
+        from app.models import EzsEquipmentMovement as EM, EzsSparePartMovement as SM
+        for M in (EM, SM):
+            if (await db.execute(select(M.id).where(
+                    (M.from_location_id == loc.id) | (M.to_location_id == loc.id)).limit(1))).first():
+                raise HTTPException(409, "По складу есть история движений — удаление стёрло бы её из отчётов. "
+                                         "Пустой склад можно закрыть, но не удалить")
     await db.delete(loc)
     return {"ok": True}
 

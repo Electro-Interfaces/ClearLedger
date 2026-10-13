@@ -806,6 +806,9 @@ async def create_contract(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(body.company_id, current_user, db)
+    cp = await db.get(Counterparty, body.counterpartyId)
+    if cp is None or cp.company_id != cid:
+        raise HTTPException(400, "Контрагент не найден в справочнике пространства")
     c = Contract(
         company_id=cid,
         number=body.number,
@@ -855,6 +858,9 @@ async def update_contract(
     if body.date is not None:
         c.date = body.date
     if body.counterpartyId is not None:
+        cp = await db.get(Counterparty, body.counterpartyId)
+        if cp is None or cp.company_id != c.company_id:
+            raise HTTPException(400, "Контрагент не найден в справочнике пространства")
         c.counterparty_id = body.counterpartyId
     if body.organizationId is not None:
         c.organization_id = body.organizationId

@@ -13,7 +13,7 @@ import { toast } from 'sonner'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { createContract, createCounterparty, getContracts, getCounterparties, getOrganizations } from '@/services/referenceService'
+import { createContract, createCounterparty, getContracts, getContractTypes, getCounterparties, getOrganizations } from '@/services/referenceService'
 import type { Contract } from '@/types'
 
 const selectClass = 'h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm'
@@ -25,12 +25,18 @@ export function contractExpired(c?: Pick<Contract, 'validUntil'> | null) {
   return !!c?.validUntil && c.validUntil.slice(0, 10) < today()
 }
 
-export function CounterpartyContractPicker({ companyId, value, onChange, preferredTypes = [], required = false, label = 'Контрагент' }: {
+export function CounterpartyContractPicker({ companyId, value, onChange, preferredTypes = [], preferredTypeCodes = [], required = false, label = 'Контрагент' }: {
   companyId: string
   value: CounterpartyContractValue
   onChange: (v: CounterpartyContractValue) => void
   /** Типы договоров, подходящие операции: показываются первыми. */
   preferredTypes?: string[]
+  /**
+   * Виды договора из справочника (rent, storage, supply…), подходящие операции.
+   * Сравнение идёт по виду; свободный текст типа — запасной путь для договоров,
+   * у которых вид ещё не проставлен: его пишут по-разному, и подсказка промахивалась.
+   */
+  preferredTypeCodes?: string[]
   required?: boolean
   label?: string
 }) {
@@ -39,7 +45,8 @@ export function CounterpartyContractPicker({ companyId, value, onChange, preferr
   const contracts = useQuery({ queryKey: ['contracts', companyId], queryFn: () => getContracts(companyId), staleTime: 60_000 })
   const [q, setQ] = useState('')
   const [newCp, setNewCp] = useState<null | { name: string; inn: string }>(null)
-  const [newContract, setNewContract] = useState<null | { number: string; date: string; type: string; validUntil: string }>(null)
+  const types = useQuery({ queryKey: ['references', 'contract-types'], queryFn: getContractTypes, staleTime: 3_600_000 })
+  const [newContract, setNewContract] = useState<null | { number: string; date: string; typeCode: string; validUntil: string }>(null)
   const [busy, setBusy] = useState(false)
 
   const selectedCp = cps.data?.find((c) => c.id === value.counterpartyId)
@@ -49,9 +56,11 @@ export function CounterpartyContractPicker({ companyId, value, onChange, preferr
     const top = list.slice(0, 200)
     return selectedCp && !top.some((c) => c.id === selectedCp.id) ? [selectedCp, ...top] : top
   }, [cps.data, q, selectedCp])
-  const own = useMemo(() => (contracts.data ?? []).filter((c) => c.counterpartyId === value.counterpartyId && !c.isClosed)
-    .sort((a, b) => Number(preferredTypes.includes(b.type)) - Number(preferredTypes.includes(a.type)) || (b.date || '').localeCompare(a.date || '')),
-  [contracts.data, value.counterpartyId, preferredTypes])
+  const own = useMemo(() => {
+    const fits = (c: Contract) => (c.typeCode ? preferredTypeCodes.includes(c.typeCode) : preferredTypes.includes(c.type))
+    return (contracts.data ?? []).filter((c) => c.counterpartyId === value.counterpartyId && !c.isClosed)
+      .sort((a, b) => Number(fits(b)) - Number(fits(a)) || (b.date || '').localeCompare(a.date || ''))
+  }, [contracts.data, value.counterpartyId, preferredTypes, preferredTypeCodes])
 
   const saveCp = async () => {
     if (!newCp?.name.trim()) return toast.error('Укажите наименование')
@@ -65,13 +74,15 @@ export function CounterpartyContractPicker({ companyId, value, onChange, preferr
   }
   const saveContract = async () => {
     if (!newContract?.number.trim() || !newContract.date) return toast.error('Укажите номер и дату договора')
+    if (!newContract.typeCode) return toast.error('Выберите вид договора')
     setBusy(true)
     try {
       const orgs = await getOrganizations(companyId)
       if (!orgs.length) throw new Error('В пространстве нет организации — договор не к кому привязать')
       const c = await createContract(companyId, {
         number: newContract.number.trim(), date: newContract.date, counterpartyId: value.counterpartyId,
-        organizationId: orgs[0].id, type: newContract.type || preferredTypes[0] || 'Прочее',
+        organizationId: orgs[0].id, typeCode: newContract.typeCode,
+        type: types.data?.find((t) => t.code === newContract.typeCode)?.label ?? preferredTypes[0] ?? 'Прочее',
         validUntil: newContract.validUntil || undefined,
       } as never)
       await qc.invalidateQueries({ queryKey: ['contracts', companyId] })
@@ -102,7 +113,7 @@ export function CounterpartyContractPicker({ companyId, value, onChange, preferr
     {chosen && contractExpired(chosen) && <p role="alert" className="text-xs text-amber-700 dark:text-amber-400">Срок договора истёк {chosen.validUntil?.slice(0, 10)} — документ проведётся, но договор стоит продлить</p>}
     <div className="flex flex-wrap gap-2">
       <Button type="button" variant="ghost" size="sm" onClick={() => setNewCp(newCp ? null : { name: q.trim(), inn: '' })}><Plus className="h-3.5 w-3.5 mr-1" />Новый контрагент</Button>
-      <Button type="button" variant="ghost" size="sm" disabled={!value.counterpartyId} onClick={() => setNewContract(newContract ? null : { number: '', date: today(), type: preferredTypes[0] || '', validUntil: '' })}><Plus className="h-3.5 w-3.5 mr-1" />Новый договор</Button>
+      <Button type="button" variant="ghost" size="sm" disabled={!value.counterpartyId} onClick={() => setNewContract(newContract ? null : { number: '', date: today(), typeCode: preferredTypeCodes[0] || '', validUntil: '' })}><Plus className="h-3.5 w-3.5 mr-1" />Новый договор</Button>
     </div>
     {newCp && <div className="grid gap-2 sm:grid-cols-[1fr_160px_auto] items-end rounded border border-dashed p-2">
       <label className="text-xs">Наименование<Input aria-label="Наименование нового контрагента" value={newCp.name} onChange={(e) => setNewCp({ ...newCp, name: e.target.value })} className="h-9" /></label>
@@ -112,8 +123,11 @@ export function CounterpartyContractPicker({ companyId, value, onChange, preferr
     {newContract && <div className="grid gap-2 sm:grid-cols-[1fr_140px_1fr_140px_auto] items-end rounded border border-dashed p-2">
       <label className="text-xs">Номер<Input aria-label="Номер нового договора" value={newContract.number} onChange={(e) => setNewContract({ ...newContract, number: e.target.value })} className="h-9" /></label>
       <label className="text-xs">Дата<Input aria-label="Дата нового договора" type="date" value={newContract.date} onChange={(e) => setNewContract({ ...newContract, date: e.target.value })} className="h-9" /></label>
-      <label className="text-xs">Тип<Input aria-label="Тип нового договора" list="eq-contract-types" value={newContract.type} onChange={(e) => setNewContract({ ...newContract, type: e.target.value })} className="h-9" />
-        <datalist id="eq-contract-types">{[...new Set([...preferredTypes, 'Поставка ЭЗС', 'Монтаж/Подряд', 'Сервисное обслуживание', 'Аренда', 'Ответственное хранение'])].map((t) => <option key={t} value={t} />)}</datalist></label>
+      <label className="text-xs">Вид договора
+        <select aria-label="Вид нового договора" className={selectClass} value={newContract.typeCode} onChange={(e) => setNewContract({ ...newContract, typeCode: e.target.value })}>
+          <option value="">{types.isLoading ? 'Загрузка…' : 'Выберите'}</option>
+          {(types.data ?? []).map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+        </select></label>
       <label className="text-xs">Действует до<Input aria-label="Срок нового договора" type="date" value={newContract.validUntil} onChange={(e) => setNewContract({ ...newContract, validUntil: e.target.value })} className="h-9" /></label>
       <Button type="button" size="sm" disabled={busy} onClick={() => void saveContract()}>Добавить</Button>
     </div>}

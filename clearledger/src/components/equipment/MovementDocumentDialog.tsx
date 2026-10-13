@@ -21,10 +21,16 @@ import {
 import type { ServiceLocation } from '@/types/location'
 import { CounterpartyContractPicker } from './CounterpartyContractPicker'
 import { eqName, printEquipmentDocument } from './equipmentDocPrint'
+import { invalidateEquipment } from './useEquipmentScope'
 
 const selectClass = 'h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm'
 const DOC_OPS: UnitOp[] = ['transfer', 'to_installation', 'commissioning', 'dismantle', 'to_repair', 'from_repair', 'to_vendor', 'write_off', 'reserve', 'unreserve']
 const NEEDS_WAREHOUSE: UnitOp[] = ['transfer', 'dismantle', 'from_repair']
+/** Виды договора из справочника, подходящие операции, — по ним подсказывается договор. */
+const CONTRACT_TYPE_CODES: Partial<Record<UnitOp, string[]>> = {
+  transfer: ['rent', 'storage'], to_installation: ['works'], commissioning: ['works'], dismantle: ['works'],
+  to_repair: ['maintenance', 'services', 'supply'], from_repair: ['maintenance', 'services', 'supply'], to_vendor: ['supply'],
+}
 
 function LocSelect({ items, value, onChange, label }: { items: ServiceLocation[]; value: string; onChange: (v: string) => void; label: string }) {
   const [f, setF] = useState('')
@@ -63,6 +69,7 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
   const [docDate, setDocDate] = useState(new Date().toISOString().slice(0, 10))
   const [number, setNumber] = useState('')
   const [toLocationId, setToLocationId] = useState('')
+  const [reservedForId, setReservedForId] = useState('')
   const [party, setParty] = useState({ counterpartyId: '', contractId: '' })
   const [responsibleFrom, setResponsibleFrom] = useState('')
   const [responsibleTo, setResponsibleTo] = useState('')
@@ -76,7 +83,7 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
   const mut = useMutation({
     mutationFn: () => postEquipmentDocument(companyId, {
       op: op as UnitOp, unitIds: units.map((u) => u.id), docDate, number: number.trim() || undefined,
-      toLocationId: toLocationId || undefined, counterpartyId: party.counterpartyId || undefined,
+      toLocationId: toLocationId || undefined, reservedForLocationId: op === 'reserve' ? reservedForId || undefined : undefined, counterpartyId: party.counterpartyId || undefined,
       contractId: party.contractId || undefined, responsibleFrom: responsibleFrom.trim() || undefined,
       responsibleTo: responsibleTo.trim() || undefined, basis: basis.trim() || undefined, comment: comment.trim() || undefined,
       custodian: op === 'to_repair' ? custodian : undefined, syncPassport: op === 'commissioning' ? syncPassport : undefined,
@@ -85,7 +92,7 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
     onSuccess: (doc) => {
       toast.success(`${doc.title} № ${doc.number} проведён: ${doc.units} ед.`)
       for (const w of doc.warnings ?? []) toast.warning(w)
-      for (const k of ['eq-units', 'eq-unit', 'eq-overview', 'eq-movements', 'eq-warehouses', 'equipment-warehouses', 'eq-documents', 'eq-audit']) void qc.invalidateQueries({ queryKey: [k] })
+      void invalidateEquipment(qc)
       try { printEquipmentDocument(doc, company?.name || 'Пространство') } catch (e) { toast.info(e instanceof Error ? e.message : String(e)) }
       onDone?.(); onClose()
     },
@@ -94,7 +101,7 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
   const problem = !op ? 'Выберите операцию'
     : (NEEDS_WAREHOUSE.includes(op) || (op === 'correction' && correctionMode === 'place')) && !toLocationId ? 'Выберите склад-получатель'
     : op === 'correction' && !comment.trim() ? 'Для корректировки учёта обязателен комментарий: что и почему исправляется'
-    : op === 'to_installation' && !toLocationId ? 'Выберите площадку ЭЗС'
+    : op === 'to_installation' && !toLocationId ? 'Выберите станцию установки'
     : needsCp && !party.counterpartyId ? 'Выберите контрагента: оборудование уходит из наших рук'
     : !docDate ? 'Укажите дату документа' : null
 
@@ -117,7 +124,8 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
           <label className="text-xs">Номер<Input aria-label="Номер документа" value={number} onChange={(e) => setNumber(e.target.value)} placeholder={op && meta.data ? `${meta.data.kinds[op]?.prefix}-${docDate.slice(0, 4)}-… автоматически` : 'автоматически'} className="h-9" /></label>
         </div>
         {op && NEEDS_WAREHOUSE.includes(op) && <LocSelect label="Склад-получатель" items={warehouses.filter((w) => !(op === 'transfer' && units.every((u) => u.location?.id === w.id)))} value={toLocationId} onChange={setToLocationId} />}
-        {op === 'to_installation' && <LocSelect label="Площадка ЭЗС" items={sites} value={toLocationId} onChange={setToLocationId} />}
+        {op === 'to_installation' && <LocSelect label="Станция установки" items={sites} value={toLocationId} onChange={setToLocationId} />}
+        {op === 'reserve' && <LocSelect label="Резерв под станцию (необязательно)" items={sites} value={reservedForId} onChange={setReservedForId} />}
         {op === 'correction' && correctionMode === 'place' && <LocSelect label="Склад-получатель" items={warehouses} value={toLocationId} onChange={setToLocationId} />}
         {op === 'correction' && correctionMode === 'doc' && <p className="text-xs text-muted-foreground">Состояние и место единиц не меняются: акт оформляет уже случившийся факт — укажите дату, основание и, если был, контрагента и договор.</p>}
         {(op === 'to_repair' || op === 'from_repair') && <div className="grid gap-2 sm:grid-cols-4 rounded-md border p-2">
@@ -137,9 +145,9 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
         {op === 'to_repair' && <label className="text-xs block">Кому передаётся
           <select aria-label="Кому передаётся" className={selectClass} value={custodian} onChange={(e) => setCustodian(e.target.value as 'contractor' | 'vendor')}>
             <option value="contractor">Подрядчику (ремонт)</option><option value="vendor">Производителю (гарантия)</option></select></label>}
-        {op === 'commissioning' && <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={syncPassport} onChange={(e) => setSyncPassport(e.target.checked)} />Обновить паспорт площадки из карточки</label>}
+        {op === 'commissioning' && <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={syncPassport} onChange={(e) => setSyncPassport(e.target.checked)} />Обновить паспорт станции из карточки</label>}
         {op && <CounterpartyContractPicker companyId={companyId} value={party} onChange={setParty} required={needsCp}
-          preferredTypes={meta.data?.contractTypes[op] ?? []} label={op === 'to_vendor' ? 'Поставщик' : op === 'transfer' ? 'Контрагент (если склад чужой)' : 'Контрагент'} />}
+          preferredTypes={meta.data?.contractTypes[op] ?? []} preferredTypeCodes={CONTRACT_TYPE_CODES[op]} label={op === 'to_vendor' ? 'Поставщик' : op === 'transfer' ? 'Контрагент (если склад чужой)' : 'Контрагент'} />}
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="text-xs">Сдал (должность, ФИО)<Input aria-label="Сдал" value={responsibleFrom} onChange={(e) => setResponsibleFrom(e.target.value)} className="h-9" /></label>
           <label className="text-xs">Принял (должность, ФИО)<Input aria-label="Принял" value={responsibleTo} onChange={(e) => setResponsibleTo(e.target.value)} className="h-9" /></label>

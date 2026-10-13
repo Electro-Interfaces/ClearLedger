@@ -24,7 +24,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
-import { Loader2, Plus, Search, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Search } from 'lucide-react'
 import { ApiError } from '@/services/apiClient'
 import { CounterpartyContractPicker } from './CounterpartyContractPicker'
 import { loadLocations } from '@/services/locationService'
@@ -33,7 +33,9 @@ import {
   SUPPLY_STATUS_META, SUPPLY_TYPE_META,
   type SupplyDocType, type SupplyStatus, type SupplyLinePayload, type SparePart,
 } from '@/services/equipmentService'
-import { SupplyCardModal } from './SupplyCardModal'
+import { SupplyCardModal, SupplyLineFields, type DraftLine } from './SupplyCardModal'
+import { ExportXlsxButton, LoadError, Pager } from './equipmentShared'
+import { allPages, invalidateEquipment } from './useEquipmentScope'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const nf2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -44,6 +46,7 @@ function errMsg(e: unknown): string {
 }
 function todayISO(): string { return new Date().toISOString().slice(0, 10) }
 
+const PAGE_SIZE = 100
 const STATUS_OPTS = Object.entries(SUPPLY_STATUS_META) as [SupplyStatus, { label: string; cls: string }][]
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -56,20 +59,20 @@ export function EquipmentSuppliesPanel({ companyId }: { companyId: string }) {
   const [openId, setOpenId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
 
-  const suppliersQ = useQuery({ queryKey: ['eq-suppliers', companyId], queryFn: () => listSuppliers(companyId) })
+  const suppliersQ = useQuery({ queryKey: ['equipment', 'suppliers', companyId], queryFn: () => listSuppliers(companyId) })
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['eq-supplies', companyId, f.docType, f.status, f.counterpartyId, f.dateFrom, f.dateTo, f.q, f.page],
-    queryFn: () => listSupplies({
-      companyId,
-      docType: f.docType === 'all' ? undefined : (f.docType as SupplyDocType),
-      status: f.status === 'all' ? undefined : (f.status as SupplyStatus),
-      counterpartyId: f.counterpartyId === 'all' ? undefined : f.counterpartyId,
-      dateFrom: f.dateFrom || undefined,
-      dateTo: f.dateTo || undefined,
-      q: f.q || undefined,
-      page: f.page, pageSize: 100,
-    }),
+  const params = {
+    companyId,
+    docType: f.docType === 'all' ? undefined : (f.docType as SupplyDocType),
+    status: f.status === 'all' ? undefined : (f.status as SupplyStatus),
+    counterpartyId: f.counterpartyId === 'all' ? undefined : f.counterpartyId,
+    dateFrom: f.dateFrom || undefined,
+    dateTo: f.dateTo || undefined,
+    q: f.q || undefined,
+  }
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['equipment', 'supplies', companyId, f.docType, f.status, f.counterpartyId, f.dateFrom, f.dateTo, f.q, f.page],
+    queryFn: () => listSupplies({ ...params, page: f.page, pageSize: PAGE_SIZE }),
     placeholderData: keepPreviousData,
   })
 
@@ -89,12 +92,19 @@ export function EquipmentSuppliesPanel({ companyId }: { companyId: string }) {
   const total = data?.total ?? 0
   const suppliers = suppliersQ.data?.items ?? []
 
-  const exCols = ['№', 'Дата', 'Тип', 'Поставщик', 'Статус', 'Позиций', 'План', 'Принято', 'Сумма']
-  const exRows = items.map((d) => [
-    d.number, d.docDate, SUPPLY_TYPE_META[d.docType].label, d.counterpartyName,
-    SUPPLY_STATUS_META[d.status].label, d.linesCount, d.qtyPlanned, d.qtyReceived,
-    d.amountTotal,
-  ])
+  // Выгрузка — весь отбор, а не загруженная страница.
+  const exportAll = async () => {
+    const all = await allPages((page) => listSupplies({ ...params, page, pageSize: 500 }))
+    return [{
+      name: 'Поставки',
+      columns: ['№', 'Дата', 'Тип', 'Поставщик', 'Статус', 'Позиций', 'План', 'Принято', 'Сумма', 'Валюта', 'Автор', 'Примечание'],
+      rows: all.map((d) => [
+        d.number, d.docDate, SUPPLY_TYPE_META[d.docType].label, d.counterpartyName,
+        SUPPLY_STATUS_META[d.status].label, d.linesCount, d.qtyPlanned, d.qtyReceived,
+        d.amountTotal, d.currency, d.createdByName, d.note,
+      ]),
+    }]
+  }
 
   return (
     <div className="space-y-4 p-4">
@@ -141,13 +151,18 @@ export function EquipmentSuppliesPanel({ companyId }: { companyId: string }) {
           <Input value={f.q} onChange={(e) => patch({ q: e.target.value })} placeholder="№ документа"
             className="h-8 w-[150px] pl-7 text-xs" />
         </div>
-        <Button size="sm" className="ml-auto h-8 text-xs" onClick={() => setCreating(true)}>
-          <Plus className="mr-1 h-3.5 w-3.5" /> Новый документ
-        </Button>
+        <div className="ml-auto flex flex-wrap gap-2">
+          <ExportXlsxButton title="Поставки и возвраты оборудования" load={exportAll} />
+          <Button size="sm" className="h-8 text-xs" onClick={() => setCreating(true)}>
+            <Plus className="mr-1 h-3.5 w-3.5" /> Новый документ
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
         <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+      ) : isError ? (
+        <LoadError what="поставки" error={error} onRetry={() => void refetch()} />
       ) : items.length === 0 ? (
         <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
           Документов нет. Создайте поставку кнопкой «Новый документ».
@@ -204,8 +219,7 @@ export function EquipmentSuppliesPanel({ companyId }: { companyId: string }) {
         <div className="text-right text-xs text-muted-foreground tabular-nums">всего документов: {nf0.format(total)}</div>
       )}
 
-      <table hidden aria-hidden data-export-name="Поставки"
-        data-export-rows={JSON.stringify({ columns: exCols, rows: exRows })} />
+      <Pager page={f.page} pages={Math.ceil(total / PAGE_SIZE)} onPage={(page) => setF((s) => ({ ...s, page }))} />
 
       {openId && <SupplyCardModal companyId={companyId} supplyId={openId} onClose={() => setOpenId(null)} />}
       {creating && <CreateSupplyDialog companyId={companyId} onClose={() => setCreating(false)}
@@ -215,8 +229,6 @@ export function EquipmentSuppliesPanel({ companyId }: { companyId: string }) {
 }
 
 // ─── создание документа со спецификацией ────────────────────────────────────
-
-type DraftLine = SupplyLinePayload & { _key: number }
 
 function CreateSupplyDialog({ companyId, onClose, onCreated }: {
   companyId: string
@@ -235,9 +247,9 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
   const [lines, setLines] = useState<DraftLine[]>([])
   const keyRef = useState(() => ({ n: 0 }))[0]
 
-  const suppliersQ = useQuery({ queryKey: ['eq-suppliers', companyId], queryFn: () => listSuppliers(companyId) })
-  const locsQ = useQuery({ queryKey: ['equipment-locations', companyId], queryFn: () => loadLocations(companyId) })
-  const partsQ = useQuery({ queryKey: ['eq-spares', companyId], queryFn: () => listSpareParts({ companyId }) })
+  const suppliersQ = useQuery({ queryKey: ['equipment', 'suppliers', companyId], queryFn: () => listSuppliers(companyId) })
+  const locsQ = useQuery({ queryKey: ['equipment', 'locations', companyId], queryFn: () => loadLocations(companyId), staleTime: 60_000 })
+  const partsQ = useQuery({ queryKey: ['equipment', 'spares', companyId], queryFn: () => listSpareParts({ companyId }) })
   const warehouses = useMemo(() => (locsQ.data ?? []).filter((l) => l.type === 'warehouse'), [locsQ.data])
   const parts: SparePart[] = partsQ.data ?? []
 
@@ -257,7 +269,7 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
       lines: lines.map(({ _key, ...l }) => l),
     }),
     onSuccess: (doc) => {
-      void qc.invalidateQueries({ queryKey: ['eq-supplies'] })
+      void invalidateEquipment(qc)
       toast.success('Документ создан')
       onCreated(doc.id)
     },
@@ -293,7 +305,7 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
           </div>
           <div className="col-span-2 sm:col-span-3">
             <CounterpartyContractPicker companyId={companyId} value={party} onChange={setParty}
-              label={docType === 'return' ? 'Кому возвращаем' : 'Поставщик'} preferredTypes={['Поставка ЭЗС', 'Поставка']} />
+              label={docType === 'return' ? 'Кому возвращаем' : 'Поставщик'} preferredTypes={['Поставка ЭЗС', 'Поставка']} preferredTypeCodes={['supply']} />
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Склад по умолчанию</Label>
@@ -323,34 +335,8 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
             </div>
           )}
           {lines.map((l) => (
-            <div key={l._key} className="flex flex-wrap items-end gap-2 rounded-md border p-2">
-              {l.lineKind === 'station' ? (
-                <>
-                  <LField label="Вендор"><Input value={l.vendor ?? ''} className="h-8 w-28 text-xs"
-                    onChange={(e) => upd(l._key, { vendor: e.target.value })} /></LField>
-                  <LField label="Модель"><Input value={l.model ?? ''} className="h-8 w-32 text-xs"
-                    onChange={(e) => upd(l._key, { model: e.target.value })} /></LField>
-                  <LField label="кВт"><Input type="number" value={l.powerKwt ?? ''} className="h-8 w-16 text-xs"
-                    onChange={(e) => upd(l._key, { powerKwt: e.target.value ? Number(e.target.value) : null })} /></LField>
-                </>
-              ) : (
-                <LField label="Номенклатура">
-                  <Select value={l.partId ?? ''} onValueChange={(v) => upd(l._key, { partId: v, name: parts.find((p) => p.id === v)?.name })}>
-                    <SelectTrigger className="h-8 w-52 text-xs"><SelectValue placeholder="Выберите ЗИП" /></SelectTrigger>
-                    <SelectContent>
-                      {parts.map((p) => (<SelectItem key={p.id} value={p.id} className="text-xs">{p.name}</SelectItem>))}
-                    </SelectContent>
-                  </Select>
-                </LField>
-              )}
-              <LField label="Кол-во"><Input type="number" min={1} value={l.qtyPlanned} className="h-8 w-16 text-xs"
-                onChange={(e) => upd(l._key, { qtyPlanned: Number(e.target.value) })} /></LField>
-              <LField label="Цена"><Input type="number" value={l.unitPrice ?? ''} className="h-8 w-24 text-xs"
-                onChange={(e) => upd(l._key, { unitPrice: e.target.value ? Number(e.target.value) : null })} /></LField>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => rm(l._key)}>
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+            <SupplyLineFields key={l._key} line={l} parts={parts}
+              onChange={(p) => upd(l._key, p)} onRemove={() => rm(l._key)} />
           ))}
         </div>
 
@@ -368,14 +354,5 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-function LField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-0.5">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70">{label}</div>
-      {children}
-    </div>
   )
 }

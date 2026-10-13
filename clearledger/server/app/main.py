@@ -70,6 +70,7 @@ from app.routers import (
     station_console_router,
     onec_router,
     equipment_router,
+    equipment_reports_router,
     sites_router,
     info_router,
     sso_router,
@@ -77,7 +78,6 @@ from app.routers import (
     space_events_router,
     space_registry_router,
     core_router,
-    matrix_chat_router,
     ops_router,
     periods_router,
     policy_router,
@@ -489,6 +489,7 @@ app.include_router(online_orders_router.router, prefix=API_PREFIX)
 app.include_router(online_reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(ops_router.router, prefix=API_PREFIX)  # управленческий кокпит ЭЗС
 app.include_router(equipment_router.router, prefix=API_PREFIX)  # складской учёт оборудования ЭЗС
+app.include_router(equipment_reports_router.router, prefix=API_PREFIX)  # отчёты складского учёта
 app.include_router(sites_router.router, prefix=API_PREFIX)  # банк ЗУ: площадки под установку ЭЗС
 from app.routers import project_workspace_router
 app.include_router(project_workspace_router.router, prefix=API_PREFIX)
@@ -506,7 +507,6 @@ app.include_router(sso_router.router, prefix=API_PREFIX)  # SSO ElsyPlus (Фаз
 app.include_router(app_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр приложений/модулей
 app.include_router(space_registry_router.router, prefix=API_PREFIX)  # ElsyPlus Core: реестр объектов пространства
 app.include_router(core_router.router, prefix=API_PREFIX)  # ElsyPlus Core: состояние Ядра (Центр управления)
-app.include_router(matrix_chat_router.router, prefix=API_PREFIX)  # Чат экосистемы на Matrix (модель Ангара)
 app.include_router(source_types_router.router, prefix=API_PREFIX)
 app.include_router(sources_router.router, prefix=API_PREFIX)
 app.include_router(locations_router.router, prefix=API_PREFIX)

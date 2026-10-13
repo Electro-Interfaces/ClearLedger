@@ -659,14 +659,21 @@ async def register_equipment_unit(
         "comment": f"Принято на учёт из проекта {site.project_no or site.title or ''}".strip(),
     })
     await db.flush()
+    # Приход и передача в монтаж — документами складского учёта, как из самого раздела.
+    from app.models import EzsEquipmentMovement
+    from app.services import ezs_equipment_docs
+    basis = f"Проект {site.project_no or ''}".strip()
+    receipt = (await db.execute(select(EzsEquipmentMovement).where(
+        EzsEquipmentMovement.unit_id == unit.id))).scalar_one()
+    await ezs_equipment_docs.document_for(db, company_id, user, "receipt", [receipt], doc_date=occurred, basis=basis)
 
     # Станция физически на площадке, а не на складе: оставить её в остатках склада
     # значит соврать в учёте на весь срок стройки. Двигаем сразу, если точка есть.
     moved_to_site = False
     if payload.get("install") and site.location_id:
-        await ezs_equipment.apply_movement(db, company_id, user, unit.id, {
-            "op": "to_installation", "to_location_id": site.location_id,
-            "occurred_on": occurred, "basis": f"Проект {site.project_no or ''}".strip(),
+        await ezs_equipment_docs.post_document(db, company_id, user, {
+            "op": "to_installation", "unit_ids": [str(unit.id)], "doc_date": occurred,
+            "to_location_id": site.location_id, "basis": basis,
         })
         moved_to_site = True
 

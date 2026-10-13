@@ -1,7 +1,7 @@
 """Доставка оповещений о событиях пространства — в чат и на почту.
 
-Каналы — те, что у пространства уже есть: служебная комната чата «Оповещения» (пишет
-сервисный аккаунт Matrix) и письмо. Внешних сервисов рассылки нет: сообщение должно
+Каналы — те, что у пространства уже есть: служебный канал чата «Оповещения» (пишет
+«Секретарь») и письмо. Внешних сервисов рассылки нет: сообщение должно
 приходить туда, где человек и так работает.
 
 Как устроено: события уже пишутся в журнал через `audit.log_audit`, поэтому подписка
@@ -9,7 +9,7 @@
 `notify_catalog.category_for`, состав подписок хранит `NotificationRule`.
 
 ponytail: доставка — fire-and-forget задача со своей сессией (`dispatch_async`). Оповещение
-не должно ни задерживать ответ API, ни ронять запрос, если Synapse или SMTP недоступны.
+не должно ни задерживать ответ API, ни ронять запрос, если SMTP недоступен.
 Ценой этого теряется гарантия доставки: упавшую отправку никто не повторит. Нужна
 гарантия — таблица-исходящая (`outbox`) и фоновый разборщик, механизм для этого уже есть
 в `channel_scheduler`.
@@ -26,12 +26,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.notify_catalog import CATEGORIES, action_label, category_for, label_of
-from app.models import (
-    Company, MatrixGroupRoom, NotificationRule, User, UserCompany,
-)
+from app.models import Company, NotificationRule, User, UserCompany
 from app.services import email_service
-from app.services import matrix_admin as ma
-from app.services.matrix_chat import ensure_matrix_account
 
 logger = logging.getLogger("clearledger.notify")
 
@@ -195,40 +191,44 @@ async def _recipients(
 # ---------------------------------------------------------------------------
 # Канал «чат»: служебная комната пространства
 # ---------------------------------------------------------------------------
-async def ensure_alerts_room(
-    db: AsyncSession, company_id: uuid.UUID, members: list[User],
-) -> str | None:
-    """Комната «Оповещения» компании: одна, идемпотентно, состав досыпается.
+async def post_alert(
+    db: AsyncSession, company_id: uuid.UUID, members: list[User], text: str,
+) -> bool:
+    """Написать в канал «Оповещения» компании: один, идемпотентно, состав досыпается.
 
-    Владелец комнаты — первый из получателей (кто-то должен быть с PL100), поэтому без
-    получателей канал не создаём: писать было бы некому.
+    Канал односторонний: пишет «Секретарь», получатели читают. Без получателей канал
+    не создаём: писать было бы некому.
     """
-    if not members:
-        return None
-    room = (await db.execute(select(MatrixGroupRoom).where(
-        MatrixGroupRoom.company_id == company_id,
-        MatrixGroupRoom.title == ALERTS_CHANNEL_TITLE))).scalar_one_or_none()
-    if room is None:
-        # Импорт здесь: matrix_chat тянет notify только в тестах, кольцо не нужно.
-        from app.services.matrix_chat import create_group_room
-        created = await create_group_room(
-            db, company_id, members[0], ALERTS_CHANNEL_TITLE,
-            [m.id for m in members[1:]], is_public=False)
-        return created["roomId"]
+    from app.models import ChatMessage, ChatParticipant, ChatRoom
 
-    joined: set[str] = set()
+    if not members:
+        return False
+    secretary = await _secretary(db, company_id)
+    # Свой канал узнаём по автору: одноимённый канал, заведённый человеком, не наш.
+    room = (await db.execute(select(ChatRoom).where(
+        ChatRoom.company_id == company_id, ChatRoom.type == "channel",
+        ChatRoom.name == ALERTS_CHANNEL_TITLE, ChatRoom.created_by == secretary.id,
+        ChatRoom.is_active.is_(True)).limit(1))).scalar_one_or_none()
+    if room is None:
+        room = ChatRoom(company_id=company_id, type="channel", name=ALERTS_CHANNEL_TITLE,
+                        created_by=secretary.id)
+        db.add(room)
+        await db.flush()
+        db.add(ChatParticipant(room_id=room.id, user_id=secretary.id, role="owner"))
+    joined = set((await db.execute(select(ChatParticipant.user_id).where(
+        ChatParticipant.room_id == room.id))).scalars().all())
+    db.add_all([ChatParticipant(room_id=room.id, user_id=p.id)
+                for p in members if p.id not in joined])
+    db.add(ChatMessage(room_id=room.id, user_id=secretary.id, user_name=SECRETARY_NAME,
+                       type="text", content=text))
+    await db.commit()
     try:
-        joined = set(await ma.get_joined_members(room.room_id))
-    except Exception:  # noqa: BLE001 — комната недоступна: пишем всё равно, вход досыпем позже
-        pass
-    for person in members:
-        mxid = await ensure_matrix_account(db, person)
-        if mxid not in joined:
-            try:
-                await ma.force_join(room.room_id, mxid)
-            except Exception:  # noqa: BLE001 — один невошедший не должен рвать доставку
-                logger.warning("Оповещения: не удалось ввести %s в комнату", mxid)
-    return room.room_id
+        from app.services import web_push
+
+        web_push.push_room_async(room.id, ALERTS_CHANNEL_TITLE, text, secretary.id)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Оповещение не ушло в push: %s", e)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -272,12 +272,10 @@ async def dispatch(
 
     if rule.via_chat:
         try:
-            room_id = await ensure_alerts_room(db, company_id, people)
-            if room_id:
-                await ma.send_text(room_id, text)
-                out["chat"] = True
-        except Exception as e:  # noqa: BLE001 — Synapse может быть выключен в этом стеке
+            out["chat"] = await post_alert(db, company_id, people, text)
+        except Exception as e:  # noqa: BLE001 — сбой чата не должен отменять письмо
             logger.warning("Оповещение в чат не ушло: %s", e)
+            await db.rollback()
             out["chat"] = False
 
     if rule.via_email:
