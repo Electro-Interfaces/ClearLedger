@@ -22,6 +22,8 @@ import {
 } from '@/components/ui/dialog'
 import * as conf from '@/services/confService'
 import * as tasksService from '@/services/tasksService'
+import * as workService from '@/services/workService'
+import { EventDialog } from '@/components/calendar/EventDialog'
 import { cn } from '@/lib/utils'
 import { длительность, когда, копировать, предмет } from './format'
 
@@ -76,6 +78,16 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
   onToggle?: () => void
 }) {
   const [итог, setИтог] = useState(meeting.session?.note ?? '')
+  // Карточка — та же, что у встречи в календаре: конференция и есть встреча
+  // календаря, и второй экран с её участниками, повесткой и повтором расходился
+  // бы с первым. Раньше из строки можно было только войти: кто позван, что в
+  // повестке и до какого числа серия, было не узнать (вопрос МАГа 14.10.2026).
+  const [карточка, setКарточка] = useState(false)
+  const событие = useQuery({
+    queryKey: ['calendar-event', companyId, meeting.id],
+    queryFn: () => workService.getEvent(companyId, meeting.id),
+    enabled: карточка, retry: false,
+  })
   const сессия = meeting.session
   // Прошла — по факту, а не по часам календаря: закрытая в своё время
   // конференция окончена, даже если её час ещё идёт. Иначе в «Истории» у неё
@@ -131,7 +143,11 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
             <Circle className="h-2.5 w-2.5 fill-current" />идёт
           </span>
         )}
-        <span className="font-medium">{meeting.title}</span>
+        <button type="button" onClick={() => setКарточка(true)}
+          title="Открыть карточку: участники, повестка, время"
+          className="rounded-sm text-left font-medium underline-offset-4 hover:underline">
+          {meeting.title}
+        </button>
         {meeting.status === 'cancelled' && (
           <span className="text-xs text-destructive">отменена</span>
         )}
@@ -189,6 +205,11 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
               <Link2 className="mr-0.5 inline h-3 w-3" />{пред.имя}
             </Link>
           : пред.имя)}
+        {' · '}
+        <button type="button" onClick={() => setКарточка(true)}
+          className="text-primary underline-offset-2 hover:underline">
+          {событие.isFetching ? 'открываем…' : 'карточка'}
+        </button>
         {rest.length > 0 && (
           <>
             {' · '}
@@ -201,6 +222,17 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
           </>
         )}
       </p>
+
+      {карточка && событие.isError && (
+        <p role="alert" className="mt-1 text-xs text-destructive">
+          Карточка не открылась — встречу могли отменить или закрыть от вас.{' '}
+          <button type="button" className="underline" onClick={() => setКарточка(false)}>Понятно</button>
+        </p>
+      )}
+      {карточка && событие.data && (
+        <EventDialog companyId={companyId} event={событие.data} startAt={null}
+          onClose={() => setКарточка(false)} onChanged={onChanged} />
+      )}
 
       {сессия && пришли > 0 && (
         <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
