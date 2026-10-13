@@ -87,6 +87,8 @@ export interface NewMeeting {
   emailCopy?: boolean
   /** Открыть конференцию всему пространству: её увидят и смогут войти все. */
   openToSpace?: boolean
+  /** Правило повторения серии календаря; пусто — разовая конференция. */
+  recurrence?: { mode: 'daily' | 'weekly' | 'monthly'; interval?: number } | null
 }
 
 export async function createMeeting(companyId: string, data: NewMeeting) {
@@ -103,6 +105,7 @@ export async function createMeeting(companyId: string, data: NewMeeting) {
       notify: data.notify ?? true,
       email_copy: data.emailCopy ?? false,
       open_to_space: data.openToSpace ?? false,
+      recurrence: data.recurrence ?? null,
     })
 }
 

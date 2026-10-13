@@ -52,6 +52,9 @@ class MeetingIn(BaseModel):
     # Открыть всему пространству: конференцию увидит и сможет присоединиться
     # любой сотрудник. По умолчанию закрыта — видят только позванные.
     open_to_space: bool = False
+    # Конференция по расписанию: правило серии календаря (`{"mode": "weekly"}`).
+    # Повторения создаёт планировщик — с теми же участниками и той же комнатой.
+    recurrence: dict | None = None
     # Продублировать почтой. Отдельная воля, а не довесок к приглашению: письмо
     # со встречей нужно тем, кто живёт в Outlook и на совещание приходит из
     # своего календаря, а на ежедневную планёрку оно шлёт лишний конверт.
@@ -371,7 +374,12 @@ async def _закрыть_брошенные(db: AsyncSession, cid: uuid.UUID) -
     изменили = False
     for s in живые:
         ev = события.get(s.event_id) if s.event_id else None
-        предел = (ev.ends_at + timedelta(minutes=30)) if ev else (s.started_at + timedelta(hours=4))
+        предел = s.started_at + timedelta(hours=4)
+        if ev:
+            # Не позже срока жизни токена: в повторение серии входят и за
+            # недели до его даты, и такая конференция висела в «Идут сейчас»
+            # до конца встречи по календарю (РусГидро, 07.10–13.10.2026).
+            предел = min(предел, ev.ends_at + timedelta(minutes=30))
         # Не раньше начала: в комнату заходят и после того, как час встречи в
         # календаре кончился, — тогда «конец по расписанию» оказывается в
         # прошлом, и конференция получала отрицательную длительность.
@@ -487,6 +495,11 @@ async def meeting_create(
     cid = await _company(payload.company_id, current_user, db)
     начало = payload.starts_at or datetime.now(timezone.utc)
     название = payload.title.strip() or f"Конференция · {current_user.name}"
+    повтор = (payload.recurrence or None) if payload.starts_at else None
+    if повтор:
+        work_router._check_event_details(
+            начало, начало + timedelta(minutes=payload.minutes),
+            current_user.tz or "Europe/Moscow", повтор, None, None)
 
     ev = CalendarEvent(
         company_id=cid, organizer_id=current_user.id, title=название,
@@ -497,13 +510,13 @@ async def meeting_create(
         # Закрытая по умолчанию: конференцию видят те, кого позвали. «Открыть
         # пространству» — отдельная воля организатора, а не молчаливое согласие.
         visibility=("company" if payload.open_to_space else "private"),
-        subject_ref=payload.subject_ref or None)
+        subject_ref=payload.subject_ref or None, recurrence=повтор)
     db.add(ev)
     await db.flush()
     # Комната считается от номера встречи: ссылка постоянна, и завтрашний вход
     # ведёт туда же, куда сегодняшнее приглашение.
     ev.conference_url = jitsi.meeting_urls(
-        jitsi.room_for(f"event:{ev.id}"), current_user.name)["guest_url"]
+        jitsi.event_room(ev), current_user.name)["guest_url"]
 
     зовём = {_uuid(i, "attendee_ids") for i in payload.attendee_ids} | {current_user.id}
     свои = set((await db.execute(select(UserCompany.user_id).where(
@@ -566,7 +579,7 @@ async def meeting_join(
     if not свой and ev.visibility != "company":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша встреча")
 
-    room = jitsi.room_for(f"event:{ev.id}")
+    room = jitsi.event_room(ev)
     сессия = (await db.execute(select(ConfSession).where(
         ConfSession.event_id == ev.id,
         ConfSession.ended_at.is_(None)))).scalar_one_or_none()
@@ -580,6 +593,7 @@ async def meeting_join(
     urls = jitsi.meeting_urls(room, current_user.name, moderator=ведущий)
     if not ev.conference_url:
         ev.conference_url = urls["guest_url"]
+        await jitsi.share_series_url(db, ev)
     if сессия is None:
         сессия = ConfSession(company_id=cid, event_id=ev.id, room=room,
                              title=ev.title, subject_ref=ev.subject_ref,

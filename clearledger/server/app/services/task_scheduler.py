@@ -483,6 +483,11 @@ async def run_meeting_series(db, now: datetime) -> int:
         # считается. Один заслон здесь уже подводил.
         if not isinstance(правило, dict) or not правило.get("mode"):
             continue
+        # Комнату голова получает при первом входе — позже, чем созданы
+        # ближайшие повторения. Без этого они в «Конференции» не попадают.
+        if head.conference_url:
+            from app.services import jitsi
+            await jitsi.share_series_url(db, head)
         зона = space_time.zone(head.tz)
         длительность = head.ends_at - head.starts_at
         предел = None

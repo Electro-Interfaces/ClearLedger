@@ -145,3 +145,46 @@ async def test_завершённая_уходит_из_назначенных_�
     история = await meetings_list(company_id=str(company.id), scope='past',
                                   q='', limit=50, db=db, current_user=хозяин)
     assert встреча['id'] in {в['id'] for в in история['meetings']}
+
+
+async def test_серия_одна_комната_и_ссылка_у_повторений(db, jitsi_key):
+    """Повторение серии входит в комнату головы, а не в свою.
+
+    Ссылку повторения берут у головы; вход считал комнату от своего номера, и
+    ведущий с гостями оказывались в разных комнатах. Повторения, созданные до
+    первого входа, ссылки не имели и в «Конференциях» не показывались.
+    """
+    from app.models import CalendarAttendee, CalendarEvent
+    from app.services import jitsi
+
+    company, хозяин, _, _ = await люди(db)
+    завтра = datetime.now(timezone.utc) + timedelta(days=1)
+    голова = CalendarEvent(company_id=company.id, organizer_id=хозяин.id,
+                           title='Планёрка', starts_at=завтра,
+                           ends_at=завтра + timedelta(hours=1), tz='Europe/Moscow',
+                           visibility='private', recurrence={'mode': 'weekly'})
+    db.add(голова)
+    await db.flush()
+    повтор = CalendarEvent(company_id=company.id, organizer_id=хозяин.id,
+                           title='Планёрка', starts_at=завтра + timedelta(days=42),
+                           ends_at=завтра + timedelta(days=42, hours=1),
+                           tz='Europe/Moscow', visibility='private',
+                           series_id=голова.id)
+    db.add(повтор)
+    await db.flush()
+    db.add(CalendarAttendee(event_id=повтор.id, user_id=хозяин.id,
+                            role='required', response='accepted'))
+    await db.flush()
+
+    вход = await meeting_join(str(повтор.id), company_id=str(company.id),
+                              db=db, current_user=хозяин)
+    assert вход['room'] == jitsi.room_for(f'event:{голова.id}')
+    await db.refresh(голова)
+    assert голова.conference_url == вход['guest_url']
+
+    # Вошли за шесть недель до даты: конференция не висит до конца встречи.
+    сессия = await db.get(ConfSession, uuid.UUID(вход['session_id']))
+    сессия.started_at = datetime.now(timezone.utc) - timedelta(hours=5)
+    await db.flush()
+    идут = await meetings_live(company_id=str(company.id), db=db, current_user=хозяин)
+    assert вход['session_id'] not in [с['id'] for с in идут['live']]

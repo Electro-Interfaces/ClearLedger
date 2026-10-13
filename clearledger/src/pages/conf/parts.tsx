@@ -167,14 +167,26 @@ export function TalkRow({ meeting, companyId, onChanged }: {
   )
 }
 
+// Те же правила, что у встречи календаря: повторения создаёт планировщик серий.
+const ПОВТОРЫ: Record<string, conf.NewMeeting['recurrence']> = {
+  none: null,
+  daily: { mode: 'daily' },
+  weekly: { mode: 'weekly' },
+  biweekly: { mode: 'weekly', interval: 2 },
+  monthly: { mode: 'monthly' },
+}
+
 /** Окно созыва: тема, время, кого зовём, чем зовём. */
-export function NewTalkDialog({ companyId, onClose, onCreated }: {
+export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
   companyId: string
+  /** Открыть сразу на назначении по времени, а не на «прямо сейчас». */
+  plan?: boolean
   onClose: () => void
   onCreated: () => void
 }) {
   const [тема, setТема] = useState('')
-  const [сейчас, setСейчас] = useState(true)
+  const [сейчас, setСейчас] = useState(!plan)
+  const [повтор, setПовтор] = useState('none')
   const [начало, setНачало] = useState(() => {
     const d = new Date(Date.now() + 30 * 60_000)
     d.setSeconds(0, 0)
@@ -210,6 +222,7 @@ export function NewTalkDialog({ companyId, onClose, onCreated }: {
       guestEmails: внешние.split(/[\s,;]+/).filter(a => a.includes('@')),
       emailCopy: почтой,
       openToSpace: всем,
+      recurrence: сейчас ? null : ПОВТОРЫ[повтор],
     }),
     onSuccess: async (m) => {
       try { localStorage.setItem('conf-email-copy', почтой ? '1' : '0') } catch { /* приватный режим */ }
@@ -282,6 +295,17 @@ export function NewTalkDialog({ companyId, onClose, onCreated }: {
                   className="h-9 w-20 text-base sm:text-sm" />
                 <span className="text-sm text-muted-foreground">мин</span>
               </div>
+              {!сейчас && (
+                <select value={повтор} aria-label="Повторять"
+                  onChange={e => setПовтор(e.target.value)}
+                  className="h-9 rounded-md border border-input bg-background px-2 text-base sm:text-sm">
+                  <option value="none">Не повторять</option>
+                  <option value="daily">Каждый день</option>
+                  <option value="weekly">Каждую неделю</option>
+                  <option value="biweekly">Раз в две недели</option>
+                  <option value="monthly">Каждый месяц</option>
+                </select>
+              )}
             </div>
             <p className="text-xs text-muted-foreground">
               Конференция встаёт в календарь пространства и занимает это время у всех,

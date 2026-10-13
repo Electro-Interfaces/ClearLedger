@@ -11,7 +11,7 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, Loader2, Radio, Square, UserPlus, Users, Video } from 'lucide-react'
+import { CalendarPlus, Copy, Loader2, Radio, Square, UserPlus, Users, Video } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -25,7 +25,7 @@ import { длительность, когда, копировать } from './fo
 export default function ConfTalksPage() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
-  const [окно, setОкно] = useState(false)
+  const [окно, setОкно] = useState<false | 'now' | 'plan'>(false)
 
   const live = useQuery({
     queryKey: ['conf-live', companyId],
@@ -98,7 +98,10 @@ export default function ConfTalksPage() {
             всегда, а после — видно, кто пришёл и о чём договорились.
           </p>
         </div>
-        <Button onClick={() => setОкно(true)} disabled={выключено}>
+        <Button variant="outline" onClick={() => setОкно('plan')} disabled={выключено}>
+          <CalendarPlus className="mr-2 h-4 w-4" />Назначить
+        </Button>
+        <Button onClick={() => setОкно('now')} disabled={выключено}>
           <Video className="mr-2 h-4 w-4" />Начать конференцию
         </Button>
       </div>
@@ -218,7 +221,7 @@ export default function ConfTalksPage() {
       )}
 
       {окно && (
-        <NewTalkDialog companyId={companyId} onClose={() => setОкно(false)}
+        <NewTalkDialog companyId={companyId} plan={окно === 'plan'} onClose={() => setОкно(false)}
           onCreated={() => { setОкно(false); обновить() }} />
       )}
     </div>

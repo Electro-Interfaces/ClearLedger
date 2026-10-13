@@ -1529,11 +1529,12 @@ async def calendar_meeting(
     ev = await _event_participant(db, cid, event_id, current_user)
     if ev.status == "cancelled":
         raise HTTPException(status.HTTP_409_CONFLICT, "Встреча отменена")
-    urls = jitsi.meeting_urls(jitsi.room_for(f"event:{ev.id}"), current_user.name)
+    urls = jitsi.meeting_urls(jitsi.event_room(ev), current_user.name)
     # Чужую ссылку (Zoom, Teams) не трогаем: её вписали руками, и подменять её
     # своей комнатой значит развести участников по двум разным совещаниям.
     if not ev.conference_url:
         ev.conference_url = urls["guest_url"]
+        await jitsi.share_series_url(db, ev)
         await db.commit()
     return urls
 

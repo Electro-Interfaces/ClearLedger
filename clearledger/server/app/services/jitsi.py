@@ -47,6 +47,35 @@ def room_for(subject: str) -> str:
                                 hashlib.sha256).hexdigest()[:16]
 
 
+def event_room(ev) -> str:
+    """Комната встречи календаря. У серии она одна на все повторения.
+
+    Повторения получают ссылку головы серии (`run_meeting_series`), а вход
+    считал комнату от номера самого повторения: гости по ссылке из приглашения
+    попадали в одну комнату, ведущий — в другую (РусГидро, серия «Интеграция»,
+    13.10.2026). Еженедельная планёрка — одно место, как и её ссылка.
+    """
+    return room_for(f"event:{ev.series_id or ev.id}")
+
+
+async def share_series_url(db, ev) -> None:
+    """Раздать ссылку комнаты повторениям серии, у которых ссылки ещё нет.
+
+    Голова получает комнату при первом входе, а повторения к этому моменту уже
+    созданы без неё — и в «Конференциях» не появляются. Чужие ссылки (Zoom,
+    вписанные руками) не трогаем.
+    """
+    from sqlalchemy import or_, update
+
+    from app.models import CalendarEvent
+
+    корень = ev.series_id or ev.id
+    await db.execute(update(CalendarEvent).where(
+        or_(CalendarEvent.id == корень, CalendarEvent.series_id == корень),
+        CalendarEvent.conference_url.is_(None),
+        CalendarEvent.status != "cancelled").values(conference_url=ev.conference_url))
+
+
 def sign_token(room: str, display_name: str, *, moderator: bool = True, hours: int = 4) -> str | None:
     """Подписать RS256 JWT организатора. None, если ключ подписи не задан."""
     key = _private_key()
