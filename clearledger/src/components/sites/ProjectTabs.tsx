@@ -1384,13 +1384,19 @@ const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: st
       { k: 'tpTermMonths', label: 'Срок мероприятий, мес.', type: 'number' },
       { k: 'techConnType', label: 'Тип присоединения' },
       { k: 'connectionCost', label: 'Итого затраты на подключение, ₽', type: 'number' },
+      { k: 'inputPriceKwth', label: 'Входная стоимость, ₽/кВт·ч', type: 'number' },
     ],
   },
   {
-    title: 'План и участники',
+    // Перегруппировка по замечаниям Ступина 09.10.2026: графы прежние, блоки по смыслу.
+    title: 'СМР',
     fields: [
       { k: 'plannedEzsCount', label: 'ЭЗС к установке, шт', type: 'number' },
       { k: 'plannedPowerKwt', label: 'Мощность к установке, кВт', type: 'number' },
+      { k: 'smrCost', label: 'Стоимость СМР, ₽', type: 'number' },
+      { k: 'subsidyPlanned', label: 'Планируется субсидия', type: 'bool' },
+      { k: 'subsidyAmount', label: 'Сумма субсидии, ₽', type: 'number' },
+      { k: 'commissionedOn', label: 'Дата ввода в эксплуатацию', type: 'date' },
       { k: 'supplier', label: 'Поставщик' },
       { k: 'contractor', label: 'Подрядчик' },
       { k: 'tuStatus', label: 'Статус согласования / ТУ', type: 'area' },
@@ -1408,23 +1414,18 @@ const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: st
       { k: 'hasInternet', label: 'Проводной интернет (LAN)', type: 'bool' },
       { k: 'hasLighting', label: 'Освещение', type: 'bool' },
       { k: 'parkingSpots', label: 'Парковочных мест', type: 'number' },
-      { k: 'subsidyPlanned', label: 'Планируется субсидия', type: 'bool' },
-      { k: 'subsidyAmount', label: 'Сумма субсидии, ₽', type: 'number' },
       { k: 'dopService', label: 'Доп. сервис (магазин, кафе, WC)' },
     ],
   },
   {
-    // Этап 3 чек-листа: экономика подключения и с кем разговаривали.
-    title: 'Экономика и контакты',
+    // Этап 3 чек-листа: о чём договорились и с кем разговаривали.
+    title: 'Условия аренды и контакты',
     fields: [
-      { k: 'inputPriceKwth', label: 'Входная стоимость, ₽/кВт·ч', type: 'number' },
-      { k: 'smrCost', label: 'Стоимость СМР, ₽', type: 'number' },
       { k: 'rentCostMonth', label: 'Аренда, ₽/мес', type: 'number' },
       { k: 'longTermContract', label: 'Долгосрочный договор', type: 'bool' },
       { k: 'ownerContact', label: 'Контакт представителя собственника', type: 'area' },
       { k: 'sourceCompany', label: 'Предоставивший ЗУ — компания' },
       { k: 'sourcePerson', label: 'Предоставивший ЗУ — ФИО' },
-      { k: 'commissionedOn', label: 'Дата ввода в эксплуатацию', type: 'date' },
     ],
   },
 ]
@@ -1458,7 +1459,9 @@ const emailIn = (text: string): string | null =>
 
 export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
   const specialized = ['warehouse', 'procurement', 'corporate_client'].includes(site.kind ?? '')
-  const groups = specialized ? PASSPORT_GROUPS.filter((g) => ['Объект', 'План и участники'].includes(g.title)).map((g) => ({ ...g,
+  const groups = specialized ? PASSPORT_GROUPS.filter((g) => ['Объект', 'СМР'].includes(g.title)).map((g) => ({ ...g,
+    // У склада, закупки и корпоративного клиента строительства нет — блок зовётся по-старому.
+    title: g.title === 'СМР' ? 'План и участники' : g.title,
     fields: g.fields.filter((f) => ['region', 'city', 'address', 'placeKind', 'installPlace', 'supplier', 'contractor', 'comment'].includes(f.k)) })) : PASSPORT_GROUPS
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [showRaw, setShowRaw] = useState(false)
