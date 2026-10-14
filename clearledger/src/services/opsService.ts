@@ -631,6 +631,8 @@ export interface WorklistRow {
   breachedTickets: number
   lastTicketId: string | null
   lastTicketNumber: string | null
+  /** Последняя сессия станции (ISO), для колонки «Последняя зарядка». */
+  lastSessionAt?: string | null
 }
 
 export interface OpsWorklist extends OpsSnapshot {
@@ -644,12 +646,16 @@ export interface OpsWorklist extends OpsSnapshot {
     meter: number; service: number; check: number
     /** Сроки, которые вообще не заполнены: не работа, но и не «в порядке». */
     upkeepUnknown: number
+    /** Станций с разъёмом в ошибке две книги витрины подряд. */
+    connector?: number
   }
   dataGaps: (NetworkStationRow & { units: number; meterUnknown: number; serviceUnknown: number })[]
   rows: WorklistRow[]
   /** false — «Поддержка» недоступна, пометки «взято/не взято» неизвестны. */
   workKnown: boolean
   note: string
+  /** День последней книги витрины АСУиМ со статусами станций (ISO) или null. */
+  statusDay?: string | null
 }
 
 /** Заявка в срезе эксплуатации: поля «Поддержки» плюс станция из реестра. */
