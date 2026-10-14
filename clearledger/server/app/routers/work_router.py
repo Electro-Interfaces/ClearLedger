@@ -2162,6 +2162,11 @@ async def _сообщить_о_материале(db: AsyncSession, cid: uuid.UU
     from app.models import CalendarAttendee
     from app.services import notify
 
+    # Материалы, приложенные в окне созыва, едут вместе с приглашением: встреча
+    # создана только что, и отдельное «приложил» на каждый файл — это ещё
+    # N сообщений вдогонку к приглашению. Участник увидит их в карточке.
+    if ev.created_at and space_time.as_utc(ev.created_at) > datetime.now(timezone.utc) - timedelta(minutes=2):
+        return
     try:
         кому = set((await db.execute(select(CalendarAttendee.user_id).where(
             CalendarAttendee.event_id == ev.id))).scalars()) | {ev.organizer_id}

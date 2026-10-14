@@ -9,7 +9,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
-  CheckCircle2, ChevronRight, Circle, Clock, Copy, FileText, Link2, Loader2, Paperclip, UserPlus, Video,
+  CheckCircle2, ChevronRight, Circle, Clock, Copy, FileText, Link2, Loader2, Paperclip, UserPlus, Video, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -328,6 +328,9 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
   const [кого, setКого] = useState<string[]>([])
   const [внешние, setВнешние] = useState('')
   const [поиск, setПоиск] = useState('')
+  // Материалы, подготовленные заранее: прикладываются сразу после создания
+  // встречи — до того им не к чему прикрепиться (МАГ, 14.10.2026).
+  const [файлы, setФайлы] = useState<File[]>([])
   // Выбор канала запоминается: в одной компании планёрку зовут чатом, в другой
   // без письма на встречу не приходят. Спрашивать это каждый раз заново значит
   // заставлять человека принимать одно и то же решение по десять раз в неделю.
@@ -346,7 +349,8 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
     [люди.data, поиск])
 
   const созвать = useMutation({
-    mutationFn: () => conf.createMeeting(companyId, {
+    mutationFn: async () => {
+      const m = await conf.createMeeting(companyId, {
       title: тема,
       startsAt: сейчас ? undefined : new Date(начало).toISOString(),
       minutes: минут,
@@ -355,7 +359,14 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
       emailCopy: почтой,
       openToSpace: всем,
       recurrence: сейчас ? null : ПОВТОРЫ[повтор],
-    }),
+      })
+      // Встреча уже создана: сбой файла её не отменяет, а называется поимённо.
+      const не = (await Promise.allSettled(файлы.map(f => workService.uploadPaper(companyId, m.id, f))))
+        .flatMap((р, i) => р.status === 'rejected' ? [файлы[i].name] : [])
+      if (не.length) toast.error(`Не приложились: ${не.join(', ')}`,
+        { description: 'Приложите их из карточки конференции' })
+      return m
+    },
     onSuccess: async (m) => {
       try { localStorage.setItem('conf-email-copy', почтой ? '1' : '0') } catch { /* приватный режим */ }
       const д = m.delivery
@@ -450,7 +461,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
             </p>
           </div>
 
-          <div className="flex min-h-0 flex-col gap-2 md:col-start-2 md:row-span-3 md:row-start-1">
+          <div className="flex min-h-0 flex-col gap-2 md:col-start-2 md:row-span-4 md:row-start-1">
             <div className="flex items-baseline justify-between">
               <Label htmlFor="conf-people">Кого зовём</Label>
               {кого.length > 0 && (
@@ -476,13 +487,47 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
             </div>
           </div>
 
-          <div className="space-y-1.5 md:col-start-2 md:row-start-4">
+          <div className="space-y-1.5 md:col-start-2 md:row-start-5">
             <Label htmlFor="conf-guests">Внешние участники</Label>
             <Textarea id="conf-guests" value={внешние} onChange={e => setВнешние(e.target.value)}
               placeholder="почта через запятую" rows={2} className="text-base sm:text-sm" />
             <p className="text-xs text-muted-foreground">
               Им уходит письмо со ссылкой и конференцией для их календаря. Учётной
               записи в пространстве гость не получает.
+            </p>
+          </div>
+
+          <div className="space-y-1.5 md:col-start-1 md:row-start-5">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="conf-files">Материалы</Label>
+              <label htmlFor="conf-files"
+                className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-md border border-input px-2 text-xs hover:bg-accent/50">
+                <Paperclip className="h-3.5 w-3.5" />Приложить файлы
+              </label>
+              <input id="conf-files" type="file" multiple className="sr-only"
+                onChange={e => {
+                  const новые = Array.from(e.target.files ?? [])
+                  setФайлы(с => [...с, ...новые])
+                  e.target.value = ''
+                }} />
+            </div>
+            {файлы.length > 0 && (
+              <ul className="space-y-1">
+                {файлы.map((f, i) => (
+                  <li key={i} className="flex items-center gap-2 text-sm">
+                    <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate" title={f.name}>{f.name}</span>
+                    <button type="button" aria-label={`Убрать ${f.name}`}
+                      onClick={() => setФайлы(с => с.filter((_, j) => j !== i))}
+                      className="rounded p-1 text-muted-foreground hover:text-foreground">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Повестка, презентация, скриншоты — участники увидят их в карточке.
             </p>
           </div>
 
@@ -517,7 +562,8 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
           <Button variant="ghost" onClick={onClose}>Отмена</Button>
           <Button disabled={созвать.isPending} onClick={() => созвать.mutate()}>
             {созвать.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {сейчас ? 'Начать и позвать' : 'Назначить и позвать'}
+            {созвать.isPending && файлы.length ? 'Прикладываем материалы…'
+            : сейчас ? 'Начать и позвать' : 'Назначить и позвать'}
           </Button>
         </DialogFooter>
       </DialogContent>

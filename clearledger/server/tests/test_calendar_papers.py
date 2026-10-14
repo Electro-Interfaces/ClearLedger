@@ -41,6 +41,17 @@ async def test_материалы_встречи(db, tmp_path, monkeypatch):
     monkeypatch.setenv('UPLOAD_DIR', str(tmp_path))
     company, хозяин, зван, чужой, встреча = await люди(db)
     cid, eid = str(company.id), встреча['id']
+    from app.models import CalendarEvent
+    ev = await db.get(CalendarEvent, uuid.UUID(eid))
+
+    # Приложенное в окне созыва уходит вместе с приглашением, без сообщения.
+    from app.models import ChatMessage
+    await paper_add(eid, PaperIn(company_id=cid, url='https://example.test/new',
+                                 title='Сразу'), db=db, current_user=хозяин)
+    assert not (await db.execute(select(ChatMessage).where(
+        ChatMessage.content.like('%«Планёрка»%Сразу')))).scalars().all()
+    ev.created_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    await db.flush()
 
     # Участник прикладывает ссылку и файл — не только организатор.
     ссылка = await paper_add(eid, PaperIn(company_id=cid, url='https://example.test/agenda',
@@ -61,7 +72,7 @@ async def test_материалы_встречи(db, tmp_path, monkeypatch):
     assert файл['kind'] == 'file' and файл['size'] == 9
 
     список = await papers_list(eid, company_id=cid, db=db, current_user=зван)
-    assert [m['title'] for m in список['papers']] == ['Повестка', 'Смета.pdf']
+    assert [m['title'] for m in список['papers']] == ['Сразу', 'Повестка', 'Смета.pdf']
     по_имени = {m['title']: m for m in список['papers']}
     assert по_имени['Повестка']['can_remove'], 'своё убрать можно'
     assert not по_имени['Смета.pdf']['can_remove'], 'чужое участник не убирает'
@@ -94,7 +105,7 @@ async def test_материалы_встречи(db, tmp_path, monkeypatch):
     await paper_remove(eid, ссылка['id'], company_id=cid, db=db, current_user=хозяин)
     осталось = (await db.execute(select(CalendarPaper).where(
         CalendarPaper.event_id == uuid.UUID(eid)))).scalars().all()
-    assert [p.title for p in осталось] == ['Смета.pdf']
+    assert sorted(p.title for p in осталось) == ['Смета.pdf', 'Сразу']
 
 
 async def test_счётчик_материалов_в_строке_конференции(db, tmp_path, monkeypatch):
