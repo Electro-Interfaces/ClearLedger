@@ -25,6 +25,8 @@ import { openSectionOf, searchWithoutOpen } from '@/lib/openSection'
 // передаёт контекст, панель добирает маршрут и продукт сама).
 export type InteractionSection =
   | 'chat' | 'tasks' | 'calendar' | 'notes' | 'tickets' | 'help' | 'auditor'
+  // Контекстные инструменты экрана: есть в рельсе, только пока открыт их раздел.
+  | 'now' | 'step'
 export type InteractionMode = 'modal' | 'dock'
 
 interface InteractionState {

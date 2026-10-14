@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
 import {
-  Bot, CalendarDays, HelpCircle, LifeBuoy, ListChecks, Maximize2, MessageCircle, NotebookPen, Video, X,
+  Bot, CalendarDays, CalendarPlus, Compass, HelpCircle, LifeBuoy, ListChecks, Maximize2, MessageCircle, NotebookPen, Video, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -35,11 +35,14 @@ import { AuditorPanel } from '@/components/auditor/AuditorPanel'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useDocsApp } from '@/hooks/useDocsApp'
 import { startMeeting } from '@/services/conferenceService'
+import { ProjectNowPanel, ProjectStepPanel, useProjectRailContext } from '@/components/sites/ProjectRailPanels'
 
 type Tab = {
   key: InteractionSection; label: string; icon: typeof MessageCircle
   /** Наверху и акцентом: отсюда работу заводят, а не только смотрят. */
   primary?: boolean
+  /** Инструмент экрана: стоит под своей чертой и живёт, пока открыт раздел. */
+  context?: boolean
 }
 const TABS: Tab[] = [
   // Календарь и записная книжка — то, во что заглядывают поверх работы, а не то,
@@ -53,6 +56,13 @@ const TABS: Tab[] = [
   { key: 'auditor', label: 'Аудитор', icon: Bot },
   { key: 'tickets', label: 'Поддержка', icon: LifeBuoy },
   { key: 'help', label: 'Инфо', icon: HelpCircle },
+]
+
+/** Инструменты открытого экрана. Общая рельса одинакова везде, а эти кнопки
+ *  отвечают на «чем помочь здесь» и появляются только в своём разделе. */
+const PROJECT_TABS: Tab[] = [
+  { key: 'now', label: 'Сейчас', icon: Compass, context: true },
+  { key: 'step', label: 'Шаг', icon: CalendarPlus, context: true },
 ]
 
 /** Области, которым в колонке не хватает места: открываются окном сразу, а не
@@ -137,7 +147,8 @@ export function RightDock() {
     }
   }
   const { canApp, appName } = useCompany()
-  const tabs = TABS
+  const projectCtx = useProjectRailContext()
+  const tabs = [...TABS, ...(projectCtx ? PROJECT_TABS : [])]
     .filter((t) => (!['tasks', 'calendar', 'notes'].includes(t.key) || tasksOn)
       && (t.key !== 'auditor' || canApp('auditor')))
     // Имя агента — как его назвала компания: рейл, окно и шапка обязаны говорить
@@ -251,7 +262,7 @@ export function RightDock() {
             {/* Черта: выше — то, что отсюда заводят, ниже — области, у которых есть
                 и кнопка в шапке. */}
             <div className="my-2 h-px w-8 bg-border" role="separator" />
-            {tabs.filter((t) => !t.primary).map((t) => (
+            {tabs.filter((t) => !t.primary && !t.context).map((t) => (
               <RailButton key={t.key} tab={t} active={section === t.key} badge={badgeOf(t.key)}
                 onClick={() => openFromRail(t.key)}
                 // Агент — единственный, кому предмет доносят целиком: он
@@ -260,6 +271,14 @@ export function RightDock() {
                   ? (ref, label) => openInteraction('auditor', `предмет:${ref}|${label}`)
                   : undefined} />
             ))}
+            {tabs.some((t) => t.context) && <>
+              {/* Черта: ниже — помощь именно этому экрану, а не всему пространству. */}
+              <div className="my-2 h-px w-8 bg-primary/40" role="separator" />
+              {tabs.filter((t) => t.context).map((t) => (
+                <RailButton key={t.key} tab={t} active={section === t.key} badge={0}
+                  onClick={() => openFromRail(t.key)} />
+              ))}
+            </>}
           </>
         )}
       </div>
@@ -298,7 +317,8 @@ function DockHead({ tabs, section, badgeOf, isMobile, onTab, onPop, onClose }: {
           )
         })}
       </div>
-      {!isMobile && (
+      {/* Инструменты экрана живут рядом с экраном: окном они его закрыли бы. */}
+      {!isMobile && !tabs.find((t) => t.key === section)?.context && (
         <button onClick={onPop} title="Открыть окном"
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
           <Maximize2 className="size-4" />
@@ -432,6 +452,8 @@ function DockBody({ section }: { section: InteractionSection }) {
       {/* «Инфо» — знание пространства под открытую рабочую область, а не статичный
           текст про один продукт (docs/INFO.md). */}
       {section === 'help' && <InfoDockPanel />}
+      {section === 'now' && <ProjectNowPanel />}
+      {section === 'step' && <ProjectStepPanel />}
     </div>
   )
 }
