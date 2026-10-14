@@ -482,8 +482,7 @@ async def _пригласить(db: AsyncSession, ev: CalendarEvent, кого: l
     Ошибки доставки глотаем: конференция уже заведена, и лежащий почтовый сервер
     не должен её отменять.
     """
-    from app.models import ChatMessage, ChatParticipant, ChatRoom
-    from app.services import email_service, ics, space_time, web_push
+    from app.services import email_service, ics, meeting_notice, space_time
 
     когда = space_time.as_utc(ev.starts_at).astimezone(space_time.zone(ev.tz))
     подпись = когда.strftime("%d.%m.%Y в %H:%M")
@@ -512,38 +511,9 @@ async def _пригласить(db: AsyncSession, ev: CalendarEvent, кого: l
         except Exception:
             pass
         try:
-            # Одна личная комната на пару: ищем по участникам, а не по имени —
-            # переименование комнаты не должно заводить вторую.
-            мои = select(ChatParticipant.room_id).where(
-                ChatParticipant.user_id == организатор.id)
-            его = select(ChatParticipant.room_id).where(
-                ChatParticipant.user_id == человек.id)
-            комната = (await db.execute(select(ChatRoom).where(
-                ChatRoom.company_id == ev.company_id, ChatRoom.type == "direct",
-                ChatRoom.is_active.is_(True),
-                ChatRoom.id.in_(мои), ChatRoom.id.in_(его)).limit(1))).scalar_one_or_none()
-            if комната is None:
-                комната = ChatRoom(company_id=ev.company_id, type="direct",
-                                   created_by=организатор.id)
-                db.add(комната)
-                await db.flush()
-                db.add_all([
-                    ChatParticipant(room_id=комната.id, user_id=организатор.id),
-                    ChatParticipant(room_id=комната.id, user_id=человек.id),
-                ])
-                await db.flush()
-            db.add(ChatMessage(room_id=комната.id, user_id=организатор.id,
-                               user_name=организатор.name, type="text",
-                               content=f"📹 {текст}"))
-            await db.flush()
+            await meeting_notice.в_личку(db, ev.company_id, организатор, человек,
+                                         f"📹 {текст}", f"Конференция: {ev.title}")
             чатом += 1
-            # Push нужен закрытой вкладке: иначе приглашение догонит человека
-            # только при следующем заходе в пространство.
-            try:
-                web_push.push_room_async(комната.id, организатор.name,
-                                         f"Конференция: {ev.title}", организатор.id)
-            except Exception:
-                pass
         except Exception:
             pass
     return {"mailed": письмом, "chatted": чатом}
@@ -858,7 +828,13 @@ async def recording_ingest(
     if сессия.ended_at is None:
         # Запись кончилась — значит кончился и конференция.
         сессия.ended_at = datetime.now(timezone.utc)
+    # Расшифровка — сразу: протокол нужен, пока разговор свежий, а не
+    # когда кто-то вспомнит нажать кнопку.
+    сессия.transcript_status, сессия.transcript_error = "queued", None
+    сессия.transcript, сессия.protocol = None, None
     await db.commit()
+    from app.services import conf_transcribe
+    conf_transcribe.поставить(сессия.id)
     return {"session_id": str(сессия.id), "file_id": str(строка.id), "size": len(данные)}
 
 
@@ -918,6 +894,8 @@ async def recordings_list(
         "started_by": (люди.get(s.started_by).name if люди.get(s.started_by) else None),
         "subject_ref": s.subject_ref,
         "can_remove": админ or current_user.id in (s.started_by, организаторы.get(s.event_id)),
+        "transcript_status": _состояние(s)[0],
+        "has_protocol": bool(s.protocol),
     } for s in доступные]}
 
 
@@ -960,6 +938,157 @@ async def recording_remove(
     if путь:
         Path(путь).unlink(missing_ok=True)
     return {"removed": True}
+
+
+# ── Расшифровка и протокол ──────────────────────────────────────────────────
+# «Дешифратор + протокол с распределением задач» (РусГидро, «ТЗ по СРМ» п. 6).
+# Запись → ASR пространства → черновик протокола правилами → человек правит →
+# поручения ставятся задачами «Трека» обычной ручкой `POST /api/tasks` из
+# интерфейса (маршрут, письмо исполнителю и след у встречи — как у любой задачи),
+# протокол рассылается участникам в личный чат.
+
+class ProtocolItemIn(BaseModel):
+    kind: str = Field(pattern="^(decision|task)$")
+    text: str = Field(min_length=1, max_length=2000)
+    at: float | None = None
+    assignee_id: str | None = None
+    due: str | None = None
+    task_id: str | None = None
+
+
+class ProtocolIn(BaseModel):
+    company_id: str
+    items: list[ProtocolItemIn] = Field(max_length=200)
+    send: bool = False
+
+
+async def _люди_встречи(db: AsyncSession, s: ConfSession) -> list[User]:
+    """Кого касается созвон: позванные на встречу, бывшие в комнате, собравший."""
+    ids = {p for p in (await db.execute(select(ConfPresence.user_id).where(
+        ConfPresence.session_id == s.id, ConfPresence.user_id.isnot(None)))).scalars()}
+    if s.started_by:
+        ids.add(s.started_by)
+    if s.event_id:
+        ev = await db.get(CalendarEvent, s.event_id)
+        if ev is not None:
+            ids.add(ev.organizer_id)
+            ids |= set((await db.execute(select(CalendarAttendee.user_id).where(
+                CalendarAttendee.event_id == ev.id))).scalars())
+    if not ids:
+        return []
+    return list((await db.execute(select(User).where(User.id.in_(ids))
+                                  .order_by(User.name))).scalars())
+
+
+async def _запись_для(db: AsyncSession, session_id: str, company_id: str,
+                      user: User) -> ConfSession:
+    cid = await _company(company_id, user, db)
+    s = await db.get(ConfSession, _uuid(session_id, "session_id"))
+    if (s is None or s.company_id != cid or s.recording_file_id is None
+            or not await _можно_смотреть(db, s, user)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Запись не найдена")
+    return s
+
+
+def _состояние(s: ConfSession) -> tuple[str | None, str | None]:
+    """Статус расшифровки с поправкой на перезапуск сервера посреди работы."""
+    from app.services import conf_transcribe
+
+    if s.transcript_status in ("queued", "running") and not conf_transcribe.идёт(s.id):
+        return "error", "Расшифровка прервалась (перезапуск сервера) — запустите снова"
+    return s.transcript_status, s.transcript_error
+
+
+@router.get("/recordings/{session_id}/transcript")
+async def recording_transcript(
+    session_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Расшифровка и протокол записи: сохранённый, а пока его нет — черновик."""
+    from app.services import conf_protocol, space_time
+
+    s = await _запись_для(db, session_id, company_id, current_user)
+    статус, ошибка = _состояние(s)
+    люди = await _люди_встречи(db, s)
+    пункты, черновик = s.protocol, False
+    if пункты is None and статус == "done":
+        сегодня = space_time.local_date(datetime.now(timezone.utc), None)
+        пункты = conf_protocol.черновик(s.transcript or [],
+                                        [(str(u.id), u.name) for u in люди], сегодня)
+        черновик = True
+    return {
+        "session_id": str(s.id), "title": s.title, "event_id": str(s.event_id) if s.event_id else None,
+        "status": статус, "error": ошибка,
+        "segments": s.transcript or [],
+        "protocol": пункты or [], "draft": черновик,
+        "people": [{"id": str(u.id), "name": u.name} for u in люди],
+    }
+
+
+@router.post("/recordings/{session_id}/transcribe")
+async def recording_transcribe(
+    session_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Расшифровать запись (или расшифровать заново после сбоя)."""
+    from app.services import conf_transcribe
+
+    s = await _запись_для(db, session_id, company_id, current_user)
+    if conf_transcribe.идёт(s.id):
+        return {"status": s.transcript_status or "queued"}
+    s.transcript_status, s.transcript_error = "queued", None
+    await db.commit()
+    conf_transcribe.поставить(s.id)
+    return {"status": "queued"}
+
+
+@router.post("/recordings/{session_id}/protocol")
+async def recording_protocol(
+    session_id: str,
+    payload: ProtocolIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Сохранить протокол; по `send` — разослать участникам в личный чат.
+
+    Пишет любой, кто имеет доступ к записи, как и заметку: секретаря у
+    конференции нет. Пустую заметку встречи протокол заполняет текстом — так
+    итог виден в «Истории» без открытия записи.
+    """
+    from app.services import conf_protocol, meeting_notice
+
+    s = await _запись_для(db, session_id, payload.company_id, current_user)
+    люди = await _люди_встречи(db, s)
+    свои = {str(u.id) for u in люди}
+    пункты = []
+    for п in payload.items:
+        if п.assignee_id and п.assignee_id not in свои:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Исполнитель должен быть участником встречи")
+        пункты.append(п.model_dump())
+    s.protocol = пункты
+    имена = {str(u.id): u.name for u in люди}
+    текст = conf_protocol.текстом(пункты, имена)
+    if текст and not (s.note or "").strip():
+        s.note = текст
+    разослано = 0
+    if payload.send and текст:
+        for человек in люди:
+            if человек.id == current_user.id:
+                continue
+            try:
+                await meeting_notice.в_личку(
+                    db, s.company_id, current_user, человек,
+                    f"📝 Протокол: {s.title}\n{текст}", f"Протокол: {s.title}")
+                разослано += 1
+            except Exception:
+                pass
+    await db.commit()
+    return {"saved": len(пункты), "sent": разослано}
 
 
 async def authorize_conf_recording_download(db: AsyncSession, user: User,

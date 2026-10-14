@@ -7,19 +7,21 @@
  */
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, FileVideo, Loader2, Trash2 } from 'lucide-react'
+import { Download, FileText, FileVideo, Loader2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as conf from '@/services/confService'
 import { EmptyBlock } from './EmptyBlock'
+import { ConfProtocolSheet } from './ConfProtocolSheet'
 import { длительность, когда, предмет } from './format'
 import { Link } from 'react-router-dom'
 
 export default function ConfRecordsPage() {
   const { companyId } = useCompany()
   const [открываю, setОткрываю] = useState<string | null>(null)
+  const [протокол, setПротокол] = useState<string | null>(null)
 
   async function смотреть(з: conf.ConfRecording) {
     if (открываю) return
@@ -101,6 +103,14 @@ export default function ConfRecordsPage() {
                   : <Download className="mr-2 h-4 w-4" />}
                 Смотреть
               </Button>
+              {/* Расшифровка запускается сама после конференции; кнопка
+                  открывает её и протокол, подпись говорит, готово ли. */}
+              <Button size="sm" variant="outline" onClick={() => setПротокол(з.session_id)}>
+                {з.transcript_status === 'queued' || з.transcript_status === 'running'
+                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  : <FileText className="mr-2 h-4 w-4" />}
+                {з.has_protocol ? 'Протокол' : з.transcript_status === 'done' ? 'Расшифровка' : 'Расшифровать'}
+              </Button>
             </div>
             {з.event_id && (
               <Link to="/conf/history"
@@ -111,6 +121,7 @@ export default function ConfRecordsPage() {
           </div>
         )
       })}
+      <ConfProtocolSheet companyId={companyId} sessionId={протокол} onClose={() => setПротокол(null)} />
     </div>
   )
 }

@@ -56,6 +56,11 @@ CONF_MIGRATION_DDL = (
     "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS recording_file_id UUID",
     "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS recording_seconds INTEGER",
     "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS conf_room_id UUID",
+    # Расшифровка записи и протокол по ней (14.10.2026).
+    "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS transcript_status VARCHAR(12)",
+    "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS transcript_error VARCHAR(300)",
+    "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS transcript JSONB",
+    "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS protocol JSONB",
 )
 
 STORE_RECEIPT_MIGRATION_DDL = (

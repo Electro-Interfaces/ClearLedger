@@ -1688,6 +1688,11 @@ async def calendar_action(
                 future.cancel_reason = ev.cancel_reason
                 await reminders.drop_for(db, f"event:{future.id}")
         await db.commit()
+        # Отмена, о которой узнают только открыв календарь, — это пустая
+        # переговорная: участникам — в чат и письмом (РусГидро, 14.10.2026).
+        from app.services import meeting_notice
+        await meeting_notice.известить(db, ev, current_user, "cancel")
+        await db.commit()
         return _event_out(ev, parts, current_user.id)
 
     if (payload.recurrence is not None or 'recurrence_until' in payload.model_fields_set) and ev.series_id is not None:
@@ -1719,6 +1724,7 @@ async def calendar_action(
         ev.tz = payload.tz
 
     время_сдвинулось = False
+    было = ev.starts_at
     if payload.starts_at is not None or payload.ends_at is not None:
         starts = payload.starts_at or ev.starts_at
         ends = payload.ends_at or ev.ends_at
@@ -1765,9 +1771,23 @@ async def calendar_action(
             if att.user_id != ev.organizer_id:
                 att.response = "pending"
                 att.responded_at = None
+        # Напоминание «за 15 минут» стоит абсолютным временем: без сдвига
+        # оно сработало бы по старому началу встречи.
+        from app.models import PersonalReminder
+        сдвиг = ev.starts_at - было
+        if сдвиг:
+            for напоминание in (await db.execute(select(PersonalReminder).where(
+                    PersonalReminder.target_ref == f"event:{ev.id}",
+                    PersonalReminder.fired_at.is_(None)))).scalars():
+                напоминание.remind_at = напоминание.remind_at + сдвиг
     await db.flush()
     parts = (await _attendees(db, [ev.id])).get(ev.id, [])
     await db.commit()
+    if время_сдвинулось:
+        # Перенос, как и отмена, доходит до людей сам (РусГидро, 14.10.2026).
+        from app.services import meeting_notice
+        await meeting_notice.известить(db, ev, current_user, "move", было=было)
+        await db.commit()
     return _event_out(ev, parts, current_user.id)
 
 

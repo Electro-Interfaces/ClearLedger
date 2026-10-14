@@ -794,7 +794,16 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
           <Button variant="outline" onClick={async () => {
             try { await navigator.clipboard.writeText(new URL(eventHref, window.location.origin).href); toast.success('Ссылка на встречу скопирована') }
             catch { toast.error('Не удалось скопировать ссылку. Проверьте разрешение браузера.') }
-          }}>Ссылка на встречу</Button>
+          }}>Ссылка на карточку</Button>
+          {/* «Ссылка на встречу» копировала адрес карточки календаря, а не комнаты:
+              человек пересылал её, и участник попадал в календарь вместо
+              конференции (РусГидро, 14.10.2026). Теперь две кнопки и два смысла. */}
+          {event!.status !== 'cancelled' && event!.conference_url && /^https?:\/\//i.test(event!.conference_url) && (
+            <Button variant="outline" onClick={async () => {
+              try { await navigator.clipboard.writeText(event!.conference_url!); toast.success('Ссылка на видеовстречу скопирована') }
+              catch { toast.error('Не удалось скопировать ссылку. Проверьте разрешение браузера.') }
+            }}>Ссылка на видеовстречу</Button>
+          )}
           {/* Своя комната — своя кнопка: сервер подписывает вход ведущим, иначе
               Jitsi держит всех на «ждём организатора». Чужую ссылку (Zoom,
               Teams) открываем как есть — ведущего там назначаем не мы. */}

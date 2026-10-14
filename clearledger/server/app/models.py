@@ -13852,6 +13852,15 @@ class ConfSession(Base):
         UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="SET NULL"), nullable=True)
     recording_path: Mapped[str | None] = mapped_column(String(400), nullable=True)
     recording_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Расшифровка записи: `queued` → `running` → `done` | `error`. Текст —
+    # отрезками с временем (`[{start, end, text}]`), чтобы из протокола можно
+    # было вернуться к месту в записи.
+    transcript_status: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    transcript_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    transcript: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Протокол, сохранённый человеком: решения и поручения (`task_id` — уже
+    # поставленная задача «Трека»). Пусто — показываем черновик по расшифровке.
+    protocol: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (Index("ix_conf_sessions_company_started", "company_id", "started_at"),)
 

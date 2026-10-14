@@ -361,3 +361,99 @@ async def test_запись_удаляет_организатор_но_не_пр
     assert s.recording_file_id is None
     assert await db.get(SourceFile, файл.id) is None
     assert await db.get(ConfSession, s.id) is not None
+
+
+async def _сообщения(db, кому):
+    """Строки чата, пришедшие человеку от других (личные комнаты)."""
+    from app.models import ChatMessage, ChatParticipant
+    комнаты = select(ChatParticipant.room_id).where(ChatParticipant.user_id == кому.id)
+    return list((await db.execute(select(ChatMessage.content).where(
+        ChatMessage.room_id.in_(комнаты), ChatMessage.user_id != кому.id))).scalars())
+
+
+async def test_отмена_и_перенос_доходят_до_участников(db, jitsi_key, monkeypatch):
+    """РусГидро, «ТЗ по СРМ» пп. 2–3: отмена и перенос не должны быть молчаливыми."""
+    from app.models import PersonalReminder
+    from app.routers.work_router import EventAction, calendar_action
+    from app.services import reminders
+
+    from app.services import email_service
+
+    письма = []
+
+    async def не_слать(to, **поля):
+        письма.append((to, поля['method']))
+        return True
+    # Тестовый контейнер видит почтовый сервер стека: письма не отправляем, а считаем.
+    monkeypatch.setattr(email_service, 'send_meeting_invite', не_слать)
+    company, хозяин, зван, _ = await люди(db)
+    начало = (datetime.now(timezone.utc) + timedelta(days=2)).replace(microsecond=0)
+    встреча = await созвать(db, company, хозяин, attendee_ids=[str(зван.id)], starts_at=начало)
+    ev_id = встреча['id']
+    напоминание = await reminders.put(db, company.id, зван.id, f'event:{ev_id}',
+                                      начало - timedelta(minutes=15))
+    await db.commit()
+
+    новое = начало + timedelta(days=1)
+    await calendar_action(ev_id, EventAction(company_id=str(company.id), starts_at=новое,
+                                             ends_at=новое + timedelta(hours=1)),
+                          db=db, current_user=хозяин)
+    assert any('перенесена' in m for m in await _сообщения(db, зван)), 'о переносе не сказали'
+    assert (зван.email, 'REQUEST') in письма, 'письма о переносе нет'
+    await db.refresh(напоминание)
+    assert напоминание.remind_at == новое - timedelta(minutes=15), 'напоминание осталось на старом времени'
+
+    await calendar_action(ev_id, EventAction(company_id=str(company.id), cancel=True,
+                                             cancel_reason='заболел докладчик'),
+                          db=db, current_user=хозяин)
+    assert any('отменена: заболел докладчик' in m for m in await _сообщения(db, зван))
+    assert (зван.email, 'CANCEL') in письма, 'письма об отмене нет'
+    assert await db.get(PersonalReminder, напоминание.id) is None
+
+
+async def test_протокол_черновик_сохранение_и_рассылка(db, tmp_path, monkeypatch):
+    """«Дешифратор + протокол»: черновик по расшифровке, исполнитель — из участников."""
+    from app.routers.conf_router import (ProtocolIn, ProtocolItemIn, recording_protocol,
+                                         recording_transcript)
+    from app.services import file_store
+
+    monkeypatch.setenv('UPLOAD_DIR', str(tmp_path))
+    company, хозяин, зван, чужой = await люди(db)
+    зван.name = 'Марков Антон Александрович'
+    файл = file_store.put(db, company.id, b'mp4', file_name='p.mp4', mime='video/mp4')
+    await db.flush()
+    s = ConfSession(company_id=company.id, room='ledger-pr', title='Планёрка',
+                    started_by=хозяин.id, recording_file_id=файл.id, transcript_status='done',
+                    transcript=[{'start': 3, 'end': 8, 'text': 'Решили начать монтаж в ноябре.'},
+                                {'start': 9, 'end': 15, 'text': 'Антону подготовить смету до пятницы.'}])
+    db.add(s)
+    from app.models import ConfPresence
+    await db.flush()
+    db.add(ConfPresence(session_id=s.id, user_id=зван.id))
+    await db.commit()
+    cid = str(company.id)
+
+    t = await recording_transcript(str(s.id), company_id=cid, db=db, current_user=хозяин)
+    assert t['draft'] and [п['kind'] for п in t['protocol']] == ['decision', 'task']
+    assert t['protocol'][1]['assignee_id'] == str(зван.id)
+
+    # Посторонний записи не видит — и протокол ему не открыть.
+    with pytest.raises(HTTPException) as отказ:
+        await recording_transcript(str(s.id), company_id=cid, db=db, current_user=чужой)
+    assert отказ.value.status_code == 404
+
+    # Исполнитель — только участник встречи.
+    with pytest.raises(HTTPException):
+        await recording_protocol(str(s.id), ProtocolIn(company_id=cid, items=[
+            ProtocolItemIn(kind='task', text='x', assignee_id=str(чужой.id))]),
+            db=db, current_user=хозяин)
+
+    пункты = [ProtocolItemIn(**п) for п in t['protocol']]
+    итог = await recording_protocol(str(s.id), ProtocolIn(company_id=cid, items=пункты, send=True),
+                                    db=db, current_user=хозяин)
+    assert итог == {'saved': 2, 'sent': 1}
+    assert any(m.startswith('📝 Протокол: Планёрка') for m in await _сообщения(db, зван))
+    await db.refresh(s)
+    assert s.protocol and 'Поручения:' in (s.note or '')
+    t = await recording_transcript(str(s.id), company_id=cid, db=db, current_user=хозяин)
+    assert not t['draft']

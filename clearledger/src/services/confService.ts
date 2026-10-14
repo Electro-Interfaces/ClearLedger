@@ -201,6 +201,51 @@ export interface ConfRecording {
   subject_ref?: string | null
   /** Удалить может организатор или администратор пространства. */
   can_remove?: boolean
+  /** Расшифровка: `queued` · `running` · `done` · `error`; пусто — не запускалась. */
+  transcript_status?: TranscriptStatus
+  has_protocol?: boolean
+}
+
+export type TranscriptStatus = 'queued' | 'running' | 'done' | 'error' | null
+
+/** Пункт протокола: решение или поручение. `at` — секунда записи, где прозвучало. */
+export interface ProtocolItem {
+  kind: 'decision' | 'task'
+  text: string
+  at?: number | null
+  assignee_id?: string | null
+  /** Срок поручения, `ГГГГ-ММ-ДД`. */
+  due?: string | null
+  /** Задача «Трека», уже поставленная по этому пункту. */
+  task_id?: string | null
+}
+
+export interface Transcript {
+  session_id: string
+  title: string
+  event_id: string | null
+  status: TranscriptStatus
+  error: string | null
+  segments: { start: number; end: number; text: string }[]
+  protocol: ProtocolItem[]
+  /** Протокол ещё не сохраняли: это черновик, собранный по расшифровке. */
+  draft: boolean
+  people: { id: string; name: string }[]
+}
+
+export async function getTranscript(companyId: string, sessionId: string) {
+  return get<Transcript>(`/api/conf/recordings/${sessionId}/transcript`, { company_id: companyId })
+}
+
+export async function transcribe(companyId: string, sessionId: string) {
+  return post<{ status: TranscriptStatus }>(
+    `/api/conf/recordings/${sessionId}/transcribe?company_id=${encodeURIComponent(companyId)}`, {})
+}
+
+export async function saveProtocol(companyId: string, sessionId: string,
+                                   items: ProtocolItem[], send = false) {
+  return post<{ saved: number; sent: number }>(`/api/conf/recordings/${sessionId}/protocol`,
+    { company_id: companyId, items, send })
 }
 
 export interface ConfStats {
