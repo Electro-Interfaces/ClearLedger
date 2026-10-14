@@ -112,7 +112,7 @@ export function NextStepsPlanPanel({ companyId }: { companyId: string }) {
           <p className="text-sm text-muted-foreground">
             {nf0.format(total)} проектов в работе
             {overdue > 0 && <>, просрочено <span className="text-red-600 dark:text-red-400">{nf0.format(overdue)}</span></>}.
-            Шаг и срок ставятся в карточке проекта, вкладка «Работа».
+            Дата берётся из «Ближайшего результата» на вкладке «Обзор» карточки проекта.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">

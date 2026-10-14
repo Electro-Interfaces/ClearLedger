@@ -146,6 +146,34 @@ async def test_следующий_шаг_использует_срок_рабо�
     assert project.id not in set((await db.scalars(select(EzsSite.id).where(*ezs_sites._risk_conditions("step_overdue")))).all())
 
 
+async def test_план_работы_берёт_дату_ближайшего_результата(auth_client, db):
+    from app.services import ezs_lifecycle
+    cid, uid = await identity(auth_client)
+    project = await site(db, cid)
+    await ezs_lifecycle.sync_from_site(db, cid, project)
+    task = Task(company_id=cid, title="Сдать ПСД", author_id=uid, subject_ref=f"site:{project.id}",
+                due_at=datetime(2026, 11, 20, 21, 30, tzinfo=timezone.utc))
+    db.add(task)
+    await db.commit()
+    params = {"company_id": str(cid)}
+
+    async def plan_row():
+        rows = (await auth_client.get("/api/sites/projects", params=params)).json()
+        return next(r for r in rows if r["siteId"] == str(project.id))
+
+    r = await auth_client.put(f"/api/project-workspace/{project.id}/next", params=params,
+                             json={"work": {"kind": "task", "id": str(task.id)}})
+    assert r.status_code == 200, r.text
+    row = await plan_row()
+    # 21:30 UTC — уже следующий день по Москве: план показывает тот же день, что и обзор
+    assert (row["nextAction"], row["nextActionDue"]) == ("Сдать ПСД", "2026-11-21")
+    r = await auth_client.put(f"/api/project-workspace/{project.id}/next", params=params,
+                             json={"waiting_for": "Ответ сетевой компании", "owner_id": str(uid), "follow_up": "2026-11-05"})
+    assert r.status_code == 200, r.text
+    row = await plan_row()
+    assert (row["nextAction"], row["nextActionDue"]) == ("Ожидание: Ответ сетевой компании", "2026-11-05")
+
+
 async def test_ошибка_приложения_не_отменяет_результат_трека(auth_client, db, monkeypatch):
     cid, uid = await identity(auth_client)
     project = await site(db, cid)

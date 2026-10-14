@@ -194,7 +194,7 @@ async def list_projects(
     """История места или актива: сколько проектов на нём было и чем кончились."""
     cid = await assert_company_member(company_id, user, db)
     return await ezs_lifecycle.list_projects(
-        db, cid, site_id=site_id, location_id=location_id, kind=kind)
+        db, cid, site_id=site_id, location_id=location_id, kind=kind, user=user)
 
 
 @router.get("/projects/{process_id}/documents")

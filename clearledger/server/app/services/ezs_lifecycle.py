@@ -24,6 +24,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import uuid
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from sqlalchemy import func, select
@@ -208,8 +210,39 @@ def _out(p: EzsProject, *, site: EzsSite | None = None,
     }
 
 
+# ponytail: Москва на все пространства; брать пояс компании, если появится восточное
+_PLAN_TZ = ZoneInfo("Europe/Moscow")
+
+
+async def _nearest_result(db: AsyncSession, company_id, user, site: EzsSite) -> tuple[str | None, str | None] | None:
+    """«Ближайший результат» с вкладки «Обзор» — шаг и дата для плана работы.
+
+    Порядок тот же, что у обзора: связанная работа Трека, затем внешнее ожидание.
+    Выбор результата в обзоре стирает ручной `next_action_due`, и без этого проект
+    падал в плане в «Шаг не назначен» (просьба отдела развития 14.10.2026).
+    """
+    from fastapi import HTTPException
+    from app.services.work_links import readable_entity
+
+    data = site.workspace_data or {}
+    if data.get("next_ref"):
+        kind, eid = data["next_ref"].split(":", 1)
+        try:
+            row = await readable_entity(db, company_id, user, kind, uuid.UUID(eid))
+        except (HTTPException, ValueError):
+            return "Связанная работа недоступна", None
+        if row.status in ("done", "executed"):
+            return f"{row.title} — результат готов, определите следующий шаг", None
+        due = row.due_at.astimezone(_PLAN_TZ).date().isoformat() if row.due_at else None
+        return row.title, due
+    wait = data.get("external_wait")
+    if wait and wait.get("waiting_for"):
+        return f"Ожидание: {wait['waiting_for']}", wait.get("follow_up")
+    return None
+
+
 async def list_projects(db: AsyncSession, company_id, *, site_id=None, location_id=None,
-                        kind: str | None = None) -> list[dict[str, Any]]:
+                        kind: str | None = None, user=None) -> list[dict[str, Any]]:
     """Проекты площадки или объекта — история места и история актива."""
     q = (select(EzsProject, EzsSite, ServiceLocation, func.coalesce(User.name, User.email))
          .join(EzsSite, EzsSite.id == EzsProject.site_id)
@@ -226,7 +259,15 @@ async def list_projects(db: AsyncSession, company_id, *, site_id=None, location_
         kinds = [k.strip() for k in kind.split(",") if k.strip()]
         q = q.where(EzsProject.kind.in_(kinds))
     rows = (await db.execute(q.order_by(EzsProject.created_at.desc()))).all()
-    return [_out(p, site=s, location=loc, owner=owner) for p, s, loc, owner in rows]
+    out = []
+    for p, s, loc, owner in rows:
+        row = _out(p, site=s, location=loc, owner=owner)
+        # ponytail: запрос на проект со связанной работой; таких единицы, пакетом — если план станет тормозить
+        nearest = await _nearest_result(db, company_id, user, s) if user is not None else None
+        if nearest:
+            row["nextAction"], row["nextActionDue"] = nearest
+        out.append(row)
+    return out
 
 
 async def current_project(db: AsyncSession, company_id, site_id) -> EzsProject | None:
