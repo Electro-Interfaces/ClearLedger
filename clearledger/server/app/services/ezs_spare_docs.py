@@ -14,6 +14,11 @@
 
 Приход по поставке сюда не входит: там документом служит сама поставка
 (`ezs_supply.py`).
+
+С 14.10.2026 остаток ведётся в количестве и сумме: приход — по цене строки, расход,
+перемещение и недостача — по средней стоимости остатка склада, излишек — по средней
+(на пустом складе — по цене строки описи). Сумма каждой строки сохраняется в
+документе, и отмена возвращает ровно её. Документ бывает черновиком (`draft`).
 """
 from __future__ import annotations
 
@@ -30,9 +35,10 @@ from app.models import (
     Contract, Counterparty, EzsEquipmentDocument, EzsEquipmentUnit, EzsSpareDocument, EzsSparePart,
     EzsSparePartMovement, EzsSparePartStock, ServiceLocation, User,
 )
-from app.services.ezs_equipment import _stock_row
+from app.services.ezs_accounting import avg_cost, money
+from app.services.ezs_equipment import _stock_row, check_period, value_delta
 from app.services.ezs_equipment_docs import (
-    _locs, check_contract, check_counterparty, contract_label, next_number,
+    _locs, _primary, _responsible, check_contract, check_counterparty, contract_label, next_number,
 )
 
 # Префикс номера и название документа по операции.
@@ -80,7 +86,49 @@ def norm_lines(op: str, raw: list[dict[str, Any]] | None) -> list[dict[str, str]
             raise HTTPException(400, "Фактическое количество не может быть отрицательным")
         if op != "inventory" and q <= 0:
             raise HTTPException(400, "Количество должно быть больше нуля")
-        out.append({"partId": pid, key: fmt(q)})
+        row = {"partId": pid, key: fmt(q)}
+        # Цена за единицу без НДС: у прихода — стоимость поступления, у описи — оценка
+        # излишка на пустом складе. У расхода цены нет: он идёт по средней.
+        if op in ("receipt", "inventory") and ln.get("price") not in (None, ""):
+            try:
+                price = money(ln["price"])
+            except Exception:  # noqa: BLE001
+                raise HTTPException(400, "Цена в строке документа — число")
+            if price < 0:
+                raise HTTPException(400, "Цена не может быть отрицательной")
+            row["price"] = f"{price:f}"
+        out.append(row)
+    return out
+
+
+def line_amounts(op: str, lines: list[dict[str, str]], stock: dict[tuple[str, str], Decimal],
+                 sums: dict[tuple[str, str], Decimal], from_id: str | None, to_id: str | None) -> None:
+    """Сумма каждой строки (`amount`) по остатку до проведения: приход — по цене,
+    расход и перемещение — по средней склада-отправителя, опись — стоимость отклонения."""
+    for ln in lines:
+        pid = ln["partId"]
+        if op == "receipt":
+            ln["amount"] = f"{money(Decimal(ln.get('price') or 0) * Decimal(ln['qty'])):f}"
+        elif op == "inventory":
+            have = stock.get((pid, to_id), Decimal(0))
+            ln["amount"] = f"{value_delta(have, sums.get((pid, to_id)), Decimal(ln['fact']) - Decimal(ln['book']), ln.get('price')):f}"
+        else:
+            ln["amount"] = f"{avg_cost(stock.get((pid, from_id), Decimal(0)), sums.get((pid, from_id)), Decimal(ln['qty'])):f}"
+
+
+def amount_effects(op: str, lines: list[dict[str, str]], from_id: str | None,
+                   to_id: str | None) -> list[tuple[str, str, Decimal]]:
+    """Что документ делает с суммой остатка: (номенклатура, склад, знаковая сумма)."""
+    out: list[tuple[str, str, Decimal]] = []
+    for ln in lines:
+        a = money(ln.get("amount"))
+        if op == "inventory":
+            out.append((ln["partId"], to_id, a))
+            continue
+        if op in _FROM_OPS:
+            out.append((ln["partId"], from_id, -a))
+        if op in ("receipt", "transfer"):
+            out.append((ln["partId"], to_id, a))
     return out
 
 
@@ -123,6 +171,8 @@ async def _warehouse(db: AsyncSession, company_id, loc_id, what: str) -> Service
     loc = await db.get(ServiceLocation, str(loc_id))
     if loc is None or loc.company_id != company_id or loc.type != "warehouse":
         raise HTTPException(400, f"Не найден среди складов пространства: {what}")
+    if loc.status == "closed":
+        raise HTTPException(400, f"Склад «{loc.name}» закрыт — откройте его в карточке склада")
     return loc
 
 
@@ -150,14 +200,83 @@ def _title(d: EzsSpareDocument) -> str:
     return f"{SPARE_DOC_KINDS[d.op][1]} № {d.number} от {d.doc_date}"
 
 
-async def post_document(db: AsyncSession, company_id, user: User | None, p: dict[str, Any]) -> dict[str, Any]:
+async def _draft_doc(db: AsyncSession, company_id, doc_id) -> EzsSpareDocument:
+    d = await db.get(EzsSpareDocument, uuid.UUID(str(doc_id)), with_for_update=True)
+    if d is None or d.company_id != company_id:
+        raise HTTPException(404, "Документ не найден")
+    if d.status != "draft":
+        raise HTTPException(409, f"Документ № {d.number} уже проведён — исправляется отменой")
+    return d
+
+
+async def save_draft(db: AsyncSession, company_id, user: User | None, p: dict[str, Any], doc_id=None) -> dict[str, Any]:
+    """Черновик: номер занят, строки сохранены, остатки не тронуты."""
+    op = p.get("op")
+    if op not in SPARE_DOC_KINDS:
+        raise HTTPException(400, f"Неизвестный вид документа: {op}")
+    try:
+        doc_date = date.fromisoformat((p.get("doc_date") or "").strip()).isoformat()
+    except ValueError:
+        raise HTTPException(400, "Укажите дату документа")
+    lines = norm_lines(op, p.get("lines")) if p.get("lines") else []
+    cp = await check_counterparty(db, company_id, p.get("counterparty_id"))
+    fields = dict(
+        op=op, doc_date=doc_date, status="draft", lines=lines,
+        counterparty_id=cp.id if cp else None, counterparty_name=cp.name if cp else None,
+        contract_id=_uuid(p["contract_id"], "Договор") if p.get("contract_id") else None,
+        from_location_id=p.get("from_location_id") or None, to_location_id=p.get("to_location_id") or None,
+        target_unit_id=_uuid(p["target_unit_id"], "Станция-получатель") if p.get("target_unit_id") else None,
+        target_location_id=p.get("target_location_id") or None,
+        target_note=(p.get("target_note") or "").strip()[:300] or None,
+        repair_document_id=_uuid(p["repair_document_id"], "Акт ремонта") if p.get("repair_document_id") else None,
+        responsible_from=(p.get("responsible_from") or "").strip()[:200] or None,
+        responsible_to=(p.get("responsible_to") or "").strip()[:200] or None,
+        basis=(p.get("basis") or "").strip()[:500] or None, comment=(p.get("comment") or "").strip()[:2000] or None,
+        **_primary(p))
+    if doc_id is not None:
+        d = await _draft_doc(db, company_id, doc_id)
+        for k, v in fields.items():
+            setattr(d, k, v)
+    else:
+        number = (p.get("number") or "").strip() or await next_number(
+            db, company_id, SPARE_DOC_KINDS[op][0], doc_date, model=EzsSpareDocument)
+        if (await db.execute(select(EzsSpareDocument.id).where(
+                EzsSpareDocument.company_id == company_id, EzsSpareDocument.number == number))).first():
+            raise HTTPException(409, f"Документ № {number} уже есть")
+        d = EzsSpareDocument(company_id=company_id, number=number, created_by_id=str(user.id) if user else None,
+                             created_by_name=(user.name or user.email) if user else None, **fields)
+        db.add(d)
+    await db.flush()
+    return await get_document(db, company_id, d.id)
+
+
+async def post_draft(db: AsyncSession, company_id, user: User | None, doc_id) -> dict[str, Any]:
+    d = await _draft_doc(db, company_id, doc_id)
+    p = {"op": d.op, "doc_date": d.doc_date, "lines": [dict(ln) for ln in d.lines or []],
+         "counterparty_id": d.counterparty_id, "contract_id": d.contract_id,
+         "from_location_id": d.from_location_id, "to_location_id": d.to_location_id,
+         "target_unit_id": d.target_unit_id, "target_location_id": d.target_location_id,
+         "target_note": d.target_note, "repair_document_id": d.repair_document_id,
+         "responsible_from": d.responsible_from, "responsible_to": d.responsible_to,
+         "basis": d.basis, "comment": d.comment, "primary_number": d.primary_number, "primary_date": d.primary_date}
+    return await post_document(db, company_id, user, p, into=d)
+
+
+async def delete_draft(db: AsyncSession, company_id, doc_id) -> dict[str, Any]:
+    d = await _draft_doc(db, company_id, doc_id)
+    await db.delete(d)
+    return {"deleted": str(d.id), "number": d.number}
+
+
+async def post_document(db: AsyncSession, company_id, user: User | None, p: dict[str, Any],
+                        into: EzsSpareDocument | None = None) -> dict[str, Any]:
     op = p.get("op")
     if op not in SPARE_DOC_KINDS:
         raise HTTPException(400, f"Неизвестный вид документа: {op}")
     # Повторная отправка той же формы (двойной щелчок, обрыв связи) возвращает уже
     # проведённый документ, а не удваивает приход: ключ документа выдаёт форма.
     doc_id = _uuid(p["id"], "Документ") if p.get("id") else None
-    if doc_id is not None:
+    if doc_id is not None and into is None:
         old = await db.get(EzsSpareDocument, doc_id)
         if old is not None:
             return await get_document(db, company_id, doc_id)
@@ -165,6 +284,7 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
         doc_date = date.fromisoformat((p.get("doc_date") or "").strip()).isoformat()
     except ValueError:
         raise HTTPException(400, "Укажите дату документа")
+    await check_period(db, company_id, doc_date)
     lines = norm_lines(op, p.get("lines"))
     ids = [ln["partId"] for ln in lines]
     parts = (await db.execute(select(EzsSparePart).where(
@@ -214,12 +334,15 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
     if contract is not None and cp is None:
         cp = await db.get(Counterparty, contract.counterparty_id)
 
-    number = (p.get("number") or "").strip() or await next_number(
-        db, company_id, SPARE_DOC_KINDS[op][0], doc_date, model=EzsSpareDocument)
-    clash = (await db.execute(select(EzsSpareDocument.id).where(
-        EzsSpareDocument.company_id == company_id, EzsSpareDocument.number == number))).first()
-    if clash:
-        raise HTTPException(409, f"Документ № {number} уже есть")
+    if into is not None:
+        number = into.number
+    else:
+        number = (p.get("number") or "").strip() or await next_number(
+            db, company_id, SPARE_DOC_KINDS[op][0], doc_date, model=EzsSpareDocument)
+        clash = (await db.execute(select(EzsSpareDocument.id).where(
+            EzsSpareDocument.company_id == company_id, EzsSpareDocument.number == number))).first()
+        if clash:
+            raise HTTPException(409, f"Документ № {number} уже есть")
 
     from_id, to_id = (src.id if src else None), (dst.id if dst else None)
     # Документ раньше уже проведённого по тем же позициям склада ломает остатки на
@@ -232,38 +355,54 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
         raise HTTPException(409, f"По этим позициям склада уже проведён документ от {last} — дата не может быть раньше")
     rows = await _lock_stock(db, company_id, ids, [i for i in (from_id, to_id) if i])
     stock = {k: Decimal(str(r.qty)) for k, r in rows.items()}
+    sums = {k: money(r.amount) for k, r in rows.items()}
     if op == "inventory":
         for ln in lines:  # учётное количество — остаток в момент проведения
             ln["book"] = fmt(stock[(ln["partId"], to_id)])
     new = apply_effects(stock, doc_effects(op, lines, from_id, to_id), names)
+    line_amounts(op, lines, stock, sums, from_id, to_id)
+    for pid, loc, a in amount_effects(op, lines, from_id, to_id):
+        sums[(pid, loc)] = sums.get((pid, loc), Decimal(0)) + a
     for k, r in rows.items():
         r.qty = new[k]
+        # Нулевой остаток не держит суммы: копейки округления средней уходят с последним расходом.
+        r.amount = sums[k] if new[k] else Decimal("0.00")
 
-    doc = EzsSpareDocument(
-        id=doc_id or uuid.uuid4(), company_id=company_id, op=op, number=number, doc_date=doc_date, status="posted",
+    head = dict(
+        op=op, number=number, doc_date=doc_date, status="posted", posted_at=datetime.now(timezone.utc),
         counterparty_id=cp.id if cp else None, counterparty_name=cp.name if cp else None,
         contract_id=contract.id if contract else None, contract_label=contract_label(contract),
         from_location_id=from_id, to_location_id=to_id,
         target_unit_id=unit.id if unit else None, target_location_id=site.id if site else None, target_note=note,
         repair_document_id=repair.id if repair else None,
-        responsible_from=(p.get("responsible_from") or "").strip()[:200] or None,
-        responsible_to=(p.get("responsible_to") or "").strip()[:200] or None,
+        # «Сдал» и «принял» по умолчанию — МОЛ складов из их карточек.
+        responsible_from=(p.get("responsible_from") or "").strip()[:200] or await _responsible(db, from_id),
+        responsible_to=(p.get("responsible_to") or "").strip()[:200] or await _responsible(db, to_id),
         basis=(p.get("basis") or "").strip()[:500] or None, comment=(p.get("comment") or "").strip()[:2000] or None,
-        lines=lines,
-        created_by_id=str(user.id) if user else None,
-        created_by_name=(user.name or user.email) if user else None,
+        lines=lines, **_primary(p),
     )
-    db.add(doc)
+    if into is not None:
+        doc = into
+        for k, v in head.items():
+            setattr(doc, k, v)
+    else:
+        doc = EzsSpareDocument(
+            id=doc_id or uuid.uuid4(), company_id=company_id, **head,
+            created_by_id=str(user.id) if user else None,
+            created_by_name=(user.name or user.email) if user else None,
+        )
+        db.add(doc)
     basis = (_title(doc) + (f"; {doc.basis}" if doc.basis else ""))[:300]
     for ln in lines:
+        amount = money(ln.get("amount"))
         if op == "inventory":
             delta = Decimal(ln["fact"]) - Decimal(ln["book"])
             if delta:
-                db.add(_move(doc, user, ln["partId"], "correction", abs(delta), delta=delta, to_location_id=to_id,
-                             occurred_on=doc_date, basis=basis, comment=doc.comment))
+                db.add(_move(doc, user, ln["partId"], "correction", abs(delta), delta=delta, amount=amount,
+                             to_location_id=to_id, occurred_on=doc_date, basis=basis, comment=doc.comment))
             continue
         db.add(_move(doc, user, ln["partId"], op, Decimal(ln["qty"]), from_location_id=from_id, to_location_id=to_id,
-                     target_unit_id=doc.target_unit_id, target_location_id=doc.target_location_id,
+                     target_unit_id=doc.target_unit_id, target_location_id=doc.target_location_id, amount=amount,
                      occurred_on=doc_date, basis=basis, comment=doc.comment))
     await db.flush()
     out = await get_document(db, company_id, doc.id)
@@ -278,10 +417,16 @@ async def cancel_document(db: AsyncSession, company_id, user: User | None, doc_i
         raise HTTPException(404, "Документ не найден")
     if d.status == "cancelled":
         raise HTTPException(409, f"Документ № {d.number} уже отменён")
+    if d.status == "draft":
+        raise HTTPException(409, f"Документ № {d.number} — черновик: его удаляют, а не отменяют")
+    await check_period(db, company_id, d.doc_date, "Отменяемый документ")
     reason = (reason or "").strip()[:500]
     if not reason:
         raise HTTPException(400, "Укажите причину отмены")
     effects = [(pid, loc, -x) for pid, loc, x in doc_effects(d.op, d.lines, d.from_location_id, d.to_location_id) if x]
+    money_back: dict[tuple[str, str], Decimal] = {}
+    for pid, loc, a in amount_effects(d.op, d.lines, d.from_location_id, d.to_location_id):
+        money_back[(pid, loc)] = money_back.get((pid, loc), Decimal(0)) - a
     ids = [ln["partId"] for ln in d.lines]
     names = dict((str(i), n) for i, n in (await db.execute(select(EzsSparePart.id, EzsSparePart.name).where(
         EzsSparePart.id.in_([uuid.UUID(i) for i in ids])))).all())
@@ -289,10 +434,12 @@ async def cancel_document(db: AsyncSession, company_id, user: User | None, doc_i
     new = apply_effects({k: Decimal(str(r.qty)) for k, r in rows.items()}, effects, names, cancel=True)
     for k, r in rows.items():
         r.qty = new[k]
+        r.amount = money(r.amount) + money_back.get(k, Decimal(0)) if new[k] else Decimal("0.00")
     # Сторно той же датой, что документ: остатки на прошлую дату считаются так, будто его не было.
     for pid, loc, x in effects:
-        db.add(_move(d, user, pid, "correction", abs(x), delta=x, to_location_id=loc, occurred_on=d.doc_date,
-                     basis=f"Отмена: {_title(d)}"[:300], comment=reason))
+        db.add(_move(d, user, pid, "correction", abs(x), delta=x, amount=money_back.get((pid, loc), Decimal(0)),
+                     to_location_id=loc, occurred_on=d.doc_date, basis=f"Отмена: {_title(d)}"[:300], comment=reason))
+        money_back.pop((pid, loc), None)  # сумма сторно — одна на пару, даже если строк было две
     d.status = "cancelled"
     d.cancelled_at = datetime.now(timezone.utc)
     d.cancelled_by_name = (user.name or user.email) if user else None
@@ -333,6 +480,10 @@ async def _heads(db: AsyncSession, company_id, docs: list[EzsSpareDocument]) -> 
             "cancelledAt": d.cancelled_at.isoformat() if d.cancelled_at else None,
             "cancelledBy": d.cancelled_by_name, "cancelReason": d.cancel_reason,
             "positions": len(d.lines or []),
+            "amount": float(sum(money(ln.get("amount")) for ln in d.lines or [])),
+            "primaryNumber": d.primary_number, "primaryDate": d.primary_date,
+            "bpRef": d.bp_ref, "bpExportedAt": d.bp_exported_at.isoformat() if d.bp_exported_at else None,
+            "postedAt": d.posted_at.isoformat() if d.posted_at else None,
         })
     return out
 
@@ -349,10 +500,15 @@ async def get_document(db: AsyncSession, company_id, doc_id) -> dict[str, Any]:
         row: dict[str, Any] = {"partId": ln["partId"], "name": x.name if x else "—", "article": x.article if x else None,
                                "category": x.category if x else None, "unitLabel": x.unit_label if x else ""}
         if d.op == "inventory":
-            book, fact = Decimal(ln["book"]), Decimal(ln["fact"])
-            row.update(book=float(book), fact=float(fact), delta=float(fact - book))
+            fact = Decimal(ln["fact"])
+            # У черновика описи учётного количества ещё нет — оно берётся при проведении.
+            book = Decimal(ln["book"]) if ln.get("book") is not None else None
+            row.update(book=float(book) if book is not None else None, fact=float(fact),
+                       delta=float(fact - book) if book is not None else None)
         else:
             row["qty"] = float(ln["qty"])
+        row["price"] = float(ln["price"]) if ln.get("price") is not None else None
+        row["amount"] = float(ln["amount"]) if ln.get("amount") is not None else None
         lines.append(row)
     lines.sort(key=lambda r: r["name"].lower())
     return {**(await _heads(db, company_id, [d]))[0], "lines": lines}

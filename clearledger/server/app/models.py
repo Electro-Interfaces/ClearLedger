@@ -6177,6 +6177,18 @@ class EzsEquipmentUnit(Base):
     supply_line_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     purchase_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     vat_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    # ── Реквизиты для 1С:Бухгалтерии (14.10.2026, services/ezs_accounting.py) ──
+    # Номенклатура (модель) из справочника `ezs_spare_parts`; поставщик и
+    # балансодержатель — карточки контрагентов (текст `supplier`/`owner_name` —
+    # исходник реестра). ОКОФ, амортгруппа и срок нужны документу «Принятие к
+    # учёту ОС»; `bp_ref` — ссылка объекта в БП после выгрузки.
+    nomenclature_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    okof: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    depreciation_group: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    useful_life_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bp_ref: Mapped[str | None] = mapped_column(String(60), nullable=True)
     # Жизненный цикл: in_stock_new | in_stock_used | reserved | in_installation |
     # in_operation | in_repair | returned_to_vendor | written_off (терминальные два).
     # Переходы — словарь TRANSITIONS в services/ezs_equipment.py (валидация на бэке).
@@ -6263,6 +6275,12 @@ class EzsEquipmentMovement(Base):
     # Единица до движения (состояние, место, держатель, даты): по этому снимку
     # отмена документа возвращает её назад, не угадывая прежние значения.
     prev: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Проводка движения (14.10.2026): счёт до и после (07 → 08.03 → 01.01), сумма —
+    # стоимость единицы на момент движения, контрагент — ссылкой на справочник.
+    account_from: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    account_to: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     __table_args__ = (
         Index("ix_ezs_move_company_date", "company_id", "occurred_on"),
@@ -6305,6 +6323,13 @@ class EzsEquipmentDocument(Base):
     created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Первичный документ (УПД, акт, накладная контрагента) и выгрузка в 1С (14.10.2026).
+    # Статус `draft` — черновик: номер занят, движений нет, состав в `details.draft`.
+    primary_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    primary_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    bp_ref: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    bp_exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("company_id", "number", name="uq_ezs_eq_doc_number"),
@@ -6542,6 +6567,15 @@ class EzsSparePart(Base):
     compatible_models: Mapped[str | None] = mapped_column(String(300), nullable=True)
     unit_label: Mapped[str] = mapped_column(String(20), nullable=False, default="шт")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ── Номенклатура под 1С (14.10.2026, services/ezs_accounting.py) ──
+    # Справочник один на запчасти и модели станций: вид задаёт счёт по умолчанию и
+    # учёт по экземплярам (станция, оборудование) или количеством (ЗИП, материалы).
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="spare", server_default="spare")
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    unit_code: Mapped[str | None] = mapped_column(String(4), nullable=True)       # ОКЕИ: 796 — шт
+    vat_rate: Mapped[str | None] = mapped_column(String(20), nullable=True)       # 20% | 10% | 0% | Без НДС
+    account: Mapped[str | None] = mapped_column(String(10), nullable=True)        # счёт учёта БП
+    bp_ref: Mapped[str | None] = mapped_column(String(60), nullable=True)
     # Удаление при наличии движений запрещено — архив (скрытие из подбора).
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -6565,6 +6599,8 @@ class EzsSparePartStock(Base):
     location_id: Mapped[str] = mapped_column(
         String(40), ForeignKey("service_locations.id", ondelete="CASCADE"), nullable=False)
     qty: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False, default=0)
+    # Сумма остатка: расход списывается по средней (amount / qty) — 14.10.2026.
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0, server_default="0")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -6613,6 +6649,9 @@ class EzsSparePartMovement(Base):
     # инвентаризации и сторно отменённого документа; qty у них = |delta|. У старых
     # корректировок (до 13.10.2026) delta пуст, а qty — установленный остаток.
     delta: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+    # Стоимость движения (14.10.2026): приход — по цене документа, расход — по средней
+    # остатка; у корректировки знак как у delta.
+    amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
 
     __table_args__ = (
         Index("ix_ezs_spmove_company_date", "company_id", "occurred_on"),
@@ -6659,6 +6698,12 @@ class EzsSpareDocument(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     cancel_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Первичный документ и выгрузка в 1С; статус `draft` — черновик без движений.
+    primary_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    primary_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    bp_ref: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    bp_exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("company_id", "number", name="uq_ezs_spare_doc_number"),

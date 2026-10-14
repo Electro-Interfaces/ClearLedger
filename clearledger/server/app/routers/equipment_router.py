@@ -71,6 +71,17 @@ class UnitPatch(BaseModel):
     purchaseDate: str | None = None
     warrantyUntil: str | None = None
     notes: str | None = None
+    # Реквизиты для 1С (14.10.2026): номенклатура, контрагенты ссылками, стоимость, ОС.
+    nomenclatureId: str | None = None
+    supplierId: str | None = None
+    ownerId: str | None = None
+    purchaseAmount: float | None = Field(None, ge=0)
+    vatAmount: float | None = Field(None, ge=0)
+    accountingNo: str | None = None
+    okof: str | None = None
+    depreciationGroup: str | None = None
+    usefulLifeMonths: int | None = Field(None, ge=1, le=1200)
+    bpRef: str | None = None
 
 
 class MovementIn(BaseModel):
@@ -103,6 +114,13 @@ class SparePartIn(BaseModel):
     compatibleModels: str | None = None
     unitLabel: str = "шт"
     notes: str | None = None
+    # Номенклатура под 1С: вид, модель, единица ОКЕИ, ставка НДС, счёт, ссылка БП.
+    kind: str = "spare"
+    model: str | None = None
+    unitCode: str | None = None
+    vatRate: str | None = None
+    account: str | None = None
+    bpRef: str | None = None
 
 
 class SpareMovementIn(BaseModel):
@@ -162,6 +180,11 @@ def _unit_out(u: EzsEquipmentUnit, locs: dict[str, ServiceLocation],
         "supplyId": str(u.supply_id) if u.supply_id else None,
         "supplyLineId": str(u.supply_line_id) if u.supply_line_id else None,
         "supplyNumber": (supplies or {}).get(u.supply_id) if u.supply_id else None,
+        "nomenclatureId": str(u.nomenclature_id) if u.nomenclature_id else None,
+        "supplierId": str(u.supplier_id) if u.supplier_id else None,
+        "ownerId": str(u.owner_id) if u.owner_id else None,
+        "okof": u.okof, "depreciationGroup": u.depreciation_group,
+        "usefulLifeMonths": u.useful_life_months, "bpRef": u.bp_ref,
         "createdAt": u.created_at.isoformat() if u.created_at else None,
         "updatedAt": u.updated_at.isoformat() if u.updated_at else None,
         "allowedOps": allowed_ops(u.state),
@@ -418,7 +441,26 @@ async def get_unit(
     out = _unit_out(unit, locs, supplies)
     docs = await _doc_numbers(db, moves)
     out["movements"] = [_move_out(m, locs, supplies=supplies, docs=docs) for m in moves]
-    return out
+    return {**out, **await _unit_refs(db, unit)}
+
+
+async def _unit_refs(db: AsyncSession, unit: EzsEquipmentUnit) -> dict[str, Any]:
+    """Названия справочных ссылок карточки: номенклатура, поставщик, балансодержатель."""
+    from app.models import Counterparty
+    from app.services.ezs_accounting import KINDS, default_account, unit_account
+    from app.services.ezs_equipment import stock_account
+    part = await db.get(EzsSparePart, unit.nomenclature_id) if unit.nomenclature_id else None
+    sup = await db.get(Counterparty, unit.supplier_id) if unit.supplier_id else None
+    own = await db.get(Counterparty, unit.owner_id) if unit.owner_id else None
+    return {
+        "nomenclature": {"id": str(part.id), "name": part.name, "kind": part.kind,
+                         "kindLabel": KINDS.get(part.kind, ("", "", False))[0],
+                         "account": part.account or default_account(part.kind)} if part is not None else None,
+        "supplierName": sup.name if sup is not None else None,
+        "ownerRefName": own.name if own is not None else None,
+        # Счёт, на котором единица числится сейчас (07 → 08.03 → 01.01).
+        "account": unit_account(unit.state, await stock_account(db, unit)),
+    }
 
 
 @router.patch("/units/{unit_id}")
@@ -439,7 +481,30 @@ async def patch_unit(
         "inventoryNumber": "inventory_number", "supplier": "supplier",
         "purchaseDoc": "purchase_doc", "purchaseDate": "purchase_date",
         "warrantyUntil": "warranty_until", "notes": "notes",
+        "nomenclatureId": "nomenclature_id", "supplierId": "supplier_id", "ownerId": "owner_id",
+        "purchaseAmount": "purchase_amount", "vatAmount": "vat_amount", "accountingNo": "accounting_no",
+        "okof": "okof", "depreciationGroup": "depreciation_group", "usefulLifeMonths": "useful_life_months",
+        "bpRef": "bp_ref",
     }
+    from app.services.ezs_equipment_docs import check_counterparty
+    from app.services.ezs_accounting import SERIAL_KINDS
+    if data.get("nomenclatureId"):
+        part = await db.get(EzsSparePart, uuid.UUID(data["nomenclatureId"]))
+        if part is None or part.company_id != cid:
+            raise HTTPException(400, "Номенклатура не найдена в справочнике пространства")
+        if part.kind not in SERIAL_KINDS:
+            raise HTTPException(400, f"«{part.name}» учитывается количеством, а не по экземплярам — "
+                                     "выберите номенклатуру вида «Зарядная станция» или «Оборудование»")
+        data["nomenclatureId"] = part.id
+    for key in ("supplierId", "ownerId"):
+        if data.get(key):
+            data[key] = (await check_counterparty(db, cid, data[key])).id
+    for key in ("nomenclatureId", "supplierId", "ownerId"):
+        if key in data and not data[key]:
+            data[key] = None
+    for key in ("accountingNo", "okof", "depreciationGroup", "bpRef"):
+        if key in data:
+            data[key] = (data[key] or "").strip() or None
     if "serialNumber" in data:
         s = (data["serialNumber"] or "").strip() or None
         if s and await _serial_conflict(db, cid, s, exclude_id=unit.id):
@@ -453,7 +518,7 @@ async def patch_unit(
     await db.flush()
     await db.refresh(unit)
     locs = await _locations_map(db, cid)
-    return _unit_out(unit, locs)
+    return {**_unit_out(unit, locs), **await _unit_refs(db, unit)}
 
 
 @router.delete("/units/{unit_id}")
@@ -593,6 +658,9 @@ class EquipmentDocIn(BaseModel):
     toState: str | None = None
     syncPassport: bool = False
     details: dict[str, Any] | None = None
+    primaryNumber: str | None = None
+    primaryDate: str | None = None
+    draft: bool = False              # сохранить черновиком: номер занят, движений нет
 
 
 class WarehouseIn(BaseModel):
@@ -602,8 +670,23 @@ class WarehouseIn(BaseModel):
     counterpartyId: str | None = None
     contractId: str | None = None
     responsible: str | None = None
+    responsibleUserId: str | None = None
     phone: str | None = None
     note: str | None = None
+    bpCode: str | None = None
+    bpRef: str | None = None
+
+
+def _doc_payload(body: EquipmentDocIn) -> dict[str, Any]:
+    return {
+        "op": body.op, "unit_ids": body.unitIds, "doc_date": body.docDate, "number": body.number,
+        "to_location_id": body.toLocationId, "counterparty_id": body.counterpartyId,
+        "contract_id": body.contractId, "responsible_from": body.responsibleFrom,
+        "responsible_to": body.responsibleTo, "basis": body.basis, "comment": body.comment,
+        "custodian": body.custodian, "reserved_for_location_id": body.reservedForLocationId,
+        "to_state": body.toState, "sync_passport": body.syncPassport, "details": body.details,
+        "primary_number": body.primaryNumber, "primary_date": body.primaryDate,
+    }
 
 
 @router.get("/documents/meta")
@@ -648,17 +731,46 @@ async def documents_post(
     body: EquipmentDocIn, company_id: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Провести документ движения по одной или нескольким единицам — атомарно."""
+    """Провести документ движения по одной или нескольким единицам — атомарно,
+    либо сохранить черновиком (`draft`)."""
     from app.services import ezs_equipment_docs as D
     cid = await assert_company_member(company_id, user, db)
-    return await D.post_document(db, cid, user, {
-        "op": body.op, "unit_ids": body.unitIds, "doc_date": body.docDate, "number": body.number,
-        "to_location_id": body.toLocationId, "counterparty_id": body.counterpartyId,
-        "contract_id": body.contractId, "responsible_from": body.responsibleFrom,
-        "responsible_to": body.responsibleTo, "basis": body.basis, "comment": body.comment,
-        "custodian": body.custodian, "reserved_for_location_id": body.reservedForLocationId,
-        "to_state": body.toState, "sync_passport": body.syncPassport, "details": body.details,
-    })
+    if body.draft:
+        return await D.save_draft(db, cid, user, _doc_payload(body))
+    return await D.post_document(db, cid, user, _doc_payload(body))
+
+
+@router.patch("/documents/{doc_id}")
+async def documents_draft_update(
+    doc_id: uuid.UUID, body: EquipmentDocIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Изменить черновик: проведённый документ не правится."""
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.save_draft(db, cid, user, _doc_payload(body), doc_id=doc_id)
+
+
+@router.post("/documents/{doc_id}/post")
+async def documents_draft_post(
+    doc_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Провести черновик: те же проверки, что у документа, проведённого сразу."""
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.post_draft(db, cid, user, doc_id)
+
+
+@router.delete("/documents/{doc_id}")
+async def documents_draft_delete(
+    doc_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Удалить черновик. Проведённый документ не удаляется — он отменяется."""
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.delete_draft(db, cid, doc_id)
 
 
 class CancelIn(BaseModel):
@@ -720,6 +832,142 @@ async def warehouse_update(
     return await D.save_warehouse(db, cid, loc_id, body.model_dump(exclude_unset=True))
 
 
+class WarehouseStatusIn(BaseModel):
+    closed: bool
+
+
+@router.post("/warehouses/{loc_id}/status")
+async def warehouse_status(
+    loc_id: str, body: WarehouseStatusIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Закрыть пустой склад (уходит из выбора, история остаётся) или открыть снова."""
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.set_warehouse_status(db, cid, loc_id, body.closed)
+
+
+@router.delete("/warehouses/{loc_id}")
+async def warehouse_delete(
+    loc_id: str, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Удалить склад, заведённый по ошибке: без единиц, остатков и истории."""
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    out = await D.delete_warehouse(db, cid, loc_id)
+    db.add(AuditEvent(company_id=cid, user_id=str(user.id), user_name=user.name or user.email,
+                      action="equipment_warehouse_delete", details=json.dumps(out, ensure_ascii=False)))
+    return out
+
+
+# ─── настройки учёта: закрытый период ───────────────────────────────────────
+
+class EquipmentSettingsIn(BaseModel):
+    closedUntil: str | None = None
+
+
+@router.get("/settings")
+async def equipment_settings(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services.ezs_equipment import closed_until
+    cid = await assert_company_member(company_id, user, db)
+    return {"closedUntil": await closed_until(db, cid)}
+
+
+@router.put("/settings")
+async def equipment_settings_update(
+    body: EquipmentSettingsIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Закрыть период по дату включительно — как дата запрета изменений в 1С.
+
+    Меняет администратор пространства: закрытие отрезает отмену документов, и
+    поставить его по ошибке рядовой участник не должен.
+    """
+    from app.models import Company, UserCompany
+    cid = await assert_company_member(company_id, user, db)
+    if not user.is_superadmin:
+        role = (await db.execute(select(UserCompany.role).where(
+            UserCompany.user_id == user.id, UserCompany.company_id == cid))).scalar_one_or_none()
+        if role != "admin":
+            raise HTTPException(403, "Закрывает период администратор пространства")
+    day = (body.closedUntil or "").strip() or None
+    if day:
+        try:
+            day = date.fromisoformat(day).isoformat()
+        except ValueError:
+            raise HTTPException(400, "Дата закрытия периода указана неверно")
+    company = await db.get(Company, cid)
+    custom = dict(company.customization or {})
+    custom["equipment"] = {**(custom.get("equipment") or {}), "closedUntil": day}
+    company.customization = custom
+    db.add(AuditEvent(company_id=cid, user_id=str(user.id), user_name=user.name or user.email,
+                      action="equipment_period_close", details=json.dumps({"closedUntil": day}, ensure_ascii=False)))
+    await db.flush()
+    return {"closedUntil": day}
+
+
+@router.get("/accounting/meta")
+async def accounting_meta(user: User = Depends(get_current_user)):
+    """Справочники учёта под 1С: виды номенклатуры, счета, единицы ОКЕИ, ставки НДС."""
+    from app.services.ezs_accounting import ACCOUNTS, KINDS, OKEI, VAT_RATES
+    return {"kinds": {k: {"label": l, "account": a, "serial": s} for k, (l, a, s) in KINDS.items()},
+            "accounts": ACCOUNTS, "okei": OKEI, "vatRates": list(VAT_RATES)}
+
+
+class NomenclatureFromUnitsIn(BaseModel):
+    unitIds: list[str] = Field(default_factory=list)
+    dryRun: bool = False
+
+
+@router.post("/nomenclature/from-units")
+async def nomenclature_from_units(
+    body: NomenclatureFromUnitsIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Связать единицы без номенклатуры с номенклатурой по их модели.
+
+    Группа — «производитель модель» из карточки; номенклатура с таким названием
+    берётся из справочника, иначе заводится видом «Зарядная станция» (счёт 07).
+    `dryRun` показывает группы, ничего не меняя.
+    """
+    from app.services.ezs_equipment_reports import unit_item
+    cid = await assert_company_member(company_id, user, db)
+    U = EzsEquipmentUnit
+    q = select(U).where(U.company_id == cid, U.nomenclature_id.is_(None))
+    if body.unitIds:
+        q = q.where(U.id.in_([uuid.UUID(i) for i in body.unitIds]))
+    units = (await db.execute(q)).scalars().all()
+    groups: dict[str, list[EzsEquipmentUnit]] = {}
+    for u in units:
+        groups.setdefault(unit_item(u, {})[1], []).append(u)
+    parts = {p.name.strip().lower(): p for p in (await db.execute(select(EzsSparePart).where(
+        EzsSparePart.company_id == cid))).scalars().all()}
+    out = []
+    for name, members in sorted(groups.items()):
+        found = parts.get(name.lower())
+        out.append({"name": name, "units": len(members), "exists": found is not None,
+                    "nomenclatureId": str(found.id) if found is not None else None})
+        if body.dryRun or name == "Модель не указана":
+            continue
+        if found is None:
+            first = members[0]
+            found = EzsSparePart(company_id=cid, name=name[:300], kind="station", category="other",
+                                 vendor=first.vendor or first.brand, model=first.model, unit_label="шт",
+                                 unit_code="796", vat_rate="20%", account="07")
+            db.add(found)
+            await db.flush()
+            parts[name.lower()] = found
+            out[-1]["nomenclatureId"] = str(found.id)
+        for u in members:
+            u.nomenclature_id = found.id
+    await db.flush()
+    return {"groups": out, "linked": 0 if body.dryRun else sum(g["units"] for g in out if g["name"] != "Модель не указана")}
+
+
 @router.get("/warehouses/summary")
 async def warehouses_summary(
     company_id: str = Query(...),
@@ -762,18 +1010,29 @@ async def warehouses_summary(
         .group_by(U.custodian)
     )).all()
 
+    # Сумма остатка склада: стоимость единиц на складе и сумма остатка ЗИП.
+    unit_cost = dict((await db.execute(
+        select(U.current_location_id, func.coalesce(func.sum(U.purchase_amount), 0))
+        .where(U.company_id == cid, U.current_location_id.is_not(None),
+               U.state.in_(("in_stock_new", "in_stock_used", "reserved")))
+        .group_by(U.current_location_id))).all())
+    spare_cost = dict((await db.execute(
+        select(EzsSparePartStock.location_id, func.coalesce(func.sum(EzsSparePartStock.amount), 0))
+        .where(EzsSparePartStock.company_id == cid).group_by(EzsSparePartStock.location_id))).all())
     from app.services.ezs_equipment_docs import warehouse_card as _card
     out = []
-    for wh in sorted(warehouses, key=lambda w: w.name):
+    for wh in sorted(warehouses, key=lambda w: (w.status == "closed", w.name)):
         states = by_wh.get(wh.id, {})
         sp = spare_by_wh.get(wh.id, {"positions": 0, "qty": 0.0})
         out.append({
             "card": await _card(db, cid, wh),
             "location": _loc_brief(wh),
+            "status": "closed" if wh.status == "closed" else "active",
             "unitsByState": states,
             "unitsTotal": sum(states.values()),
             "sparePositions": sp["positions"],
             "spareQty": sp["qty"],
+            "amount": float(unit_cost.get(wh.id, 0) or 0) + float(spare_cost.get(wh.id, 0) or 0),
         })
     external = [{
         "custodian": r[0],
@@ -860,12 +1119,35 @@ async def import_units(
 # ─── ЗИП ────────────────────────────────────────────────────────────────────
 
 def _part_out(p: EzsSparePart) -> dict[str, Any]:
+    from app.services.ezs_accounting import KINDS, default_account, unit_label
     return {
         "id": str(p.id), "name": p.name, "category": p.category,
         "vendor": p.vendor, "article": p.article,
-        "compatibleModels": p.compatible_models, "unitLabel": p.unit_label,
+        "compatibleModels": p.compatible_models, "unitLabel": unit_label(p.unit_code, p.unit_label),
         "notes": p.notes, "isArchived": p.is_archived,
+        "kind": p.kind or "spare", "kindLabel": KINDS.get(p.kind or "spare", ("", "", False))[0],
+        "serial": KINDS.get(p.kind or "spare", ("", "", False))[2],
+        "model": p.model, "unitCode": p.unit_code, "vatRate": p.vat_rate,
+        "account": p.account or default_account(p.kind), "bpRef": p.bp_ref,
     }
+
+
+def _part_fields(body: SparePartIn) -> dict[str, Any]:
+    """Поля номенклатуры из формы с проверкой справочников учёта."""
+    from app.services.ezs_accounting import ACCOUNTS, KINDS, OKEI, VAT_RATES, default_account, okei_code
+    if body.kind not in KINDS:
+        raise HTTPException(400, "Неизвестный вид номенклатуры")
+    code = (body.unitCode or "").strip() or okei_code(body.unitLabel)
+    if code not in OKEI:
+        raise HTTPException(400, "Единица измерения — из классификатора ОКЕИ")
+    if body.vatRate and body.vatRate not in VAT_RATES:
+        raise HTTPException(400, "Ставка НДС — 20%, 10%, 0% или «Без НДС»")
+    account = (body.account or "").strip() or default_account(body.kind)
+    if account not in ACCOUNTS:
+        raise HTTPException(400, f"Счёт учёта {account} не из плана счетов раздела")
+    return {"kind": body.kind, "model": (body.model or "").strip() or None, "unit_code": code,
+            "unit_label": OKEI[code], "vat_rate": body.vatRate or None, "account": account,
+            "bp_ref": (body.bpRef or "").strip() or None}
 
 
 @router.get("/spare-parts")
@@ -873,8 +1155,12 @@ async def list_spare_parts(
     company_id: str = Query(...),
     q: str | None = Query(None), category: str | None = Query(None),
     include_archived: bool = Query(False),
+    kind: str | None = Query(None), include_serial: bool = Query(False),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
+    """Номенклатура. По умолчанию — количественная (ЗИП, материалы): её показывают
+    остатки и строки документов ЗИП. Модели станций — `include_serial` или `kind`."""
+    from app.services.ezs_accounting import SERIAL_KINDS
     cid = await assert_company_member(company_id, user, db)
     P = EzsSparePart
     conds = [P.company_id == cid]
@@ -882,6 +1168,10 @@ async def list_spare_parts(
         conds.append(P.is_archived.is_(False))
     if category:
         conds.append(P.category == category)
+    if kind:
+        conds.append(P.kind.in_(kind.split(",")))
+    elif not include_serial:
+        conds.append(P.kind.notin_(tuple(SERIAL_KINDS)))
     if q:
         like = f"%{q.strip()}%"
         conds.append(P.name.ilike(like) | P.article.ilike(like) | P.vendor.ilike(like))
@@ -897,12 +1187,17 @@ async def list_spare_parts(
         by_part.setdefault(str(s.part_id), []).append({
             "locationId": s.location_id,
             "locationName": locs.get(s.location_id).name if locs.get(s.location_id) else "—",
-            "qty": float(s.qty),
+            "qty": float(s.qty), "amount": float(s.amount or 0),
         })
+    units_by_part = dict((await db.execute(select(EzsEquipmentUnit.nomenclature_id, func.count()).where(
+        EzsEquipmentUnit.company_id == cid, EzsEquipmentUnit.nomenclature_id.is_not(None))
+        .group_by(EzsEquipmentUnit.nomenclature_id))).all())
     out = []
     for p in parts:
         rows = by_part.get(str(p.id), [])
-        out.append({**_part_out(p), "totalQty": sum(r["qty"] for r in rows), "byLocation": rows})
+        out.append({**_part_out(p), "totalQty": sum(r["qty"] for r in rows),
+                    "totalAmount": round(sum(r["amount"] for r in rows), 2), "byLocation": rows,
+                    "units": int(units_by_part.get(p.id) or 0)})
     return out
 
 
@@ -923,8 +1218,8 @@ async def create_spare_part(
     p = EzsSparePart(
         company_id=cid, name=body.name.strip(), category=body.category,
         vendor=body.vendor, article=body.article,
-        compatible_models=body.compatibleModels, unit_label=body.unitLabel,
-        notes=body.notes,
+        compatible_models=body.compatibleModels,
+        notes=body.notes, **_part_fields(body),
     )
     db.add(p)
     await db.flush()
@@ -940,13 +1235,31 @@ async def update_spare_part(
     p = await db.get(EzsSparePart, part_id)
     if p is None or p.company_id != cid:
         raise HTTPException(404, "Номенклатура не найдена")
+    from app.services.ezs_accounting import SERIAL_KINDS
+    fields = _part_fields(body)
+    # Вид меняет способ учёта: запчасть с остатком не становится станцией, а модель
+    # с единицами — количественной позицией.
+    if (fields["kind"] in SERIAL_KINDS) != ((p.kind or "spare") in SERIAL_KINDS):
+        used = int((await db.execute(select(func.count()).select_from(EzsSparePartMovement).where(
+            EzsSparePartMovement.part_id == part_id))).scalar_one()) + int((await db.execute(
+            select(func.count()).select_from(EzsEquipmentUnit).where(
+                EzsEquipmentUnit.nomenclature_id == part_id))).scalar_one())
+        if used:
+            raise HTTPException(409, "По номенклатуре уже есть движения или единицы — вид учёта "
+                                     "(по экземплярам или количеством) не меняется")
+    dup = (await db.execute(select(EzsSparePart.id).where(
+        EzsSparePart.company_id == cid, EzsSparePart.id != part_id,
+        func.lower(EzsSparePart.name) == body.name.strip().lower()).limit(1))).scalar_one_or_none()
+    if dup is not None:
+        raise HTTPException(409, f"Номенклатура «{body.name.strip()}» уже есть")
     p.name = body.name.strip()
     p.category = body.category
     p.vendor = body.vendor
     p.article = body.article
     p.compatible_models = body.compatibleModels
-    p.unit_label = body.unitLabel
     p.notes = body.notes
+    for k, v in fields.items():
+        setattr(p, k, v)
     await db.flush()
     return _part_out(p)
 
@@ -963,6 +1276,8 @@ async def delete_spare_part(
     n = int((await db.execute(
         select(func.count()).select_from(EzsSparePartMovement)
         .where(EzsSparePartMovement.part_id == part_id)
+    )).scalar_one()) + int((await db.execute(
+        select(func.count()).select_from(EzsEquipmentUnit).where(EzsEquipmentUnit.nomenclature_id == part_id)
     )).scalar_one())
     if n > 0:
         p.is_archived = True
@@ -1076,6 +1391,7 @@ class SpareDocLineIn(BaseModel):
     partId: str
     qty: float | None = None         # у описи не заполняется
     fact: float | None = None        # фактическое количество — только у описи
+    price: float | None = Field(None, ge=0)  # цена без НДС: приход; у описи — оценка излишка
 
 
 class SpareDocIn(BaseModel):
@@ -1096,10 +1412,27 @@ class SpareDocIn(BaseModel):
     responsibleTo: str | None = None
     basis: str | None = None
     comment: str | None = None
+    primaryNumber: str | None = None
+    primaryDate: str | None = None
+    draft: bool = False
 
 
 class SpareDocCancelIn(BaseModel):
     reason: str
+
+
+def _spare_doc_payload(body: SpareDocIn) -> dict[str, Any]:
+    return {
+        "id": body.id, "op": body.op, "doc_date": body.docDate, "number": body.number,
+        "lines": [ln.model_dump() for ln in body.lines],
+        "from_location_id": body.fromLocationId, "to_location_id": body.toLocationId,
+        "target_unit_id": body.targetUnitId, "target_location_id": body.targetLocationId,
+        "target_note": body.targetNote, "repair_document_id": body.repairDocumentId,
+        "counterparty_id": body.counterpartyId, "contract_id": body.contractId,
+        "responsible_from": body.responsibleFrom, "responsible_to": body.responsibleTo,
+        "basis": body.basis, "comment": body.comment,
+        "primary_number": body.primaryNumber, "primary_date": body.primaryDate,
+    }
 
 
 @router.get("/spare-documents/count-sheet")
@@ -1145,19 +1478,42 @@ async def spare_documents_post(
     body: SpareDocIn, company_id: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Провести документ ЗИП на одну или несколько строк — атомарно."""
+    """Провести документ ЗИП на одну или несколько строк — атомарно, либо сохранить черновиком."""
     from app.services import ezs_spare_docs as SD
     cid = await assert_company_member(company_id, user, db)
-    return await SD.post_document(db, cid, user, {
-        "id": body.id, "op": body.op, "doc_date": body.docDate, "number": body.number,
-        "lines": [ln.model_dump() for ln in body.lines],
-        "from_location_id": body.fromLocationId, "to_location_id": body.toLocationId,
-        "target_unit_id": body.targetUnitId, "target_location_id": body.targetLocationId,
-        "target_note": body.targetNote, "repair_document_id": body.repairDocumentId,
-        "counterparty_id": body.counterpartyId, "contract_id": body.contractId,
-        "responsible_from": body.responsibleFrom, "responsible_to": body.responsibleTo,
-        "basis": body.basis, "comment": body.comment,
-    })
+    if body.draft:
+        return await SD.save_draft(db, cid, user, _spare_doc_payload(body))
+    return await SD.post_document(db, cid, user, _spare_doc_payload(body))
+
+
+@router.patch("/spare-documents/{doc_id}")
+async def spare_documents_draft_update(
+    doc_id: uuid.UUID, body: SpareDocIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_spare_docs as SD
+    cid = await assert_company_member(company_id, user, db)
+    return await SD.save_draft(db, cid, user, _spare_doc_payload(body), doc_id=doc_id)
+
+
+@router.post("/spare-documents/{doc_id}/post")
+async def spare_documents_draft_post(
+    doc_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_spare_docs as SD
+    cid = await assert_company_member(company_id, user, db)
+    return await SD.post_draft(db, cid, user, doc_id)
+
+
+@router.delete("/spare-documents/{doc_id}")
+async def spare_documents_draft_delete(
+    doc_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_spare_docs as SD
+    cid = await assert_company_member(company_id, user, db)
+    return await SD.delete_draft(db, cid, doc_id)
 
 
 @router.post("/spare-documents/{doc_id}/cancel")

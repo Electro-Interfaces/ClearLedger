@@ -11,6 +11,11 @@
 справочников пространства, ответственных (кто сдал, кто принял) и основание.
 Договор проверяется: этой компании, этого контрагента, не закрыт; истёкший срок —
 предупреждение в ответе, а не отказ (договоры продлевают задним числом).
+
+С 14.10.2026 документ бывает черновиком (`draft`): номер занят, состав лежит в
+`details.draft`, движений нет — проводится отдельным действием. У документа есть
+номер и дата первичного документа контрагента (УПД, акт), а дата не может
+попасть в закрытый период (`check_period`, как дата запрета изменений в 1С).
 """
 from __future__ import annotations
 
@@ -27,7 +32,7 @@ from app.models import (
     Contract, Counterparty, EzsEquipmentDocument, EzsEquipmentMovement, EzsEquipmentUnit,
     ServiceLocation, User,
 )
-from app.services.ezs_equipment import OP_LABELS, STATE_LABELS, TRANSITIONS, apply_movement
+from app.services.ezs_equipment import OP_LABELS, STATE_LABELS, TRANSITIONS, apply_movement, check_period
 
 # Префикс номера и название документа по операции.
 DOC_KINDS: dict[str, tuple[str, str]] = {
@@ -215,8 +220,16 @@ async def _storage(db: AsyncSession, company_id, unit_ids: list[str], to_locatio
 
 
 async def _head(db: AsyncSession, company_id, user: User | None, op: str, doc_date: str, *,
-                number: str | None = None, details: dict | None = None, **fields) -> EzsEquipmentDocument:
-    """Шапка документа с номером: своим или следующим в ряду вида."""
+                number: str | None = None, details: dict | None = None, into: EzsEquipmentDocument | None = None,
+                **fields) -> EzsEquipmentDocument:
+    """Шапка документа с номером: своим или следующим в ряду вида. `into` — черновик,
+    который проводится: номер и id остаются его."""
+    if into is not None:
+        into.op, into.doc_date, into.details = op, doc_date, details
+        for k, v in fields.items():
+            setattr(into, k, v)
+        await db.flush()
+        return into
     number = (number or "").strip() or await next_number(db, company_id, doc_kind(op, details)[0], doc_date)
     clash = (await db.execute(select(EzsEquipmentDocument.id).where(
         EzsEquipmentDocument.company_id == company_id, EzsEquipmentDocument.number == number))).first()
@@ -229,6 +242,23 @@ async def _head(db: AsyncSession, company_id, user: User | None, op: str, doc_da
     db.add(doc)
     await db.flush()
     return doc
+
+
+def _primary(p: dict[str, Any]) -> dict[str, Any]:
+    """Номер и дата первичного документа контрагента (УПД, акт, накладная)."""
+    day = (p.get("primary_date") or "").strip() or None
+    if day:
+        try:
+            day = date.fromisoformat(day).isoformat()
+        except ValueError:
+            raise HTTPException(400, "Дата первичного документа указана неверно")
+    return {"primary_number": (p.get("primary_number") or "").strip()[:100] or None, "primary_date": day}
+
+
+async def _responsible(db: AsyncSession, loc_id: str | None) -> str | None:
+    """МОЛ склада из его карточки — подставляется в «сдал» / «принял»."""
+    loc = await db.get(ServiceLocation, loc_id) if loc_id else None
+    return _wh(loc).get("responsible") if loc is not None and loc.type == "warehouse" else None
 
 
 def _basis(doc: EzsEquipmentDocument) -> str:
@@ -256,7 +286,70 @@ async def document_for(db: AsyncSession, company_id, user: User | None, op: str,
     return doc
 
 
-async def post_document(db: AsyncSession, company_id, user: User | None, p: dict[str, Any]) -> dict[str, Any]:
+# Поля формы, которые черновик хранит как есть, чтобы провести их позже.
+_DRAFT_KEYS = ("unit_ids", "to_location_id", "counterparty_id", "contract_id", "responsible_from",
+               "responsible_to", "basis", "comment", "custodian", "reserved_for_location_id", "to_state",
+               "sync_passport", "details", "primary_number", "primary_date")
+
+
+def _draft_payload(p: dict[str, Any]) -> dict[str, Any]:
+    out = {k: p.get(k) for k in _DRAFT_KEYS if p.get(k) not in (None, "", [])}
+    out["unit_ids"] = list(dict.fromkeys(str(u) for u in (p.get("unit_ids") or [])))[:500]
+    for k in ("counterparty_id", "contract_id"):
+        if out.get(k):
+            out[k] = str(out[k])
+    return out
+
+
+async def save_draft(db: AsyncSession, company_id, user: User | None, p: dict[str, Any],
+                     doc_id=None) -> dict[str, Any]:
+    """Черновик: номер занят, состав сохранён, движений нет. Проверки — при проведении."""
+    op = p.get("op")
+    if op not in DOC_KINDS or op not in TRANSITIONS or op == "receipt":
+        raise HTTPException(400, f"Неизвестная операция: {op}")
+    try:
+        doc_date = date.fromisoformat((p.get("doc_date") or "").strip()).isoformat()
+    except ValueError:
+        raise HTTPException(400, "Укажите дату документа")
+    cp = await check_counterparty(db, company_id, p.get("counterparty_id"))
+    draft = _draft_payload(p)
+    fields = dict(status="draft", counterparty_id=cp.id if cp else None, counterparty_name=cp.name if cp else None,
+                  to_location_id=p.get("to_location_id") or None, **_primary(p),
+                  basis=(p.get("basis") or "").strip()[:500] or None, comment=(p.get("comment") or "").strip()[:2000] or None)
+    if doc_id is None:
+        doc = await _head(db, company_id, user, op, doc_date, number=p.get("number"), details={"draft": draft}, **fields)
+    else:
+        doc = await _draft_doc(db, company_id, doc_id)
+        doc = await _head(db, company_id, user, op, doc_date, details={"draft": draft}, into=doc, **fields)
+    return await get_document(db, company_id, doc.id)
+
+
+async def _draft_doc(db: AsyncSession, company_id, doc_id) -> EzsEquipmentDocument:
+    d = (await db.execute(select(EzsEquipmentDocument).where(
+        EzsEquipmentDocument.id == uuid.UUID(str(doc_id)), EzsEquipmentDocument.company_id == company_id)
+        .with_for_update())).scalar_one_or_none()
+    if d is None:
+        raise HTTPException(404, "Документ не найден")
+    if d.status != "draft":
+        raise HTTPException(409, f"Документ № {d.number} уже проведён — исправляется отменой")
+    return d
+
+
+async def post_draft(db: AsyncSession, company_id, user: User | None, doc_id) -> dict[str, Any]:
+    d = await _draft_doc(db, company_id, doc_id)
+    payload = {**((d.details or {}).get("draft") or {}), "op": d.op, "doc_date": d.doc_date,
+               "primary_number": d.primary_number, "primary_date": d.primary_date}
+    return await post_document(db, company_id, user, payload, into=d)
+
+
+async def delete_draft(db: AsyncSession, company_id, doc_id) -> dict[str, Any]:
+    d = await _draft_doc(db, company_id, doc_id)
+    await db.delete(d)
+    return {"deleted": str(d.id), "number": d.number}
+
+
+async def post_document(db: AsyncSession, company_id, user: User | None, p: dict[str, Any],
+                        into: EzsEquipmentDocument | None = None) -> dict[str, Any]:
     op = p.get("op")
     if op not in DOC_KINDS or op not in TRANSITIONS or op == "receipt":
         raise HTTPException(400, f"Неизвестная операция: {op}")
@@ -269,6 +362,7 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
         doc_date = date.fromisoformat((p.get("doc_date") or "").strip()).isoformat()
     except ValueError:
         raise HTTPException(400, "Укажите дату документа")
+    await check_period(db, company_id, doc_date)
     cp_id, contract_id, details, warnings = p.get("counterparty_id"), p.get("contract_id"), None, []
     if op == "transfer":
         form, cp_id, contract_id, warnings = await _storage(
@@ -282,7 +376,7 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
     if contract is not None and cp is None:
         cp = await db.get(Counterparty, contract.counterparty_id)
     doc = await _head(
-        db, company_id, user, op, doc_date, number=p.get("number"),
+        db, company_id, user, op, doc_date, number=p.get("number"), into=into,
         details=details or repair_details(op, p.get("details")),
         counterparty_id=cp.id if cp else None, counterparty_name=cp.name if cp else None,
         contract_id=contract.id if contract else None, contract_label=contract_label(contract),
@@ -290,6 +384,7 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
         responsible_from=(p.get("responsible_from") or "").strip()[:200] or None,
         responsible_to=(p.get("responsible_to") or "").strip()[:200] or None,
         basis=(p.get("basis") or "").strip()[:500] or None, comment=(p.get("comment") or "").strip()[:2000] or None,
+        status="posted", posted_at=datetime.now(timezone.utc), **_primary(p),
     )
     basis = _basis(doc)
     froms = set()
@@ -303,9 +398,13 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
             "keep_location": op == "correction" and not doc.to_location_id,
         })
         move.document_id = doc.id
+        move.counterparty_id = cp.id if cp else None
         froms.add(move.from_location_id)
     if len(froms) == 1:
         doc.from_location_id = froms.pop()
+    # «Сдал» и «принял» по умолчанию — МОЛ складов из их карточек.
+    doc.responsible_from = doc.responsible_from or await _responsible(db, doc.from_location_id)
+    doc.responsible_to = doc.responsible_to or await _responsible(db, doc.to_location_id)
     await db.flush()
     out = await get_document(db, company_id, doc.id)
     out["warnings"] = warnings
@@ -325,7 +424,11 @@ def _doc_head(d: EzsEquipmentDocument, locs: dict[str, ServiceLocation], units: 
         "fromLocation": name(d.from_location_id), "toLocation": name(d.to_location_id),
         "responsibleFrom": d.responsible_from, "responsibleTo": d.responsible_to,
         "basis": d.basis, "comment": d.comment, "createdBy": d.created_by_name,
-        "details": d.details or {},
+        "details": {k: v for k, v in (d.details or {}).items() if k != "draft"},
+        "draft": (d.details or {}).get("draft") if d.status == "draft" else None,
+        "primaryNumber": d.primary_number, "primaryDate": d.primary_date,
+        "bpRef": d.bp_ref, "bpExportedAt": d.bp_exported_at.isoformat() if d.bp_exported_at else None,
+        "postedAt": d.posted_at.isoformat() if d.posted_at else None,
         "createdAt": d.created_at.isoformat() if d.created_at else None, "units": units,
     }
 
@@ -351,7 +454,23 @@ async def get_document(db: AsyncSession, company_id, doc_id) -> dict[str, Any]:
         "purchaseAmount": float(u.purchase_amount) if u.purchase_amount is not None else None,
         "from": name(m.from_location_id), "to": name(m.to_location_id),
         "fromState": STATE_LABELS.get(m.from_state or "", m.from_state), "toState": STATE_LABELS.get(m.to_state or "", m.to_state),
+        "accountFrom": m.account_from, "accountTo": m.account_to,
+        "amount": float(m.amount) if m.amount is not None else None,
     } for m, u in rows]
+    if d.status == "draft":
+        # Черновик: движений нет, строки — единицы из состава в их нынешнем положении.
+        ids = _uuids(((d.details or {}).get("draft") or {}).get("unit_ids") or [])
+        units = (await db.execute(select(EzsEquipmentUnit).where(
+            EzsEquipmentUnit.company_id == company_id, EzsEquipmentUnit.id.in_(ids or [uuid.uuid4()]))
+            .order_by(EzsEquipmentUnit.serial_number))).scalars().all()
+        lines = [{
+            "unitId": str(u.id), "serialNumber": u.serial_number, "inventoryNumber": u.inventory_number,
+            "vendor": u.vendor or u.brand, "model": u.model,
+            "powerKwt": float(u.power_kwt) if u.power_kwt is not None else None,
+            "purchaseAmount": float(u.purchase_amount) if u.purchase_amount is not None else None,
+            "from": name(u.current_location_id), "to": name(d.to_location_id),
+            "fromState": STATE_LABELS.get(u.state, u.state), "toState": None,
+        } for u in units]
     # Отменённый приход: карточек уже нет, строки — из снимка в документе.
     lines = lines or list((d.details or {}).get("cancelledUnits") or [])
     return {**_doc_head(d, locs, len(lines)), "lines": lines}
@@ -378,6 +497,9 @@ async def cancel_document(db: AsyncSession, company_id, user: User | None, doc_i
         raise HTTPException(404, "Документ не найден")
     if d.status == "cancelled":
         raise HTTPException(409, f"Документ № {d.number} уже отменён")
+    if d.status == "draft":
+        raise HTTPException(409, f"Документ № {d.number} — черновик: его удаляют, а не отменяют")
+    await check_period(db, company_id, d.doc_date, "Отменяемый документ")
     rows = (await db.execute(select(M, U).join(U, U.id == M.unit_id).where(
         M.document_id == d.id, M.op != "cancel").with_for_update())).all()
     # Позже документа — только движения в силе: отменённый документ и его сторно не мешают.
@@ -460,8 +582,11 @@ async def list_documents(db: AsyncSession, company_id, *, op=None, q=None, date_
         EzsEquipmentMovement.document_id.in_([d.id for d in docs] or [None]), EzsEquipmentMovement.op != "cancel")
         .group_by(EzsEquipmentMovement.document_id))).all())
     locs = await _locs(db, company_id)
-    return {"items": [_doc_head(d, locs, int(counts.get(d.id) or len((d.details or {}).get("cancelledUnits") or [])))
-                      for d in docs], "total": int(total)}
+    def units(d):
+        if d.status == "draft":
+            return len(((d.details or {}).get("draft") or {}).get("unit_ids") or [])
+        return int(counts.get(d.id) or len((d.details or {}).get("cancelledUnits") or []))
+    return {"items": [_doc_head(d, locs, units(d)) for d in docs], "total": int(total)}
 
 
 # ── Карточка склада ─────────────────────────────────────────────────────────
@@ -470,6 +595,7 @@ async def list_documents(db: AsyncSession, company_id, *, op=None, q=None, date_
 
 async def warehouse_card(db: AsyncSession, company_id, loc: ServiceLocation) -> dict[str, Any]:
     w = dict((loc.extra_metadata or {}).get("warehouse") or {})
+    w["status"] = "closed" if getattr(loc, "status", None) == "closed" else "active"
     status = None
     if w.get("contractId"):
         c = await db.get(Contract, uuid.UUID(w["contractId"]))
@@ -505,29 +631,121 @@ async def save_warehouse(db: AsyncSession, company_id, loc_id: str | None, p: di
                 func.lower(func.btrim(ServiceLocation.name)) == name.lower()))).first():
             raise HTTPException(409, f"Склад «{name}» уже есть — откройте его карточку")
         loc = await get_or_create_warehouse(db, company_id, name)
-    ownership = p.get("ownership") or "own"
+    meta = dict(loc.extra_metadata or {})
+    old = dict(meta.get("warehouse") or {})
+    # Частичная правка (одно поле) не сбрасывает остальные реквизиты карточки.
+    given = lambda k: p.get(k) if k in p else old.get(k)  # noqa: E731
+    ownership = given("ownership") or "own"
     if ownership not in OWNERSHIP:
         raise HTTPException(400, "Неизвестный вид владения складом")
-    cp = await check_counterparty(db, company_id, p.get("counterpartyId"))
-    contract, _ = await check_contract(db, company_id, p.get("contractId"), cp.id if cp else None) if p.get("contractId") else (None, [])
+    cp = await check_counterparty(db, company_id, given("counterpartyId"))
+    contract_id = given("contractId")
+    contract, _ = await check_contract(db, company_id, contract_id, cp.id if cp else None) if contract_id else (None, [])
     if ownership in ("rent", "custody") and cp is None:
         raise HTTPException(400, "Для арендованного склада или ответственного хранения укажите контрагента")
-    if p.get("name") and loc_id:
-        loc.name = p["name"].strip()[:300]
+    new_name = (p.get("name") or "").strip()[:300]
+    if new_name and loc_id and new_name != loc.name:
+        if (await db.execute(select(ServiceLocation.id).where(
+                ServiceLocation.company_id == company_id, ServiceLocation.type == "warehouse",
+                ServiceLocation.id != loc.id,
+                func.lower(func.btrim(ServiceLocation.name)) == new_name.lower()))).first():
+            raise HTTPException(409, f"Склад «{new_name}» уже есть")
+        loc.name = new_name
     if "address" in p:
         loc.address = (p.get("address") or "").strip()[:500] or None
-    meta = dict(loc.extra_metadata or {})
+    # МОЛ — участник пространства (в 1С — физическое лицо); имя хранится снимком.
+    resp_user = old.get("responsibleUserId") if "responsibleUserId" not in p else p.get("responsibleUserId")
+    responsible = (p.get("responsible") if "responsible" in p else old.get("responsible")) or ""
+    if resp_user:
+        u = await db.get(User, uuid.UUID(str(resp_user)))
+        if u is None:
+            raise HTTPException(400, "МОЛ не найден среди участников пространства")
+        responsible = u.name or u.email
+    take = lambda k, n: ((p.get(k) if k in p else old.get(k)) or "").strip()[:n] or None  # noqa: E731
     meta["warehouse"] = {
         "ownership": ownership, "counterpartyId": str(cp.id) if cp else None,
         "contractId": str(contract.id) if contract else None,
-        "responsible": (p.get("responsible") or "").strip()[:200] or None,
-        "phone": (p.get("phone") or "").strip()[:60] or None,
-        "note": (p.get("note") or "").strip()[:1000] or None,
+        "responsible": responsible.strip()[:200] or None,
+        "responsibleUserId": str(resp_user) if resp_user else None,
+        "phone": take("phone", 60), "note": take("note", 1000),
+        # Код и ссылка склада в 1С: по ним выгрузка находит склад, а сверка — остаток.
+        "bpCode": take("bpCode", 30), "bpRef": take("bpRef", 60),
         "updatedAt": datetime.now(timezone.utc).isoformat(),
     }
     loc.extra_metadata = meta
     await db.flush()
     return await warehouse_card(db, company_id, loc)
+
+
+async def _warehouse_usage(db: AsyncSession, company_id, loc_id: str) -> dict[str, int]:
+    """Что держит склад: единицы на нём, ненулевые остатки ЗИП, история движений и документов."""
+    from app.models import (
+        EzsSpareDocument, EzsSparePartMovement, EzsSparePartStock, EzsSupplyDocument,
+    )
+    from app.services.ezs_equipment import TERMINAL_STATES
+    U, M, SM, S = EzsEquipmentUnit, EzsEquipmentMovement, EzsSparePartMovement, EzsSparePartStock
+    count = lambda q: db.execute(q)  # noqa: E731
+    n = lambda r: int(r.scalar_one() or 0)  # noqa: E731
+    return {
+        "units": n(await count(select(func.count()).select_from(U).where(
+            U.company_id == company_id, U.current_location_id == loc_id, U.state.notin_(tuple(TERMINAL_STATES))))),
+        "spares": n(await count(select(func.count()).select_from(S).where(
+            S.company_id == company_id, S.location_id == loc_id, S.qty != 0))),
+        "history": n(await count(select(func.count()).select_from(M).where(
+            M.company_id == company_id, (M.from_location_id == loc_id) | (M.to_location_id == loc_id))))
+        + n(await count(select(func.count()).select_from(SM).where(
+            SM.company_id == company_id, (SM.from_location_id == loc_id) | (SM.to_location_id == loc_id))))
+        + n(await count(select(func.count()).select_from(EzsEquipmentDocument).where(
+            EzsEquipmentDocument.company_id == company_id,
+            (EzsEquipmentDocument.from_location_id == loc_id) | (EzsEquipmentDocument.to_location_id == loc_id))))
+        + n(await count(select(func.count()).select_from(EzsSpareDocument).where(
+            EzsSpareDocument.company_id == company_id,
+            (EzsSpareDocument.from_location_id == loc_id) | (EzsSpareDocument.to_location_id == loc_id))))
+        + n(await count(select(func.count()).select_from(EzsSupplyDocument).where(
+            EzsSupplyDocument.company_id == company_id, EzsSupplyDocument.warehouse_id == loc_id))),
+    }
+
+
+async def _own_warehouse(db: AsyncSession, company_id, loc_id: str) -> ServiceLocation:
+    loc = await db.get(ServiceLocation, loc_id)
+    if loc is None or loc.company_id != company_id or loc.type != "warehouse":
+        raise HTTPException(404, "Склад не найден")
+    return loc
+
+
+async def set_warehouse_status(db: AsyncSession, company_id, loc_id: str, close: bool) -> dict[str, Any]:
+    """Закрыть склад: он пропадает из выбора в документах, история остаётся.
+
+    Закрыть можно только пустой склад — иначе единицы и остатки повисли бы на
+    месте, куда ничего нельзя провести и откуда нельзя вывезти.
+    """
+    loc = await _own_warehouse(db, company_id, loc_id)
+    if close:
+        used = await _warehouse_usage(db, company_id, loc_id)
+        if used["units"] or used["spares"]:
+            raise HTTPException(409, f"На складе «{loc.name}» числится: единиц {used['units']}, позиций ЗИП "
+                                     f"{used['spares']} — сначала переместите их на другой склад")
+    loc.status = "closed" if close else "active"
+    await db.flush()
+    return await warehouse_card(db, company_id, loc)
+
+
+async def delete_warehouse(db: AsyncSession, company_id, loc_id: str) -> dict[str, Any]:
+    """Удалить склад, заведённый по ошибке: только без единиц, остатков и истории.
+
+    Склад с историей не удаляется — его закрывают: иначе прошлые документы и
+    остатки на дату ссылались бы в пустоту.
+    """
+    from app.models import EzsSparePartStock
+    loc = await _own_warehouse(db, company_id, loc_id)
+    used = await _warehouse_usage(db, company_id, loc_id)
+    if used["units"] or used["spares"]:
+        raise HTTPException(409, f"На складе «{loc.name}» числятся единицы или ЗИП — удалить нельзя")
+    if used["history"]:
+        raise HTTPException(409, f"По складу «{loc.name}» есть движения и документы — его можно закрыть, но не удалить")
+    await db.execute(delete(EzsSparePartStock).where(EzsSparePartStock.location_id == loc.id))
+    await db.delete(loc)
+    return {"deleted": loc_id, "name": loc.name}
 
 
 # ── Разбор данных ───────────────────────────────────────────────────────────
@@ -595,6 +813,19 @@ async def audit(db: AsyncSession, company_id) -> dict[str, Any]:
         {"key": "unconfirmed", "title": "Данные не подтверждены поставщиком", "action": "open",
          "hint": "Количество портов или модель ждут уточнения у поставщика.",
          "items": [{**_unit_brief(u, locs), "reason": u.unconfirmed_reason} for u in units if not u.data_confirmed]},
+    ]
+    # Для выгрузки в 1С: номенклатура и стоимость нужны всему, что лежит на учёте склада.
+    on_books = [u for u in units if u.state not in ("in_operation", "written_off", "returned_to_vendor")]
+    sections += [
+        {"key": "no_nomenclature", "title": "Без номенклатуры", "action": "nomenclature",
+         "hint": "Модель записана текстом в карточке. Без номенклатуры (вид, единица, счёт учёта) "
+                 "единица не выгружается в 1С: свяжите её с номенклатурой или заведите номенклатуру по группе.",
+         "items": [{**_unit_brief(u, locs), "group": " ".join(x for x in (u.vendor or u.brand, u.model) if x) or "Модель не указана"}
+                   for u in on_books if not u.nomenclature_id]},
+        {"key": "no_cost", "title": "Без стоимости", "action": "open",
+         "hint": "Стоимость не указана: в оборотно-сальдовой ведомости единица идёт количеством без суммы, "
+                 "сверка с бухгалтерией по сумме не сойдётся. Внесите стоимость в карточке единицы.",
+         "items": [_unit_brief(u, locs) for u in on_books if u.purchase_amount is None]},
     ]
     for s in sections:
         s["count"] = len(s["items"])

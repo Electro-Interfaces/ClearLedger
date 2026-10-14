@@ -30,7 +30,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    AuditEvent, EzsEquipmentDocument, EzsEquipmentMovement, EzsEquipmentUnit,
+    AuditEvent, Company, EzsEquipmentDocument, EzsEquipmentMovement, EzsEquipmentUnit,
     EzsSparePart, EzsSparePartMovement, EzsSparePartStock,
     ObjectLink, ServiceLocation, User,
 )
@@ -156,6 +156,22 @@ def canon_vendor(raw: str | None) -> str | None:
     return _vendor_lookup(low) or _vendor_lookup(low.translate(_HOMOGLYPHS)) or s
 
 
+# ─── закрытый период ────────────────────────────────────────────────────────
+# Как дата запрета изменений в 1С: период, сверенный с бухгалтерией, не меняется —
+# ни проведением документа той датой, ни отменой. Хранится в настройках компании.
+
+async def closed_until(db: AsyncSession, company_id) -> str | None:
+    c = await db.get(Company, company_id)
+    return (((c.customization or {}) if c is not None else {}).get("equipment") or {}).get("closedUntil")
+
+
+async def check_period(db: AsyncSession, company_id, day: str | None, what: str = "Документ") -> None:
+    closed = await closed_until(db, company_id)
+    if closed and day and day[:10] <= closed:
+        raise HTTPException(409, f"{what} от {day[:10]} попадает в закрытый период (по {closed}): "
+                                 "период сверен с бухгалтерией и не меняется")
+
+
 # ─── хелперы локаций ────────────────────────────────────────────────────────
 
 async def _get_location(db: AsyncSession, company_id, loc_id: str,
@@ -165,6 +181,8 @@ async def _get_location(db: AsyncSession, company_id, loc_id: str,
         raise HTTPException(404, "Склад или станция не найдены")
     if want_type == "warehouse" and loc.type != "warehouse":
         raise HTTPException(400, f"«{loc.name}» — не склад")
+    if want_type == "warehouse" and loc.status == "closed":
+        raise HTTPException(400, f"Склад «{loc.name}» закрыт — откройте его в карточке склада")
     if want_type == "site" and loc.type != "ev_charging":
         raise HTTPException(400, f"«{loc.name}» — не станция")
     return loc
@@ -235,6 +253,22 @@ def _movement(company_id, unit: EzsEquipmentUnit, op: str, *, user: User | None,
     )
 
 
+async def stock_account(db: AsyncSession, unit: EzsEquipmentUnit) -> str:
+    """Счёт единицы, пока она не смонтирована: из номенклатуры, иначе 07."""
+    from app.services.ezs_accounting import default_account
+    part = await db.get(EzsSparePart, unit.nomenclature_id) if unit.nomenclature_id else None
+    return (part.account or default_account(part.kind)) if part is not None else "07"
+
+
+async def post_entry(db: AsyncSession, unit: EzsEquipmentUnit, move: EzsEquipmentMovement) -> None:
+    """Проводка движения: счёт до и после по состояниям, сумма — стоимость единицы."""
+    from app.services.ezs_accounting import unit_account
+    acc = await stock_account(db, unit)
+    move.account_from = unit_account(move.from_state, acc)
+    move.account_to = unit_account(move.to_state, acc)
+    move.amount = unit.purchase_amount
+
+
 def live_moves() -> list:
     """Условие «движение в силе»: не сторно и не из отменённого документа."""
     M = EzsEquipmentMovement
@@ -266,14 +300,17 @@ async def _create_receipt_unit(
         purchase_amount=purchase_amount, vat_amount=vat_amount,
         **fields,
     )
+    await check_period(db, company_id, occurred_on or date.today().isoformat(), "Поступление")
     db.add(unit)
     await db.flush()
-    db.add(_movement(
+    move = _movement(
         company_id, unit, "receipt", user=user, to_location_id=warehouse.id,
         from_state=None, to_state=unit.state,
         supply_id=supply_id, supply_line_id=supply_line_id,
         occurred_on=occurred_on, basis=basis, comment=comment,
-    ))
+    )
+    await post_entry(db, unit, move)
+    db.add(move)
     return unit
 
 
@@ -331,6 +368,7 @@ async def apply_movement(db: AsyncSession, company_id, user: User | None,
         occurred_on = date.fromisoformat(occurred_on).isoformat()
     except ValueError:
         raise HTTPException(400, "Дата операции указана неверно")
+    await check_period(db, company_id, occurred_on, "Операция")
     # Документ раньше уже проведённого ломает порядок: состояние единицы хранится
     # только текущее, а остатки на дату читают движения по дате. Движения разового
     # импорта (без документа и поставки) не в счёт — у них дата загрузки файла.
@@ -450,6 +488,7 @@ async def apply_movement(db: AsyncSession, company_id, user: User | None,
         supply_id=payload.get("supply_id"), supply_line_id=payload.get("supply_line_id"),
     )
     move.prev = prev
+    await post_entry(db, unit, move)
     db.add(move)
     # Связь трогаем, только когда единица действительно пришла на станцию или ушла с
     # неё: корректировка реквизитов не должна переоткрывать связь, закрытую раньше.
@@ -993,10 +1032,26 @@ async def _stock_row(db: AsyncSession, company_id, part_id, location_id,
     )).scalar_one_or_none()
     if row is None and create:
         row = EzsSparePartStock(company_id=company_id, part_id=part_id,
-                                location_id=location_id, qty=0)
+                                location_id=location_id, qty=0, amount=0)
         db.add(row)
         await db.flush()
     return row
+
+
+def value_delta(have: Decimal, amount, delta: Decimal, price=None) -> Decimal:
+    """Стоимость изменения остатка на `delta` (излишек или недостача).
+
+    Недостача списывается по средней; излишек приходуется по средней остатка, а
+    на пустом складе — по цене строки (её даёт опись), иначе нулём.
+    """
+    from app.services.ezs_accounting import avg_cost, money
+    if delta < 0:
+        return -avg_cost(have, amount, -delta)
+    if delta == 0:
+        return Decimal("0.00")
+    if have > 0:
+        return money(money(amount) / have * delta)
+    return money(Decimal(str(price or 0)) * delta)
 
 
 async def spare_apply_movement(db: AsyncSession, company_id, user: User | None,
@@ -1018,23 +1073,31 @@ async def spare_apply_movement(db: AsyncSession, company_id, user: User | None,
     if qty < 0 or (qty == 0 and op != "correction"):
         raise HTTPException(400, "Количество должно быть больше нуля")
     delta = None
+    from app.services.ezs_accounting import avg_cost, money
+    await check_period(db, company_id, payload.get("occurred_on") or date.today().isoformat(), "Движение ЗИП")
+    # Приход — по цене документа (сумма строки), расход — по средней остатка.
+    amount = money(payload.get("amount")) if op == "receipt" else None
 
     from_id = payload.get("from_location_id")
     to_id = payload.get("to_location_id")
 
     async def debit(loc_id):
+        nonlocal amount
         await _get_location(db, company_id, loc_id, want_type="warehouse")
         row = await _stock_row(db, company_id, part_id, loc_id, create=False)
         have = Decimal(str(row.qty)) if row else Decimal(0)
         if have < qty:
             fmt = lambda d: f"{d:f}".rstrip("0").rstrip(".") or "0"  # noqa: E731 — без экспоненты (1E+2)
             raise HTTPException(409, f"Недостаточно остатка: есть {fmt(have)}, нужно {fmt(qty)}")
+        amount = avg_cost(have, row.amount, qty)
         row.qty = have - qty
+        row.amount = money(row.amount) - amount
 
     async def credit(loc_id):
         await _get_location(db, company_id, loc_id, want_type="warehouse")
         row = await _stock_row(db, company_id, part_id, loc_id, create=True)
         row.qty = Decimal(str(row.qty)) + qty
+        row.amount = money(row.amount) + (amount or 0)
 
     if op == "receipt":
         if not to_id:
@@ -1058,8 +1121,11 @@ async def spare_apply_movement(db: AsyncSession, company_id, user: User | None,
             raise HTTPException(400, "Для корректировки обязателен комментарий")
         await _get_location(db, company_id, to_id, want_type="warehouse")
         row = await _stock_row(db, company_id, part_id, to_id, create=True)
-        delta = qty - Decimal(str(row.qty))
+        have = Decimal(str(row.qty))
+        delta = qty - have
+        amount = value_delta(have, row.amount, delta)
         row.qty, qty = qty, abs(delta)
+        row.amount = money(row.amount) + amount
 
     if payload.get("target_location_id"):
         await _get_location(db, company_id, payload["target_location_id"])
@@ -1070,7 +1136,7 @@ async def spare_apply_movement(db: AsyncSession, company_id, user: User | None,
             raise HTTPException(404, "Станция-получатель не найдена")
 
     move = EzsSparePartMovement(
-        company_id=company_id, part_id=part_id, op=op, qty=qty, delta=delta,
+        company_id=company_id, part_id=part_id, op=op, qty=qty, delta=delta, amount=amount,
         from_location_id=from_id, to_location_id=to_id,
         target_unit_id=target_unit_id,
         target_location_id=payload.get("target_location_id"),

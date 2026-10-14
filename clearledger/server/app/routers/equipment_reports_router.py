@@ -69,3 +69,28 @@ async def repairs(
 ):
     cid = await assert_company_member(company_id, user, db)
     return await R.repairs_report(db, cid)
+
+
+@router.get("/balance")
+async def balance(
+    company_id: str = Query(...), date: str | None = None, location_id: str | None = None,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Остатки по складам на дату: номенклатура, количество, сумма, счёт учёта."""
+    cid = await assert_company_member(company_id, user, db)
+    return await R.balance_report(db, cid, _day(date), location_id or None)
+
+
+@router.get("/osv")
+async def osv(
+    company_id: str = Query(...), date_from: str | None = None, date_to: str | None = None,
+    location_id: str | None = None, account: str | None = None,
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Оборотно-сальдовая ведомость по счетам, местам и номенклатуре — для сверки с 1С."""
+    cid = await assert_company_member(company_id, user, db)
+    end = _day(date_to, "Дата окончания периода")
+    start = _day(date_from, "Дата начала периода") if date_from else end[:8] + "01"
+    if start > end:
+        raise HTTPException(400, "Начало периода позже окончания")
+    return await R.osv_report(db, cid, start, end, location_id or None, account or None)

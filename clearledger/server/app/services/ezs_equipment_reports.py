@@ -24,6 +24,7 @@ from __future__ import annotations
 import uuid
 from collections import Counter
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -439,3 +440,168 @@ async def repairs_report(db: AsyncSession, company_id) -> dict[str, Any]:
     today = date.today().isoformat()
     items = repairs(units, moves, docs, today)
     return {"date": today, "items": items, "overdue": sum(1 for r in items if r["overdueDays"])}
+
+
+# ── Остатки по складам и оборотно-сальдовая ведомость (под 1С:БП) ────────────
+# Номенклатура единицы — её карточка справочника; у единицы без номенклатуры
+# ключ — текст «производитель модель», чтобы разные модели не слипались в одну
+# строку. Стоимость единицы — её первоначальная стоимость без НДС.
+
+def unit_item(u, parts) -> tuple[str, str]:
+    """Ключ и название номенклатуры единицы."""
+    p = parts.get(u.nomenclature_id) if getattr(u, "nomenclature_id", None) else None
+    if p is not None:
+        return str(p.id), p.name
+    text = " ".join(x for x in (u.vendor or u.brand, u.model) if x) or "Модель не указана"
+    return f"text:{text}", text
+
+
+def unit_place(locs):
+    """Место единицы в ведомости: склад, площадка монтажа или эксплуатации, ремонт."""
+    def place(state, location_id):
+        loc = locs.get(location_id) if location_id else None
+        if state in IN_STOCK:
+            return loc.id if loc is not None and loc.type == "warehouse" else "unknown"
+        if state == "in_repair":
+            return "repair"
+        return loc.id if loc is not None else "unknown"
+    return place
+
+
+def place_name(key, locs) -> str:
+    if key in locs:
+        return locs[key].name
+    return {"unknown": "Склад не указан", "repair": "У подрядчика, в ремонте"}.get(key, key or "—")
+
+
+def _stock_acc(parts):
+    from app.services.ezs_accounting import default_account
+
+    def acc(pid):
+        p = parts.get(pid)
+        return (p.account or default_account(p.kind)) if p is not None else None
+    return acc
+
+
+def balance(units, moves, docs, locs, parts, spare_moves, day: str, location_id=None) -> dict[str, Any]:
+    """Остатки по складам на дату: номенклатура, количество, сумма, счёт; единицы — списком."""
+    from app.services.ezs_accounting import money, spare_value_flows, unit_label
+    acc_of = _stock_acc(parts)
+    by_id = {str(u.id): u for u in units}
+    groups: dict[str, dict[str, Any]] = {}
+
+    def group(key):
+        loc = locs.get(key)
+        w = wh_meta(loc)
+        return groups.setdefault(key, {
+            "id": key, "name": place_name(key, locs),
+            "status": "closed" if loc is not None and getattr(loc, "status", None) == "closed" else "active",
+            "ownershipLabel": OWNERSHIP.get(w.get("ownership") or "", ""), "responsible": w.get("responsible"),
+            "items": {}, "noCost": 0})
+
+    def item(g, key, name, kind, account, label):
+        return g["items"].setdefault(key, {"key": key, "name": name, "kind": kind, "account": account,
+                                           "unitLabel": label, "qty": Decimal(0), "amount": Decimal(0), "units": []})
+
+    for r in unit_rows(units, moves, docs, locs, day):
+        if r["placeKind"] not in ("warehouse", "unknown"):
+            continue
+        u = by_id[r["id"]]
+        p = parts.get(u.nomenclature_id) if getattr(u, "nomenclature_id", None) else None
+        key, name = unit_item(u, parts)
+        g = group(r["placeKey"] if r["placeKind"] == "warehouse" else "unknown")
+        it = item(g, key, name, p.kind if p is not None else "station", acc_of(p.id) if p is not None else "07", "шт")
+        cost = money(u.purchase_amount) if u.purchase_amount is not None else None
+        it["qty"] += 1
+        it["amount"] += cost or 0
+        it["units"].append({"id": r["id"], "serialNumber": u.serial_number, "inventoryNumber": u.inventory_number,
+                            "state": r["state"], "stateLabel": r["stateLabel"], "since": r["since"],
+                            "amount": float(cost) if cost is not None else None})
+        g["noCost"] += cost is None
+
+    qty: Counter = Counter()
+    amount: Counter = Counter()
+    for d, _acc, loc, pid, q, a in spare_value_flows(spare_moves, lambda pid: acc_of(pid) or "10.05"):
+        if d <= day:
+            qty[(pid, loc)] += q
+            amount[(pid, loc)] += a
+    for (pid, loc), q in qty.items():
+        if not q:
+            continue
+        p = parts.get(pid)
+        it = item(group(loc), str(pid), p.name if p else "—", p.kind if p else "spare", acc_of(pid) or "10.05",
+                  unit_label(p.unit_code, p.unit_label) if p else "шт")
+        it["qty"] += q
+        it["amount"] += amount[(pid, loc)]
+
+    # Пустые склады тоже в списке: «на складе ничего» — ответ, а не пропуск.
+    for l in locs.values():
+        if l.type == "warehouse":
+            group(l.id)
+    out = []
+    for g in groups.values():
+        if location_id and g["id"] != location_id:
+            continue
+        items = sorted(g["items"].values(), key=lambda i: (i["account"], i["name"].lower()))
+        for i in items:
+            i["qty"], i["amount"] = float(i["qty"]), float(money(i["amount"]))
+        g["items"] = items
+        g["amount"] = float(money(sum((Decimal(str(i["amount"])) for i in items), Decimal(0))))
+        g["units"] = sum(len(i["units"]) for i in items)
+        g["positions"] = len(items)
+        out.append(g)
+    out.sort(key=lambda g: (g["id"] == "unknown", g["status"] == "closed", g["name"].lower()))
+    return {"date": day, "warehouses": out,
+            "amount": float(money(sum((Decimal(str(g["amount"])) for g in out), Decimal(0)))),
+            "noCost": sum(g["noCost"] for g in out)}
+
+
+def osv_rows(units, moves, locs, parts, spare_moves, date_from: str, date_to: str,
+             location_id=None, account=None) -> dict[str, Any]:
+    """Оборотно-сальдовая ведомость: счёт × место × номенклатура, количество и сумма —
+    в разрезе, в котором её строит 1С (ОСВ по счёту с субконто «Склады», «Номенклатура»)."""
+    from app.services.ezs_accounting import ACCOUNTS, money, osv, spare_value_flows, totals, unit_flows, unit_label
+    acc_of = _stock_acc(parts)
+    names: dict[Any, tuple[str, str]] = {}
+
+    def unit_key(u):
+        key, name = unit_item(u, parts)
+        names[key] = (name, "шт")
+        return key
+
+    flows = unit_flows(units, unit_moves(moves), lambda u: acc_of(getattr(u, "nomenclature_id", None)) or "07",
+                       unit_place(locs), lambda u: money(u.purchase_amount), unit_key)
+    for pid, p in parts.items():
+        names[pid] = (p.name, unit_label(p.unit_code, p.unit_label))
+    flows += spare_value_flows(spare_moves, lambda pid: acc_of(pid) or "10.05")
+    keys = ("oq", "os", "dq", "ds", "cq", "cs", "zq", "zs")
+    rows = []
+    for (acc, place, item), c in osv(flows, date_from, date_to).items():
+        if (location_id and place != location_id) or (account and acc != account) or not any(c.values()):
+            continue
+        name, label = names.get(item, ("—", "шт"))
+        rows.append({"account": acc, "place": place, "placeName": place_name(place, locs),
+                     "item": str(item), "itemName": name, "unitLabel": label, **{k: float(c[k]) for k in keys}})
+    rows.sort(key=lambda r: (r["account"], r["placeName"].lower(), r["itemName"].lower()))
+    accounts = []
+    for acc in sorted({r["account"] for r in rows}):
+        own = [r for r in rows if r["account"] == acc]
+        t = totals({k: Decimal(str(r[k])) for k in keys} for r in own)
+        accounts.append({"account": acc, "label": ACCOUNTS.get(acc, acc), "rows": len(own),
+                         **{k: float(v) for k, v in t.items()}})
+    return {"dateFrom": date_from, "dateTo": date_to, "rows": rows, "accounts": accounts}
+
+
+async def balance_report(db: AsyncSession, company_id, day: str, location_id=None) -> dict[str, Any]:
+    units, moves, docs, locs = await _load(db, company_id)
+    parts, spare_moves = await _spares(db, company_id)
+    return balance(units, moves, docs, locs, parts, spare_moves, day, location_id)
+
+
+async def osv_report(db: AsyncSession, company_id, date_from: str, date_to: str,
+                     location_id=None, account=None) -> dict[str, Any]:
+    units, moves, _, locs = await _load(db, company_id)
+    parts, spare_moves = await _spares(db, company_id)
+    out = osv_rows(units, moves, locs, parts, spare_moves, date_from, date_to, location_id, account)
+    out["noCost"] = sum(1 for u in units if u.purchase_amount is None and u.state not in ("written_off", "returned_to_vendor"))
+    return out

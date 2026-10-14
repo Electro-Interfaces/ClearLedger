@@ -425,6 +425,7 @@ async def receive_line(db: AsyncSession, company_id, user: User | None,
                 serial = (u.get("serial") or "").strip() or None
                 fields = {k: getattr(line, k) for k in _STATION_TEMPLATE if getattr(line, k) is not None}
                 fields["supplier"] = doc.counterparty_name
+                fields["supplier_id"] = doc.counterparty_id
                 fields["purchase_doc"] = f"Поставка №{doc.number}"
                 fields["purchase_date"] = doc.doc_date
                 if (u.get("inventory_number") or "").strip():
@@ -443,6 +444,8 @@ async def receive_line(db: AsyncSession, company_id, user: User | None,
             _guard(qty)
             await spare_apply_movement(db, company_id, user, line.part_id, {
                 "op": "receipt", "to_location_id": wh_id, "qty": str(qty),
+                # Стоимость прихода — по цене спецификации (без НДС).
+                "amount": str(qty * _dec(line.unit_price)) if line.unit_price is not None else None,
                 "supply_id": doc.id, "supply_line_id": line.id,
                 "occurred_on": occurred_on, "basis": basis, "comment": comment})
 

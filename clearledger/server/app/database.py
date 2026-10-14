@@ -2857,6 +2857,34 @@ async def create_all() -> None:
             "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS prev JSONB",
             "CREATE INDEX IF NOT EXISTS ix_ezs_unit_supply "
             "ON ezs_equipment_units (company_id, supply_id)",
+            # 14.10.2026: учёт под 1С:БП — номенклатура со счётом, ОКЕИ и НДС; стоимость
+            # остатка ЗИП и движений; проводка движения единицы; черновик, первичка и
+            # ссылка БП у документов; реквизиты ОС у единицы (services/ezs_accounting.py).
+            "ALTER TABLE ezs_spare_parts ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'spare'",
+            "ALTER TABLE ezs_spare_parts ADD COLUMN IF NOT EXISTS model VARCHAR(120)",
+            "ALTER TABLE ezs_spare_parts ADD COLUMN IF NOT EXISTS unit_code VARCHAR(4)",
+            "ALTER TABLE ezs_spare_parts ADD COLUMN IF NOT EXISTS vat_rate VARCHAR(20)",
+            "ALTER TABLE ezs_spare_parts ADD COLUMN IF NOT EXISTS account VARCHAR(10)",
+            "ALTER TABLE ezs_spare_parts ADD COLUMN IF NOT EXISTS bp_ref VARCHAR(60)",
+            "ALTER TABLE ezs_spare_part_stock ADD COLUMN IF NOT EXISTS amount NUMERIC(14,2) NOT NULL DEFAULT 0",
+            "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS amount NUMERIC(14,2)",
+            "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS account_from VARCHAR(10)",
+            "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS account_to VARCHAR(10)",
+            "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS amount NUMERIC(14,2)",
+            "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS counterparty_id UUID",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS nomenclature_id UUID",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS supplier_id UUID",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS owner_id UUID",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS okof VARCHAR(30)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS depreciation_group VARCHAR(10)",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS useful_life_months INTEGER",
+            "ALTER TABLE ezs_equipment_units ADD COLUMN IF NOT EXISTS bp_ref VARCHAR(60)",
+            "CREATE INDEX IF NOT EXISTS ix_ezs_equipment_units_nomenclature_id "
+            "ON ezs_equipment_units (nomenclature_id)",
+            *(f"ALTER TABLE IF EXISTS {t} ADD COLUMN IF NOT EXISTS {c}"
+              for t in ("ezs_equipment_documents", "ezs_spare_documents")
+              for c in ("primary_number VARCHAR(100)", "primary_date VARCHAR(10)", "bp_ref VARCHAR(60)",
+                        "bp_exported_at TIMESTAMPTZ", "posted_at TIMESTAMPTZ")),
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
