@@ -27,7 +27,10 @@ export function CostAccountFields({ op, value, onChange }: {
       <label className="text-xs">{op === 'issue' ? 'Счёт затрат' : 'Счёт списания'}
         <select aria-label="Счёт затрат" className="h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm"
           value={value.costAccount || def} onChange={(e) => onChange({ ...value, costAccount: e.target.value })}>
-          {Object.entries(meta?.costAccounts ?? (def ? { [def]: def } : {})).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          {/* Ключи «23», «94» браузер ставит перед «20.01»: порядок плана счетов — сортировкой. */}
+          {Object.entries(meta?.costAccounts ?? (def ? { [def]: def } : {}))
+            .sort(([a], [b]) => a.localeCompare(b, 'ru', { numeric: true }))
+            .map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </select></label>
       <label className="text-xs">Статья затрат
         <input aria-label="Статья затрат" className="h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm"
