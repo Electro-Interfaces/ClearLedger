@@ -88,6 +88,8 @@ function DocCard({ companyId, id, onClose }: { companyId: string; id: string; on
             {!inv && <><F k="Контрагент" v={d.counterpartyName} /><F k="Договор" v={d.contractLabel} /></>}
             <F k={signFrom} v={d.responsibleFrom} /><F k={signTo} v={d.responsibleTo} />
             {(d.primaryNumber || d.primaryDate) && <F k="Первичный документ" v={`№ ${d.primaryNumber ?? '—'} от ${ruDate(d.primaryDate)}`} />}
+            {d.costAccount && <F k={d.op === 'issue' ? 'Счёт затрат' : 'Счёт списания'} v={d.costAccount + (d.costItem ? ` · ${d.costItem}` : '')} />}
+            {inv && <F k="Корреспонденция" v="недостача — Дт 94, излишек — Кт 91.01" />}
             {!draft && <F k="Сумма без НДС" v={`${rub.format(d.amount ?? 0)} ₽`} />}
             {!draft && <F k="1С:Бухгалтерия" v={d.bpExportedAt ? `выгружен ${ruDate(d.bpExportedAt)}` : 'не выгружен'} />}
             {d.basis && <F k="Основание" v={d.basis} wide />}

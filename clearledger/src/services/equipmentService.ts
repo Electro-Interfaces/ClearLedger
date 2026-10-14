@@ -530,6 +530,8 @@ export interface SpareDocument {
   createdBy: string | null; createdAt: string | null
   cancelledAt: string | null; cancelledBy: string | null; cancelReason: string | null
   positions: number; lines?: SpareDocLine[]; warnings?: string[]
+  /** Счёт и статья затрат отпуска и списания (дебет проводки в 1С). */
+  costAccount?: string | null; costItem?: string | null
 }
 export interface SpareDocPayload {
   /** Ключ документа от формы: повторная отправка не проводит документ дважды. */
@@ -539,6 +541,8 @@ export interface SpareDocPayload {
   repairDocumentId?: string; counterpartyId?: string; contractId?: string
   responsibleFrom?: string; responsibleTo?: string; basis?: string; comment?: string
   primaryNumber?: string; primaryDate?: string
+  /** Счёт и статья затрат — у отпуска и списания (как в «Требовании-накладной» 1С). */
+  costAccount?: string; costItem?: string
   /** Сохранить черновиком: номер занят, остатки не тронуты. */
   draft?: boolean
 }
@@ -797,6 +801,8 @@ export interface EquipmentDocument {
 export interface RepairDetails {
   ticketRef?: string; repairKind?: 'warranty' | 'paid'; plannedReturn?: string
   costEstimate?: number; costActual?: number; result?: 'repaired' | 'unrepairable'
+  /** Акт списания: счёт и статья затрат (дебет проводки в 1С). */
+  costAccount?: string; costItem?: string
 }
 export interface EquipmentDocPayload {
   op: UnitOp; unitIds: string[]; docDate: string; number?: string; toLocationId?: string
@@ -864,6 +870,9 @@ export interface AccountingMeta {
   accounts: Record<string, string>
   okei: Record<string, string>
   vatRates: string[]
+  /** Счета затрат расхода со склада (дебет отпуска и списания) и счёт по умолчанию по операции. */
+  costAccounts: Record<string, string>
+  defaultCostAccount: Record<string, string>
 }
 export const getAccountingMeta = () => get<AccountingMeta>('/api/equipment/accounting/meta')
 export const getEquipmentSettings = (companyId: string) =>
@@ -963,7 +972,7 @@ export interface OsvRow extends OsvCells {
   account: string; place: string; placeName: string; item: string; itemName: string; unitLabel: string
 }
 export interface OsvReport {
-  dateFrom: string; dateTo: string; rows: OsvRow[]; noCost: number
+  dateFrom: string; dateTo: string; rows: OsvRow[]; noCost: number; noCostStock: number
   accounts: (OsvCells & { account: string; label: string; rows: number })[]
 }
 export const getOsvReport = (p: { companyId: string; dateFrom: string; dateTo: string; locationId?: string; account?: string }) =>

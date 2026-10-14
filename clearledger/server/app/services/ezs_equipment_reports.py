@@ -604,4 +604,7 @@ async def osv_report(db: AsyncSession, company_id, date_from: str, date_to: str,
     parts, spare_moves = await _spares(db, company_id)
     out = osv_rows(units, moves, locs, parts, spare_moves, date_from, date_to, location_id, account)
     out["noCost"] = sum(1 for u in units if u.purchase_amount is None and u.state not in ("written_off", "returned_to_vendor"))
+    # Без работающих станций (01.01): по умолчанию ведомость показывает только складские счета.
+    out["noCostStock"] = sum(1 for u in units if u.purchase_amount is None
+                             and u.state not in ("written_off", "returned_to_vendor", "in_operation"))
     return out

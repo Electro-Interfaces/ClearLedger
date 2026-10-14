@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import uuid
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -24,13 +25,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    Counterparty, EzsEquipmentMovement, EzsEquipmentUnit, EzsSparePartMovement,
+    Counterparty, EzsEquipmentMovement, EzsEquipmentUnit, EzsSparePart, EzsSparePartMovement,
     EzsSupplyDocument, EzsSupplyLine, ServiceLocation, User,
 )
 from app.services.ezs_equipment import (
     _create_receipt_unit, _get_location, _serial_conflict,
     apply_movement, canon_vendor, spare_apply_movement,
 )
+from app.services.ezs_accounting import vat_amount
 
 DOC_TYPES = ("supply", "return")
 LINE_KINDS = ("station", "spare")
@@ -180,13 +182,38 @@ def _line_fields(company_id, supply_id, payload: dict[str, Any]) -> dict[str, An
         if not payload.get("part_id"):
             raise HTTPException(400, "Для строки ЗИП укажите номенклатуру (part_id)")
         fields["part_id"] = payload.get("part_id")
-    else:  # station — шаблон единицы
+    else:  # station — шаблон единицы; номенклатура (модель) — как в «Поступлении» БП
+        fields["part_id"] = payload.get("part_id") or None
         fields["vendor"] = canon_vendor(payload.get("vendor"))
         for k in ("model", "station_type", "connector_types"):
             fields[k] = payload.get(k)
         fields["power_kwt"] = payload.get("power_kwt")
         fields["connectors_count"] = payload.get("connectors_count")
     return fields
+
+
+async def _check_line_part(db: AsyncSession, company_id, fields: dict[str, Any]) -> None:
+    """Номенклатура строки — этой компании и подходящего вида: у станции — учёт по
+    экземплярам, у ЗИП — количественный. Модель станции пустая — берётся из номенклатуры."""
+    from app.services.ezs_accounting import SERIAL_KINDS
+    if not fields.get("part_id"):
+        return
+    try:
+        part = await db.get(EzsSparePart, uuid.UUID(str(fields["part_id"])))
+    except ValueError:
+        part = None
+    if part is None or part.company_id != company_id:
+        raise HTTPException(400, "Номенклатура строки не найдена в справочнике пространства")
+    station = fields.get("line_kind") == "station"
+    if station != (part.kind in SERIAL_KINDS):
+        raise HTTPException(400, f"«{part.name}» " + ("учитывается количеством — для станции выберите номенклатуру "
+                                                    "вида «Зарядная станция» или «Оборудование»" if station else
+                                                    "учитывается по экземплярам — добавьте её строкой «Станция»"))
+    fields["part_id"] = part.id
+    if station:
+        fields["vendor"] = fields.get("vendor") or canon_vendor(part.vendor)
+        fields["model"] = fields.get("model") or part.model
+    fields["vat_rate"] = fields.get("vat_rate") or part.vat_rate
 
 
 # ─── CRUD документов ────────────────────────────────────────────────────────
@@ -240,7 +267,9 @@ async def create_supply(db: AsyncSession, company_id, user: User | None,
 
     lines: list[EzsSupplyLine] = []
     for ln in (payload.get("lines") or []):
-        obj = EzsSupplyLine(**_line_fields(company_id, doc.id, ln))
+        fields = _line_fields(company_id, doc.id, ln)
+        await _check_line_part(db, company_id, fields)
+        obj = EzsSupplyLine(**fields)
         db.add(obj)
         lines.append(obj)
     await db.flush()
@@ -325,7 +354,9 @@ async def set_status(db: AsyncSession, company_id, user: User | None,
 async def add_line(db: AsyncSession, company_id, supply_id, payload: dict[str, Any]) -> EzsSupplyLine:
     doc = await _get_doc(db, company_id, supply_id, lock=True)
     _assert_editable(doc)
-    obj = EzsSupplyLine(**_line_fields(company_id, supply_id, payload))
+    fields = _line_fields(company_id, supply_id, payload)
+    await _check_line_part(db, company_id, fields)
+    obj = EzsSupplyLine(**fields)
     db.add(obj)
     await db.flush()
     _recompute_amount(doc, await _lines_of(db, company_id, supply_id))
@@ -340,6 +371,7 @@ async def update_line(db: AsyncSession, company_id, supply_id, line_id,
     if await _has_receipts(db, company_id, supply_id, line_id=line_id):
         raise HTTPException(409, "По строке уже есть приёмка — правка запрещена")
     fields = _line_fields(company_id, supply_id, {**_line_as_payload(ln), **payload})
+    await _check_line_part(db, company_id, fields)
     for k, v in fields.items():
         if k not in ("company_id", "supply_id"):
             setattr(ln, k, v)
@@ -426,6 +458,8 @@ async def receive_line(db: AsyncSession, company_id, user: User | None,
                 fields = {k: getattr(line, k) for k in _STATION_TEMPLATE if getattr(line, k) is not None}
                 fields["supplier"] = doc.counterparty_name
                 fields["supplier_id"] = doc.counterparty_id
+                if line.part_id:
+                    fields["nomenclature_id"] = line.part_id
                 fields["purchase_doc"] = f"Поставка №{doc.number}"
                 fields["purchase_date"] = doc.doc_date
                 if (u.get("inventory_number") or "").strip():
@@ -435,7 +469,8 @@ async def receive_line(db: AsyncSession, company_id, user: User | None,
                 await _create_receipt_unit(
                     db, company_id, user, warehouse=wh, serial=serial, is_used=False,
                     fields=fields, supply_id=doc.id, supply_line_id=line.id,
-                    purchase_amount=line.unit_price, occurred_on=occurred_on,
+                    purchase_amount=line.unit_price, vat_amount=vat_amount(line.unit_price, line.vat_rate),
+                    occurred_on=occurred_on,
                     basis=basis, comment=comment)
         else:  # spare
             qty = _dec(payload.get("qty"))

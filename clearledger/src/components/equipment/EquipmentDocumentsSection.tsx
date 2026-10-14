@@ -100,6 +100,7 @@ export function EquipmentDocCard({ companyId, id, onClose }: { companyId: string
             {r?.plannedReturn && <F k="Плановый возврат">{ru(r.plannedReturn)}</F>}
             {r?.costEstimate != null && <F k="Оценка стоимости">{rub(r.costEstimate)}</F>}
             {r?.costActual != null && <F k="Стоимость ремонта">{rub(r.costActual)}</F>}
+            {r?.costAccount && <F k="Счёт списания">{r.costAccount}{r.costItem ? ` · ${r.costItem}` : ''}</F>}
             {r?.result && <F k="Результат">{r.result === 'repaired' ? 'отремонтировано' : 'ремонту не подлежит'}</F>}
             {d.basis && <div className="sm:col-span-2"><F k="Основание">{d.basis}</F></div>}
             {d.comment && <div className="sm:col-span-2"><F k="Комментарий">{d.comment}</F></div>}

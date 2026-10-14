@@ -23,6 +23,7 @@ import {
 } from '@/services/equipmentService'
 import type { ServiceLocation } from '@/types/location'
 import { CounterpartyContractPicker } from './CounterpartyContractPicker'
+import { CostAccountFields } from './equipmentShared'
 import { eqName, printEquipmentDocument } from './equipmentDocPrint'
 import { invalidateEquipment } from './useEquipmentScope'
 
@@ -83,6 +84,7 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
   const [syncPassport, setSyncPassport] = useState(false)
   const [primaryNumber, setPrimaryNumber] = useState('')
   const [primaryDate, setPrimaryDate] = useState('')
+  const [cost, setCost] = useState({ costAccount: '', costItem: '' })
   const needsCp = !!op && (meta.data?.counterpartyRequired ?? ['to_repair', 'from_repair', 'to_vendor']).includes(op)
 
   const mut = useMutation({
@@ -92,7 +94,8 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
       contractId: party.contractId || undefined, responsibleFrom: responsibleFrom.trim() || undefined,
       responsibleTo: responsibleTo.trim() || undefined, basis: basis.trim() || undefined, comment: comment.trim() || undefined,
       custodian: op === 'to_repair' ? custodian : undefined, syncPassport: op === 'commissioning' ? syncPassport : undefined,
-      details: op === 'to_repair' || op === 'from_repair' ? repair : undefined,
+      details: op === 'to_repair' || op === 'from_repair' ? repair
+        : op === 'write_off' ? { costAccount: cost.costAccount || undefined, costItem: cost.costItem.trim() || undefined } : undefined,
       primaryNumber: primaryNumber.trim() || undefined, primaryDate: primaryDate || undefined, draft,
     }),
     onSuccess: (doc, draft) => {
@@ -155,6 +158,7 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
         {op === 'to_repair' && <label className="text-xs block">Кому передаётся
           <select aria-label="Кому передаётся" className={selectClass} value={custodian} onChange={(e) => setCustodian(e.target.value as 'contractor' | 'vendor')}>
             <option value="contractor">Подрядчику (ремонт)</option><option value="vendor">Производителю (гарантия)</option></select></label>}
+        {op === 'write_off' && <CostAccountFields op="write_off" value={cost} onChange={setCost} />}
         {op === 'commissioning' && <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={syncPassport} onChange={(e) => setSyncPassport(e.target.checked)} />Обновить паспорт станции из карточки</label>}
         {op && <CounterpartyContractPicker companyId={companyId} value={party} onChange={setParty} required={needsCp}
           preferredTypes={meta.data?.contractTypes[op] ?? []} preferredTypeCodes={CONTRACT_TYPE_CODES[op]} label={op === 'to_vendor' ? 'Поставщик' : op === 'transfer' ? 'Контрагент (если склад чужой)' : 'Контрагент'} />}

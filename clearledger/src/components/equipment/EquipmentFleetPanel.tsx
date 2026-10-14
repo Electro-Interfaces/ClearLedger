@@ -84,6 +84,8 @@ function placeLabel(u: EquipmentUnit): string {
     const cl = CUSTODIAN_LABELS[u.custodian]
     return cl && cl !== '—' ? `${cl}: ${u.custodianName}` : u.custodianName
   }
+  // На складе, а на каком — неизвестно: «Склад» читался бы как название склада.
+  if (u.custodian === 'warehouse') return 'Склад не указан'
   const cl = CUSTODIAN_LABELS[u.custodian]
   return cl && cl !== '—' && u.custodian !== 'none' ? cl : '—'
 }

@@ -32,6 +32,7 @@ from app.models import (
     Contract, Counterparty, EzsEquipmentDocument, EzsEquipmentMovement, EzsEquipmentUnit,
     ServiceLocation, User,
 )
+from app.services.ezs_accounting import cost_details
 from app.services.ezs_equipment import OP_LABELS, STATE_LABELS, TRANSITIONS, apply_movement, check_period
 
 # Префикс номера и название документа по операции.
@@ -377,7 +378,7 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
         cp = await db.get(Counterparty, contract.counterparty_id)
     doc = await _head(
         db, company_id, user, op, doc_date, number=p.get("number"), into=into,
-        details=details or repair_details(op, p.get("details")),
+        details=details or repair_details(op, p.get("details")) or cost_details(op, p.get("details")) or None,
         counterparty_id=cp.id if cp else None, counterparty_name=cp.name if cp else None,
         contract_id=contract.id if contract else None, contract_label=contract_label(contract),
         to_location_id=p.get("to_location_id") or None,

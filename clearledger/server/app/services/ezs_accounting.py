@@ -44,6 +44,39 @@ ACCOUNTS: dict[str, str] = {
     "41.01": "41.01 — товары на складах",
 }
 
+# Счёт затрат (дебет) расхода со склада — как в «Требовании-накладной» и
+# «Списании товаров» БП: кредит 10/07 известен по номенклатуре, а куда ушло —
+# называет документ. Без него расход не выгрузить проводкой.
+COST_ACCOUNTS: dict[str, str] = {
+    "20.01": "20.01 — основное производство",
+    "23": "23 — вспомогательные производства",
+    "25": "25 — общепроизводственные расходы",
+    "26": "26 — общехозяйственные расходы",
+    "44.01": "44.01 — расходы на продажу",
+    "08.03": "08.03 — строительство объектов ОС",
+    "91.02": "91.02 — прочие расходы",
+    "94": "94 — недостачи и потери от порчи",
+}
+# Счёт по умолчанию: отпуск на станцию — производственный расход, списание — прочий.
+DEFAULT_COST_ACCOUNT = {"issue": "20.01", "write_off": "91.02"}
+
+
+def cost_details(op: str, raw: dict[str, Any] | None) -> dict[str, str]:
+    """Счёт и статья затрат расхода (`costAccount`, `costItem`); пусто у прочих операций."""
+    if op not in DEFAULT_COST_ACCOUNT:
+        return {}
+    raw = raw or {}
+    acc = str(raw.get("costAccount") or "").strip() or DEFAULT_COST_ACCOUNT[op]
+    if acc not in COST_ACCOUNTS:
+        from fastapi import HTTPException
+        raise HTTPException(400, f"Неизвестный счёт затрат: {acc}")
+    out = {"costAccount": acc}
+    item = str(raw.get("costItem") or "").strip()[:150]
+    if item:
+        out["costItem"] = item
+    return out
+
+
 # Единицы измерения по ОКЕИ: код → краткое обозначение (как в классификаторе БП).
 OKEI: dict[str, str] = {
     "796": "шт", "839": "компл", "006": "м", "055": "м²", "113": "м³", "166": "кг",
@@ -89,6 +122,14 @@ def unit_account(state: str | None, stock_account: str | None) -> str | None:
     if state == "in_operation":
         return "01.01"
     return None
+
+
+def vat_amount(price: Any, rate: str | None) -> Decimal | None:
+    """НДС сверх цены без НДС по ставке в написании БП («20%»); «Без НДС» — None."""
+    pct = (rate or "").strip().rstrip("%")
+    if price is None or not pct.isdigit():
+        return None
+    return money(Decimal(str(price)) * int(pct) / 100)
 
 
 def money(x: Any) -> Decimal:

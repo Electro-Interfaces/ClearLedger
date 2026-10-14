@@ -35,7 +35,7 @@ from app.models import (
     Contract, Counterparty, EzsEquipmentDocument, EzsEquipmentUnit, EzsSpareDocument, EzsSparePart,
     EzsSparePartMovement, EzsSparePartStock, ServiceLocation, User,
 )
-from app.services.ezs_accounting import avg_cost, money
+from app.services.ezs_accounting import avg_cost, cost_details, money
 from app.services.ezs_equipment import _stock_row, check_period, value_delta
 from app.services.ezs_equipment_docs import (
     _locs, _primary, _responsible, check_contract, check_counterparty, contract_label, next_number,
@@ -219,6 +219,9 @@ async def save_draft(db: AsyncSession, company_id, user: User | None, p: dict[st
     except ValueError:
         raise HTTPException(400, "Укажите дату документа")
     lines = norm_lines(op, p.get("lines")) if p.get("lines") else []
+    cost = cost_details(op, p)
+    for ln in lines:
+        ln.update(cost)
     cp = await check_counterparty(db, company_id, p.get("counterparty_id"))
     fields = dict(
         op=op, doc_date=doc_date, status="draft", lines=lines,
@@ -258,7 +261,8 @@ async def post_draft(db: AsyncSession, company_id, user: User | None, doc_id) ->
          "target_unit_id": d.target_unit_id, "target_location_id": d.target_location_id,
          "target_note": d.target_note, "repair_document_id": d.repair_document_id,
          "responsible_from": d.responsible_from, "responsible_to": d.responsible_to,
-         "basis": d.basis, "comment": d.comment, "primary_number": d.primary_number, "primary_date": d.primary_date}
+         "basis": d.basis, "comment": d.comment, "primary_number": d.primary_number, "primary_date": d.primary_date,
+         **{k: (d.lines or [{}])[0].get(k) for k in ("costAccount", "costItem")}}
     return await post_document(db, company_id, user, p, into=d)
 
 
@@ -286,6 +290,10 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
         raise HTTPException(400, "Укажите дату документа")
     await check_period(db, company_id, doc_date)
     lines = norm_lines(op, p.get("lines"))
+    # Счёт затрат — в каждой строке, как в табличной части «Требования-накладной» БП.
+    cost = cost_details(op, p)
+    for ln in lines:
+        ln.update(cost)
     ids = [ln["partId"] for ln in lines]
     parts = (await db.execute(select(EzsSparePart).where(
         EzsSparePart.company_id == company_id, EzsSparePart.id.in_([uuid.UUID(i) for i in ids])))).scalars().all()
@@ -511,7 +519,9 @@ async def get_document(db: AsyncSession, company_id, doc_id) -> dict[str, Any]:
         row["amount"] = float(ln["amount"]) if ln.get("amount") is not None else None
         lines.append(row)
     lines.sort(key=lambda r: r["name"].lower())
-    return {**(await _heads(db, company_id, [d]))[0], "lines": lines}
+    first = (d.lines or [{}])[0]
+    return {**(await _heads(db, company_id, [d]))[0], "lines": lines,
+            "costAccount": first.get("costAccount"), "costItem": first.get("costItem")}
 
 
 async def list_documents(db: AsyncSession, company_id, *, op=None, status=None, location_id=None,

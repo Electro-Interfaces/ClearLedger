@@ -335,7 +335,7 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
             </div>
           )}
           {lines.map((l) => (
-            <SupplyLineFields key={l._key} line={l} parts={parts}
+            <SupplyLineFields key={l._key} companyId={companyId} line={l} parts={parts}
               onChange={(p) => upd(l._key, p)} onRemove={() => rm(l._key)} />
           ))}
         </div>

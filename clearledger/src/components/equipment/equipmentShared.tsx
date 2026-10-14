@@ -4,12 +4,38 @@
  * читается как «данных нет», и человек уходит с неверным ответом.
  */
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, Download, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { ApiError } from '@/services/apiClient'
+import { getAccountingMeta } from '@/services/equipmentService'
 import { exportEquipmentXlsx, type ExportSheet } from './equipmentDocPrint'
+
+/** Счёт и статья затрат расхода со склада: куда ушло — дебет проводки в 1С
+ *  («Требование-накладная», «Списание товаров»). Пустой счёт — по умолчанию сервера. */
+export function CostAccountFields({ op, value, onChange }: {
+  op: 'issue' | 'write_off'
+  value: { costAccount: string; costItem: string }
+  onChange: (v: { costAccount: string; costItem: string }) => void
+}) {
+  const meta = useQuery({ queryKey: ['equipment', 'accounting-meta'], queryFn: getAccountingMeta, staleTime: Infinity }).data
+  const def = meta?.defaultCostAccount[op] ?? ''
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      <label className="text-xs">{op === 'issue' ? 'Счёт затрат' : 'Счёт списания'}
+        <select aria-label="Счёт затрат" className="h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm"
+          value={value.costAccount || def} onChange={(e) => onChange({ ...value, costAccount: e.target.value })}>
+          {Object.entries(meta?.costAccounts ?? (def ? { [def]: def } : {})).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </select></label>
+      <label className="text-xs">Статья затрат
+        <input aria-label="Статья затрат" className="h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm"
+          value={value.costItem} maxLength={150} onChange={(e) => onChange({ ...value, costItem: e.target.value })}
+          placeholder={op === 'issue' ? 'ремонт и обслуживание ЭЗС' : 'порча, недостача, моральный износ'} /></label>
+    </div>
+  )
+}
 
 /** Выгружает весь отбор экрана, а не загруженную страницу: строки собирает `load`. */
 export function ExportXlsxButton({ title, load }: { title: string; load: () => Promise<ExportSheet[]> }) {

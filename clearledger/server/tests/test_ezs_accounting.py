@@ -99,3 +99,19 @@ def test_остатки_по_складам_в_количестве_и_сумм�
     assert a["amount"] == 1_001_000 and a["units"] == 2
     # Работающая станция в остаток склада не входит; пустой закрытый склад — в списке последним.
     assert out["warehouses"][-1]["id"] == "wh-b" and out["warehouses"][-1]["status"] == "closed"
+
+def test_cost_details_expense_account():
+    """Расход со склада называет счёт затрат, как «Требование-накладная» в 1С."""
+    import pytest
+    from fastapi import HTTPException
+    assert A.cost_details("issue", {}) == {"costAccount": "20.01"}
+    assert A.cost_details("write_off", {"costAccount": "94", "costItem": " недостача "}) == {"costAccount": "94", "costItem": "недостача"}
+    assert A.cost_details("transfer", {"costAccount": "26"}) == {}
+    with pytest.raises(HTTPException):
+        A.cost_details("issue", {"costAccount": "60.01"})
+
+
+def test_vat_amount_by_rate():
+    assert A.vat_amount(1000, "20%") == Decimal("200.00")
+    assert A.vat_amount(99.99, "10%") == Decimal("10.00")
+    assert A.vat_amount(1000, "Без НДС") is None and A.vat_amount(None, "20%") is None

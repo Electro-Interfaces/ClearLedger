@@ -286,7 +286,7 @@ function OsvReportView({ companyId, f, patch, warehouses, bar }: ReportProps) {
           </table>
         </div>)}
     </CardContent></Card>}
-    {!!d?.noCost && <Note>У {nf.format(d.noCost)} ед. оборудования не указана стоимость: в ведомости они идут количеством без суммы. Стоимость вносится в карточке единицы или приходит из поставки.</Note>}
+    {!!d && !!(account === 'stock' ? d.noCostStock : d.noCost) && <Note>У {nf.format(account === 'stock' ? d.noCostStock : d.noCost)} ед. оборудования не указана стоимость: в ведомости они идут количеством без суммы. Стоимость вносится в карточке единицы или приходит из поставки.</Note>}
     <ClosedPeriod companyId={companyId} />
   </>
 }

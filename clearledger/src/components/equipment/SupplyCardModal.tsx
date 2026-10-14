@@ -32,7 +32,7 @@ import { ApiError } from '@/services/apiClient'
 import { loadLocations } from '@/services/locationService'
 import { getContracts } from '@/services/referenceService'
 import {
-  getSupply, setSupplyStatus, deleteSupply, receiveSupplyLine, listUnits, listSpareParts,
+  getSupply, setSupplyStatus, deleteSupply, receiveSupplyLine, listUnits, listSpareParts, getAccountingMeta,
   updateSupply, addSupplyLine, updateSupplyLine, deleteSupplyLine,
   SUPPLY_STATUS_META, SUPPLY_TYPE_META,
   type SupplyDoc, type SupplyLine, type SupplyLinePayload, type ReceiveUnit, type SparePart,
@@ -73,10 +73,15 @@ export function LField({ label, children }: { label: string; children: React.Rea
   )
 }
 
-export function SupplyLineFields({ line: l, parts, onChange, onRemove }: {
-  line: DraftLine; parts: SparePart[]
+/** Строка спецификации — как табличная часть «Поступления» 1С: номенклатура (у станции —
+ *  её модель, тогда единица сразу получает счёт учёта), количество, цена без НДС, ставка НДС. */
+export function SupplyLineFields({ companyId, line: l, parts, onChange, onRemove }: {
+  companyId: string; line: DraftLine; parts: SparePart[]
   onChange: (p: Partial<SupplyLinePayload>) => void; onRemove: () => void
 }) {
+  const modelsQ = useQuery({ queryKey: ['equipment', 'spares-serial', companyId],
+    queryFn: () => listSpareParts({ companyId, kind: 'station,equipment' }), staleTime: 60_000, enabled: l.lineKind === 'station' })
+  const meta = useQuery({ queryKey: ['equipment', 'accounting-meta'], queryFn: getAccountingMeta, staleTime: Infinity }).data
   if (l.locked) {
     return (
       <div className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
@@ -89,6 +94,16 @@ export function SupplyLineFields({ line: l, parts, onChange, onRemove }: {
     <div className="flex flex-wrap items-end gap-2 rounded-md border p-2">
       {l.lineKind === 'station' ? (
         <>
+          <LField label="Номенклатура">
+            <select aria-label="Номенклатура станции" className="h-8 w-48 rounded-md border bg-background px-2 text-xs" value={l.partId ?? ''}
+              onChange={(e) => {
+                const p = (modelsQ.data ?? []).find((x) => x.id === e.target.value)
+                onChange(p ? { partId: p.id, vendor: p.vendor ?? l.vendor, model: p.model ?? l.model, vatRate: l.vatRate ?? p.vatRate ?? undefined } : { partId: null })
+              }}>
+              <option value="">Без номенклатуры</option>
+              {(modelsQ.data ?? []).filter((p) => !p.isArchived || p.id === l.partId).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </LField>
           <LField label="Производитель"><Input value={l.vendor ?? ''} className="h-8 w-28 text-xs"
             onChange={(e) => onChange({ vendor: e.target.value })} /></LField>
           <LField label="Модель"><Input value={l.model ?? ''} className="h-8 w-32 text-xs"
@@ -108,8 +123,15 @@ export function SupplyLineFields({ line: l, parts, onChange, onRemove }: {
       )}
       <LField label="Кол-во"><Input type="number" min={1} value={l.qtyPlanned} className="h-8 w-16 text-xs"
         onChange={(e) => onChange({ qtyPlanned: Number(e.target.value) })} /></LField>
-      <LField label="Цена"><Input type="number" value={l.unitPrice ?? ''} className="h-8 w-24 text-xs"
+      <LField label="Цена без НДС"><Input type="number" value={l.unitPrice ?? ''} className="h-8 w-24 text-xs"
         onChange={(e) => onChange({ unitPrice: e.target.value ? Number(e.target.value) : null })} /></LField>
+      <LField label="НДС">
+        <select aria-label="Ставка НДС" className="h-8 w-24 rounded-md border bg-background px-2 text-xs" value={l.vatRate ?? ''}
+          onChange={(e) => onChange({ vatRate: e.target.value || null })}>
+          <option value="">—</option>
+          {(meta?.vatRates ?? []).map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </LField>
       <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Убрать строку" onClick={onRemove}>
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
@@ -216,7 +238,7 @@ function SupplyEditForm({ companyId, doc, onDone }: { companyId: string; doc: Su
             </Button>
           </div>
           {lines.map((l) => (
-            <SupplyLineFields key={l._key} line={l} parts={partsQ.data ?? []}
+            <SupplyLineFields key={l._key} companyId={companyId} line={l} parts={partsQ.data ?? []}
               onChange={(p) => setLines((s) => s.map((x) => (x._key === l._key ? { ...x, ...p } : x)))}
               onRemove={() => setLines((s) => s.filter((x) => x._key !== l._key))} />
           ))}

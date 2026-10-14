@@ -499,6 +499,23 @@ async def patch_unit(
     for key in ("supplierId", "ownerId"):
         if data.get(key):
             data[key] = (await check_counterparty(db, cid, data[key])).id
+    # Стоимость и номенклатура дают сумму и счёт всем прошлым движениям единицы: в
+    # закрытом периоде их не меняют, как в 1С после даты запрета изменений.
+    from app.services.ezs_accounting import money
+
+    def differs(k: str) -> bool:
+        old, new = getattr(unit, mapping[k]), data[k]
+        if k == "nomenclatureId":
+            return (str(old) if old else None) != (str(new) if new else None)
+        return (None if old is None else money(old)) != (None if new is None else money(new))
+    if any(differs(k) for k in ("purchaseAmount", "vatAmount", "nomenclatureId") if k in data):
+        from app.services.ezs_equipment import closed_until, live_moves
+        closed = await closed_until(db, cid)
+        first = (await db.execute(select(func.min(EzsEquipmentMovement.occurred_on)).where(
+            EzsEquipmentMovement.unit_id == unit.id, *live_moves()))).scalar() if closed else None
+        if first and first[:10] <= closed:
+            raise HTTPException(409, f"Единица на учёте с {first[:10]}, а период закрыт по {closed}: стоимость и "
+                                     "номенклатура изменили бы сверенные с бухгалтерией остатки")
     for key in ("nomenclatureId", "supplierId", "ownerId"):
         if key in data and not data[key]:
             data[key] = None
@@ -927,9 +944,10 @@ async def equipment_people(
 @router.get("/accounting/meta")
 async def accounting_meta(user: User = Depends(get_current_user)):
     """Справочники учёта под 1С: виды номенклатуры, счета, единицы ОКЕИ, ставки НДС."""
-    from app.services.ezs_accounting import ACCOUNTS, KINDS, OKEI, VAT_RATES
+    from app.services.ezs_accounting import ACCOUNTS, COST_ACCOUNTS, DEFAULT_COST_ACCOUNT, KINDS, OKEI, VAT_RATES
     return {"kinds": {k: {"label": l, "account": a, "serial": s} for k, (l, a, s) in KINDS.items()},
-            "accounts": ACCOUNTS, "okei": OKEI, "vatRates": list(VAT_RATES)}
+            "accounts": ACCOUNTS, "okei": OKEI, "vatRates": list(VAT_RATES),
+            "costAccounts": COST_ACCOUNTS, "defaultCostAccount": DEFAULT_COST_ACCOUNT}
 
 
 class NomenclatureFromUnitsIn(BaseModel):
@@ -1428,6 +1446,8 @@ class SpareDocIn(BaseModel):
     comment: str | None = None
     primaryNumber: str | None = None
     primaryDate: str | None = None
+    costAccount: str | None = None   # счёт затрат отпуска и списания (20.01, 91.02…)
+    costItem: str | None = None      # статья затрат
     draft: bool = False
 
 
@@ -1446,6 +1466,7 @@ def _spare_doc_payload(body: SpareDocIn) -> dict[str, Any]:
         "responsible_from": body.responsibleFrom, "responsible_to": body.responsibleTo,
         "basis": body.basis, "comment": body.comment,
         "primary_number": body.primaryNumber, "primary_date": body.primaryDate,
+        "costAccount": body.costAccount, "costItem": body.costItem,
     }
 
 
@@ -1545,7 +1566,7 @@ async def spare_documents_cancel(
 
 class SupplyLineIn(BaseModel):
     lineKind: str = "station"        # station | spare
-    partId: str | None = None        # для spare
+    partId: str | None = None        # номенклатура: ЗИП, у станции — её модель
     name: str | None = None
     qtyPlanned: float = Field(gt=0)
     unitPrice: float | None = None

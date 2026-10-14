@@ -24,6 +24,7 @@ import {
   type EquipmentUnit, type SpareDocOp, type SparePart,
 } from '@/services/equipmentService'
 import { CounterpartyContractPicker } from './CounterpartyContractPicker'
+import { CostAccountFields } from './equipmentShared'
 import { eqName } from './equipmentDocPrint'
 import { printSpareDocument, ruDate, signed, spareSigners } from './spareDocPrint'
 
@@ -73,6 +74,8 @@ export function SpareDocumentDialog({ companyId, op, parts, presetPartId, onClos
   const [repairId, setRepairId] = useState('')
   const [primaryNumber, setPrimaryNumber] = useState('')
   const [primaryDate, setPrimaryDate] = useState('')
+  const [cost, setCost] = useState({ costAccount: '', costItem: '' })
+  const expense = op === 'issue' || op === 'write_off'
   const receipt = op === 'receipt'
 
   const whQ = useQuery({ queryKey: ['equipment', 'warehouses-summary', companyId], queryFn: () => getWarehousesSummary(companyId), staleTime: 60_000 })
@@ -110,6 +113,7 @@ export function SpareDocumentDialog({ companyId, op, parts, presetPartId, onClos
       counterpartyId: party.counterpartyId || undefined, contractId: party.contractId || undefined,
       responsibleFrom: responsibleFrom.trim() || undefined, responsibleTo: responsibleTo.trim() || undefined,
       basis: basis.trim() || undefined, comment: comment.trim() || undefined,
+      ...(expense ? { costAccount: cost.costAccount || undefined, costItem: cost.costItem.trim() || undefined } : {}),
     }),
     onSuccess: (doc, draft) => {
       for (const k of ['equipment', 'eq-spares', 'eq-spare-movements', 'eq-warehouses', 'equipment-warehouses']) void qc.invalidateQueries({ queryKey: [k] })
@@ -238,6 +242,7 @@ export function SpareDocumentDialog({ companyId, op, parts, presetPartId, onClos
           </div>
         </div>
 
+        {expense && <CostAccountFields op={op} value={cost} onChange={setCost} />}
         {!inventory && <CounterpartyContractPicker companyId={companyId} value={party} onChange={setParty}
           label={op === 'receipt' ? 'Поставщик' : op === 'transfer' ? 'Контрагент (если склад чужой — подставится из карточки склада)' : 'Контрагент'} />}
         <div className="grid gap-2 sm:grid-cols-2">

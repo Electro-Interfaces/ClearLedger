@@ -50,7 +50,7 @@ ${d.status === 'cancelled' ? `<div class="void">Документ отменён 
 <div class="sub">№ ${esc(d.number)} от ${esc(ruDate(d.docDate))}</div>
 <table class="head">
 ${field(inv ? 'Склад' : 'Склад-получатель', d.toLocation)}${field('Склад-отправитель', d.fromLocation)}${field('Получатель', spareTarget(d))}
-${field('Акт ремонта', d.repairDocument?.number ? '№ ' + d.repairDocument.number : '')}${field('Контрагент', d.counterpartyName)}${field('Договор', d.contractLabel)}${field('Основание', d.basis)}${field('Комментарий', d.comment)}
+${field('Акт ремонта', d.repairDocument?.number ? '№ ' + d.repairDocument.number : '')}${field(d.op === 'issue' ? 'Счёт затрат' : 'Счёт списания', d.costAccount ? d.costAccount + (d.costItem ? ' · ' + d.costItem : '') : '')}${field('Контрагент', d.counterpartyName)}${field('Договор', d.contractLabel)}${field('Основание', d.basis)}${field('Комментарий', d.comment)}
 </table>
 <table class="lines"><thead><tr><th>№</th><th>Наименование</th><th>Артикул</th><th>Ед.</th>${inv ? '<th>По учёту</th><th>Фактически</th><th>Отклонение</th>' : '<th>Количество</th>'}</tr></thead>
 <tbody>${rows}</tbody></table>
