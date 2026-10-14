@@ -41,6 +41,13 @@ from app.services.ezs_checklist_integration import (
 # ── Воронка ────────────────────────────────────────────────────────────────
 # Порядок = порядок гейтов. Импорт может двигать площадку только ВПЕРЁД по
 # этому списку (кроме архива) — иначе файл откатывал бы ручную работу.
+# Интеграция с партнёром — проект без площадки: у неё свой раздел и свой отчёт.
+# В воронке, обзоре и приоритетах стройки она искажала бы счёт площадок.
+def not_integration(S=None):
+    S = S or EzsSite
+    return func.coalesce(S.kind, "new_build") != "integration"
+
+
 STAGE_ORDER = [
     "lead", "screening", "negotiation", "dd", "decision",
     "contracting", "construction", "commissioning", "live",
@@ -1250,6 +1257,7 @@ async def list_sites(
     search: str | None = None, owner_id=None, overdue: bool = False,
     risk: str | None = None, node: str | None = None,
     kind: str | None = None, place_kind: str | None = None,
+    without_kind: str | None = None,
     page: int = 1, page_size: int = 100,
 ) -> dict[str, Any]:
     from app.models import User
@@ -1258,6 +1266,8 @@ async def list_sites(
     conds = [S.company_id == company_id]
     if kind:
         conds.append(func.coalesce(S.kind, "new_build") == kind)
+    elif without_kind:
+        conds.append(func.coalesce(S.kind, "new_build") != without_kind)
     if place_kind:
         conds.append(func.lower(S.place_kind) == place_kind.lower())
     if risk:
@@ -1371,7 +1381,7 @@ async def site_detail(db: AsyncSession, company_id, site_id) -> dict[str, Any] |
 
 async def sites_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     S = EzsSite
-    base = S.company_id == company_id
+    base = (S.company_id == company_id) & not_integration(S)
     stage_expr = project_reporting_stage(S)
     total = int((await db.execute(select(func.count()).select_from(S).where(base))).scalar_one() or 0)
     by_stage = {r.stage: int(r.n) for r in (await db.execute(

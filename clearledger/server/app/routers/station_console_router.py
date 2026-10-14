@@ -223,6 +223,15 @@ async def station_console_session(
     return ответ
 
 
+def _path_ok(path: str) -> bool:
+    """Хвост пути консоли без выхода наверх: ни «..» (и их кодировок), ни «//», ни «\\»."""
+    from urllib.parse import unquote
+    p = path
+    for _ in range(3):  # двойное и тройное кодирование
+        p = unquote(p)
+    return not (".." in p.split("/") or "\\" in p or "//" in p or p.startswith("/") or chr(0) in p)
+
+
 @router.api_route(
     "/{station_id}/console/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "HEAD"],
@@ -281,6 +290,10 @@ async def station_console(
         заголовки["accept"] = acc
 
     тело = await request.body()
+    # Хвост пути — только внутри консоли этой станции: «../» увёл бы запрос с ключом
+    # интеграции на другие ручки хаба (аудит 07.10.2026).
+    if not _path_ok(path):
+        raise HTTPException(400, "недопустимый путь")
     цель = f"{HUB_URL}/api/v1/integration/stations/{station_id}/console/{path}"
 
     try:

@@ -4,7 +4,7 @@
  * справа — выбранный контрагент с полными реквизитами из 1С, где он работает,
  * и его договоры (с детальной карточкой каждого).
  */
-import { useState, useMemo, useEffect } from 'react'
+import { Fragment, useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { DocumentWindow } from '@/components/books/DocumentWindow'
@@ -42,12 +42,20 @@ import {
   useCounterparties, useContracts, useCounterpartyLocations, useCounterpartyActivity,
   useCreateCounterparty, useUpdateCounterparty, useDeleteCounterparty,
   useCreateContract, useDeleteContract, useSettlementsDetail,
+  useContractLocations, useSetContractScope,
 } from '@/hooks/useReferences'
 import * as refs from '@/services/referenceService'
 import { getCorporateClients } from '@/services/corporateService'
-import { ROLE_LABEL, PAYMENT_META, paidThroughLabel } from '@/types/settlement'
+import { ROLE_LABEL, PAYMENT_META, paidThroughLabel, type SettlementDetail } from '@/types/settlement'
 import { ContractScopeDialog, ContractScopeBadgeLabel } from '@/components/reference/ContractScopeDialog'
+import { ContractStationsField, contractStatus, type ContractStationsValue } from '@/components/reference/ContractStationsField'
 import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
+import { getSiteMembers } from '@/services/sitesService'
+import { ContractAppsField, saveContractLinks, useAppLabel, type ContractLinkDraft } from '@/components/reference/ContractAppsField'
+import { useSearchParams } from 'react-router-dom'
+import { ContractDocumentsBlock } from '@/components/reference/ContractDocumentsBlock'
+import { ContractQualityPanel } from '@/components/reference/ContractQualityPanel'
+import { useStationContracts, stationHitLabel } from '@/components/reference/useStationContracts'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
 import type { Counterparty, Contract, CounterpartyType } from '@/types'
 import { useSpacePageSub } from '@/hooks/useSpacePageSub'
@@ -248,9 +256,20 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
             <Req label="Сумма включает НДС" value={c.amountInclVat == null ? ('СуммаВключаетНДС' in raw ? fmtRaw(raw.СуммаВключаетНДС) : undefined) : (c.amountInclVat ? 'Да' : 'Нет')} />
             <Req label="Вид взаиморасчётов" value={c.settlementKind} />
             <Req label="Договор закрыт" value={c.isClosed ? 'Да' : 'Нет'} />
-            {isEnergy && <Req label="Охват точек" value={ContractScopeBadgeLabel(c.scopeType)} />}
+            {isEnergy && <Req label="Охват точек" value={ContractScopeBadgeLabel(c.scopeType, c.locationsCount)} />}
+            <Req label="Подписан" value={c.signed == null ? undefined : c.signed ? `Да${c.signedAt ? `, ${c.signedAt}` : ''}` : 'Нет'} />
+            <Req label="Срок оплаты" value={c.paymentTermDays != null ? `${c.paymentTermDays} дн.` : undefined} />
+            <Req label="Сумма НДС" value={vatAmount(c)} />
+            <Req label="Госконтракт" value={c.isStateContract ? `Да${c.igk ? ` · ИГК ${c.igk}` : ''}` : undefined} />
+            <Req label="Основание заключения" value={c.basis} />
+            <Req label="Ответственный" value={c.responsibleId ? <MemberName id={c.responsibleId} /> : undefined} />
+            <Req label="Подписант с нашей стороны" value={[c.signerOur, c.signerOurPosition].filter(Boolean).join(', ') || undefined} />
+            <Req label="Подписант контрагента" value={[c.signerCp, c.signerCpPosition, c.signerCpBasis && `на основании: ${c.signerCpBasis}`].filter(Boolean).join(', ') || undefined} />
             <Req label="Комментарий" value={c.comment || (raw.Комментарий as string)} span />
           </div>
+          <ContractDocumentsBlock contract={c} />
+          <ContractLinksBlock id={c.id} />
+          <ContractUsageBlock id={c.id} />
           {/* Условие — это договор, прочитанный учётом: «5000 ₽ в месяц до 10-го
               числа». Держим его здесь же, а не отдельным реестром приложения:
               иначе человек ищет связь, которую система знает сама. */}
@@ -266,6 +285,50 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** Сумма НДС из суммы и ставки (реквизит 1С СуммаНДС считается, а не вводится). */
+function vatAmount(c: Contract): string | undefined {
+  const rate = Number(String(c.vatRate ?? '').replace(/[^\d.,]/g, '').replace(',', '.'))
+  if (!c.amountLimit || !rate) return undefined
+  const v = c.amountInclVat === false ? c.amountLimit * rate / 100 : c.amountLimit * rate / (100 + rate)
+  return v.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
+}
+
+function MemberName({ id }: { id: string }) {
+  const { companyId } = useCompany()
+  const people = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId), staleTime: 300_000 })
+  return <>{people.data?.find((p) => p.id === id)?.name ?? 'сотрудник недоступен'}</>
+}
+
+const USAGE_APP: Record<string, string> = { ops: 'Эксплуатация', projects: 'Проекты', docs: 'Трек', shop: 'Магазин', books: 'Бухгалтерия', mail: 'Почта', support: 'Поддержка' }
+
+/** К каким приложениям и проектам договор привязан человеком. */
+function ContractLinksBlock({ id }: { id: string }) {
+  const links = useQuery({ queryKey: ['contract-links', id], queryFn: () => refs.getContractLinks(id) })
+  const label = useAppLabel()
+  return (
+    <div className="space-y-1.5 border-t border-border/50 pt-3">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Приложения и проекты</p>
+      {links.isLoading ? <p className="text-xs text-muted-foreground">Загрузка…</p>
+        : !links.data?.length ? <p className="text-xs text-muted-foreground">Не привязан — привязку ставят в форме договора.</p>
+        : <ul className="text-sm space-y-0.5">{links.data.map((l) => <li key={l.id}>{label(l.app)}{l.projectRef ? ` → ${l.projectLabel ?? 'проект'}` : ''}</li>)}</ul>}
+    </div>
+  )
+}
+
+/** Где договор используется — по фактическим ссылкам приложений. */
+function ContractUsageBlock({ id }: { id: string }) {
+  const usage = useQuery({ queryKey: ['contract-usage', id], queryFn: () => refs.getContractUsage(id) })
+  return (
+    <div className="space-y-1.5 border-t border-border/50 pt-3">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">Где используется</p>
+      {usage.isLoading ? <p className="text-xs text-muted-foreground">Загрузка…</p>
+        : !usage.data?.length ? <p className="text-xs text-muted-foreground">Нигде: ни расчётов, ни документов, ни проектов по договору.</p>
+        : <ul className="text-sm space-y-0.5">{usage.data.map((u) => <li key={u.label}>
+            <span className="text-muted-foreground">{USAGE_APP[u.app] ?? u.app} · </span>{u.label}: {u.count}</li>)}</ul>}
+    </div>
   )
 }
 
@@ -421,13 +484,84 @@ function ContactFormDialog({ counterpartyId, edit, onSaved, children }: {
 }
 
 // ─── Блок «Станции и расчёты» (energy: платёжная дисциплина контрагента) ─────
-function SettlementsBlock({ cp }: { cp: Counterparty }) {
+/** Станции договора по реестру: станция, роль, плата, оплачено по, срок по реестру. */
+function SettlementRows({ rows }: { rows: SettlementDetail[] }) {
+  return (
+    <div className="rounded-md border max-h-72 overflow-y-auto">
+      <Table>
+        <TableHeader className="sticky top-0 bg-card z-10">
+          <TableRow>
+            <TableHead>Станция</TableHead>
+            <TableHead className="w-[120px]">Роль</TableHead>
+            <TableHead className="w-[110px] text-right">Плата, ₽/мес</TableHead>
+            <TableHead className="w-[160px]">Оплачено</TableHead>
+            <TableHead className="w-[190px]">Срок по реестру</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((r, i) => (
+            <TableRow key={`${r.locationId}-${r.role}-${i}`}>
+              <TableCell className="text-sm">
+                <span className="font-medium">{r.buNumber || r.stationCode || '—'}</span>
+                {r.stationName && <span className="text-muted-foreground"> · {r.stationName}</span>}
+              </TableCell>
+              <TableCell className="text-sm">{ROLE_LABEL[r.role] ?? r.role}</TableCell>
+              <TableCell className="text-right text-sm tabular-nums">{r.amountGross ? Math.round(r.amountGross).toLocaleString('ru-RU') : '—'}</TableCell>
+              <TableCell><Badge variant="outline" className={`text-[11px] ${PAYMENT_META[r.paymentStatus]?.cls ?? ''}`}>{paidThroughLabel(r)}</Badge></TableCell>
+              <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                {r.contractStart || r.contractEnd ? `${r.contractStart ?? '…'} — ${r.contractEnd ?? '…'}` : '—'}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+/** Расчёты контрагента по станциям (из реестра аренды и энергоснабжения). */
+function useCpSettlements(cp: Counterparty): SettlementDetail[] {
   const { data: all = [] } = useSettlementsDetail()
-  const rows = useMemo(
+  return useMemo(
     () => all.filter((s) => s.counterpartyId
       && (s.counterpartyId === cp.id || (cp.externalRef && s.counterpartyId === cp.externalRef))),
     [all, cp.id, cp.externalRef],
   )
+}
+
+/** Станции по договору — под строкой договора: к какому договору относится расчёт, видно сразу. */
+function ContractStationsRow({ contract: c, rows, cols }: { contract: Contract; rows: SettlementDetail[]; cols: number }) {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const monthly = rows.reduce((s, r) => s + (r.amountGross ?? 0), 0)
+  // Срок в реестре есть и расходится с договором (или в договоре пуст) — предложить взять,
+  // если по всем станциям договора он один. Решает человек: реестр бывает старше договора.
+  const ends = [...new Set(rows.map((r) => r.contractEnd).filter(Boolean))] as string[]
+  const fill = useMutation({
+    mutationFn: () => refs.updateContract(companyId, c.id, { validUntil: ends[0] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['references', companyId] }); toast.success(`Срок договора: до ${ends[0]}`) },
+    onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
+  return (
+    <TableRow className="hover:bg-transparent">
+      <TableCell colSpan={cols} className="pt-0 pb-3">
+        <div className="flex flex-wrap items-center gap-2 mb-1.5 text-xs text-muted-foreground">
+          <span>Станции по договору: {rows.length}{monthly > 0 ? ` · ${Math.round(monthly).toLocaleString('ru-RU')} ₽/мес` : ''}</span>
+          {ends.length === 1 && c.validUntil !== ends[0] && (
+            <Button size="sm" variant="outline" className="h-6 text-[11px]" disabled={fill.isPending} onClick={() => fill.mutate()}>
+              {c.validUntil ? `В договоре срок до ${c.validUntil}, в реестре — до ${ends[0]}: взять из реестра` : `В договоре срок не указан — взять из реестра: до ${ends[0]}`}
+            </Button>
+          )}
+        </div>
+        <SettlementRows rows={rows} />
+      </TableCell>
+    </TableRow>
+  )
+}
+
+/** Расчёты, у которых не найден договор: строка реестра есть, договора под ней нет. */
+function SettlementsBlock({ cp, contractIds }: { cp: Counterparty; contractIds: Set<string> }) {
+  const rows = useCpSettlements(cp).filter((s) => !s.contractId || !contractIds.has(s.contractId))
   if (rows.length === 0) return null
   const monthly = rows.reduce((sum, r) => sum + (r.amountGross ?? 0), 0)
   const unpaid = rows.filter((r) => r.paymentStatus === 'unpaid').length
@@ -435,7 +569,7 @@ function SettlementsBlock({ cp }: { cp: Counterparty }) {
     <div>
       <div className="flex items-center gap-2 flex-wrap mb-2">
         <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
-          Станции и расчёты ({rows.length})
+          Расчёты по станциям без договора ({rows.length})
         </p>
         {monthly > 0 && (
           <Badge variant="outline" className="text-[11px]">
@@ -448,45 +582,8 @@ function SettlementsBlock({ cp }: { cp: Counterparty }) {
           </Badge>
         )}
       </div>
-      <div className="rounded-md border max-h-72 overflow-y-auto">
-        <Table>
-          <TableHeader className="sticky top-0 bg-card z-10">
-            <TableRow>
-              <TableHead>Станция</TableHead>
-              <TableHead className="w-[130px]">Роль</TableHead>
-              <TableHead className="w-[110px] text-right">Плата, ₽/мес</TableHead>
-              <TableHead className="w-[170px]">Оплата</TableHead>
-              <TableHead className="w-[150px]">Срок договора</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r, i) => (
-              <TableRow key={`${r.locationId}-${r.role}-${i}`}>
-                <TableCell className="text-sm">
-                  <span className="font-medium">{r.buNumber || r.stationCode || '—'}</span>
-                  {r.stationName && (
-                    <span className="text-muted-foreground"> · {r.stationName}</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-sm">{ROLE_LABEL[r.role] ?? r.role}</TableCell>
-                <TableCell className="text-right text-sm tabular-nums">
-                  {r.amountGross ? Math.round(r.amountGross).toLocaleString('ru-RU') : '—'}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className={`text-[11px] ${PAYMENT_META[r.paymentStatus]?.cls ?? ''}`}>
-                    {paidThroughLabel(r)}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-                  {r.contractStart || r.contractEnd
-                    ? `${r.contractStart ?? '…'} — ${r.contractEnd ?? '…'}`
-                    : '—'}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <p className="mb-2 text-xs text-muted-foreground">Строки реестра аренды и энергоснабжения по станциям этого контрагента, к которым не найден договор: заведите договор (кнопка «Добавить» выше) или поправьте охват существующего.</p>
+      <SettlementRows rows={rows} />
     </div>
   )
 }
@@ -643,6 +740,12 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
     }
     return [...m.entries()].sort((a, b) => b[1] - a[1])
   }, [contracts, isEnergy])
+  const cpSettlements = useCpSettlements(cp)
+  const settlementsByContract = useMemo(() => {
+    const m = new Map<string, SettlementDetail[]>()
+    for (const s of cpSettlements) if (s.contractId) m.set(s.contractId, [...(m.get(s.contractId) ?? []), s])
+    return m
+  }, [cpSettlements])
 
   return (
     <div className="space-y-5">
@@ -748,11 +851,13 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                 </TableRow>
               )}
               {contracts.map((c) => (
-                <TableRow key={c.id}>
+                <Fragment key={c.id}>
+                <TableRow className={isEnergy && settlementsByContract.get(c.id)?.length ? 'border-b-0' : undefined}>
                   <TableCell>
                     <ContractDetailDialog contract={c}>
                       <button className="font-mono text-sm text-primary hover:underline text-left">{c.number}</button>
                     </ContractDetailDialog>
+                    <div className={`text-[11px] ${contractStatus(c).cls}`}>{contractStatus(c).label}</div>
                   </TableCell>
                   <TableCell className="text-sm">{c.date || '—'}</TableCell>
                   <TableCell><ContractKindBadge contract={c} /></TableCell>
@@ -765,7 +870,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                           variant={c.scopeType === 'company' ? 'secondary' : 'outline'}
                           className={c.scopeType === 'unassigned' || !c.scopeType ? 'text-muted-foreground' : ''}
                         >
-                          {ContractScopeBadgeLabel(c.scopeType)}
+                          {ContractScopeBadgeLabel(c.scopeType, c.locationsCount)}
                         </Badge>
                       </Button>
                     </ContractScopeDialog>
@@ -777,11 +882,14 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                         <ContractFormDialog counterpartyId={cp.externalRef || cp.id} edit={c}>
                           <Button variant="ghost" size="icon" className="h-8 w-8"><Pencil className="size-4" /></Button>
                         </ContractFormDialog>
-                        <DeleteContractButton id={c.id} />
+                        <DeleteContractButton contract={c} />
                       </div>
                     )}
                   </TableCell>
                 </TableRow>
+                {isEnergy && !!settlementsByContract.get(c.id)?.length &&
+                  <ContractStationsRow contract={c} rows={settlementsByContract.get(c.id)!} cols={isEnergy ? 5 : 4} />}
+                </Fragment>
               ))}
             </TableBody>
           </Table>
@@ -790,7 +898,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
 
       {/* Связь со слоем данных: energy — платёжная дисциплина по станциям,
           fuel — документы БП, сопоставленные по ИНН */}
-      {isEnergy ? <SettlementsBlock cp={cp} /> : <ActivityBlock cp={cp} />}
+      {isEnergy ? <SettlementsBlock cp={cp} contractIds={new Set(contracts.map((c) => c.id))} /> : <ActivityBlock cp={cp} />}
 
       {/* Все реквизиты из 1С */}
       {cp.externalRef && (
@@ -924,8 +1032,15 @@ function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; child
 }
 
 // ─── Форма договора (создание/правка) ────────────────────────────────────────
-function ContractFormDialog({ counterpartyId, edit, children }: {
-  counterpartyId: string; edit?: Contract; children: React.ReactNode
+/** «28.11.2023» → «2023-11-28»: поле даты понимает только ISO, иначе дата выглядит пустой. */
+function isoDate(v?: string | null): string {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(v ?? '')
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : (v ?? '')
+}
+
+function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, children }: {
+  /** Контрагент задан (карточка контрагента) — или выбирается в форме (раздел «Договоры»). */
+  counterpartyId?: string; counterparties?: Counterparty[]; edit?: Contract; children: React.ReactNode
 }) {
   const { companyId } = useCompany()
   const qc = useQueryClient()
@@ -941,9 +1056,9 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
   const orgs = orgsQuery.data ?? []
   const [open, setOpen] = useState(false)
   const [f, setF] = useState({
-    number: edit?.number ?? '', date: edit?.date ?? '', kind: edit?.kind ?? 'СПокупателем',
+    number: edit?.number ?? '', date: isoDate(edit?.date), kind: edit?.kind ?? 'СПокупателем',
     type: edit?.type ?? '', organizationId: edit?.organizationId ?? '',
-    currency: edit?.currency ?? 'RUB', validUntil: edit?.validUntil ?? '',
+    currency: edit?.currency ?? 'RUB', validUntil: isoDate(edit?.validUntil),
     amountLimit: edit?.amountLimit != null ? String(edit.amountLimit) : '',
     vatRate: edit?.vatRate ?? '', settlementKind: edit?.settlementKind ?? '', comment: edit?.comment ?? '',
     amountInclVat: edit?.amountInclVat == null ? '' : (edit.amountInclVat ? 'true' : 'false'),
@@ -951,61 +1066,139 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
     // Бессрочность хранится отсутствием даты — своей колонки нет и не нужно:
     // пустой `valid_until` уже везде читается как «действует до расторжения».
     perpetual: !edit?.validUntil,
+    typeCode: edit?.typeCode ?? '',
+    counterpartyId: fixedCp ?? edit?.counterpartyId ?? '',
+    cpQuery: '',
+    basis: edit?.basis ?? '',
+    signed: edit?.signed ?? false, signedAt: edit?.signedAt ?? '',
+    paymentTermDays: edit?.paymentTermDays != null ? String(edit.paymentTermDays) : '',
+    isStateContract: edit?.isStateContract ?? false, igk: edit?.igk ?? '',
+    responsibleId: edit?.responsibleId ?? '',
+    signerOur: edit?.signerOur ?? '', signerOurPosition: edit?.signerOurPosition ?? '',
+    signerCp: edit?.signerCp ?? '', signerCpPosition: edit?.signerCpPosition ?? '', signerCpBasis: edit?.signerCpBasis ?? '',
   })
+  const counterpartyId = f.counterpartyId
+  const people = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId), enabled: open, staleTime: 300_000 })
+  const cpOptions = useMemo(() => {
+    const q = f.cpQuery.trim().toLocaleLowerCase('ru')
+    return (counterparties ?? []).filter((c) => !q || `${c.name} ${c.inn ?? ''}`.toLocaleLowerCase('ru').includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru')).slice(0, 200)
+  }, [counterparties, f.cpQuery])
+  // Вид по справочнику (основание по ГК) — рядом со свободным «предметом».
+  const typesQuery = useQuery({ queryKey: ['references', 'contract-types'], queryFn: refs.getContractTypes, staleTime: 3_600_000 })
+  // Станции договора — прямо в форме. При правке охват сохраняется, только если
+  // его меняли: иначе правка суммы сбрасывала бы привязку (старая грабля формы).
+  const currentLocs = useContractLocations(open && edit ? edit.id : null)
+  const setScope = useSetContractScope()
+  const [scope, setScopeValue] = useState<ContractStationsValue>({ scopeType: edit?.scopeType ?? 'locations', locationIds: [] })
+  const [scopeDirty, setScopeDirty] = useState(false)
+  // Приложения и проекты договора: черновик, сохраняется разницей после договора.
+  const linksQuery = useQuery({ queryKey: ['contract-links', edit?.id], queryFn: () => refs.getContractLinks(edit!.id), enabled: open && !!edit })
+  const [links, setLinks] = useState<ContractLinkDraft[]>([])
+  const [linksDirty, setLinksDirty] = useState(false)
+  useEffect(() => { if (linksQuery.data && !linksDirty) setLinks(linksQuery.data) }, [linksQuery.data, linksDirty])
+  useEffect(() => {
+    if (open && edit && currentLocs.data && !scopeDirty) setScopeValue({ scopeType: edit.scopeType ?? 'unassigned', locationIds: currentLocs.data.map((l) => l.id) })
+  }, [open, edit, currentLocs.data, scopeDirty])
   const orgId = f.organizationId || (orgs[0]?.externalRef || orgs[0]?.id || '')
-  const canSave = f.number.trim() !== '' && f.date.trim() !== '' && orgId !== ''
-  const pending = create.isPending || update.isPending
-  function save() {
+  const canSave = f.number.trim() !== '' && f.date.trim() !== '' && orgId !== '' && counterpartyId !== ''
+  const pending = create.isPending || update.isPending || setScope.isPending
+  async function save() {
     const payload = {
       number: f.number.trim(), date: f.date.trim(), counterpartyId,
       organizationId: orgId, kind: f.kind, type: f.type.trim() || kindLabel(f.kind),
-      currency: f.currency.trim() || 'RUB', validUntil: f.validUntil.trim() || undefined,
-      amountLimit: f.amountLimit ? Number(f.amountLimit) : undefined,
+      // null — явная очистка: бессрочный договор стирает прежний срок, пустая сумма — сумму.
+      currency: f.currency.trim() || 'RUB', validUntil: f.perpetual ? null : (f.validUntil.trim() || null),
+      amountLimit: f.amountLimit ? Number(f.amountLimit) : null,
+      basis: f.basis.trim() || null,
+      signed: f.signed, signedAt: f.signed ? (f.signedAt || null) : null,
+      paymentTermDays: f.paymentTermDays ? Number(f.paymentTermDays) : null,
+      isStateContract: f.isStateContract, igk: f.isStateContract ? (f.igk.trim() || null) : null,
+      responsibleId: f.responsibleId || null,
+      signerOur: f.signerOur.trim() || null, signerOurPosition: f.signerOurPosition.trim() || null,
+      signerCp: f.signerCp.trim() || null, signerCpPosition: f.signerCpPosition.trim() || null,
+      signerCpBasis: f.signerCpBasis.trim() || null,
       vatRate: f.vatRate.trim() || undefined,
       amountInclVat: f.amountInclVat === '' ? undefined : f.amountInclVat === 'true',
       settlementKind: f.settlementKind.trim() || undefined,
       comment: f.comment.trim() || undefined,
       isClosed: f.isClosed,
+      typeCode: f.typeCode || undefined,
       // Охват правится своим диалогом («Охват договора»). Слать его отсюда нельзя:
       // при правке любого поля привязка к точкам сбрасывалась в «Не распределён».
       ...(edit ? {} : { scopeType: 'unassigned' as const }),
     }
-    const opts = {
-      onSuccess: () => { toast.success(edit ? 'Договор обновлён' : 'Договор добавлен'); setOpen(false) },
-      onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+    if (scope.scopeType === 'locations' && scope.locationIds.length === 0 && (!edit || scopeDirty)) {
+      toast.error('Выберите станции договора или укажите «Общий по компании» / «Не распределён»')
+      return
     }
-    if (edit) update.mutate(payload, opts)
-    else create.mutate(payload, opts)
+    try {
+      const saved = edit ? await update.mutateAsync(payload) : await create.mutateAsync(payload)
+      if (!edit || scopeDirty) {
+        const contractId = edit?.id ?? saved?.id
+        if (contractId) await setScope.mutateAsync({ contractId, scopeType: scope.scopeType,
+          locationIds: scope.scopeType === 'locations' ? scope.locationIds : [] })
+      }
+      const linkedId = edit?.id ?? saved?.id
+      if (linkedId && linksDirty) {
+        await saveContractLinks(linkedId, edit ? (linksQuery.data ?? []) : [], links)
+        qc.invalidateQueries({ queryKey: ['contract-links', linkedId] })
+      }
+      qc.invalidateQueries({ queryKey: ['contract-bindings', companyId] })
+      toast.success(edit ? 'Договор обновлён' : 'Договор добавлен')
+      setOpen(false)
+    } catch (e) { toast.error(`Ошибка: ${(e as Error).message}`) }
   }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto [&_input]:bg-muted/60! [&_textarea]:bg-muted/60! [&_[data-slot=select-trigger]]:bg-muted/60!">
+      <DialogContent className="w-[96vw] sm:max-w-4xl max-h-[92dvh] overflow-y-auto [&_input]:bg-muted/60! [&_textarea]:bg-muted/60! [&_[data-slot=select-trigger]]:bg-muted/60!">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="size-5" /> {edit ? 'Изменить договор' : 'Новый договор'}
+            {edit && <span className={`text-xs font-normal ${contractStatus(edit).cls}`}>{contractStatus(edit).label}</span>}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
+          {!fixedCp && <div className="space-y-1.5"><Label>Контрагент <span className="text-destructive">*</span></Label>
+            <Input aria-label="Поиск контрагента" value={f.cpQuery} placeholder="Название или ИНН"
+              onChange={(e) => setF((s) => ({ ...s, cpQuery: e.target.value }))} />
+            <select aria-label="Контрагент" className="h-9 w-full rounded-md border bg-muted/60 px-2 text-sm" value={f.counterpartyId}
+              onChange={(e) => setF((s) => ({ ...s, counterpartyId: e.target.value }))}>
+              <option value="">Выберите контрагента</option>
+              {f.counterpartyId && !cpOptions.some((c) => (c.externalRef || c.id) === f.counterpartyId) &&
+                <option value={f.counterpartyId}>{counterparties?.find((c) => (c.externalRef || c.id) === f.counterpartyId)?.name ?? 'выбранный'}</option>}
+              {cpOptions.map((c) => <option key={c.id} value={c.externalRef || c.id}>{c.name}{c.inn ? ` · ИНН ${c.inn}` : ''}</option>)}
+            </select></div>}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5"><Label>Номер <span className="text-destructive">*</span></Label>
               <Input value={f.number} onChange={(e) => setF((s) => ({ ...s, number: e.target.value }))} /></div>
             <div className="space-y-1.5"><Label>Дата <span className="text-destructive">*</span></Label>
               <Input type="date" value={f.date} onChange={(e) => setF((s) => ({ ...s, date: e.target.value }))} /></div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5"><Label>Вид договора</Label>
             <Select value={f.kind} onValueChange={(v) => setF((s) => ({ ...s, kind: v }))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>{Object.entries(KIND_META).map(([k, m]) => <SelectItem key={k} value={k}>{m.label}</SelectItem>)}</SelectContent>
+            </Select></div>
+          <div className="space-y-1.5"><Label>Вид по справочнику</Label>
+            <Select value={f.typeCode || '—'} onValueChange={(v) => setF((s) => ({ ...s, typeCode: v === '—' ? '' : v }))}>
+              <SelectTrigger aria-label="Вид по справочнику" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="—">Не указан</SelectItem>
+                {(typesQuery.data ?? []).map((tp) => <SelectItem key={tp.code} value={tp.code}>{tp.label}{tp.gkBasis ? ` · ${tp.gkBasis}` : ''}</SelectItem>)}
+              </SelectContent>
             </Select></div>
           <div className="space-y-1.5"><Label>Тип / предмет</Label>
             <Input value={f.type} onChange={(e) => setF((s) => ({ ...s, type: e.target.value }))} placeholder="Поставка ГСМ, аренда, услуги…" /></div>
           <div className="space-y-1.5"><Label>Организация</Label>
             <Select value={orgId} onValueChange={(v) => setF((s) => ({ ...s, organizationId: v }))}>
-              <SelectTrigger><SelectValue placeholder={orgs.length ? 'Выберите' : 'Нет организаций'} /></SelectTrigger>
+              <SelectTrigger className="w-full"><SelectValue placeholder={orgs.length ? 'Выберите' : 'Нет организаций'} /></SelectTrigger>
               <SelectContent>{orgs.map((o) => <SelectItem key={o.id} value={o.externalRef || o.id}>{o.name}</SelectItem>)}</SelectContent>
             </Select></div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {/* Валюта почти всегда рублёвая и правится редко — в простом режиме убрана.
                 Ставка НДС и «Сумма включает НДС» ниже остаются всегда: они
                 определяют суммы, которые уйдут в бухгалтерию. */}
@@ -1023,11 +1216,10 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
               </label></div>
             <div className="space-y-1.5"><Label>Сумма</Label>
               <Input value={f.amountLimit} onChange={(e) => setF((s) => ({ ...s, amountLimit: e.target.value.replace(/[^\d.]/g, '') }))} /></div>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {/* срок, сумма и НДС — одной строкой: на широком окне это четыре коротких поля */}
             <div className="space-y-1.5"><Label>Ставка НДС</Label>
               <Input value={f.vatRate} onChange={(e) => setF((s) => ({ ...s, vatRate: e.target.value }))} placeholder="20% / Без НДС" /></div>
-            <div className="space-y-1.5"><Label>Сумма включает НДС</Label>
+            <div className="space-y-1.5"><Label>Включает НДС</Label>
               <Select value={f.amountInclVat || '—'} onValueChange={(v) => setF((s) => ({ ...s, amountInclVat: v === '—' ? '' : v }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -1042,12 +1234,55 @@ function ContractFormDialog({ counterpartyId, edit, children }: {
             </AdvancedOnly>
           </div>
           <AdvancedHint count={2} what="поля — валюта и вид взаиморасчётов" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="space-y-1.5"><Label>Подписание</Label>
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input type="checkbox" checked={f.signed} className="size-4 accent-primary"
+                  onChange={(e) => setF((s) => ({ ...s, signed: e.target.checked }))} /> подписан</label>
+              {f.signed && <Input type="date" aria-label="Дата подписания" value={f.signedAt} onChange={(e) => setF((s) => ({ ...s, signedAt: e.target.value }))} />}</div>
+            <div className="space-y-1.5"><Label>Срок оплаты, дней</Label>
+              <Input inputMode="numeric" value={f.paymentTermDays} placeholder="не установлен"
+                onChange={(e) => setF((s) => ({ ...s, paymentTermDays: e.target.value.replace(/\D/g, '') }))} /></div>
+            <div className="space-y-1.5"><Label>Ответственный</Label>
+              <select aria-label="Ответственный" className="h-9 w-full rounded-md border bg-muted/60 px-2 text-sm" value={f.responsibleId}
+                onChange={(e) => setF((s) => ({ ...s, responsibleId: e.target.value }))}>
+                <option value="">не назначен</option>
+                {f.responsibleId && !people.data?.some((p) => p.id === f.responsibleId) && <option value={f.responsibleId}>сотрудник недоступен</option>}
+                {people.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select></div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5"><Label>Основание заключения</Label>
+              <Input value={f.basis} placeholder="Закупка 223-ФЗ №…, протокол, решение" onChange={(e) => setF((s) => ({ ...s, basis: e.target.value }))} /></div>
+            <div className="space-y-1.5"><Label>Государственный контракт</Label>
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input type="checkbox" checked={f.isStateContract} className="size-4 accent-primary"
+                  onChange={(e) => setF((s) => ({ ...s, isStateContract: e.target.checked }))} /> госконтракт</label>
+              {f.isStateContract && <Input aria-label="ИГК" value={f.igk} placeholder="Идентификатор госконтракта (ИГК)" onChange={(e) => setF((s) => ({ ...s, igk: e.target.value }))} />}</div>
+          </div>
+          <div className="space-y-2 border-t pt-3"><Label>Подписанты</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Input aria-label="Подписант с нашей стороны" value={f.signerOur} placeholder="Наш подписант (ФИО)" onChange={(e) => setF((s) => ({ ...s, signerOur: e.target.value }))} />
+              <Input aria-label="Должность нашего подписанта" value={f.signerOurPosition} placeholder="Должность" onChange={(e) => setF((s) => ({ ...s, signerOurPosition: e.target.value }))} />
+              <Input aria-label="Подписант контрагента" value={f.signerCp} placeholder="Подписант контрагента (ФИО)" onChange={(e) => setF((s) => ({ ...s, signerCp: e.target.value }))} />
+              <Input aria-label="Должность подписанта контрагента" value={f.signerCpPosition} placeholder="Должность" onChange={(e) => setF((s) => ({ ...s, signerCpPosition: e.target.value }))} />
+              <Input aria-label="Основание полномочий" className="sm:col-span-2" value={f.signerCpBasis} placeholder="Основание полномочий: Устав, доверенность №…" onChange={(e) => setF((s) => ({ ...s, signerCpBasis: e.target.value }))} />
+            </div>
+          </div>
           <div className="space-y-1.5"><Label>Комментарий</Label>
             <Textarea value={f.comment} onChange={(e) => setF((s) => ({ ...s, comment: e.target.value }))} rows={2} /></div>
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input type="checkbox" checked={f.isClosed} onChange={(e) => setF((s) => ({ ...s, isClosed: e.target.checked }))} className="size-4 accent-primary" />
             Договор закрыт
           </label>
+          <div className="space-y-1.5 border-t pt-3"><Label>Станции договора</Label>
+            {edit && currentLocs.isLoading ? <p className="text-xs text-muted-foreground">Загрузка станций…</p>
+              : <ContractStationsField value={scope} onChange={(v) => { setScopeValue(v); setScopeDirty(true) }} />}
+          </div>
+          <div className="space-y-1.5 border-t pt-3"><Label>Приложения и проекты</Label>
+            {edit && linksQuery.isLoading ? <p className="text-xs text-muted-foreground">Загрузка привязок…</p>
+              : <ContractAppsField value={links} onChange={(v) => { setLinks(v); setLinksDirty(true) }} />}
+          </div>
           {orgs.length === 0 && <p className="text-xs text-amber-600 dark:text-amber-400">Сначала заведите организацию (раздел «Данные → Организация»).</p>}
         </div>
         <DialogFooter>
@@ -1084,24 +1319,41 @@ function DeleteCounterpartyButton({ cp }: { cp: Counterparty }) {
   )
 }
 
-function DeleteContractButton({ id }: { id: string }) {
+/** Удаление как пометка удаления в 1С: договор, на который ссылаются расчёты, документы
+ *  или проекты, не стирается — его закрывают. Удаляется только неиспользованный. */
+function DeleteContractButton({ contract: c }: { contract: Contract }) {
   const del = useDeleteContract()
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const usage = useQuery({ queryKey: ['contract-usage', c.id], queryFn: () => refs.getContractUsage(c.id), enabled: open })
+  const used = (usage.data?.length ?? 0) > 0
+  const close = useMutation({
+    mutationFn: () => refs.updateContract(companyId, c.id, { isClosed: true }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['references', companyId] }); toast.success('Договор закрыт') },
+    onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+  })
   return (
-    <AlertDialog>
+    <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8"><Trash2 className="size-4 text-destructive" /></Button>
+        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Удалить договор ${c.number}`}><Trash2 className="size-4 text-destructive" /></Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Удалить договор?</AlertDialogTitle>
-          <AlertDialogDescription>Действие необратимо.</AlertDialogDescription>
+          <AlertDialogTitle>{used ? `Договор № ${c.number} используется` : `Удалить договор № ${c.number}?`}</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div>{usage.isLoading ? 'Проверяю, где используется договор…'
+              : used ? <>Удалить нельзя — на договор ссылаются: {usage.data!.map((u) => `${u.label} (${u.count})`).join(', ')}. Договор можно закрыть: он останется в истории расчётов и документов.</>
+              : 'Договор нигде не используется. Удаление необратимо.'}</div>
+          </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Отмена</AlertDialogCancel>
-          <AlertDialogAction onClick={() => del.mutate(id, {
-            onSuccess: () => toast.success('Договор удалён'),
-            onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
-          })}>Удалить</AlertDialogAction>
+          {used ? (!c.isClosed && <AlertDialogAction onClick={() => close.mutate()}>Закрыть договор</AlertDialogAction>)
+            : <AlertDialogAction disabled={usage.isLoading} onClick={() => del.mutate(c.id, {
+              onSuccess: () => toast.success('Договор удалён'),
+              onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+            })}>Удалить</AlertDialogAction>}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -1115,6 +1367,22 @@ const chipCls = (active: boolean) =>
            : 'bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted'
   }`
 
+/** Строки списка с заголовками групп: заголовок — перед договорами контрагента; у свёрнутой
+ *  группы договоры скрыты, заголовок остаётся. Предел считается по строкам договоров. */
+function withGroups(all: Contract[], limit: number, collapsed: Set<string>): { c: Contract | null; head: string | null }[] {
+  const out: { c: Contract | null; head: string | null }[] = []
+  let prev: string | null = null
+  let n = 0
+  for (const c of all) {
+    if (c.counterpartyId !== prev) {
+      if (n >= limit) break
+      out.push({ c: null, head: c.counterpartyId }); prev = c.counterpartyId
+    }
+    if (!collapsed.has(c.counterpartyId) && n < limit) { out.push({ c, head: null }); n++ }
+  }
+  return out
+}
+
 // ─── Глобальный список всех договоров (с фильтром по типу) ───────────────────
 function AllContractsView({ counterparties }: { counterparties: Counterparty[] }) {
   const { company } = useCompany()
@@ -1127,6 +1395,9 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
   const [limit, setLimit] = useState(100)
   const [sortKey, setSortKey] = useState<'date' | 'amount'>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  // По контрагентам — как договоры и заводятся: контрагент → его договоры.
+  const [grouped, setGrouped] = useState(true)
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const toggleSort = (col: 'date' | 'amount') => {
     if (sortKey === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(col); setSortDir('desc') }
@@ -1142,6 +1413,25 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
     return m
   }, [counterparties])
 
+  const { companyId } = useCompany()
+  const bindings = useQuery({ queryKey: ['contract-bindings', companyId], queryFn: () => refs.getContractBindings(companyId), staleTime: 60_000 })
+  const appLabel = useAppLabel()
+  const [params, setParams] = useSearchParams()
+  const appFilter = params.get('app') ?? ''
+  const projectFilter = params.get('project') ?? ''
+  // Один договор — переход из «Документов» пространства («Карточка договора»).
+  const contractFilter = params.get('contract') ?? ''
+  const setParam = (k: string, v: string) => setParams((prev) => { const n = new URLSearchParams(prev); if (v) n.set(k, v); else n.delete(k); return n }, { replace: true })
+  const appCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const b of Object.values(bindings.data?.contracts ?? {})) for (const a of b.apps) m.set(a, (m.get(a) ?? 0) + 1)
+    return [...m.entries()].sort((a, b) => b[1] - a[1])
+  }, [bindings.data])
+
+  // Поиск по локации: станция (название, код, № БУ, адрес) или проект → её договоры.
+  const stationSearch = useStationContracts()
+  const stationHit = useMemo(() => stationSearch(search), [stationSearch, search])
+
   const typeCounts = useMemo(() => {
     const m = new Map<string, number>()
     for (const c of allContracts) { const t = c.type || '—'; m.set(t, (m.get(t) ?? 0) + 1) }
@@ -1152,12 +1442,23 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
     const q = search.trim().toLowerCase()
     const list = allContracts.filter((c) => {
       if (typeFilter !== 'all' && (c.type || '—') !== typeFilter) return false
+      const bd = bindings.data?.contracts[c.id]
+      if (appFilter === '-' ? bd?.apps.length : appFilter && !bd?.apps.includes(appFilter)) return false
+      if (projectFilter && !bd?.projects.includes(projectFilter)) return false
+      if (contractFilter && c.id !== contractFilter) return false
       if (!q) return true
       const name = cpName.get(c.counterpartyId) ?? ''
-      return c.number.toLowerCase().includes(q) || name.toLowerCase().includes(q)
+      return c.number.toLowerCase().includes(q) || name.toLowerCase().includes(q) || !!stationHit?.contractIds.has(c.id)
     })
     const sign = sortDir === 'asc' ? 1 : -1
     return [...list].sort((a, b) => {
+      if (grouped) {
+        // Имя, затем карточка: у разных карточек бывает одно имя («разрешение») — без
+        // второго ключа их договоры перемешивались по дате и группа повторялась.
+        const g = (cpName.get(a.counterpartyId) ?? '').localeCompare(cpName.get(b.counterpartyId) ?? '', 'ru')
+          || a.counterpartyId.localeCompare(b.counterpartyId)
+        if (g) return g
+      }
       if (sortKey === 'amount') {
         // пустые суммы всегда внизу, независимо от направления
         const an = a.amountLimit == null, bn = b.amountLimit == null
@@ -1173,14 +1474,21 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
       if (!bd) return -1
       return sign * ad.localeCompare(bd)
     })
-  }, [allContracts, search, typeFilter, cpName, sortKey, sortDir])
+  }, [allContracts, search, typeFilter, cpName, sortKey, sortDir, grouped, bindings.data, appFilter, projectFilter, contractFilter, stationHit])
+  const groupStat = useMemo(() => {
+    const m = new Map<string, { n: number; sum: number }>()
+    for (const c of filtered) { const s = m.get(c.counterpartyId) ?? { n: 0, sum: 0 }; s.n++; s.sum += c.amountLimit ?? 0; m.set(c.counterpartyId, s) }
+    return m
+  }, [filtered])
 
   const SortIcon = ({ col }: { col: 'date' | 'amount' }) =>
     sortKey !== col ? <ArrowUpDown className="size-3 opacity-40" />
       : sortDir === 'desc' ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />
 
-  useEffect(() => { setLimit(100) }, [search, typeFilter])
-  const shown = filtered.slice(0, limit)
+  useEffect(() => { setLimit(100) }, [search, typeFilter, grouped, appFilter, projectFilter])
+  const visible = grouped ? filtered.filter((c) => !collapsed.has(c.counterpartyId)) : filtered
+  const shown = visible.slice(0, limit)
+  const cols = isEnergy ? 7 : 6
 
   return (
     <Card className="lg:h-[calc(100vh-13rem)] flex flex-col">
@@ -1188,12 +1496,34 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-            <Input placeholder="Поиск по номеру или контрагенту..." value={search}
+            <Input placeholder="Номер, контрагент, станция (название, код, № БУ) или проект…" value={search}
               onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" />
           </div>
           <span className="text-[11px] text-muted-foreground whitespace-nowrap">
             Найдено: {filtered.length}{filtered.length !== allContracts.length && ` из ${allContracts.length}`}
           </span>
+          <label className="flex items-center gap-1.5 text-xs whitespace-nowrap cursor-pointer">
+            <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="size-3.5 accent-primary" />
+            по контрагентам</label>
+          <ContractFormDialog counterparties={counterparties}>
+            <Button size="sm" className="shrink-0"><Plus className="size-4 mr-1" /> Договор</Button>
+          </ContractFormDialog>
+        </div>
+
+        {stationHit && <p className="text-xs text-muted-foreground -mt-1">По локации {stationHitLabel(stationHit)} · договоров {stationHit.contractIds.size}. Общие договоры компании (на все станции) в этот отбор не входят.</p>}
+        {/* Приложение и проект: договоры, привязанные к ним или используемые ими */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <select aria-label="Приложение" className="h-8 rounded-md border bg-background px-2" value={appFilter} onChange={(e) => setParam('app', e.target.value)}>
+            <option value="">Все приложения</option>
+            {appCounts.map(([a, n]) => <option key={a} value={a}>{appLabel(a)} · {n}</option>)}
+            <option value="-">Ни к чему не относится · {allContracts.filter((c) => !bindings.data?.contracts[c.id]?.apps.length).length}</option>
+          </select>
+          {contractFilter && <span className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5">
+            Договор № {allContracts.find((c) => c.id === contractFilter)?.number ?? '…'}
+            <button type="button" aria-label="Показать все договоры" onClick={() => setParam('contract', '')}>×</button></span>}
+          {projectFilter && <span className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5">
+            Проект: {bindings.data?.projects[projectFilter] ?? projectFilter}
+            <button type="button" aria-label="Снять фильтр проекта" onClick={() => setParam('project', '')}>×</button></span>}
         </div>
 
         {/* Фильтр по типу договора */}
@@ -1226,46 +1556,76 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
                     Сумма <SortIcon col="amount" />
                   </button>
                 </TableHead>
+                <TableHead className="w-[84px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading && (
-                <TableRow><TableCell colSpan={isEnergy ? 6 : 5} className="h-20 text-center text-muted-foreground">Загрузка…</TableCell></TableRow>
+                <TableRow><TableCell colSpan={cols} className="h-20 text-center text-muted-foreground">Загрузка…</TableCell></TableRow>
               )}
               {!isLoading && filtered.length === 0 && (
-                <TableRow><TableCell colSpan={isEnergy ? 6 : 5} className="h-20 text-center text-muted-foreground">Договоры не найдены</TableCell></TableRow>
+                <TableRow><TableCell colSpan={cols} className="h-20 text-center text-muted-foreground">Договоры не найдены</TableCell></TableRow>
               )}
-              {shown.map((c) => (
+              {(grouped ? withGroups(filtered, limit, collapsed) : shown.map((c) => ({ c, head: null as string | null }))).map(({ c, head }) => head ? (
+                <TableRow key={`g-${head}`} className="bg-muted/40 hover:bg-muted/60">
+                  <TableCell colSpan={cols - 1}>
+                    <button type="button" className="flex items-center gap-2 text-left font-medium" onClick={() => setCollapsed((s) => { const n = new Set(s); n.has(head) ? n.delete(head) : n.add(head); return n })}>
+                      <ChevronDown className={`size-4 transition-transform ${collapsed.has(head) ? '-rotate-90' : ''}`} />
+                      {cpName.get(head) ?? 'Контрагент не найден'}
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {groupStat.get(head)?.n} дог.{groupStat.get(head)?.sum ? ` · ${groupStat.get(head)!.sum.toLocaleString('ru-RU')}` : ''}</span>
+                    </button>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <ContractFormDialog counterpartyId={head}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Добавить договор: ${cpName.get(head) ?? ''}`}><Plus className="size-4" /></Button>
+                    </ContractFormDialog>
+                  </TableCell>
+                </TableRow>
+              ) : c && (
                 <TableRow key={c.id}>
                   <TableCell>
                     <ContractDetailDialog contract={c}>
                       <button className="font-mono text-sm text-primary hover:underline text-left">{c.number}</button>
                     </ContractDetailDialog>
+                    <div className={`text-[11px] ${contractStatus(c).cls}`}>{contractStatus(c).label}</div>
                   </TableCell>
                   <TableCell className="text-sm whitespace-nowrap">{c.date || '—'}</TableCell>
-                  <TableCell className="text-sm">{c.type ? typeLabel(c.type) : '—'}</TableCell>
+                  <TableCell className="text-sm">{c.type ? typeLabel(c.type) : '—'}
+                    {!!bindings.data?.contracts[c.id]?.apps.length && <div className="text-[11px] text-muted-foreground">
+                      {bindings.data.contracts[c.id].apps.map((a) => appLabel(a)).join(' · ')}</div>}</TableCell>
                   <TableCell className="text-sm truncate max-w-[280px]">
                     {cpName.get(c.counterpartyId) ?? <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   {isEnergy && (
                   <TableCell>
-                    <Badge variant={c.scopeType === 'company' ? 'secondary' : 'outline'}
-                      className={c.scopeType === 'unassigned' || !c.scopeType ? 'text-muted-foreground' : ''}>
-                      {ContractScopeBadgeLabel(c.scopeType)}
-                    </Badge>
+                    <ContractScopeDialog contract={c}>
+                      <button type="button" className="text-left">
+                        <Badge variant={c.scopeType === 'company' ? 'secondary' : 'outline'}
+                          className={c.scopeType === 'unassigned' || !c.scopeType || (c.scopeType === 'locations' && !c.locationsCount) ? 'text-amber-700 dark:text-amber-400' : ''}>
+                          {ContractScopeBadgeLabel(c.scopeType, c.locationsCount)}
+                        </Badge>
+                      </button>
+                    </ContractScopeDialog>
                   </TableCell>
                   )}
                   <TableCell className="text-right text-sm tabular-nums">
                     {c.amountLimit ? c.amountLimit.toLocaleString('ru-RU') : '—'}
                   </TableCell>
+                  <TableCell className="text-right whitespace-nowrap">
+                    <ContractFormDialog counterpartyId={c.counterpartyId} edit={c}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Изменить договор ${c.number}`}><Pencil className="size-4" /></Button>
+                    </ContractFormDialog>
+                    <DeleteContractButton contract={c} />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          {filtered.length > limit && (
+          {visible.length > limit && (
             <div className="p-2 text-center border-t">
               <Button variant="ghost" size="sm" onClick={() => setLimit((l) => l + 200)}>
-                Показать ещё ({filtered.length - limit})
+                Показать ещё ({visible.length - limit})
               </Button>
             </div>
           )}
@@ -1295,6 +1655,17 @@ function CorpClientsView() {
   })
   const clients = data?.clients ?? []
   const t = data?.totals
+  // Договор клиента — из общего реестра договоров по его контрагенту: постоплата
+  // заводится при загрузке организаций, номер и срок уточняются здесь же.
+  const { data: contracts = [] } = useContracts()
+  const contractOf = useMemo(() => {
+    const m = new Map<string, Contract>()
+    for (const c of contracts) {
+      const prev = m.get(c.counterpartyId)
+      if (!prev || (c.type === 'Корпоративная зарядка (постоплата)' && prev.type !== c.type) || (!c.isClosed && prev.isClosed)) m.set(c.counterpartyId, c)
+    }
+    return m
+  }, [contracts])
   return (
     <Card className="lg:h-[calc(100vh-13rem)] flex flex-col">
       <CardContent className="p-3 flex flex-col gap-2.5 min-h-0">
@@ -1314,7 +1685,7 @@ function CorpClientsView() {
               <TableRow>
                 <TableHead>Клиент</TableHead>
                 <TableHead className="w-[130px]">Режим тарифа</TableHead>
-                <TableHead className="w-[110px]">Договор с</TableHead>
+                <TableHead className="w-[190px]">Договор</TableHead>
                 <TableHead className="w-[90px] text-right">Сессии</TableHead>
                 <TableHead className="w-[110px] text-right">кВт·ч</TableHead>
                 <TableHead className="w-[130px] text-right">Выручка, ₽</TableHead>
@@ -1332,7 +1703,20 @@ function CorpClientsView() {
                 <TableRow key={c.phone}>
                   <TableCell className="text-sm font-medium max-w-[280px] truncate">{c.name}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{CORP_MODE_LABEL[c.mode] ?? c.mode}</TableCell>
-                  <TableCell className="text-sm whitespace-nowrap">{c.contract_start || '—'}</TableCell>
+                  <TableCell className="text-sm">{(() => {
+                    const k = c.counterparty_id ? contractOf.get(c.counterparty_id) : undefined
+                    if (!c.counterparty_id) return <span className="text-xs text-amber-700 dark:text-amber-400">контрагент не сопоставлен</span>
+                    if (!k) return <ContractFormDialog counterpartyId={c.counterparty_id}>
+                      <Button size="sm" variant="outline" className="h-7">Завести договор</Button></ContractFormDialog>
+                    return <div className="flex items-center gap-1">
+                      <ContractDetailDialog contract={k}>
+                        <button type="button" className="text-left text-primary hover:underline">№ {k.number} от {k.date || c.contract_start || '—'}</button>
+                      </ContractDetailDialog>
+                      <ContractFormDialog counterpartyId={c.counterparty_id} edit={k}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={`Изменить договор ${c.name}`}><Pencil className="size-3.5" /></Button>
+                      </ContractFormDialog>
+                    </div>
+                  })()}</TableCell>
                   <TableCell className="text-right text-sm tabular-nums">{c.sessions.toLocaleString('ru-RU')}</TableCell>
                   <TableCell className="text-right text-sm tabular-nums">{Math.round(c.energy_kwh).toLocaleString('ru-RU')}</TableCell>
                   <TableCell className="text-right text-sm tabular-nums">{Math.round(c.corp_revenue).toLocaleString('ru-RU')}</TableCell>
@@ -1382,6 +1766,7 @@ export function ContractorsPage() {
   // переключателем: один язык навигации на рабочий стол (20.09.2026).
   const [sub, setSub] = useSpacePageSub()
   const view = sub as 'counterparties' | 'contracts' | 'corp' | 'quality'
+  const [, setSearchParams] = useSearchParams()
   const setView = setSub
   // <1024 (порог грида lg): мастер-деталь — карточка шторкой поверх списка.
   const isNarrow = useMaxWidth(1024)
@@ -1443,6 +1828,15 @@ export function ContractorsPage() {
     return m
   }, [counterparties])
 
+  // Поиск по локации: контрагенты договоров станции и её строк реестра.
+  const stationSearch = useStationContracts()
+  const stationCps = useMemo(() => {
+    const hit = stationSearch(search)
+    if (!hit) return null
+    const ids = new Set(hit.counterpartyIds)
+    for (const c of allContracts) if (hit.contractIds.has(c.id) && c.counterpartyId) ids.add(c.counterpartyId)
+    return { hit, ids }
+  }, [stationSearch, search, allContracts])
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     const list = counterparties.filter((c) => {
@@ -1460,6 +1854,7 @@ export function ContractorsPage() {
       // ИНН, КПП, ОГРН и номер договора этого контрагента.
       const hay = [c.name, c.fullName, c.inn, c.kpp, c.ogrn].filter(Boolean).join(' ').toLowerCase()
       if (hay.includes(q)) return true
+      if (stationCps && (stationCps.ids.has(c.id) || (c.externalRef && stationCps.ids.has(c.externalRef)))) return true
       return contractNumbers(c).some((n) => n.toLowerCase().includes(q))
     })
     const st = (c: Counterparty) => stats.get(c.id)
@@ -1474,7 +1869,7 @@ export function ContractorsPage() {
         (st(b)?.lastDoc ?? '').localeCompare(st(a)?.lastDoc ?? ''))
       default: return list
     }
-  }, [counterparties, search, roleFilter, flag, sortBy, contractCount, stats])
+  }, [counterparties, search, roleFilter, flag, sortBy, contractCount, stats, stationCps])
 
   const selected = counterparties.find((c) => c.id === selectedId) ?? null
   const chip = chipCls
@@ -1499,7 +1894,12 @@ export function ContractorsPage() {
 
       {view === 'quality' ? (
         // Из проверки — сразу в карточку: болезнь показана, чтобы её пошли лечить.
-        <CounterpartyQuality onOpen={(id) => { setSelectedId(id); setView('counterparties') }} />
+        <>
+          <ContractQualityPanel
+            onContract={(id) => setSearchParams((prev) => { const n = new URLSearchParams(prev); n.set('sub', 'contracts'); n.set('contract', id); return n })}
+            onCounterparty={(id) => { setSelectedId(id); setView('counterparties') }} />
+          <CounterpartyQuality onOpen={(id) => { setSelectedId(id); setView('counterparties') }} />
+        </>
       ) : view === 'corp' ? (
         <CorpClientsView />
       ) : view === 'contracts' ? (
@@ -1513,9 +1913,10 @@ export function ContractorsPage() {
           <CardContent className="p-3 flex flex-col gap-2.5 min-h-0">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input placeholder="Имя, ИНН, КПП, ОГРН или номер договора…" value={search}
+              <Input placeholder="Имя, ИНН, № договора, станция или проект…" value={search}
                 onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" />
             </div>
+            {stationCps && <p className="text-[11px] text-muted-foreground -mt-1">По локации {stationHitLabel(stationCps.hit)} · контрагентов {stationCps.ids.size}</p>}
 
             {/* Фильтр по ролям */}
             <div className="flex flex-wrap gap-1">

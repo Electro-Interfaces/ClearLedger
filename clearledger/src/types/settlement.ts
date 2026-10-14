@@ -10,6 +10,8 @@ export type SettlementRole = 'energy' | 'rent' | 'service'
 export type PaymentStatus = 'paid' | 'unpaid' | 'unknown' | 'special'
 
 export interface StationSettlement {
+  /** Имя контрагента — сервер кладёт в запись (окно станции). */
+  counterpartyName?: string | null
   id: string
   companyId: string
   locationId: string
@@ -27,6 +29,8 @@ export interface StationSettlement {
 
 export interface SettlementDetail {
   locationId: string
+  /** Договор, к которому относится расчёт станции. */
+  contractId?: string | null
   stationCode: string | null
   stationName: string | null
   buNumber: string | null

@@ -94,3 +94,21 @@ async def test_новые_виды_работ_и_тип_объекта_сохр�
 @pytest.mark.parametrize("label", ["АЗС/АГНС", "Гостиница", "Трасса", "Город", "БЦ/ТЦ", "Автосалон", "Общепит", "Девелопмент"])
 def test_импорт_сохраняет_типы_объектов(label):
     assert ezs_sites._place_kind(label) == label.lower()
+
+
+@pytest.mark.asyncio
+async def test_создатель_руководитель_по_умолчанию(monkeypatch):
+    """Руководитель не указан — им становится создатель; указанный — сохраняется."""
+    from app.services import project_scenario_settings
+    monkeypatch.setattr(project_scenario_settings, "initialize", AsyncMock())
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [])))
+    db.flush = AsyncMock()
+    monkeypatch.setattr(ezs_site_work, "next_project_no", AsyncMock(return_value="ЭЗС-2026-2001"))
+    monkeypatch.setattr(ezs_lifecycle, "sync_from_site", AsyncMock(return_value=SimpleNamespace(id=uuid.uuid4())))
+    monkeypatch.setattr(ezs_site_work, "log_event", AsyncMock())
+    creator, other = SimpleNamespace(id=uuid.uuid4()), uuid.uuid4()
+    site = await ezs_site_work.create_site(db, uuid.uuid4(), {"title": "Новая площадка", "address": "ул. Ленина, 1"}, creator)
+    assert site.owner_user_id == creator.id
+    site = await ezs_site_work.create_site(db, uuid.uuid4(), {"title": "Другая", "address": "ул. Мира, 2", "owner_user_id": str(other)}, creator)
+    assert str(site.owner_user_id) == str(other)

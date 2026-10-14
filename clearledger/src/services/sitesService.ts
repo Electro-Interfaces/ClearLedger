@@ -42,6 +42,16 @@ export const STAGE_META: Record<SiteStage, { label: string; hint: string; cls: s
   archive: { label: 'Архив', hint: 'отклонён, с причиной', cls: 'border-zinc-600 text-zinc-500', dot: 'bg-zinc-500' },
 }
 
+/** Названия стадий воронки у проекта интеграции: те же коды, другой смысл. */
+export const INTEGRATION_STAGE_LABEL: Partial<Record<SiteStage, string>> = {
+  lead: 'Заявка', screening: 'Оценка партнёра', negotiation: 'Переговоры', dd: 'Техническое согласование',
+  decision: 'Решение о пилоте', contracting: 'Пилотное соглашение', construction: 'Настройка и тесты',
+  commissioning: 'Договор', live: 'Работает', on_hold: 'На паузе', archive: 'Отклонена',
+}
+/** Название стадии с учётом вида проекта. */
+export const stageLabelOf = (kind: string | null | undefined, st: SiteStage): string =>
+  (kind === 'integration' && INTEGRATION_STAGE_LABEL[st]) || STAGE_META[st]?.label || st
+
 export interface SiteRow {
   id: string
   /** Вид работы: new_build | retrofit | relocation | decommission. */
@@ -132,6 +142,8 @@ export interface GateState {
   stage: SiteStage; stageLabel: string; items: GateItem[]; done: number; total: number
   /** Обязательные незакрытые пункты — они держат переход вперёд. */
   blocking: string[]
+  /** Пункты прошлых стадий, требующие повторного подтверждения (держат переход). */
+  staleBefore?: { key: string; label: string; stage: string }[]
   /** Пункты, прошедшие с послаблением: кто снял, когда и почему. */
   waived?: {
     key: string; label: string; by: string | null; at: string | null; reason: string | null
@@ -267,6 +279,8 @@ export async function getSitesOverview(companyId: string): Promise<SitesOverview
 export async function getSites(p: {
   companyId: string; stage?: string; region?: string; search?: string
   kind?: string; placeKind?: string
+  /** Исключить вид работ: реестр стройки не показывает интеграции, у них свой раздел. */
+  withoutKind?: string
   ownerId?: string; overdue?: boolean; risk?: string; node?: string
   page?: number; pageSize?: number
 }): Promise<SitesList> {
@@ -276,6 +290,7 @@ export async function getSites(p: {
     overdue: p.overdue ? 1 : undefined, risk: p.risk || undefined,
     node: p.node || undefined,
     kind: p.kind || undefined, place_kind: p.placeKind || undefined,
+    without_kind: (!p.kind && p.withoutKind) || undefined,
     page: p.page ?? 1, page_size: p.pageSize ?? 300,
   })
 }
@@ -534,6 +549,16 @@ export async function addSiteParticipant(
 }
 
 /** Снять человека с роли в проекте. */
+export async function orderSiteParticipants(companyId: string, id: string, ids: string[]): Promise<{ ok: boolean }> {
+  return put(`/api/sites/${id}/participants/order?company_id=${companyId}`, { ids })
+}
+
+export async function editSiteParticipant(
+  companyId: string, id: string, participantId: string, body: { roleCode?: string; note?: string },
+): Promise<{ ok: boolean }> {
+  return patch(`/api/sites/${id}/participants/${participantId}?company_id=${companyId}`, body)
+}
+
 export async function removeSiteParticipant(
   companyId: string, id: string, participantId: string,
 ): Promise<{ ok: boolean }> {
@@ -560,8 +585,8 @@ export async function waiveSiteGate(
   return post(`/api/sites/${id}/gate/waive?company_id=${companyId}`, { key, waived, reason })
 }
 
-export async function getSiteEvents(companyId: string, id: string): Promise<SiteEvent[]> {
-  return get(`/api/sites/${id}/events`, { company_id: companyId })
+export async function getSiteEvents(companyId: string, id: string, kind?: SiteEvent['kind']): Promise<SiteEvent[]> {
+  return get(`/api/sites/${id}/events`, kind ? { company_id: companyId, kind } : { company_id: companyId })
 }
 
 export async function addSiteEvent(
@@ -715,13 +740,26 @@ export interface SiteDoc {
   uploadedBy: string | null; createdAt: string | null
 }
 
+/** Шаг хода присоединения: дата факта, срок по Правилам ТП и просрочка. */
+export interface TpStep {
+  key: string; no: string; label: string; hint: string | null; branch: 'main' | 'supply'
+  date: string | null; plannedDate: string | null; normDays: number | null; overdue: boolean
+}
 export interface TechConnection {
+  method?: string | null; methodLabel?: string | null; steps?: TpStep[]
+  /** Комплект документов к заявке для выбранного способа: что уже приложено к проекту. */
+  kit?: { kind: string; label: string; optional: boolean; present: boolean }[]
   id: string; siteId: string; status: string; statusLabel: string
   gridOperator: string | null
   applicationNo: string | null; applicationDate: string | null
   specsNo: string | null; specsDate: string | null
   contractNo: string | null; contractDate: string | null
   powerKwt: number | null; voltage: string | null; cost: number | null
+  /** Сведения заявки на ТП: категория надёжности, вид нагрузки, ранее присоединённая мощность, сбыт. */
+  reliabilityCategory?: string | null; loadKind?: string | null
+  existingPowerKwt?: number | null; energySupplier?: string | null
+  /** Координаты трансформаторной подстанции, «широта, долгота». */
+  tpCoords?: string | null
   dueDate: string | null; doneDate: string | null
   needsReconstruction: boolean | null; note: string | null; overdue: boolean
   // паспорт питающей сети и деньги ТУ — графы AQ–BA банка ЗУ
@@ -776,6 +814,7 @@ export interface ProjectContext {
   location: { id: string; name: string; code: string; status: string | null } | null
   docKinds: { key: string; label: string }[]
   tcStatuses: { key: string; label: string }[]
+  tcMethods?: { key: string; label: string }[]
   eqStatuses: { key: string; label: string }[]
   costKinds: { key: string; label: string; capital?: boolean }[]
 }
@@ -980,8 +1019,11 @@ export interface ProjectRoadmap {
     phase: string | null; phaseLabel: string
     state: 'done' | 'current' | 'stopped' | 'waiting' | 'unknown'
     date: string | null
-    gateDone: number; gateTotal: number; blocking: string[]
-    items: { label: string; done: boolean; required: boolean; waived?: boolean }[]
+    gateDone: number; gateTotal: number; blocking: string[]; normDays?: number
+    items: { key?: string; label: string; done: boolean; required: boolean; waived?: boolean
+      confirmedAt?: string | null; confirmedBy?: string | null; role?: string | null; needsConfirmation?: boolean
+      /** Вкладка, где пункт закрывается. */
+      target?: 'docs' | 'equipment' | 'work' | 'passport' }[]
   }[]
   tracks: {
     key: string; kind: 'track'; phase: string; label: string

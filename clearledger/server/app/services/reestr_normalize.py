@@ -188,9 +188,10 @@ async def ingest_reestr(
     )).scalars().all()
     cp_by_norm: dict[str, Counterparty] = {}
     for c in cps:
-        nn = _normname(c.name)
-        if nn:
-            cp_by_norm[nn] = c
+        for name in [c.name, *((c.raw or {}).get("mergedNames") or [])]:
+            nn = _normname(name)
+            if nn:
+                cp_by_norm.setdefault(nn, c)
 
     contracts = (await db.execute(
         select(Contract).where(Contract.company_id == company_id)
@@ -292,12 +293,11 @@ async def ingest_reestr(
                     contract = contr_by_key.get((cid, str(number), ctype))
                     if contract:
                         break
-            if contract is None:
-                for cid in ids:
-                    same = contr_by_cp_type.get((cid, ctype))
-                    if same:
-                        contract = same[0]
-                        break
+            if contract is None and not number:
+                # см. reestr_rushydro.contract: только единственный договор вида, без номера
+                same = [c for cid in ids for c in contr_by_cp_type.get((cid, ctype), [])]
+                if len(same) == 1:
+                    contract = same[0]
             if contract is None and number:
                 contract = Contract(
                     company_id=company_id, number=str(number)[:100], date=cdate or "",

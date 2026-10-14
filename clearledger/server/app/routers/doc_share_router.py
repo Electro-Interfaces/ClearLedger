@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import guard
 from app.database import get_db
 from app.models import (
     DocApproval, DocCard, DocEvent, DocKind, DocShareLink, DocVersion, Organization,
@@ -159,7 +160,7 @@ async def open_link(token: str, request: Request, response: Response,
 
     link.opened_count += 1
     link.last_opened_at = datetime.now(timezone.utc)
-    link.last_ip = (request.client.host if request.client else None)
+    link.last_ip = (guard.client_ip(request))
     await db.commit()
 
     return {
@@ -245,7 +246,7 @@ async def acknowledge(token: str, payload: AckIn, request: Request, response: Re
         return {"acknowledged_at": link.acknowledged_at.isoformat(), "repeated": True}
 
     now = datetime.now(timezone.utc)
-    ip = request.client.host if request.client else None
+    ip = guard.client_ip(request)
     link.acknowledged_at = now
     link.acknowledged_by_name = payload.name.strip()
     link.ack_evidence = {
@@ -293,7 +294,7 @@ async def decide_by_link(token: str, payload: DecideIn, request: Request,
         result = await external_approval.decide(
             db, link, approved=payload.approved, signer_name=payload.name,
             comment=payload.comment,
-            ip=(request.client.host if request.client else None),
+            ip=(guard.client_ip(request)),
             user_agent=request.headers.get("user-agent"))
     except external_approval.ExternalApprovalError as exc:
         # Причину называем: человек снаружи не может посмотреть журнал и обязан

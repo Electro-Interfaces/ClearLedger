@@ -22,6 +22,7 @@ from app.models import (
     Company,
     Contract,
     ContractDimension,
+    ContractLink,
     ContractLocation,
     Counterparty,
     CounterpartyContact,
@@ -89,6 +90,7 @@ from app.schemas import (
     WarehouseUpdate,
 )
 
+from app.services.contract_usage import contract_usage, usage_by_contract
 router = APIRouter(prefix="/references", tags=["НСИ (Справочники)"])
 
 
@@ -340,8 +342,11 @@ async def delete_counterparty(
 # CounterpartyContact (контактные лица контрагента)
 # ---------------------------------------------------------------------------
 
+# Финансы и поддержка — для партнёров интеграции: сверки и обращения пользователей
+# ведут другие люди, чем договор и протокол (05.10.2026).
 CONTACT_ROLES = {"contract": "Договор", "tech": "Техника",
-                 "comm": "Взаимодействие", "other": "Прочее"}
+                 "comm": "Взаимодействие", "finance": "Финансы и сверки",
+                 "support": "Поддержка пользователей", "other": "Прочее"}
 
 
 def _contact_resp(c: CounterpartyContact) -> dict:
@@ -700,6 +705,21 @@ async def delete_nomenclature(
 # Contract (Договоры)
 # ---------------------------------------------------------------------------
 
+_CONTRACT_REQ_FIELDS = {
+    "signed": "signed", "signedAt": "signed_at", "paymentTermDays": "payment_term_days",
+    "isStateContract": "is_state_contract", "igk": "igk", "responsibleId": "responsible_id",
+    "signerOur": "signer_our", "signerOurPosition": "signer_our_position", "signerCp": "signer_cp",
+    "signerCpPosition": "signer_cp_position", "signerCpBasis": "signer_cp_basis",
+}
+
+
+def _req_val(api: str, v):
+    # Пустая строка — очистка поля; ответственный — UUID пользователя.
+    if v == "" or v is None:
+        return None
+    return _parse_uuid(v) if api == "responsibleId" else v
+
+
 def _contract_resp(c: Contract) -> ContractResponse:
     return ContractResponse(
         id=str(c.id),
@@ -720,6 +740,8 @@ def _contract_resp(c: Contract) -> ContractResponse:
         basis=c.basis,
         isClosed=c.is_closed,
         scopeType=c.scope_type,
+        typeCode=c.type_code,
+        **{api: getattr(c, col) for api, col in _CONTRACT_REQ_FIELDS.items()},
         externalRef=c.external_ref,
         raw=c.raw,
         createdAt=_ts(c.created_at),
@@ -738,8 +760,39 @@ async def list_contracts(
     stmt = select(Contract).where(Contract.company_id == cid)
     if counterparty_id:
         stmt = stmt.where(Contract.counterparty_id == counterparty_id)
-    result = await db.execute(stmt.order_by(Contract.date.desc()))
-    return [_contract_resp(c) for c in result.scalars().all()]
+    rows = (await db.execute(stmt.order_by(Contract.date.desc()))).scalars().all()
+    counts = dict((await db.execute(
+        select(ContractLocation.contract_id, func.count())
+        .where(ContractLocation.company_id == cid).group_by(ContractLocation.contract_id))).all())
+    out = []
+    for c in rows:
+        r = _contract_resp(c)
+        r.locationsCount = int(counts.get(c.id, 0))
+        out.append(r)
+    return out
+
+
+async def _check_type_code(db: AsyncSession, code: str | None) -> str | None:
+    """Вид договора — только из справочника contract_types."""
+    if not code:
+        return None
+    from sqlalchemy import text as _t
+    ok = (await db.execute(_t("SELECT 1 FROM contract_types WHERE code = :c AND is_active"), {"c": code})).first()
+    if not ok:
+        raise HTTPException(status_code=422, detail=f"Неизвестный вид договора: {code}")
+    return code
+
+
+@router.get("/contract-types")
+async def list_contract_types(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Справочник видов договоров: код, название, основание по ГК, направление."""
+    from sqlalchemy import text as _t
+    rows = (await db.execute(_t(
+        "SELECT code, label, gk_basis, direction FROM contract_types WHERE is_active ORDER BY sort_order"))).mappings().all()
+    return [{"code": r["code"], "label": r["label"], "gkBasis": r["gk_basis"], "direction": r["direction"]} for r in rows]
 
 
 @router.post(
@@ -753,6 +806,9 @@ async def create_contract(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(body.company_id, current_user, db)
+    cp = await db.get(Counterparty, body.counterpartyId)
+    if cp is None or cp.company_id != cid:
+        raise HTTPException(400, "Контрагент не найден в справочнике пространства")
     c = Contract(
         company_id=cid,
         number=body.number,
@@ -760,6 +816,7 @@ async def create_contract(
         counterparty_id=body.counterpartyId,
         organization_id=body.organizationId,
         type=body.type,
+        type_code=await _check_type_code(db, body.typeCode),
         amount_limit=body.amountLimit,
         kind=body.kind,
         currency=body.currency,
@@ -771,6 +828,7 @@ async def create_contract(
         basis=body.basis,
         is_closed=body.isClosed,
         scope_type=body.scopeType,
+        **{col: _req_val(api, getattr(body, api)) for api, col in _CONTRACT_REQ_FIELDS.items()},
     )
     db.add(c)
     await db.flush()
@@ -787,16 +845,29 @@ async def update_contract(
     uid = _parse_uuid(item_id)
     c = await get_owned(Contract, uid, current_user, db)  # 404 для чужого/несуществующего
 
+    sent = body.model_fields_set
+    for api, col in (("validUntil", "valid_until"), ("amountLimit", "amount_limit"), ("vatRate", "vat_rate"),
+                     ("amountInclVat", "amount_incl_vat"), ("settlementKind", "settlement_kind"),
+                     ("comment", "comment"), ("basis", "basis"), *_CONTRACT_REQ_FIELDS.items()):
+        if api in sent:
+            setattr(c, col, _req_val(api, getattr(body, api)))
+    if "typeCode" in sent and body.typeCode is None:
+        c.type_code = None
     if body.number is not None:
         c.number = body.number
     if body.date is not None:
         c.date = body.date
     if body.counterpartyId is not None:
+        cp = await db.get(Counterparty, body.counterpartyId)
+        if cp is None or cp.company_id != c.company_id:
+            raise HTTPException(400, "Контрагент не найден в справочнике пространства")
         c.counterparty_id = body.counterpartyId
     if body.organizationId is not None:
         c.organization_id = body.organizationId
     if body.type is not None:
         c.type = body.type
+    if body.typeCode is not None:
+        c.type_code = await _check_type_code(db, body.typeCode)
     if body.amountLimit is not None:
         c.amount_limit = body.amountLimit
     if body.kind is not None:
@@ -833,7 +904,178 @@ async def delete_contract(
 ):
     uid = _parse_uuid(item_id)
     c = await get_owned(Contract, uid, current_user, db)  # 404 для чужого/несуществующего
+    # Договор со ссылками не стирается — закрывается (как пометка удаления в 1С).
+    # Иначе расчёты станции и условия «Хозяйства» молча теряли договор.
+    used = await contract_usage(db, c.id)
+    if used:
+        where = ", ".join(f"{u['label']} ({u['count']})" for u in used)
+        raise HTTPException(status_code=409,
+                            detail=f"Договор используется: {where}. Удалить нельзя — закройте договор")
     await db.delete(c)
+
+
+# ---------------------------------------------------------------------------
+# Договор → приложение и проект (сквозной разрез: договоры приложения)
+# ---------------------------------------------------------------------------
+
+_SITE_LABEL = ("COALESCE(NULLIF(s.title, ''), NULLIF(s.address, ''), s.id::text)"
+               " || CASE WHEN s.project_no IS NOT NULL THEN ' · ' || s.project_no ELSE '' END")
+
+
+async def _project_labels(db: AsyncSession, company_id: uuid.UUID, refs: set[str]) -> dict[str, str]:
+    """Подписи проектов `site:<id>`. Других видов проектов пока нет — «Проекты» ведут площадки."""
+    ids = [r[5:] for r in refs if r.startswith("site:")]
+    if not ids:
+        return {}
+    from sqlalchemy import text as _t
+    rows = (await db.execute(_t(f"SELECT 'site:' || s.id::text, {_SITE_LABEL} FROM ezs_sites s"
+                                " WHERE s.company_id = :co AND s.id::text = ANY(:ids)"), {"co": company_id, "ids": ids})).all()
+    return dict(rows)
+
+
+@router.get("/contract-bindings")
+async def contract_bindings(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Приложения и проекты каждого договора: привязанные человеком ∪ используемые по факту.
+
+    {contracts: {id: {apps: [...], projects: [...], linked: [...]}}, projects: {ref: label}}.
+    `linked` — только явные привязки (приложение или `app|проект`), чтобы отличить их от факта.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    out: dict[str, dict] = {}
+    for k, v in (await usage_by_contract(db, cid)).items():
+        out[str(k)] = {"apps": set(v["apps"]), "projects": set(v["projects"]), "linked": set()}
+    for ln in (await db.execute(select(ContractLink).where(ContractLink.company_id == cid))).scalars():
+        e = out.setdefault(str(ln.contract_id), {"apps": set(), "projects": set(), "linked": set()})
+        e["apps"].add(ln.app_code)
+        e["linked"].add(ln.app_code + ("|" + ln.project_ref if ln.project_ref else ""))
+        if ln.project_ref:
+            e["projects"].add(ln.project_ref)
+    refs = set().union(*(e["projects"] for e in out.values())) if out else set()
+    # Станции договора — для поиска «все договоры этой локации» по названию, коду, № БУ.
+    locs: dict[str, list[str]] = {}
+    for c_id, l_id in (await db.execute(select(ContractLocation.contract_id, ContractLocation.location_id)
+                                         .where(ContractLocation.company_id == cid))).all():
+        locs.setdefault(str(c_id), []).append(l_id)
+    return {"contracts": {k: {kk: sorted(vv) for kk, vv in e.items()} for k, e in out.items()},
+            "projects": await _project_labels(db, cid, refs), "locations": locs}
+
+
+@router.get("/contract-projects")
+async def search_contract_projects(
+    company_id: str = Query(...),
+    q: str = Query(""),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Поиск проекта для привязки договора: площадки «Проектов» по названию, номеру, адресу."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from sqlalchemy import text as _t
+    rows = (await db.execute(_t(
+        f"SELECT 'site:' || s.id::text AS ref, {_SITE_LABEL} AS label, s.kind FROM ezs_sites s"
+        " WHERE s.company_id = :co AND (:q = '' OR concat_ws(' ', s.title, s.project_no, s.address, s.city) ILIKE '%' || :q || '%')"
+        " ORDER BY s.kind = 'integration' DESC, s.updated_at DESC NULLS LAST LIMIT 30"), {"co": cid, "q": q.strip()})).mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def _contract_links_resp(db: AsyncSession, c: Contract) -> list[dict]:
+    links = (await db.execute(select(ContractLink).where(ContractLink.contract_id == c.id)
+                              .order_by(ContractLink.created_at))).scalars().all()
+    labels = await _project_labels(db, c.company_id, {ln.project_ref for ln in links if ln.project_ref})
+    return [{"id": str(ln.id), "app": ln.app_code, "projectRef": ln.project_ref or None,
+             "projectLabel": labels.get(ln.project_ref)} for ln in links]
+
+
+@router.get("/contracts/{item_id}/links")
+async def get_contract_links(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    c = await get_owned(Contract, _parse_uuid(item_id), current_user, db)
+    return await _contract_links_resp(db, c)
+
+
+@router.post("/contracts/{item_id}/links")
+async def add_contract_link(
+    item_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Привязать договор к приложению {app} и, если указан, к проекту {projectRef: 'site:<id>'}."""
+    c = await get_owned(Contract, _parse_uuid(item_id), current_user, db)
+    from sqlalchemy import text as _t
+    app = str(body.get("app") or "").strip()
+    ref = str(body.get("projectRef") or "").strip()
+    if not (await db.execute(_t("SELECT 1 FROM eco_apps WHERE code = :c"), {"c": app})).first():
+        raise HTTPException(status_code=422, detail=f"Неизвестное приложение: {app or '—'}")
+    if ref:
+        ok = ref.startswith("site:") and (await db.execute(_t(
+            "SELECT 1 FROM ezs_sites WHERE company_id = :co AND id::text = :id"), {"co": c.company_id, "id": ref[5:]})).first()
+        if not ok:
+            raise HTTPException(status_code=422, detail="Проект не найден в пространстве")
+    exists = (await db.execute(select(ContractLink).where(
+        ContractLink.contract_id == c.id, ContractLink.app_code == app, ContractLink.project_ref == ref))).scalar_one_or_none()
+    if exists is None:
+        db.add(ContractLink(company_id=c.company_id, contract_id=c.id, app_code=app, project_ref=ref,
+                            created_by=current_user.id))
+        await db.flush()
+    return await _contract_links_resp(db, c)
+
+
+@router.delete("/contracts/{item_id}/links/{link_id}")
+async def delete_contract_link(
+    item_id: str,
+    link_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    c = await get_owned(Contract, _parse_uuid(item_id), current_user, db)
+    ln = await db.get(ContractLink, _parse_uuid(link_id))
+    if ln is None or ln.contract_id != c.id:
+        raise HTTPException(status_code=404, detail="Привязка не найдена")
+    await db.delete(ln)
+    await db.flush()
+    return await _contract_links_resp(db, c)
+
+
+@router.get("/contract-quality")
+async def get_contract_quality(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Качество договоров: что поправить, чтобы договор работал разрезом учёта."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.services.contract_quality import contract_quality
+    return await contract_quality(db, cid)
+
+
+@router.get("/space-documents")
+async def get_space_documents(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Дерево «Документов» пространства: договоры с их бумагами, документы проектов, «Трек»."""
+    cid = await assert_company_member(company_id, current_user, db)
+    from app.services.space_documents import space_documents
+    return await space_documents(db, cid, current_user)
+
+
+@router.get("/contracts/{item_id}/usage")
+async def get_contract_usage(
+    item_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Где договор используется: [{app, label, count}] по приложениям."""
+    c = await get_owned(Contract, _parse_uuid(item_id), current_user, db)
+    return await contract_usage(db, c.id)
 
 
 # ---------------------------------------------------------------------------
@@ -886,6 +1128,56 @@ async def set_contract_scope(
     await db.flush()
     # execute(delete)/insert истекают атрибуты c — освежаем перед сериализацией
     # (иначе lazy-load в async-контексте → MissingGreenlet).
+    await db.refresh(c)
+    return _contract_resp(c)
+
+
+@router.post("/contracts/{item_id}/locations/{loc_id}", response_model=ContractResponse)
+async def link_contract_location(
+    item_id: str, loc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Привязать договор к станции (из окна станции). Общий договор компании уже
+    действует на все станции — его не превращаем в адресный молча."""
+    c = (await db.execute(select(Contract).where(Contract.id == _parse_uuid(item_id)))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_company_member(str(c.company_id), current_user, db)
+    loc = (await db.execute(select(ServiceLocation).where(
+        ServiceLocation.id == loc_id, ServiceLocation.company_id == c.company_id))).scalar_one_or_none()
+    if not loc:
+        raise HTTPException(status_code=404, detail="Станция не найдена в пространстве")
+    if c.scope_type == "company":
+        raise HTTPException(status_code=409, detail=f"Договор № {c.number} общий на компанию — он уже действует на эту станцию")
+    exists = (await db.execute(select(ContractLocation.id).where(
+        ContractLocation.contract_id == c.id, ContractLocation.location_id == loc.id))).first()
+    if not exists:
+        db.add(ContractLocation(company_id=c.company_id, contract_id=c.id, location_id=loc.id))
+    c.scope_type = "locations"
+    await db.flush()
+    await db.refresh(c)
+    return _contract_resp(c)
+
+
+@router.delete("/contracts/{item_id}/locations/{loc_id}", response_model=ContractResponse)
+async def unlink_contract_location(
+    item_id: str, loc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отвязать договор от станции. Последняя станция ушла — договор «не распределён»."""
+    c = (await db.execute(select(Contract).where(Contract.id == _parse_uuid(item_id)))).scalar_one_or_none()
+    if not c:
+        raise HTTPException(status_code=404, detail="Договор не найден")
+    await assert_company_member(str(c.company_id), current_user, db)
+    await db.execute(delete(ContractLocation).where(
+        ContractLocation.contract_id == c.id, ContractLocation.location_id == loc_id))
+    left = (await db.execute(select(func.count()).select_from(ContractLocation).where(
+        ContractLocation.contract_id == c.id))).scalar_one()
+    if c.scope_type == "locations" and not left:
+        c.scope_type = "unassigned"
+    await db.flush()
     await db.refresh(c)
     return _contract_resp(c)
 
@@ -1086,10 +1378,13 @@ async def get_location_contracts(
         ))
         if c.counterparty_id and c.counterparty_id not in seen:
             seen[c.counterparty_id] = CounterpartyBrief(
+                id=str(cp.id) if cp else None,
                 # У ручного контрагента внешней ссылки нет — тогда ключом идёт
                 # наш идентификатор, и он обязан доехать строкой: схема ответа
-                # объявляет строку, а в поле договора теперь UUID.
-                externalRef=cp.external_ref if cp else str(c.counterparty_id),
+                # объявляет строку, а в поле договора теперь UUID. Пустой ключ
+                # (external_ref NULL у всех 512 контрагентов РусГидро) не находил
+                # имя в окне станции — теперь падаем на наш id.
+                externalRef=(cp.external_ref or str(cp.id)) if cp else str(c.counterparty_id),
                 name=cp.name if cp else "(неизвестный контрагент)",
                 inn=cp.inn if cp else None,
             )
@@ -1134,8 +1429,19 @@ async def list_settlements(
         stmt = stmt.where(StationContractSettlement.location_id == location_id)
     if role:
         stmt = stmt.where(StationContractSettlement.role == role)
-    result = await db.execute(stmt)
-    return [_settlement_resp(s) for s in result.scalars().all()]
+    rows = (await db.execute(stmt)).scalars().all()
+    out = [_settlement_resp(s) for s in rows]
+    # Имя контрагента — в самой записи: окно станции искало его по внешнему коду
+    # 1С среди контрагентов договоров и не находило никогда (у всех записей тут
+    # наш UUID, а внешний код пуст), строка «Платёжная дисциплина» шла без имени.
+    ids = {str(s.counterparty_id) for s in rows if s.counterparty_id}
+    if location_id and ids:
+        names = dict((await db.execute(select(Counterparty.id, Counterparty.name).where(
+            Counterparty.company_id == cid, Counterparty.id.in_([_parse_uuid(i) for i in ids])))).all())
+        for r in out:
+            if r.counterpartyId:
+                r.counterpartyName = names.get(_parse_uuid(str(r.counterpartyId)))
+    return out
 
 
 @router.post("/settlements", response_model=SettlementResponse, status_code=status.HTTP_201_CREATED)
@@ -1258,6 +1564,7 @@ async def settlements_detail(
             counterpartyName=(cp_map.get(str(r.counterparty_id))
                               if r.counterparty_id else None),
             contractNumber=contr_map.get(r.contract_id) if r.contract_id else None,
+            contractId=str(r.contract_id) if r.contract_id else None,
             basis=r.basis,
             paidThrough=r.paid_through,
             paymentStatus=r.payment_status,

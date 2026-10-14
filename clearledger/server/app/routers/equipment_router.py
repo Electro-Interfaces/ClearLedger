@@ -7,7 +7,9 @@ API складского учёта оборудования ЭЗС: едини�
 """
 from __future__ import annotations
 
+import json
 import uuid
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -18,12 +20,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
 from app.models import (
-    EzsEquipmentMovement, EzsEquipmentUnit, EzsSparePart, EzsSparePartMovement,
+    AuditEvent, EzsEquipmentMovement, EzsEquipmentUnit, EzsSparePart, EzsSparePartMovement,
     EzsSparePartStock, EzsSupplyDocument, Region, ServiceLocation, User,
 )
 from app.services.ezs_equipment import (
-    OP_LABELS, STATE_LABELS, TERMINAL_STATES, allowed_ops, apply_movement,
-    create_unit, dismantle_from_site, import_units_xlsx, spare_apply_movement,
+    OP_LABELS, STATE_LABELS, TERMINAL_STATES, allowed_ops,
+    create_unit, dismantle_from_site, import_units_xlsx,
 )
 from app.services import ezs_supply
 
@@ -105,7 +107,7 @@ class SparePartIn(BaseModel):
 
 class SpareMovementIn(BaseModel):
     op: str
-    qty: float = Field(gt=0)
+    qty: float = Field(ge=0)         # ноль допустим только у корректировки
     fromLocationId: str | None = None
     toLocationId: str | None = None
     targetUnitId: str | None = None
@@ -152,7 +154,7 @@ def _unit_out(u: EzsEquipmentUnit, locs: dict[str, ServiceLocation],
         "notes": u.notes,
         # Графы складского реестра заказчика: где лежит, кто хранит, чем числится
         # в его учёте — и подтвердил ли поставщик то, что здесь написано.
-        "region": u.region, "keeper": u.keeper,
+        "region": u.region, "keeper": u.keeper, "ownerName": u.owner_name,
         "accountingNo": u.accounting_no, "externalNo": u.external_no,
         "speedClass": u.speed_class,
         "dataConfirmed": u.data_confirmed,
@@ -168,7 +170,8 @@ def _unit_out(u: EzsEquipmentUnit, locs: dict[str, ServiceLocation],
 
 def _move_out(m: EzsEquipmentMovement, locs: dict[str, ServiceLocation],
               unit: EzsEquipmentUnit | None = None,
-              supplies: dict[Any, str] | None = None) -> dict[str, Any]:
+              supplies: dict[Any, str] | None = None,
+              docs: dict[Any, str] | None = None) -> dict[str, Any]:
     out = {
         "id": str(m.id), "unitId": str(m.unit_id),
         "op": m.op, "opLabel": OP_LABELS.get(m.op, m.op),
@@ -179,6 +182,8 @@ def _move_out(m: EzsEquipmentMovement, locs: dict[str, ServiceLocation],
         "toStateLabel": STATE_LABELS.get(m.to_state or "", m.to_state),
         "counterparty": m.counterparty,
         "occurredOn": m.occurred_on, "basis": m.basis, "comment": m.comment,
+        "documentId": str(m.document_id) if m.document_id else None,
+        "documentNumber": (docs or {}).get(m.document_id) if m.document_id else None,
         "supplyId": str(m.supply_id) if m.supply_id else None,
         "supplyNumber": (supplies or {}).get(m.supply_id) if m.supply_id else None,
         "createdBy": m.created_by_name,
@@ -188,6 +193,21 @@ def _move_out(m: EzsEquipmentMovement, locs: dict[str, ServiceLocation],
         out["unit"] = {"serialNumber": unit.serial_number, "vendor": unit.vendor,
                        "model": unit.model, "inventoryNumber": unit.inventory_number}
     return out
+
+
+async def _doc_numbers(db: AsyncSession, moves) -> dict[Any, str]:
+    """Номера документов движения для строк журнала."""
+    from app.models import EzsEquipmentDocument as D
+    ids = {m.document_id for m in moves if m.document_id}
+    if not ids:
+        return {}
+    return dict((await db.execute(select(D.id, D.number).where(D.id.in_(ids)))).all())
+
+
+async def _auto_doc(db: AsyncSession, cid, user, op: str, move: EzsEquipmentMovement, **kw) -> str:
+    """Документ с автономером для движения прежней формы; возвращает его номер."""
+    from app.services import ezs_equipment_docs as D
+    return (await D.document_for(db, cid, user, op, [move], **kw)).number
 
 
 async def _locations_map(db: AsyncSession, company_id) -> dict[str, ServiceLocation]:
@@ -295,7 +315,8 @@ async def list_units(
     company_id: str = Query(...),
     state: str | None = Query(None), location_id: str | None = Query(None),
     vendor: str | None = Query(None), custodian: str | None = Query(None),
-    q: str | None = Query(None),
+    q: str | None = Query(None), kind: str | None = Query(None),
+    sort: str = Query("updatedAt"), dir: str = Query("desc"),
     scope: ScopeQ = Depends(),
     page: int = Query(1, ge=1), page_size: int = Query(500, le=1000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
@@ -303,8 +324,8 @@ async def list_units(
     cid = await assert_company_member(company_id, user, db)
     U = EzsEquipmentUnit
     conds = [U.company_id == cid]
-    if state:
-        conds.append(U.state.in_(state.split(",")))
+    if kind:
+        conds.append(U.kind.in_(kind.split(",")))
     if location_id:
         conds.append(U.current_location_id == location_id)
     if vendor:
@@ -325,13 +346,30 @@ async def list_units(
         conds.append(U.serial_number.ilike(like) | U.model.ilike(like) |
                      U.inventory_number.ilike(like) | _vendor_col().ilike(like) |
                      U.keeper.ilike(like) | at_location)
+    # Плитки над реестром считаются здесь, по всему отбору, а не в браузере по
+    # загруженной странице. Состояния — без отбора по состоянию: иначе, выбрав
+    # «Резерв», человек видит одну плитку и нули в остальных.
+    by_state = {s: int(n) for s, n in (await db.execute(
+        select(U.state, func.count()).where(*conds).group_by(U.state))).all()}
+    if state:
+        conds.append(U.state.in_(state.split(",")))
     total = int((await db.execute(select(func.count()).select_from(U).where(*conds))).scalar_one())
+    unconfirmed = int((await db.execute(
+        select(func.count()).select_from(U).where(*conds, U.data_confirmed.is_(False)))).scalar_one())
+    # Сортировка на сервере: реестр листается, и порядок одной страницы — не порядок реестра.
+    place = select(ServiceLocation.name).where(
+        ServiceLocation.id == U.current_location_id).scalar_subquery()
+    col = {"serialNumber": U.serial_number, "vendor": _vendor_col(), "model": U.model,
+           "powerKwt": U.power_kwt, "state": U.state, "place": place,
+           "inventoryNumber": U.inventory_number}.get(sort, U.updated_at)
+    order = (col.asc() if dir == "asc" else col.desc()).nulls_last()
     rows = (await db.execute(
-        select(U).where(*conds).order_by(U.updated_at.desc())
+        select(U).where(*conds).order_by(order, U.id)
         .limit(page_size).offset((page - 1) * page_size)
     )).scalars().all()
     locs = await _locations_map(db, cid)
-    return {"items": [_unit_out(u, locs) for u in rows], "total": total}
+    return {"items": [_unit_out(u, locs) for u in rows], "total": total,
+            "counts": {"byState": by_state, "unconfirmed": unconfirmed}}
 
 
 @router.post("/units")
@@ -353,9 +391,13 @@ async def create_unit_ep(
         "occurred_on": body.occurredOn, "basis": body.basis, "comment": body.comment,
     })
     await db.flush()
+    move = (await db.execute(select(EzsEquipmentMovement).where(
+        EzsEquipmentMovement.unit_id == unit.id))).scalar_one()
+    number = await _auto_doc(db, cid, user, "receipt", move, doc_date=body.occurredOn,
+                             basis=body.basis, comment=body.comment)
     await db.refresh(unit)
     locs = await _locations_map(db, cid)
-    return _unit_out(unit, locs)
+    return {**_unit_out(unit, locs), "documentNumber": number}
 
 
 @router.get("/units/{unit_id}")
@@ -374,7 +416,8 @@ async def get_unit(
     locs = await _locations_map(db, cid)
     supplies = await _supplies_map(db, cid, [unit.supply_id, *(m.supply_id for m in moves)])
     out = _unit_out(unit, locs, supplies)
-    out["movements"] = [_move_out(m, locs, supplies=supplies) for m in moves]
+    docs = await _doc_numbers(db, moves)
+    out["movements"] = [_move_out(m, locs, supplies=supplies, docs=docs) for m in moves]
     return out
 
 
@@ -422,12 +465,20 @@ async def delete_unit(
     unit = await db.get(EzsEquipmentUnit, unit_id)
     if unit is None or unit.company_id != cid:
         raise HTTPException(404, "Единица не найдена")
-    n_moves = int((await db.execute(
-        select(func.count()).select_from(EzsEquipmentMovement)
-        .where(EzsEquipmentMovement.unit_id == unit_id)
-    )).scalar_one())
-    if n_moves > 1:
-        raise HTTPException(409, "У единицы есть история движений — используйте списание или корректировку")
+    # Стереть можно только карточку, заведённую по ошибке и ничем не подтверждённую:
+    # одно поступление без документа и без поставки. Всё остальное убирается
+    # отменой документа или списанием — иначе приход исчезал бы без следа.
+    moves = (await db.execute(
+        select(EzsEquipmentMovement).where(EzsEquipmentMovement.unit_id == unit_id)
+    )).scalars().all()
+    if len(moves) > 1 or any(m.op != "receipt" or m.document_id or m.supply_id for m in moves) or unit.supply_id:
+        raise HTTPException(409, "Карточку с документом, поставкой или историей движений удалить нельзя — "
+                                 "отмените документ либо оформите списание")
+    db.add(AuditEvent(
+        company_id=cid, user_id=str(user.id), user_name=user.name or user.email, action="equipment_unit_delete",
+        details=json.dumps({"unit_id": str(unit_id), "serial_number": unit.serial_number,
+                            "vendor": unit.vendor or unit.brand, "model": unit.model, "state": unit.state,
+                            "location_id": unit.current_location_id}, ensure_ascii=False)))
     await db.delete(unit)
     return {"deleted": str(unit_id)}
 
@@ -437,13 +488,26 @@ async def unit_movement(
     unit_id: uuid.UUID, body: MovementIn, company_id: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
+    # Прежняя форма (корректировка из карточки) проводится тем же документом, что и
+    # новая: номер присваивается сам, движение без документа не возникает.
+    from app.services import ezs_equipment_docs as D
     cid = await assert_company_member(company_id, user, db)
-    unit, move = await apply_movement(db, cid, user, unit_id, _payload_movement(body))
-    await db.flush()
+    p = _payload_movement(body)
+    doc = await D.post_document(db, cid, user, {
+        **p, "unit_ids": [str(unit_id)],
+        # Дату ввода и вывода называет человек: сегодняшний день за него не подставляется.
+        "doc_date": p.get("occurred_on") or ("" if body.op in ("commissioning", "write_off", "to_vendor")
+                                              else date.today().isoformat()),
+        "counterparty_text": p.get("counterparty")})
+    unit = await db.get(EzsEquipmentUnit, unit_id)
     await db.refresh(unit)
-    await db.refresh(move)
+    move = (await db.execute(select(EzsEquipmentMovement).where(
+        EzsEquipmentMovement.unit_id == unit_id,
+        EzsEquipmentMovement.document_id == uuid.UUID(doc["id"])))).scalar_one()
     locs = await _locations_map(db, cid)
-    return {"unit": _unit_out(unit, locs), "movement": _move_out(move, locs)}
+    return {"unit": _unit_out(unit, locs),
+            "movement": _move_out(move, locs, docs={move.document_id: doc["number"]}),
+            "documentNumber": doc["number"], "warnings": doc["warnings"]}
 
 
 @router.post("/dismantle")
@@ -459,10 +523,13 @@ async def dismantle(
         "set_decommissioned": body.setDecommissioned,
     })
     await db.flush()
+    number = await _auto_doc(db, cid, user, "dismantle", move, doc_date=body.occurredOn,
+                             basis=body.basis, comment=body.comment)
     await db.refresh(unit)
     await db.refresh(move)
     locs = await _locations_map(db, cid)
-    return {"unit": _unit_out(unit, locs), "movement": _move_out(move, locs), "unitCreated": created}
+    return {"unit": _unit_out(unit, locs), "movement": _move_out(move, locs, docs={move.document_id: number}),
+            "unitCreated": created, "documentNumber": number}
 
 
 # ─── журнал движений ────────────────────────────────────────────────────────
@@ -501,10 +568,157 @@ async def list_movements(
     )).all()
     locs = await _locations_map(db, cid)
     supplies = await _supplies_map(db, cid, [m.supply_id for m, _ in rows])
-    return {"items": [_move_out(m, locs, unit=u, supplies=supplies) for m, u in rows], "total": total}
+    docs = await _doc_numbers(db, [m for m, _ in rows])
+    return {"items": [_move_out(m, locs, unit=u, supplies=supplies, docs=docs) for m, u in rows], "total": total}
 
 
 # ─── склады и обзор ─────────────────────────────────────────────────────────
+
+# ─── документы движения и карточка склада ───────────────────────────────────
+
+class EquipmentDocIn(BaseModel):
+    op: str
+    unitIds: list[str] = Field(default_factory=list)
+    docDate: str
+    number: str | None = None
+    toLocationId: str | None = None
+    counterpartyId: str | None = None
+    contractId: str | None = None
+    responsibleFrom: str | None = None
+    responsibleTo: str | None = None
+    basis: str | None = None
+    comment: str | None = None
+    custodian: str | None = None
+    reservedForLocationId: str | None = None
+    toState: str | None = None
+    syncPassport: bool = False
+    details: dict[str, Any] | None = None
+
+
+class WarehouseIn(BaseModel):
+    name: str | None = None
+    address: str | None = None
+    ownership: str | None = None
+    counterpartyId: str | None = None
+    contractId: str | None = None
+    responsible: str | None = None
+    phone: str | None = None
+    note: str | None = None
+
+
+@router.get("/documents/meta")
+async def documents_meta(user: User = Depends(get_current_user)):
+    """Виды документов, подходящие типы договоров, виды владения складом."""
+    from app.services import ezs_equipment_docs as D
+    return {"kinds": {op: {"prefix": p, "title": t} for op, (p, t) in D.DOC_KINDS.items()},
+            "contractTypes": {k: list(v) for k, v in D.CONTRACT_TYPES.items()},
+            "counterpartyRequired": sorted(D.COUNTERPARTY_REQUIRED), "ownership": D.OWNERSHIP,
+            "storageForms": {k: {"prefix": p, "title": t} for k, (p, t) in D.STORAGE_FORMS.items()}}
+
+
+@router.get("/documents")
+async def documents_list(
+    company_id: str = Query(...), op: str | None = Query(None), q: str | None = Query(None),
+    date_from: str | None = Query(None), date_to: str | None = Query(None),
+    status: str | None = Query(None), counterparty_id: uuid.UUID | None = Query(None),
+    contract_id: uuid.UUID | None = Query(None), location_id: str | None = Query(None),
+    unit_id: uuid.UUID | None = Query(None),
+    limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.list_documents(db, cid, op=op, q=q, date_from=date_from, date_to=date_to, status=status,
+                                  counterparty_id=counterparty_id, contract_id=contract_id,
+                                  location_id=location_id, unit_id=unit_id, limit=limit, offset=offset)
+
+
+@router.get("/documents/{doc_id}")
+async def documents_get(
+    doc_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.get_document(db, cid, doc_id)
+
+
+@router.post("/documents")
+async def documents_post(
+    body: EquipmentDocIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Провести документ движения по одной или нескольким единицам — атомарно."""
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.post_document(db, cid, user, {
+        "op": body.op, "unit_ids": body.unitIds, "doc_date": body.docDate, "number": body.number,
+        "to_location_id": body.toLocationId, "counterparty_id": body.counterpartyId,
+        "contract_id": body.contractId, "responsible_from": body.responsibleFrom,
+        "responsible_to": body.responsibleTo, "basis": body.basis, "comment": body.comment,
+        "custodian": body.custodian, "reserved_for_location_id": body.reservedForLocationId,
+        "to_state": body.toState, "sync_passport": body.syncPassport, "details": body.details,
+    })
+
+
+class CancelIn(BaseModel):
+    reason: str = ""
+
+
+@router.post("/documents/{doc_id}/cancel")
+async def documents_cancel(
+    doc_id: uuid.UUID, body: CancelIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Отменить проведённый документ: единицы возвращаются в прежнее состояние."""
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.cancel_document(db, cid, user, doc_id, body.reason)
+
+
+@router.get("/audit")
+async def equipment_audit(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Разбор данных складского учёта: что не так и каким документом закрывается."""
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.audit(db, cid)
+
+
+@router.get("/warehouses/{loc_id}/card")
+async def warehouse_card(
+    loc_id: str, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    loc = await db.get(ServiceLocation, loc_id)
+    if loc is None or loc.company_id != cid or loc.type != "warehouse":
+        raise HTTPException(404, "Склад не найден")
+    return await D.warehouse_card(db, cid, loc)
+
+
+@router.post("/warehouses")
+async def warehouse_create(
+    body: WarehouseIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.save_warehouse(db, cid, None, body.model_dump())
+
+
+@router.patch("/warehouses/{loc_id}")
+async def warehouse_update(
+    loc_id: str, body: WarehouseIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_equipment_docs as D
+    cid = await assert_company_member(company_id, user, db)
+    return await D.save_warehouse(db, cid, loc_id, body.model_dump(exclude_unset=True))
+
 
 @router.get("/warehouses/summary")
 async def warehouses_summary(
@@ -548,11 +762,13 @@ async def warehouses_summary(
         .group_by(U.custodian)
     )).all()
 
+    from app.services.ezs_equipment_docs import warehouse_card as _card
     out = []
     for wh in sorted(warehouses, key=lambda w: w.name):
         states = by_wh.get(wh.id, {})
         sp = spare_by_wh.get(wh.id, {"positions": 0, "qty": 0.0})
         out.append({
+            "card": await _card(db, cid, wh),
             "location": _loc_brief(wh),
             "unitsByState": states,
             "unitsTotal": sum(states.values()),
@@ -760,21 +976,32 @@ async def spare_movement(
     part_id: uuid.UUID, body: SpareMovementIn, company_id: str = Query(...),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
+    """Одна строка — тот же документ ЗИП с автономером: движений без документа не бывает.
+    Корректировка оформляется описью на одну позицию (qty — фактический остаток)."""
+    from datetime import date
+    from app.services import ezs_spare_docs as SD
     cid = await assert_company_member(company_id, user, db)
-    move = await spare_apply_movement(db, cid, user, part_id, {
-        "op": body.op, "qty": body.qty,
+    inventory = body.op == "correction"
+    if inventory and not (body.comment or "").strip():
+        raise HTTPException(400, "Для корректировки обязателен комментарий")
+    doc = await SD.post_document(db, cid, user, {
+        "op": "inventory" if inventory else body.op,
+        "doc_date": body.occurredOn or date.today().isoformat(),
+        "lines": [{"partId": str(part_id), "fact" if inventory else "qty": body.qty}],
         "from_location_id": body.fromLocationId, "to_location_id": body.toLocationId,
         "target_unit_id": body.targetUnitId, "target_location_id": body.targetLocationId,
-        "occurred_on": body.occurredOn, "basis": body.basis, "comment": body.comment,
+        "basis": body.basis, "comment": body.comment,
     })
-    await db.flush()
+    move_id = (await db.execute(select(EzsSparePartMovement.id).where(
+        EzsSparePartMovement.document_id == uuid.UUID(doc["id"])).limit(1))).scalar_one_or_none()
     stock = (await db.execute(
         select(EzsSparePartStock).where(
             EzsSparePartStock.company_id == cid, EzsSparePartStock.part_id == part_id)
     )).scalars().all()
     locs = await _locations_map(db, cid)
     return {
-        "movementId": str(move.id),
+        "movementId": str(move_id) if move_id else None,  # опись без расхождения движения не даёт
+        "documentId": doc["id"], "documentNumber": doc["number"],
         "stock": [{"locationId": s.location_id,
                    "locationName": locs.get(s.location_id).name if locs.get(s.location_id) else "—",
                    "qty": float(s.qty)} for s in stock],
@@ -785,15 +1012,19 @@ async def spare_movement(
 async def spare_movements_journal(
     company_id: str = Query(...),
     part_id: uuid.UUID | None = Query(None), location_id: str | None = Query(None),
+    op: str | None = Query(None),
     date_from: str | None = Query(None), date_to: str | None = Query(None),
     page: int = Query(1, ge=1), page_size: int = Query(200, le=1000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
+    from app.models import EzsSpareDocument
     cid = await assert_company_member(company_id, user, db)
     M = EzsSparePartMovement
     conds = [M.company_id == cid]
     if part_id:
         conds.append(M.part_id == part_id)
+    if op:
+        conds.append(M.op == op)
     if location_id:
         conds.append((M.from_location_id == location_id) | (M.to_location_id == location_id))
     if date_from:
@@ -807,11 +1038,28 @@ async def spare_movements_journal(
         .limit(page_size).offset((page - 1) * page_size)
     )).all()
     locs = await _locations_map(db, cid)
+    doc_ids = {m.document_id for m, _ in rows if m.document_id}
+    docs = {i: (n, note) for i, n, note in (await db.execute(select(
+        EzsSpareDocument.id, EzsSpareDocument.number, EzsSpareDocument.target_note).where(
+        EzsSpareDocument.id.in_(doc_ids)))).all()} if doc_ids else {}
+    unit_ids = {m.target_unit_id for m, _ in rows if m.target_unit_id}
+    units = {u.id: u for u in (await db.execute(select(EzsEquipmentUnit).where(
+        EzsEquipmentUnit.id.in_(unit_ids)))).scalars().all()} if unit_ids else {}
     items = []
     for m, p in rows:
+        tu = units.get(m.target_unit_id)
         items.append({
             "id": str(m.id), "part": {"id": str(p.id), "name": p.name, "unitLabel": p.unit_label},
-            "op": m.op, "qty": float(m.qty),
+            "op": m.op, "qty": float(m.qty), "delta": float(m.delta) if m.delta is not None else None,
+            "documentId": str(m.document_id) if m.document_id else None,
+            "documentNumber": docs.get(m.document_id, (None, None))[0],
+            # получатель расхода — названием: станция в эксплуатации — именем станции,
+            # прочая единица — моделью; объект без привязки к станции — текстом документа
+            "targetUnit": {"id": str(tu.id), "serialNumber": tu.serial_number,
+                           "name": (getattr(locs.get(tu.current_location_id or ""), "name", None)
+                                    if tu.state == "in_operation" else None)
+                           or " ".join(x for x in (tu.vendor or tu.brand, tu.model) if x)} if tu else None,
+            "targetNote": docs.get(m.document_id, (None, None))[1],
             "fromLocation": _loc_brief(locs.get(m.from_location_id or "")),
             "toLocation": _loc_brief(locs.get(m.to_location_id or "")),
             "targetUnitId": str(m.target_unit_id) if m.target_unit_id else None,
@@ -820,6 +1068,107 @@ async def spare_movements_journal(
             "createdBy": m.created_by_name,
         })
     return {"items": items, "total": total}
+
+
+# ─── документы ЗИП: приход, отпуск, перемещение, списание, инвентаризация ─────
+
+class SpareDocLineIn(BaseModel):
+    partId: str
+    qty: float | None = None         # у описи не заполняется
+    fact: float | None = None        # фактическое количество — только у описи
+
+
+class SpareDocIn(BaseModel):
+    id: uuid.UUID | None = None      # ключ от формы: повторная отправка не проводит дважды
+    op: str
+    docDate: str
+    number: str | None = None
+    lines: list[SpareDocLineIn] = Field(default_factory=list)
+    fromLocationId: str | None = None
+    toLocationId: str | None = None
+    targetUnitId: str | None = None
+    targetLocationId: str | None = None
+    targetNote: str | None = None    # объект без привязки к станции — текстом
+    repairDocumentId: str | None = None
+    counterpartyId: str | None = None
+    contractId: str | None = None
+    responsibleFrom: str | None = None
+    responsibleTo: str | None = None
+    basis: str | None = None
+    comment: str | None = None
+
+
+class SpareDocCancelIn(BaseModel):
+    reason: str
+
+
+@router.get("/spare-documents/count-sheet")
+async def spare_documents_count_sheet(
+    company_id: str = Query(...), location_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Лист пересчёта склада: текущие остатки как заготовка строк описи."""
+    from app.services import ezs_spare_docs as SD
+    cid = await assert_company_member(company_id, user, db)
+    return await SD.count_sheet(db, cid, location_id)
+
+
+@router.get("/spare-documents")
+async def spare_documents_list(
+    company_id: str = Query(...), op: str | None = Query(None), status: str | None = Query(None),
+    location_id: str | None = Query(None), counterparty_id: uuid.UUID | None = Query(None),
+    contract_id: uuid.UUID | None = Query(None), part_id: uuid.UUID | None = Query(None),
+    date_from: str | None = Query(None), date_to: str | None = Query(None), q: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_spare_docs as SD
+    cid = await assert_company_member(company_id, user, db)
+    return await SD.list_documents(
+        db, cid, op=op, status=status, location_id=location_id, counterparty_id=counterparty_id,
+        contract_id=contract_id, part_id=part_id, q=q, date_from=date_from, date_to=date_to,
+        limit=limit, offset=offset)
+
+
+@router.get("/spare-documents/{doc_id}")
+async def spare_documents_get(
+    doc_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    from app.services import ezs_spare_docs as SD
+    cid = await assert_company_member(company_id, user, db)
+    return await SD.get_document(db, cid, doc_id)
+
+
+@router.post("/spare-documents")
+async def spare_documents_post(
+    body: SpareDocIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Провести документ ЗИП на одну или несколько строк — атомарно."""
+    from app.services import ezs_spare_docs as SD
+    cid = await assert_company_member(company_id, user, db)
+    return await SD.post_document(db, cid, user, {
+        "id": body.id, "op": body.op, "doc_date": body.docDate, "number": body.number,
+        "lines": [ln.model_dump() for ln in body.lines],
+        "from_location_id": body.fromLocationId, "to_location_id": body.toLocationId,
+        "target_unit_id": body.targetUnitId, "target_location_id": body.targetLocationId,
+        "target_note": body.targetNote, "repair_document_id": body.repairDocumentId,
+        "counterparty_id": body.counterpartyId, "contract_id": body.contractId,
+        "responsible_from": body.responsibleFrom, "responsible_to": body.responsibleTo,
+        "basis": body.basis, "comment": body.comment,
+    })
+
+
+@router.post("/spare-documents/{doc_id}/cancel")
+async def spare_documents_cancel(
+    doc_id: uuid.UUID, body: SpareDocCancelIn, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Отменить документ: сторно движений возвращает остаток, номер остаётся занят."""
+    from app.services import ezs_spare_docs as SD
+    cid = await assert_company_member(company_id, user, db)
+    return await SD.cancel_document(db, cid, user, doc_id, body.reason)
 
 
 # ─── документы поставки/возврата (слой оснований поверх движений) ────────────

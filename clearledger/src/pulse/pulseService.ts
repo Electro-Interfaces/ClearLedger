@@ -603,7 +603,9 @@ export const replyPulseRequest = (
 export interface PulseViewLink {
   id: string; token: string; label: string
   expiresAt: string | null; revoked: boolean; expired: boolean
-  opened: number; lastOpenedAt: string | null; url: string
+  opened: number; lastOpenedAt: string | null
+  /** null — ссылка хранится хешем, адрес показывали только при выдаче. */
+  url: string | null
 }
 
 export const getPulseViewLinks = (companyId: string, viewId: string) =>

@@ -14,7 +14,12 @@
  * показывает (у Управления параметры ядра живут отдельным разделом).
  */
 import { useState } from 'react'
-import { Bell, Bot, LogOut, Moon, RefreshCw, Sun, User, Video } from 'lucide-react'
+import { Bell, Bot, LogOut, Moon, RefreshCw, ShieldCheck, Sun, User, Video } from 'lucide-react'
+import { logoutAll } from '@/services/authService'
+import { TwoFactorDialog } from './TwoFactorDialog'
+
+/** Двухэтапный вход в меню пользователя — выключено до решения МАГа. */
+const TWOFA_IN_MENU = import.meta.env.VITE_TWOFA === '1'
 import { toast } from 'sonner'
 import { startMeeting } from '@/services/conferenceService'
 import { isDemoMode } from '@/services/apiClient'
@@ -71,6 +76,7 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
   const { user, logout } = useAuth()
   const { toggleInteraction } = useSupportContext()
   const [confBusy, setConfBusy] = useState(false)
+  const [twofaOpen, setTwofaOpen] = useState(false)
 
   const userName = user?.name ?? 'Пользователь'
   // 🔴 Профиль НЕ называет организацию.
@@ -104,7 +110,16 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
     navigate('/login')
   }
 
+  // Пароль мог утечь или вход остался на чужом компьютере: гасим все входы сразу.
+  async function handleLogoutAll() {
+    if (!window.confirm('Выйти на всех устройствах? Входить придётся заново везде, включая это окно.')) return
+    try { await logoutAll() } catch { /* токен уже снят — уходим на вход */ }
+    logout()
+    navigate('/login')
+  }
+
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         {/* Аватар квадратом в цвете пространства и с обводкой: на тёмном фоне
@@ -175,6 +190,12 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
           )}
           {/* Версия здесь, а не мелкой строкой в подвале: это первое, что
               спрашивают, когда «у меня выглядит иначе». Рядом — способ обновиться. */}
+          {/* «Двухэтапный вход» (TOTP) готов в коде, в меню не выводим — решение МАГа
+              07.10.2026: пока не включаем. Вернуть: показать MenuRow с ShieldCheck → setTwofaOpen. */}
+          {TWOFA_IN_MENU && !isDemoMode() && (
+            <MenuRow icon={ShieldCheck} title="Двухэтапный вход" note="Код из приложения при входе"
+              onSelect={() => setTwofaOpen(true)} />
+          )}
           <MenuRow icon={RefreshCw} title="Проверить обновления"
             note={`Версия ${APP_VERSION} · сборка ${APP_BUILD}`}
             onSelect={() => void applyUpdate()} />
@@ -183,8 +204,12 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
         <div className="border-t border-border/40 p-2">
           <MenuRow icon={LogOut} title="Выйти" note="Завершить сеанс" danger
             onSelect={handleLogout} />
+          <MenuRow icon={LogOut} title="Выйти на всех устройствах" note="Если пароль мог утечь" danger
+            onSelect={() => void handleLogoutAll()} />
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
+    <TwoFactorDialog open={twofaOpen} onOpenChange={setTwofaOpen} />
+    </>
   )
 }

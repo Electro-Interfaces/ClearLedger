@@ -31,6 +31,9 @@ LIMITS: dict[str, tuple[int, int]] = {
     "auth": (10, 60),        # вход, восстановление и сброс пароля
     "invite": (20, 60),      # просмотр и приём приглашения
     "public_doc": (60, 60),  # публичная ссылка на документ и проверка записи
+    # Служебные ручки по общему секрету (сайт, приём записей конференций): честный
+    # клиент ходит редко, перебор секрета упирается (аудит 07.10.2026).
+    "service": (120, 60),
 }
 
 # Путь (префикс после /api) → группа. Пусто — ручка не ограничивается.
@@ -45,6 +48,14 @@ ROUTES: tuple[tuple[str, str], ...] = (
     # перебор токенов по ней ограничивается так же, как по документу.
     ("/api/invite/", "public_doc"),
     ("/api/showcase", "public_doc"),
+    # Вход без пароля по пропуску поставщика и демо-вход — это тоже вход.
+    ("/api/eco/partner/visit", "auth"),
+    ("/api/auth/demo-session", "auth"),
+    # Лента календаря по личной ссылке.
+    ("/api/work/calendar/feed/", "public_doc"),
+    ("/api/conf/recordings/ingest", "service"),
+    ("/api/site/pull", "service"),
+    ("/api/site/push", "service"),
 )
 
 _hits: dict[str, deque[float]] = defaultdict(deque)

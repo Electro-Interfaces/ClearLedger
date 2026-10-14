@@ -450,13 +450,60 @@ export async function updateContract(
 
 export async function deleteContract(companyId: string, id: string): Promise<boolean> {
   if (isApiEnabled()) {
-    try { await del(`/api/references/contracts/${id}`); return true } catch { return false }
+    // Ошибку не глотаем: «используется — удалить нельзя» должно дойти до человека,
+    // а не превратиться в «Договор удалён» при живом договоре.
+    await del(`/api/references/contracts/${id}`); return true
   }
   const list = await loadList<Contract>(contractsKey(companyId))
   const filtered = list.filter((c) => c.id !== id)
   if (filtered.length === list.length) return false
   await saveList(contractsKey(companyId), filtered)
   return true
+}
+
+export interface ContractUsage { app: string; label: string; count: number }
+
+/** Лист «Документов» пространства: документ с файлом или карточка договора. */
+export interface SpaceDocument {
+  id: string; docType: 'space_file' | 'contract_card'; title: string; catalog: string; date: string
+  contractId?: string | null; docId?: string; fileId?: string | null; fileName?: string | null; size?: number | null; status?: string | null
+}
+
+/** Дерево «Документов» пространства: договоры с их бумагами, документы проектов, «Трек». */
+export async function getSpaceDocuments(companyId: string): Promise<SpaceDocument[]> {
+  return get<SpaceDocument[]>('/api/references/space-documents', { company_id: companyId })
+}
+
+/** Где договор используется (по приложениям). Непустой ответ — удалить нельзя, только закрыть. */
+export async function getContractUsage(id: string): Promise<ContractUsage[]> {
+  return get<ContractUsage[]>(`/api/references/contracts/${id}/usage`)
+}
+
+/** Явная привязка договора к приложению и (необязательно) проекту внутри него. */
+export interface ContractLinkRef { id: string; app: string; projectRef: string | null; projectLabel: string | null }
+export interface ContractBindings {
+  /** По договору: приложения и проекты (привязанные ∪ используемые), `linked` — только явные (`app` или `app|ref`). */
+  contracts: Record<string, { apps: string[]; projects: string[]; linked: string[] }>
+  projects: Record<string, string>
+  /** Станции договора (адресный охват): id договора → id станций. */
+  locations?: Record<string, string[]>
+}
+export interface ContractProjectOption { ref: string; label: string; kind: string }
+
+export async function getContractBindings(companyId: string): Promise<ContractBindings> {
+  return get<ContractBindings>('/api/references/contract-bindings', { company_id: companyId })
+}
+export async function searchContractProjects(companyId: string, q: string): Promise<ContractProjectOption[]> {
+  return get<ContractProjectOption[]>('/api/references/contract-projects', { company_id: companyId, q })
+}
+export async function getContractLinks(id: string): Promise<ContractLinkRef[]> {
+  return get<ContractLinkRef[]>(`/api/references/contracts/${id}/links`)
+}
+export async function addContractLink(id: string, app: string, projectRef?: string | null): Promise<ContractLinkRef[]> {
+  return post<ContractLinkRef[]>(`/api/references/contracts/${id}/links`, { app, projectRef: projectRef || null })
+}
+export async function deleteContractLink(id: string, linkId: string): Promise<ContractLinkRef[]> {
+  return del<ContractLinkRef[]>(`/api/references/contracts/${id}/links/${linkId}`)
 }
 
 // ---- Ось договор↔торговые точки (Фаза 2; требует backend) ----
@@ -480,6 +527,14 @@ export async function getCounterpartyLocations(counterpartyId: string): Promise<
 }
 
 /** Договоры точки: адресные + общекомпанейские. */
+export interface ContractTypeRef { code: string; label: string; gkBasis: string | null; direction: string | null }
+export const getContractTypes = () => get<ContractTypeRef[]>('/api/references/contract-types')
+/** Привязать договор к станции (из окна станции); общий договор компании сервер не трогает (409). */
+export const linkContractLocation = (contractId: string, locationId: string) =>
+  post<Contract>(`/api/references/contracts/${contractId}/locations/${encodeURIComponent(locationId)}`, {})
+export const unlinkContractLocation = (contractId: string, locationId: string) =>
+  del<Contract>(`/api/references/contracts/${contractId}/locations/${encodeURIComponent(locationId)}`)
+
 export async function getLocationContracts(locationId: string): Promise<LocationContracts> {
   return get<LocationContracts>(`/api/references/locations/${locationId}/contracts`)
 }
@@ -487,7 +542,8 @@ export async function getLocationContracts(locationId: string): Promise<Location
 // ---- Контактные лица контрагента ----
 
 export const CONTACT_ROLE_LABEL: Record<string, string> = {
-  contract: 'Договор', tech: 'Техника', comm: 'Взаимодействие', other: 'Прочее',
+  contract: 'Договор', tech: 'Техника', comm: 'Взаимодействие', finance: 'Финансы и сверки',
+  support: 'Поддержка пользователей', other: 'Прочее',
 }
 
 export interface CounterpartyContact {

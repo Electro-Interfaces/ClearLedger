@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import create_access_token, get_current_user, hash_password
+from app.auth import get_current_user, hash_password, token_for
 from app.config import get_settings
 from app.database import get_db
 from app.models import Company, Counterparty, Invitation, User, UserCompany
@@ -404,7 +404,7 @@ async def accept_invite(
     inv.accepted_at = datetime.now(timezone.utc)
     await db.flush()
 
-    access_token = create_access_token(str(user.id), user.email)
+    access_token = token_for(user)
     return TokenResponse(
         access_token=access_token,
         user=UserResponse(

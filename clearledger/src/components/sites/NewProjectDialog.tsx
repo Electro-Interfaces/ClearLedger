@@ -15,12 +15,14 @@ import { PROJECT_OBJECT_TYPES, type ProjectSuggestionField } from '@/services/si
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { createSite, getProjectKinds, getSites } from '@/services/sitesService'
+import { createSite, getProjectKinds, getSites, openProjectCase } from '@/services/sitesService'
 import { useOpenProject } from './useOpenProject'
 import { initialIntegration, INTEGRATION_DIRECTIONS, INTEGRATION_FORMATS } from '@/services/projectIntegrationService'
 
-export function NewProjectDialog({ companyId, onClose, onCreated }: {
+export function NewProjectDialog({ companyId, onClose, onCreated, initialKind = 'new_build' }: {
   companyId: string; onClose: () => void; onCreated: (id: string) => void
+  /** Раздел «Интеграции» открывает диалог сразу на своём виде работ. */
+  initialKind?: string
 }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
@@ -29,7 +31,7 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
   // Вид работы — ось маршрута: по нему процесс на входе решает, вести ли подбор
   // земли и договор или сразу планировать работы. Спросить потом уже поздно:
   // проект успеет уехать по чужой ветке.
-  const [kind, setKind] = useState('new_build')
+  const [kind, setKind] = useState(initialKind)
   const [partner, setPartner] = useState('')
   const [format, setFormat] = useState<keyof typeof INTEGRATION_FORMATS | ''>('')
   const [direction, setDirection] = useState<keyof typeof INTEGRATION_DIRECTIONS | ''>('')
@@ -74,6 +76,9 @@ export function NewProjectDialog({ companyId, onClose, onCreated }: {
         ? { title: form.title.trim() || `Интеграция с ${partner.trim()}`, integration: initialIntegration(partner.trim(), format, direction) }
         : form
       const s = await createSite(companyId, { ...payload, kind, stage: kindDef?.startStage ?? 'lead' })
+      if (kind === 'integration') {
+        await openProjectCase(companyId, s.id).catch(() => toast.warning('Маршрут не открылся — нажмите «Вести по маршруту» в «Работе»'))
+      }
       await qc.invalidateQueries({ queryKey: ['pr-projects', companyId] })
       await qc.invalidateQueries({ queryKey: ['pr-board', companyId] })
       await qc.invalidateQueries({ queryKey: ['pr-suggestions', companyId] })

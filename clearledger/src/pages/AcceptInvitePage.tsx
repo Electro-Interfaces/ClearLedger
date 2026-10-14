@@ -169,8 +169,8 @@ export function AcceptInvitePage() {
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Пароль (мин. 6 символов)</label>
-                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6}
+                  <label className="text-sm font-medium">Пароль (мин. 10 символов)</label>
+                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={10}
                     autoComplete="new-password"
                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>

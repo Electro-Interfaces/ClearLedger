@@ -208,6 +208,14 @@ async def run_recurrences(db, now: datetime) -> int:
     return made
 
 
+def task_link(t) -> str:
+    """«№68 «Название»» ссылкой на карточку: чат рисует `[текст](адрес)` кликабельным,
+    push получает голый текст. Личная запись открывается своим адресом."""
+    path = f"/tasks/{t.id}" if t.visibility == "personal" else f"/docs/company?view=errands&task={t.id}"
+    title = (t.title or "").replace("]", ")")
+    return f"[№{t.number} «{title}»]({path})"
+
+
 async def run_due_reminders(db, now: datetime, bucket: digest.Bucket) -> int:
     """Напомнить исполнителю о сроке: за сутки до и в день просрочки.
 
@@ -247,8 +255,7 @@ async def run_due_reminders(db, now: datetime, bucket: digest.Bucket) -> int:
             space_time.zone(await bucket.tz(db, t.company_id))).strftime("%d.%m.%Y")
         bucket.add(
             t.company_id, t.assignee_id or t.author_id, f"task-due:{t.id}",
-            (f"{'Просрочено' if overdue else 'Завтра срок'}: №{t.number} "
-             f"«{t.title}» — {день}"),
+            (f"{'Просрочено' if overdue else 'Завтра срок'}: {task_link(t)} — {день}"),
             mark=lambda t=t: setattr(t, "reminded_at", now))
         sent += 1
     return sent
@@ -305,7 +312,7 @@ async def run_escalations(db, now: datetime, bucket: digest.Bucket) -> int:
                 space_time.zone(assignee.tz if assignee else None)).strftime("%H:%M")
             bucket.add(
                 t.company_id, t.assignee_id, f"escalate-warn:{t.id}",
-                (f"Ждёт вашего отклика: №{t.number} «{t.title}». Если не "
+                (f"Ждёт вашего отклика: {task_link(t)}. Если не "
                  f"приступить до {когда}, уйдёт к "
                  f"{target.name if target else 'постановщику'}"),
                 mark=lambda t=t: db.add(TaskEvent(
@@ -341,8 +348,8 @@ async def run_escalations(db, now: datetime, bucket: digest.Bucket) -> int:
         # старший не узнает никогда, а в карточке будет написано, что ушло.
         bucket.add(
             t.company_id, target.id, f"escalate:{t.id}",
-            (f"Без отклика {ttype.reaction_hours} ч: №{t.number} "
-             f"«{t.title}» (исполнитель — "
+            (f"Без отклика {ttype.reaction_hours} ч: {task_link(t)} "
+             f"(исполнитель — "
              f"{assignee.name if assignee else '—'})"),
             mark=lambda с=след: db.add(с))
         sent += 1

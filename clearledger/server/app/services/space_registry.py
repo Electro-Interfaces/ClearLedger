@@ -313,7 +313,7 @@ async def list_equipment(
         "manufacturer": u.vendor,
         "serialNumber": u.serial_number,
         "inventoryNumber": u.inventory_number,
-        "status": "active" if (u.state or "").startswith("installed") else "storage",
+        "status": "active" if u.state == "in_operation" else "storage",
         "state": u.state,
         "warrantyUntil": u.warranty_until,
     } for u in res.scalars().all()]

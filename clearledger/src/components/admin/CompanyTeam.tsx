@@ -489,12 +489,12 @@ function AddUserDialog({ companyId, party = 'internal', orgs = [] }: {
                   <SelectItem value="admin">Администратор</SelectItem>
                 </SelectContent>
               </Select></div>
-            <div className="space-y-2 col-span-2"><Label>Пароль (мин. 6)</Label>
+            <div className="space-y-2 col-span-2"><Label>Пароль (мин. 10)</Label>
               <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
           </div>
         </div>
         <DialogFooter>
-          <Button disabled={!form.email || !form.name || form.password.length < 6
+          <Button disabled={!form.email || !form.name || form.password.length < 10
             || (external && !form.orgId) || create.isPending}
             onClick={() => create.mutate()}>
             {create.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />} Добавить

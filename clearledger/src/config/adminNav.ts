@@ -18,7 +18,7 @@
 import type { ComponentType } from 'react'
 import {
   LayoutDashboard, Map, Users, History, Settings2,
-  KeyRound, MapPin, Library, Building2, Mail, Handshake, FileSignature, Network,
+  KeyRound, MapPin, Library, Building2, Mail, Handshake, FileSignature, Network, ShieldAlert,
 } from 'lucide-react'
 
 export type AdminScope = 'eco' | 'company'
@@ -52,6 +52,9 @@ export const ecosystemSections: AdminSection[] = [
   // Соседние пространства — уровень контейнера: связь между ними заводит тот, у
   // кого оба конца и ключи, а не администратор одной организации.
   { code: 'spaces', label: 'Пространства', hint: 'Связь с пространствами клиентов: переписка поддержки и вход инженера', icon: Network },
+  // Враждебные действия снаружи идут до входа — у них нет организации, поэтому журнал на
+  // уровне контейнера (07.10.2026).
+  { code: 'security', label: 'Безопасность', hint: 'Сканеры, подбор пароля, выкачка данных, блокировки адресов', icon: ShieldAlert },
 ]
 
 /**

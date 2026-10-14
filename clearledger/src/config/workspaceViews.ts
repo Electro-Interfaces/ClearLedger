@@ -44,6 +44,7 @@ export const MODE_LABELS: Record<CoreMode, string> = {
   ops_economy: 'Эксплуатация · Хозяйство',
   projects: 'Проекты · Работа',
   projects_analytics: 'Проекты · Аналитика',
+  projects_integration: 'Проекты · Интеграции',
   store: 'Торговый центр',
   store_documents: 'Магазин · Документы',
   store_catering: 'Магазин · Общепит',
@@ -111,6 +112,7 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
     pr_portfolio: 'Обзор', sites_overview: 'Воронка', sites_priority: 'Приоритеты',
     pr_budget: 'Бюджет', pr_accounting: 'Ждёт учёта',
   },
+  projects_integration: { pr_integrations: 'Реестр', pr_integrations_report: 'Отчёт' },
   // Подписи двух профилей лежат в одном режиме: коды не пересекаются, а старые
   // закладки «Топлива» (все 12 пунктов жили под `management`) продолжают
   // подписываться правильно — даже когда пункт уехал в свой раздел.
@@ -166,7 +168,8 @@ const SUB_LABELS: Partial<Record<CoreMode, Record<string, string>>> = {
   ops_equipment: {
     eq_fleet: 'Парк оборудования', eq_warehouses: 'Склады и остатки',
     eq_supplies: 'Поставки и возвраты',
-    eq_movements: 'Движения', eq_spares: 'ЗИП и запчасти',
+    eq_movements: 'Движения', eq_spares: 'ЗИП и материалы', eq_audit: 'Разбор данных',
+    eq_reports: 'Отчёты',
   },
   ops_economy: { procurement: 'Энергозакупка', rent: 'Аренда', ops_payments: 'Оплаты' },
   marketing: {

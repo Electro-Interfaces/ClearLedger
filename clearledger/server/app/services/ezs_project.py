@@ -29,8 +29,9 @@ from app.models import (
     ServiceLocation, User,
 )
 from app.services.ezs_changes import make_change
-from app.services.ezs_site_work import log_event
+from app.services.ezs_site_work import _item_by_key, log_event, set_gate_waiver, site_doc_kinds
 from app.services.ezs_checklist import norm_days
+from app.services import ezs_tp_steps
 from app.services.ezs_sites import (
     PHASE_LABELS, PHASES, STAGE_LABELS, STAGE_ORDER, STAGE_PHASE, next_step_overdue_sql, phases_for,
     project_reporting_stage, stage_label, stage_phase,
@@ -57,11 +58,31 @@ DOC_KINDS = [
     {"key": "egrn", "label": "Выписка ЕГРН"},
     {"key": "site_plan", "label": "Схема участка"},
     {"key": "photo", "label": "Фото места"},
+    # Схемы переговоров с собственником — пункты 3.2–3.6 чек-листа (Ступин, 09.10.2026).
+    {"key": "scheme_install", "label": "Схема места установки ЭЗС и точки подключения"},
+    {"key": "scheme_cables", "label": "Схема прокладки кабельных трасс"},
+    {"key": "scheme_lan", "label": "Схема прокладки LAN"},
+    {"key": "scheme_parking", "label": "Схема парковочных мест и знаков"},
+    {"key": "scheme_navigation", "label": "Схема размещения навигации и информационных материалов"},
+    {"key": "counterparty_card", "label": "Карточка контрагента"},
     {"key": "offer", "label": "Коммерческое предложение"},
     {"key": "contract", "label": "Договор на землю"},
     {"key": "tu", "label": "Технические условия"},
     {"key": "tp_contract", "label": "Договор техприсоединения"},
+    {"key": "tp_indirect", "label": "Соглашение об опосредованном присоединении"},
+    {"key": "tp_power_share", "label": "Соглашение о перераспределении мощности"},
+    {"key": "tp_avtu", "label": "Акт о выполнении ТУ, акт допуска узла учёта"},
+    {"key": "tp_act", "label": "Акт о техприсоединении"},
+    {"key": "supply_contract", "label": "Договор электроснабжения"},
+    {"key": "egrul", "label": "Выписка из ЕГРЮЛ"},
+    {"key": "poa", "label": "Доверенность"},
     {"key": "project", "label": "Проектная документация"},
+    # Документы площадки для техприсоединения — показываются и на вкладке «Присоединение».
+    {"key": "geo_survey", "label": "Геологические изыскания"},
+    {"key": "site_design", "label": "Проектная документация места аренды"},
+    {"key": "master_plan", "label": "Генеральный план места аренды"},
+    {"key": "networks_plan", "label": "Сводный план сетей места аренды"},
+    {"key": "landlord_power_project", "label": "Проект по электроснабжению арендодателя"},
     {"key": "act_mount", "label": "Акт монтажа"},
     {"key": "act", "label": "Акт приёмки / ввода"},
     {"key": "equipment_doc", "label": "Документы на оборудование"},
@@ -145,8 +166,11 @@ TC_FIELDS = {"status", "grid_operator", "application_no", "application_date", "s
              # паспорт питающей сети и деньги ТУ (графы AQ–BA банка ЗУ)
              "substation_owner", "line_owner", "transformer_kva", "line_type",
              "extra_power_possible", "transformer_swap_possible",
-             "works_cost", "total_cost", "applicant_term_months"}
-_TC_NUM = {"power_kwt", "cost", "works_cost", "total_cost", "applicant_term_months"}
+             "works_cost", "total_cost", "applicant_term_months",
+             # сведения заявки на ТП (`ezs_tp_application`)
+             "reliability_category", "load_kind", "existing_power_kwt", "energy_supplier",
+             "tp_coords"}
+_TC_NUM = {"power_kwt", "cost", "works_cost", "total_cost", "applicant_term_months", "existing_power_kwt"}
 _TC_BOOL_FIELDS = {"needs_reconstruction", "extra_power_possible", "transformer_swap_possible"}
 
 
@@ -171,6 +195,11 @@ def _tc_out(tc: EzsTechConnection) -> dict[str, Any]:
         "worksCost": float(tc.works_cost) if tc.works_cost is not None else None,
         "totalCost": float(tc.total_cost) if tc.total_cost is not None else None,
         "applicantTermMonths": tc.applicant_term_months,
+        "reliabilityCategory": tc.reliability_category, "loadKind": tc.load_kind,
+        "existingPowerKwt": tc.existing_power_kwt, "energySupplier": tc.energy_supplier,
+        "tpCoords": tc.tp_coords,
+        "method": tc.method, "methodLabel": ezs_tp_steps.METHOD_LABELS.get(tc.method or ""),
+        "steps": ezs_tp_steps.steps_out(tc),
         "overdue": overdue,
     }
 
@@ -179,11 +208,61 @@ async def get_tech_connection(db: AsyncSession, company_id, site_id) -> dict[str
     tc = (await db.execute(select(EzsTechConnection).where(
         EzsTechConnection.company_id == company_id,
         EzsTechConnection.site_id == site_id))).scalars().first()
-    return _tc_out(tc) if tc else None
+    if tc is None:
+        return None
+    out = _tc_out(tc)
+    out["kit"] = ezs_tp_steps.kit_for(tc.method, await site_doc_kinds(db, site_id))
+    return out
+
+
+async def tech_connection_application(db: AsyncSession, company_id, site: EzsSite) -> str | None:
+    """Заявка на ТП печатной формой; None — присоединение не заведено."""
+    from app.models import Organization
+    from app.services import ezs_tp_application
+    tc = (await db.execute(select(EzsTechConnection).where(
+        EzsTechConnection.company_id == company_id,
+        EzsTechConnection.site_id == site.id))).scalars().first()
+    if tc is None:
+        return None
+    # ponytail: заявитель — первое юрлицо компании; выбор в проекте — когда юрлиц станет несколько.
+    org = (await db.execute(select(Organization).where(
+        Organization.company_id == company_id).order_by(Organization.created_at).limit(1))).scalars().first()
+    kit = ezs_tp_steps.kit_for(tc.method, await site_doc_kinds(db, site.id))
+    return ezs_tp_application.render(org, site, tc, kit)
+
+
+def _gate_from_step(site: EzsSite, key: str, done: bool, user: User | None) -> dict[str, Any] | None:
+    """Шаг хода закрывает ручной пункт чек-листа: дату заявки не подтверждают дважды.
+
+    Снимается только отметка, поставленная шагом: галочку человека стёртая дата не трогает.
+    """
+    found = None if site.kind == "integration" else _item_by_key(site.kind, key)
+    if found is None or not found[1].get("manual"):
+        return None
+    stage, item = found
+    gates = dict(site.gates or {})
+    marks = dict(gates.get(stage) or {})
+    mark = dict(marks.get(key) or {})
+    if done and not mark.get("done"):
+        mark.update(done=True, source="tp_step", at=datetime.now(timezone.utc).isoformat(),
+                    by=str(user.id) if user is not None else None,
+                    by_name=getattr(user, "name", None) or getattr(user, "email", None))
+    elif not done and mark.get("done") and mark.get("source") == "tp_step":
+        mark.update(done=False)
+        mark.pop("source")
+    else:
+        return None
+    marks[key] = mark
+    gates[stage] = marks
+    site.gates = gates
+    return make_change(f"gate:{key}", not done, done, label=item["label"], category="decision",
+                       old_display="не выполнено" if done else "выполнено",
+                       new_display="выполнено" if done else "не выполнено")
 
 
 async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
-                                 patch: dict[str, Any], user: User | None) -> dict[str, Any]:
+                                 patch: dict[str, Any], user: User | None,
+                                 may_waive: bool = False) -> dict[str, Any]:
     tc = (await db.execute(select(EzsTechConnection).where(
         EzsTechConnection.company_id == company_id,
         EzsTechConnection.site_id == site.id))).scalars().first()
@@ -206,7 +285,9 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
         elif f in _TC_BOOL_FIELDS:
             setattr(tc, f, bool(v))
         else:
-            setattr(tc, f, str(v))
+            # Строка длиннее графы роняла сохранение целиком («III категория» в VARCHAR(8)).
+            limit = getattr(EzsTechConnection.__table__.c[f].type, "length", None)
+            setattr(tc, f, str(v).strip()[:limit] if limit else str(v))
         new = getattr(tc, f, None)
         if old != new:
             changes.append(make_change(
@@ -214,6 +295,61 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
                 old_display=TC_LABELS.get(old, old) if f == "status" and old else None,
                 new_display=TC_LABELS.get(new, new) if f == "status" and new else None,
             ))
+    # Способ и шаги хода (блок-схема энергетика, `ezs_tp_steps`): шаг — дата факта.
+    if "method" in patch:
+        method = patch["method"] if patch["method"] in ezs_tp_steps.METHOD_LABELS else None
+        if method != tc.method:
+            changes.append(make_change(
+                "tc.method", tc.method, method, label="Способ присоединения", category="technical",
+                old_display=ezs_tp_steps.METHOD_LABELS.get(tc.method or ""),
+                new_display=ezs_tp_steps.METHOD_LABELS.get(method or "")))
+            # Присоединения нет — заявка (5.1) не должна держать переход. Послабление
+            # ставится подписью того, кто имеет на него право; остальным — подсказка.
+            if may_waive and site.kind != "integration" and "landlord" in (method, tc.method):
+                mark = ((site.gates or {}).get("construction") or {}).get("5.1") or {}
+                if method == "landlord":
+                    await set_gate_waiver(db, site, "5.1", True, ezs_tp_steps.LANDLORD_WAIVE_REASON, user)
+                elif mark.get("waive_reason") == ezs_tp_steps.LANDLORD_WAIVE_REASON:
+                    await set_gate_waiver(db, site, "5.1", False, "", user)
+            tc.method = method
+    for key, value in (patch.get("steps") or {}).items():
+        step = ezs_tp_steps.STEP_BY_KEY.get(key)
+        if step is None:
+            continue
+        new_date = str(value)[:10] if value else None
+        if new_date:
+            try:
+                date.fromisoformat(new_date)
+            except ValueError:
+                continue
+        old_date = ezs_tp_steps.step_date(tc, step)
+        if new_date == old_date:
+            continue
+        if step.get("field"):
+            setattr(tc, step["field"], new_date)
+        else:
+            marks = dict(tc.steps or {})
+            if new_date:
+                marks[key] = {"date": new_date,
+                              "by_name": getattr(user, "name", None) or getattr(user, "email", None)}
+            else:
+                marks.pop(key, None)
+            tc.steps = marks
+        changes.append(make_change(f"tc.step.{key}", old_date, new_date,
+                                   label=f"Шаг {step['no']}: {step['label']}", category="deadline"))
+        if step.get("gate"):
+            gate_change = _gate_from_step(site, step["gate"], bool(new_date), user)
+            if gate_change:
+                changes.append(gate_change)
+    # Статус идёт за шагами, но только когда правят шаги: выбранный руками статус
+    # («ТУ получены», «Отказ сетевой») сохранение заметки перетирать не должно.
+    if "steps" in patch and "status" not in patch and tc.status != "rejected":
+        status = ezs_tp_steps.derived_status(tc)
+        if status and status != tc.status:
+            changes.append(make_change("tc.status", tc.status, status,
+                                       old_display=TC_LABELS.get(tc.status or ""),
+                                       new_display=TC_LABELS.get(status)))
+            tc.status = status
     tc.updated_at = datetime.now(timezone.utc)
     # Пункт 5.6 гейта («фиксация сроков мероприятий ТУ») смотрит в графу площадки,
     # а срок задают здесь — месяцами заявителя или датой мероприятий. Без зеркала
@@ -523,14 +659,21 @@ async def register_equipment_unit(
         "comment": f"Принято на учёт из проекта {site.project_no or site.title or ''}".strip(),
     })
     await db.flush()
+    # Приход и передача в монтаж — документами складского учёта, как из самого раздела.
+    from app.models import EzsEquipmentMovement
+    from app.services import ezs_equipment_docs
+    basis = f"Проект {site.project_no or ''}".strip()
+    receipt = (await db.execute(select(EzsEquipmentMovement).where(
+        EzsEquipmentMovement.unit_id == unit.id))).scalar_one()
+    await ezs_equipment_docs.document_for(db, company_id, user, "receipt", [receipt], doc_date=occurred, basis=basis)
 
     # Станция физически на площадке, а не на складе: оставить её в остатках склада
     # значит соврать в учёте на весь срок стройки. Двигаем сразу, если точка есть.
     moved_to_site = False
     if payload.get("install") and site.location_id:
-        await ezs_equipment.apply_movement(db, company_id, user, unit.id, {
-            "op": "to_installation", "to_location_id": site.location_id,
-            "occurred_on": occurred, "basis": f"Проект {site.project_no or ''}".strip(),
+        await ezs_equipment_docs.post_document(db, company_id, user, {
+            "op": "to_installation", "unit_ids": [str(unit.id)], "doc_date": occurred,
+            "to_location_id": site.location_id, "basis": basis,
         })
         moved_to_site = True
 
@@ -861,7 +1004,8 @@ async def portfolio(db: AsyncSession, company_id) -> dict[str, Any]:
     S = EzsSite
     stage_expr = project_reporting_stage(S)
     by_stage = {r.stage: int(r.n) for r in (await db.execute(
-        select(stage_expr.label("stage"), func.count().label("n")).where(S.company_id == company_id)
+        select(stage_expr.label("stage"), func.count().label("n")).where(
+            S.company_id == company_id, func.coalesce(S.kind, "new_build") != "integration")
         .group_by(stage_expr))).all()}
     phases = []
     for p in PHASES:
@@ -938,6 +1082,7 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
         with active as (
             select s.* from ezs_sites s
             where s.company_id = :cid and s.stage = any(:active) and coalesce(s.workspace_data->'scenario'->>'stage', '') <> 'done'
+              and coalesce(s.kind, 'new_build') <> 'integration'
         ),
         stage_events as (
             select e.site_id, e.from_stage, e.to_stage
@@ -1335,7 +1480,8 @@ async def phase_durations(db: AsyncSession, company_id) -> dict[str, Any]:
     }
 
 
-async def export_portfolio_xlsx(db: AsyncSession, company_id, site_ids: list | None = None) -> bytes:
+async def export_portfolio_xlsx(db: AsyncSession, company_id, site_ids: list | None = None,
+                                user=None, history_days: int = 90) -> bytes:
     """Выгрузка портфеля: проекты с этапом, ведением, ТП, бюджетом и субсидией.
 
     `site_ids` — ровно те проекты, что человек видит в списке после фильтров.
@@ -1350,7 +1496,7 @@ async def export_portfolio_xlsx(db: AsyncSession, company_id, site_ids: list | N
     from openpyxl.styles import Alignment, Font
 
     rows = (await db.execute(text("""
-        select s.project_no, s.title, coalesce(s.region_norm, s.region) as region, s.city,
+        select s.id, s.project_no, s.title, coalesce(s.region_norm, s.region) as region, s.city,
                coalesce(s.address, s.full_address, s.install_place) as address,
                s.stage, s.stage_since, s.owner, u.name as owner_user,
                s.next_action, s.next_action_due,
@@ -1476,6 +1622,19 @@ async def export_portfolio_xlsx(db: AsyncSession, company_id, site_ids: list | N
                            18, 20, 16, 14, 14, 16, 16, 20, 16], start=1):
         wst.column_dimensions[wst.cell(row=1, column=i).column_letter].width = w
     wst.freeze_panes = "A2"
+
+    # История, открытые пункты чек-листа и работа — то, чего в выгрузке не хватало
+    # для совещания (замечание коллег 04.10.2026: «история не выгружается»). Те же
+    # проекты, что на листе «Проекты»; история — за `history_days` дней, иначе по
+    # старому портфелю это десятки тысяч строк.
+    from app.services import project_report as pr
+    ids = [r["id"] for r in rows]
+    since = date.today() - timedelta(days=max(1, min(int(history_days or 90), 3650)))
+    pr.add_sheet(wb, f"История ({history_days} дн.)", pr.HISTORY_COLUMNS, await pr.history(db, company_id, ids, since))
+    sites = (await db.execute(select(EzsSite).where(EzsSite.id.in_(ids)))).scalars().all() if ids else []
+    pr.add_sheet(wb, "Чек-лист", pr.CHECKLIST_COLUMNS, await pr.open_gates(db, sites))
+    if user is not None:
+        pr.add_sheet(wb, "Работа", pr.WORK_COLUMNS, await pr.work_rows(db, company_id, user, ids))
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -1639,11 +1798,18 @@ async def project_roadmap(db: AsyncSession, company_id, site: EzsSite) -> dict[s
             "state": st,
             "date": site.stage_since if st == "current" else None,
             "gateDone": g["done"], "gateTotal": g["total"], "blocking": blocking,
+            "normDays": norm_days(stage),
             # `waived` — обязательный пункт, с которого сняли обязательность. Без
             # него схема продолжала бы писать «держит переход» там, где переход
             # уже открыт под чью-то подпись.
-            "items": [{"label": i["label"], "done": i["done"], "required": i["required"],
-                       "waived": i["waived"]}
+            # Дата и автор подтверждения, служба — для подэтапов на Ганте (МАГ 07.10.2026).
+            "items": [{"key": i["key"], "label": i["label"], "done": i["done"], "required": i["required"],
+                       "waived": i["waived"], "confirmedAt": i.get("confirmedAt"),
+                       "confirmedBy": i.get("confirmedBy"), "role": i.get("role"),
+                       "needsConfirmation": i.get("needsConfirmation"),
+                       # Где пункт закрывается — туда и ведёт нажатие на Ганте.
+                       "target": ("docs" if i.get("doc") else "equipment" if i.get("equipment")
+                                  else "work" if i.get("manual") else "passport")}
                       for i in g["items"]],
         })
 
@@ -1764,6 +1930,7 @@ async def project_context(db: AsyncSession, company_id, site: EzsSite) -> dict[s
         "location": location,
         "docKinds": DOC_KINDS,
         "tcStatuses": TC_STATUSES,
+        "tcMethods": ezs_tp_steps.METHODS,
         "eqStatuses": EQ_STATUSES,
         "costKinds": COST_KINDS,
     }

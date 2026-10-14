@@ -17,14 +17,14 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Loader2, ArrowLeft, MapPin, User as UserIcon, CalendarClock } from 'lucide-react'
 import {
-  getSite, patchSite, STAGE_META, PHASE_META, FUNNEL_STAGES, type SiteDetail,
-} from '@/services/sitesService'
+  getSite, patchSite, STAGE_META, PHASE_META, FUNNEL_STAGES, type SiteDetail, stageLabelOf } from '@/services/sitesService'
 import { toast } from 'sonner'
 import { PROJECT_TABS, ProjectTabContent, type ProjectTabKey } from './ProjectTabs'
-import { ProjectPhaseStrip } from './ProjectPhaseStrip'
+import { ProjectPhaseStrip, INTEGRATION_PHASES } from './ProjectPhaseStrip'
 import { ProjectsListPanel } from './ProjectsListPanel'
 import { ProjectScenarioSettings } from './ProjectScenarioSettings'
 import { plural } from '@/lib/textUtils'
+import { ProjectReportButtons } from './ProjectReportButtons'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -46,10 +46,11 @@ export function ProjectWorkspacePanel({ companyId }: { companyId: string }) {
   // Вкладка тоже живёт в URL: по ссылке «открыть присоединение» человек попадает
   // на нужную вкладку, а правая панель «Инфо» знает, какой экран сейчас открыт.
   const tab = (params.get('ptab') as ProjectTabKey | null) ?? 'overview'
-  const setTab = (k: ProjectTabKey) => {
+  const setTab = (k: ProjectTabKey, query?: Record<string, string | null>) => {
     setParams((prev) => {
       const next = new URLSearchParams(prev)
       next.set('ptab', k)
+      for (const [key, v] of Object.entries(query ?? {})) { if (v) next.set(key, v); else next.delete(key) }
       return next
     }, { replace: true })
   }
@@ -68,7 +69,7 @@ export function ProjectWorkspacePanel({ companyId }: { companyId: string }) {
 
 function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
   companyId: string; id: string; tab: ProjectTabKey
-  onTab: (k: ProjectTabKey) => void; onBack: () => void
+  onTab: (k: ProjectTabKey, query?: Record<string, string | null>) => void; onBack: () => void
 }) {
   const qc = useQueryClient()
   // staleTime: 0 — шапка обязана быть свежей. Стадию проекта меняют и с соседних
@@ -86,7 +87,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
   // них вид работ и заводился. Нет у неё другого: техприсоединения, поставки
   // оборудования и экономики площадки. Пустые вкладки читались бы как пробел в
   // данных (замечание Маркова 11.09.2026).
-  const скрытые = specialized ? ['roadmap', 'work', 'tp', 'equipment', 'economics']
+  const скрытые = specialized ? ['roadmap', 'gantt', 'work', 'tp', 'equipment', 'economics']
     : s?.kind === 'integration' ? ['tp', 'equipment', 'economics'] : []
 
   const refresh = async () => {
@@ -97,7 +98,8 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
                        ['site-project', companyId, id], ['site-docs', companyId, id],
                        ['site-roadmap', companyId, id],
                        ['pr-portfolio', companyId], ['pr-overview', companyId],
-                       ['pr-projects', companyId], ['pr-tc', companyId], ['pr-equipment', companyId]]) {
+                       ['pr-projects', companyId], ['pr-tc', companyId], ['pr-equipment', companyId],
+                       ['pr-integrations', companyId]]) {
       await qc.invalidateQueries({ queryKey: key })
     }
   }
@@ -168,9 +170,10 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
             )}
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground mt-0.5">
-            <span className="inline-flex items-center gap-1">
+            {/* У интеграции адреса нет — пустое «📍 —» только сбивало (06.10.2026) */}
+            {s.kind !== 'integration' && <span className="inline-flex items-center gap-1">
               <MapPin className="h-3 w-3" />{[s.region, s.city, s.address].filter(Boolean).join(', ') || '—'}
-            </span>
+            </span>}
             <span className="inline-flex items-center gap-1">
               <UserIcon className="h-3 w-3" />{s.ownerName ?? 'ответственный не назначен'}
             </span>
@@ -189,20 +192,24 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
                   waived > 0 ? 'text-amber-600 dark:text-amber-400'
                     : s.gate.canAdvance ? 'text-emerald-600 dark:text-emerald-400' : ''}
                   title={waived > 0 ? 'С части обязательных пунктов снята обязательность' : undefined}>
-                  гейт {s.gate.done}/{s.gate.total}
+                  чек-лист стадии {s.gate.done}/{s.gate.total}
                   {waived > 0 && ` · ${waived} с послаблением`}
-                  {!s.gate.canAdvance && s.gate.blocking.length > 0 && ` · держит: ${s.gate.blocking[0]}`}
+                  {/* На последней стадии переходить некуда — «держит» вводило в заблуждение */}
+                  {!s.gate.canAdvance && s.gate.blocking.length > 0 && ` · ${s.stage === 'live' ? 'не закрыто' : 'держит'}: ${s.gate.blocking[0]}`}
                 </span>
               )
             })()}
           </div>
         </div>
+        <ProjectReportButtons companyId={companyId} siteId={id} projectNo={s.projectNo} />
       </div>
 
       {/* Где проект в жизненном цикле — видно на любой вкладке */}
       {!specialized && <ProjectPhaseStrip current={s.phase ?? undefined} kind={s.kind}
+        // У интеграции — что делается на текущем этапе. Было «площадки нет, путь идёт от
+        // сценария…» — сравнение со стройкой, которое человеку ничего не говорит (МАГ 06.10.2026).
         note={s.kind === 'integration'
-          ? 'Интеграция с партнёром: площадки нет, путь идёт от сценария к коммерческому запуску.'
+          ? (() => { const ph = INTEGRATION_PHASES.find((p) => p.key === s.phase); return ph ? `Сейчас этап «${ph.label}»: ${ph.hint}.` : undefined })()
           : s.kind && s.kind !== 'new_build'
             ? 'Работа на действующем объекте: место известно, подбор площадки не нужен.'
             : 'Подбор места — первый этап этого же проекта, дальше земля, реализация и ввод.'} />}
@@ -244,7 +251,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
 
       <Card>
         <CardContent className="p-4">
-          <ProjectTabContent tab={скрытые.includes(tab) ? 'overview' : tab} site={s} companyId={companyId} onDone={refresh} />
+          <ProjectTabContent tab={скрытые.includes(tab) ? 'overview' : tab} site={s} companyId={companyId} onDone={refresh} onTab={onTab} />
         </CardContent>
       </Card>
     </div>
@@ -256,7 +263,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
 // Куда идти закрывать пункт: гейт называет задачу, но не место, где её закрывают.
 // Человек читал «держит: Акт о техприсоединении» и искал, куда его положить.
 const GATE_TAB: Record<string, ProjectTabKey> = {
-  doc: 'docs', equipment: 'equipment', manual: 'work',
+  doc: 'docs', equipment: 'equipment', manual: 'work', field: 'passport',
 }
 
 /**
@@ -274,8 +281,18 @@ function NextStepBar({ site, onGoTab, onPlanStep }: {
 }) {
   const gate = site.gate
   if (!gate) return null
+  // Пауза и отказ: «всё обязательное закрыто — дальше …» на остановленном проекте
+  // читалось как приглашение двигаться (проход 06.10.2026).
+  if (site.stage === 'on_hold' || site.stage === 'archive') {
+    return (
+      <div data-zone="Что делать сейчас" className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+        <span className="font-medium">Сейчас: {site.stageLabel}</span>
+        <span className="text-muted-foreground"> — проект не в работе{site.stage === 'on_hold' ? '; вернуть — кнопкой «Вернуть в работу» в ходе по маршруту' : ''}</span>
+      </div>
+    )
+  }
   const nextStage = FUNNEL_STAGES[FUNNEL_STAGES.indexOf(site.stage as never) + 1]
-  const nextLabel = nextStage ? STAGE_META[nextStage]?.label : null
+  const nextLabel = nextStage ? stageLabelOf(site.kind, nextStage) : null
   // Пункт с послаблением не держит переход и не может быть «ближайшим шагом»:
   // отправлять человека делать то, чего он сам решил не ждать, — издевательство.
   // `required` у такого пункта остаётся истиной (по регламенту он обязателен),
@@ -313,17 +330,11 @@ function NextStepBar({ site, onGoTab, onPlanStep }: {
           <span>Ближайший шаг: {lead.label}</span>
           <button type="button"
             onClick={() => onGoTab(leadTab ?? 'work')}
-            className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-primary/60 hover:text-foreground">
+            className="rounded border border-primary bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary hover:bg-primary/20">
             {lead.doc ? 'Приложить документ'
               : lead.equipment ? 'Открыть оборудование'
               : lead.manual ? 'Отметить в чек-листе' : 'Заполнить в паспорте'}
           </button>
-          {!lead.manual && !lead.doc && !lead.equipment && (
-            <button type="button" onClick={() => onGoTab('passport')}
-              className="rounded border border-border px-1.5 py-0.5 text-xs hover:border-primary/60 hover:text-foreground">
-              Открыть паспорт
-            </button>
-          )}
           {/* Мост «регламент → план»: ближайший шаг известен, а в план он попадал
               только перепечаткой руками. Кнопка кладёт его в «Следующий шаг»
               карточки, откуда его берёт план работы по датам. */}

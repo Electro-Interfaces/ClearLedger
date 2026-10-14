@@ -17,9 +17,13 @@
  *
  * Правка любого поля помечает его «ручным»: следующий импорт файла его не тронет.
  */
+import { Link, useSearchParams } from 'react-router-dom'
+import { getIntegration } from '@/services/projectIntegrationService'
+import { ProjectContractsBlock } from './ProjectContractsBlock'
 import { ProjectOverviewTab } from './ProjectOverviewTab'
 import { ProjectDocumentsTrack, PromoteProjectFile } from './ProjectDocumentsTrack'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { openAuthAttachment } from '@/lib/authFiles'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,7 +32,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   Loader2, ExternalLink, Check, Circle, Save, MessageSquarePlus, AlertTriangle,
-  Upload, Trash2, Lock, Link as LinkIcon, Plus, Undo2,
+  Upload, Trash2, Pencil, X as XIcon, ArrowUp, ArrowDown, Lock, Link as LinkIcon, Plus, Undo2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import * as chatApi from '@/services/chatService'
@@ -41,11 +45,10 @@ import {
   saveTechConnection, saveCost, deleteCost, saveEquipment, deleteEquipment,
   linkContract, linkLocation, getProjectKinds, getLocationWorks, startSuccessor,
   getProjectCase, openProjectCase, applyProjectStep, undoProjectStep,
-  getSiteParticipants, addSiteParticipant, removeSiteParticipant, registerEquipmentUnit,
+  getSiteParticipants, addSiteParticipant, editSiteParticipant, orderSiteParticipants, removeSiteParticipant, registerEquipmentUnit,
   STAGE_META, FUNNEL_STAGES, CLOSING_STAGES, QUADRANT_META, EXIT_REASONS, PROJECT_OBJECT_TYPES, projectObjectLabel,
   type SiteDetail, type SiteStage, type ProjectContext, type CaseAction,
-  type SiteEquipment,
-} from '@/services/sitesService'
+  type SiteEquipment, stageLabelOf } from '@/services/sitesService'
 import { getWarehousesSummary } from '@/services/equipmentService'
 import { getContracts, getCounterparties } from '@/services/referenceService'
 import { loadLocations } from '@/services/locationService'
@@ -55,29 +58,36 @@ import { ProjectTrackTab } from './ProjectTrackTab'
 import { ProjectRoadmapTab } from './ProjectRoadmapTab'
 import { useOpenProject } from './useOpenProject'
 import { formatDate } from '@/lib/formatDate'
-import { IntegrationPassport, IntegrationChecklist, IntegrationDocuments, IntegrationWorkPlan, IntegrationAccountingFields } from './IntegrationProjectPanels'
+import { IntegrationGantt } from './IntegrationGantt'
+import { StationGantt } from './StationGantt'
+import { IntegrationPassport, IntegrationChecklist, IntegrationDocuments, IntegrationWorkPlan, IntegrationAccountingFields, IntegrationPartnerContacts } from './IntegrationProjectPanels'
 
 export const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
 const CONTROL_FORMS = ['аренда', 'сервитут', 'разрешение на размещение', 'собственность', 'соглашение с ТЦ']
 
 /** Набор вкладок карточки — один и тот же в диалоге и в полноэкранном режиме. */
 export const PROJECT_TABS = [
+  // Порядок — по частоте в работе: сначала то, что заполняют и закрывают, справа
+  // — то, куда заглядывают посмотреть (замечания Ступина 09.10.2026).
   { k: 'overview', label: 'Обзор' },
-  { k: 'roadmap', label: 'Схема' },
   { k: 'work', label: 'Работа' },
   { k: 'passport', label: 'Паспорт' },
   { k: 'tp', label: 'Присоединение' },
   { k: 'equipment', label: 'Оборудование' },
   { k: 'docs', label: 'Документы' },
-  // «Трек» отдельной вкладкой, а не внутри «Документов»: там файлы, приложенные
-  // к площадке (ЕГРН, ТУ, договор), здесь — работа, которая по ней идёт.
-  { k: 'track', label: 'Трек' },
-  // Разговор стоит рядом с работой: по проекту сначала договариваются с
-  // собственником и сетевой, и только потом это становится документом.
-  { k: 'chats', label: 'Чаты' },
   { k: 'economics', label: 'Экономика' },
   { k: 'accounting', label: 'Учёт' },
+  // «Трек» отдельной вкладкой, а не внутри «Документов»: там файлы, приложенные
+  // к площадке (ЕГРН, ТУ, договор), здесь — работа, которая по ней идёт.
+  // «Обзор» показывает сводку и ссылается сюда и в «Чаты» — убирать их нельзя.
+  { k: 'track', label: 'Трек' },
+  { k: 'chats', label: 'Чаты' },
   { k: 'history', label: 'История' },
+  { k: 'gantt', label: 'Гант' },
+  // Состав и контакты нужны не на каждом шаге: в «Работе» они занимали полэкрана
+  // на каждой стадии (замечание МАГа 06.10.2026).
+  { k: 'team', label: 'Команда' },
+  { k: 'roadmap', label: 'Схема' },
 ] as const
 export type ProjectTabKey = (typeof PROJECT_TABS)[number]['k']
 export function projectTabsFor(kind: string | null | undefined) {
@@ -85,21 +95,35 @@ export function projectTabsFor(kind: string | null | undefined) {
 }
 
 /** Рендер вкладки по ключу — чтобы вызывающий не знал про внутренние компоненты. */
-export function ProjectTabContent({ tab, site, companyId, onDone }: {
+export function ProjectTabContent({ tab, site, companyId, onDone, onTab }: {
   tab: ProjectTabKey; site: SiteDetail; companyId: string; onDone: () => Promise<void>
+  /** Переход на другую вкладку изнутри (схема → «Работа» по стадии). `query` — что
+   *  положить в адрес вместе с вкладкой: одним обновлением, иначе второе затрёт первое. */
+  onTab?: (k: ProjectTabKey, query?: Record<string, string | null>) => void
 }) {
   if (tab === 'overview') return (
     <div className="space-y-4">
-      {site.kind !== 'integration' && <DecisionBlock site={site} companyId={companyId} onDone={onDone} />}
       <ProjectOverviewTab site={site} companyId={companyId} />
+      {site.kind !== 'integration' && <DecisionBlock site={site} companyId={companyId} onDone={onDone} />}
     </div>
   )
-  if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId} />
-  if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} />
+  // Стадия маршрута интеграции = стадия воронки с префиксом (int_lead → lead); у
+  // маршрута стройки стадий больше, чем у воронки, — там открывается «Работа» как есть.
+  if (tab === 'roadmap') return <ProjectRoadmapTab site={site} companyId={companyId}
+    onStage={onTab && ((code) => onTab('work', { pstage: code.startsWith('int_') ? code.slice(4) : null }))} />
+  if (tab === 'gantt' && site.kind !== 'integration') return <StationGantt site={site} companyId={companyId}
+    onStage={onTab && (() => onTab('work'))}
+    onItem={onTab && ((target, key) => onTab(target as ProjectTabKey, { pitem: key ?? null }))} />
+  if (tab === 'gantt') return <IntegrationGantt site={site} companyId={companyId}
+    onStage={onTab && ((code) => onTab('work', { pstage: code.startsWith('int_') ? code.slice(4) : null }))} />
+  if (tab === 'work') return <WorkTab site={site} companyId={companyId} onDone={onDone} onTeam={onTab && (() => onTab('team'))} />
+  if (tab === 'team') return <TeamTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'passport') return site.kind === 'integration' ? <IntegrationPassport site={site} companyId={companyId} onDone={onDone} /> : <PassportTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'tp') return <TechConnectionTab site={site} companyId={companyId} onDone={onDone} />
   if (tab === 'equipment') return <EquipmentTab site={site} companyId={companyId} onDone={onDone} />
-  if (tab === 'docs') return site.kind === 'integration' ? <IntegrationDocuments site={site} companyId={companyId} onDone={onDone} /> : <DocsTab site={site} companyId={companyId} onDone={onDone} />
+  // Договоры проекта — над документами: договор живёт у контрагента, здесь его вид из проекта.
+  if (tab === 'docs') return <div className="space-y-4"><ProjectContractsBlock siteId={site.id} companyId={companyId} />
+    {site.kind === 'integration' ? <IntegrationDocuments site={site} companyId={companyId} onDone={onDone} /> : <DocsTab site={site} companyId={companyId} onDone={onDone} />}</div>
   if (tab === 'track') return <ProjectTrackTab site={site} companyId={companyId} />
   if (tab === 'chats') return (
     <ChatsTab plain companyId={companyId} subject={{
@@ -116,6 +140,58 @@ export function ProjectTabContent({ tab, site, companyId, onDone }: {
 /* ── Ход по маршруту ────────────────────────────────────────────────────── */
 
 /**
+ * Что нужно, чтобы перейти дальше — прямо в шапке хода (замечание МАГа 05.10.2026).
+ *
+ * Шаг вперёд держит флаг «обязательные пункты стадии закрыты»; раньше вместо них
+ * печатался его код («отмечено «integration_gate»»), и было непонятно, что делать.
+ * Здесь — куда ведёт шаг, какие обязательные пункты закрыты, чего по каждому не хватает,
+ * и переход в сам пункт (окно пункта в чек-листе ниже).
+ */
+function NextStepCriteria({ site, companyId, actions }: { site: SiteDetail; companyId: string; actions: CaseAction[] }) {
+  const [, setParams] = useSearchParams()
+  const isIntegration = site.kind === 'integration'
+  const integ = useQuery({ queryKey: ['project-integration', companyId, site.id], queryFn: () => getIntegration(companyId, site.id), enabled: isIntegration })
+  const need = new Map((integ.data?.tasks ?? []).map((t) => [t.key, t.need]))
+  const step = actions.find((a) => a.is_positive === true && !a.is_discretionary)
+  const items = (site.gate?.items ?? []).filter((i) => i.required && !i.waived)
+  const stale = site.gate?.staleBefore ?? []
+  if (!step || (items.length === 0 && stale.length === 0)) return null
+  const done = items.filter((i) => i.done).length
+  const all = done === items.length && stale.length === 0
+  const openItem = (key: string, stage: string = site.stage) => setParams((prev) => { const n = new URLSearchParams(prev); n.set('pstage', stage); n.set('pitem', key); return n }, { replace: true })
+  return (
+    <div data-zone="Что нужно для перехода дальше" className={`rounded-md border p-2.5 space-y-1.5 ${all ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-amber-500/40 bg-amber-500/5'}`}>
+      <div className="text-sm font-medium">
+        Чтобы перейти к «{step.to_name}» (кнопка «{step.verb}»): закрыто {done} из {items.length} обязательных пунктов
+      </div>
+      <ul className="space-y-1">{items.map((i) => (
+        <li key={i.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
+          {i.done ? <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            : <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-amber-500" />}
+          <span className="font-mono text-xs text-muted-foreground">{i.key}</span>
+          <span className={i.done ? 'text-muted-foreground' : ''}>{i.label}</span>
+          {!i.done && need.get(i.key) && <span className="text-xs text-amber-700 dark:text-amber-400">— не хватает: {need.get(i.key)}</span>}
+          {!i.done && isIntegration && <button type="button" className="text-xs underline" onClick={() => openItem(i.key)}>открыть пункт</button>}
+        </li>
+      ))}</ul>
+      {stale.length > 0 && <div className="space-y-1">
+        <div className="text-sm text-amber-700 dark:text-amber-400">Держат и пункты прошлых стадий — их данные изменились после подтверждения, подтвердите заново:</div>
+        <ul className="space-y-1">{stale.map((i) => (
+          <li key={i.key} className="flex flex-wrap items-center gap-x-2 text-sm">
+            <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-amber-500" />
+            <span className="font-mono text-xs text-muted-foreground">{i.key}</span><span>{i.label}</span>
+            {isIntegration && <button type="button" className="text-xs underline" onClick={() => openItem(i.key, i.stage)}>открыть пункт</button>}
+          </li>))}</ul>
+      </div>}
+      <div className="text-xs text-muted-foreground">
+        {all ? `Все обязательные пункты закрыты — нажмите «${step.verb}».`
+          : 'Откройте пункт, заполните данные в его окне и нажмите «Подтвердить выполнение» внизу окна.'}
+      </div>
+    </div>
+  )
+}
+
+/**
  * Причина недоступности — на языке проекта, а не графа.
  *
  * Координатор называет условие кодом вида проекта («new_build»), потому что
@@ -129,6 +205,9 @@ const PROJECT_KIND_WORDS: Record<string, string> = {
 }
 function humanReason(reason: string | null | undefined): string {
   let out = reason ?? 'недоступно'
+  // Условие ребра «отмечено «integration_gate»» — это флаг «обязательные пункты стадии
+  // закрыты». Код флага человеку ничего не говорит: список пунктов — в блоке выше.
+  out = out.replace(/отмечено «\w*gate»/g, 'закрыты обязательные пункты стадии (список выше)')
   for (const [code, word] of Object.entries(PROJECT_KIND_WORDS)) {
     out = out.replaceAll(`«${code}»`, `«${word}»`)
   }
@@ -164,8 +243,13 @@ function effectText(a: CaseAction, defs: Record<string, { label?: string }>): st
   return null
 }
 
-function RoutePanel({ site, companyId, onDone }: {
+/** Отработанные метки «перейти к следующей стадии» (?pstep=) — на время жизни вкладки. */
+const consumedSteps = new Set<string>()
+
+function RoutePanel({ site, companyId, onDone, onTeam }: {
   site: SiteDetail; companyId: string; onDone: () => Promise<void>
+  /** Перейти во вкладку «Команда» — состав и контакты живут там. */
+  onTeam?: () => void
 }) {
   const [picked, setPicked] = useState<CaseAction | null>(null)
   const [form, setForm] = useState<Record<string, string>>({})
@@ -175,6 +259,47 @@ function RoutePanel({ site, companyId, onDone }: {
     queryFn: () => getProjectCase(companyId, site.id),
   })
   const state = q.data
+  // «Перейти к следующей стадии» из чек-листа (?pstep=): открыть подтверждение ведущего
+  // шага здесь и прокрутить к нему — кнопка жила только наверху карточки, и закрывший
+  // последний пункт внизу не находил, как идти дальше (вопрос МАГа 06.10.2026).
+  const [stepParams, setStepParams] = useSearchParams()
+  const stepRef = useRef<HTMLDivElement>(null)
+  const wantStep = stepParams.get('pstep')
+  // Метку из адреса снимаем не сразу, а когда подтверждение закрыли: смена адреса
+  // перерисовывает карточку, и открытое подтверждение тут же пропадало.
+  const stepTaken = useRef(false)
+  // Метка одноразовая: значение — момент нажатия. Отработанная или старше 30 с (после
+  // перезагрузки страницы) шаг не делает и снимается — иначе обновление страницы могло
+  // бы само перевести проект ещё раз.
+  const stepFresh = !!wantStep && !consumedSteps.has(wantStep) && Date.now() - Number(wantStep) < 30_000
+  useEffect(() => {
+    // Проверка набора — здесь, а не только при отрисовке: панель хода стоит в карточке
+    // не в одном месте, и обе отрабатывали одну метку — шаг уходил дважды (06.10.2026).
+    if (!wantStep || !stepFresh || !state?.actions || stepTaken.current || consumedSteps.has(wantStep)) return
+    stepTaken.current = true
+    consumedSteps.add(wantStep)
+    const fwd = state.actions.filter((a) => a.allowed !== false && !a.is_discretionary && a.is_positive === true)
+    // Кнопка в чек-листе — это и есть решение перейти: шаг без полей выполняем сразу.
+    // Второе подтверждение наверху страницы человек не видел и считал, что «ничего не
+    // происходит» (МАГ 06.10.2026). Поля нужны — открываем их и прокручиваем к ним.
+    if (fwd.length === 1 && !(fwd[0].requirements?.require ?? []).length) {
+      // Метку снимаем после ответа: смена адреса раньше перерисовала бы карточку посреди шага.
+      mStep.mutate(fwd[0], { onSettled: () => setStepParams((prev) => { const n = new URLSearchParams(prev); n.delete('pstep'); return n }, { replace: true }) })
+      return
+    }
+    if (fwd.length === 1) { setPicked(fwd[0]); setForm({}) }
+    setTimeout(() => stepRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantStep, state])
+  // Снимаем только когда открытое подтверждение закрыли (было выбрано → стало пусто):
+  // в первой отрисовке шаг ещё не выбран, и снятие там же убивало подтверждение.
+  const hadPicked = useRef(false)
+  useEffect(() => {
+    if (picked) { hadPicked.current = true; return }
+    if (!hadPicked.current || !wantStep) return
+    hadPicked.current = false
+    setStepParams((prev) => { const n = new URLSearchParams(prev); n.delete('pstep'); return n }, { replace: true })
+  }, [picked, wantStep, setStepParams])
 
   // Маршруты спрашиваем только пока проект не на рельсах: у идущего выбор уже
   // сделан и менять его нечем — лишний запрос в карточку каждого проекта.
@@ -212,6 +337,12 @@ function RoutePanel({ site, companyId, onDone }: {
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Шаг не выполнен'),
   })
+  useEffect(() => {
+    if (wantStep && !stepFresh && !mStep.isPending && !picked) {
+      setStepParams((prev) => { const n = new URLSearchParams(prev); n.delete('pstep'); return n }, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantStep, stepFresh, picked, mStep.isPending])
   // Отмена последнего шага — «нажал не ту кнопку». Правила держит Координатор
   // (свой шаг, сутки), поэтому здесь только кнопка и честный текст отказа: он
   // объясняет, чей это был шаг и что делать, если срок вышел.
@@ -313,8 +444,10 @@ function RoutePanel({ site, companyId, onDone }: {
   // работу — не выполнено условие» рядом с работающей кнопкой «Взять в работу».
   // Прячем только такие: кнопка с тем же словом никуда не делась, она под рукой.
   const openVerbs = new Set(open.map((a) => a.verb))
+  // Возврат с паузы доступен только на ту стадию, с которой ушли: остальные семь
+  // «Вернуть в работу: …» с условием «eco_prev_stage = …» — шум (проход 06.10.2026).
   const blockedActions = (state.actions ?? [])
-    .filter((a) => a.allowed === false && !openVerbs.has(a.verb))
+    .filter((a) => a.allowed === false && !openVerbs.has(a.verb) && !/eco_prev_stage/.test(a.deny_reason ?? ''))
   const normal = open.filter((a) => !a.is_discretionary)
   const extra = open.filter((a) => a.is_discretionary)
   // Ведущий шаг стадии — единственный ход вперёд. Их два и больше (развилка формы
@@ -365,22 +498,27 @@ function RoutePanel({ site, companyId, onDone }: {
           {(state.stages ?? []).map((s) => {
             const here = s.code === state.stage?.code
             const seen = !!s.visited_at
-            return (
-              <span key={s.code}
-                title={s.visited_at ? `Пройдена ${new Date(s.visited_at).toLocaleDateString('ru-RU')}` : 'Ещё не проходили'}
-                className={`text-[11px] px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
-                  here ? 'bg-primary text-primary-foreground'
-                    : seen ? 'bg-muted text-foreground'
-                    : 'border border-dashed border-border text-muted-foreground'}`}>
-                {seen && !here && <Check className="h-2.5 w-2.5" />}
-                {s.name}
-              </span>
-            )
+            // У интеграции стадия открывает свой чек-лист: пункты не обязаны идти по
+            // порядку, впереди лежащие заполняют заранее (МАГ 06.10.2026). Пауза и
+            // отказ — не стадии работы, у них пунктов нет.
+            const own = site.kind === 'integration' && s.code.startsWith('int_') && !['int_hold', 'int_rejected'].includes(s.code)
+              ? s.code.slice(4) : null
+            const viewed = own != null && own === (stepParams.get('pstage') || site.stage)
+            const cls = `text-[11px] px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
+              here ? 'bg-primary text-primary-foreground'
+                : seen ? 'bg-muted text-foreground'
+                : 'border border-dashed border-border text-muted-foreground'} ${viewed ? 'ring-2 ring-primary ring-offset-1 ring-offset-background' : ''}`
+            const title = s.visited_at ? `Пройдена ${new Date(s.visited_at).toLocaleDateString('ru-RU')}` : 'Ещё не проходили'
+            const body = <>{seen && !here && <Check className="h-2.5 w-2.5" />}{s.name}</>
+            return own
+              ? <button key={s.code} type="button" title={`${title} · открыть пункты стадии`} className={`${cls} hover:opacity-80`}
+                  onClick={() => setStepParams((prev) => { const n = new URLSearchParams(prev); n.set('pstage', own); n.delete('pitem'); return n }, { replace: true })}>{body}</button>
+              : <span key={s.code} title={title} className={cls}>{body}</span>
           })}
         </div>
         {/* Признак не только цветом: сплошное — были, пунктир — впереди. */}
         <div className="mt-1 text-[10px] text-muted-foreground">
-          Заливка — стадия пройдена, пунктир — впереди, синим — где стоим сейчас.
+          Заливка — стадия пройдена, пунктир — впереди, синим — где стоим сейчас.{site.kind === 'integration' && ' Нажатие на стадию открывает её пункты в чек-листе ниже — их можно выполнять в любом порядке.'}
         </div>
       </div>
 
@@ -433,7 +571,8 @@ function RoutePanel({ site, companyId, onDone }: {
             Сейчас ход за другой службой — доступных вам действий на этой стадии нет.
           </div>
         )}
-        <div data-zone="Действия маршрута: чей сейчас шаг" className="flex flex-wrap gap-2">
+        <NextStepCriteria site={site} companyId={companyId} actions={state.actions ?? []} />
+        <div ref={stepRef} data-zone="Действия маршрута: чей сейчас шаг" className="flex flex-wrap gap-2 scroll-mt-24">
           {/* Залит ровно один шаг — тот, которым маршрут идёт вперёд. Когда «ТП
               выполнено» и «Отложить» одинаково синие, экран перестаёт отличать
               обычный ход от исключения. На развилке (ДА / ДоРНО / РНР — все ходы
@@ -516,6 +655,7 @@ function RoutePanel({ site, companyId, onDone }: {
             ? 'Роли регламента на проект не назначены — действия открыты всем участникам пространства.'
             : <>Ведут проект: {(state.participants ?? [])
                 .map((p) => `${p.role_code} — ${p.name}`).join(' · ')}</>}
+          {onTeam && <button type="button" className="ml-2 underline hover:text-foreground" onClick={onTeam}>состав и контакты →</button>}
         </div>
 
         {picked && (
@@ -538,12 +678,12 @@ function RoutePanel({ site, companyId, onDone }: {
                       узнает об этом только после нажатия. Деньги — числом, иначе
                       на телефоне открывается буквенная клавиатура. */}
                   {d?.field_type === 'textarea' ? (
-                    <Textarea rows={2} value={form[code] ?? ''}
+                    <Textarea rows={2} aria-label={d?.label ?? code} value={form[code] ?? ''}
                       onChange={(e) => setForm({ ...form, [code]: e.target.value })} />
                   ) : d?.field_type === 'select' && d.options?.length ? (
                     <Select value={form[code] || '__none__'}
                       onValueChange={(v) => setForm({ ...form, [code]: v === '__none__' ? '' : v })}>
-                      <SelectTrigger className="h-10 sm:h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectTrigger aria-label={d?.label ?? code} className="h-10 sm:h-8 text-sm"><SelectValue placeholder="—" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__" className="text-sm">—</SelectItem>
                         {d.options.map((o) => (
@@ -564,6 +704,7 @@ function RoutePanel({ site, companyId, onDone }: {
                       type={d?.field_type === 'date' ? 'date' : 'text'}
                       inputMode={d?.field_type === 'money' || d?.field_type === 'number' ? 'decimal' : undefined}
                       className="h-10 sm:h-9"
+                      aria-label={d?.label ?? code}
                       value={form[code] ?? ''}
                       onChange={(e) => setForm({ ...form, [code]: e.target.value })} />
                   )}
@@ -630,7 +771,25 @@ function PartiesPanel({ site, companyId, onChanged }: {
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось снять'),
   })
 
+  // Правка строки: роль и уточнение. Человека не меняем — другой человек это новое
+  // назначение со своим письмом (замечание МАГа 06.10.2026: «а как отредактировать»).
+  const [edit, setEdit] = useState<{ id: string; role: string; note: string } | null>(null)
+  const mEdit = useMutation({
+    mutationFn: () => editSiteParticipant(companyId, site.id, edit!.id, { roleCode: edit!.role, note: edit!.note }),
+    onSuccess: async () => { setEdit(null); toast.success('Сохранено'); await q.refetch(); await onChanged() },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось сохранить'),
+  })
+
   const rows = q.data?.participants ?? []
+  // Порядок задаёт человек: стрелки меняют строку с соседней (МАГ 06.10.2026).
+  const mOrder = useMutation({
+    mutationFn: (ids: string[]) => orderSiteParticipants(companyId, site.id, ids),
+    onSuccess: async () => { await q.refetch() },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось переставить'),
+  })
+  const move = (i: number, d: -1 | 1) => {
+    const ids = rows.map((r) => r.id); [ids[i], ids[i + d]] = [ids[i + d], ids[i]]; mOrder.mutate(ids)
+  }
 
   return (
     <section className="rounded-lg border border-border">
@@ -645,13 +804,42 @@ function PartiesPanel({ site, companyId, onChanged }: {
             пространства — назначьте хотя бы ОР и ОКС, и каждый увидит свои.
           </div>
         )}
-        {rows.map((p) => (
+        {rows.map((p, i) => edit?.id === p.id ? (
+          <div key={p.id} className="flex flex-wrap items-center gap-2 text-sm px-1">
+            <span className="w-56 truncate font-medium">{p.name}</span>
+            <Select value={edit.role} onValueChange={(v) => setEdit({ ...edit, role: v })}>
+              <SelectTrigger className="h-8 w-64 text-xs" aria-label="Роль по регламенту"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(q.data?.roles ?? []).map((r) => <SelectItem key={r.code} value={r.code}>{r.code} — {r.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Input value={edit.note} onChange={(e) => setEdit({ ...edit, note: e.target.value })} autoFocus
+              onKeyDown={(e) => { if (e.key === 'Enter') mEdit.mutate(); if (e.key === 'Escape') setEdit(null) }}
+              placeholder="Уточнение" aria-label="Уточнение" className="h-8 flex-1 min-w-48 text-xs" />
+            <Button size="icon" variant="ghost" className="h-7 w-7" title="Сохранить" onClick={() => mEdit.mutate()} disabled={mEdit.isPending}>
+              <Check className="h-4 w-4" />
+            </Button>
+            <Button size="icon" variant="ghost" className="h-7 w-7" title="Отмена" onClick={() => setEdit(null)}>
+              <XIcon className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
           <div key={p.id} className="flex items-center gap-2 text-sm px-1">
             <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-muted">{p.roleCode}</span>
             <span className="flex-1 truncate">
               {p.name}
               {p.note && <span className="text-muted-foreground"> · {p.note}</span>}
             </span>
+            {rows.length > 1 && <>
+              <Button size="icon" variant="ghost" className="h-6 w-6" title="Выше" aria-label="Выше"
+                disabled={i === 0 || mOrder.isPending} onClick={() => move(i, -1)}><ArrowUp className="h-3.5 w-3.5" /></Button>
+              <Button size="icon" variant="ghost" className="h-6 w-6" title="Ниже" aria-label="Ниже"
+                disabled={i === rows.length - 1 || mOrder.isPending} onClick={() => move(i, 1)}><ArrowDown className="h-3.5 w-3.5" /></Button>
+            </>}
+            <Button size="icon" variant="ghost" className="h-6 w-6" title="Изменить роль и уточнение"
+              onClick={() => setEdit({ id: p.id, role: p.roleCode, note: p.note ?? '' })}>
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
             <Button size="icon" variant="ghost" className="h-6 w-6"
               onClick={() => mDrop.mutate(p.id)} disabled={mDrop.isPending} title="Снять с роли">
               <Trash2 className="h-3.5 w-3.5" />
@@ -696,8 +884,19 @@ function PartiesPanel({ site, companyId, onChanged }: {
 
 /* ── Вкладка «Работа» ───────────────────────────────────────────────────── */
 
-export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
+/** «Команда»: кто ведёт проект в ролях регламента и, у интеграции, контакты партнёра. */
+function TeamTab({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
   const qc = useQueryClient()
+  return (
+    <div className="space-y-4">
+      <PartiesPanel site={site} companyId={companyId}
+        onChanged={() => qc.invalidateQueries({ queryKey: ['site-case', companyId, site.id] })} />
+      {site.kind === 'integration' && <IntegrationPartnerContacts site={site} companyId={companyId} onDone={onDone} />}
+    </div>
+  )
+}
+
+export function WorkTab({ site, companyId, onDone, onTeam }: { site: SiteDetail; companyId: string; onDone: () => Promise<void>; onTeam?: () => void }) {
   const [stage, setStage] = useState<SiteStage>(site.stage)
   const [reason, setReason] = useState('')
   const [owner, setOwner] = useState(site.ownerUserId ?? '')
@@ -712,6 +911,12 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
 
   const members = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId) })
   const gate = site.gate
+  // С Ганта сюда приходят к конкретному пункту — показываем его, а не верх вкладки.
+  const [workParams] = useSearchParams()
+  const focusItem = workParams.get('pitem')
+  useEffect(() => {
+    if (focusItem) document.querySelector(`[data-gate-item="${CSS.escape(focusItem)}"]`)?.scrollIntoView({ block: 'center' })
+  }, [focusItem])
   const missing = gate.items.filter((i) => !i.done)
 
   const [override, setOverride] = useState(false)
@@ -730,8 +935,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
     const d = new Date(); d.setMonth(d.getMonth() + 3); return d.toISOString().slice(0, 10)
   })
   const nextStage = FUNNEL_STAGES[FUNNEL_STAGES.indexOf(site.stage as never) + 1]
-  const integrationLabels: Record<string, string> = { lead: 'Заявка', screening: 'Оценка партнёра', negotiation: 'Переговоры', dd: 'Техническое согласование', decision: 'Решение о пилоте', contracting: 'Пилотное соглашение', construction: 'Настройка и тесты', commissioning: 'Договор', live: 'Работает' }
-  const stageLabel = (st: SiteStage) => site.kind === 'integration' ? integrationLabels[st] || STAGE_META[st].label : STAGE_META[st].label
+  const stageLabel = (st: SiteStage) => stageLabelOf(site.kind, st)
 
   // Стадию передаём аргументом: кнопка «Перевести в …» не может ждать, пока
   // setStage доедет до следующего рендера, иначе уйдёт предыдущее значение.
@@ -805,10 +1009,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
 
   return (
     <div className="space-y-4">
-      <RoutePanel site={site} companyId={companyId} onDone={onDone} />
-
-      <PartiesPanel site={site} companyId={companyId}
-        onChanged={() => qc.invalidateQueries({ queryKey: ['site-case', companyId, site.id] })} />
+      <RoutePanel site={site} companyId={companyId} onDone={onDone} onTeam={onTeam} />
 
       {site.kind === 'integration' && <><IntegrationWorkPlan site={site} companyId={companyId} onDone={onDone} /><IntegrationChecklist site={site} companyId={companyId} onDone={onDone} /></>}
 
@@ -843,7 +1044,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
             const canOfferWaive = !!site.mayWaive && !!it.waivable && it.required
               && !it.done && !it.waived
             return (
-              <div key={it.key}>
+              <div key={it.key} data-gate-item={it.key} className={it.key === focusItem ? 'rounded ring-1 ring-primary/50' : undefined}>
                 <Row type={it.manual ? 'button' : undefined}
                   disabled={it.manual ? mGate.isPending : undefined}
                   onClick={it.manual ? () => mGate.mutate({ key: it.key, done: !it.done }) : undefined}
@@ -936,7 +1137,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
           лежали «Заморожен» и «Архив»: рабочее действие и отказ от проекта выглядели
           одинаково. Теперь вперёд — кнопкой, а прыжок через стадию, пауза и отказ —
           отдельно, по явному запросу. */}
-      <section className="rounded-lg border border-border p-3 space-y-2">
+      <section className={`rounded-lg border border-border p-3 space-y-2${site.kind === 'integration' ? ' hidden' : ''}`}>
         <div data-zone="Перевод на следующую стадию" className="text-sm font-semibold">Стадия</div>
         {!otherStage && nextStage ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -1081,7 +1282,7 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
         )}
         <div className="text-xs text-muted-foreground">
           В стадии с {site.stageSince ?? '—'}
-          {site.prevStage ? ` · до этого «${STAGE_META[site.prevStage]?.label ?? site.prevStage}»` : ''}
+          {site.prevStage ? ` · до этого «${stageLabelOf(site.kind, site.prevStage)}»` : ''}
         </div>
       </section>
 
@@ -1090,7 +1291,9 @@ export function WorkTab({ site, companyId, onDone }: { site: SiteDetail; company
         <div data-zone="Ответственный и следующий шаг" className="text-sm font-semibold">Кто ведёт и что дальше</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
           <div>
-            <Label>Ответственный</Label>
+            {/* Это и есть руководитель проекта (пункт 1.4 интеграции): роли регламента в
+                «Кто ведёт проект» — отдельный состав и руководителя не задают. */}
+            <Label>Руководитель проекта (ответственный)</Label>
             <Select value={owner || '__none__'} onValueChange={(v) => setOwner(v === '__none__' ? '' : v)}>
               <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Не назначен" /></SelectTrigger>
               <SelectContent>
@@ -1161,6 +1364,8 @@ const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: st
     title: 'Право на землю',
     fields: [
       { k: 'owner', label: 'Собственник' },
+      // Графа пункта 2.6: без поля в паспорте пункт нельзя было закрыть руками.
+      { k: 'ownership', label: 'Форма владения (собственность / аренда)' },
       { k: 'controlForm', label: 'Форма контроля', type: 'select', options: CONTROL_FORMS },
       { k: 'landCategory', label: 'Категория земель' },
       { k: 'permittedUse', label: 'Вид разрешённого использования' },
@@ -1179,13 +1384,19 @@ const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: st
       { k: 'tpTermMonths', label: 'Срок мероприятий, мес.', type: 'number' },
       { k: 'techConnType', label: 'Тип присоединения' },
       { k: 'connectionCost', label: 'Итого затраты на подключение, ₽', type: 'number' },
+      { k: 'inputPriceKwth', label: 'Входная стоимость, ₽/кВт·ч', type: 'number' },
     ],
   },
   {
-    title: 'План и участники',
+    // Перегруппировка по замечаниям Ступина 09.10.2026: графы прежние, блоки по смыслу.
+    title: 'СМР',
     fields: [
       { k: 'plannedEzsCount', label: 'ЭЗС к установке, шт', type: 'number' },
       { k: 'plannedPowerKwt', label: 'Мощность к установке, кВт', type: 'number' },
+      { k: 'smrCost', label: 'Стоимость СМР, ₽', type: 'number' },
+      { k: 'subsidyPlanned', label: 'Планируется субсидия', type: 'bool' },
+      { k: 'subsidyAmount', label: 'Сумма субсидии, ₽', type: 'number' },
+      { k: 'commissionedOn', label: 'Дата ввода в эксплуатацию', type: 'date' },
       { k: 'supplier', label: 'Поставщик' },
       { k: 'contractor', label: 'Подрядчик' },
       { k: 'tuStatus', label: 'Статус согласования / ТУ', type: 'area' },
@@ -1203,23 +1414,18 @@ const PASSPORT_GROUPS: { title: string; fields: { k: keyof SiteDetail; label: st
       { k: 'hasInternet', label: 'Проводной интернет (LAN)', type: 'bool' },
       { k: 'hasLighting', label: 'Освещение', type: 'bool' },
       { k: 'parkingSpots', label: 'Парковочных мест', type: 'number' },
-      { k: 'subsidyPlanned', label: 'Планируется субсидия', type: 'bool' },
-      { k: 'subsidyAmount', label: 'Сумма субсидии, ₽', type: 'number' },
       { k: 'dopService', label: 'Доп. сервис (магазин, кафе, WC)' },
     ],
   },
   {
-    // Этап 3 чек-листа: экономика подключения и с кем разговаривали.
-    title: 'Экономика и контакты',
+    // Этап 3 чек-листа: о чём договорились и с кем разговаривали.
+    title: 'Условия аренды и контакты',
     fields: [
-      { k: 'inputPriceKwth', label: 'Входная стоимость, ₽/кВт·ч', type: 'number' },
-      { k: 'smrCost', label: 'Стоимость СМР, ₽', type: 'number' },
       { k: 'rentCostMonth', label: 'Аренда, ₽/мес', type: 'number' },
       { k: 'longTermContract', label: 'Долгосрочный договор', type: 'bool' },
       { k: 'ownerContact', label: 'Контакт представителя собственника', type: 'area' },
       { k: 'sourceCompany', label: 'Предоставивший ЗУ — компания' },
       { k: 'sourcePerson', label: 'Предоставивший ЗУ — ФИО' },
-      { k: 'commissionedOn', label: 'Дата ввода в эксплуатацию', type: 'date' },
     ],
   },
 ]
@@ -1253,7 +1459,9 @@ const emailIn = (text: string): string | null =>
 
 export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; companyId: string; onDone: () => Promise<void> }) {
   const specialized = ['warehouse', 'procurement', 'corporate_client'].includes(site.kind ?? '')
-  const groups = specialized ? PASSPORT_GROUPS.filter((g) => ['Объект', 'План и участники'].includes(g.title)).map((g) => ({ ...g,
+  const groups = specialized ? PASSPORT_GROUPS.filter((g) => ['Объект', 'СМР'].includes(g.title)).map((g) => ({ ...g,
+    // У склада, закупки и корпоративного клиента строительства нет — блок зовётся по-старому.
+    title: g.title === 'СМР' ? 'План и участники' : g.title,
     fields: g.fields.filter((f) => ['region', 'city', 'address', 'placeKind', 'installPlace', 'supplier', 'contractor', 'comment'].includes(f.k)) })) : PASSPORT_GROUPS
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [showRaw, setShowRaw] = useState(false)
@@ -1316,7 +1524,12 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
     }
     return map
   }, [site.gate])
-  const wantedCount = wanted.size
+  // Подсвечиваются только пустые графы: пункт из трёх граф красил жёлтым все три,
+  // и заполненная выглядела непринятой («ввёл 0 — осталась жёлтой»).
+  const needs = (key: string) => (val(key) === '' ? wanted.get(API_FIELD[key] ?? key) : undefined)
+  const wantedCount = groups.flatMap((g) => g.fields).filter((f) => needs(String(f.k))).length
+  // Из «Сейчас» сюда приходят заполнять конкретную графу — показываем её сразу.
+  useEffect(() => { document.querySelector('[data-wanted]')?.scrollIntoView({ block: 'center' }) }, [])
 
   return (
     <div className="space-y-3">
@@ -1341,9 +1554,9 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
               const key = String(f.k)
               const apiKey = API_FIELD[key] ?? key
               const isManual = manual.has(apiKey)
-              const needFor = wanted.get(apiKey)
+              const needFor = needs(key)
               return (
-                <div key={key} className={`${f.type === 'area' ? 'md:col-span-3' : ''} ${
+                <div key={key} data-wanted={needFor ? '' : undefined} className={`${f.type === 'area' ? 'md:col-span-3' : ''} ${
                   needFor ? '-mx-1 rounded-md bg-amber-400/10 px-1 py-0.5 ring-1 ring-amber-400/40' : ''}`}>
                   <Label>
                     {f.label}
@@ -1437,7 +1650,9 @@ export function TechConnectionTab({ site, companyId, onDone }: {
     queryFn: () => getProjectContext(companyId, site.id),
   })
   const [draft, setDraft] = useState<Record<string, string | boolean>>({})
-  useEffect(() => setDraft({}), [ctx.data])
+  // Даты шагов хода — отдельно: сервер ждёт их вложенным `steps`.
+  const [stepDraft, setStepDraft] = useState<Record<string, string>>({})
+  useEffect(() => { setDraft({}); setStepDraft({}) }, [ctx.data])
   // Справочник для подсказки по сетевой организации: разрез аналитики строится
   // по её имени, поэтому его нужно писать одинаково.
   const counterparties = useQuery({
@@ -1446,8 +1661,9 @@ export function TechConnectionTab({ site, companyId, onDone }: {
   })
 
   const m = useMutation({
-    mutationFn: () => saveTechConnection(companyId, site.id, draft),
-    onSuccess: async () => { setDraft({}); toast.success('Сохранено'); await onDone() },
+    mutationFn: () => saveTechConnection(companyId, site.id,
+      Object.keys(stepDraft).length ? { ...draft, steps: stepDraft } : draft),
+    onSuccess: async () => { setDraft({}); setStepDraft({}); toast.success('Сохранено'); await onDone() },
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось сохранить'),
   })
 
@@ -1458,7 +1674,9 @@ export function TechConnectionTab({ site, companyId, onDone }: {
   const val = (k: string, fallback: unknown) =>
     (k in draft ? draft[k] : (fallback ?? '')) as string
   const set = (k: string, v: string | boolean) => setDraft((d) => ({ ...d, [k]: v }))
-  const dirty = Object.keys(draft).length > 0
+  const dirty = Object.keys(draft).length > 0 || Object.keys(stepDraft).length > 0
+  const method = val('method', tc?.method)
+  const steps = 'method' in draft ? [] : (tc?.steps ?? [])
 
   return (
     <div className="space-y-3">
@@ -1479,6 +1697,85 @@ export function TechConnectionTab({ site, companyId, onDone }: {
           Срок мероприятий сетевой ({tc.dueDate}) прошёл, отметки об исполнении нет.
         </div>
       )}
+
+      {/* Ход присоединения — порядок энергетика (блок-схема 07.10.2026): способ
+          определяет шаги, шаг закрывается датой, срок считается по Правилам ТП. */}
+      <section className="rounded-lg border border-border p-3 space-y-2">
+        <div className="max-w-xl">
+          <Label>Способ присоединения</Label>
+          <Select value={method || '__none__'} onValueChange={(v) => set('method', v === '__none__' ? '' : v)}>
+            <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__" className="text-sm">— не выбран —</SelectItem>
+              {(ctx.data.tcMethods ?? []).map((o) => (
+                <SelectItem key={o.key} value={o.key} className="text-sm">{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {!method && <p className="text-xs text-muted-foreground">От способа зависят шаги и комплект документов — выберите его первым.</p>}
+        {'method' in draft && method && <p className="text-xs text-muted-foreground">Сохраните — появятся шаги этого способа.</p>}
+        {!('method' in draft) && method === 'landlord' && (
+          <p className="text-sm text-muted-foreground">
+            Электроэнергия оплачивается арендодателю — заявка в сетевую организацию не подаётся. Пункт 5.1 чек-листа
+            переход не держит: обязательность снимается при сохранении способа ответственным за проект или отделом развития.
+          </p>
+        )}
+        {!('method' in draft) && (tc?.kit?.length ?? 0) > 0 && (
+          <div className="space-y-1">
+            <div className="pt-1 text-sm font-semibold">Комплект документов к заявке</div>
+            {tc!.kit!.map((d) => (
+              <div key={d.kind} className="flex items-baseline gap-2 text-sm">
+                <span className={`w-4 shrink-0 ${d.present ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>{d.present ? '✓' : '—'}</span>
+                <span className={d.present ? '' : 'text-muted-foreground'}>{d.label}</span>
+                {!d.present && <span className="text-xs text-muted-foreground">{d.optional ? 'по обстоятельствам' : 'не приложен'}</span>}
+              </div>
+            ))}
+            <p className="text-xs text-muted-foreground">
+              {tc!.kit!.every((d) => d.present || d.optional)
+                ? 'Комплект собран — можно подавать заявку.'
+                : 'Документы прикладываются на вкладке «Документы» с этим же видом.'}
+            </p>
+            <Button size="sm" variant="outline" className="h-8 text-sm" disabled={dirty}
+              title={dirty ? 'Сначала сохраните изменения' : 'Откроется в новой вкладке — печать или «Сохранить как PDF»'}
+              onClick={() => openAuthAttachment(
+                `/api/sites/${site.id}/tech-connection/application?company_id=${companyId}`, { cache: false },
+              ).catch((error) => toast.error(`Заявка не открыта: ${error.message}`))}>
+              Заявка на ТП — печатная форма
+            </Button>
+          </div>
+        )}
+        {(['main', 'supply'] as const).map((branch) => {
+          const list = steps.filter((s) => s.branch === branch)
+          if (!list.length) return null
+          return (
+            <div key={branch} className="space-y-1">
+              <div className="pt-1 text-sm font-semibold">
+                {branch === 'main' ? 'Ход присоединения' : 'Договор электроснабжения — отдельной веткой'}
+              </div>
+              {list.map((s) => {
+                const d = stepDraft[s.key] ?? s.date ?? ''
+                return (
+                  <div key={s.key} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" title={s.hint ?? undefined}>
+                    <span className="w-7 shrink-0 font-mono text-xs text-muted-foreground">{s.no}</span>
+                    <span className={`min-w-0 flex-1 basis-64 ${d ? '' : 'text-muted-foreground'}`}>
+                      {d ? <span className="mr-1 text-emerald-600 dark:text-emerald-400">✓</span> : null}{s.label}
+                      {s.hint ? <span className="block text-xs text-muted-foreground">{s.hint}</span> : null}
+                    </span>
+                    {!d && s.plannedDate && (
+                      <span className={`text-xs ${s.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
+                        {s.overdue ? 'просрочено, срок' : 'срок'} {s.plannedDate}
+                      </span>
+                    )}
+                    <Input type="date" className="h-8 w-40 text-sm" value={d} aria-label={`Дата: ${s.label}`}
+                      onChange={(e) => setStepDraft((p) => ({ ...p, [s.key]: e.target.value }))} />
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })}
+      </section>
 
       <section className="rounded-lg border border-border p-3 grid grid-cols-1 md:grid-cols-3 gap-2">
         <div>
@@ -1510,6 +1807,11 @@ export function TechConnectionTab({ site, companyId, onDone }: {
         <Field2 label="№ ТУ" v={val('specs_no', tc?.specsNo)} on={(v) => set('specs_no', v)} />
         <Field2 label="Дата ТУ" type="date" v={val('specs_date', tc?.specsDate)} on={(v) => set('specs_date', v)} />
         <Field2 label="Класс напряжения" v={val('voltage', tc?.voltage)} on={(v) => set('voltage', v)} />
+        <Field2 label="Координаты ТП (широта, долгота)" v={val('tp_coords', tc?.tpCoords)} on={(v) => set('tp_coords', v)} />
+        <Field2 label="Ранее присоединённая мощность, кВт" v={val('existing_power_kwt', tc?.existingPowerKwt)} on={(v) => set('existing_power_kwt', v)} />
+        <Field2 label="Категория надёжности (по умолчанию III)" v={val('reliability_category', tc?.reliabilityCategory)} on={(v) => set('reliability_category', v)} />
+        <Field2 label="Вид нагрузки (по умолчанию ЭЗС)" v={val('load_kind', tc?.loadKind)} on={(v) => set('load_kind', v)} />
+        <Field2 label="Сбытовая организация" v={val('energy_supplier', tc?.energySupplier)} on={(v) => set('energy_supplier', v)} />
         <Field2 label="№ договора ТП" v={val('contract_no', tc?.contractNo)} on={(v) => set('contract_no', v)} />
         <Field2 label="Дата договора ТП" type="date" v={val('contract_date', tc?.contractDate)} on={(v) => set('contract_date', v)} />
         <Field2 label="Стоимость, ₽" v={val('cost', tc?.cost)} on={(v) => set('cost', v)} />
@@ -1529,6 +1831,8 @@ export function TechConnectionTab({ site, companyId, onDone }: {
             onChange={(e) => set('note', e.target.value)} />
         </div>
       </section>
+
+      <TpSiteDocs site={site} companyId={companyId} kinds={ctx.data.docKinds ?? []} />
 
       {/* Паспорт питающей сети — графы AQ–BA банка ЗУ. Приезжают из файла отдела
           развития и до сих пор нигде не показывались: без владельца ТП и запаса
@@ -1561,6 +1865,41 @@ export function TechConnectionTab({ site, companyId, onDone }: {
         </div>
       </section>
     </div>
+  )
+}
+
+/** Документы площадки на «Присоединении» (Ступин, 09.10.2026): что приложено и ссылка на файл.
+ *  Сами файлы прикладываются на вкладке «Документы» с тем же видом. */
+const TP_SITE_DOCS = ['geo_survey', 'site_design', 'master_plan', 'networks_plan', 'landlord_power_project']
+
+function TpSiteDocs({ site, companyId, kinds }: { site: SiteDetail; companyId: string; kinds: { key: string; label: string }[] }) {
+  const docs = useQuery({ queryKey: ['site-docs', companyId, site.id], queryFn: () => getSiteDocs(companyId, site.id) })
+  const rows = kinds.filter((k) => TP_SITE_DOCS.includes(k.key))
+  if (!rows.length) return null
+  return (
+    <section className="rounded-lg border border-border p-3 space-y-1">
+      <div className="text-sm font-semibold">Документы площадки</div>
+      {rows.map((k) => {
+        const found = (docs.data ?? []).filter((d) => d.kind === k.key)
+        return (
+          <div key={k.key} className="flex flex-wrap items-baseline gap-x-2 text-sm">
+            <span className={`w-4 shrink-0 ${found.length ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>{found.length ? '✓' : '—'}</span>
+            <span className={found.length ? '' : 'text-muted-foreground'}>{k.label}</span>
+            {found.map((d) => (
+              <button key={d.id} type="button" disabled={!d.fileId} className="text-primary underline underline-offset-4 disabled:no-underline"
+                onClick={() => downloadSiteDoc(companyId, site.id, d.id, d.fileName ?? d.title ?? undefined)
+                  .catch((e) => toast.error(e instanceof Error ? e.message : 'Не удалось открыть файл'))}>
+                {d.title || d.fileName || 'файл'}
+              </button>
+            ))}
+            {!found.length && <span className="text-xs text-muted-foreground">{docs.isLoading ? 'проверяем…' : 'не приложен'}</span>}
+          </div>
+        )
+      })}
+      <p className="text-xs text-muted-foreground">
+        Прикладываются на вкладке <Link className="text-primary underline underline-offset-4" to={`?mode=projects&sub=pr_project&project=${site.id}&ptab=docs`}>«Документы»</Link> с этим же видом.
+      </p>
+    </section>
   )
 }
 
@@ -1788,7 +2127,7 @@ function RegisterUnitDialog({ site, companyId, item, onClose, onDone }: {
   const [busy, setBusy] = useState(false)
 
   const wh = useQuery({
-    queryKey: ['equipment-warehouses', companyId],
+    queryKey: ['equipment', 'warehouses-summary', companyId],
     queryFn: () => getWarehousesSummary(companyId),
   })
   const rows = wh.data?.warehouses ?? []
@@ -1837,7 +2176,7 @@ function RegisterUnitDialog({ site, companyId, item, onClose, onDone }: {
             </Select>
             {rows.length === 0 && !wh.isLoading && (
               <p className="mt-1 text-xs text-muted-foreground">
-                Складов нет — их заводят в разделе «Оборудование», вкладка «Склады».
+                Складов нет — их заводят в разделе «Оборудование», вкладка «Склады и остатки».
               </p>
             )}
           </div>
@@ -2772,15 +3111,28 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 export function HistoryTab({ site, companyId }: { site: SiteDetail; companyId: string }) {
+  const [kind, setKind] = useState<string | null>(null)
   const q = useQuery({
     queryKey: ['site-events', companyId, site.id],
     queryFn: () => getSiteEvents(companyId, site.id),
   })
   if (q.isLoading) return <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-  const rows = q.data ?? []
-  if (rows.length === 0) return <div className="py-8 text-center text-sm text-muted-foreground">Событий пока нет.</div>
+  const all = q.data ?? []
+  if (all.length === 0) return <div className="py-8 text-center text-sm text-muted-foreground">Событий пока нет.</div>
+  const kinds = [...new Set(all.map((e) => e.kind))]
+  const rows = kind ? all.filter((e) => e.kind === kind) : all
   return (
     <div className="space-y-1.5">
+      {kinds.length > 1 && (
+        <div className="flex flex-wrap gap-1.5 pb-1 text-xs" role="group" aria-label="Тип события">
+          {[null, ...kinds].map((k) => (
+            <button key={k ?? 'all'} type="button" aria-pressed={kind === k} onClick={() => setKind(k)}
+              className={`rounded border px-2 py-1 ${kind === k ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+              {k ? KIND_LABEL[k] ?? k : 'Все'} <span className="tabular-nums opacity-70">{k ? all.filter((e) => e.kind === k).length : all.length}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {rows.map((e) => (
         <div key={e.id} className="flex gap-2 text-sm border-b border-border/30 pb-1.5">
           <span className="text-xs uppercase tracking-wide text-muted-foreground w-16 shrink-0 pt-0.5">

@@ -468,13 +468,15 @@ function LinksBlock({ viewId, published }: { viewId: string; published: boolean 
                 </span>
                 {!dead && (
                   <>
-                    <button onClick={() => {
+                    {/* Ссылка хранится хешем (07.10.2026): адрес виден только при выдаче.
+                        Нужен снова — выдайте новую и отзовите старую. */}
+                    {l.url ? <button onClick={() => {
                       navigator.clipboard?.writeText(`${window.location.origin}${l.url}`)
                       toast.success('Ссылка скопирована')
                     }} className="inline-flex items-center gap-1 text-muted-foreground
                                   hover:text-foreground">
                       <Copy className="h-3 w-3" /> скопировать
-                    </button>
+                    </button> : <span className="text-muted-foreground" title="Адрес ссылки показывается только при выдаче — он хранится зашифрованным">адрес — при выдаче</span>}
                     <button onClick={() => {
                       if (window.confirm('Отозвать ссылку? У получателя витрина'
                         + ' перестанет открываться сразу.')) revoke.mutate(l.id)

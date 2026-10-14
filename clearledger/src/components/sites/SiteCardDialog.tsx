@@ -81,7 +81,11 @@ export function SiteCardDialog({ companyId, id, onClose }: {
                 </button>
               ))}
             </div>
-            <ProjectTabContent tab={tab} site={s} companyId={companyId} onDone={refresh} />
+            <ProjectTabContent tab={tab} site={s} companyId={companyId} onDone={refresh} onTab={(k, query) => {
+              // Вкладка диалога — своё состояние; стадия для чек-листа — в адресе.
+              setLocalTab(k)
+              if (query) setSearchParams((prev) => { const n = new URLSearchParams(prev); for (const [key, v] of Object.entries(query)) { if (v) n.set(key, v); else n.delete(key) } return n }, { replace: true })
+            }} />
           </>
         )}
       </DialogContent>

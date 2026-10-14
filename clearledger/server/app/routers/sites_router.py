@@ -81,6 +81,7 @@ async def list_sites(
     overdue: bool = Query(False), risk: str | None = Query(None),
     node: str | None = Query(None, description="узел маршрута: ezs_contract_approval и т. п."),
     kind: str | None = Query(None), place_kind: str | None = Query(None),
+    without_kind: str | None = Query(None, description="исключить вид работ: реестр стройки без интеграций"),
     page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=2000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
@@ -91,6 +92,7 @@ async def list_sites(
     return await ezs_sites.list_sites(db, cid, stage=stage, region=region, search=search,
                                       owner_id=owner_id, overdue=overdue, risk=risk,
                                       node=node, kind=kind, place_kind=place_kind,
+                                      without_kind=without_kind,
                                       page=page, page_size=page_size)
 
 
@@ -413,6 +415,18 @@ async def create_site(
     return await ezs_sites.site_detail(db, cid, site.id)
 
 
+@router.get("/integrations")
+async def integrations_portfolio(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Раздел «Интеграции»: реестр проектов интеграции и сводка отчёта."""
+    from app.services import project_integration
+
+    cid = await assert_company_member(company_id, user, db)
+    return await project_integration.portfolio(db, cid)
+
+
 @router.get("/portfolio")
 async def portfolio(
     company_id: str = Query(...),
@@ -501,7 +515,8 @@ async def export_report(
     search: str | None = Query(None), owner_id: uuid.UUID | None = Query(None),
     overdue: bool = Query(False), risk: str | None = Query(None),
     node: str | None = Query(None), kind: str | None = Query(None),
-    place_kind: str | None = Query(None),
+    place_kind: str | None = Query(None), without_kind: str | None = Query(None),
+    history_days: int = Query(90, ge=1, le=3650, description="портфель: глубина листа «История», дней"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Выгрузка экрана в xlsx: воронка, приоритеты, бюджет, учёт, ТП, оборудование."""
@@ -512,15 +527,21 @@ async def export_report(
     cid = await assert_company_member(company_id, user, db)
     _, fname = _EXPORTS[report]
     fn = getattr(ezs_project, f"export_{report.replace('-', '_')}_xlsx")
-    filtered = any([stage, region, search, owner_id, overdue, risk, node, kind, place_kind])
+    filtered = any([stage, region, search, owner_id, overdue, risk, node, kind, place_kind, without_kind])
     if report == "portfolio" and filtered:
         listed = await ezs_sites.list_sites(db, cid, stage=stage, region=region, search=search,
                                             owner_id=owner_id, overdue=overdue, risk=risk,
                                             node=node, kind=kind, place_kind=place_kind,
+                                            without_kind=without_kind,
                                             page=1, page_size=100000)
-        data = await fn(db, cid, site_ids=[it["id"] for it in listed["items"]])
+        data = await fn(db, cid, site_ids=[it["id"] for it in listed["items"]], user=user, history_days=history_days)
+    elif report == "portfolio":
+        data = await fn(db, cid, user=user, history_days=history_days)
     else:
         data = await fn(db, cid)
+    # След выгрузки реестров проектов (аудит 07.10.2026).
+    from app.services.export_audit import log_export
+    log_export(db, cid, user, f"Реестр проектов «{report}»{' (с отбором)' if filtered else ''}")
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -719,6 +740,38 @@ async def get_site(
     return out
 
 
+@router.get("/{site_id}/report")
+async def project_report_data(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Отчёт проекта одним ответом — для PDF-презентации (тот же сборщик, что у Excel)."""
+    from app.services import project_report
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    return await project_report.project_report(db, cid, user, site)
+
+
+@router.get("/{site_id}/report.xlsx")
+async def project_report_xlsx(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Excel проекта: сводка, чек-лист, работа, присоединение/оборудование/бюджет или
+    сценарии/станции/испытания/сверки интеграции, документы, полная история."""
+    from urllib.parse import quote
+    from fastapi.responses import Response
+    from app.services import project_report
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    data = project_report.project_xlsx(await project_report.project_report(db, cid, user, site))
+    name = f"project_{site.project_no or site.id}.xlsx".replace(" ", "_")
+    from app.services.export_audit import log_export
+    log_export(db, cid, user, f"Отчёт по проекту {site.project_no or site.id}")
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f"attachment; filename=\"{quote(name)}\"; filename*=UTF-8''{quote(name)}"})
+
+
 @router.get("/{site_id}/integration")
 async def get_integration(
     site_id: uuid.UUID, company_id: str = Query(...),
@@ -730,7 +783,10 @@ async def get_integration(
     if site.kind != "integration":
         raise HTTPException(400, "Это не проект интеграции")
     data = project_integration.read(site)
-    return {"data": data, "tasks": [{**t, "section": project_integration.section_for(t["key"])} for t in ezs_checklist_integration.TASKS],
+    return {"data": data, "tasks": [{**t, "section": project_integration.section_for(t["key"]),
+                                     "need": project_integration.requirement_problem(site, t["key"], data),
+                                     "dataRule": t["key"] in project_integration.DATA_RULE_KEYS}
+                                    for t in ezs_checklist_integration.TASKS],
             "phases": ezs_checklist_integration.PHASES_DOC,
             "gates": [ezs_site_work.gate_state(site, stage=p) for p in ezs_sites.STAGE_ORDER]}
 
@@ -746,6 +802,29 @@ async def integration_stations(
     if site.kind != "integration":
         raise HTTPException(400, "Это не проект интеграции")
     return await project_integration.station_catalog(db, cid)
+
+
+@router.get("/{site_id}/integration/sessions")
+async def integration_sessions(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    date_from: date | None = Query(None, alias="from"), date_to: date | None = Query(None, alias="to"),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Сессии партнёра в нашем учёте за период (по умолчанию — 90 дней) по правилу паспорта."""
+    from datetime import timedelta
+    from app.services import project_integration
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    if site.kind != "integration":
+        raise HTTPException(400, "Это не проект интеграции")
+    date_to = date_to or date.today()
+    date_from = date_from or date_to - timedelta(days=90)
+    if date_from > date_to or (date_to - date_from).days > 400:
+        raise HTTPException(400, "Период — не больше 400 дней, начало не позже конца")
+    try:
+        return await project_integration.partner_sessions(db, site, date_from, date_to)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.patch("/{site_id}/integration")
@@ -983,6 +1062,21 @@ async def project_roadmap(
     return await ezs_project.project_roadmap(db, cid, site)
 
 
+@router.get("/{site_id}/tech-connection/application")
+async def tech_connection_application(
+    site_id: uuid.UUID, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Заявка на ТП печатной формой: HTML, печатает браузер."""
+    from fastapi.responses import HTMLResponse
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    page = await ezs_project.tech_connection_application(db, cid, site)
+    if page is None:
+        raise HTTPException(404, "Присоединение не заведено")
+    return HTMLResponse(page, headers={"Cache-Control": "private, no-store"})
+
+
 @router.put("/{site_id}/tech-connection")
 async def put_tech_connection(
     site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
@@ -991,7 +1085,8 @@ async def put_tech_connection(
     """Завести или обновить техприсоединение проекта (заявка → ТУ → договор → факт)."""
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
-    res = await ezs_project.upsert_tech_connection(db, cid, site, payload, user)
+    res = await ezs_project.upsert_tech_connection(
+        db, cid, site, payload, user, may_waive=await _may_waive_gate(db, cid, site, user))
     await db.commit()
     return res
 
@@ -1147,13 +1242,13 @@ async def waive_gate(
 
 @router.get("/{site_id}/events")
 async def get_events(
-    site_id: uuid.UUID, company_id: str = Query(...),
+    site_id: uuid.UUID, company_id: str = Query(...), kind: str | None = Query(None),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """История площадки: стадии, касания, заметки, правки, импорт."""
+    """История площадки: стадии, касания, заметки, правки, импорт. `kind` — только этот вид."""
     cid = await assert_company_member(company_id, user, db)
     await _owned(db, cid, site_id)
-    return await ezs_site_work.site_events(db, cid, site_id)
+    return await ezs_site_work.site_events(db, cid, site_id, only_kind=kind)
 
 
 @router.post("/{site_id}/events", status_code=201)
@@ -1273,11 +1368,27 @@ async def apply_project_step(
     if not link_id:
         raise HTTPException(400, "Не указано действие (linkId)")
     branch = payload.get("branchCaseId")
+    stage_before = site.stage
     try:
         res = await projects_process.apply_step(
             db, cid, site, link_id, payload.get("payload") or {}, user,
             branch_case_id=str(branch) if branch else None)
     except ProjectionError as e:
+        # Координатор мог выполнить шаг позже нашего тайм-аута (06.10.2026: «Поддержка»
+        # была занята выгрузкой HubEx, шаг прошёл через 30 с, карточка осталась на
+        # прежней стадии, повтор — «действие недоступно»). Перечитываем маршрут: если
+        # стадия уже сменилась, шаг выполнен — сводим карточку и отвечаем успехом.
+        await db.rollback()
+        # После отката атрибуты сброшены: ленивое чтение в async-сессии падает
+        # MissingGreenlet (500 на боевом 06.10.2026) — перечитываем явно.
+        await db.refresh(site)
+        try:
+            state = await projects_process.reconcile(db, cid, site, user)
+        except ProjectionError:
+            state = None
+        if state is not None and site.stage != stage_before:
+            await db.commit()
+            return {**state, "recovered": True}
         raise HTTPException(400, str(e)) from e
     await db.commit()
     return res
@@ -1314,7 +1425,7 @@ async def project_participants(
         select(EzsSiteParticipant, User)
         .join(User, User.id == EzsSiteParticipant.user_id)
         .where(EzsSiteParticipant.site_id == site_id)
-        .order_by(EzsSiteParticipant.role_code, User.name)
+        .order_by(EzsSiteParticipant.position.asc().nullslast(), EzsSiteParticipant.role_code, User.name)
     )).all()
     return {
         "roles": [{"code": c, "label": l} for c, l in ezs_checklist.ROLES.items()],
@@ -1372,6 +1483,56 @@ async def add_project_participant(
 
     # Состав — часть полномочий маршрута, поэтому уезжает в кейс сразу, а не при
     # следующем шаге: иначе назначенный человек не увидит своей кнопки.
+    await _push_participants(db, cid, site, user)
+    return {"ok": True}
+
+
+@router.put("/{site_id}/participants/order")
+async def order_project_participants(
+    site_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Порядок людей в «Кто ведёт проект». Тело: { ids: [...] } — сверху вниз.
+    Чужие и незнакомые id пропускаются; кого нет в списке — остаются ниже, по роли."""
+    cid = await assert_company_member(company_id, user, db)
+    await _owned(db, cid, site_id)
+    rows = {str(p.id): p for p in (await db.execute(select(EzsSiteParticipant).where(
+        EzsSiteParticipant.site_id == site_id))).scalars()}
+    ids = [i for i in (payload.get("ids") or []) if str(i) in rows]
+    for p in rows.values():
+        p.position = None
+    for n, i in enumerate(ids):
+        rows[str(i)].position = n
+    await db.commit()
+    return {"ok": True}
+
+
+@router.patch("/{site_id}/participants/{participant_id}")
+async def edit_project_participant(
+    site_id: uuid.UUID, participant_id: uuid.UUID, payload: dict, company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Поправить роль и уточнение участника. Тело: { roleCode?, note? }.
+    Человека не меняем: другой человек — новое назначение со своим письмом."""
+    cid = await assert_company_member(company_id, user, db)
+    site = await _owned(db, cid, site_id)
+    row = (await db.execute(select(EzsSiteParticipant).where(
+        EzsSiteParticipant.id == participant_id,
+        EzsSiteParticipant.site_id == site_id))).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "Участник не найден")
+    if "roleCode" in payload:
+        role_code = (payload.get("roleCode") or "").strip()
+        if role_code not in ezs_checklist.ROLES:
+            raise HTTPException(400, f"Неизвестная роль регламента: {role_code}")
+        if role_code != row.role_code and (await db.execute(select(EzsSiteParticipant.id).where(
+                EzsSiteParticipant.site_id == site_id, EzsSiteParticipant.user_id == row.user_id,
+                EzsSiteParticipant.role_code == role_code))).first():
+            raise HTTPException(409, "У этого человека уже есть такая роль в проекте")
+        row.role_code = role_code
+    if "note" in payload:
+        row.note = (payload.get("note") or "").strip() or None
+    await db.commit()
     await _push_participants(db, cid, site, user)
     return {"ok": True}
 

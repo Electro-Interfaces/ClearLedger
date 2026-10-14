@@ -21,7 +21,7 @@ interface AuthContextType {
   token: string | null
   isAuthenticated: boolean
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, otp?: string) => Promise<void>
   logout: () => void
   /** Усыновить сессию по готовому access-токену (после принятия приглашения). */
   applySession: (accessToken: string) => Promise<void>
@@ -79,8 +79,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => { alive = false }
   }, [apiEnabled])
 
-  const login = useCallback(async (email: string, password: string) => {
-    const res = await authService.login(email, password)  // токен сохранён сервисом
+  const login = useCallback(async (email: string, password: string, otp?: string) => {
+    const res = await authService.login(email, password, otp)  // токен сохранён сервисом
     const me = await authService.getMe()
     setTokenState(res.access_token)
     setUser(me)

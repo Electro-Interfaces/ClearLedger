@@ -73,6 +73,10 @@ async def канал_компании(
             status.HTTP_403_FORBIDDEN, "Ключ не опознан или отозван",
             headers={"WWW-Authenticate": "Basic"},
         )
+    # Ключ агента станции пакетов смен всех АЗС не читает (аудит 07.10.2026).
+    if ключ.station_id is not None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Ключ станции не даёт доступа к каналу",
+                            headers={"WWW-Authenticate": "Basic"})
     company = await db.get(Company, ключ.company_id)
     if company is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Ключ не привязан к пространству")

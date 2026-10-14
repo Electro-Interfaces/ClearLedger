@@ -82,12 +82,12 @@ export function ResetPasswordPage() {
             <p className="text-sm text-muted-foreground">Аккаунт: <b>{email}</b></p>
             {error && <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div>}
             <div className="space-y-2">
-              <label className="text-sm font-medium">Новый пароль (мин. 6 символов)</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} autoComplete="new-password" className={inputCls} />
+              <label className="text-sm font-medium">Новый пароль (мин. 10 символов)</label>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={10} autoComplete="new-password" className={inputCls} />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Повторите пароль</label>
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required minLength={6} autoComplete="new-password" className={inputCls} />
+              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required minLength={10} autoComplete="new-password" className={inputCls} />
             </div>
             <button type="submit" disabled={submitting}
               className="inline-flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">

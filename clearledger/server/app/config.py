@@ -115,8 +115,14 @@ class Settings(BaseSettings):
 
     @property
     def secret_is_insecure(self) -> bool:
-        """Секрет не задан в окружении (используется небезопасный дефолт)?"""
-        return self.secret_key == DEFAULT_INSECURE_SECRET
+        """Секрет подписи слабый: дефолт кода, дефолт из compose-файлов или короче 32 символов.
+
+        Дефолты compose (`clearledger-dev-secret` и т.п.) раньше проверку не задевали
+        вовсе — JWT подделывался известным ключом (аудит 07.10.2026).
+        """
+        return (self.secret_key in (DEFAULT_INSECURE_SECRET, "clearledger-dev-secret",
+                                    "clearledger-demo-secret-change-in-production")
+                or len(self.secret_key) < 32)
 
     # CORS — список origin через запятую
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
@@ -131,6 +137,10 @@ class Settings(BaseSettings):
     # На проде SMTP_HOST=10.10.70.51 (внутренний IP хоста), 587 STARTTLS,
     # SMTP_SERVERNAME=mail.dataworker.ru для проверки TLS-сертификата.
     # Пусто → dev-режим: ссылка приглашения печатается в лог.
+    # Тревоги безопасности в Telegram (бот алертов инфраструктуры, через прокси сети).
+    security_tg_token: str = ""
+    security_tg_chat: str = ""
+    security_tg_proxy: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""

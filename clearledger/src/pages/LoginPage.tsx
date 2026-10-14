@@ -13,10 +13,16 @@ import { Boxes, Loader2, CheckCircle2 } from 'lucide-react'
 export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const backTo = safeBackTo((location.state as { from?: unknown } | null)?.from)
+  // Возврат: из состояния роутера, а из публичной сборки — параметром ?next= (туда
+  // она отправляет с закрытого адреса основного приложения).
+  const backTo = safeBackTo((location.state as { from?: unknown } | null)?.from
+    ?? new URLSearchParams(location.search).get('next'))
   const { login } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  // Второй фактор: поле кода появляется, когда сервер сказал, что пароль верен и нужен код.
+  const [otp, setOtp] = useState('')
+  const [needOtp, setNeedOtp] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   // Режим «восстановление пароля».
@@ -32,10 +38,15 @@ export function LoginPage() {
     try {
       // login() из контекста: токен + /me + обновление состояния auth (иначе
       // ProtectedRoute не увидит авторизацию и вернёт назад на /login).
-      await login(email, password)
+      await login(email, password, needOtp ? otp : undefined)
       navigate(backTo, { replace: true })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Ошибка входа'
+      if (message.includes(authService.OTP_REQUIRED)) {
+        setNeedOtp(true)
+        setError('')
+        return
+      }
       setError(message)
     } finally {
       setLoading(false)
@@ -154,6 +165,17 @@ export function LoginPage() {
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
+
+          {needOtp && (
+            <div className="space-y-2">
+              <label htmlFor="otp" className="text-sm font-medium">Код из приложения-аутентификатора</label>
+              <input id="otp" inputMode="numeric" autoComplete="one-time-code" autoFocus maxLength={8}
+                value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))} required
+                placeholder="6 цифр"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm tracking-widest ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+              <p className="text-xs text-muted-foreground">Телефон потерян — попросите администратора компании снять второй фактор.</p>
+            </div>
+          )}
 
           <div className="text-right">
             <button type="button" onClick={() => setMode('forgot')}

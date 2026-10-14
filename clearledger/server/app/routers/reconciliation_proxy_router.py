@@ -63,7 +63,11 @@ def _upstream_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=502, detail=f"Upstream error: {exc.response.status_code}")
     if isinstance(exc, httpx.RequestError):
         return HTTPException(status_code=503, detail="Внешний сервис недоступен")
-    return HTTPException(status_code=500, detail=str(exc))
+    # Текст неизвестного исключения (адреса, SQL) — только в журнал; наружу номер случая.
+    import logging, uuid as _uuid
+    incident = _uuid.uuid4().hex[:8]
+    logging.getLogger("clearledger.recon").exception("Сбой сверки, случай %s", incident, exc_info=exc)
+    return HTTPException(status_code=500, detail=f"Внутренняя ошибка сверки, случай {incident}")
 
 
 # ─────────────────────────── TradeCorp ───────────────────────────

@@ -1,4 +1,8 @@
 import { useState, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
+import { openAuthAttachment } from '@/lib/authFiles'
+import type { SpaceDocument } from '@/services/referenceService'
 import { useWorkspace } from '@/contexts/WorkspaceContext'
 import { getItem, setItem } from '@/services/storage'
 import type { ShiftRecord } from '@/services/fuel/types'
@@ -24,6 +28,7 @@ function usePersisted<T>(key: string, fallback: T): [T, (v: T | ((prev: T) => T)
 }
 
 export function useRawPanelState() {
+  const navigate = useNavigate()
   // --- Persisted state ---
   const [viewMode, setViewMode] = usePersisted<ViewMode>(LS_KEY_VIEW_MODE, 'tree')
   const [treeState, setTreeState] = usePersisted<TreeState>(LS_KEY_TREE_STATE, {
@@ -145,6 +150,16 @@ export function useRawPanelState() {
         setViewingApiReceipt(d.data as LoadedReceipt)
         return
       }
+      // Документы пространства: файл открывается во вкладке, договор — в «Договорах».
+      if (d.docType === 'space_file' || d.docType === 'contract_card') {
+        const sd = d.data as SpaceDocument
+        if (sd.fileId) {
+          openAuthAttachment(`/api/files/${sd.fileId}`).catch((e: unknown) => toast.error(e instanceof Error ? e.message : 'Не удалось открыть файл'))
+        } else if (sd.contractId) {
+          navigate(`${window.location.pathname.replace(/\/files$/, '')}/contractors?sub=contracts&contract=${sd.contractId}`)
+        } else toast.info('Файл к документу не приложен')
+        return
+      }
       return // channel_run и прочие — только выделение и панель деталей
     }
     if (d.docType === 'shift_report') {
@@ -160,7 +175,7 @@ export function useRawPanelState() {
       return
     }
     // Прочие типы — пока только выделение и панель деталей (спец-модалки нет).
-  }, [workspace])
+  }, [workspace, navigate])
 
   // --- Tab operations ---
   const closeTab = useCallback((path: string) => {

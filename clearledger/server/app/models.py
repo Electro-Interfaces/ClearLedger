@@ -127,6 +127,22 @@ class User(Base):
     mail_only: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # Версия входа: кладётся в JWT и сверяется на каждом запросе. Смена пароля, «выйти
+    # со всех устройств» и сброс сессий админом поднимают её — выданные токены гаснут.
+    token_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    # Неудачные входы подряд и блокировка: после серии вход закрывается на время.
+    failed_logins: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Второй фактор: секрет TOTP (зашифрован) и включён ли он. Секрет без флага —
+    # настройка начата, но код ещё не подтверждён.
+    totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     # Когда человека можно трогать. Пространство растянуто от Владивостока до
     # Москвы, и регламентное напоминание не бывает срочнее сна: в тишину оно не
     # пропускается, а сдвигается на начало ближайшего окна. Пояс — имя IANA, а
@@ -857,6 +873,26 @@ class SecurityEvent(Base):
     path: Mapped[str] = mapped_column(String(200), nullable=False)
     user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
     hits: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Что именно было: учётная запись при подборе пароля, объём выкачки (07.10.2026).
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SecurityBlock(Base):
+    """Адрес, закрытый для API после враждебного действия (`app/guard.py`).
+
+    Блок временный (`until`) и снимается руками с экрана «Безопасность» — тогда
+    `lifted_at` и кто снял: запись остаётся, чтобы был виден весь эпизод.
+    """
+
+    __tablename__ = "security_blocks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ip: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str] = mapped_column(String(300), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    lifted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lifted_by_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class ClientError(Base):
@@ -1278,6 +1314,20 @@ class Contract(Base):
     # Без ForeignKey: сам справочник заведён сырым DDL и в метаданных ORM его нет,
     # а FK на неизвестную таблицу уронил бы create_all.
     type_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Реквизиты 1С (ДоговорПодписан, СрокОплаты, ГосударственныйКонтракт, руководители
+    # сторон) — колонками, чтобы синхронизация и выгрузка в БП шли поле в поле.
+    signed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    signed_at: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    payment_term_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_state_contract: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    igk: Mapped[str | None] = mapped_column(String(40), nullable=True)   # идентификатор госконтракта
+    responsible_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    signer_our: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    signer_our_position: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    signer_cp: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    signer_cp_position: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    signer_cp_basis: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # СрокДействия (ISO-дата строкой) и ДоговорЗакрыт
     valid_until: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_closed: Mapped[bool] = mapped_column(
@@ -1319,6 +1369,30 @@ class Contract(Base):
 # производное (объединение охватов его договоров). См.
 # TRADELEDGER_COUNTERPARTY_AXIS §5, SCHEMA_REFS_GIG §2a.
 # ---------------------------------------------------------------------------
+class ContractLink(Base):
+    """Договор → приложение пространства и, где уместно, проект внутри него.
+
+    Договор один на пространство; приложение видит «свои» договоры по этой привязке
+    и по фактическому использованию (расчёты, документы — `services/contract_usage`).
+    Привязку ставит человек: энергоснабжение относится и к «Эксплуатации», и к
+    проекту строительства станции. Проект — ссылка в формате «Трека» (`site:<id>`),
+    пустая строка — «всё приложение» (пустая, а не NULL: так работает уникальность).
+    """
+    __tablename__ = "contract_links"
+    __table_args__ = (UniqueConstraint("contract_id", "app_code", "project_ref", name="uq_contract_link"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    contract_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="CASCADE"), nullable=False, index=True)
+    app_code: Mapped[str] = mapped_column(String(40), nullable=False)       # eco_apps.code
+    project_ref: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ContractLocation(Base):
     __tablename__ = "contract_locations"
 
@@ -6184,9 +6258,57 @@ class EzsEquipmentMovement(Base):
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Документ движения (накладная, акт), которым проведено движение (04.10.2026).
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # Единица до движения (состояние, место, держатель, даты): по этому снимку
+    # отмена документа возвращает её назад, не угадывая прежние значения.
+    prev: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     __table_args__ = (
         Index("ix_ezs_move_company_date", "company_id", "occurred_on"),
         Index("ix_ezs_move_unit_created", "unit_id", "created_at"),
+    )
+
+
+class EzsEquipmentDocument(Base):
+    """Документ движения оборудования: накладная на перемещение, акт монтажа,
+    ввода, демонтажа, ремонта, возврата, списания. Проводит операцию по одной или
+    нескольким единицам; контрагент и договор — ссылками на справочники
+    пространства, ответственные — кто сдал и кто принял (services/ezs_equipment_docs.py)."""
+    __tablename__ = "ezs_equipment_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    op: Mapped[str] = mapped_column(String(30), nullable=False)
+    number: Mapped[str] = mapped_column(String(60), nullable=False)
+    doc_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    counterparty_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    contract_label: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    from_location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    to_location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    responsible_from: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    responsible_to: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    basis: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Детали вида документа: ремонт — заявка Поддержки, гарантия/платный, плановый
+    # возврат, стоимость, результат.
+    details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # posted | cancelled. Проведённый документ не правится: ошибку исправляет
+    # отмена (сторно движений) и новый документ — номер отменённого остаётся занят.
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="posted", server_default="posted")
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "number", name="uq_ezs_eq_doc_number"),
+        Index("ix_ezs_eq_doc_company_date", "company_id", "doc_date"),
     )
 
 
@@ -6484,9 +6606,63 @@ class EzsSparePartMovement(Base):
     created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # Документ ЗИП, которым проведено движение (13.10.2026); у прихода по поставке
+    # документом служит сама поставка (supply_id).
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # Знаковое изменение остатка на складе to_location_id — у корректировки,
+    # инвентаризации и сторно отменённого документа; qty у них = |delta|. У старых
+    # корректировок (до 13.10.2026) delta пуст, а qty — установленный остаток.
+    delta: Mapped[float | None] = mapped_column(Numeric(14, 3), nullable=True)
+
     __table_args__ = (
         Index("ix_ezs_spmove_company_date", "company_id", "occurred_on"),
         Index("ix_ezs_spmove_part_created", "part_id", "created_at"),
+    )
+
+
+class EzsSpareDocument(Base):
+    """Документ ЗИП: приходный ордер, требование-накладная на отпуск, накладная на
+    перемещение, акт на списание, инвентаризационная опись. Проводит несколько
+    строк номенклатуры атомарно; не правится — исправление через отмену (сторно
+    движений) и новый документ (services/ezs_spare_docs.py)."""
+    __tablename__ = "ezs_spare_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    op: Mapped[str] = mapped_column(String(20), nullable=False)  # receipt|issue|transfer|write_off|inventory
+    number: Mapped[str] = mapped_column(String(60), nullable=False)
+    doc_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="posted", server_default="posted")
+    counterparty_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    counterparty_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    contract_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    contract_label: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    from_location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    to_location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # На что ушёл расход: станция (единица оборудования) либо объект без привязки
+    # к станции — текстом; акт ремонта — по желанию.
+    target_unit_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    target_location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    target_note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    repair_document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    responsible_from: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    responsible_to: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    basis: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Строки как проведены: [{partId, qty}], у описи — [{partId, book, fact}]. Опись
+    # хранит и строки без расхождения, по которым движения нет.
+    lines: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    created_by_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancelled_by_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cancel_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "number", name="uq_ezs_spare_doc_number"),
+        Index("ix_ezs_spare_doc_company_date", "company_id", "doc_date"),
     )
 
 
@@ -6713,6 +6889,21 @@ class EzsSite(Base):
     access_24x7: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     has_lighting: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     has_internet: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # ── условия аренды и площадки, уточнённые отделом развития (10.2026) ──
+    contract_kind: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    rent_variable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    rent_revenue_pct: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    rent_indexation_pct: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
+    contract_term_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    contract_registration: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    contract_registration_by: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    rent_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    free_access: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    access_hours: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    internet_kind: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    parking_kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    parking_floor: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    conditions_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     subsidy_amount: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)
     commissioned_on: Mapped[str | None] = mapped_column(String(10), nullable=True)  # дата ввода
     # ── замыкание цикла: построенная площадка = объект сети + договор в учёте ──
@@ -6842,6 +7033,8 @@ class EzsSiteParticipant(Base):
     # Код службы из ezs_checklist.ROLES: ОР, ДР/ГД, ОКС, ОЭ, ЮБ, ФБ, ОЦО, Подрядчик
     role_code: Mapped[str] = mapped_column(String(40), nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Место в списке «Кто ведёт проект», задаёт человек; пусто — после упорядоченных, по роли.
+    position: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
@@ -6974,6 +7167,15 @@ class EzsTechConnection(Base):
     works_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)    # AX
     total_cost: Mapped[float | None] = mapped_column(Numeric(16, 2), nullable=True)    # AY
     applicant_term_months: Mapped[float | None] = mapped_column(Float, nullable=True)  # BA
+    # Способ присоединения и даты шагов хода — см. services/ezs_tp_steps.py.
+    method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    steps: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Сведения заявки на ТП (п. 12.1 Правил), которых не было в графах банка ЗУ.
+    reliability_category: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    load_kind: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    existing_power_kwt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    energy_supplier: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    tp_coords: Mapped[str | None] = mapped_column(String(60), nullable=True)  # координаты ТП, «широта, долгота»
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -13669,3 +13871,33 @@ class ConfPresence(Base):
         DateTime(timezone=True), nullable=True)
 
     __table_args__ = (Index("uq_conf_presence", "session_id", "user_id", unique=True),)
+
+
+class StationStatusDay(Base):
+    """Статус станции и её коннекторов на дату выгрузки витрины АСУиМ.
+
+    Витрина приходит книгой раз в сутки и знает только «сейчас»: статус станции
+    («Активная», «Нет связи», «Отключена», …) и каждого разъёма («Доступен»,
+    «Ошибка», …). Карточка станции хранит последнее значение и перезаписывает
+    его — тогда «отключена больше суток» и «доступность за месяц» не посчитать.
+    Здесь ряд: одна строка на станцию и день, повторная загрузка той же книги
+    обновляет строку. Точность — сутки, чаще витрина не приходит.
+    """
+    __tablename__ = "station_status_days"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    location_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="CASCADE"), nullable=False)
+    day: Mapped[date_type] = mapped_column(Date, nullable=False)       # дата среза витрины (МСК)
+    status_dev: Mapped[str | None] = mapped_column(String(60), nullable=True)   # как в витрине
+    operational_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    # {"1": "Доступен", "2": "Ошибка"} — номер разъёма → статус витрины
+    connectors: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_station_status_day", "company_id", "location_id", "day", unique=True),
+        Index("ix_station_status_days_company_day", "company_id", "day"),
+    )

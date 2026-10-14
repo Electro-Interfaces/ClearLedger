@@ -14,6 +14,7 @@
  * сегменты пути, листья = документы.
  */
 
+import { getSpaceDocuments, type SpaceDocument } from '@/services/referenceService'
 import { useMemo, useCallback, useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useFilters } from '@/contexts/FilterContext'
@@ -63,6 +64,8 @@ export function docTypeLabel(docType: string): string {
     msto_transactions: 'Онлайн-заказы',
     corp_transactions: 'Корп. карты',
     channel_run: 'Загрузка данных',
+    contract_card: 'Договор',
+    space_file: 'Файл',
   }
   return map[docType] ?? 'Документ'
 }
@@ -118,6 +121,13 @@ function runToDoc(ch: Channel, run: ChannelRun): LoadedDocument {
   }
 }
 
+function spaceToDoc(d: SpaceDocument): LoadedDocument {
+  return {
+    id: d.id, channelId: '', streamId: '', docType: d.docType, origin: 'api', fingerprint: d.id,
+    title: d.title, stationId: 0, date: d.date, data: d, catalog: d.catalog, loadedAt: d.date,
+  }
+}
+
 const RUN_STATUS_LABEL: Record<string, string> = {
   success: 'Успешно', partial: 'Частично', error: 'Ошибка', running: 'Идёт…',
 }
@@ -161,6 +171,10 @@ function docSize(doc: LoadedDocument): string {
   if (doc.docType === 'shift_report') return `${fmtInt((doc.data as LoadedShift).total_liters)} л`
   if (doc.docType === 'receipt') return `${fmtInt((doc.data as LoadedReceipt).doc_volume_liters)} л`
   if (doc.docType === 'channel_run') return `${fmtInt((doc.data as ChannelRun).loaded)} зап.`
+  if (doc.docType === 'space_file') {
+    const b = (doc.data as SpaceDocument).size
+    return b ? (b > 1048576 ? `${(b / 1048576).toFixed(1)} МБ` : `${Math.max(1, Math.round(b / 1024))} КБ`) : '—'
+  }
   if (isBookDoc(doc)) return `${fmtInt((doc.data as DocRow).amount)} ₽`
   return '—'
 }
@@ -177,6 +191,7 @@ function docStatus(doc: LoadedDocument): string | undefined {
     return (doc.data as ShiftRecord)?.status === 'closed' ? 'Закрыта' : 'Открыта'
   }
   if (doc.docType === 'channel_run') return RUN_STATUS_LABEL[(doc.data as ChannelRun).status] ?? (doc.data as ChannelRun).status
+  if (doc.docType === 'space_file' || doc.docType === 'contract_card') return (doc.data as SpaceDocument).status ?? undefined
   if (isBookDoc(doc)) return bookDocStatus(doc.data as DocRow)
   return undefined
 }
@@ -232,6 +247,14 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
     },
     staleTime: 60_000,
   })
+  // Документы пространства (договоры, проекты, «Трек») — рядом с загрузками каналов: у
+  // пространства без смен и бухгалтерии раньше были видны только прогоны каналов.
+  const spaceQ = useQuery({
+    queryKey: ['raw-docs-space', company.id],
+    enabled: apiRuns,
+    queryFn: async () => (await getSpaceDocuments(company.id)).map(spaceToDoc),
+    staleTime: 60_000,
+  })
   const runsQ = useQuery({
     queryKey: ['raw-docs-runs', company.id],
     enabled: apiRuns,
@@ -257,9 +280,9 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
       ]
     }
     if (apiBooks) return booksQ.data ?? []
-    if (apiRuns) return runsQ.data ?? []
+    if (apiRuns) return [...(spaceQ.data ?? []), ...(runsQ.data ?? [])]
     return localDocs
-  }, [apiFuel, apiBooks, apiRuns, shiftsQ.data, receiptsQ.data, booksQ.data, runsQ.data, localDocs])
+  }, [apiFuel, apiBooks, apiRuns, shiftsQ.data, receiptsQ.data, booksQ.data, runsQ.data, spaceQ.data, localDocs])
 
   const fsTree = useMemo(() => {
     const tree = new Map<string, FsNode[]>()

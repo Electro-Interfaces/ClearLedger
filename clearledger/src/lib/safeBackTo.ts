@@ -10,6 +10,8 @@
 export function safeBackTo(from: unknown): string {
   if (typeof from !== 'string') return '/'
   if (!from.startsWith('/') || from.startsWith('//')) return '/'
+  // `/\evil.com` браузер читает как `//evil.com` — уход на чужой сайт (аудит 07.10.2026).
+  if (from.includes('\\')) return '/'
   if (from === '/login' || from.startsWith('/login?')) return '/'
   return from
 }

@@ -23,11 +23,47 @@ def _normalize_email(value: str) -> str:
 NormEmail = Annotated[EmailStr, AfterValidator(_normalize_email)]
 
 
+# Пароль человека: единое правило для регистрации, сброса и приглашения
+# (аудит 07.10.2026 — было 4–6 символов без проверок, пароль мог совпасть с email).
+MIN_PASSWORD_LEN = 10
+_COMMON_PASSWORDS: set[str] = set()
+
+
+def _load_common_passwords() -> set[str]:
+    global _COMMON_PASSWORDS
+    if _COMMON_PASSWORDS:
+        return _COMMON_PASSWORDS
+    import os
+    path = os.path.join(os.path.dirname(__file__), "common_passwords.txt")
+    try:
+        with open(path, encoding="utf-8") as f:
+            _COMMON_PASSWORDS = {line.strip().lower() for line in f if line.strip()}
+    except OSError:
+        _COMMON_PASSWORDS = set()
+    return _COMMON_PASSWORDS
+
+
+def check_password(password: str) -> str:
+    """Проверить пароль на длину, предел bcrypt и частоту. Бросает ValueError."""
+    if len(password) < MIN_PASSWORD_LEN:
+        raise ValueError(f"Пароль должен быть не короче {MIN_PASSWORD_LEN} символов")
+    if len(password.encode("utf-8")) > 200:
+        raise ValueError("Пароль слишком длинный")
+    if password.lower() in _load_common_passwords():
+        raise ValueError("Этот пароль слишком распространён — выберите другой")
+    return password
+
+
+Password = Annotated[str, AfterValidator(check_password)]
+
+
 # ===== Auth =====
 
 class LoginRequest(BaseModel):
     email: NormEmail
     password: str = Field(min_length=4)
+    # Код из приложения-аутентификатора — если у учётки включён второй фактор.
+    otp: str | None = Field(None, max_length=12)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -36,12 +72,12 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    password: str = Field(min_length=6)
+    password: Password
 
 
 class RegisterRequest(BaseModel):
     email: NormEmail
-    password: str = Field(min_length=6)
+    password: Password
     name: str = Field(min_length=1, max_length=255)
     company_id: str
 
@@ -125,7 +161,7 @@ class UserCreate(BaseModel):
     company_id: str
     email: NormEmail
     name: str = Field(min_length=1, max_length=255)   # ФИО
-    password: str = Field(min_length=6)
+    password: Password
     role: Literal["user", "admin"] = "user"
     position: str | None = Field(None, max_length=150)  # должность
     # Кем человек заводится: свой сотрудник (по умолчанию), представитель
@@ -343,7 +379,7 @@ class AcceptPreview(BaseModel):
 
 class AcceptInvite(BaseModel):
     name: str | None = Field(None, max_length=255)
-    password: str | None = Field(None, min_length=6)
+    password: Password | None = None
     # Уточнённая приглашённым должность; пусто — остаётся из приглашения.
     position: str | None = Field(None, max_length=150)
 
@@ -803,6 +839,7 @@ class ContractCreate(BaseModel):
     counterpartyId: str
     organizationId: str
     type: str
+    typeCode: str | None = None   # вид из справочника contract_types (основание по ГК)
     amountLimit: float | None = None
     kind: str | None = None
     currency: str | None = None
@@ -814,11 +851,23 @@ class ContractCreate(BaseModel):
     basis: str | None = None
     isClosed: bool = False
     scopeType: str = "unassigned"
+    signed: bool | None = None
+    signedAt: str | None = None
+    paymentTermDays: int | None = None
+    isStateContract: bool | None = None
+    igk: str | None = None
+    responsibleId: str | None = None
+    signerOur: str | None = None
+    signerOurPosition: str | None = None
+    signerCp: str | None = None
+    signerCpPosition: str | None = None
+    signerCpBasis: str | None = None
 
 
 class ContractUpdate(BaseModel):
     number: str | None = None
     date: str | None = None
+    typeCode: str | None = None
     counterpartyId: str | None = None
     organizationId: str | None = None
     type: str | None = None
@@ -833,9 +882,23 @@ class ContractUpdate(BaseModel):
     basis: str | None = None
     isClosed: bool | None = None
     scopeType: str | None = None
+    signed: bool | None = None
+    signedAt: str | None = None
+    paymentTermDays: int | None = None
+    isStateContract: bool | None = None
+    igk: str | None = None
+    responsibleId: str | None = None
+    signerOur: str | None = None
+    signerOurPosition: str | None = None
+    signerCp: str | None = None
+    signerCpPosition: str | None = None
+    signerCpBasis: str | None = None
 
 
 class ContractResponse(BaseModel):
+    typeCode: str | None = None
+    # Сколько станций у договора (для «Выбранные точки»); в списке договоров.
+    locationsCount: int | None = None
     id: str
     companyId: str
     number: str
@@ -857,6 +920,17 @@ class ContractResponse(BaseModel):
     basis: str | None = None
     isClosed: bool = False
     scopeType: str = "unassigned"
+    signed: bool | None = None
+    signedAt: str | None = None
+    paymentTermDays: int | None = None
+    isStateContract: bool | None = None
+    igk: str | None = None
+    responsibleId: Annotated[str | None, BeforeValidator(lambda v: str(v) if v else None)] = None
+    signerOur: str | None = None
+    signerOurPosition: str | None = None
+    signerCp: str | None = None
+    signerCpPosition: str | None = None
+    signerCpBasis: str | None = None
     externalRef: str | None = None
     raw: dict | None = None           # полный снимок реквизитов 1С
     createdAt: str
@@ -888,6 +962,7 @@ class SettlementResponse(BaseModel):
     role: str
     contractId: str | None = None
     counterpartyId: str | None = None
+    counterpartyName: str | None = None
     paidThrough: str | None = None
     paymentStatus: str
     basis: str | None = None
@@ -900,6 +975,8 @@ class SettlementResponse(BaseModel):
 class SettlementDetail(BaseModel):
     """Строка детализации платёжной дисциплины: станция × контрагент × договор × оплата."""
     locationId: str
+    # Ссылка на договор: по ней карточка контрагента кладёт расчёт под свой договор.
+    contractId: str | None = None
     stationCode: str | None = None
     stationName: str | None = None
     buNumber: str | None = None
@@ -1053,6 +1130,7 @@ class LocationBrief(BaseModel):
 
 
 class CounterpartyBrief(BaseModel):
+    id: str | None = None
     externalRef: str | None = None
     name: str
     inn: str | None = None

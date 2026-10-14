@@ -2838,6 +2838,23 @@ async def create_all() -> None:
             "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS supply_line_id UUID",
             "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS supply_id UUID",
             "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS supply_line_id UUID",
+            # 13.10.2026: движение ЗИП проводится документом (ezs_spare_documents — через
+            # create_all); delta — знаковое изменение остатка у корректировки и описи.
+            "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS document_id UUID",
+            "ALTER TABLE ezs_spare_part_movements ADD COLUMN IF NOT EXISTS delta NUMERIC(14,3)",
+            "CREATE INDEX IF NOT EXISTS ix_ezs_spare_part_movements_document_id "
+            "ON ezs_spare_part_movements (document_id)",
+            # 04.10.2026: движение проводится документом (накладная, акт).
+            "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS document_id UUID",
+            "CREATE INDEX IF NOT EXISTS ix_ezs_equipment_movements_document_id "
+            "ON ezs_equipment_movements (document_id)",
+            "ALTER TABLE IF EXISTS ezs_equipment_documents ADD COLUMN IF NOT EXISTS details JSONB",
+            # 13.10.2026: отмена документа движения — статус и снимок единицы до движения.
+            "ALTER TABLE IF EXISTS ezs_equipment_documents ADD COLUMN IF NOT EXISTS status VARCHAR(12) NOT NULL DEFAULT 'posted'",
+            "ALTER TABLE IF EXISTS ezs_equipment_documents ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ",
+            "ALTER TABLE IF EXISTS ezs_equipment_documents ADD COLUMN IF NOT EXISTS cancelled_by_name VARCHAR(255)",
+            "ALTER TABLE IF EXISTS ezs_equipment_documents ADD COLUMN IF NOT EXISTS cancel_reason VARCHAR(500)",
+            "ALTER TABLE ezs_equipment_movements ADD COLUMN IF NOT EXISTS prev JSONB",
             "CREATE INDEX IF NOT EXISTS ix_ezs_unit_supply "
             "ON ezs_equipment_units (company_id, supply_id)",
         ):
@@ -2856,6 +2873,7 @@ async def create_all() -> None:
         # legacy-стадии: «Согласованные» лежали в prospect, хотя там договоры на
         # подписи — это конец воронки, а не начало (см. docs/SITES_LAND_BANK_BLUEPRINT.md).
         for stmt in (
+            "ALTER TABLE ezs_site_participants ADD COLUMN IF NOT EXISTS position INTEGER",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS stage_since VARCHAR(10)",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS prev_stage VARCHAR(16)",
             "ALTER TABLE ezs_sites ADD COLUMN IF NOT EXISTS archive_reason VARCHAR(200)",
@@ -3002,6 +3020,13 @@ async def create_all() -> None:
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS works_cost NUMERIC(16,2)",
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS total_cost NUMERIC(16,2)",
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS applicant_term_months DOUBLE PRECISION",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS method VARCHAR(16)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS steps JSONB",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS reliability_category VARCHAR(8)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS load_kind VARCHAR(120)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS existing_power_kwt DOUBLE PRECISION",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS energy_supplier VARCHAR(300)",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS tp_coords VARCHAR(60)",
         ):
             await conn.execute(__import__("sqlalchemy").text(stmt))
 
@@ -3133,6 +3158,7 @@ async def create_all() -> None:
               ('agency',           'Агентский договор',         'гл. 52 ГК РФ',     'any', 80),
               ('sale',             'Купля-продажа',             'гл. 30 ГК РФ',     'any', 90),
               ('charging_service', 'Зарядка электромобилей',    'гл. 39 ГК РФ',     'out', 100),
+              ('storage',          'Хранение',                  'гл. 47 ГК РФ',     'in',  45),
               ('other',            'Иное',                       NULL,              'any', 200)
             ON CONFLICT (code) DO UPDATE
               SET label = EXCLUDED.label, gk_basis = EXCLUDED.gk_basis,
@@ -3140,6 +3166,23 @@ async def create_all() -> None:
             """,
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS type_code TEXT REFERENCES contract_types(code)",
             "CREATE INDEX IF NOT EXISTS idx_contracts_type_code ON contracts (company_id, type_code)",
+            # Реквизиты 1С: подписание, срок оплаты, госконтракт, ответственный, подписанты.
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signed BOOLEAN",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signed_at VARCHAR(20)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS payment_term_days INTEGER",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS is_state_contract BOOLEAN",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS igk VARCHAR(40)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS responsible_id UUID REFERENCES users(id) ON DELETE SET NULL",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_our VARCHAR(200)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_our_position VARCHAR(200)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_cp VARCHAR(200)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_cp_position VARCHAR(200)",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS signer_cp_basis VARCHAR(200)",
+            # Дата корп-договора приходила текстом «28.11.2023» (дата начала из справочника
+            # организаций): поле даты в форме её не показывало, сортировка и сроки шли по
+            # строке. Приводим к ISO; повторный прогон ничего не находит.
+            r"""UPDATE contracts SET date = substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2)
+                WHERE date ~ '^[0-9]{2}\.[0-9]{2}\.[0-9]{4}$'""",
             # Разбор накопленного текста. Список закрытый: что не опознано, остаётся
             # без кода и видно запросом, а не растворяется в «прочем».
             """
@@ -4659,6 +4702,8 @@ async def create_all() -> None:
         # существующих: связь задаёт делопроизводитель, а не наш перечень.
         for stmt in (
             "ALTER TABLE doc_kinds ADD COLUMN IF NOT EXISTS gate_key VARCHAR(40)",
+            # 5.3 — акт о ТП, а ключ назывался по договору: вид «Трека» едет за пунктом.
+            "UPDATE doc_kinds SET gate_key = 'tp_act' WHERE gate_key = 'tp_contract'",
         ):
             await conn.execute(_sa.text(stmt))
 
@@ -5029,6 +5074,14 @@ async def create_all() -> None:
             "ALTER TABLE conf_presence ADD COLUMN IF NOT EXISTS left_at TIMESTAMPTZ",
             "ALTER TABLE conf_presence ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ",
             "ALTER TABLE market_players ADD COLUMN IF NOT EXISTS status_note TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_logins INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ",
+            "ALTER TABLE security_events ADD COLUMN IF NOT EXISTS detail TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0",
+            "UPDATE companies SET cloud_api_key = 'sha256:' || encode(sha256(cloud_api_key::bytea), 'hex') WHERE cloud_api_key IS NOT NULL AND cloud_api_key NOT LIKE 'sha256:%'",
+            "UPDATE pulse_view_links SET token = encode(sha256(token::bytea), 'hex') WHERE length(token) <> 64",
         ):
             await conn.execute(_sa.text(stmt))
 

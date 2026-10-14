@@ -9,18 +9,27 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
 from app.auth import (
-    create_access_token,
+    GATE_COOKIE,
+    clear_gate_cookie,
+    gate_ok,
+    set_gate_cookie,
+    bearer_scheme,
+    decode_token,
+    token_for,
     get_current_user,
     hash_password,
     resolve_member_modules,
     verify_password,
 )
+from app import totp
 from app.database import get_db
 from app.services import oversight
 from app.models import Company, Counterparty, User, UserCompany
@@ -64,6 +73,49 @@ async def _pending_invite(email: str, db: AsyncSession):
     return inv
 
 
+OTP_REQUIRED = "Введите код из приложения-аутентификатора"
+
+# Блокировка учётки после серии неудачных входов (аудит 07.10.2026).
+LOCK_AFTER_FAILURES = 10
+LOCK_MINUTES = 30
+
+
+async def _is_new_place(db: AsyncSession, user: User, ip: str | None) -> bool:
+    """Вход с адреса, с которого этот человек за 90 дней не входил. Первый вход — не «новый»."""
+    from app.models import AuditEvent
+    since = datetime.now(timezone.utc) - timedelta(days=90)
+    q = select(AuditEvent.details).where(
+        AuditEvent.user_id == str(user.id), AuditEvent.action.in_(("auth.login", "auth.login_new_ip")),
+        AuditEvent.timestamp >= since).limit(500)
+    seen = [d or "" for d in (await db.execute(q)).scalars().all()]
+    if not seen:
+        return False
+    return not any((ip or "-") == d.split(" ", 1)[0] for d in seen)
+
+
+async def _notify_new_login(db: AsyncSession, user: User, ip: str | None, ua: str) -> None:
+    """Письмо владельцу: вход с нового адреса. «Это не я» — ссылка смены пароля: новый
+    пароль гасит все прежние входы (версия токена)."""
+    raw = secrets.token_urlsafe(32)
+    user.reset_token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    user.reset_token_expires = datetime.now(timezone.utc) + timedelta(hours=24)
+    from app.config import get_settings
+    base = get_settings().app_public_url.rstrip("/")
+    when = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    text = chr(10).join([
+        "В ваше пространство выполнен вход с нового адреса.", "",
+        f"Когда: {when}", f"Адрес: {ip or '—'}", f"Браузер: {ua[:200] or '—'}", "",
+        "Если это были вы — ничего делать не нужно.",
+        "Если НЕ вы — смените пароль по ссылке (действует сутки), все входы в учётную запись "
+        "при этом будут сброшены:",
+        f"{base}/reset-password/{raw}",
+    ])
+    try:
+        await email_service.send_notice([user.email], "Вход в пространство с нового адреса", text)
+    except Exception:  # noqa: BLE001 — письмо не должно ронять вход
+        logging.getLogger("clearledger.auth").warning("Письмо о новом входе не ушло: %s", user.email, exc_info=True)
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Вход по email + пароль. Возвращает JWT."""
@@ -89,7 +141,33 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
                    "приходят вам от участников.",
         )
 
-    if user is None or not verify_password(body.password, user.password_hash):
+    from app import guard
+    now = datetime.now(timezone.utc)
+    # Учётка под блокировкой после серии неудач: пароль даже не проверяем, а ответ —
+    # тот же, что на неверный пароль, чтобы не подсказывать подбирающему (аудит 07.10.2026).
+    locked = user is not None and user.locked_until is not None and user.locked_until > now
+    password_ok = (not locked and user is not None and verify_password(body.password, user.password_hash))
+    # Второй фактор: пароль верен, но кода нет — просим код, попытку неудачей не считаем
+    # (это обычный первый шаг входа). Неверный код — неудача, как неверный пароль.
+    if password_ok and user.totp_enabled and not body.otp:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=OTP_REQUIRED,
+                            headers={"X-Need-OTP": "1"})
+    otp_ok = (not password_ok or not user.totp_enabled
+              or totp.verify(totp.unseal(user.totp_secret), body.otp or ""))
+    if not password_ok or not otp_ok:
+        # Подбор пароля к одной учётной записи — эпизод журнала безопасности и тревога,
+        # даже если адреса меняются (лимит по адресу такой подбор не видит).
+        if guard.note_login_failed(body.email, guard.client_ip(request)) >= guard.LOGIN_ALERT:
+            await guard.record("login_failed", request, detail=f"учётная запись {body.email[:120]}",
+                               who=body.email[:120], company_id=user.company_id if user else None)
+        if user is not None and not locked:
+            user.failed_logins = (user.failed_logins or 0) + 1
+            if user.failed_logins >= LOCK_AFTER_FAILURES:
+                user.failed_logins = 0
+                user.locked_until = now + timedelta(minutes=LOCK_MINUTES)
+                await guard.record("account_locked", request, who=user.email, company_id=user.company_id,
+                                   detail=f"{LOCK_AFTER_FAILURES} неудачных входов подряд — вход закрыт на {LOCK_MINUTES} мин.")
+            await db.commit()
         # Неудачную попытку по СУЩЕСТВУЮЩЕМУ email пишем в журнал его компании:
         # админ должен видеть, что в учётку ломятся. Несуществующие email не пишем —
         # журнал не место для перебора чужих адресов.
@@ -105,12 +183,18 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     # Отметка входа: без неё карта пространства показывала «не заходили» даже у тех, кто
     # работает каждый день — раньше last_seen_at обновлял только веб-сокет чата.
     user.last_seen_at = datetime.now(timezone.utc)
+    user.failed_logins = 0
+    user.locked_until = None
+    ip = _client_ip(request)
     if user.company_id is not None:
+        new_place = await _is_new_place(db, user, ip)
         await log_audit(db, actor=user, company_id=user.company_id,
-                        action="auth.login", target=_client_ip(request))
+                        action="auth.login_new_ip" if new_place else "auth.login", target=ip)
+        if new_place:
+            await _notify_new_login(db, user, ip, request.headers.get("user-agent") or "")
     await db.commit()
 
-    token = create_access_token(str(user.id), user.email)
+    token = token_for(user)
     return TokenResponse(
         access_token=token,
         user=_user_response(user),
@@ -139,6 +223,11 @@ async def demo_session(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Демо-вход не включён")
     if request.headers.get("X-Demo-Context") != "cabinet":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Демо-вход — только из кабинета")
+    # Заголовок подделывается, поэтому при заданном общем секрете кромка кабинета
+    # обязана прислать и его (аудит 07.10.2026).
+    secret = os.environ.get("DEMO_SPACE_SECRET") or ""
+    if secret and not secrets.compare_digest(request.headers.get("X-Demo-Secret") or "", secret):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Демо-вход — только из кабинета")
 
     user = (await db.execute(select(User).where(
         func.lower(User.email) == email))).scalar_one_or_none()
@@ -148,7 +237,7 @@ async def demo_session(
     user.last_seen_at = datetime.now(timezone.utc)
     await db.commit()
     return TokenResponse(
-        access_token=create_access_token(str(user.id), user.email),
+        access_token=token_for(user),
         user=_user_response(user),
     )
 
@@ -242,6 +331,11 @@ async def reset_password(
     user.password_hash = hash_password(body.password)
     user.reset_token_hash = None
     user.reset_token_expires = None
+    user.failed_logins = 0
+    user.locked_until = None
+    # Новый пароль гасит все прежние входы: кто вошёл со старым (утёкшим) паролем,
+    # остаётся без сессии.
+    user.token_version = (user.token_version or 0) + 1
     if user.company_id is not None:
         await log_audit(db, actor=user, company_id=user.company_id,
                         action="auth.password_reset")
@@ -291,7 +385,7 @@ async def register(
     db.add(UserCompany(user_id=user.id, company_id=company_uuid))
     await db.flush()
 
-    token = create_access_token(str(user.id), user.email)
+    token = token_for(user)
     return TokenResponse(
         access_token=token,
         user=_user_response(user),
@@ -299,13 +393,110 @@ async def register(
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(current_user: User = Depends(get_current_user)):
-    """Продлить сессию — выдаёт новый JWT на основе текущего валидного."""
-    token = create_access_token(str(current_user.id), current_user.email)
+async def refresh_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    current_user: User = Depends(get_current_user),
+):
+    """Продлить сессию — новый JWT с тем же моментом входа по паролю: продление не
+    тянет сессию дальше `MAX_SESSION_DAYS` от настоящего входа (аудит 07.10.2026)."""
+    payload = decode_token(credentials.credentials) if credentials else {}
+    token = token_for(current_user, payload.get("at"))
     return TokenResponse(
         access_token=token,
         user=_user_response(current_user),
     )
+
+
+@router.post("/gate", status_code=204)
+async def gate_issue(
+    response: Response,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    current_user: User = Depends(get_current_user),
+):
+    """Поставить метку входа по действующему токену — после входа и у тех, кто вошёл
+    до введения меток: им не нужно входить заново."""
+    set_gate_cookie(response, credentials.credentials)
+    response.status_code = 204
+    return response
+
+
+@router.get("/gate-check", status_code=204)
+async def gate_check(request: Request, db: AsyncSession = Depends(get_db)):
+    """Для nginx стека (auth_request): 204 — отдать приложение, 401 — публичную сборку."""
+    if not await gate_ok(request.cookies.get(GATE_COOKIE), db):
+        return Response(status_code=401)
+    return Response(status_code=204)
+
+
+@router.post("/logout", status_code=204)
+async def logout(response: Response):
+    """Снять метку входа (токен в браузере снимает само приложение)."""
+    clear_gate_cookie(response)
+    response.status_code = 204
+    return response
+
+
+@router.post("/logout-all")
+async def logout_all(response: Response, current_user: User = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)):
+    """Выйти со всех устройств: все выданные токены этой учётной записи гаснут."""
+    clear_gate_cookie(response)
+    current_user.token_version = (current_user.token_version or 0) + 1
+    if current_user.company_id is not None:
+        await log_audit(db, actor=current_user, company_id=current_user.company_id, action="auth.logout_all")
+    await db.commit()
+    return {"ok": True}
+
+
+class OtpCode(BaseModel):
+    code: str = Field(min_length=6, max_length=12)
+
+
+@router.get("/2fa")
+async def twofa_status(current_user: User = Depends(get_current_user)):
+    """Включён ли второй фактор входа у текущего пользователя."""
+    return {"enabled": bool(current_user.totp_enabled)}
+
+
+@router.post("/2fa/setup")
+async def twofa_setup(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Начать настройку: новый секрет. Включится только после подтверждения кодом."""
+    if current_user.totp_enabled:
+        raise HTTPException(409, "Второй фактор уже включён — сначала отключите его")
+    secret = totp.new_secret()
+    current_user.totp_secret = totp.seal(secret)
+    await db.commit()
+    from app.config import get_settings
+    issuer = get_settings().app_public_url.replace("https://", "").split("/")[0] or "Пространство"
+    return {"secret": secret, "uri": totp.uri(secret, current_user.email, issuer)}
+
+
+@router.post("/2fa/enable")
+async def twofa_enable(body: OtpCode, current_user: User = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
+    """Подтвердить настройку кодом из приложения — с этого момента вход требует код."""
+    if not current_user.totp_secret or not totp.verify(totp.unseal(current_user.totp_secret), body.code):
+        raise HTTPException(400, "Код не подошёл — проверьте время на телефоне и введите свежий")
+    current_user.totp_enabled = True
+    if current_user.company_id is not None:
+        await log_audit(db, actor=current_user, company_id=current_user.company_id, action="auth.2fa_enabled")
+    await db.commit()
+    return {"enabled": True}
+
+
+@router.post("/2fa/disable")
+async def twofa_disable(body: OtpCode, current_user: User = Depends(get_current_user),
+                        db: AsyncSession = Depends(get_db)):
+    """Отключить второй фактор — только с действующим кодом: с одного украденного токена
+    защиту не снять."""
+    if not current_user.totp_enabled or not totp.verify(totp.unseal(current_user.totp_secret), body.code):
+        raise HTTPException(400, "Код не подошёл")
+    current_user.totp_enabled = False
+    current_user.totp_secret = None
+    if current_user.company_id is not None:
+        await log_audit(db, actor=current_user, company_id=current_user.company_id, action="auth.2fa_disabled")
+    await db.commit()
+    return {"enabled": False}
 
 
 @router.get("/me", response_model=MeResponse)

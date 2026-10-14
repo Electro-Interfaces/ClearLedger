@@ -2,10 +2,11 @@
  * «Парк оборудования» — главная панель складского учёта оборудования ЭЗС
  * (раздел «Управленческий» → группа «Оборудование», профиль energy/РусГидро).
  *
- * Единица = станция-железка складского контура (серийник, вендор, модель,
- * состояние жизненного цикла). Карточки создаются при закупке/демонтаже/импорте
- * — НЕ для всего работающего парка, поэтому KPI «В эксплуатации» подписан
- * «прошедшие через склад». Матрица переходов живёт на бэке: сервер отдаёт
+ * Единица = складской предмет (станция, шкаф, трансформатор…): серийник, вендор,
+ * модель, состояние жизненного цикла. Раздел ведёт то, что на складском учёте;
+ * станция, введённая в эксплуатацию, с него выбывает и дальше живёт в приложении
+ * эксплуатации станций — здесь она показана отдельным отбором и возвращается
+ * только демонтажем. Матрица переходов живёт на бэке: сервер отдаёт
  * allowedOps[] в каждой единице, фронт просто рисует кнопки доступных операций.
  *
  * Состав: KPI-ряд · тулбар (поиск + фильтры + действия) · реестр единиц ·
@@ -14,10 +15,9 @@
  */
 
 import { useMemo, useState, type ReactNode } from 'react'
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Card, CardContent } from '@/components/ui/card'
-import { StationLink } from '@/components/common/StationLink'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -30,18 +30,27 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   ArrowDown, ArrowUp, ChevronsUpDown, Loader2, Pencil, Plus, Search,
   Trash2, Unplug, Upload,
 } from 'lucide-react'
 import { Kpi } from '@/components/workspace/analytics/Kpi'
-import { useEquipmentScope, scopeKeyOf } from './useEquipmentScope'
+import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
+import { StationLink } from '@/components/common/StationLink'
+import { allPages, invalidateEquipment, useEquipmentScope, scopeKeyOf } from './useEquipmentScope'
+import { EquipmentDocCard } from './EquipmentDocumentsSection'
+import { ExportXlsxButton, Pager } from './equipmentShared'
 import { ApiError } from '@/services/apiClient'
 import { getLocations, loadLocations } from '@/services/locationService'
 import type { ServiceLocation } from '@/types/location'
+import { MovementDocumentDialog } from './MovementDocumentDialog'
 import {
   applyUnitMovement, createUnit, deleteUnit, dismantleFromSite,
   getEquipmentOverview, getUnit, importUnitsXlsx, listUnits, patchUnit,
-  CUSTODIAN_LABELS, UNIT_OP_META, UNIT_STATE_META,
+  CUSTODIAN_LABELS, UNIT_KIND_LABELS, UNIT_OP_META, UNIT_STATE_META, unitKindLabel,
   type EquipmentUnit, type ImportReport, type MovementPayload,
   type UnitDetail, type UnitInPayload, type UnitOp, type UnitState,
 } from '@/services/equipmentService'
@@ -67,14 +76,7 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-/** Место единицы кликом ведёт на станцию, когда единица стоит на объекте. */
-function PlaceCell({ unit }: { unit: EquipmentUnit }) {
-  const текст = placeLabel(unit)
-  if (!unit.location) return <>{текст}</>
-  return <StationLink station={unit.location.id}>{текст}</StationLink>
-}
-
-/** «Где находится»: локация | держатель с меткой | «—». */
+/** «Где находится»: склад или станция | держатель с меткой | «—». */
 function placeLabel(u: EquipmentUnit): string {
   if (u.location) return u.location.name
   if (u.custodianName) {
@@ -94,16 +96,18 @@ function stateBadge(state: UnitState, label?: string) {
   )
 }
 
-/** Инвалидация всех витрин оборудования после мутаций. */
-function invalidateEquipment(qc: QueryClient) {
-  for (const key of ['eq-units', 'eq-unit', 'eq-overview', 'eq-movements', 'eq-warehouses']) {
-    void qc.invalidateQueries({ queryKey: [key] })
-  }
+/** Место единицы: станция — ссылкой на её карточку в эксплуатации, остальное текстом. */
+function Place({ u }: { u: EquipmentUnit }) {
+  return u.location?.type === 'ev_charging'
+    ? <StationLink station={u.location.id}>{u.location.name}</StationLink>
+    : <>{placeLabel(u)}</>
 }
+
+const docSuffix = (n?: string | null) => (n ? ` · документ № ${n}` : '')
 
 const ALL_STATES = Object.keys(UNIT_STATE_META) as UnitState[]
 
-// ─── выбор локации (Select + опц. Input-фильтр — площадок ~600) ─────────────
+// ─── выбор склада или станции (Select + опц. Input-фильтр — станций ~600) ───
 
 function LocPicker({ items, value, onChange, placeholder, withFilter }: {
   items: ServiceLocation[]
@@ -181,9 +185,9 @@ function MovementDialog({ companyId, unit, op, warehouses, sites, onClose }: {
 
   const mut = useMutation({
     mutationFn: (body: MovementPayload) => applyUnitMovement(companyId, unit.id, body),
-    onSuccess: () => {
-      toast.success(`${UNIT_OP_META[op].label}: операция проведена`)
-      invalidateEquipment(qc)
+    onSuccess: (res) => {
+      toast.success(`${UNIT_OP_META[op].label}: операция проведена${docSuffix(res.documentNumber)}`)
+      void invalidateEquipment(qc)
       onClose()
     },
     onError: (e) => toast.error('Операция не проведена', { description: errMsg(e) }),
@@ -196,7 +200,7 @@ function MovementDialog({ companyId, unit, op, warehouses, sites, onClose }: {
         if (toLocationId === unit.location?.id) return 'Склад-получатель совпадает с текущим'
         return null
       case 'to_installation':
-        return toLocationId ? null : 'Выберите площадку ЭЗС'
+        return toLocationId ? null : 'Выберите станцию установки'
       case 'from_repair':
       case 'dismantle':
         return toLocationId ? null : 'Выберите склад-получатель'
@@ -264,7 +268,7 @@ function MovementDialog({ companyId, unit, op, warehouses, sites, onClose }: {
         <div className="space-y-3 pt-1">
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             Текущее: {stateBadge(unit.state, unit.stateLabel)}
-            <span>· <PlaceCell unit={unit} /></span>
+            <span>· {placeLabel(unit)}</span>
           </div>
 
           {op === 'transfer' && (
@@ -277,17 +281,17 @@ function MovementDialog({ companyId, unit, op, warehouses, sites, onClose }: {
 
           {op === 'reserve' && (
             <div className="space-y-1.5">
-              <Label>Резерв под площадку (необязательно)</Label>
+              <Label>Резерв под станцию (необязательно)</Label>
               <LocPicker items={sites} value={reservedForId} onChange={setReservedForId}
-                placeholder="Площадка ЭЗС" withFilter />
+                placeholder="Станция" withFilter />
             </div>
           )}
 
           {op === 'to_installation' && (
             <div className="space-y-1.5">
-              <Label>Площадка ЭЗС</Label>
+              <Label>Станция установки</Label>
               <LocPicker items={sites} value={toLocationId} onChange={setToLocationId}
-                placeholder="Выберите площадку" withFilter />
+                placeholder="Выберите станцию" withFilter />
             </div>
           )}
 
@@ -296,8 +300,8 @@ function MovementDialog({ companyId, unit, op, warehouses, sites, onClose }: {
               <input type="checkbox" checked={syncPassport}
                 onChange={(e) => setSyncPassport(e.target.checked)} className="size-4 accent-primary" />
               <div>
-                <div className="text-sm font-medium">Обновить паспорт площадки из карточки</div>
-                <div className="text-xs text-muted-foreground">Мощность, коннекторы, вендор/модель — в паспорт L2 площадки</div>
+                <div className="text-sm font-medium">Обновить паспорт станции из карточки</div>
+                <div className="text-xs text-muted-foreground">Мощность, коннекторы, производитель и модель — в паспорт станции</div>
               </div>
             </label>
           )}
@@ -355,15 +359,15 @@ function MovementDialog({ companyId, unit, op, warehouses, sites, onClose }: {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label>Локация (необязательно)</Label>
+                <Label>Склад или станция (необязательно)</Label>
                 <LocPicker items={allLocations} value={toLocationId} onChange={setToLocationId}
-                  placeholder="Склад или площадка" withFilter />
+                  placeholder="Склад или станция" withFilter />
               </div>
             </>
           )}
 
           {/* Общие поля всех операций */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Дата операции</Label>
               <Input type="date" value={occurredOn} onChange={(e) => setOccurredOn(e.target.value)} />
@@ -397,7 +401,7 @@ interface EditState {
   serialNumber: string; vendor: string; model: string; stationType: string
   powerKwt: string; connectorsCount: string; connectorTypes: string
   inventoryNumber: string; supplier: string; purchaseDoc: string
-  purchaseDate: string; warrantyUntil: string; isUsed: boolean; notes: string
+  purchaseDate: string; warrantyUntil: string; notes: string
 }
 
 function toEditState(u: UnitDetail): EditState {
@@ -408,7 +412,7 @@ function toEditState(u: UnitDetail): EditState {
     connectorTypes: u.connectorTypes ?? '', inventoryNumber: u.inventoryNumber ?? '',
     supplier: u.supplier ?? '', purchaseDoc: u.purchaseDoc ?? '',
     purchaseDate: u.purchaseDate ?? '', warrantyUntil: u.warrantyUntil ?? '',
-    isUsed: u.isUsed, notes: u.notes ?? '',
+    notes: u.notes ?? '',
   }
 }
 
@@ -426,7 +430,7 @@ function editToPayload(e: EditState): Partial<UnitInPayload> {
     connectorsCount: numOrNull(e.connectorsCount), connectorTypes: sOrNull(e.connectorTypes),
     inventoryNumber: sOrNull(e.inventoryNumber), supplier: sOrNull(e.supplier),
     purchaseDoc: sOrNull(e.purchaseDoc), purchaseDate: e.purchaseDate || null,
-    warrantyUntil: e.warrantyUntil || null, isUsed: e.isUsed, notes: sOrNull(e.notes),
+    warrantyUntil: e.warrantyUntil || null, notes: sOrNull(e.notes),
   }
 }
 
@@ -440,7 +444,7 @@ function EF({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
+export function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
   companyId: string
   unitId: string
   warehouses: ServiceLocation[]
@@ -451,19 +455,29 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
   const [edit, setEdit] = useState<EditState | null>(null)
   const [movementOp, setMovementOp] = useState<UnitOp | null>(null)
   const [confirmDel, setConfirmDel] = useState(false)
+  const [docId, setDocId] = useState<string | null>(null)
 
   const detQ = useQuery({
-    queryKey: ['eq-unit', companyId, unitId],
+    queryKey: ['equipment', 'unit', companyId, unitId],
     queryFn: () => getUnit(companyId, unitId),
   })
   const unit = detQ.data
+  const inOperation = unit?.state === 'in_operation'
+  // Станция в эксплуатации ведётся не здесь: из складских операций ей остаются
+  // демонтаж (возврат на склад) и корректировка учёта.
+  const ops = (unit?.allowedOps ?? []).filter((op) => !inOperation || op === 'dismantle' || op === 'correction')
+  // Сервер удаляет только ошибочно заведённую карточку: одно поступление без
+  // документа и без поставки. В остальных случаях кнопку не показываем.
+  const first = unit?.movements[0]
+  const deletable = !!unit && unit.movements.length === 1 && first?.op === 'receipt'
+    && !first.documentId && !first.supplyId && !unit.supplyId
 
   const patchMut = useMutation({
     mutationFn: (body: Partial<UnitInPayload>) => patchUnit(companyId, unitId, body),
     onSuccess: () => {
       toast.success('Паспорт единицы обновлён')
       setEdit(null)
-      invalidateEquipment(qc)
+      void invalidateEquipment(qc)
     },
     onError: (e) => toast.error('Не удалось сохранить паспорт', { description: errMsg(e) }),
   })
@@ -472,7 +486,7 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
     mutationFn: () => deleteUnit(companyId, unitId),
     onSuccess: () => {
       toast.success('Карточка единицы удалена')
-      invalidateEquipment(qc)
+      void invalidateEquipment(qc)
       onClose()
     },
     onError: (e) => toast.error('Удаление невозможно', { description: errMsg(e) }),
@@ -542,11 +556,6 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
                     <Input type="date" value={edit.warrantyUntil} onChange={(e) => setEdit({ ...edit, warrantyUntil: e.target.value })} />
                   </EF>
                 </div>
-                <label className="flex w-fit cursor-pointer items-center gap-2 text-sm">
-                  <input type="checkbox" checked={edit.isUsed}
-                    onChange={(e) => setEdit({ ...edit, isUsed: e.target.checked })} className="size-4 accent-primary" />
-                  Б/у (бывшая в эксплуатации)
-                </label>
                 <EF label="Заметки">
                   <Textarea value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} rows={2} />
                 </EF>
@@ -560,7 +569,14 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
               </div>
             ) : (
               <>
+                {inOperation && (
+                  <p className="rounded-md border border-sky-400/40 bg-sky-500/10 px-3 py-2 text-xs">
+                    Установлена на станции <b><Place u={unit} /></b> и ведётся в приложении эксплуатации
+                    станций. На складской учёт вернётся демонтажем.
+                  </p>
+                )}
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  <KV label="Вид" value={unitKindLabel(unit.kind)} />
                   <KV label="Серийный №" value={unit.serialNumber ?? undefined} />
                   <KV label="Инв. №" value={unit.inventoryNumber ?? undefined} />
                   <KV label="Производитель" value={unit.vendor ?? unit.vendorRaw ?? undefined} />
@@ -576,22 +592,32 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
                   <KV label="Документ закупки" value={unit.purchaseDoc ?? undefined} />
                   <KV label="Из поставки" value={unit.supplyNumber ? `№ ${unit.supplyNumber}` : undefined} />
                   <KV label="Стоимость" value={unit.purchaseAmount != null ? `${nf0.format(unit.purchaseAmount)} ₽` : undefined} />
+                  <KV label="В том числе НДС" value={unit.vatAmount != null ? `${nf0.format(unit.vatAmount)} ₽` : undefined} />
                   <KV label="Дата закупки" value={unit.purchaseDate ? fmtD(unit.purchaseDate) : undefined} />
                   <KV label="Гарантия до" value={unit.warrantyUntil ? fmtD(unit.warrantyUntil) : undefined} />
-                  <KV label="Местонахождение" value={<PlaceCell unit={unit} />} />
-                  <KV label="Резерв под" value={unit.reservedFor?.name ?? undefined} />
+                  <KV label="Местонахождение" value={<Place u={unit} />} />
+                  <KV label="Резерв под станцию" value={unit.reservedFor
+                    ? <StationLink station={unit.reservedFor.id}>{unit.reservedFor.name}</StationLink> : undefined} />
                   <KV label="Склад происхождения" value={unit.originLocation?.name ?? undefined} />
+                  <KV label="Хранитель" value={unit.keeper ?? undefined} />
+                  <KV label="Регион" value={unit.region ?? undefined} />
+                  <KV label="Владелец" value={unit.ownerName ?? undefined} />
+                  <KV label="Бухгалтерский №" value={unit.accountingNo ?? undefined} />
+                  <KV label="Внешний №" value={unit.externalNo ?? undefined} />
+                  {!unit.dataConfirmed && (
+                    <KV label="Данные не подтверждены" value={unit.unconfirmedReason ?? 'поставщик не подтвердил данные'} />
+                  )}
                   <KV label="Заметки" value={unit.notes ?? undefined} />
                 </div>
 
                 {/* Операции жизненного цикла — только разрешённые сервером */}
                 <div className="flex flex-wrap items-center gap-2 border-t border-border/50 pt-3">
-                  {unit.allowedOps.map((op) => (
+                  {ops.map((op) => (
                     <Button key={op} variant="outline" size="sm" onClick={() => setMovementOp(op)}>
                       {UNIT_OP_META[op]?.label ?? op}
                     </Button>
                   ))}
-                  {unit.allowedOps.length === 0 && (
+                  {ops.length === 0 && (
                     <span className="text-xs text-muted-foreground">Операции недоступны (финальное состояние)</span>
                   )}
                   <Button variant="ghost" size="sm" className="ml-auto"
@@ -617,13 +643,15 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
                       <th className="p-2 text-left font-medium">Откуда → Куда</th>
                       <th className="p-2 text-left font-medium">Состояние</th>
                       <th className="p-2 text-left font-medium">Контрагент</th>
+                      <th className="p-2 text-left font-medium">Документ</th>
                       <th className="p-2 text-left font-medium">Основание</th>
+                      <th className="p-2 text-left font-medium">Комментарий</th>
                       <th className="p-2 text-left font-medium whitespace-nowrap">Кто</th>
                     </tr>
                   </thead>
                   <tbody>
                     {unit.movements.length === 0 && (
-                      <tr><td colSpan={7} className="p-4 text-center text-muted-foreground">Движений пока нет</td></tr>
+                      <tr><td colSpan={9} className="p-4 text-center text-muted-foreground">Движений пока нет</td></tr>
                     )}
                     {unit.movements.map((m) => (
                       <tr key={m.id} className="border-b border-border/30">
@@ -634,7 +662,14 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
                           {(m.fromStateLabel ?? '—')} → {(m.toStateLabel ?? '—')}
                         </td>
                         <td className="p-2">{m.counterparty ?? '—'}</td>
+                        <td className="p-2 whitespace-nowrap font-mono">
+                          {m.documentId
+                            ? <button type="button" className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                              title="Открыть документ" onClick={() => setDocId(m.documentId ?? null)}>{m.documentNumber ?? 'документ'}</button>
+                            : m.supplyNumber ? `поставка № ${m.supplyNumber}` : '—'}
+                        </td>
                         <td className="p-2">{m.basis ?? '—'}</td>
+                        <td className="p-2 text-muted-foreground">{m.comment ?? '—'}</td>
                         <td className="p-2 text-muted-foreground">{m.createdBy ?? '—'}</td>
                       </tr>
                     ))}
@@ -643,15 +678,15 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
               </div>
             </div>
 
-            {/* Удаление карточки (бэкенд вернёт 409 при движениях >1) */}
             <div className="flex items-center justify-between border-t border-border/50 pt-3">
-              <Button variant="ghost" size="sm"
-                className="text-muted-foreground hover:text-destructive"
-                disabled={delMut.isPending}
-                onClick={() => (confirmDel ? delMut.mutate() : setConfirmDel(true))}>
-                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                {confirmDel ? 'Точно удалить карточку?' : 'Удалить карточку'}
-              </Button>
+              {deletable ? (
+                <Button variant="ghost" size="sm"
+                  className="text-muted-foreground hover:text-destructive"
+                  disabled={delMut.isPending} onClick={() => setConfirmDel(true)}>
+                  <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                  Удалить карточку
+                </Button>
+              ) : <span />}
               <div className="text-[11px] text-muted-foreground">
                 Создана {fmtD(unit.createdAt)} · обновлена {fmtD(unit.updatedAt)}
               </div>
@@ -660,8 +695,33 @@ function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClose }: {
         )}
 
         {unit && movementOp && (
-          <MovementDialog companyId={companyId} unit={unit} op={movementOp}
-            warehouses={warehouses} sites={sites} onClose={() => setMovementOp(null)} />
+          // Операция проводится документом (номер, договор, сдал/принял); корректировка
+          // учёта — прежней формой: ей нужны новое состояние и обязательный комментарий.
+          movementOp === 'correction'
+            ? <MovementDialog companyId={companyId} unit={unit} op={movementOp}
+              warehouses={warehouses} sites={sites} onClose={() => setMovementOp(null)} />
+            : <MovementDocumentDialog companyId={companyId} units={[unit]} op={movementOp}
+              warehouses={warehouses} sites={sites} onClose={() => setMovementOp(null)} />
+        )}
+        {docId && <EquipmentDocCard companyId={companyId} id={docId} onClose={() => setDocId(null)} />}
+        {unit && (
+          <AlertDialog open={confirmDel} onOpenChange={setConfirmDel}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Удалить карточку единицы?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Будет удалена карточка «{[unit.serialNumber, unit.vendor, unit.model].filter(Boolean).join(' · ') || 'без номера'}»
+                  вместе с записью о её поступлении {fmtD(first?.occurredOn)}{first?.toLocation ? ` на «${first.toLocation.name}»` : ''}.
+                  Вернуть удалённую карточку нельзя. Так убирают только ошибочно заведённую единицу;
+                  выбывшее оборудование оформляют списанием.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Не удалять</AlertDialogCancel>
+                <AlertDialogAction onClick={() => delMut.mutate()}>Удалить карточку</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         )}
       </DialogContent>
     </Dialog>
@@ -676,6 +736,7 @@ function UnitFormDialog({ companyId, warehouses, onClose }: {
   onClose: () => void
 }) {
   const qc = useQueryClient()
+  const [kind, setKind] = useState('station')
   const [serial, setSerial] = useState('')
   const [vendor, setVendor] = useState('')
   const [model, setModel] = useState('')
@@ -697,8 +758,10 @@ function UnitFormDialog({ companyId, warehouses, onClose }: {
   const mut = useMutation({
     mutationFn: (body: UnitInPayload) => createUnit(companyId, body),
     onSuccess: (u) => {
-      toast.success(`Единица создана${u.serialNumber ? `: ${u.serialNumber}` : ''}`)
-      invalidateEquipment(qc)
+      toast.success(`Единица создана${u.serialNumber ? `: ${u.serialNumber}` : ''}`, {
+        description: u.documentNumber ? `Оформлен приходный ордер № ${u.documentNumber}` : undefined,
+      })
+      void invalidateEquipment(qc)
       onClose()
     },
     onError: (e) => toast.error('Не удалось создать единицу', { description: errMsg(e) }),
@@ -707,7 +770,7 @@ function UnitFormDialog({ companyId, warehouses, onClose }: {
   function submit() {
     if (!warehouseId) { toast.error('Выберите склад поступления'); return }
     mut.mutate({
-      serialNumber: sOrNull(serial), vendor: sOrNull(vendor), model: sOrNull(model),
+      kind, serialNumber: sOrNull(serial), vendor: sOrNull(vendor), model: sOrNull(model),
       stationType: sOrNull(stype), powerKwt: numOrNull(power),
       connectorsCount: numOrNull(connCount), connectorTypes: sOrNull(connTypes),
       inventoryNumber: sOrNull(inv), supplier: sOrNull(supplier), purchaseDoc: sOrNull(pdoc),
@@ -727,6 +790,14 @@ function UnitFormDialog({ companyId, warehouses, onClose }: {
         </DialogHeader>
         <div className="space-y-3 pt-1">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <EF label="Вид">
+              <Select value={kind} onValueChange={setKind}>
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(UNIT_KIND_LABELS).map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </EF>
             <EF label="Серийный №">
               <Input value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="SN-…" />
             </EF>
@@ -778,12 +849,12 @@ function UnitFormDialog({ companyId, warehouses, onClose }: {
                 placeholder="Выберите склад" />
               {warehouses.length === 0 && (
                 <div className="text-xs text-amber-600 dark:text-amber-400">
-                  Складов нет — создайте объект типа «Склад» в разделе «Объекты»
+                  Складов нет — создайте склад на вкладке «Склады и остатки»
                 </div>
               )}
             </div>
             <div className="space-y-1.5">
-              <Label>Дата операции</Label>
+              <Label>Дата поступления</Label>
               <Input type="date" value={occurredOn} onChange={(e) => setOccurredOn(e.target.value)} />
             </div>
           </div>
@@ -834,18 +905,17 @@ function DismantleDialog({ companyId, warehouses, sites, onClose }: {
       setDecommissioned,
     }),
     onSuccess: (res) => {
-      toast.success('Демонтаж проведён', {
-        description: res.unitCreated ? 'Карточка создана из паспорта площадки' : undefined,
+      toast.success(`Демонтаж проведён${docSuffix(res.documentNumber)}`, {
+        description: res.unitCreated ? 'Карточка создана из паспорта станции' : undefined,
       })
-      invalidateEquipment(qc)
-      void qc.invalidateQueries({ queryKey: ['eq-locations'] })
+      void invalidateEquipment(qc)
       onClose()
     },
     onError: (e) => toast.error('Демонтаж не проведён', { description: errMsg(e) }),
   })
 
   function submit() {
-    if (!siteId) { toast.error('Выберите площадку ЭЗС'); return }
+    if (!siteId) { toast.error('Выберите станцию'); return }
     if (!warehouseId) { toast.error('Выберите склад-приёмник'); return }
     mut.mutate()
   }
@@ -859,12 +929,12 @@ function DismantleDialog({ companyId, warehouses, sites, onClose }: {
         <div className="space-y-3 pt-1">
           <p className="text-xs text-muted-foreground">
             Если у станции ещё нет карточки в складском контуре — она будет создана
-            автоматически из паспорта площадки.
+            автоматически из паспорта станции.
           </p>
           <div className="space-y-1.5">
-            <Label>Площадка ЭЗС</Label>
+            <Label>Станция</Label>
             <LocPicker items={sites} value={siteId} onChange={setSiteId}
-              placeholder="Выберите площадку" withFilter />
+              placeholder="Выберите станцию" withFilter />
           </div>
           <div className="space-y-1.5">
             <Label>Склад-приёмник</Label>
@@ -889,8 +959,8 @@ function DismantleDialog({ companyId, warehouses, sites, onClose }: {
             <input type="checkbox" checked={setDecommissioned}
               onChange={(e) => setSetDecommissioned(e.target.checked)} className="size-4 accent-primary" />
             <div>
-              <div className="text-sm font-medium">Отметить площадку выведенной из эксплуатации</div>
-              <div className="text-xs text-muted-foreground">Статус площадки в справочнике объектов будет обновлён</div>
+              <div className="text-sm font-medium">Отметить станцию выведенной из эксплуатации</div>
+              <div className="text-xs text-muted-foreground">Статус станции в справочнике объектов будет обновлён</div>
             </div>
           </label>
         </div>
@@ -906,7 +976,7 @@ function DismantleDialog({ companyId, warehouses, sites, onClose }: {
   )
 }
 
-// ─── ImportDialog: импорт реестра единиц из Excel (dry-run → импорт) ────────
+// ─── ImportDialog: импорт реестра единиц из Excel (проверка → импорт) ───────
 
 function ImportReportView({ report }: { report: ImportReport }) {
   return (
@@ -915,7 +985,7 @@ function ImportReportView({ report }: { report: ImportReport }) {
         <Badge variant="outline" className={report.dryRun
           ? 'border-blue-400/50 text-blue-600 dark:text-blue-300/80'
           : 'border-emerald-400/50 text-emerald-600 dark:text-emerald-300/80'}>
-          {report.dryRun ? 'Проверка (dry-run)' : 'Импорт выполнен'}
+          {report.dryRun ? 'Проверка без записи' : 'Импорт выполнен'}
         </Badge>
         <span>Создано: <b className="tabular-nums">{nf0.format(report.created)}</b></span>
         <span>Обновлено: <b className="tabular-nums">{nf0.format(report.updated)}</b></span>
@@ -994,8 +1064,7 @@ function ImportDialog({ companyId, onClose }: { companyId: string; onClose: () =
       const rep = await importUnitsXlsx(companyId, file, dryRun)
       setReport(rep)
       if (!dryRun) {
-        invalidateEquipment(qc)
-        void qc.invalidateQueries({ queryKey: ['eq-locations'] })
+        void invalidateEquipment(qc)
         toast.success(`Импорт завершён: создано ${rep.created}, обновлено ${rep.updated}`)
       }
     } catch (e) {
@@ -1013,15 +1082,15 @@ function ImportDialog({ companyId, onClose }: { companyId: string; onClose: () =
         </DialogHeader>
         <div className="space-y-3 pt-1">
           <p className="text-xs text-muted-foreground">
-            Реестр оборудования .xlsx: серийники, вендоры, модели, склады, состояния.
-            Сначала выполните проверку (dry-run) — файл будет разобран без записи.
+            Реестр оборудования .xlsx: серийные номера, производители, модели, склады, состояния.
+            Сначала нажмите «Проверить без записи» — файл будет разобран, но в учёт ничего не попадёт.
           </p>
           <Input type="file" accept=".xlsx"
             onChange={(e) => { setFile(e.target.files?.[0] ?? null); setReport(null) }} />
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => void run(true)} disabled={!file || busy}>
               {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Проверить (dry-run)
+              Проверить без записи
             </Button>
             <Button size="sm" onClick={() => void run(false)} disabled={!file || busy}>
               {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
@@ -1038,44 +1107,65 @@ function ImportDialog({ companyId, onClose }: { companyId: string; onClose: () =
   )
 }
 
-// ─── реестр: сортируемая шапка ──────────────────────────────────────────────
+// ─── реестр ─────────────────────────────────────────────────────────────────
 
 type SortKey =
   | 'serialNumber' | 'vendor' | 'model' | 'powerKwt' | 'state'
   | 'place' | 'inventoryNumber' | 'updatedAt'
 
-function sortVal(u: EquipmentUnit, k: SortKey): string | number {
-  switch (k) {
-    case 'serialNumber': return u.serialNumber ?? ''
-    case 'vendor': return u.vendor ?? u.vendorRaw ?? ''
-    case 'model': return u.model ?? ''
-    case 'powerKwt': return u.powerKwt ?? -1
-    case 'state': return UNIT_STATE_META[u.state]?.label ?? u.state
-    case 'place': return placeLabel(u)
-    case 'inventoryNumber': return u.inventoryNumber ?? ''
-    case 'updatedAt': return u.updatedAt ?? ''
-  }
+const PAGE_SIZE = 100
+/** Сервер не проводит документ больше чем на столько единиц. */
+const DOC_LIMIT = 500
+
+/**
+ * Что показывает реестр. Складской учёт — это то, что лежит, зарезервировано,
+ * монтируется или чинится. Введённая в эксплуатацию станция с него выбыла и
+ * ведётся в приложении эксплуатации; списанное и возвращённое — выбыло совсем.
+ */
+type View = 'stock' | 'operation' | 'gone'
+const VIEWS: Record<View, { label: string; states: UnitState[] }> = {
+  stock: { label: 'На складском учёте', states: ['in_stock_new', 'in_stock_used', 'reserved', 'in_installation', 'in_repair'] },
+  operation: { label: 'Переданы в эксплуатацию', states: ['in_operation'] },
+  gone: { label: 'Выбыли', states: ['written_off', 'returned_to_vendor'] },
 }
+const VIEW_TABS = (Object.keys(VIEWS) as View[]).map((k) => ({ k, label: VIEWS[k].label }))
+
+const EXPORT_COLS = ['Вид', 'Серийный №', 'Инв. №', 'Производитель', 'Модель', 'Тип', 'кВт', 'Коннекторов',
+  'Типы коннекторов', 'Состояние', 'Где находится', 'Резерв под станцию', 'Хранитель', 'Регион', 'Владелец',
+  'Бухгалтерский №', 'Внешний №', 'Поставщик', 'Документ закупки', 'Дата закупки', 'Гарантия до',
+  'Стоимость', 'НДС', 'Данные подтверждены', 'Заметки', 'Обновлено']
+const exportRow = (u: EquipmentUnit) => [unitKindLabel(u.kind), u.serialNumber, u.inventoryNumber, u.vendor ?? u.vendorRaw,
+  u.model, u.stationType, u.powerKwt, u.connectorsCount, u.connectorTypes, u.stateLabel, placeLabel(u),
+  u.reservedFor?.name, u.keeper, u.region, u.ownerName, u.accountingNo, u.externalNo, u.supplier, u.purchaseDoc,
+  u.purchaseDate, u.warrantyUntil, u.purchaseAmount, u.vatAmount, u.dataConfirmed ? 'да' : (u.unconfirmedReason ?? 'нет'),
+  u.notes, u.updatedAt?.slice(0, 10)]
 
 // ─── главная панель ─────────────────────────────────────────────────────────
 
 export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
   // Фильтры реестра (q применяется по Enter/кнопке)
+  const [view, setView] = useState<View>('stock')
   const [qInput, setQInput] = useState('')
   const [q, setQ] = useState('')
   const [state, setState] = useState('all')
   const [vendor, setVendor] = useState('all')
   const [warehouseFilter, setWarehouseFilter] = useState('all')
+  const [kind, setKind] = useState('all')
 
   // Диалоги
   const [detailsId, setDetailsId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [dismantleOpen, setDismantleOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  // Отмеченные единицы — для одного документа на несколько (накладная, акт).
+  // Храним сами единицы: отметка переживает листание, а документу нужны их данные.
+  const [picked, setPicked] = useState<Map<string, EquipmentUnit>>(new Map())
+  const [marking, setMarking] = useState(false)
+  const [docOpen, setDocOpen] = useState(false)
 
-  // Справочник локаций (гидрация из бэкенда; склады + площадки ЭЗС)
+  // Справочник складов и станций (гидрация из бэкенда)
   const locQ = useQuery({
-    queryKey: ['eq-locations', companyId],
+    queryKey: ['equipment', 'locations', companyId],
     queryFn: () => loadLocations(companyId),
     staleTime: 60_000,
   })
@@ -1095,38 +1185,57 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
   const scope = useEquipmentScope()
   const scopeKey = scopeKeyOf(scope)
 
+  // Производители для отбора и «ремонт дольше 30 дней» — по контуру.
   const overviewQ = useQuery({
-    queryKey: ['eq-overview', companyId, scopeKey],
+    queryKey: ['equipment', 'overview', companyId, scopeKey],
     queryFn: () => getEquipmentOverview(companyId, scope),
   })
   const overview = overviewQ.data
-
-  const unitsQ = useQuery({
-    queryKey: ['eq-units', companyId, { state, vendor, warehouseFilter, q, scopeKey }],
-    queryFn: () => listUnits({
-      companyId,
-      state: state === 'all' ? undefined : state,
-      vendor: vendor === 'all' ? undefined : vendor,
-      locationId: warehouseFilter === 'all' ? undefined : warehouseFilter,
-      q: q || undefined,
-      scope,
-    }),
-  })
 
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'updatedAt', dir: 'desc' })
   const toggleSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }))
 
-  const rows = useMemo(() => {
-    const items = unitsQ.data?.items ?? []
-    const dir = sort.dir === 'asc' ? 1 : -1
-    return [...items].sort((a, b) => {
-      const va = sortVal(a, sort.key)
-      const vb = sortVal(b, sort.key)
-      if (typeof va === 'number' && typeof vb === 'number') return dir * (va - vb)
-      return dir * String(va).localeCompare(String(vb), 'ru')
-    })
-  }, [unitsQ.data, sort])
+  const params = {
+    companyId,
+    state: state === 'all' ? VIEWS[view].states.join(',') : state,
+    vendor: vendor === 'all' ? undefined : vendor,
+    locationId: warehouseFilter === 'all' ? undefined : warehouseFilter,
+    kind: kind === 'all' ? undefined : kind,
+    q: q || undefined,
+    sort: sort.key, dir: sort.dir,
+    scope,
+  }
+  // Страница привязана к отбору: сменился отбор, сортировка или контур — снова первая.
+  const listKey = JSON.stringify([view, state, vendor, warehouseFilter, kind, q, sort, scopeKey])
+  const [pg, setPg] = useState({ key: listKey, page: 1 })
+  const page = pg.key === listKey ? pg.page : 1
+
+  const unitsQ = useQuery({
+    queryKey: ['equipment', 'units', companyId, listKey, page],
+    queryFn: () => listUnits({ ...params, page, pageSize: PAGE_SIZE }),
+    placeholderData: keepPreviousData,
+  })
+  const rows = unitsQ.data?.items ?? []
+  const total = unitsQ.data?.total ?? 0
+  const allUnits = () => allPages((p) => listUnits({ ...params, page: p, pageSize: 1000 }))
+
+  async function markAll() {
+    setMarking(true)
+    try {
+      const all = await allUnits()
+      setPicked(new Map(all.map((u) => [u.id, u])))
+    } catch (e) {
+      toast.error('Не удалось отметить все единицы', { description: errMsg(e) })
+    } finally {
+      setMarking(false)
+    }
+  }
+  const togglePicked = (units: EquipmentUnit[], on: boolean) => setPicked((prev) => {
+    const next = new Map(prev)
+    for (const u of units) { if (on) next.set(u.id, u); else next.delete(u.id) }
+    return next
+  })
 
   const H = ({ k, children, right }: { k: SortKey; children: ReactNode; right?: boolean }) => {
     const active = sort.key === k
@@ -1143,33 +1252,40 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
     )
   }
 
-  const cs = (k: UnitState) => overview?.countsByState?.[k] ?? 0
-  const kpiVal = (n: number) => (overviewQ.isLoading ? '—' : nf0.format(n))
-  const filtersActive = q !== '' || state !== 'all' || vendor !== 'all' || warehouseFilter !== 'all'
-  const total = unitsQ.data?.total ?? 0
-  // Позиции реестра, по которым поставщик ещё не назвал количество или порты:
-  // показывать их остатком наравне с принятыми значит выдать ожидание за факт.
-  const unconfirmed = rows.filter((u) => !u.dataConfirmed).length
+  // Плитки считает сервер по всему отбору (без отбора по состоянию), а не браузер
+  // по загруженной странице.
+  const counts = unitsQ.data?.counts
+  const cs = (k: UnitState) => counts?.byState?.[k] ?? 0
+  const sum = (v: View) => VIEWS[v].states.reduce((a, s) => a + cs(s), 0)
+  const kpiVal = (n: number) => (counts ? nf0.format(n) : '—')
+  const filtersActive = q !== '' || state !== 'all' || vendor !== 'all' || warehouseFilter !== 'all' || kind !== 'all'
+  const unconfirmed = counts?.unconfirmed ?? 0
 
   return (
     <div className="p-4 space-y-4">
-      {/* KPI-ряд по состояниям жизненного цикла */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
+      {/* Складской итог — без переданных в эксплуатацию и выбывших; они справочно, справа */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-8">
+        <Kpi label="На складском учёте" value={kpiVal(sum('stock'))}
+          sub={filtersActive ? 'по текущему отбору' : undefined} />
         <Kpi label="На складах новые" value={kpiVal(cs('in_stock_new'))} />
-        {unconfirmed > 0 && (
-          <Kpi label="Ждут подтверждения" value={nf0.format(unconfirmed)}
-            sub="поставщик не назвал порты или статус"
-            cls="text-amber-600 dark:text-amber-500" />
-        )}
         <Kpi label="На складах б/у" value={kpiVal(cs('in_stock_used'))} />
         <Kpi label="Резерв" value={kpiVal(cs('reserved'))} />
         <Kpi label="В монтаже" value={kpiVal(cs('in_installation'))} />
-        <Kpi label="В эксплуатации" value={kpiVal(cs('in_operation'))} sub="прошедшие через склад" />
         <Kpi label="В ремонте" value={kpiVal(cs('in_repair'))}
           sub={`дольше 30 дн: ${overview ? nf0.format(overview.inRepairOver30d) : '—'}`}
           cls={overview && overview.inRepairOver30d > 0 ? 'text-amber-600 dark:text-amber-300/90' : undefined} />
-        <Kpi label="Списано/возврат" value={kpiVal(cs('written_off') + cs('returned_to_vendor'))} />
+        <Kpi label="Переданы в эксплуатацию" value={kpiVal(sum('operation'))} sub="справочно: ведутся в эксплуатации станций" />
+        <Kpi label="Выбыли" value={kpiVal(sum('gone'))} sub="справочно: списаны или возвращены" />
       </div>
+
+      <PanelViewTabs tabs={VIEW_TABS} value={view} label="Показать"
+        onChange={(k) => { setView(k as View); setState('all') }} />
+      {view === 'operation' && (
+        <p className="text-xs text-muted-foreground">
+          Эти станции установлены и введены в эксплуатацию: со складского учёта они выбыли и ведутся в приложении
+          эксплуатации станций — нажмите на название станции, чтобы открыть её карточку. Сюда единица вернётся демонтажем.
+        </p>
+      )}
 
       {/* Тулбар: поиск + фильтры + действия */}
       <div className="flex flex-wrap items-center gap-2">
@@ -1183,12 +1299,24 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
           </Button>
         </div>
 
-        <Select value={state} onValueChange={setState}>
-          <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue /></SelectTrigger>
+        {VIEWS[view].states.length > 1 && (
+          <Select value={state} onValueChange={setState}>
+            <SelectTrigger className="h-8 w-[190px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-xs">Все состояния</SelectItem>
+              {VIEWS[view].states.map((s) => (
+                <SelectItem key={s} value={s} className="text-xs">{UNIT_STATE_META[s].label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        <Select value={kind} onValueChange={setKind}>
+          <SelectTrigger className="h-8 w-[170px] text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all" className="text-xs">Все состояния</SelectItem>
-            {ALL_STATES.map((s) => (
-              <SelectItem key={s} value={s} className="text-xs">{UNIT_STATE_META[s].label}</SelectItem>
+            <SelectItem value="all" className="text-xs">Все виды</SelectItem>
+            {Object.entries(UNIT_KIND_LABELS).map(([k, l]) => (
+              <SelectItem key={k} value={k} className="text-xs">{l}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -1198,24 +1326,29 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
           <SelectContent>
             <SelectItem value="all" className="text-xs">Все производители</SelectItem>
             {(overview?.countsByVendor ?? []).map((v) => (
-              <SelectItem key={v.vendor} value={v.vendor} className="text-xs">
-                {v.vendor} · {nf0.format(v.count)}
-              </SelectItem>
+              <SelectItem key={v.vendor} value={v.vendor} className="text-xs">{v.vendor}</SelectItem>
             ))}
           </SelectContent>
         </Select>
 
-        <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
-          <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-xs">Все склады</SelectItem>
-            {warehouses.map((w) => (
-              <SelectItem key={w.id} value={w.id} className="text-xs">{w.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {view !== 'operation' && (
+          <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
+            <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-xs">Все склады</SelectItem>
+              {warehouses.map((w) => (
+                <SelectItem key={w.id} value={w.id} className="text-xs">{w.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
         <div className="ml-auto flex flex-wrap gap-2">
+          {picked.size > 0 && (
+            <Button size="sm" className="h-8" onClick={() => setDocOpen(true)}>
+              Оформить документ ({picked.size})
+            </Button>
+          )}
           <Button size="sm" className="h-8" onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4 mr-1.5" />
             Добавить единицу
@@ -1228,8 +1361,36 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
             <Upload className="h-4 w-4 mr-1.5" />
             Импорт из Excel
           </Button>
+          <ExportXlsxButton title={`Парк оборудования · ${VIEWS[view].label}`}
+            load={async () => [{ name: 'Парк оборудования', columns: EXPORT_COLS, rows: (await allUnits()).map(exportRow) }]} />
         </div>
       </div>
+
+      {/* Отметки: сколько отмечено из скольких подходит под отбор */}
+      {total > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span>Отмечено {nf0.format(picked.size)} из {nf0.format(total)} по отбору</span>
+          <Button variant="link" size="sm" className="h-auto p-0 text-xs" disabled={marking} onClick={() => void markAll()}>
+            {marking && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+            Отметить все {nf0.format(total)}
+          </Button>
+          {picked.size > 0 && (
+            <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setPicked(new Map())}>
+              Снять отметки
+            </Button>
+          )}
+          {picked.size > DOC_LIMIT && (
+            <span className="text-amber-700 dark:text-amber-400">
+              В один документ входит не больше {DOC_LIMIT} единиц — сузьте отбор
+            </span>
+          )}
+          {unconfirmed > 0 && (
+            <span className="ml-auto text-amber-700 dark:text-amber-400">
+              Ждут подтверждения поставщика: {nf0.format(unconfirmed)}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Реестр единиц */}
       {unitsQ.isLoading ? (
@@ -1238,8 +1399,9 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
         </div>
       ) : unitsQ.isError ? (
         <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            Не удалось загрузить реестр: {errMsg(unitsQ.error)}
+          <CardContent className="flex flex-wrap items-center justify-center gap-3 py-10 text-sm text-muted-foreground">
+            <span>Не удалось загрузить реестр: {errMsg(unitsQ.error)}</span>
+            <Button variant="outline" size="sm" onClick={() => void unitsQ.refetch()}>Повторить</Button>
           </CardContent>
         </Card>
       ) : rows.length === 0 ? (
@@ -1247,7 +1409,9 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             {filtersActive
               ? 'Ничего не найдено по заданным фильтрам.'
-              : 'Единиц оборудования пока нет — добавьте вручную, импортируйте реестр или проведите демонтаж со станции.'}
+              : view === 'stock'
+                ? 'На складском учёте пока ничего нет — добавьте единицу, импортируйте реестр или проведите демонтаж со станции.'
+                : view === 'operation' ? 'Переданных в эксплуатацию единиц нет.' : 'Выбывших единиц нет.'}
           </CardContent>
         </Card>
       ) : (
@@ -1256,12 +1420,17 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b bg-muted/40 text-muted-foreground">
+                  <th className="w-8 p-2">
+                    <input type="checkbox" aria-label="Отметить все на странице" title="Отметить все на странице" className="cursor-pointer"
+                      checked={rows.every((r) => picked.has(r.id))}
+                      onChange={(e) => togglePicked(rows, e.target.checked)} />
+                  </th>
                   <H k="serialNumber">Серийный №</H>
                   <H k="vendor">Производитель</H>
                   <H k="model">Модель</H>
                   <H k="powerKwt" right>кВт</H>
                   <H k="state">Состояние</H>
-                  <H k="place">Местонахождение</H>
+                  <H k="place">{view === 'operation' ? 'Станция' : 'Где находится'}</H>
                   <H k="inventoryNumber">Инв. №</H>
                   <H k="updatedAt" right>Обновлено</H>
                 </tr>
@@ -1270,6 +1439,10 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
                 {rows.map((u) => (
                   <tr key={u.id} onClick={() => setDetailsId(u.id)}
                     className="cursor-pointer border-b border-border/30 hover:bg-muted/30">
+                    <td className="p-2" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" aria-label={`Отметить ${u.serialNumber ?? u.model ?? 'единицу'}`} className="cursor-pointer"
+                        checked={picked.has(u.id)} onChange={(e) => togglePicked([u], e.target.checked)} />
+                    </td>
                     <td className="p-2 font-mono font-medium whitespace-nowrap">
                       {u.serialNumber ?? '—'}
                       {!u.dataConfirmed && (
@@ -1281,10 +1454,15 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
                       )}
                     </td>
                     <td className="p-2 whitespace-nowrap">{u.vendor ?? u.vendorRaw ?? '—'}</td>
-                    <td className="p-2 max-w-[220px] truncate">{u.model ?? '—'}</td>
+                    <td className="p-2 max-w-[220px] truncate">
+                      {u.model ?? '—'}
+                      {u.kind && u.kind !== 'station' && (
+                        <span className="ml-1.5 text-muted-foreground">· {unitKindLabel(u.kind)}</span>
+                      )}
+                    </td>
                     <td className="p-2 text-right font-mono">{u.powerKwt != null ? nf0.format(u.powerKwt) : '—'}</td>
                     <td className="p-2 whitespace-nowrap">{stateBadge(u.state, u.stateLabel)}</td>
-                    <td className="p-2 max-w-[260px] truncate"><PlaceCell unit={u} /></td>
+                    <td className="p-2 max-w-[260px] truncate"><Place u={u} /></td>
                     <td className="p-2 font-mono whitespace-nowrap">{u.inventoryNumber ?? '—'}</td>
                     <td className="p-2 text-right font-mono text-muted-foreground whitespace-nowrap">{fmtD(u.updatedAt)}</td>
                   </tr>
@@ -1296,12 +1474,20 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
       )}
 
       {total > 0 && (
-        <div className="text-[11px] text-muted-foreground">
-          Единиц: {nf0.format(total)}{filtersActive ? ' (по текущему отбору)' : ''}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+          <span>
+            Единиц: {nf0.format(total)}{filtersActive ? ' (по текущему отбору)' : ''}
+            {total > rows.length && ` · показаны ${nf0.format((page - 1) * PAGE_SIZE + 1)}–${nf0.format((page - 1) * PAGE_SIZE + rows.length)}`}
+          </span>
+          <Pager page={page} pages={Math.ceil(total / PAGE_SIZE)} onPage={(p) => setPg({ key: listKey, page: p })} />
         </div>
       )}
 
       {/* Диалоги */}
+      {docOpen && (
+        <MovementDocumentDialog companyId={companyId} units={[...picked.values()]}
+          warehouses={warehouses} sites={sites} onClose={() => setDocOpen(false)} onDone={() => setPicked(new Map())} />
+      )}
       {detailsId && (
         <UnitDetailsDialog companyId={companyId} unitId={detailsId}
           warehouses={warehouses} sites={sites} onClose={() => setDetailsId(null)} />

@@ -40,7 +40,7 @@ class RunRequest(BaseModel):
 
 
 @router.post("/run")
-async def run(req: RunRequest):
+async def run(req: RunRequest, current_user: User = Depends(get_current_user)):
     """Исполнить разрез над потоками → ReconResult."""
     rule = _RULES.get(req.rule_id)
     if not rule:
@@ -51,6 +51,20 @@ async def run(req: RunRequest):
 class DiffRequest(BaseModel):
     engine: dict[str, Any]   # результат ReconcileEngine
     golden: dict[str, Any]   # результат императивного движка (golden)
+
+
+# Узлы внешних систем сверки, куда сервер может ходить по адресу из запроса.
+# Добавить узел — переменная окружения RECON_ALLOWED_HOSTS (через запятую).
+RECON_ALLOWED_HOSTS = {"pos.autooplata.ru"}
+
+
+def _check_external_url(url: str) -> None:
+    import os
+    from urllib.parse import urlparse
+    allowed = RECON_ALLOWED_HOSTS | {h.strip().lower() for h in os.environ.get("RECON_ALLOWED_HOSTS", "").split(",") if h.strip()}
+    u = urlparse(url or "")
+    if u.scheme != "https" or (u.hostname or "").lower() not in allowed:
+        raise HTTPException(400, "Адрес внешней системы не из разрешённого списка")
 
 
 class RunRuleRequest(BaseModel):
@@ -80,6 +94,9 @@ async def run_rule_endpoint(
     """
     cid = await assert_company_member(req.company_id, current_user, db) if req.company_id else None
     chid = uuid.UUID(req.channel_id) if req.channel_id else None
+    # Сервер ходит по адресу из запроса с переданными логином и паролем — без списка
+    # это запрос во внутреннюю сеть от имени сервера (SSRF, аудит 07.10.2026).
+    _check_external_url(req.base_url)
     from app.services.reconciliation_proxy import MissingCompanyConnection
     try:
         return await run_rule_live(
@@ -94,7 +111,7 @@ async def run_rule_endpoint(
 
 
 @router.get("/selfchecks")
-async def list_selfcheck_rules():
+async def list_selfcheck_rules(current_user: User = Depends(get_current_user)):
     """Справочник правил самосверки L2 (внутренняя ось, без внешних источников)."""
     return list_selfchecks()
 
@@ -138,7 +155,7 @@ async def selfcheck_run(
 
 
 @router.post("/diff")
-async def diff(req: DiffRequest):
+async def diff(req: DiffRequest, current_user: User = Depends(get_current_user)):
     """Сверка engine ↔ golden по summary (§6.4). identical=True → можно заменять."""
     e = req.engine.get("summary", {})
     g = req.golden.get("summary", {})

@@ -51,7 +51,8 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     code: 'projects', route: '/projects', label: 'Проекты',
     // Два раздела: «Работа» (ведение) и «Аналитика» (сводки). В левой рельсе они
     // стоят рядом с пространством, пункты каждого — во второй панели.
-    modes: ['projects', 'projects_analytics'], paths: [],
+    // Третий — «Интеграции»: проекты подключения партнёров, у них свой реестр и отчёт.
+    modes: ['projects', 'projects_analytics', 'projects_integration'], paths: [],
   },
   {
     // Эксплуатация — железо и его состояние. Три раздела в рельсе: «Мониторинг» (что с

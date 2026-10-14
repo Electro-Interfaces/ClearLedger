@@ -24,7 +24,7 @@ from app.services.ezs_checklist import PHASE_LABELS_DOC, WAIVE_FORBIDDEN, gates_
 from app.services.ezs_checklist_integration import gates_by_stage as integration_gates
 from app.services.ezs_sites import (
     STAGE_LABELS, STAGE_ORDER, _site_out, format_project_no, parse_project_seq,
-    project_no_prefix,
+    project_no_prefix, stage_label,
 )
 from app.services.ezs_changes import make_change
 
@@ -198,6 +198,7 @@ def gate_state(site: EzsSite, stage: str | None = None,
                     "phase": it.get("phase"),
                     "phaseLabel": phase_labels.get(it.get("phase", ""), "")})
     blocking = [i["label"] for i in out if i["required"] and not i["done"] and not i["waived"]]
+    stale_before = []
     if site.kind == "integration" and st in STAGE_ORDER:
         from app.services.ezs_checklist_integration import TASKS
         from app.services.project_integration import stale
@@ -206,6 +207,7 @@ def gate_state(site: EzsSite, stage: str | None = None,
             mark = (site.gates or {}).get(task["stage"], {}).get(task["key"], {})
             if task["stage"] in previous and task.get("required") and stale(site, task["key"], mark):
                 blocking.append(f"Требует повторного подтверждения: {task['label']}")
+                stale_before.append({"key": task["key"], "label": task["label"], "stage": task["stage"]})
     waived = [{"key": i["key"], "label": i["label"], "by": i["waivedBy"],
                "at": i["waivedAt"], "reason": i["waiveReason"]}
               for i in out if i["waived"]]
@@ -215,6 +217,9 @@ def gate_state(site: EzsSite, stage: str | None = None,
         "done": sum(1 for i in out if i["done"]),
         "total": len(out),
         "blocking": blocking,          # что держит переход вперёд
+        # пункты прошлых стадий, у которых изменились данные после подтверждения: держат
+        # переход, хотя пункты текущей стадии закрыты — шапка хода называет их (06.10.2026)
+        "staleBefore": stale_before,
         # Пройденное с послаблением называется вслух: иначе «переход открыт»
         # выглядит как «всё собрано», а собрано не всё.
         "waived": waived,
@@ -333,8 +338,8 @@ async def log_event(db: AsyncSession, site: EzsSite, kind: str, *, text: str | N
         from app.audit import log_audit
 
         name = site.project_no or site.title or site.address or "проект"
-        details = ({"из": STAGE_LABELS.get(from_stage or "", from_stage or "—"),
-                    "в": STAGE_LABELS.get(to_stage or "", to_stage or "—")}
+        details = ({"из": stage_label(from_stage, site.kind) or "—",
+                    "в": stage_label(to_stage, site.kind) or "—"}
                    if kind == "stage" else {"пункт" if kind == "gate" else "событие": text or ""})
         await log_audit(db, actor=user, company_id=site.company_id,
                         action=f"project.{kind}", target=name, details=details)
@@ -508,6 +513,11 @@ async def create_site(db: AsyncSession, company_id, payload: dict[str, Any],
     for f, v in fields.items():
         setattr(site, f, _coerce(f, v))
     site.manual_fields = sorted(fields.keys())
+    # Руководитель по умолчанию — создатель, пока не назначат другого (решение МАГа
+    # 05.10.2026): без этого ни один из четырёх интеграционных проектов не имел
+    # руководителя, и пункт 1.4 держал каждый новый проект.
+    if not site.owner_user_id and user is not None:
+        site.owner_user_id = user.id
     region_norm, region = resolver.resolve(site.region, site.city)
     site.region_norm, site.region_id = region_norm, (region.id if region else None)
     site.dedup_key = _dedup_key(
@@ -617,7 +627,7 @@ async def set_stage(db: AsyncSession, site: EzsSite, stage: str, *, reason: str 
     else:
         old_archive_reason = site.archive_reason
 
-    note = f"{STAGE_LABELS.get(prev, prev)} → {STAGE_LABELS.get(stage, stage)}"
+    note = f"{stage_label(prev, site.kind)} → {stage_label(stage, site.kind)}"
     if reason:
         note += f". {reason}"
     # Пропущенные пункты гейта пишем в историю: через месяц никто не вспомнит,
@@ -916,17 +926,37 @@ async def add_touch(db: AsyncSession, site: EzsSite, text: str, kind: str,
     return {"id": str(ev.id)}
 
 
-async def site_events(db: AsyncSession, company_id, site_id, limit: int = 200) -> list[dict[str, Any]]:
-    rows = (await db.execute(
-        select(EzsSiteEvent, User.name, User.email)
-        .outerjoin(User, User.id == EzsSiteEvent.author_user_id)
-        .where(EzsSiteEvent.company_id == company_id, EzsSiteEvent.site_id == site_id)
-        .order_by(EzsSiteEvent.created_at.desc()).limit(limit))).all()
+def relabel_stage_text(text: str | None, from_stage: str | None, to_stage: str | None, kind: str | None) -> str | None:
+    """Начало текста «стадия → стадия» — подписями своего вида работ.
+
+    До 04.10.2026 смена стадии записывалась общими подписями, и у интеграции в
+    журнале стояло «Решение → Оформление земли». Запись не переписываем —
+    переподписываем при показе по кодам стадий из того же события.
+    """
+    if not text or not (from_stage or to_stage):
+        return text
+    old = f"{STAGE_LABELS.get(from_stage or '', from_stage)} → {STAGE_LABELS.get(to_stage or '', to_stage)}"
+    if not text.startswith(old):
+        return text
+    return f"{stage_label(from_stage, kind)} → {stage_label(to_stage, kind)}" + text[len(old):]
+
+
+async def site_events(db: AsyncSession, company_id, site_id, limit: int = 200,
+                      only_kind: str | None = None) -> list[dict[str, Any]]:
+    """История проекта. `only_kind` — один вид событий без общего лимита в 200: Ганту
+    нужны ВСЕ смены стадии, а у живого проекта их вытесняют касания и правки."""
+    kind = (await db.execute(select(EzsSite.kind).where(EzsSite.id == site_id))).scalar_one_or_none()
+    q = (select(EzsSiteEvent, User.name, User.email)
+         .outerjoin(User, User.id == EzsSiteEvent.author_user_id)
+         .where(EzsSiteEvent.company_id == company_id, EzsSiteEvent.site_id == site_id))
+    if only_kind:
+        q, limit = q.where(EzsSiteEvent.kind == only_kind), 2000
+    rows = (await db.execute(q.order_by(EzsSiteEvent.created_at.desc()).limit(limit))).all()
     return [{
-        "id": str(e.id), "kind": e.kind, "text": e.text,
+        "id": str(e.id), "kind": e.kind,
+        "text": relabel_stage_text(e.text, e.from_stage, e.to_stage, kind) if e.kind == "stage" else e.text,
         "fromStage": e.from_stage, "toStage": e.to_stage,
-        "fromLabel": STAGE_LABELS.get(e.from_stage or "", e.from_stage),
-        "toLabel": STAGE_LABELS.get(e.to_stage or "", e.to_stage),
+        "fromLabel": stage_label(e.from_stage, kind), "toLabel": stage_label(e.to_stage, kind),
         "author": name or email, "createdAt": e.created_at.isoformat() if e.created_at else None,
     } for e, name, email in rows]
 

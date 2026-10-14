@@ -18,6 +18,7 @@ import { Loader2, Check, Circle, Play, AlertTriangle, XCircle, Minus, PauseCircl
 import { getProjectRoadmap, getProjectCase, type SiteDetail } from '@/services/sitesService'
 import { Button } from '@/components/ui/button'
 import { ProjectFlowChart } from './ProjectFlowChart'
+import { IntegrationStageMap } from './IntegrationStageMap'
 
 const STATE_META: Record<string, { icon: typeof Check; cls: string }> = {
   done: { icon: Check, cls: 'text-emerald-600 dark:text-emerald-400' },
@@ -38,7 +39,7 @@ const PHASE_BLOCKS = [
   { key: 'operate', n: 4, label: 'Эксплуатация' },
 ]
 
-export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; companyId: string }) {
+export function ProjectRoadmapTab({ site, companyId, onStage }: { site: SiteDetail; companyId: string; onStage?: (code: string) => void }) {
   const q = useQuery({
     queryKey: ['site-roadmap', companyId, site.id],
     queryFn: () => getProjectRoadmap(companyId, site.id),
@@ -65,6 +66,10 @@ export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; compa
     )
   }
   const d = q.data
+  // Интеграция: только карта стадий. Полоса «по стадиям воронки», граф со стрелками,
+  // список этапов и «Субсидия» стройки были тремя пересказами одного и ещё одним
+  // чужим блоком (замечание МАГа 06.10.2026).
+  if (site.kind === 'integration') return <IntegrationStageMap site={site} companyId={companyId} onStage={onStage} />
   // Этап, на котором проект стоит сейчас (или на котором остановлен).
   const activePhase = d.steps.find((s) => s.state === 'current' || s.state === 'stopped')?.phase ?? null
 
@@ -97,6 +102,8 @@ export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; compa
 
       {/* Схема маршрута: стадии, стрелки и фактический путь проекта. Стоит первой —
           это ответ на «покажи всю картину целиком», ради которого сюда заходят. */}
+      {/* Интеграция — карта стадий вместо графа со стрелками и списка этапов ниже:
+          одна картина, а не три (замечание МАГа 06.10.2026). */}
       {(qCase.data?.exists || qCase.data?.preview) && (
         <section className="rounded-lg border border-border">
           <div className="px-3 py-2 border-b bg-muted/40">
@@ -109,12 +116,13 @@ export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; compa
                 : 'Проект ещё не ведётся по маршруту, поэтому пройденного нет: это весь путь целиком — какие стадии впереди и какими кнопками они проходятся. Начните вести проект на вкладке «Работа», и схема начнёт раскрашиваться.'}
             </div>
           </div>
-          <div className="p-3"><ProjectFlowChart state={qCase.data} /></div>
+          {onStage && <p className="px-3 pt-2 text-xs text-muted-foreground">Нажмите на стадию — откроется её работа: чек-лист и что не закрыто. Стадия проекта при этом не меняется.</p>}
+          <div className="p-3"><ProjectFlowChart state={qCase.data} onStage={onStage} /></div>
         </section>
       )}
 
       {/* Этапы проекта: стадии + свои параллельные треки под общим заголовком */}
-      {(site.kind === 'integration' ? d.phases.filter((p) => p.key !== 'closed').map((p, i) => ({ ...p, n: i + 1 })) : PHASE_BLOCKS).map((ph) => {
+      {PHASE_BLOCKS.map((ph) => {
         const stages = d.steps.filter((s) => s.phase === ph.key)
         const tracks = d.tracks.filter((t) => t.phase === ph.key)
         const isActive = activePhase === ph.key
@@ -145,7 +153,7 @@ export function ProjectRoadmapTab({ site, companyId }: { site: SiteDetail; compa
                       <span className={`text-sm ${['waiting', 'unknown'].includes(s.state) ? 'text-muted-foreground' : 'font-medium'}`}>
                         {s.label}
                       </span>
-                      <span className="text-xs text-muted-foreground">гейт {s.gateDone}/{s.gateTotal}</span>
+                      <span className="text-xs text-muted-foreground">чек-лист {s.gateDone}/{s.gateTotal}</span>
                       {s.date && <span className="text-xs text-muted-foreground">с {s.date}</span>}
                     </div>
                     {s.state === 'current' && s.items.length > 0 && (

@@ -394,9 +394,12 @@ class L2Cache:
         for c in (await db.execute(
             select(Counterparty).where(Counterparty.company_id == company_id)
         )).scalars().all():
-            nn = _normname(c.name)
-            if nn and nn not in self.cp_by_norm:
-                self.cp_by_norm[nn] = c
+            # Имена слитых дублей (raw.mergedNames): иначе повторная загрузка реестра
+            # с прежним написанием заведёт дубль заново (чистка 05.10.2026).
+            for name in [c.name, *((c.raw or {}).get("mergedNames") or [])]:
+                nn = _normname(name)
+                if nn and nn not in self.cp_by_norm:
+                    self.cp_by_norm[nn] = c
         contracts = (await db.execute(
             select(Contract).where(Contract.company_id == company_id)
         )).scalars().all()
@@ -468,12 +471,13 @@ class L2Cache:
                 contract = self.contr_by_key.get((cid, str(number), ctype))
                 if contract:
                     break
-        if contract is None:
-            for cid in ids:
-                same = self.contr_by_cp_type.get((cid, ctype))
-                if same:
-                    contract = same[0]
-                    break
+        if contract is None and not number:
+            # Без номера — договор контрагента этого вида, только если он единственный.
+            # Раньше брался первый попавшийся и при несовпавшем номере: так договор
+            # «4» «Разрешения администрации» встал на 21 станцию (чистка 05.10.2026).
+            same = [c for cid in ids for c in self.contr_by_cp_type.get((cid, ctype), [])]
+            if len(same) == 1:
+                contract = same[0]
         if contract is None:
             # Без номера обязательство всё равно есть: часть площадок стоит на
             # муниципальной земле по разрешению или сервитуту, и раньше такие строки

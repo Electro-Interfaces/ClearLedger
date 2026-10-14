@@ -71,6 +71,7 @@ from app.routers import (
     station_console_router,
     onec_router,
     equipment_router,
+    equipment_reports_router,
     sites_router,
     info_router,
     sso_router,
@@ -228,6 +229,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "SECRET_KEY не задан — используется небезопасный дефолт! "
             "JWT можно подделать. Задайте SECRET_KEY (или JWT_SECRET) в окружении."
         )
+        # На проде со слабым секретом не стартуем вовсе: предупреждение в журнале
+        # никто не читает, а токены подделываются известным ключом (аудит 07.10.2026).
+        if settings.app_env == "prod":
+            raise RuntimeError("Слабый SECRET_KEY на проде — запуск остановлен")
+    if os.environ.get("DEMO_SPACE_USER") and not os.environ.get("DEMO_SPACE_SECRET"):
+        # Демо-стенд (stack demo) снаружи закрыт, вход — только через кромку ai-core;
+        # без общего секрета демо-вход держится на одном этом. Не роняем, но кричим.
+        logger.critical("DEMO_SPACE_USER задан без DEMO_SPACE_SECRET: демо-вход по одному заголовку")
 
     # Gunicorn запускает два процесса. Без общего лока оба одновременно меняют
     # схему и делают check-then-insert seed, что даёт гонки на DDL и unique.
@@ -358,6 +367,8 @@ app = FastAPI(
     description="Бэкенд системы приёма, классификации и верификации документов",
     version=APP_VERSION,
     lifespan=lifespan,
+    # Описание API наружу не отдаём: карта всех ручек — подарок тому, кто ищет дыры.
+    docs_url=None, redoc_url=None, openapi_url=None,
 )
 
 # CORS
@@ -375,14 +386,39 @@ async def rate_limit_public(request, call_next):
 
     Стоит перед остальными обработчиками намеренно: смысл лимита в том, чтобы
     перебор не доходил до проверки пароля и до выборки по токену."""
+    from fastapi.responses import JSONResponse
+    from app import guard
     from app.rate_limit import check
+
+    # Враждебные действия снаружи (`app/guard.py`): заблокированный адрес, инструмент
+    # взлома, ловушка — до всякой работы. Ловушка не своя ручка: её адрес nginx отдаёт
+    # сюда только для путей сканеров вне API.
+    path = request.url.path
+    if path.startswith("/api/") and path != "/api/security/trap":
+        if await guard.blocked(guard.client_ip(request)):
+            return JSONResponse(status_code=403, content={"detail": "Доступ с этого адреса временно закрыт"})
+        if guard.is_bad_ua(request.headers.get("user-agent")):
+            await guard.record("bad_ua", request, block=True)
+            return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+        if guard.is_trap(path):
+            await guard.record("trap", request, block=True)
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
     blocked, event = check(request)
     if blocked is not None:
         if event is not None:
             await _log_security_event(event)
+            await guard.record("rate_limited", request, hits=int(event.get("hits") or 0),
+                               detail=str(event.get("scope") or ""))
         return blocked
-    return await call_next(request)
+    response = await call_next(request)
+    if path.startswith("/api/"):
+        episode = guard.note_response(request, response.status_code)
+        if episode is not None:
+            kind, hits = episode
+            await guard.record("probe" if kind.startswith("probe") else kind, request, hits=hits,
+                               detail=f"{hits} запросов за минуту", block=kind == "probe_block")
+    return response
 
 
 async def _log_security_event(event: dict) -> None:
@@ -490,6 +526,7 @@ app.include_router(online_orders_router.router, prefix=API_PREFIX)
 app.include_router(online_reconciliation_router.router, prefix=API_PREFIX)
 app.include_router(ops_router.router, prefix=API_PREFIX)  # управленческий кокпит ЭЗС
 app.include_router(equipment_router.router, prefix=API_PREFIX)  # складской учёт оборудования ЭЗС
+app.include_router(equipment_reports_router.router, prefix=API_PREFIX)  # отчёты складского учёта
 app.include_router(sites_router.router, prefix=API_PREFIX)  # банк ЗУ: площадки под установку ЭЗС
 from app.routers import project_workspace_router
 app.include_router(project_workspace_router.router, prefix=API_PREFIX)
@@ -552,16 +589,15 @@ app.include_router(mail_router.router, prefix=API_PREFIX)
 # Канал ОРП в бухгалтерию: расширение TradeLedger забирает пакеты по HTTP,
 # без каталога обмена на сервере 1С.
 app.include_router(tl_channel_router.router, prefix=API_PREFIX)
+from app.routers import security_router  # noqa: E402 — журнал безопасности и ловушка
+app.include_router(security_router.router, prefix=API_PREFIX)
 
 
 @app.get("/api/health")
 async def health_check():
     """Liveness: процесс отвечает; зависимости проверяет /api/ready."""
-    return {
-        "status": "ok",
-        "version": APP_VERSION,
-        "service": "TradeLedger API",
-    }
+    # Без версии и имени сервиса: по ним подбирают известные уязвимости.
+    return {"status": "ok"}
 
 
 @app.get("/api/live")
@@ -686,13 +722,7 @@ async def readiness_check(db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="База, схема или файловое хранилище не готовы",
         ) from exc
-    return {
-        "status": "ready",
-        "version": APP_VERSION,
-        "service": "TradeLedger API",
-        "database": "ok",
-        "storage": "ok",
-    }
+    return {"status": "ready", "database": "ok", "storage": "ok"}
 
 
 def _git_sha_local() -> str:
@@ -712,6 +742,11 @@ def _git_sha_local() -> str:
 
 @app.get("/api/_debug/state")
 async def debug_state(current_user=Depends(get_current_user)):
+    # Счётчики и названия ВСЕХ компаний стека, имя базы — только суперадмину: обычному
+    # вошедшему это утечка между арендаторами (аудит 07.10.2026).
+    if not current_user.is_superadmin:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Только суперадминистратору")
     """«Отпечаток среды»: env, git-SHA, БД и счётчики по компаниям.
 
     Назначение — мгновенно отличать dev от прода и видеть расхождение данных

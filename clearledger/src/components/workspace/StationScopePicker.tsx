@@ -239,11 +239,12 @@ export function StationScopePicker({
   }, [facets, onlyPicked, searched, selectedSet, sort, groupRegions])
 
   const shownCodes = useMemo(() => filtered.map((s) => s.code), [filtered])
-  const displayCodes = useMemo(() => new Map(stations.map((s) => [s.code, s.displayCode || s.code])), [stations])
+  const displayCodes = useMemo(() => new Map(stations.map((s) => [s.code, s.displayCode ?? s.code])), [stations])
   // Сколько станций подходит под условия — без учёта поиска и режима «только
   // выбранные»: это и есть контур, когда набор идёт условиями.
   const подУсловиями = useMemo(
     () => stations.filter((s) => matchesFacets(s, facets)).length, [facets, stations])
+  const [shownLimit, setShownLimit] = useState(300)
   const allShownPicked = shownCodes.length > 0 && shownCodes.every((c) => selectedSet.has(c))
 
   const activeFacets = useMemo(() => {
@@ -379,7 +380,7 @@ export function StationScopePicker({
                   </Button>
                 ) : null}
               </div>
-            ) : filtered.map((station, index) => {
+            ) : filtered.slice(0, shownLimit).map((station, index) => {
               const active = selectedSet.has(station.code)
               const meta = stationMeta(station)
               return (
@@ -404,7 +405,7 @@ export function StationScopePicker({
                     {meta ? <span className="block text-muted-foreground">{meta}</span> : null}
                   </span>
                   <span className="flex shrink-0 flex-col items-end">
-                    <span className="font-mono tabular-nums text-muted-foreground">{displayCodes.get(station.code) || station.code}</span>
+                    <span className="font-mono tabular-nums text-muted-foreground">{displayCodes.get(station.code) ?? station.code}</span>
                     {showSessionStats && <span className="tabular-nums text-muted-foreground">
                       {station.sessions > 0 ? `${station.sessions.toLocaleString('ru')} зар.` : 'нет зарядок'}
                     </span>}
@@ -412,6 +413,15 @@ export function StationScopePicker({
                 </label></div>
               )
             })}
+            {/* Каталог чужих сетей — тысячи станций: рисуем порциями, иначе окно
+                открывается полминуты (проверка на боевом 06.10.2026). «Выбрать
+                показанные» по-прежнему берёт весь отбор, а не только нарисованное. */}
+            {filtered.length > shownLimit && (
+              <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                Показаны первые {shownLimit} из {filtered.length} — уточните поиск или условия
+                <Button variant="outline" size="xs" onClick={() => setShownLimit(shownLimit + 300)}>Показать ещё 300</Button>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-muted/30 px-3 py-2 text-xs">

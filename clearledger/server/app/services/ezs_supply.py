@@ -209,9 +209,22 @@ async def create_supply(db: AsyncSession, company_id, user: User | None,
             raise HTTPException(404, "Поставщик не найден")
         cp_name = cp_name or cp.short_name or cp.name
 
+    # Одна накладная поставщика вводится один раз: тот же номер той же датой у того
+    # же поставщика — повтор, а не второй документ.
+    twin = (await db.execute(select(EzsSupplyDocument.id).where(
+        EzsSupplyDocument.company_id == company_id, EzsSupplyDocument.doc_type == doc_type,
+        EzsSupplyDocument.number == number, EzsSupplyDocument.doc_date == doc_date,
+        EzsSupplyDocument.counterparty_id == cp_id, EzsSupplyDocument.status != "cancelled"))).first()
+    if twin:
+        raise HTTPException(409, f"Документ № {number} от {doc_date} этого поставщика уже введён")
+
     wh_id = payload.get("warehouse_id")
     if wh_id:
         await _get_location(db, company_id, wh_id, want_type="warehouse")
+    # Договор поставки — из справочника пространства и того же поставщика: поле
+    # было в модели, но интерфейс его не заполнял, а сервер не проверял.
+    from app.services.ezs_equipment_docs import check_contract
+    await check_contract(db, company_id, payload.get("contract_id"), cp_id)
 
     doc = EzsSupplyDocument(
         company_id=company_id, doc_type=doc_type, number=number, doc_date=doc_date,
@@ -260,7 +273,9 @@ async def update_supply(db: AsyncSession, company_id, user: User | None,
             doc.counterparty_id = None
             doc.counterparty_name = (payload.get("counterparty_name") or "").strip() or None
     if "contract_id" in payload:
-        doc.contract_id = payload.get("contract_id")
+        from app.services.ezs_equipment_docs import check_contract
+        await check_contract(db, company_id, payload.get("contract_id"), doc.counterparty_id)
+        doc.contract_id = payload.get("contract_id") or None
     if "warehouse_id" in payload:
         wh_id = payload.get("warehouse_id")
         if wh_id:
@@ -275,8 +290,8 @@ async def update_supply(db: AsyncSession, company_id, user: User | None,
 async def delete_supply(db: AsyncSession, company_id, supply_id) -> None:
     doc = await _get_doc(db, company_id, supply_id, lock=True)
     if await _has_receipts(db, company_id, supply_id):
-        raise HTTPException(409, "К документу есть приход — удаление запрещено "
-                                 "(сначала спишите/верните единицы или отмените)")
+        raise HTTPException(409, "По документу уже была приёмка — его не удаляют, а закрывают. "
+                                 "Ошибочно принятое возвращают поставщику или списывают")
     for ln in await _lines_of(db, company_id, supply_id):
         await db.delete(ln)
     await db.delete(doc)
@@ -297,8 +312,8 @@ async def set_status(db: AsyncSession, company_id, user: User | None,
         if doc.status == "cancelled":
             return doc
         if await _has_receipts(db, company_id, supply_id):
-            raise HTTPException(409, "К документу есть приход — сначала спишите/верните "
-                                     "единицы, затем отменяйте")
+            raise HTTPException(409, "По документу уже была приёмка — его не отменяют, а закрывают. "
+                                     "Ошибочно принятое возвращают поставщику или списывают")
         doc.status = "cancelled"
     else:
         raise HTTPException(400, f"Неизвестное действие: {action}")

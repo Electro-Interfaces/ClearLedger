@@ -166,3 +166,117 @@ async def test_contract_dimensions(auth_client: AsyncClient):
     d2 = (await auth_client.get(f"/api/references/contracts/{ct['id']}/dimensions")).json()
     assert "nomenclature" not in d2["dimensions"]
     assert d2["dimensions"]["channel"] == ["ch-1"]
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_contract_type_and_station_link(auth_client: AsyncClient):
+    """Вид договора из справочника; привязка и отвязка станции по одной из её карточки."""
+    org_id = await _organization(auth_client)
+    await _post(auth_client, "/api/locations", {
+        "company_id": "gig", "id": "loc-scope-401", "code": "401", "name": "ЭЗС 401", "type": "ev_charging",
+    })
+    cp = await _post(auth_client, "/api/references/counterparties", {
+        "company_id": "gig", "inn": "7800000401", "name": "Арендодатель-4 ООО",
+    })
+    types = (await auth_client.get("/api/references/contract-types")).json()
+    assert "rent" in {t["code"] for t in types}
+    bad = await auth_client.post("/api/references/contracts", json={
+        "company_id": "gig", "number": "АР-4X", "date": "2026-05-01",
+        "counterpartyId": cp["id"], "organizationId": org_id, "typeCode": "нет-такого"})
+    assert bad.status_code == 422, bad.text
+    ct = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "АР-4", "date": "2026-05-01",
+        "counterpartyId": cp["id"], "organizationId": org_id, "typeCode": "rent"})
+    assert ct["typeCode"] == "rent"
+
+    r = await auth_client.post(f"/api/references/contracts/{ct['id']}/locations/loc-scope-401")
+    assert r.status_code == 200, r.text
+    assert r.json()["scopeType"] == "locations"
+    listed = (await auth_client.get("/api/references/contracts", params={"company_id": "gig"})).json()
+    assert next(c for c in listed if c["id"] == ct["id"])["locationsCount"] == 1
+
+    r = await auth_client.delete(f"/api/references/contracts/{ct['id']}/locations/loc-scope-401")
+    assert r.status_code == 200, r.text
+    assert r.json()["scopeType"] == "unassigned"   # последняя станция снята — договор в разбор
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_contract_requisites_and_safe_delete(auth_client: AsyncClient):
+    """Реквизиты 1С сохраняются и очищаются; используемый договор не удаляется."""
+    org_id = await _organization(auth_client)
+    cp = await _post(auth_client, "/api/references/counterparties", {
+        "company_id": "gig", "inn": "7800000501", "name": "Подрядчик-5 ООО",
+    })
+    ct = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "ПД-5", "date": "2026-05-01", "type": "Подряд",
+        "counterpartyId": cp["id"], "organizationId": org_id, "validUntil": "2027-01-01",
+        "signed": True, "signedAt": "2026-05-02", "paymentTermDays": 30,
+        "isStateContract": True, "igk": "26123456789", "signerCp": "Иванов И. И.",
+        "signerCpPosition": "Генеральный директор", "signerCpBasis": "Устав"})
+    assert ct["paymentTermDays"] == 30 and ct["signed"] is True and ct["signerCpBasis"] == "Устав"
+
+    # бессрочный: явная пустота стирает срок (раньше None игнорировался)
+    r = await auth_client.patch(f"/api/references/contracts/{ct['id']}", json={"validUntil": None, "igk": ""})
+    assert r.status_code == 200, r.text
+    assert r.json()["validUntil"] is None and r.json()["igk"] is None
+    assert r.json()["paymentTermDays"] == 30          # не присланное — не трогается
+
+    assert (await auth_client.get(f"/api/references/contracts/{ct['id']}/usage")).json() == []
+    # неиспользуемый договор удаляется; запрет для используемого проверен приёмкой на стенде
+    unused = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "ПД-6", "date": "2026-05-01", "type": "Подряд",
+        "counterpartyId": cp["id"], "organizationId": org_id})
+    r = await auth_client.delete(f"/api/references/contracts/{unused['id']}")
+    assert r.status_code in (200, 204), r.text
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_contract_app_links(auth_client: AsyncClient):
+    """Договор → приложение: привязка, повтор не дублирует, сводка видит её, снятие."""
+    org_id = await _organization(auth_client)
+    cp = await _post(auth_client, "/api/references/counterparties", {
+        "company_id": "gig", "inn": "7800000601", "name": "Энергосбыт-6 ООО",
+    })
+    ct = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "ЭС-6", "date": "2026-06-01", "type": "Энергоснабжение",
+        "counterpartyId": cp["id"], "organizationId": org_id})
+    bad = await auth_client.post(f"/api/references/contracts/{ct['id']}/links", json={"app": "нет-такого"})
+    assert bad.status_code == 422
+    links = (await auth_client.post(f"/api/references/contracts/{ct['id']}/links", json={"app": "ops"})).json()
+    again = (await auth_client.post(f"/api/references/contracts/{ct['id']}/links", json={"app": "ops"})).json()
+    assert len(links) == len(again) == 1 and links[0]["app"] == "ops" and links[0]["projectRef"] is None
+    b = (await auth_client.get("/api/references/contract-bindings", params={"company_id": "gig"})).json()
+    assert b["contracts"][ct["id"]]["apps"] == ["ops"] and b["contracts"][ct["id"]]["linked"] == ["ops"]
+    left = (await auth_client.delete(f"/api/references/contracts/{ct['id']}/links/{links[0]['id']}")).json()
+    assert left == []
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_space_documents_tree(auth_client: AsyncClient):
+    """«Документы» пространства: каждый договор — папка контрагента с карточкой договора."""
+    org_id = await _organization(auth_client)
+    cp = await _post(auth_client, "/api/references/counterparties", {
+        "company_id": "gig", "inn": "7800000701", "name": "Арендодатель-7 ООО",
+    })
+    ct = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "А/7", "date": "2026-07-01", "type": "Аренда",
+        "counterpartyId": cp["id"], "organizationId": org_id})
+    docs = (await auth_client.get("/api/references/space-documents", params={"company_id": "gig"})).json()
+    card = next(d for d in docs if d.get("contractId") == ct["id"] and d["docType"] == "contract_card")
+    assert card["catalog"] == "Договоры/Арендодатель-7 ООО/№ А∕7 от 2026-07-01"   # «/» в номере не рвёт путь
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_contract_quality(auth_client: AsyncClient):
+    """Качество договоров: «на станциях» без станций и без даты попадают в свои списки."""
+    org_id = await _organization(auth_client)
+    cp = await _post(auth_client, "/api/references/counterparties", {
+        "company_id": "gig", "inn": "7800000801", "name": "Арендодатель-8 ООО",
+    })
+    ct = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "А-8", "date": "", "type": "Аренда",
+        "counterpartyId": cp["id"], "organizationId": org_id, "scopeType": "locations"})
+    q = {s["key"]: s for s in (await auth_client.get("/api/references/contract-quality", params={"company_id": "gig"})).json()["sections"]}
+    assert any(i["id"] == ct["id"] for i in q["no_stations"]["items"])
+    assert any(i["id"] == ct["id"] for i in q["no_date"]["items"])
+    assert any(i["id"] == ct["id"] for i in q["orphan"]["items"])

@@ -436,7 +436,8 @@ async def priority_matrix(db: AsyncSession, company_id, *, stage: str | None = N
     bench = await cached_benchmarks(db, company_id)
     near = await nearest_station_km(db, company_id)
 
-    conds = [EzsSite.company_id == company_id]
+    from sqlalchemy import func as _f
+    conds = [EzsSite.company_id == company_id, _f.coalesce(EzsSite.kind, "new_build") != "integration"]
     conds.append(EzsSite.stage == stage if stage else EzsSite.stage.in_(STAGE_ORDER))
     if region:
         from sqlalchemy import func

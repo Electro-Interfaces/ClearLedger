@@ -1,0 +1,166 @@
+"""Исправления аудита безопасности 07.10.2026: отзыв входа, пропуск партнёра, пути, секреты."""
+import json
+import time
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+import jwt
+import pytest
+from fastapi import HTTPException
+
+from app import auth, rate_limit
+from app.config import Settings
+from app.routers import reconcile_router, space_bridge_router, station_console_router
+
+
+def user(tv=0):
+    return SimpleNamespace(id="u1", email="a@x.ru", token_version=tv)
+
+
+def test_версия_входа_гасит_старые_токены():
+    tok = auth.create_access_token("u1", "a@x.ru", tv=0)
+    payload = auth.decode_token(tok)
+    assert auth.session_valid(payload, user(0))
+    assert not auth.session_valid(payload, user(1))  # пароль сменили — старый токен мёртв
+
+
+def test_продление_не_дальше_предела_сессии():
+    old = int(datetime.now(timezone.utc).timestamp()) - (auth.MAX_SESSION_DAYS + 1) * 86400
+    payload = auth.decode_token(auth.create_access_token("u1", "a@x.ru", tv=0, auth_time=old))
+    assert payload["at"] == old  # продление сохраняет момент входа
+    assert not auth.session_valid(payload, user(0))
+
+
+def test_путь_консоли_без_выхода_наверх():
+    ok = station_console_router._path_ok
+    for p in ("index.html", "api/prices", "static/app.js"):
+        assert ok(p), p
+    for p in ("../x", "a/../../x", "%2e%2e/x", "%252e%252e/x", "..%2fx", "a//b", "a\\b", "/etc"):
+        assert not ok(p), p
+
+
+def test_сверка_ходит_только_на_разрешённые_узлы():
+    reconcile_router._check_external_url("https://pos.autooplata.ru/tms")
+    for bad in ("http://pos.autooplata.ru/tms", "https://10.10.70.52/", "https://localhost/", "https://evil.example/"):
+        with pytest.raises(HTTPException):
+            reconcile_router._check_external_url(bad)
+
+
+def test_слабый_секрет_опознаётся():
+    assert Settings(SECRET_KEY="clearledger-dev-secret").secret_is_insecure
+    assert Settings(SECRET_KEY="short").secret_is_insecure
+    assert not Settings(SECRET_KEY="x" * 64).secret_is_insecure
+
+
+def test_общий_ключ_хранится_хешем():
+    v = auth.legacy_key_value("abc")
+    assert v.startswith("sha256:") and "abc" not in v and len(v) == 71
+
+
+def test_новые_публичные_ручки_под_лимитом():
+    for path in ("/api/eco/partner/visit", "/api/auth/demo-session", "/api/work/calendar/feed/x.ics",
+                 "/api/conf/recordings/ingest", "/api/site/pull/news"):
+        assert rate_limit._group(path), path
+
+
+@pytest.fixture()
+def keys():
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from jwt.algorithms import RSAAlgorithm
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = json.loads(RSAAlgorithm.to_jwk(priv.public_key()))
+    jwk["kid"] = "k1"
+    return priv, {"keys": [jwk]}
+
+
+def visit(priv, **claims):
+    now = int(time.time())
+    base = {"aud": "space:rushydro", "email": "eng@desk.ru", "space": "desk", "iat": now, "exp": now + 120}
+    base.update(claims)
+    return jwt.encode({k: v for k, v in base.items() if v is not None}, priv, algorithm="RS256", headers={"kid": "k1"})
+
+
+def test_пропуск_партнёра_срок_и_повтор(keys):
+    priv, jwks = keys
+    space_bridge_router._seen_visits.clear()
+    tok = visit(priv)
+    assert space_bridge_router._verify_visit(tok, jwks, audience="space:rushydro")["email"] == "eng@desk.ru"
+    with pytest.raises(HTTPException):  # второй раз тот же пропуск — нет
+        space_bridge_router._verify_visit(tok, jwks, audience="space:rushydro")
+    now = int(time.time())
+    for bad in (visit(priv, exp=None), visit(priv, iat=now, exp=now + 3600),
+                visit(priv, aud="space:gig")):
+        with pytest.raises(HTTPException) as e:
+            space_bridge_router._verify_visit(bad, jwks, audience="space:rushydro")
+        assert e.value.detail == space_bridge_router.VISIT_REFUSED  # без подробностей
+
+
+@pytest.mark.asyncio
+async def test_пропуск_не_входит_под_здешней_учёткой():
+    class DB:
+        def __init__(self, kinds):
+            self.kinds = kinds
+
+        async def execute(self, _q):
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: self.kinds))
+    guest = SimpleNamespace(id="g", is_superadmin=False)
+    assert await space_bridge_router._bridge_guest(guest, DB(["vendor"]))
+    assert not await space_bridge_router._bridge_guest(guest, DB(["vendor", "staff"]))
+    assert not await space_bridge_router._bridge_guest(SimpleNamespace(id="s", is_superadmin=True), DB(["vendor"]))
+
+
+def test_политика_паролей():
+    from app import schemas
+    for ok in ("Корова2026!", "long-enough-pass", "x" * 10):
+        assert schemas.check_password(ok) == ok
+    for bad in ("short", "1234", "password123", "qwerty123", ""):
+        with pytest.raises(ValueError):
+            schemas.check_password(bad)
+
+
+def test_схемы_требуют_надёжный_пароль():
+    from app.schemas import RegisterRequest
+    with pytest.raises(Exception):
+        RegisterRequest(email="a@x.ru", password="123456", name="A", company_id="c")
+    r = RegisterRequest(email="a@x.ru", password="Надёжный-2026", name="A", company_id="c")
+    assert r.password == "Надёжный-2026"
+
+
+def test_объём_выгрузок_копится_по_пользователю():
+    from app import guard
+    guard._exports.clear()
+    for _ in range(4):
+        cnt, total = guard.note_export("u1", 10000)
+    assert cnt == 4 and total == 40000
+    cnt, total = guard.note_export("u1", 20000)
+    assert cnt == 5 and total == 60000  # перевалило EXPORT_ROWS — будет тревога
+
+
+def test_второй_фактор_rfc6238():
+    import base64
+    from app import totp
+    rfc = base64.b32encode(b"12345678901234567890").decode()
+    assert totp.verify(rfc, "287082", at=59)
+    assert totp.verify(rfc, "287082", at=59 + 30)  # соседний шаг — допуск часов телефона
+    assert not totp.verify(rfc, "287082", at=59 + 120)
+    assert not totp.verify(rfc, "abc", at=59) and not totp.verify("", "287082", at=59)
+    s = totp.new_secret()
+    assert len(s) == 32 and totp.uri(s, "a@x.ru", "rushydro.dataworker.ru").startswith("otpauth://totp/")
+
+
+@pytest.mark.asyncio
+async def test_метка_входа_для_выдачи_кода():
+    from app import auth
+
+    class DB:
+        def __init__(self, user):
+            self.user = user
+
+        async def execute(self, _q):
+            return SimpleNamespace(scalar_one_or_none=lambda: self.user)
+    u = SimpleNamespace(id="00000000-0000-0000-0000-000000000001", email="a@x.ru", token_version=0)
+    tok = auth.create_access_token(u.id, u.email, tv=0)
+    assert await auth.gate_ok(tok, DB(u))
+    assert not await auth.gate_ok(tok, DB(SimpleNamespace(**{**u.__dict__, "token_version": 1})))  # вход отозван
+    assert not await auth.gate_ok(tok, DB(None))                                                 # учётки нет
+    assert not await auth.gate_ok(None, DB(u)) and not await auth.gate_ok("мусор", DB(u))

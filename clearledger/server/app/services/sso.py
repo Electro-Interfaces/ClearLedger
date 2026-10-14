@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import json
+import secrets
 import time
 from typing import Any
 
@@ -130,6 +131,8 @@ def sign_visit_token(*, user, space_code: str, self_code: str,
         "iat": now,
         "nbf": now - 10,
         "exp": now + ttl_seconds,
+        # Номер пропуска: принимающая сторона пускает по нему один раз.
+        "jti": secrets.token_urlsafe(16),
     }
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})
 

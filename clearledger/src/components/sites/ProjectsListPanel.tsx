@@ -175,6 +175,10 @@ function StageBoard({ companyId, stages, filters, onOpen }: {
   )
 }
 
+// Интеграции ведутся в своём разделе «Проектов»: в общем реестре без явного выбора
+// вида работ их нет. Выбрали «Интеграция» в фильтре — видны, как и раньше.
+const OWN_SECTION = 'integration'
+
 export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const { user } = useAuth()
   const [workspace, patchWorkspace] = useTabParams(`pr_workspace_${user?.id ?? 'anonymous'}`, PROJECT_WORKSPACE_DEFAULTS)
@@ -247,7 +251,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   }, [closed, stagePick, phase, stagesOfPhase])
   const boardFilters = useMemo(() => ({
     region: region || undefined, ownerId: ownerId || undefined, overdue,
-    kind: kind || undefined, placeKind: placeKind || undefined,
+    kind: kind || undefined, placeKind: placeKind || undefined, withoutKind: OWN_SECTION,
     search: search || undefined, risk: risk || undefined, node: node || undefined,
   }), [region, ownerId, overdue, search, risk, node, kind, placeKind])
 
@@ -258,11 +262,13 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
       : stagePick || (phase ? (stagesOfPhase as string[]).join(',') || undefined
         : risk === 'no_exit_kind' || risk === 'no_hold_date' ? undefined : 'active'),
     region: region || undefined, kind: kind || undefined, place_kind: placeKind || undefined,
+    without_kind: kind ? undefined : OWN_SECTION,
     owner_id: ownerId || undefined, overdue, search: search || undefined,
     risk: risk || undefined, node: node || undefined,
   }
 
   const exitRisk = risk === 'no_exit_kind' || risk === 'no_hold_date'
+  const [historyDays, setHistoryDays] = useState(90)
   const q = useQuery({
     queryKey: ['pr-projects', companyId, phase, stagePick, node, ownerId, region, closed, overdue, search, risk, page, kind, placeKind],
     queryFn: () => getSites({
@@ -273,7 +279,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         : stagePick
         || (phase && stagesOfPhase.length === 1 ? stagesOfPhase[0] : (phase || exitRisk ? undefined : 'active')),
       region: region || undefined,
-      kind: kind || undefined, placeKind: placeKind || undefined,
+      kind: kind || undefined, placeKind: placeKind || undefined, withoutKind: OWN_SECTION,
       ownerId: ownerId || undefined, overdue, search: search || undefined,
       risk: risk || undefined, node: node || undefined, page, pageSize: PAGE,
     }),
@@ -502,7 +508,15 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           const next = new URLSearchParams(prev); next.set('scenarioSettings', '1'); return next
         }, { replace: true })}>Сценарии</Button>
         {/* Реестр тоже уходит на совещание — своей выгрузкой, а не пересказом. */}
-        <ExportButton companyId={companyId} report="portfolio" fileName="projects_portfolio.xlsx" params={exportParams} />
+        {/* В файле — листы «История», «Чек-лист» и «Работа»; глубина истории выбирается
+            здесь: по старому портфелю журнал за всё время — десятки тысяч строк. */}
+        <select aria-label="Глубина истории в выгрузке" title="Сколько истории положить в лист «История»"
+          className="h-8 rounded-md border bg-background px-2 text-sm" value={historyDays}
+          onChange={(e) => setHistoryDays(Number(e.target.value))}>
+          <option value={30}>История: 30 дней</option><option value={90}>История: 90 дней</option>
+          <option value={365}>История: год</option><option value={3650}>История: вся</option>
+        </select>
+        <ExportButton companyId={companyId} report="portfolio" fileName="projects_portfolio.xlsx" params={{ ...exportParams, history_days: historyDays }} />
         {risk && (
           <button type="button" onClick={clearRisk}
             className="px-2.5 py-1 text-sm rounded-md border border-primary bg-primary/10 text-primary">
