@@ -250,7 +250,7 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
   const suppliersQ = useQuery({ queryKey: ['equipment', 'suppliers', companyId], queryFn: () => listSuppliers(companyId) })
   const locsQ = useQuery({ queryKey: ['equipment', 'locations', companyId], queryFn: () => loadLocations(companyId), staleTime: 60_000 })
   const partsQ = useQuery({ queryKey: ['equipment', 'spares', companyId], queryFn: () => listSpareParts({ companyId }) })
-  const warehouses = useMemo(() => (locsQ.data ?? []).filter((l) => l.type === 'warehouse'), [locsQ.data])
+  const warehouses = useMemo(() => (locsQ.data ?? []).filter((l) => l.type === 'warehouse' && l.status !== 'closed'), [locsQ.data])
   const parts: SparePart[] = partsQ.data ?? []
 
   const addLine = (kind: 'station' | 'spare') =>

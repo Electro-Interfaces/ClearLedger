@@ -47,9 +47,10 @@ import { ApiError } from '@/services/apiClient'
 import { getLocations, loadLocations } from '@/services/locationService'
 import type { ServiceLocation } from '@/types/location'
 import { MovementDocumentDialog } from './MovementDocumentDialog'
+import { getCounterparties } from '@/services/referenceService'
 import {
   applyUnitMovement, createUnit, deleteUnit, dismantleFromSite,
-  getEquipmentOverview, getUnit, importUnitsXlsx, listUnits, patchUnit,
+  getEquipmentOverview, getUnit, importUnitsXlsx, listSpareParts, listUnits, patchUnit,
   CUSTODIAN_LABELS, UNIT_KIND_LABELS, UNIT_OP_META, UNIT_STATE_META, unitKindLabel,
   type EquipmentUnit, type ImportReport, type MovementPayload,
   type UnitDetail, type UnitInPayload, type UnitOp, type UnitState,
@@ -402,7 +403,13 @@ interface EditState {
   powerKwt: string; connectorsCount: string; connectorTypes: string
   inventoryNumber: string; supplier: string; purchaseDoc: string
   purchaseDate: string; warrantyUntil: string; notes: string
+  // Реквизиты для 1С: номенклатура и контрагенты ссылками, стоимость, ОС.
+  nomenclatureId: string; supplierId: string; ownerId: string
+  purchaseAmount: string; vatAmount: string; accountingNo: string
+  okof: string; depreciationGroup: string; usefulLifeMonths: string
 }
+
+const numStr = (v: number | null | undefined) => (v != null ? String(v) : '')
 
 function toEditState(u: UnitDetail): EditState {
   return {
@@ -413,7 +420,31 @@ function toEditState(u: UnitDetail): EditState {
     supplier: u.supplier ?? '', purchaseDoc: u.purchaseDoc ?? '',
     purchaseDate: u.purchaseDate ?? '', warrantyUntil: u.warrantyUntil ?? '',
     notes: u.notes ?? '',
+    nomenclatureId: u.nomenclatureId ?? '', supplierId: u.supplierId ?? '', ownerId: u.ownerId ?? '',
+    purchaseAmount: numStr(u.purchaseAmount), vatAmount: numStr(u.vatAmount), accountingNo: u.accountingNo ?? '',
+    okof: u.okof ?? '', depreciationGroup: u.depreciationGroup ?? '', usefulLifeMonths: numStr(u.usefulLifeMonths),
   }
+}
+
+/** Контрагент из справочника пространства: поиск по имени или ИНН и выбор. */
+function CounterpartySelect({ companyId, value, onChange, label }: {
+  companyId: string; value: string; onChange: (id: string) => void; label: string
+}) {
+  const cps = useQuery({ queryKey: ['counterparties', companyId], queryFn: () => getCounterparties(companyId), staleTime: 60_000 })
+  const [q, setQ] = useState('')
+  const needle = q.trim().toLocaleLowerCase('ru')
+  const list = (cps.data ?? []).filter((c) => c.id === value || !needle
+    || `${c.name} ${c.shortName ?? ''} ${c.inn}`.toLocaleLowerCase('ru').includes(needle)).slice(0, 200)
+  return (
+    <div className="flex gap-1">
+      <Input aria-label={`${label}: поиск`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="имя или ИНН" className="h-9 w-28 shrink-0" />
+      <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}
+        className="h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm">
+        <option value="">{cps.isError ? 'Справочник не загрузился' : 'Не выбран'}</option>
+        {list.map((c) => <option key={c.id} value={c.id}>{c.shortName || c.name}{c.inn ? ` · ${c.inn}` : ''}</option>)}
+      </select>
+    </div>
+  )
 }
 
 const sOrNull = (v: string): string | null => v.trim() || null
@@ -431,6 +462,9 @@ function editToPayload(e: EditState): Partial<UnitInPayload> {
     inventoryNumber: sOrNull(e.inventoryNumber), supplier: sOrNull(e.supplier),
     purchaseDoc: sOrNull(e.purchaseDoc), purchaseDate: e.purchaseDate || null,
     warrantyUntil: e.warrantyUntil || null, notes: sOrNull(e.notes),
+    nomenclatureId: e.nomenclatureId || null, supplierId: e.supplierId || null, ownerId: e.ownerId || null,
+    purchaseAmount: numOrNull(e.purchaseAmount), vatAmount: numOrNull(e.vatAmount), accountingNo: sOrNull(e.accountingNo),
+    okof: sOrNull(e.okof), depreciationGroup: sOrNull(e.depreciationGroup), usefulLifeMonths: numOrNull(e.usefulLifeMonths),
   }
 }
 
@@ -460,6 +494,12 @@ export function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClos
   const detQ = useQuery({
     queryKey: ['equipment', 'unit', companyId, unitId],
     queryFn: () => getUnit(companyId, unitId),
+  })
+  // Номенклатура для экземпляров: модели станций и оборудования.
+  const modelsQ = useQuery({
+    queryKey: ['equipment', 'spares', companyId, 'serial'],
+    queryFn: () => listSpareParts({ companyId, kind: 'station,equipment' }),
+    enabled: !!edit, staleTime: 60_000,
   })
   const unit = detQ.data
   const inOperation = unit?.state === 'in_operation'
@@ -556,6 +596,49 @@ export function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClos
                     <Input type="date" value={edit.warrantyUntil} onChange={(e) => setEdit({ ...edit, warrantyUntil: e.target.value })} />
                   </EF>
                 </div>
+                <fieldset className="space-y-3 rounded-lg border p-3">
+                  <legend className="px-1 text-xs text-muted-foreground">Учёт и 1С:Бухгалтерия</legend>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <div className="col-span-2 sm:col-span-3">
+                      <EF label="Номенклатура (модель)">
+                        <select aria-label="Номенклатура" value={edit.nomenclatureId}
+                          onChange={(e) => setEdit({ ...edit, nomenclatureId: e.target.value })}
+                          className="h-9 w-full min-w-0 rounded-md border bg-background px-2 text-sm">
+                          <option value="">{modelsQ.isError ? 'Справочник не загрузился' : 'Не выбрана — модель записана текстом'}</option>
+                          {(modelsQ.data ?? []).map((p) => <option key={p.id} value={p.id}>{p.name} · счёт {p.account}</option>)}
+                        </select>
+                      </EF>
+                    </div>
+                    <EF label="Стоимость без НДС, ₽">
+                      <Input inputMode="decimal" value={edit.purchaseAmount} onChange={(e) => setEdit({ ...edit, purchaseAmount: e.target.value })} />
+                    </EF>
+                    <EF label="НДС, ₽">
+                      <Input inputMode="decimal" value={edit.vatAmount} onChange={(e) => setEdit({ ...edit, vatAmount: e.target.value })} />
+                    </EF>
+                    <EF label="Бухгалтерский №">
+                      <Input value={edit.accountingNo} onChange={(e) => setEdit({ ...edit, accountingNo: e.target.value })} />
+                    </EF>
+                    <EF label="ОКОФ">
+                      <Input value={edit.okof} onChange={(e) => setEdit({ ...edit, okof: e.target.value })} placeholder="330.28.29.19" />
+                    </EF>
+                    <EF label="Амортизационная группа">
+                      <Input value={edit.depreciationGroup} onChange={(e) => setEdit({ ...edit, depreciationGroup: e.target.value })} placeholder="5" />
+                    </EF>
+                    <EF label="Срок полезного использования, мес.">
+                      <Input inputMode="numeric" value={edit.usefulLifeMonths} onChange={(e) => setEdit({ ...edit, usefulLifeMonths: e.target.value })} />
+                    </EF>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <EF label="Поставщик (контрагент)">
+                      <CounterpartySelect companyId={companyId} label="Поставщик" value={edit.supplierId}
+                        onChange={(id) => setEdit({ ...edit, supplierId: id })} />
+                    </EF>
+                    <EF label="Балансодержатель">
+                      <CounterpartySelect companyId={companyId} label="Балансодержатель" value={edit.ownerId}
+                        onChange={(id) => setEdit({ ...edit, ownerId: id })} />
+                    </EF>
+                  </div>
+                </fieldset>
                 <EF label="Заметки">
                   <Textarea value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} rows={2} />
                 </EF>
@@ -591,6 +674,10 @@ export function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClos
                   <KV label="Поставщик" value={unit.supplier ?? undefined} />
                   <KV label="Документ закупки" value={unit.purchaseDoc ?? undefined} />
                   <KV label="Из поставки" value={unit.supplyNumber ? `№ ${unit.supplyNumber}` : undefined} />
+                  <KV label="Номенклатура" value={unit.nomenclature ? `${unit.nomenclature.name} (${unit.nomenclature.kindLabel})` : 'не выбрана'} />
+                  <KV label="Счёт учёта сейчас" value={unit.account ?? undefined} />
+                  <KV label="Поставщик в справочнике" value={unit.supplierName ?? undefined} />
+                  <KV label="Балансодержатель" value={unit.ownerRefName ?? undefined} />
                   <KV label="Стоимость" value={unit.purchaseAmount != null ? `${nf0.format(unit.purchaseAmount)} ₽` : undefined} />
                   <KV label="В том числе НДС" value={unit.vatAmount != null ? `${nf0.format(unit.vatAmount)} ₽` : undefined} />
                   <KV label="Дата закупки" value={unit.purchaseDate ? fmtD(unit.purchaseDate) : undefined} />
@@ -604,6 +691,9 @@ export function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClos
                   <KV label="Владелец" value={unit.ownerName ?? undefined} />
                   <KV label="Бухгалтерский №" value={unit.accountingNo ?? undefined} />
                   <KV label="Внешний №" value={unit.externalNo ?? undefined} />
+                  <KV label="ОКОФ · амортгруппа · срок" value={unit.okof || unit.depreciationGroup || unit.usefulLifeMonths
+                    ? [unit.okof, unit.depreciationGroup && `${unit.depreciationGroup} гр.`, unit.usefulLifeMonths && `${unit.usefulLifeMonths} мес.`].filter(Boolean).join(' · ')
+                    : undefined} />
                   {!unit.dataConfirmed && (
                     <KV label="Данные не подтверждены" value={unit.unconfirmedReason ?? 'поставщик не подтвердил данные'} />
                   )}
@@ -1171,7 +1261,7 @@ export function EquipmentFleetPanel({ companyId }: { companyId: string }) {
   })
   const locations = locQ.data ?? getLocations()
   const warehouses = useMemo(
-    () => locations.filter((l) => l.type === 'warehouse'),
+    () => locations.filter((l) => l.type === 'warehouse' && l.status !== 'closed'),
     [locations],
   )
   const sites = useMemo(

@@ -7,6 +7,10 @@
  * приход, отпуск на станцию, перемещение, списание, инвентаризация. Проведённый
  * документ не правится — отмена и повторная печать в реестре «Документы».
  * Отрицательный остаток запрещён сервером.
+ *
+ * С 14.10.2026 «Номенклатура» — общий справочник под 1С: и количественные позиции,
+ * и модели станций (вид «Зарядная станция» — учёт по экземплярам в «Парке»). У
+ * позиции вид, единица ОКЕИ, ставка НДС и счёт учёта. Остаток — в количестве и сумме.
  */
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -39,9 +43,9 @@ import { Kpi } from '@/components/workspace/analytics/Kpi'
 import { ApiError } from '@/services/apiClient'
 import {
   SPARE_CATEGORY_META, SPARE_DOC_META, SPARE_STATION_CATEGORIES,
-  createSparePart, deleteSparePart, getWarehousesSummary,
+  createSparePart, deleteSparePart, getAccountingMeta, getWarehousesSummary,
   listSpareMovements, listSpareParts, updateSparePart,
-  type SpareDocOp, type SpareMovementRow, type SparePart, type SparePartPayload,
+  type NomenclatureKind, type SpareDocOp, type SpareMovementRow, type SparePart, type SparePartPayload,
 } from '@/services/equipmentService'
 import { SpareDocumentDialog } from './SpareDocumentDialog'
 import { SpareDocumentsSection } from './SpareDocumentsSection'
@@ -65,6 +69,7 @@ const inCategory = (p: SparePart, cat: string) =>
   cat === 'all' || (cat in GROUPS ? SPARE_STATION_CATEGORIES.includes(p.category) === (cat === 'g:station') : p.category === cat)
 
 const nfQty = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 })
+const nfRub = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const catLabel = (c: string) => SPARE_CATEGORY_META[c] ?? c
 
 function errMsg(e: unknown): string {
@@ -119,19 +124,22 @@ export function EquipmentSparesPanel({ companyId }: { companyId: string }) {
   // Один запрос со всей номенклатурой (включая архив) — фильтры клиентские:
   // объём справочника мал, зато поиск мгновенный и KPI без второго запроса.
   const partsQ = useQuery({
-    queryKey: ['equipment', 'spares', companyId],
-    queryFn: () => listSpareParts({ companyId, includeArchived: true }),
+    queryKey: ['equipment', 'spares', companyId, 'all'],
+    queryFn: () => listSpareParts({ companyId, includeArchived: true, includeSerial: true }),
   })
-  const parts = useMemo(() => partsQ.data ?? [], [partsQ.data])
+  const allParts = useMemo(() => partsQ.data ?? [], [partsQ.data])
+  // Остатки и документы ЗИП — только количественная номенклатура; модели станций
+  // учитываются экземплярами в «Парке» и живут здесь лишь в справочнике.
+  const parts = useMemo(() => allParts.filter((p) => !p.serial), [allParts])
   const activeParts = useMemo(() => parts.filter((p) => !p.isArchived), [parts])
 
   const kpi = useMemo(() => {
-    const totalQty = activeParts.reduce((s, p) => s + p.totalQty, 0)
+    const totalAmount = activeParts.reduce((s, p) => s + (p.totalAmount ?? 0), 0)
     const wh = new Set<string>()
     for (const p of activeParts) for (const b of p.byLocation) if (b.qty > 0) wh.add(b.locationId)
     return {
       positions: activeParts.length,
-      totalQty,
+      totalAmount,
       warehouses: wh.size,
       zero: activeParts.filter((p) => p.totalQty <= 0).length,
     }
@@ -141,7 +149,7 @@ export function EquipmentSparesPanel({ companyId }: { companyId: string }) {
     <div className="space-y-4 p-4">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Kpi label="Позиций" value={nfQty.format(kpi.positions)} sub="активная номенклатура" />
-        <Kpi label="Суммарный остаток" value={nfQty.format(kpi.totalQty)} sub="сумма в разных ед. изм." />
+        <Kpi label="Сумма остатка, ₽" value={nfRub.format(kpi.totalAmount)} sub="без НДС, по средней" />
         <Kpi label="Складов с остатком" value={nfQty.format(kpi.warehouses)} sub="запчасти и материалы" />
         <Kpi label="Нулевой остаток" value={nfQty.format(kpi.zero)} sub="позиций без остатка" />
       </div>
@@ -174,7 +182,7 @@ export function EquipmentSparesPanel({ companyId }: { companyId: string }) {
         <StockTab parts={activeParts} loading={partsQ.isLoading} error={partsQ.error}
           onDoc={(op, partId) => setDocDlg({ op, partId })} />
       )}
-      {tab === 'parts' && <PartsTab companyId={companyId} parts={parts} loading={partsQ.isLoading} error={partsQ.error} />}
+      {tab === 'parts' && <PartsTab companyId={companyId} parts={allParts} loading={partsQ.isLoading} error={partsQ.error} />}
       {tab === 'docs' && <SpareDocumentsSection companyId={companyId} />}
       {tab === 'movements' && <MovementsTab companyId={companyId} parts={parts} />}
 
@@ -246,24 +254,25 @@ function StockTab({ parts, loading, error, onDoc }: {
               <TableHead className="w-[170px]">Совместимость</TableHead>
               <TableHead className="min-w-[200px]">Остатки по складам</TableHead>
               <TableHead className="w-[100px] text-right">Итого</TableHead>
+              <TableHead className="w-[120px] text-right">Сумма, ₽</TableHead>
               <TableHead className="w-[240px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && (
-              <TableRow><TableCell colSpan={7} className="h-20 text-center text-muted-foreground">
+              <TableRow><TableCell colSpan={8} className="h-20 text-center text-muted-foreground">
                 <Loader2 className="size-4 animate-spin inline-block" />
               </TableCell></TableRow>
             )}
-            {!!error && <ErrorRow cols={7} error={error} />}
+            {!!error && <ErrorRow cols={8} error={error} />}
             {!loading && !error && parts.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+              <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                 <Package className="size-5 mx-auto mb-1.5 opacity-50" />
                 Номенклатуры пока нет — добавьте позиции на вкладке «Номенклатура»
               </TableCell></TableRow>
             )}
             {!loading && parts.length > 0 && filtered.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="h-20 text-center text-muted-foreground">
+              <TableRow><TableCell colSpan={8} className="h-20 text-center text-muted-foreground">
                 Ничего не найдено
               </TableCell></TableRow>
             )}
@@ -299,6 +308,9 @@ function StockTab({ parts, loading, error, onDoc }: {
                     p.totalQty <= 0 ? 'text-muted-foreground' : 'font-medium'
                   }`}>
                     {nfQty.format(p.totalQty)} <span className="text-[11px] text-muted-foreground">{p.unitLabel}</span>
+                  </TableCell>
+                  <TableCell className="text-right text-sm tabular-nums whitespace-nowrap">
+                    {p.totalAmount ? nfRub.format(p.totalAmount) : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-0.5 whitespace-nowrap">
@@ -336,9 +348,12 @@ function PartsTab({ companyId, parts, loading, error }: {
 }) {
   const [showArchived, setShowArchived] = useState(false)
   const [cat, setCat] = useState('all')
+  const [kind, setKind] = useState('all')
+  const metaQ = useQuery({ queryKey: ['equipment', 'accounting-meta'], queryFn: getAccountingMeta, staleTime: Infinity })
   const shown = useMemo(
-    () => parts.filter((p) => (showArchived || !p.isArchived) && inCategory(p, cat)),
-    [parts, showArchived, cat],
+    () => parts.filter((p) => (showArchived || !p.isArchived) && (p.serial || inCategory(p, cat))
+      && (kind === 'all' || p.kind === kind)),
+    [parts, showArchived, cat, kind],
   )
 
   return (
@@ -347,6 +362,13 @@ function PartsTab({ companyId, parts, loading, error }: {
         <SparePartFormDialog companyId={companyId}>
           <Button size="sm"><Plus className="size-4 mr-1.5" /> Добавить позицию</Button>
         </SparePartFormDialog>
+        <Select value={kind} onValueChange={setKind}>
+          <SelectTrigger className="h-9 w-[230px]" aria-label="Вид номенклатуры"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все виды</SelectItem>
+            {Object.entries(metaQ.data?.kinds ?? {}).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <CategorySelect value={cat} onChange={setCat} />
         <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
           <Switch size="sm" checked={showArchived} onCheckedChange={setShowArchived} />
@@ -359,24 +381,25 @@ function PartsTab({ companyId, parts, loading, error }: {
           <TableHeader>
             <TableRow>
               <TableHead className="min-w-[200px]">Наименование</TableHead>
-              <TableHead className="w-[150px]">Категория</TableHead>
+              <TableHead className="w-[170px]">Вид · категория</TableHead>
               <TableHead className="w-[120px]">Вендор</TableHead>
               <TableHead className="w-[110px]">Артикул</TableHead>
               <TableHead className="w-[80px]">Ед. изм.</TableHead>
-              <TableHead className="min-w-[160px]">Примечание</TableHead>
+              <TableHead className="w-[80px]">НДС</TableHead>
+              <TableHead className="w-[80px]">Счёт</TableHead>
               <TableHead className="w-[80px]">Статус</TableHead>
               <TableHead className="w-[90px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading && (
-              <TableRow><TableCell colSpan={8} className="h-20 text-center text-muted-foreground">
+              <TableRow><TableCell colSpan={9} className="h-20 text-center text-muted-foreground">
                 <Loader2 className="size-4 animate-spin inline-block" />
               </TableCell></TableRow>
             )}
-            {!!error && <ErrorRow cols={8} error={error} />}
+            {!!error && <ErrorRow cols={9} error={error} />}
             {!loading && !error && shown.length === 0 && (
-              <TableRow><TableCell colSpan={8} className="h-20 text-center text-muted-foreground">
+              <TableRow><TableCell colSpan={9} className="h-20 text-center text-muted-foreground">
                 {parts.length ? 'Ничего не найдено' : 'Номенклатуры пока нет'}
               </TableCell></TableRow>
             )}
@@ -391,14 +414,17 @@ function PartsTab({ companyId, parts, loading, error }: {
                     </div>
                   )}
                 </TableCell>
-                <TableCell><CategoryBadge category={p.category} /></TableCell>
+                <TableCell>
+                  <div className="text-xs">{p.kindLabel || 'Запчасти (ЗИП)'}</div>
+                  {p.serial
+                    ? <div className="text-xs text-muted-foreground">{p.units ? `${p.units} ед. в парке` : 'учёт по экземплярам'}</div>
+                    : <CategoryBadge category={p.category} />}
+                </TableCell>
                 <TableCell className="text-sm">{p.vendor || '—'}</TableCell>
                 <TableCell className="text-sm">{p.article || '—'}</TableCell>
                 <TableCell className="text-sm">{p.unitLabel}</TableCell>
-                <TableCell className="text-xs text-muted-foreground max-w-[220px] truncate"
-                  title={p.notes ?? undefined}>
-                  {p.notes || '—'}
-                </TableCell>
+                <TableCell className="text-sm">{p.vatRate || '—'}</TableCell>
+                <TableCell className="font-mono text-xs">{p.account || '—'}</TableCell>
                 <TableCell>
                   {p.isArchived
                     ? <Badge variant="outline" className="text-[11px] border-zinc-600 text-zinc-500">архив</Badge>
@@ -431,6 +457,8 @@ function SparePartFormDialog({ companyId, edit, children }: {
 }) {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
+  const metaQ = useQuery({ queryKey: ['equipment', 'accounting-meta'], queryFn: getAccountingMeta, staleTime: Infinity })
+  const meta = metaQ.data
   const initial = () => ({
     name: edit?.name ?? '',
     category: edit?.category ?? 'other',
@@ -439,13 +467,25 @@ function SparePartFormDialog({ companyId, edit, children }: {
     compatibleModels: edit?.compatibleModels ?? '',
     unitLabel: edit?.unitLabel ?? 'шт',
     notes: edit?.notes ?? '',
+    kind: (edit?.kind ?? 'spare') as NomenclatureKind,
+    model: edit?.model ?? '',
+    unitCode: edit?.unitCode ?? '796',
+    vatRate: edit?.vatRate ?? '20%',
+    account: edit?.account ?? '',
+    bpRef: edit?.bpRef ?? '',
   })
   const [f, setF] = useState(initial)
   const set = (k: keyof ReturnType<typeof initial>) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setF((s) => ({ ...s, [k]: e.target.value }))
+  const serial = !!meta?.kinds[f.kind]?.serial
   // Совместимость с моделями станций имеет смысл только у запчастей к станциям.
-  const forStation = SPARE_STATION_CATEGORIES.includes(f.category)
+  const forStation = !serial && SPARE_STATION_CATEGORIES.includes(f.category)
+  // Вид задаёт счёт по умолчанию, как «Счета учёта номенклатуры» в 1С.
+  const setKind = (k: string) => setF((s) => ({
+    ...s, kind: k as NomenclatureKind, account: meta?.kinds[k as NomenclatureKind]?.account ?? s.account,
+    unitCode: meta?.kinds[k as NomenclatureKind]?.serial ? '796' : s.unitCode,
+  }))
 
   const mut = useMutation({
     mutationFn: (body: SparePartPayload) =>
@@ -465,8 +505,14 @@ function SparePartFormDialog({ companyId, edit, children }: {
       vendor: f.vendor.trim() || null,
       article: f.article.trim() || null,
       compatibleModels: f.compatibleModels.trim() || null,
-      unitLabel: f.unitLabel.trim() || 'шт',
+      unitLabel: meta?.okei[f.unitCode] ?? (f.unitLabel.trim() || 'шт'),
       notes: f.notes.trim() || null,
+      kind: f.kind,
+      model: serial ? f.model.trim() || null : null,
+      unitCode: f.unitCode,
+      vatRate: f.vatRate || null,
+      account: f.account || null,
+      bpRef: f.bpRef.trim() || null,
     })
   }
 
@@ -480,22 +526,60 @@ function SparePartFormDialog({ companyId, edit, children }: {
           </DialogTitle>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-x-3 gap-y-2.5">
-          <FField label="Наименование" required span>
-            <Input value={f.name} onChange={set('name')}
-              placeholder={forStation ? 'Силовой модуль 30 кВт…' : 'Кабель ВВГнг 5×10, набор ключей, стяжки…'} />
-          </FField>
-          <FField label="Категория">
-            <Select value={f.category} onValueChange={(v) => setF((s) => ({ ...s, category: v }))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+          <FField label="Вид номенклатуры" required>
+            <Select value={f.kind} onValueChange={setKind}>
+              <SelectTrigger aria-label="Вид номенклатуры"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {Object.entries(SPARE_CATEGORY_META).map(([k, v]) => (
-                  <SelectItem key={k} value={k}>{v}</SelectItem>
-                ))}
+                {Object.entries(meta?.kinds ?? {}).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </FField>
-          <FField label="Ед. измерения">
-            <Input value={f.unitLabel} onChange={set('unitLabel')} placeholder="шт, м, кг, упак" />
+          {serial ? (
+            <FField label="Модель">
+              <Input value={f.model} onChange={set('model')} placeholder="DC60, AC22…" />
+            </FField>
+          ) : (
+            <FField label="Категория">
+              <Select value={f.category} onValueChange={(v) => setF((s) => ({ ...s, category: v }))}>
+                <SelectTrigger aria-label="Категория"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(SPARE_CATEGORY_META).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FField>
+          )}
+          <FField label="Наименование" required span>
+            <Input value={f.name} onChange={set('name')}
+              placeholder={serial ? 'Станция Фора 150 кВт DC' : forStation ? 'Силовой модуль 30 кВт…' : 'Кабель ВВГнг 5×10, набор ключей, стяжки…'} />
+          </FField>
+          <FField label="Единица измерения (ОКЕИ)">
+            <Select value={f.unitCode} onValueChange={(v) => setF((s) => ({ ...s, unitCode: v }))} disabled={serial}>
+              <SelectTrigger aria-label="Единица измерения"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(meta?.okei ?? {}).map(([k, v]) => <SelectItem key={k} value={k}>{v} · {k}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FField>
+          <FField label="Ставка НДС">
+            <Select value={f.vatRate} onValueChange={(v) => setF((s) => ({ ...s, vatRate: v }))}>
+              <SelectTrigger aria-label="Ставка НДС"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(meta?.vatRates ?? []).map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FField>
+          <FField label="Счёт учёта">
+            <Select value={f.account || meta?.kinds[f.kind]?.account || ''} onValueChange={(v) => setF((s) => ({ ...s, account: v }))}>
+              <SelectTrigger aria-label="Счёт учёта"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(meta?.accounts ?? {}).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </FField>
+          <FField label="Ссылка (GUID) в 1С">
+            <Input value={f.bpRef} onChange={set('bpRef')} placeholder="заполняется выгрузкой" className="font-mono" />
           </FField>
           <FField label="Вендор">
             <Input value={f.vendor} onChange={set('vendor')} placeholder={forStation ? 'Sicon, ABB…' : ''} />
@@ -503,6 +587,12 @@ function SparePartFormDialog({ companyId, edit, children }: {
           <FField label="Артикул">
             <Input value={f.article} onChange={set('article')} />
           </FField>
+          {serial && (
+            <p className="col-span-2 text-xs text-muted-foreground">
+              Станции и оборудование учитываются по экземплярам: каждая единица с серийным номером — в «Парке»,
+              на складе на счёте {f.account || '07'}, в монтаже — 08.03, после ввода — основное средство 01.01.
+            </p>
+          )}
           {forStation && (
             <FField label="Совместимые модели" span>
               <Textarea value={f.compatibleModels} onChange={set('compatibleModels')} rows={2}
@@ -518,6 +608,7 @@ function SparePartFormDialog({ companyId, edit, children }: {
             {mut.isPending && <Loader2 className="size-4 animate-spin mr-2" />} Сохранить
           </Button>
         </DialogFooter>
+        {metaQ.isError && <p role="alert" className="text-xs text-destructive">Справочники учёта не загрузились — вид, единица и счёт недоступны.</p>}
       </DialogContent>
     </Dialog>
   )

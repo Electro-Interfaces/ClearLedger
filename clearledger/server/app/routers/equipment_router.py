@@ -910,6 +910,20 @@ async def equipment_settings_update(
     return {"closedUntil": day}
 
 
+@router.get("/people")
+async def equipment_people(
+    company_id: str = Query(...),
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Участники пространства для выбора МОЛ склада: только имя, без почты и ролей."""
+    from app.models import UserCompany
+    from app.services.service_accounts import not_service
+    cid = await assert_company_member(company_id, user, db)
+    rows = (await db.execute(select(User).join(UserCompany, UserCompany.user_id == User.id).where(
+        UserCompany.company_id == cid, not_service()).order_by(User.name))).scalars().all()
+    return [{"id": str(u.id), "name": u.name or u.email} for u in rows]
+
+
 @router.get("/accounting/meta")
 async def accounting_meta(user: User = Depends(get_current_user)):
     """Справочники учёта под 1С: виды номенклатуры, счета, единицы ОКЕИ, ставки НДС."""

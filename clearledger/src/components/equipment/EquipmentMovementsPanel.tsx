@@ -123,7 +123,7 @@ export function EquipmentMovementsPanel({ companyId }: { companyId: string }) {
     queryFn: () => loadLocations(companyId),
     staleTime: 60_000,
   })
-  const warehouses = useMemo(() => (locationsQ.data ?? []).filter((l) => l.type === 'warehouse'), [locationsQ.data])
+  const warehouses = useMemo(() => (locationsQ.data ?? []).filter((l) => l.type === 'warehouse' && l.status !== 'closed'), [locationsQ.data])
   const sites = useMemo(() => (locationsQ.data ?? []).filter((l) => l.type === 'ev_charging'), [locationsQ.data])
   const locOpts = useMemo(() => [
     ...warehouses.map((l) => ({ id: l.id, label: `${l.name} · склад` })),

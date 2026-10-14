@@ -2,12 +2,13 @@
  * Реестр документов движения оборудования: накладные и акты с номером, датой,
  * контрагентом, договором и ответственными; карточка документа, повторная печать
  * и отмена. Отменённый документ из реестра не исчезает: видно, кто, когда и почему.
+ * Черновик проводится или удаляется из своей карточки.
  */
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Ban, FileText, Loader2, Printer } from 'lucide-react'
+import { Ban, CheckCircle2, FileText, Loader2, Printer, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -19,8 +20,8 @@ import { ApiError } from '@/services/apiClient'
 import { loadLocations } from '@/services/locationService'
 import { getContracts, getCounterparties } from '@/services/referenceService'
 import {
-  UNIT_OP_META, cancelEquipmentDocument, getEquipmentDocument, listEquipmentDocuments,
-  type EquipmentDocument, type UnitOp,
+  UNIT_OP_META, cancelEquipmentDocument, deleteEquipmentDraft, getEquipmentDocument, listEquipmentDocuments,
+  postEquipmentDraft, type EquipmentDocument, type UnitOp,
 } from '@/services/equipmentService'
 import { eqName, printEquipmentDocument } from './equipmentDocPrint'
 import { ExportXlsxButton, LoadError, Pager } from './equipmentShared'
@@ -32,6 +33,9 @@ const OPS: UnitOp[] = ['receipt', 'transfer', 'to_installation', 'commissioning'
 const PAGE = 50
 const selectClass = 'h-8 max-w-[200px] rounded-md border bg-background px-2 text-xs'
 const cancelledBadge = <Badge variant="outline" className="border-zinc-600 text-zinc-500 font-normal">Отменён</Badge>
+const draftBadge = <Badge variant="outline" className="border-amber-500/60 text-amber-700 dark:text-amber-400 font-normal">Черновик</Badge>
+const STATUS_LABEL = { posted: 'Проведён', cancelled: 'Отменён', draft: 'Черновик' } as const
+const errText = (e: unknown) => e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e)
 
 function F({ k, children }: { k: string; children: React.ReactNode }) {
   return <div><span className="text-muted-foreground">{k}: </span>{children}</div>
@@ -46,19 +50,38 @@ export function EquipmentDocCard({ companyId, id, onClose }: { companyId: string
   const cancel = useMutation({
     mutationFn: () => cancelEquipmentDocument(companyId, id, reason.trim()),
     onSuccess: (doc) => { toast.success(`Документ № ${doc.number} отменён`); setCancelling(false); void invalidateEquipment(qc) },
-    onError: (e) => toast.error('Документ не отменён', { description: e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e) }),
+    onError: (e) => toast.error('Документ не отменён', { description: errText(e) }),
+  })
+  const postDraft = useMutation({
+    mutationFn: () => postEquipmentDraft(companyId, id),
+    onSuccess: (doc) => {
+      toast.success(`${doc.title} № ${doc.number} проведён: ${doc.units} ед.`)
+      for (const w of doc.warnings ?? []) toast.warning(w)
+      void invalidateEquipment(qc)
+    },
+    onError: (e) => toast.error('Черновик не проведён', { description: errText(e) }),
+  })
+  const [deleting, setDeleting] = useState(false)
+  const delDraft = useMutation({
+    mutationFn: () => deleteEquipmentDraft(companyId, id),
+    onSuccess: (r) => { toast.success(`Черновик № ${r.number} удалён`); void invalidateEquipment(qc); onClose() },
+    onError: (e) => toast.error('Черновик не удалён', { description: errText(e) }),
   })
   const d = q.data
   const cancelled = d?.status === 'cancelled'
+  const draft = d?.status === 'draft'
   const r = d?.details
   return <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
     <DialogContent className="sm:max-w-3xl w-[96vw] max-h-[92dvh] overflow-y-auto">
-      <DialogHeader><DialogTitle className="flex flex-wrap items-center gap-2">{d ? `${d.title} № ${d.number}` : 'Документ'}{cancelled && cancelledBadge}</DialogTitle></DialogHeader>
+      <DialogHeader><DialogTitle className="flex flex-wrap items-center gap-2">{d ? `${d.title} № ${d.number}` : 'Документ'}{cancelled && cancelledBadge}{draft && draftBadge}</DialogTitle></DialogHeader>
       {q.isError ? <LoadError what="документ" error={q.error} onRetry={() => void q.refetch()} />
         : !d ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : <div className="space-y-3 text-sm">
           {cancelled && <p role="status" className="rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-xs">
             Документ отменён {ru(d.cancelledAt)}{d.cancelledBy ? ` · ${d.cancelledBy}` : ''}. Причина: {d.cancelReason || 'не указана'}.
             Движения по нему сняты, единицы возвращены в прежнее состояние.</p>}
+          {draft && <p role="status" className="rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-xs">
+            Черновик: номер занят, единицы ещё не двигались. Проведение проверит состояние каждой единицы на сегодня —
+            строки ниже показывают, где они сейчас.</p>}
           <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 text-xs">
             <F k="Дата">{ru(d.docDate)}</F>
             <F k="Операция">{d.opLabel}</F>
@@ -70,6 +93,8 @@ export function EquipmentDocCard({ companyId, id, onClose }: { companyId: string
               : d.contractLabel ?? '—'}</F>
             <F k="Сдал">{d.responsibleFrom ?? '—'}</F>
             <F k="Принял">{d.responsibleTo ?? '—'}</F>
+            {(d.primaryNumber || d.primaryDate) && <F k="Первичный документ">№ {d.primaryNumber ?? '—'} от {ru(d.primaryDate)}</F>}
+            {!draft && <F k="1С:Бухгалтерия">{d.bpExportedAt ? `выгружен ${ru(d.bpExportedAt)}` : 'не выгружен'}</F>}
             {r?.ticketRef && <F k="Заявка Поддержки">№ {r.ticketRef}</F>}
             {r?.repairKind && <F k="Вид ремонта">{r.repairKind === 'warranty' ? 'гарантийный' : 'платный'}</F>}
             {r?.plannedReturn && <F k="Плановый возврат">{ru(r.plannedReturn)}</F>}
@@ -83,12 +108,15 @@ export function EquipmentDocCard({ companyId, id, onClose }: { companyId: string
           <div className="overflow-x-auto"><table className="w-full text-xs">
             <thead><tr className="border-b bg-muted/40 text-muted-foreground text-left">
               <th className="p-2 font-medium">Серийный №</th><th className="p-2 font-medium">Инв. №</th><th className="p-2 font-medium">Оборудование</th>
-              <th className="p-2 font-medium">Откуда</th><th className="p-2 font-medium">Куда</th><th className="p-2 font-medium">Состояние до → после</th></tr></thead>
+              <th className="p-2 font-medium">Откуда</th><th className="p-2 font-medium">Куда</th><th className="p-2 font-medium">Состояние до → после</th>
+              <th className="p-2 font-medium">Счёт</th><th className="p-2 text-right font-medium">Сумма, ₽</th></tr></thead>
             <tbody>{(d.lines ?? []).map((l) => <tr key={l.unitId} className="border-b border-border/30">
               <td className="p-2 font-mono">{l.serialNumber ?? '—'}</td><td className="p-2 font-mono">{l.inventoryNumber ?? '—'}</td>
               <td className="p-2">{eqName(l.vendor, l.model) || '—'}</td>
               <td className="p-2">{l.from ?? '—'}</td><td className="p-2">{l.to ?? '—'}</td>
-              <td className="p-2">{l.fromState ?? '—'} → {l.toState ?? '—'}</td></tr>)}</tbody>
+              <td className="p-2">{l.fromState ?? '—'} → {l.toState ?? '—'}</td>
+              <td className="p-2 font-mono whitespace-nowrap">{l.accountFrom || l.accountTo ? `${l.accountFrom ?? '—'} → ${l.accountTo ?? '—'}` : '—'}</td>
+              <td className="p-2 text-right font-mono tabular-nums">{l.amount != null ? l.amount.toLocaleString('ru-RU', { minimumFractionDigits: 2 }) : '—'}</td></tr>)}</tbody>
           </table></div>
           {cancelling && <div className="space-y-2 rounded-md border border-dashed p-3">
             <p className="text-xs">Отмена документа № {d.number}: движения по {d.lines?.length ?? d.units ?? 0} ед. будут сняты, единицы вернутся в прежнее состояние и место.
@@ -100,11 +128,20 @@ export function EquipmentDocCard({ companyId, id, onClose }: { companyId: string
                 {cancel.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}Подтвердить отмену</Button>
             </div>
           </div>}
+          {deleting && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 p-3 text-xs">
+            <span className="min-w-0 flex-1">Удалить черновик № {d.number}? Номер освободится, единицы не затронуты.</span>
+            <Button variant="outline" size="sm" onClick={() => setDeleting(false)}>Не удалять</Button>
+            <Button variant="destructive" size="sm" disabled={delDraft.isPending} onClick={() => delDraft.mutate()}>Удалить черновик</Button>
+          </div>}
           <div className="flex flex-wrap justify-end gap-2">
-            {!cancelled && !cancelling && <Button variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setCancelling(true)}>
+            {draft && !deleting && <Button variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setDeleting(true)}>
+              <Trash2 className="h-3.5 w-3.5 mr-1" />Удалить черновик</Button>}
+            {!cancelled && !draft && !cancelling && <Button variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setCancelling(true)}>
               <Ban className="h-3.5 w-3.5 mr-1" />Отменить документ</Button>}
-            <Button variant="outline" onClick={() => { try { printEquipmentDocument(d, company?.name || 'Пространство') } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) } }}>
-              <Printer className="h-3.5 w-3.5 mr-1" />Печать</Button>
+            {!draft && <Button variant="outline" onClick={() => { try { printEquipmentDocument(d, company?.name || 'Пространство') } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) } }}>
+              <Printer className="h-3.5 w-3.5 mr-1" />Печать</Button>}
+            {draft && <Button disabled={postDraft.isPending} onClick={() => postDraft.mutate()}>
+              {postDraft.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5 mr-1" />}Провести</Button>}
           </div>
         </div>}
     </DialogContent>
@@ -136,9 +173,11 @@ export function EquipmentDocumentsSection({ companyId }: { companyId: string }) 
     const all = await allPages<EquipmentDocument>((p) => listEquipmentDocuments({ companyId, ...filters, limit: 500, offset: (p - 1) * 500 }))
     return [{
       name: 'Документы движения',
-      columns: ['Номер', 'Дата', 'Документ', 'Операция', 'Статус', 'Единиц', 'Откуда', 'Куда', 'Контрагент', 'Договор', 'Сдал', 'Принял', 'Основание', 'Комментарий', 'Оформил', 'Причина отмены'],
-      rows: all.map((d) => [d.number, d.docDate, d.title, d.opLabel, d.status === 'cancelled' ? 'Отменён' : 'Проведён', d.units, d.fromLocation, d.toLocation,
-        d.counterpartyName, d.contractLabel, d.responsibleFrom, d.responsibleTo, d.basis, d.comment, d.createdBy, d.cancelReason]),
+      columns: ['Номер', 'Дата', 'Документ', 'Операция', 'Статус', 'Единиц', 'Откуда', 'Куда', 'Контрагент', 'Договор', 'Первичный №', 'Первичный от',
+        'Сдал', 'Принял', 'Основание', 'Комментарий', 'Оформил', 'Причина отмены', 'Выгружен в 1С'],
+      rows: all.map((d) => [d.number, d.docDate, d.title, d.opLabel, STATUS_LABEL[d.status ?? 'posted'], d.units, d.fromLocation, d.toLocation,
+        d.counterpartyName, d.contractLabel, d.primaryNumber, d.primaryDate, d.responsibleFrom, d.responsibleTo, d.basis, d.comment, d.createdBy,
+        d.cancelReason, d.bpExportedAt?.slice(0, 10) ?? '']),
     }]
   }
 
@@ -153,7 +192,7 @@ export function EquipmentDocumentsSection({ companyId }: { companyId: string }) 
         <select aria-label="Операция документа" className={selectClass} value={f.op} onChange={(e) => patch({ op: e.target.value })}>
           <option value="">Все операции</option>{OPS.map((o) => <option key={o} value={o}>{UNIT_OP_META[o].label}</option>)}</select>
         <select aria-label="Статус документа" className={selectClass} value={f.status} onChange={(e) => patch({ status: e.target.value })}>
-          <option value="">Все статусы</option><option value="posted">Проведённые</option><option value="cancelled">Отменённые</option></select>
+          <option value="">Все статусы</option><option value="posted">Проведённые</option><option value="draft">Черновики</option><option value="cancelled">Отменённые</option></select>
         <select aria-label="Склад документа" className={selectClass} value={f.locationId} onChange={(e) => patch({ locationId: e.target.value })}>
           <option value="">Все склады</option>{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
         <select aria-label="Контрагент документа" className={selectClass} value={f.counterpartyId} onChange={(e) => patch({ counterpartyId: e.target.value, contractId: '' })}>
@@ -173,7 +212,7 @@ export function EquipmentDocumentsSection({ companyId }: { companyId: string }) 
           <th className="p-2 font-medium">Документ</th><th className="p-2 font-medium">Дата</th><th className="p-2 font-medium">Ед.</th>
           <th className="p-2 font-medium">Откуда → куда</th><th className="p-2 font-medium">Контрагент / договор</th><th className="p-2 font-medium">Сдал / принял</th></tr></thead>
         <tbody>{docs.data.items.map((d) => <tr key={d.id} className={`cursor-pointer border-b border-border/30 hover:bg-muted/30 ${d.status === 'cancelled' ? 'text-muted-foreground' : ''}`} onClick={() => setOpen(d.id)}>
-          <td className="p-2"><div className="flex items-center gap-2 font-mono font-medium"><span className={d.status === 'cancelled' ? 'line-through' : ''}>{d.number}</span>{d.status === 'cancelled' && cancelledBadge}</div>
+          <td className="p-2"><div className="flex items-center gap-2 font-mono font-medium"><span className={d.status === 'cancelled' ? 'line-through' : ''}>{d.number}</span>{d.status === 'cancelled' && cancelledBadge}{d.status === 'draft' && draftBadge}</div>
             <div className="text-muted-foreground">{d.opLabel}{d.status === 'cancelled' && d.cancelReason ? ` · ${d.cancelReason}` : ''}</div></td>
           <td className="p-2 whitespace-nowrap">{ru(d.docDate)}</td><td className="p-2 text-right font-mono">{d.units}</td>
           <td className="p-2">{d.fromLocation ?? '—'} → {d.toLocation ?? '—'}</td>

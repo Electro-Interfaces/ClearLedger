@@ -9,10 +9,17 @@
  *
  * Раздел ведёт складские предметы: станция, введённая в эксплуатацию, со
  * складского учёта выбыла и в остатки не входит — она показана одним числом.
+ *
+ * «Оборотно-сальдовая» — та же ведомость, что строит 1С:Бухгалтерия по счёту с
+ * субконто «Склады» и «Номенклатура»: сальдо и обороты в количестве и сумме по
+ * счетам 07, 08.03, 01.01, 10.xx. По ней сверяются с бухгалтерией; сверенный
+ * период закрывается — документы той датой больше не проводятся и не отменяются.
  */
 import { useRef, useState, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { Loader2, Lock } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
@@ -21,14 +28,16 @@ import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { loadLocations } from '@/services/locationService'
 import {
-  getHoldersReport, getRepairsReport, getStockReport, getTurnoverReport,
-  type ReportUnitRow, type TurnoverFigures,
+  getEquipmentSettings, getHoldersReport, getOsvReport, getRepairsReport, getStockReport, getTurnoverReport, setClosedPeriod,
+  type OsvCells, type ReportUnitRow, type TurnoverFigures,
 } from '@/services/equipmentService'
+import { ApiError } from '@/services/apiClient'
 import { formatDate } from '@/lib/formatDate'
 import { eqName } from './equipmentDocPrint'
 
 const REPORTS = [
   { k: 'stock', label: 'Остатки на дату' },
+  { k: 'osv', label: 'Оборотно-сальдовая' },
   { k: 'turnover', label: 'Оборотная ведомость' },
   { k: 'holders', label: 'За контрагентом' },
   { k: 'repairs', label: 'В ремонте' },
@@ -235,7 +244,89 @@ function RepairsReportView({ companyId, bar }: ReportProps) {
   </>
 }
 
-const VIEWS = { stock: StockReportView, turnover: TurnoverReportView, holders: HoldersReportView, repairs: RepairsReportView }
+const money = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const OSV_COLS: [keyof OsvCells, string][] = [
+  ['oq', 'Нач. кол-во'], ['os', 'Нач. сумма'], ['dq', 'Приход, кол-во'], ['ds', 'Приход, сумма'],
+  ['cq', 'Расход, кол-во'], ['cs', 'Расход, сумма'], ['zq', 'Кон. кол-во'], ['zs', 'Кон. сумма'],
+]
+
+/** ОСВ: строки по счёту, месту, номенклатуре; над группой счёта — его итог. */
+function OsvReportView({ companyId, f, patch, warehouses, bar }: ReportProps) {
+  const [account, setAccount] = useState('')
+  const q = useQuery({
+    queryKey: ['eq-report-osv', companyId, f.dateFrom, f.dateTo, f.locationId, account],
+    queryFn: () => getOsvReport({ companyId, dateFrom: f.dateFrom, dateTo: f.dateTo, locationId: f.locationId || undefined, account: account || undefined }),
+  })
+  const d = q.data
+  const fmt = (k: keyof OsvCells, v: number) => (v ? (k.endsWith('s') ? money.format(v) : nf.format(v)) : '')
+  const cols = ['Счёт', 'Склад / место', 'Номенклатура', 'Ед.', ...OSV_COLS.map(([, l]) => l)]
+  return <>
+    {bar(<>
+      <DateField label="Период с" value={f.dateFrom} onChange={(v) => patch({ dateFrom: v })} />
+      <DateField label="по" value={f.dateTo} onChange={(v) => patch({ dateTo: v })} />
+      <Pick label="Склад" all="Все места" value={f.locationId} onChange={(v) => patch({ locationId: v })} opts={warehouses} />
+      <Pick label="Счёт" all="Все счета" value={account} onChange={setAccount}
+        opts={(d?.accounts ?? []).map((a) => ({ id: a.account, name: a.label }))} />
+    </>, `${formatDate(f.dateFrom)} — ${formatDate(f.dateTo)}`)}
+    {!d ? <Pending q={q} /> : <Card><CardContent className="p-0">
+      <h3 className="px-3 py-2 text-sm font-semibold">Оборотно-сальдовая ведомость <span className="font-normal text-muted-foreground">· {nf.format(d.rows.length)} строк · суммы без НДС, ₽</span></h3>
+      {d.rows.length === 0 ? <p className="px-3 pb-3 text-sm text-muted-foreground">За период по отбору ни остатков, ни оборотов нет.</p> : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs" {...exportRows('Оборотно-сальдовая ведомость', cols,
+            d.rows.map((r) => [r.account, r.placeName, r.itemName, r.unitLabel, ...OSV_COLS.map(([k]) => r[k])]))}>
+            <thead><tr className="border-y bg-muted/40 text-left text-muted-foreground">
+              {cols.map((c, i) => <th key={c} className={`p-2 font-medium ${i > 3 ? 'text-right whitespace-nowrap' : ''}`}>{c}</th>)}</tr></thead>
+            <tbody>{d.accounts.map((a) => <AccountGroup key={a.account} a={a} rows={d.rows.filter((r) => r.account === a.account)} fmt={fmt} />)}</tbody>
+          </table>
+        </div>)}
+    </CardContent></Card>}
+    {!!d?.noCost && <Note>У {nf.format(d.noCost)} ед. оборудования не указана стоимость: в ведомости они идут количеством без суммы. Стоимость вносится в карточке единицы или приходит из поставки.</Note>}
+    <ClosedPeriod companyId={companyId} />
+  </>
+}
+
+function AccountGroup({ a, rows, fmt }: { a: OsvCells & { account: string; label: string }; rows: (OsvCells & { place: string; placeName: string; item: string; itemName: string; unitLabel: string })[]; fmt: (k: keyof OsvCells, v: number) => string }) {
+  return <>
+    <tr className="bg-muted/30 font-semibold"><td className="p-2 font-mono">{a.account}</td><td className="p-2" colSpan={3}>{a.label}</td>
+      {OSV_COLS.map(([k]) => <td key={k} className="p-2 text-right tabular-nums whitespace-nowrap">{fmt(k, a[k])}</td>)}</tr>
+    {rows.map((r) => <tr key={`${r.place}|${r.item}`} className="border-b border-border/30">
+      <td className="p-2" /><td className="p-2">{r.placeName}</td>
+      <td className={`p-2 ${r.item.startsWith('text:') ? 'text-amber-700 dark:text-amber-400' : ''}`} title={r.item.startsWith('text:') ? 'Без номенклатуры — модель из карточки' : undefined}>{r.itemName}</td>
+      <td className="p-2">{r.unitLabel}</td>
+      {OSV_COLS.map(([k]) => <td key={k} className="p-2 text-right tabular-nums whitespace-nowrap">{fmt(k, r[k])}</td>)}</tr>)}
+  </>
+}
+
+/** Закрытый период — как дата запрета изменений в 1С: закрывает администратор пространства. */
+function ClosedPeriod({ companyId }: { companyId: string }) {
+  const qc = useQueryClient()
+  const q = useQuery({ queryKey: ['equipment', 'settings', companyId], queryFn: () => getEquipmentSettings(companyId) })
+  const [value, setValue] = useState<string | null>(null)
+  const current = q.data?.closedUntil ?? ''
+  const shown = value ?? current
+  const mut = useMutation({
+    mutationFn: (v: string | null) => setClosedPeriod(companyId, v),
+    onSuccess: (r) => {
+      toast.success(r.closedUntil ? `Период закрыт по ${formatDate(r.closedUntil)}` : 'Закрытый период снят')
+      setValue(null); void qc.invalidateQueries({ queryKey: ['equipment', 'settings', companyId] })
+    },
+    onError: (e) => toast.error('Период не изменён', { description: e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e) }),
+  })
+  return <Card><CardContent className="flex flex-wrap items-center gap-3 p-3 text-sm">
+    <Lock className="h-4 w-4 text-muted-foreground" />
+    <span className="min-w-0 flex-1">
+      <span className="font-medium">Закрытый период</span>
+      <span className="block text-xs text-muted-foreground">{current
+        ? `Сверен с бухгалтерией по ${formatDate(current)} включительно: документы этими датами не проводятся и не отменяются.`
+        : 'Не закрыт. После сверки с 1С закройте период — так прошлые остатки не изменятся задним числом.'}</span>
+    </span>
+    <Input type="date" aria-label="Закрыть период по дату" value={shown} onChange={(e) => setValue(e.target.value)} className="h-9 w-40" />
+    <Button size="sm" variant="outline" disabled={mut.isPending || !shown || shown === current} onClick={() => mut.mutate(shown)}>Закрыть по дату</Button>
+    {current && <Button size="sm" variant="ghost" disabled={mut.isPending} onClick={() => mut.mutate(null)}>Снять</Button>}
+  </CardContent></Card>
+}
+
+const VIEWS = { stock: StockReportView, osv: OsvReportView, turnover: TurnoverReportView, holders: HoldersReportView, repairs: RepairsReportView }
 
 export function EquipmentReportsPanel({ companyId }: { companyId: string }) {
   const [report, setReport] = useState<keyof typeof VIEWS>('stock')

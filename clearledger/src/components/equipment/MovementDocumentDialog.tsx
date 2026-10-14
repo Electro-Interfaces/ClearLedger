@@ -4,6 +4,9 @@
  * Операция проводится документом с номером, датой, контрагентом и договором из
  * справочников пространства и ответственными «сдал / принял» — как в складском
  * учёте. Переходы состояния проверяет сервер, по каждой единице.
+ *
+ * Документ можно сохранить черновиком (номер занят, движений нет) и провести позже
+ * из реестра. «Сдал» и «принял» по умолчанию — МОЛ складов из их карточек.
  */
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -78,25 +81,32 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
   const [comment, setComment] = useState('')
   const [custodian, setCustodian] = useState<'contractor' | 'vendor'>('contractor')
   const [syncPassport, setSyncPassport] = useState(false)
+  const [primaryNumber, setPrimaryNumber] = useState('')
+  const [primaryDate, setPrimaryDate] = useState('')
   const needsCp = !!op && (meta.data?.counterpartyRequired ?? ['to_repair', 'from_repair', 'to_vendor']).includes(op)
 
   const mut = useMutation({
-    mutationFn: () => postEquipmentDocument(companyId, {
+    mutationFn: (draft: boolean) => postEquipmentDocument(companyId, {
       op: op as UnitOp, unitIds: units.map((u) => u.id), docDate, number: number.trim() || undefined,
       toLocationId: toLocationId || undefined, reservedForLocationId: op === 'reserve' ? reservedForId || undefined : undefined, counterpartyId: party.counterpartyId || undefined,
       contractId: party.contractId || undefined, responsibleFrom: responsibleFrom.trim() || undefined,
       responsibleTo: responsibleTo.trim() || undefined, basis: basis.trim() || undefined, comment: comment.trim() || undefined,
       custodian: op === 'to_repair' ? custodian : undefined, syncPassport: op === 'commissioning' ? syncPassport : undefined,
       details: op === 'to_repair' || op === 'from_repair' ? repair : undefined,
+      primaryNumber: primaryNumber.trim() || undefined, primaryDate: primaryDate || undefined, draft,
     }),
-    onSuccess: (doc) => {
-      toast.success(`${doc.title} № ${doc.number} проведён: ${doc.units} ед.`)
-      for (const w of doc.warnings ?? []) toast.warning(w)
+    onSuccess: (doc, draft) => {
       void invalidateEquipment(qc)
-      try { printEquipmentDocument(doc, company?.name || 'Пространство') } catch (e) { toast.info(e instanceof Error ? e.message : String(e)) }
+      if (draft) {
+        toast.success(`Черновик № ${doc.number} сохранён`, { description: 'Провести его можно из реестра «Документы».' })
+      } else {
+        toast.success(`${doc.title} № ${doc.number} проведён: ${doc.units} ед.`)
+        for (const w of doc.warnings ?? []) toast.warning(w)
+        try { printEquipmentDocument(doc, company?.name || 'Пространство') } catch (e) { toast.info(e instanceof Error ? e.message : String(e)) }
+      }
       onDone?.(); onClose()
     },
-    onError: (e) => toast.error('Документ не проведён', { description: e instanceof Error ? e.message : String(e) }),
+    onError: (e, draft) => toast.error(draft ? 'Черновик не сохранён' : 'Документ не проведён', { description: e instanceof Error ? e.message : String(e) }),
   })
   const problem = !op ? 'Выберите операцию'
     : (NEEDS_WAREHOUSE.includes(op) || (op === 'correction' && correctionMode === 'place')) && !toLocationId ? 'Выберите склад-получатель'
@@ -149,15 +159,23 @@ export function MovementDocumentDialog({ companyId, units, op: fixedOp, warehous
         {op && <CounterpartyContractPicker companyId={companyId} value={party} onChange={setParty} required={needsCp}
           preferredTypes={meta.data?.contractTypes[op] ?? []} preferredTypeCodes={CONTRACT_TYPE_CODES[op]} label={op === 'to_vendor' ? 'Поставщик' : op === 'transfer' ? 'Контрагент (если склад чужой)' : 'Контрагент'} />}
         <div className="grid gap-2 sm:grid-cols-2">
-          <label className="text-xs">Сдал (должность, ФИО)<Input aria-label="Сдал" value={responsibleFrom} onChange={(e) => setResponsibleFrom(e.target.value)} className="h-9" /></label>
-          <label className="text-xs">Принял (должность, ФИО)<Input aria-label="Принял" value={responsibleTo} onChange={(e) => setResponsibleTo(e.target.value)} className="h-9" /></label>
+          <label className="text-xs">Сдал (должность, ФИО)<Input aria-label="Сдал" value={responsibleFrom} onChange={(e) => setResponsibleFrom(e.target.value)}
+            placeholder="по умолчанию — МОЛ склада-отправителя" className="h-9" /></label>
+          <label className="text-xs">Принял (должность, ФИО)<Input aria-label="Принял" value={responsibleTo} onChange={(e) => setResponsibleTo(e.target.value)}
+            placeholder="по умолчанию — МОЛ склада-получателя" className="h-9" /></label>
+          <label className="text-xs">Первичный документ контрагента, №<Input aria-label="Номер первичного документа" value={primaryNumber}
+            onChange={(e) => setPrimaryNumber(e.target.value)} placeholder="УПД, акт, накладная" className="h-9" /></label>
+          <label className="text-xs">Дата первичного документа<Input aria-label="Дата первичного документа" type="date" value={primaryDate}
+            onChange={(e) => setPrimaryDate(e.target.value)} className="h-9" /></label>
         </div>
         <label className="text-xs block">Основание<Input aria-label="Основание" value={basis} onChange={(e) => setBasis(e.target.value)} placeholder="заявка, письмо, распоряжение…" className="h-9" /></label>
         <label className="text-xs block">Комментарий<Textarea aria-label="Комментарий" rows={2} value={comment} onChange={(e) => setComment(e.target.value)} /></label>
         {problem && <p className="text-xs text-muted-foreground">{problem}</p>}
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="outline" onClick={onClose}>Отмена</Button>
-          <Button disabled={!!problem || mut.isPending} onClick={() => mut.mutate()}>
+          <Button variant="outline" disabled={!op || !docDate || mut.isPending} onClick={() => mut.mutate(true)}
+            title="Номер займётся, единицы не двинутся — провести можно позже из реестра">Сохранить черновик</Button>
+          <Button disabled={!!problem || mut.isPending} onClick={() => mut.mutate(false)}>
             {mut.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}Провести и распечатать</Button>
         </div>
       </div>

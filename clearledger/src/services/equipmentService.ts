@@ -7,7 +7,7 @@
  * переходов НЕ дублируется на фронте.
  */
 
-import { del, get, patch, post, upload } from './apiClient'
+import { del, get, patch, post, put, upload } from './apiClient'
 
 // ─── справочники состояний/операций (метки + приглушённые классы) ──────────
 
@@ -113,6 +113,19 @@ export interface EquipmentUnit {
   createdAt: string | null
   updatedAt: string | null
   allowedOps: UnitOp[]
+  /** Реквизиты для 1С: номенклатура, поставщик и балансодержатель ссылками, ОС. */
+  nomenclatureId?: string | null
+  supplierId?: string | null
+  ownerId?: string | null
+  okof?: string | null
+  depreciationGroup?: string | null
+  usefulLifeMonths?: number | null
+  bpRef?: string | null
+  /** Только в карточке: названия ссылок и счёт, на котором единица сейчас. */
+  nomenclature?: { id: string; name: string; kind: string; kindLabel: string; account: string } | null
+  supplierName?: string | null
+  ownerRefName?: string | null
+  account?: string | null
 }
 
 export interface EquipmentMovement {
@@ -161,6 +174,16 @@ export interface UnitInPayload {
   occurredOn?: string
   basis?: string
   comment?: string
+  nomenclatureId?: string | null
+  supplierId?: string | null
+  ownerId?: string | null
+  purchaseAmount?: number | null
+  vatAmount?: number | null
+  accountingNo?: string | null
+  okof?: string | null
+  depreciationGroup?: string | null
+  usefulLifeMonths?: number | null
+  bpRef?: string | null
 }
 
 export interface MovementPayload {
@@ -179,10 +202,13 @@ export interface MovementPayload {
 export interface WarehouseSummaryRow {
   card?: WarehouseCard
   location: LocBrief
+  status?: 'active' | 'closed'
   unitsByState: Partial<Record<UnitState, number>>
   unitsTotal: number
   sparePositions: number
   spareQty: number
+  /** Стоимость остатка: единицы на складе + сумма остатка ЗИП. */
+  amount?: number
 }
 
 export interface EquipmentOverview {
@@ -204,6 +230,9 @@ export interface ImportReport {
   dryRun: boolean
 }
 
+/** Вид номенклатуры: станция и оборудование — по экземплярам, остальное — количеством. */
+export type NomenclatureKind = 'station' | 'equipment' | 'spare' | 'material' | 'inventory' | 'goods'
+
 export interface SparePart {
   id: string
   name: string
@@ -215,7 +244,18 @@ export interface SparePart {
   notes: string | null
   isArchived: boolean
   totalQty: number
-  byLocation: { locationId: string; locationName: string; qty: number }[]
+  totalAmount?: number
+  byLocation: { locationId: string; locationName: string; qty: number; amount?: number }[]
+  kind?: NomenclatureKind
+  kindLabel?: string
+  serial?: boolean
+  model?: string | null
+  unitCode?: string | null
+  vatRate?: string | null
+  account?: string | null
+  bpRef?: string | null
+  /** Сколько единиц-экземпляров связано с номенклатурой (станции, оборудование). */
+  units?: number
 }
 
 export interface SparePartPayload {
@@ -226,6 +266,12 @@ export interface SparePartPayload {
   compatibleModels?: string | null
   unitLabel?: string
   notes?: string | null
+  kind?: NomenclatureKind
+  model?: string | null
+  unitCode?: string | null
+  vatRate?: string | null
+  account?: string | null
+  bpRef?: string | null
 }
 
 export interface SpareMovementPayload {
@@ -399,12 +445,17 @@ export async function listSpareParts(p: {
   q?: string
   category?: string
   includeArchived?: boolean
+  /** Без отбора — только количественная номенклатура (ЗИП, материалы). */
+  kind?: string
+  includeSerial?: boolean
 }): Promise<SparePart[]> {
   return get('/api/equipment/spare-parts', {
     company_id: p.companyId,
     ...(p.q ? { q: p.q } : {}),
     ...(p.category ? { category: p.category } : {}),
     ...(p.includeArchived ? { include_archived: 'true' } : {}),
+    ...(p.kind ? { kind: p.kind } : {}),
+    ...(p.includeSerial ? { include_serial: 'true' } : {}),
   })
 }
 
@@ -462,11 +513,15 @@ export const SPARE_DOC_META: Record<SpareDocOp, { label: string; title: string; 
 export interface SpareTargetUnit { id: string; serialNumber: string | null; name: string }
 export interface SpareDocLine {
   partId: string; name: string; article: string | null; category: string | null; unitLabel: string
-  qty?: number; book?: number; fact?: number; delta?: number
+  qty?: number; book?: number | null; fact?: number; delta?: number | null
+  /** Цена без НДС (приход, оценка излишка) и сумма строки — расход идёт по средней. */
+  price?: number | null; amount?: number | null
 }
 export interface SpareDocument {
   id: string; op: SpareDocOp; opLabel: string; title: string; number: string; docDate: string
-  status: 'posted' | 'cancelled'
+  status: 'posted' | 'cancelled' | 'draft'
+  amount?: number; primaryNumber?: string | null; primaryDate?: string | null
+  bpRef?: string | null; bpExportedAt?: string | null; postedAt?: string | null
   counterpartyId: string | null; counterpartyName: string | null; contractId: string | null; contractLabel: string | null
   fromLocationId: string | null; fromLocation: string | null; toLocationId: string | null; toLocation: string | null
   targetUnit: SpareTargetUnit | null; targetLocation: string | null; targetNote: string | null
@@ -479,10 +534,13 @@ export interface SpareDocument {
 export interface SpareDocPayload {
   /** Ключ документа от формы: повторная отправка не проводит документ дважды. */
   id: string; op: SpareDocOp; docDate: string; number?: string
-  lines: { partId: string; qty?: number; fact?: number }[]
+  lines: { partId: string; qty?: number; fact?: number; price?: number | null }[]
   fromLocationId?: string; toLocationId?: string; targetUnitId?: string; targetNote?: string
   repairDocumentId?: string; counterpartyId?: string; contractId?: string
   responsibleFrom?: string; responsibleTo?: string; basis?: string; comment?: string
+  primaryNumber?: string; primaryDate?: string
+  /** Сохранить черновиком: номер занят, остатки не тронуты. */
+  draft?: boolean
 }
 export interface SpareCountSheet {
   location: { id: string; name: string }
@@ -503,6 +561,12 @@ export const postSpareDocument = (companyId: string, body: SpareDocPayload) =>
   post<SpareDocument>(`/api/equipment/spare-documents?company_id=${companyId}`, body)
 export const cancelSpareDocument = (companyId: string, id: string, reason: string) =>
   post<SpareDocument>(`/api/equipment/spare-documents/${id}/cancel?company_id=${companyId}`, { reason })
+export const updateSpareDraft = (companyId: string, id: string, body: SpareDocPayload) =>
+  patch<SpareDocument>(`/api/equipment/spare-documents/${id}?company_id=${companyId}`, body)
+export const postSpareDraft = (companyId: string, id: string) =>
+  post<SpareDocument>(`/api/equipment/spare-documents/${id}/post?company_id=${companyId}`, {})
+export const deleteSpareDraft = (companyId: string, id: string) =>
+  del<{ deleted: string; number: string }>(`/api/equipment/spare-documents/${id}?company_id=${companyId}`)
 export const getSpareCountSheet = (companyId: string, locationId: string) =>
   get<SpareCountSheet>('/api/equipment/spare-documents/count-sheet', { company_id: companyId, location_id: locationId })
 
@@ -712,16 +776,23 @@ export interface EquipmentDocLine {
   unitId: string; serialNumber: string | null; inventoryNumber: string | null; vendor: string | null
   model: string | null; powerKwt: number | null; purchaseAmount: number | null
   from: string | null; to: string | null; fromState: string | null; toState: string | null
+  /** Проводка строки: счёт до → после и стоимость единицы. */
+  accountFrom?: string | null; accountTo?: string | null; amount?: number | null
 }
 export interface EquipmentDocument {
   id: string; op: UnitOp; opLabel: string; title: string; number: string; docDate: string
   counterpartyId: string | null; counterpartyName: string | null; contractId: string | null; contractLabel: string | null
   fromLocation: string | null; toLocation: string | null; responsibleFrom: string | null; responsibleTo: string | null
   basis: string | null; comment: string | null; createdBy: string | null; createdAt: string | null; units: number | null
-  status?: 'posted' | 'cancelled'; cancelledAt?: string | null; cancelledBy?: string | null; cancelReason?: string | null
+  status?: 'posted' | 'cancelled' | 'draft'; cancelledAt?: string | null; cancelledBy?: string | null; cancelReason?: string | null
   fromLocationId?: string | null; toLocationId?: string | null
   lines?: EquipmentDocLine[]; warnings?: string[]
   details?: RepairDetails
+  primaryNumber?: string | null; primaryDate?: string | null
+  bpRef?: string | null; bpExportedAt?: string | null; postedAt?: string | null
+  /** Состав черновика — то, что будет проведено. */
+  draft?: { unit_ids?: string[]; to_location_id?: string; counterparty_id?: string; contract_id?: string
+    responsible_from?: string; responsible_to?: string; basis?: string; comment?: string } | null
 }
 export interface RepairDetails {
   ticketRef?: string; repairKind?: 'warranty' | 'paid'; plannedReturn?: string
@@ -732,16 +803,23 @@ export interface EquipmentDocPayload {
   counterpartyId?: string; contractId?: string; responsibleFrom?: string; responsibleTo?: string
   basis?: string; comment?: string; custodian?: 'contractor' | 'vendor'; reservedForLocationId?: string
   toState?: UnitState; syncPassport?: boolean; details?: RepairDetails
+  primaryNumber?: string; primaryDate?: string
+  /** Сохранить черновиком: номер занят, движений нет. */
+  draft?: boolean
 }
 export interface WarehouseCard {
   id: string; name: string; address: string | null
+  status?: 'active' | 'closed'
   ownership?: 'own' | 'rent' | 'custody'; ownershipLabel?: string
   counterpartyId?: string | null; counterpartyName?: string; contractId?: string | null
   contractLabel?: string; contractValidUntil?: string | null
   contractStatus?: 'active' | 'expired' | 'closed' | 'missing' | null
-  responsible?: string | null; phone?: string | null; note?: string | null
+  responsible?: string | null; responsibleUserId?: string | null; phone?: string | null; note?: string | null
+  /** Код и ссылка склада в 1С — по ним выгрузка находит склад, а сверка остаток. */
+  bpCode?: string | null; bpRef?: string | null
 }
-export type WarehousePayload = Partial<Pick<WarehouseCard, 'name' | 'address' | 'ownership' | 'counterpartyId' | 'contractId' | 'responsible' | 'phone' | 'note'>>
+export type WarehousePayload = Partial<Pick<WarehouseCard, 'name' | 'address' | 'ownership' | 'counterpartyId' | 'contractId'
+  | 'responsible' | 'responsibleUserId' | 'phone' | 'note' | 'bpCode' | 'bpRef'>>
 
 export const getEquipmentDocsMeta = () => get<EquipmentDocsMeta>('/api/equipment/documents/meta')
 export const listEquipmentDocuments = (p: {
@@ -765,6 +843,36 @@ export const createWarehouse = (companyId: string, body: WarehousePayload) =>
   post<WarehouseCard>(`/api/equipment/warehouses?company_id=${companyId}`, body)
 export const updateWarehouse = (companyId: string, id: string, body: WarehousePayload) =>
   patch<WarehouseCard>(`/api/equipment/warehouses/${encodeURIComponent(id)}?company_id=${companyId}`, body)
+/** Закрыть пустой склад (уходит из выбора, история остаётся) или открыть снова. */
+export const setWarehouseClosed = (companyId: string, id: string, closed: boolean) =>
+  post<WarehouseCard>(`/api/equipment/warehouses/${encodeURIComponent(id)}/status?company_id=${companyId}`, { closed })
+/** Удалить склад, заведённый по ошибке: без единиц, остатков и истории. */
+export const deleteWarehouse = (companyId: string, id: string) =>
+  del<{ deleted: string; name: string }>(`/api/equipment/warehouses/${encodeURIComponent(id)}?company_id=${companyId}`)
+export const listEquipmentPeople = (companyId: string) =>
+  get<{ id: string; name: string }[]>('/api/equipment/people', { company_id: companyId })
+export const updateEquipmentDraft = (companyId: string, id: string, body: EquipmentDocPayload) =>
+  patch<EquipmentDocument>(`/api/equipment/documents/${id}?company_id=${companyId}`, body)
+export const postEquipmentDraft = (companyId: string, id: string) =>
+  post<EquipmentDocument>(`/api/equipment/documents/${id}/post?company_id=${companyId}`, {})
+export const deleteEquipmentDraft = (companyId: string, id: string) =>
+  del<{ deleted: string; number: string }>(`/api/equipment/documents/${id}?company_id=${companyId}`)
+
+// ─── учёт под 1С: справочники, закрытый период, номенклатура по моделям ─────
+export interface AccountingMeta {
+  kinds: Record<NomenclatureKind, { label: string; account: string; serial: boolean }>
+  accounts: Record<string, string>
+  okei: Record<string, string>
+  vatRates: string[]
+}
+export const getAccountingMeta = () => get<AccountingMeta>('/api/equipment/accounting/meta')
+export const getEquipmentSettings = (companyId: string) =>
+  get<{ closedUntil: string | null }>('/api/equipment/settings', { company_id: companyId })
+export const setClosedPeriod = (companyId: string, closedUntil: string | null) =>
+  put<{ closedUntil: string | null }>(`/api/equipment/settings?company_id=${companyId}`, { closedUntil })
+export const linkNomenclatureFromUnits = (companyId: string, body: { unitIds?: string[]; dryRun?: boolean }) =>
+  post<{ groups: { name: string; units: number; exists: boolean; nomenclatureId: string | null }[]; linked: number }>(
+    `/api/equipment/nomenclature/from-units?company_id=${companyId}`, body)
 
 // ─── разбор данных ──────────────────────────────────────────────────────────
 export interface AuditUnit {
@@ -775,6 +883,7 @@ export interface AuditUnit {
 }
 export interface AuditSection {
   key: 'stock_no_place' | 'terminal_no_doc' | 'keeper_text' | 'warehouse_contract' | 'repair_overdue' | 'unconfirmed'
+    | 'no_nomenclature' | 'no_cost'
   title: string; hint: string; action: string; count: number; items: AuditUnit[]
 }
 export const getEquipmentAudit = (companyId: string) =>
@@ -833,4 +942,31 @@ export const getHoldersReport = (companyId: string, date: string) =>
   get<{ date: string; holders: HolderGroup[] }>('/api/equipment/reports/holders', { company_id: companyId, date })
 export const getRepairsReport = (companyId: string) =>
   get<{ date: string; items: RepairRow[]; overdue: number }>('/api/equipment/reports/repairs', { company_id: companyId })
+
+/** Остатки склада на дату: номенклатура × количество × сумма; единицы — списком. */
+export interface BalanceItem {
+  key: string; name: string; kind: string; account: string; unitLabel: string; qty: number; amount: number
+  units: { id: string; serialNumber: string | null; inventoryNumber: string | null; state: UnitState
+    stateLabel: string; since: string | null; amount: number | null }[]
+}
+export interface BalanceWarehouse {
+  id: string; name: string; status: 'active' | 'closed'; ownershipLabel: string; responsible: string | null
+  items: BalanceItem[]; amount: number; units: number; positions: number; noCost: number
+}
+export const getBalanceReport = (p: { companyId: string; date: string; locationId?: string }) =>
+  get<{ date: string; warehouses: BalanceWarehouse[]; amount: number; noCost: number }>('/api/equipment/reports/balance', {
+    company_id: p.companyId, date: p.date, location_id: p.locationId })
+
+/** Строка оборотно-сальдовой ведомости: о — сальдо на начало, д — дебет, к — кредит, з — на конец; q — количество, s — сумма. */
+export interface OsvCells { oq: number; os: number; dq: number; ds: number; cq: number; cs: number; zq: number; zs: number }
+export interface OsvRow extends OsvCells {
+  account: string; place: string; placeName: string; item: string; itemName: string; unitLabel: string
+}
+export interface OsvReport {
+  dateFrom: string; dateTo: string; rows: OsvRow[]; noCost: number
+  accounts: (OsvCells & { account: string; label: string; rows: number })[]
+}
+export const getOsvReport = (p: { companyId: string; dateFrom: string; dateTo: string; locationId?: string; account?: string }) =>
+  get<OsvReport>('/api/equipment/reports/osv', {
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, location_id: p.locationId, account: p.account })
 

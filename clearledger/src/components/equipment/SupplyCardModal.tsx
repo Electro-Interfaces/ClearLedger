@@ -56,7 +56,7 @@ function lineTitle(ln: Pick<SupplyLine, 'lineKind' | 'name' | 'vendor' | 'model'
 
 function useWarehouses(companyId: string) {
   const q = useQuery({ queryKey: ['equipment', 'locations', companyId], queryFn: () => loadLocations(companyId), staleTime: 60_000 })
-  return (q.data ?? []).filter((l) => l.type === 'warehouse')
+  return (q.data ?? []).filter((l) => l.type === 'warehouse' && l.status !== 'closed')
 }
 
 // ─── строка спецификации в форме (создание и правка документа) ──────────────

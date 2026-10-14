@@ -1,10 +1,11 @@
 /**
  * «Склады и остатки» — сводка складского учёта оборудования ЭЗС.
  *
- * KPI (склады · единицы · внешние держатели · ЗИП) + таблица складов с
- * разбивкой единиц по складским состояниям + единицы вне складов (у подрядчика,
- * у производителя). Любое число раскрывается в список единиц, строка списка —
- * в карточку единицы. Склад заводится на сервере, без локального справочника.
+ * KPI (склады · единицы · сумма · внешние держатели · ЗИП) + таблица складов с
+ * разбивкой единиц по складским состояниям и суммой остатка + единицы вне складов
+ * (у подрядчика, у производителя). Название склада и кнопка «Карточка» открывают
+ * карточку: остатки на дату по номенклатуре, реквизиты, закрытие и удаление.
+ * Любое число раскрывается в список единиц, строка списка — в карточку единицы.
  */
 
 import { useMemo, useState } from 'react'
@@ -12,7 +13,8 @@ import { SortTh } from '@/components/workspace/SortableTh'
 import { useTableSort } from '@/hooks/useTableSort'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Loader2, Plus, Warehouse } from 'lucide-react'
+import { FileText, Loader2, Plus, Warehouse } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -34,6 +36,7 @@ import { invalidateEquipment } from './useEquipmentScope'
 import { CONTRACT_STATUS, WarehouseCardDialog } from './WarehouseCardDialog'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
+const rub = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 /** Колонки-состояния таблицы складов (порядок фиксирован) — только складские. */
 const STATE_COLS: { state: UnitState; label: string }[] = [
@@ -61,7 +64,7 @@ function Num({ v, dim, onOpen }: { v: number; dim?: boolean; onOpen?: () => void
   )
 }
 
-function NewWarehouseDialog({ companyId }: { companyId: string }) {
+function NewWarehouseDialog({ companyId, onCreated }: { companyId: string; onCreated: (id: string) => void }) {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -74,6 +77,7 @@ function NewWarehouseDialog({ companyId }: { companyId: string }) {
       setAddress('')
       setOpen(false)
       void invalidateEquipment(qc)
+      onCreated(w.id)
     },
     onError: (e) => toast.error('Склад не создан', { description: e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e) }),
   })
@@ -102,7 +106,7 @@ function NewWarehouseDialog({ companyId }: { companyId: string }) {
               placeholder="г. Хабаровск, ул. Промышленная, 5" />
           </div>
           <p className="text-xs text-muted-foreground">
-            Чей склад, договор и ответственный заполняются в карточке склада после создания.
+            После создания откроется карточка склада: там указываются вид владения, договор, МОЛ и код склада в 1С.
           </p>
         </div>
         <DialogFooter>
@@ -174,7 +178,8 @@ function UnitsListDialog({ companyId, drill, onOpenUnit, onClose }: {
 }
 
 export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
-  const [cardId, setCardId] = useState<string | null>(null)
+  const [card, setCard] = useState<{ id: string; tab: 'stock' | 'card' } | null>(null)
+  const [showClosed, setShowClosed] = useState(false)
   const [drill, setDrill] = useState<Drill | null>(null)
   const [unitId, setUnitId] = useState<string | null>(null)
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -187,10 +192,12 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
     queryFn: () => loadLocations(companyId),
     staleTime: 60_000,
   })
-  const warehouses = useMemo(() => (locationsQ.data ?? []).filter((l) => l.type === 'warehouse'), [locationsQ.data])
+  const warehouses = useMemo(() => (locationsQ.data ?? []).filter((l) => l.type === 'warehouse' && l.status !== 'closed'), [locationsQ.data])
   const sites = useMemo(() => (locationsQ.data ?? []).filter((l) => l.type === 'ev_charging'), [locationsQ.data])
 
-  const rows = useMemo(() => data?.warehouses ?? [], [data])
+  const allRows = useMemo(() => data?.warehouses ?? [], [data])
+  const closedCount = allRows.filter((w) => w.status === 'closed').length
+  const rows = useMemo(() => allRows.filter((w) => showClosed || w.status !== 'closed'), [allRows, showClosed])
 
   // Склады сравнивают по загруженности: где скопились единицы, где пусто.
   const сортировка = useMemo(() => ({
@@ -198,6 +205,7 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
     units: (w: WarehouseSummaryRow) => w.unitsTotal,
     spareLines: (w: WarehouseSummaryRow) => w.sparePositions,
     spareQty: (w: WarehouseSummaryRow) => w.spareQty,
+    amount: (w: WarehouseSummaryRow) => w.amount ?? 0,
   }), [])
   const склады = useTableSort(rows, сортировка)
 
@@ -209,13 +217,14 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
     contractor: external.find((e) => e.custodian === 'contractor')?.unitsTotal ?? 0,
     vendor: external.find((e) => e.custodian === 'vendor')?.unitsTotal ?? 0,
     sparePositions: rows.reduce((a, w) => a + w.sparePositions, 0),
+    amount: rows.reduce((a, w) => a + (w.amount ?? 0), 0),
   }), [rows, external])
 
   const totals = useMemo(() => ({
     byState: STATE_COLS.map((c) => rows.reduce((a, w) => a + (w.unitsByState[c.state] ?? 0), 0)),
     unitsTotal: rows.reduce((a, w) => a + w.unitsTotal, 0),
     sparePositions: rows.reduce((a, w) => a + w.sparePositions, 0),
-    spareQty: rows.reduce((a, w) => a + w.spareQty, 0),
+    amount: rows.reduce((a, w) => a + (w.amount ?? 0), 0),
   }), [rows])
 
   if (isLoading) {
@@ -233,11 +242,11 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
   const exportAll = async () => [
     {
       name: 'Склады и остатки',
-      columns: ['Склад', 'Адрес', 'Вид владения', 'Контрагент', 'Договор', 'Ответственный',
-        ...STATE_COLS.map((c) => c.label), 'Всего единиц', 'Позиций ЗИП', 'Кол-во ЗИП'],
-      rows: rows.map((w) => [w.location.name, w.location.address, w.card?.ownershipLabel, w.card?.counterpartyName,
-        w.card?.contractLabel, w.card?.responsible, ...STATE_COLS.map((c) => w.unitsByState[c.state] ?? 0),
-        w.unitsTotal, w.sparePositions, w.spareQty]),
+      columns: ['Склад', 'Состояние', 'Адрес', 'Вид владения', 'Контрагент', 'Договор', 'Ответственный', 'Код в 1С',
+        ...STATE_COLS.map((c) => c.label), 'Всего единиц', 'Позиций ЗИП', 'Сумма остатка, ₽'],
+      rows: allRows.map((w) => [w.location.name, w.status === 'closed' ? 'закрыт' : 'действует', w.location.address,
+        w.card?.ownershipLabel, w.card?.counterpartyName, w.card?.contractLabel, w.card?.responsible, w.card?.bpCode,
+        ...STATE_COLS.map((c) => w.unitsByState[c.state] ?? 0), w.unitsTotal, w.sparePositions, w.amount ?? 0]),
     },
     {
       name: 'Вне складов',
@@ -249,16 +258,22 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
   return (
     <div className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground">Склады и остатки оборудования</div>
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-sm font-semibold">Склады и остатки</h2>
+          {closedCount > 0 && <label className="flex min-h-8 items-center gap-1.5 text-xs text-muted-foreground">
+            <input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} />
+            Показать закрытые ({closedCount})</label>}
+        </div>
         <div className="flex flex-wrap gap-2">
           <ExportXlsxButton title="Склады и остатки оборудования" load={exportAll} />
-          <NewWarehouseDialog companyId={companyId} />
+          <NewWarehouseDialog companyId={companyId} onCreated={(id) => setCard({ id, tab: 'card' })} />
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi label="Складов" value={nf0.format(kpi.warehouses)} />
         <Kpi label="Единиц на складах" value={nf0.format(kpi.units)} />
+        <Kpi label="Сумма остатка, ₽" value={rub.format(kpi.amount)} />
         <Kpi label="У подрядчиков" value={nf0.format(kpi.contractor)} />
         <Kpi label="У производителя" value={nf0.format(kpi.vendor)} />
         <Kpi label="Позиций ЗИП" value={nf0.format(kpi.sparePositions)} />
@@ -282,16 +297,20 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
                   ))}
                   <SortTh sortKey="units" sort={склады.sort} onSort={склады.toggle} align="right">Всего единиц</SortTh>
                   <SortTh sortKey="spareLines" sort={склады.sort} onSort={склады.toggle} align="right">Позиций ЗИП</SortTh>
-                  <SortTh sortKey="spareQty" sort={склады.sort} onSort={склады.toggle} align="right">Кол-во ЗИП</SortTh>
+                  <SortTh sortKey="amount" sort={склады.sort} onSort={склады.toggle} align="right">Сумма, ₽</SortTh>
+                  <th className="p-2"><span className="sr-only">Действия</span></th>
                 </tr>
               </thead>
               <tbody>
                 {склады.rows.map((w) => (
-                  <tr key={w.location.id} className="border-b border-border/30 hover:bg-muted/30">
+                  <tr key={w.location.id} className={`border-b border-border/30 hover:bg-muted/30 ${w.status === 'closed' ? 'text-muted-foreground' : ''}`}>
                     <td className="p-2">
                       <div className="flex items-center gap-1.5 font-medium">
                         <Warehouse className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-                        {w.location.name}
+                        <button type="button" className="min-h-6 text-left hover:text-primary hover:underline"
+                          title="Остатки и реквизиты склада" onClick={() => setCard({ id: w.location.id, tab: 'stock' })}>
+                          {w.location.name}</button>
+                        {w.status === 'closed' && <Badge variant="outline" className="font-normal text-muted-foreground">закрыт</Badge>}
                       </div>
                       {w.location.address && (
                         <div className="mt-0.5 max-w-[320px] truncate text-[11px] text-muted-foreground" title={w.location.address}>
@@ -305,8 +324,7 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
                         {w.card?.contractLabel && <span>· {w.card.contractLabel}</span>}
                         {w.card?.contractStatus && <span className={CONTRACT_STATUS[w.card.contractStatus][1]}>· {CONTRACT_STATUS[w.card.contractStatus][0]}</span>}
                         {w.card?.responsible && <span>· МОЛ: {w.card.responsible}</span>}
-                        <button type="button" className="underline hover:no-underline min-h-6" onClick={() => setCardId(w.location.id)}>
-                          {w.card?.ownership ? 'карточка' : 'заполнить карточку'}</button>
+                        {!w.card?.ownership && <span className="text-amber-700 dark:text-amber-400">· реквизиты не заполнены</span>}
                       </div>
                     </td>
                     {STATE_COLS.map((c) => (
@@ -319,7 +337,11 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
                       <Num v={w.unitsTotal} onOpen={() => setDrill({ title: w.location.name, locationId: w.location.id })} />
                     </td>
                     <td className="p-2 text-right font-mono"><Num v={w.sparePositions} dim /></td>
-                    <td className="p-2 text-right font-mono"><Num v={w.spareQty} dim /></td>
+                    <td className="p-2 text-right font-mono tabular-nums">{w.amount ? rub.format(w.amount) : <span className="text-muted-foreground/40">—</span>}</td>
+                    <td className="p-2 text-right">
+                      <Button size="sm" variant="outline" className="h-8" onClick={() => setCard({ id: w.location.id, tab: 'stock' })}>
+                        <FileText className="mr-1.5 h-3.5 w-3.5" />Карточка</Button>
+                    </td>
                   </tr>
                 ))}
                 <tr className="bg-muted/60 font-medium">
@@ -329,7 +351,8 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
                   ))}
                   <td className="p-2 text-right font-mono"><Num v={totals.unitsTotal} /></td>
                   <td className="p-2 text-right font-mono"><Num v={totals.sparePositions} /></td>
-                  <td className="p-2 text-right font-mono"><Num v={totals.spareQty} /></td>
+                  <td className="p-2 text-right font-mono tabular-nums">{rub.format(totals.amount)}</td>
+                  <td />
                 </tr>
               </tbody>
             </table>
@@ -368,7 +391,8 @@ export function EquipmentWarehousesPanel({ companyId }: { companyId: string }) {
           </CardContent>
         </Card>
       )}
-      {cardId && <WarehouseCardDialog companyId={companyId} warehouseId={cardId} onClose={() => setCardId(null)} />}
+      {card && <WarehouseCardDialog key={card.id} companyId={companyId} warehouseId={card.id} initialTab={card.tab}
+        onClose={() => setCard(null)} />}
       {drill && <UnitsListDialog companyId={companyId} drill={drill} onOpenUnit={setUnitId} onClose={() => setDrill(null)} />}
       {unitId && (
         <UnitDetailsDialog companyId={companyId} unitId={unitId}
