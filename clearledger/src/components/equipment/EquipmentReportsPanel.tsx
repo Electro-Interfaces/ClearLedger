@@ -252,12 +252,18 @@ const OSV_COLS: [keyof OsvCells, string][] = [
 
 /** ОСВ: строки по счёту, месту, номенклатуре; над группой счёта — его итог. */
 function OsvReportView({ companyId, f, patch, warehouses, bar }: ReportProps) {
-  const [account, setAccount] = useState('')
+  // По умолчанию — складские счета: работающие станции (01.01) со склада выбыли и
+  // нужны только для сверки основных средств, их выбирают отдельно.
+  const [account, setAccount] = useState('stock')
   const q = useQuery({
     queryKey: ['eq-report-osv', companyId, f.dateFrom, f.dateTo, f.locationId, account],
-    queryFn: () => getOsvReport({ companyId, dateFrom: f.dateFrom, dateTo: f.dateTo, locationId: f.locationId || undefined, account: account || undefined }),
+    queryFn: () => getOsvReport({ companyId, dateFrom: f.dateFrom, dateTo: f.dateTo, locationId: f.locationId || undefined,
+      account: account && account !== 'stock' ? account : undefined }),
   })
-  const d = q.data
+  const raw = q.data
+  const d = raw && account === 'stock'
+    ? { ...raw, rows: raw.rows.filter((r) => r.account !== '01.01'), accounts: raw.accounts.filter((a) => a.account !== '01.01') }
+    : raw
   const fmt = (k: keyof OsvCells, v: number) => (v ? (k.endsWith('s') ? money.format(v) : nf.format(v)) : '')
   const cols = ['Счёт', 'Склад / место', 'Номенклатура', 'Ед.', ...OSV_COLS.map(([, l]) => l)]
   return <>
@@ -266,7 +272,7 @@ function OsvReportView({ companyId, f, patch, warehouses, bar }: ReportProps) {
       <DateField label="по" value={f.dateTo} onChange={(v) => patch({ dateTo: v })} />
       <Pick label="Склад" all="Все места" value={f.locationId} onChange={(v) => patch({ locationId: v })} opts={warehouses} />
       <Pick label="Счёт" all="Все счета" value={account} onChange={setAccount}
-        opts={(d?.accounts ?? []).map((a) => ({ id: a.account, name: a.label }))} />
+        opts={[{ id: 'stock', name: 'Складские счета (без 01.01)' }, ...(raw?.accounts ?? []).map((a) => ({ id: a.account, name: a.label }))]} />
     </>, `${formatDate(f.dateFrom)} — ${formatDate(f.dateTo)}`)}
     {!d ? <Pending q={q} /> : <Card><CardContent className="p-0">
       <h3 className="px-3 py-2 text-sm font-semibold">Оборотно-сальдовая ведомость <span className="font-normal text-muted-foreground">· {nf.format(d.rows.length)} строк · суммы без НДС, ₽</span></h3>

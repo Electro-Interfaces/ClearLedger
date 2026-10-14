@@ -48,7 +48,9 @@ function Requisites({ companyId, card, onClose }: { companyId: string; card: War
     responsible: card.responsible ?? '', responsibleUserId: card.responsibleUserId ?? '',
     phone: card.phone ?? '', note: card.note ?? '', bpCode: card.bpCode ?? '', bpRef: card.bpRef ?? '',
   })
-  const [party, setParty] = useState({ counterpartyId: card.counterpartyId ?? '', contractId: card.contractId ?? '' })
+  // Договор, которого нет в справочнике (ссылка устарела), в форму не подставляется: иначе
+  // поле показывает «Не выбран», а сохранение отвечает «договор не найден».
+  const [party, setParty] = useState({ counterpartyId: card.counterpartyId ?? '', contractId: card.contractLabel ? card.contractId ?? '' : '' })
   const [busy, setBusy] = useState(false)
   const foreign = f.ownership !== 'own'
   const save = async () => {
