@@ -533,7 +533,7 @@ async def run_meeting_series(db, now: datetime) -> int:
             for a in участники:
                 db.add(CalendarAttendee(
                     event_id=копия.id, user_id=a.user_id, role=a.role,
-                    response=a.response))
+                    response=a.response, is_host=a.is_host))
             курсор = следующая
             создано += 1
     return создано

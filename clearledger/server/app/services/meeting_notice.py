@@ -106,6 +106,14 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
         строка = (f"{кто.name} зовёт на встречу «{ev.title}» {когда}."
                   + (f"\nГде: {ev.location}" if ev.location else "")
                   + (f"\nСсылка на видеовстречу: {ev.conference_url}" if ev.conference_url else ""))
+        if ev.conference_url:
+            # Кого ждут в комнате — видно сразу: ведущий впускает гостей, без
+            # него первые пять минут никто не откроет конференцию.
+            from app.routers.conf_router import ведущие_встречи
+            имена = list((await db.execute(select(User.name).where(
+                User.id.in_(await ведущие_встречи(db, ev))))).scalars())
+            if имена:
+                строка += "\nВедущие: " + ", ".join(sorted(имена))
     elif отмена:
         тема = f"Отменено: {ev.title} — {когда}"
         строка = (f"Встреча «{ev.title}» {когда} отменена"

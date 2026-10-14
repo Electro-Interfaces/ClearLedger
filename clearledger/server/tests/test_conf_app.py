@@ -525,3 +525,48 @@ async def test_видеоконференция_до_сохранения_та_�
                                       starts_at=начало, ends_at=начало + timedelta(hours=1)),
                               db=db, current_user=хозяин)
     assert отказ.value.status_code == 409
+
+
+async def test_ведущие_встречи_и_пять_минут(db, jitsi_key, monkeypatch):
+    """Ведущий — отмеченный участник (по умолчанию организатор). Остальные ждут;
+    через 5 минут без ведущего комнату открывает первый вошедший — и только он
+    (решение МАГа 15.10.2026)."""
+    from app.models import CalendarAttendee
+    from app.routers.work_router import EventAction, EventIn, calendar_action, calendar_create, calendar_meeting
+    from app.services import email_service
+
+    async def не_слать(to, **поля):
+        return True
+    monkeypatch.setattr(email_service, 'send_meeting_invite', не_слать)
+    company, хозяин, зван, чужой = await люди(db)
+    cid = str(company.id)
+    скоро = (datetime.now(timezone.utc) + timedelta(hours=2)).replace(microsecond=0)
+
+    # По умолчанию ведущий — организатор.
+    ev = await calendar_create(EventIn(company_id=cid, title='Ведущий по умолчанию', starts_at=скоро,
+                                       ends_at=скоро + timedelta(hours=1), attendee_ids=[str(зван.id)],
+                                       video=True), db=db, current_user=хозяин)
+    отметки = {a['user_id']: a['is_host'] for a in ev['attendees']}
+    assert отметки == {str(хозяин.id): True, str(зван.id): False}
+
+    # Секретарь передаёт роль: ведущий — приглашённый, организатор — нет.
+    ev = await calendar_action(ev['id'], EventAction(company_id=cid, host_ids=[str(зван.id)]),
+                               db=db, current_user=хозяин)
+    assert {a['user_id']: a['is_host'] for a in ev['attendees']} == {str(хозяин.id): False, str(зван.id): True}
+    вход = await calendar_meeting(ev['id'], company_id=cid, db=db, current_user=зван)
+    assert вход['moderator'] is True
+    вход = await calendar_meeting(ev['id'], company_id=cid, db=db, current_user=хозяин)
+    assert вход['moderator'] is False and вход['host_wait_until'], 'до срока организатор не ведущий'
+
+    # Встреча началась 10 минут назад, ведущего в комнате нет — первый вошедший
+    # получает пропуск ведущего, второй застаёт его и входит участником.
+    давно = (datetime.now(timezone.utc) - timedelta(minutes=10)).replace(microsecond=0)
+    ev2 = await calendar_create(EventIn(company_id=cid, title='Ведущий опоздал', starts_at=давно,
+                                        ends_at=давно + timedelta(hours=1),
+                                        attendee_ids=[str(зван.id), str(чужой.id)], video=True),
+                                db=db, current_user=хозяин)
+    первый = await calendar_meeting(ev2['id'], company_id=cid, db=db, current_user=зван)
+    второй = await calendar_meeting(ev2['id'], company_id=cid, db=db, current_user=чужой)
+    assert первый['moderator'] is True and второй['moderator'] is False
+    # Сам ведущий входит ведущим всегда.
+    assert (await calendar_meeting(ev2['id'], company_id=cid, db=db, current_user=хозяин))['moderator'] is True

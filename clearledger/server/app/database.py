@@ -61,6 +61,9 @@ CONF_MIGRATION_DDL = (
     "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS transcript_error VARCHAR(300)",
     "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS transcript JSONB",
     "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS protocol JSONB",
+    # Ведущие видеоконференции и с каким пропуском вошли (15.10.2026).
+    "ALTER TABLE IF EXISTS calendar_attendees ADD COLUMN IF NOT EXISTS is_host BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE IF EXISTS conf_presence ADD COLUMN IF NOT EXISTS moderator BOOLEAN NOT NULL DEFAULT false",
 )
 
 STORE_RECEIPT_MIGRATION_DDL = (

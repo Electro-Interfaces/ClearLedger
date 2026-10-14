@@ -1,6 +1,8 @@
 // Видеоконференции TradeLedger (Jitsi meet.dataworker.ru). Бэк подписывает токен
 // организатора своим ключом (RS256/ASAP), фронт открывает ссылку.
+import { toast } from 'sonner'
 import { get, isDemoMode, post } from './apiClient'
+import { следитьЗаВкладкой } from './confService'
 
 export interface MeetingUrls {
   room: string
@@ -8,6 +10,11 @@ export interface MeetingUrls {
   moderator_url: string
   /** Гостевая ссылка (без токена) — разослать участникам. */
   guest_url: string
+  /** Вход во встречу: созыв, с каким пропуском вошли и до какого времени
+   *  ждём ведущего (после — первый вошедший откроет комнату сам). */
+  session_id?: string
+  moderator?: boolean
+  host_wait_until?: string | null
 }
 
 /** Создать конференцию: случайная комната + ссылки организатора и гостя. */
@@ -38,6 +45,20 @@ export async function startMeeting(): Promise<MeetingUrls> {
   }
 }
 
+/**
+ * Вошёл участником — сказать, кого и до какого часа ждём. Иначе человек видит
+ * «ждём организатора» и не знает, что через пять минут откроет комнату сам.
+ */
+export function сказатьОВходе(m: MeetingUrls) {
+  if (m.moderator !== false) return
+  const до = m.host_wait_until
+    ? new Date(m.host_wait_until).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+    : null
+  toast.info(до
+    ? `Вы вошли участником: ведущего ждём до ${до}. Если он не придёт, войдите снова после ${до} — откроете комнату сами.`
+    : 'Вы вошли участником: ведущий уже в комнате.', { duration: 10_000 })
+}
+
 /** Доступны ли конференции (задан ли ключ подписи на бэке). */
 export async function getMeetingsConfig(): Promise<{ enabled: boolean; domain: string }> {
   return get<{ enabled: boolean; domain: string }>('/api/meetings/config')
@@ -59,6 +80,10 @@ export async function startEventMeeting(companyId: string, eventId: string): Pro
       `/api/work/calendar/${eventId}/meeting?company_id=${encodeURIComponent(companyId)}`)
     if (вкладка) вкладка.location.href = m.moderator_url
     else window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
+    // Присутствие — как у входа из «Конференций»: по нему решается, есть ли
+    // ведущий в комнате, когда истекут пять минут ожидания.
+    if (m.session_id) следитьЗаВкладкой(companyId, m.session_id, вкладка)
+    сказатьОВходе(m)
     return m
   } catch (e) {
     вкладка?.close()

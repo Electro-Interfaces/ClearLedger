@@ -420,6 +420,8 @@ export interface EventAttendee {
   user_id: string
   name: string | null
   role: 'required' | 'optional'
+  /** Ведущий видеоконференции: его ждут, он впускает гостей. */
+  is_host?: boolean
   response: EventResponse
   comment: string | null
   /** Что участник предложил взамен. Время это не двигает — решает организатор. */
@@ -507,6 +509,8 @@ export async function videoLink(companyId: string, eventId: string) {
 export async function createEvent(companyId: string, data: {
   /** Номер, выданный заранее (под него уже создана ссылка на видеокомнату). */
   id?: string
+  /** Ведущие видеоконференции — из участников; пусто — организатор. */
+  hostIds?: string[]
   title: string; startsAt: string; endsAt: string
   description?: string; location?: string; conferenceUrl?: string
   allDay?: boolean; tz?: string; attendeeIds?: string[]; subjectRef?: string
@@ -521,6 +525,7 @@ export async function createEvent(companyId: string, data: {
 }) {
   return post<CalendarEvent>('/api/work/calendar', {
     id: data.id || undefined,
+    host_ids: data.hostIds,
     company_id: companyId, title: data.title,
     starts_at: data.startsAt, ends_at: data.endsAt,
     description: data.description || undefined,
@@ -698,6 +703,7 @@ export async function eventAction(companyId: string, id: string, data: {
   attendeeIds?: string[]
   optionalIds?: string[]; visibility?: EventVisibility; allDay?: boolean; tz?: string
   cancel?: boolean; cancelReason?: string
+  hostIds?: string[]
   response?: Exclude<EventResponse, 'pending'>; comment?: string
   /** Встречное предложение участника. Время оно не двигает: перенос —
    *  решение организатора. */
@@ -717,6 +723,7 @@ export async function eventAction(companyId: string, id: string, data: {
     attendee_ids: data.attendeeIds,
     optional_ids: data.optionalIds, visibility: data.visibility, all_day: data.allDay, tz: data.tz,
     cancel: data.cancel, cancel_reason: data.cancelReason,
+    host_ids: data.hostIds,
     propose_starts_at: data.proposeStartsAt,
     propose_ends_at: data.proposeEndsAt,
     recurrence: data.recurrence ?? undefined,

@@ -11034,6 +11034,10 @@ class CalendarAttendee(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     # required — без него встречу переносят; optional — зовут для сведения.
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="required")
+    # Ведущий видеоконференции: получает пропуск ведущего, его ждут гости и
+    # участники. Не отмечен никто — ведущий организатор (решение МАГа 15.10.2026).
+    is_host: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                          server_default="false")
     # pending | accepted | declined | tentative
     response: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     responded_at: Mapped[datetime | None] = mapped_column(
@@ -13923,6 +13927,9 @@ class ConfPresence(Base):
     # PRESENCE_TTL — считаем, что вышел.
     last_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # Вошёл с пропуском ведущего: по этому «есть ли ведущий в комнате».
+    moderator: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False,
+                                            server_default="false")
 
     __table_args__ = (Index("uq_conf_presence", "session_id", "user_id", unique=True),)
 

@@ -55,6 +55,8 @@ class MeetingIn(BaseModel):
     # Открыть всему пространству: конференцию увидит и сможет присоединиться
     # любой сотрудник. По умолчанию закрыта — видят только позванные.
     open_to_space: bool = False
+    # Ведущие из позванных; пусто — ведущий тот, кто созывает.
+    host_ids: list[str] = Field(default_factory=list)
     # Конференция по расписанию: правило серии календаря (`{"mode": "weekly"}`).
     # Повторения создаёт планировщик — с теми же участниками и той же комнатой.
     recurrence: dict | None = None
@@ -376,7 +378,8 @@ ROOM_EMPTY_SEC = 60
 ROOM_SILENT_SEC = 300
 
 
-async def _отметить_приход(db: AsyncSession, сессия: ConfSession, user: User) -> None:
+async def _отметить_приход(db: AsyncSession, сессия: ConfSession, user: User,
+                           moderator: bool = False) -> None:
     """Человек вошёл в комнату — впервые или вернулся.
 
     Сигнал «я здесь» ставим сразу: без него вошедший и закрывший вкладку в
@@ -388,10 +391,11 @@ async def _отметить_приход(db: AsyncSession, сессия: ConfSes
         ConfPresence.user_id == user.id))).scalar_one_or_none()
     if p is None:
         db.add(ConfPresence(session_id=сессия.id, user_id=user.id,
-                            last_seen_at=сейчас))
+                            last_seen_at=сейчас, moderator=moderator))
     else:
         p.last_seen_at = сейчас
         p.left_at = None
+        p.moderator = moderator
 
 
 async def _закрыть_брошенные(db: AsyncSession, cid: uuid.UUID) -> None:
@@ -560,9 +564,10 @@ async def meeting_create(
     зовём = {_uuid(i, "attendee_ids") for i in payload.attendee_ids} | {current_user.id}
     свои = set((await db.execute(select(UserCompany.user_id).where(
         UserCompany.company_id == cid, UserCompany.user_id.in_(зовём)))).scalars())
+    ведущие = ({_uuid(i, "host_ids") for i in payload.host_ids} & зовём & свои) or {current_user.id}
     for uid in зовём & свои:
         db.add(CalendarAttendee(
-            event_id=ev.id, user_id=uid, role="required",
+            event_id=ev.id, user_id=uid, role="required", is_host=uid in ведущие,
             response="accepted" if uid == current_user.id else "pending"))
     await db.commit()
     await db.refresh(ev)
@@ -588,6 +593,62 @@ async def meeting_create(
 
     карточки = await _load(db, [ev], current_user.id)
     return {**карточки[0], "delivery": доставка}
+
+
+# Сколько ждём ведущего после начала: дальше комнату открывает первый вошедший
+# (решение МАГа 15.10.2026). Опоздание ведущего не должно срывать совещание, но
+# и раньше срока роль не перехватить.
+ЖДЁМ_ВЕДУЩЕГО = timedelta(minutes=5)
+
+
+async def ведущие_встречи(db: AsyncSession, ev: CalendarEvent) -> set:
+    """Ведущие встречи: отмеченные участники, а не отмечен никто — организатор."""
+    отмечены = set((await db.execute(select(CalendarAttendee.user_id).where(
+        CalendarAttendee.event_id == ev.id, CalendarAttendee.is_host.is_(True)))).scalars())
+    return отмечены or {ev.organizer_id}
+
+
+async def войти_во_встречу(db: AsyncSession, cid, ev: CalendarEvent, user: User) -> dict:
+    """Вход в видеоконференцию встречи — один на карточку календаря и «Конференции».
+
+    Раньше входы расходились: из карточки ведущим входил любой приглашённый, из
+    «Конференций» — только организатор. Теперь пропуск ведущего у отмеченных
+    ведущих; остальные входят участниками и ждут. Если через `ЖДЁМ_ВЕДУЩЕГО`
+    после начала ведущего в комнате нет, первый вошедший получает пропуск
+    ведущего — только он: следующий застанет ведущего в комнате.
+    """
+    room = jitsi.event_room(ev)
+    сессия = (await db.execute(select(ConfSession).where(
+        ConfSession.event_id == ev.id,
+        ConfSession.ended_at.is_(None)))).scalar_one_or_none()
+    сейчас = datetime.now(timezone.utc)
+    ждать_до = None
+    if user.id in await ведущие_встречи(db, ev):
+        ведущий = True
+    elif сейчас < ev.starts_at + ЖДЁМ_ВЕДУЩЕГО:
+        ведущий, ждать_до = False, ev.starts_at + ЖДЁМ_ВЕДУЩЕГО
+    else:
+        есть_ведущий = False
+        if сессия is not None:
+            есть_ведущий = any(_в_комнате(p, сейчас) for p in (await db.execute(
+                select(ConfPresence).where(ConfPresence.session_id == сессия.id,
+                                           ConfPresence.moderator.is_(True),
+                                           ConfPresence.user_id != user.id))).scalars())
+        ведущий = not есть_ведущий
+    urls = jitsi.meeting_urls(room, user.name, moderator=ведущий, subject=ev.title)
+    if not ev.conference_url:
+        ev.conference_url = urls["guest_url"]
+        await jitsi.share_series_url(db, ev)
+    if сессия is None:
+        сессия = ConfSession(company_id=cid, event_id=ev.id, room=room,
+                             title=ev.title, subject_ref=ev.subject_ref,
+                             started_by=user.id)
+        db.add(сессия)
+        await db.flush()
+    await _отметить_приход(db, сессия, user, moderator=ведущий)
+    await db.commit()
+    return {**urls, "session_id": str(сессия.id), "moderator": ведущий,
+            "host_wait_until": ждать_до}
 
 
 @router.post("/meetings/{event_id}/join")
@@ -618,31 +679,9 @@ async def meeting_join(
     if not свой and ev.visibility != "company":
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Это не ваша встреча")
 
-    room = jitsi.event_room(ev)
-    сессия = (await db.execute(select(ConfSession).where(
-        ConfSession.event_id == ev.id,
-        ConfSession.ended_at.is_(None)))).scalar_one_or_none()
-
-    # Ведущий — тот, кто собрал: входить ведущим в чужую конференцию человек не
-    # должен, там распоряжается организатор (замечание МАГа 10.09.2026). Но если
-    # ведущего в комнате ещё нет, а время уже пришло, открыть её обязан кто-то —
-    # иначе опоздание организатора отменяет совещание, и люди расходятся.
-    некому_открыть = сессия is None and datetime.now(timezone.utc) >= ev.starts_at
-    ведущий = ev.organizer_id == current_user.id or некому_открыть
-    urls = jitsi.meeting_urls(room, current_user.name, moderator=ведущий,
-                              subject=ev.title)
-    if not ev.conference_url:
-        ev.conference_url = urls["guest_url"]
-        await jitsi.share_series_url(db, ev)
-    if сессия is None:
-        сессия = ConfSession(company_id=cid, event_id=ev.id, room=room,
-                             title=ev.title, subject_ref=ev.subject_ref,
-                             started_by=current_user.id)
-        db.add(сессия)
-        await db.flush()
-    await _отметить_приход(db, сессия, current_user)
-    await db.commit()
-    return {**urls, "session_id": str(сессия.id), "moderator": ведущий}
+    # Ведущего решает общее правило (`войти_во_встречу`): отмеченные ведущие,
+    # а через 5 минут без ведущего — первый вошедший (МАГ, 15.10.2026).
+    return await войти_во_встречу(db, cid, ev, current_user)
 
 
 # Сколько молчит вкладка, прежде чем мы считаем, что человек вышел. Браузер о

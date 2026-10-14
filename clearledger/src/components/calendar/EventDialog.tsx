@@ -210,6 +210,17 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const [conference, setConference] = useState(event?.conference_url ?? '')
   const [attendees, setAttendees] = useState<string[]>(
     () => (event?.attendees ?? []).map((a) => a.user_id))
+  // Ведущие видеоконференции. По умолчанию — организатор; он же может
+  // передать роль другому участнику, например секретарь — руководителю
+  // (МАГ, 15.10.2026). Ведущими бывают только участники.
+  const организаторId = event?.organizer_id ?? user?.id ?? ''
+  const [hosts, setHosts] = useState<string[]>(() => {
+    const отмечены = (event?.attendees ?? []).filter((a) => a.is_host).map((a) => a.user_id)
+    return отмечены.length ? отмечены : (event?.organizer_id ?? user?.id ? [event?.organizer_id ?? user!.id] : [])
+  })
+  const ведущий = (id: string) => hosts.includes(id)
+  const отметитьВедущего = (id: string, on: boolean) =>
+    setHosts((было) => (on ? [...было.filter((x) => x !== id), id] : было.filter((x) => x !== id)))
   // Кто позван «для сведения». Его занятость не блокирует подбор времени:
   // иначе приглашённый руководитель закрывает все слоты, хотя встреча может
   // пройти без него.
@@ -355,6 +366,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
           recurrence: ПОВТОРЫ.find((r) => r.key === повтор)?.rule ?? null,
           recurrenceUntil: повтор === 'none' ? null : (until || null),
           id: заранееId ?? undefined,
+          hostIds: hosts.filter(id => id === организаторId || attendees.includes(id)),
         })
         // Напоминание себе — сразу, тем же нажатием: иначе человек собирает
         // встречу, закрывает окно и открывает его заново, чтобы «напомнить».
@@ -372,6 +384,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
         title: title.trim(), startsAt: начало, endsAt: конец,
         description: description.trim(), location: location.trim(),
         conferenceUrl: conference.trim(), attendeeIds: attendees,
+        hostIds: hosts.filter(id => id === организаторId || attendees.includes(id)),
         optionalIds: optional, visibility, allDay,
         // Серия правится только у головы: у порождённой встречи `recurrence`
         // пуст, и слать пустой объект значило бы каждый раз снимать повторение
@@ -759,6 +772,18 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
               : мой ? <>
                 <Input aria-label="Найти участника" placeholder="Имя сотрудника" value={peopleSearch} onChange={e => setPeopleSearch(e.target.value)} className="text-base sm:text-sm" />
                 <p className="text-sm text-muted-foreground">Организатор участвует обязательно. Остальных можно позвать для сведения.</p>
+                {conference.trim() && (
+                  <div className="space-y-1 rounded-md border border-border p-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={ведущий(организаторId)} onChange={e => отметитьВедущего(организаторId, e.target.checked)} />
+                      Организатор — ведущий видеоконференции
+                    </label>
+                    <p className="text-xs text-muted-foreground">Ведущего ждут участники и гости, он впускает гостей. Отметьте «ведущий» у участников ниже, чтобы передать роль. Если через 5 минут после начала ведущего нет, первый вошедший откроет комнату сам.</p>
+                    {!hosts.some(id => id === организаторId || attendees.includes(id)) && (
+                      <p className="text-xs text-amber-700 dark:text-amber-400">Ведущий не выбран — им будет организатор.</p>
+                    )}
+                  </div>
+                )}
                 {peopleQ.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить сотрудников. <button className="underline" onClick={() => void peopleQ.refetch()}>Повторить</button></p>}
                 <div className="max-h-48 overflow-y-auto rounded-md border border-border px-2 lg:max-h-64">
                   {peopleQ.isLoading && <p role="status" className="py-2 text-sm">Загружаются сотрудники…</p>}
@@ -768,6 +793,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
                       <input type="checkbox" checked={attendees.includes(person.id)} onChange={e => {
                         setAttendees(current => e.target.checked ? [...current, person.id] : current.filter(id => id !== person.id))
                         if (!e.target.checked) setOptional(current => current.filter(id => id !== person.id))
+                        if (!e.target.checked) отметитьВедущего(person.id, false)
                       }} /><span className="break-words">{person.name}</span>
                     </label>
                     {attendees.includes(person.id) && <select aria-label={`Участие: ${person.name}`} value={optional.includes(person.id) ? 'optional' : 'required'}
@@ -775,9 +801,15 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
                       className="h-10 max-w-36 rounded-md border border-input bg-background px-2 text-base sm:text-sm">
                       <option value="required">Обязательно</option><option value="optional">Для сведения</option>
                     </select>}
+                    {attendees.includes(person.id) && person.id !== организаторId && conference.trim() && (
+                      <label className="flex shrink-0 items-center gap-1 text-xs" title="Ведущий видеоконференции: его ждут, он впускает гостей">
+                        <input type="checkbox" checked={ведущий(person.id)} onChange={e => отметитьВедущего(person.id, e.target.checked)} />
+                        ведущий
+                      </label>
+                    )}
                   </div>)}
                 </div>
-              </> : <div className="space-y-1 text-sm text-muted-foreground">{event!.attendees.map(attendee => <p key={attendee.user_id}>{attendee.name || 'Участник'} · {ОТВЕТ_СЛОВОМ[attendee.response]}{attendee.role === 'optional' ? ' · для сведения' : ''}</p>)}</div>}
+              </> : <div className="space-y-1 text-sm text-muted-foreground">{event!.attendees.map(attendee => <p key={attendee.user_id}>{attendee.name || 'Участник'} · {ОТВЕТ_СЛОВОМ[attendee.response]}{attendee.role === 'optional' ? ' · для сведения' : ''}{event!.conference_url && ведущий(attendee.user_id) ? ' · ведущий' : ''}</p>)}</div>}
           </div>
 
           {!новая && мой && event!.attendees.length > 1 && (

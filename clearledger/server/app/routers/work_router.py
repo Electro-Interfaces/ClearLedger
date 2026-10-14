@@ -958,6 +958,9 @@ class EventIn(BaseModel):
     # только после «Начать видеовстречу» в уже собранной встрече — в
     # приглашение она не попадала (РусГидро, 15.10.2026).
     video: bool = False
+    # Ведущие видеоконференции — из участников (и организатора). Пусто или не
+    # передано при создании — ведущий организатор.
+    host_ids: list[str] | None = None
     visibility: str = Field("company", pattern="^(company|private|personal)$")
     subject_ref: str | None = None
     # Кого зовём. Пара «идентификатор — обязательность»: необязательный участник
@@ -1001,6 +1004,9 @@ class EventAction(BaseModel):
     tz: str | None = None
     cancel: bool | None = None
     cancel_reason: str | None = None
+    # Ведущие видеоконференции — из участников (и организатора). Пусто или не
+    # передано при создании — ведущий организатор.
+    host_ids: list[str] | None = None
     # Создать видеовстречу пространства: сервер сам ставит гостевую ссылку на
     # постоянную комнату встречи, без входа ведущим. Раньше ссылка появлялась
     # только после «Начать видеовстречу» в уже собранной встрече — в
@@ -1069,6 +1075,7 @@ def _event_out(ev, attendees: list, me: uuid.UUID) -> dict[str, Any]:
         "my_response": mine.response if mine else None,
         "attendees": [{
             "user_id": str(a.user_id), "name": getattr(a, "name", None), "role": a.role,
+            "is_host": bool(getattr(a, "is_host", False)),
             "response": a.response, "comment": a.comment,
             "proposed_starts_at": getattr(a, "proposed_starts_at", None),
             "proposed_ends_at": getattr(a, "proposed_ends_at", None),
@@ -1574,14 +1581,12 @@ async def calendar_meeting(
     ev = await _event_participant(db, cid, event_id, current_user)
     if ev.status == "cancelled":
         raise HTTPException(status.HTTP_409_CONFLICT, "Встреча отменена")
-    urls = jitsi.meeting_urls(jitsi.event_room(ev), current_user.name)
-    # Чужую ссылку (Zoom, Teams) не трогаем: её вписали руками, и подменять её
-    # своей комнатой значит развести участников по двум разным совещаниям.
-    if not ev.conference_url:
-        ev.conference_url = urls["guest_url"]
-        await jitsi.share_series_url(db, ev)
-        await db.commit()
-    return urls
+    # Один вход с «Конференциями»: тот же выбор ведущего, та же отметка прихода.
+    # Раньше отсюда ведущим входил любой приглашённый, а присутствие не
+    # писалось вовсе (15.10.2026).
+    from app.routers.conf_router import войти_во_встречу
+
+    return await войти_во_встречу(db, cid, ev, current_user)
 
 
 async def _видеовстреча(db: AsyncSession, ev, нужна: bool, кто: User) -> None:
@@ -1650,9 +1655,12 @@ async def calendar_create(
     # карточку встречи вместе с предметом и составом участников.
     свои = set((await db.execute(select(UserCompany.user_id).where(
         UserCompany.company_id == cid, UserCompany.user_id.in_(ids)))).scalars())
+    # Ведущие — только из участников; не отмечен никто — организатор (МАГ, 15.10.2026).
+    ведущие = ({_uuid_or_400(i, "host_ids") for i in (payload.host_ids or [])}
+               & ids & свои) or {организатор}
     for uid in ids & свои:
         db.add(CalendarAttendee(
-            event_id=ev.id, user_id=uid,
+            event_id=ev.id, user_id=uid, is_host=uid in ведущие,
             # Необязательный участник не блокирует подбор времени: иначе
             # приглашённый «для сведения» руководитель закрывает все слоты, хотя
             # встреча может пройти без него.
@@ -1832,6 +1840,15 @@ async def calendar_action(
                 await reminders.drop_for(db, f'event:{ev.id}', uid)
             else:
                 att.role = 'optional' if uid in необязательные and uid != ev.organizer_id else 'required'
+
+    if payload.host_ids is not None:
+        # Организатор передаёт роль ведущего: отмечены только участники, никто —
+        # значит организатор (правило `ведущие_встречи`).
+        await db.flush()
+        отмечены = {_uuid_or_400(i, "host_ids") for i in payload.host_ids}
+        for att in (await db.execute(select(CalendarAttendee).where(
+                CalendarAttendee.event_id == ev.id))).scalars():
+            att.is_host = att.user_id in отмечены
 
     if время_сдвинулось:
         # «Буду в 10» не равно «буду в 18»: перенос обнуляет согласия, иначе

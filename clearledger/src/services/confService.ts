@@ -2,7 +2,7 @@
 // Встречу заводит и хранит календарь, здесь — свой экран, вход ведущим и то,
 // что осталось после конференции: кто пришёл, сколько шло, о чём договорились.
 import { downloadBlob, get, getToken, post } from './apiClient'
-import type { MeetingUrls } from './conferenceService'
+import { сказатьОВходе, type MeetingUrls } from './conferenceService'
 
 export interface ConfAttendee {
   user_id: string
@@ -130,7 +130,7 @@ export async function createMeeting(companyId: string, data: NewMeeting) {
  * · Марков Антон» и после закрытия вкладки, и после кнопки «Завершить»
  * (замечание Маркова 11.09.2026).
  */
-function следитьЗаВкладкой(companyId: string, sessionId: string, вкладка: Window | null) {
+export function следитьЗаВкладкой(companyId: string, sessionId: string, вкладка: Window | null) {
   const адрес = (действие: string) =>
     `/api/conf/sessions/${sessionId}/${действие}?company_id=${encodeURIComponent(companyId)}`
 
@@ -172,6 +172,7 @@ export async function joinMeeting(companyId: string, eventId: string): Promise<M
     if (вкладка) вкладка.location.href = m.moderator_url
     else window.open(m.moderator_url, '_blank', 'noopener,noreferrer')
     следитьЗаВкладкой(companyId, m.session_id, вкладка)
+    сказатьОВходе(m)
     return m
   } catch (e) {
     вкладка?.close()
