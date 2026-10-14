@@ -203,7 +203,10 @@ export function ReportPivot({ fields, columns, rows }: {
               } ${тащим === i ? 'opacity-50' : ''}`}>
               <GripVertical className="size-3 opacity-60" />
               <b>{i + 1}</b>
-              {разрезы.find((р) => р.поле === поле)?.имя ?? поле}
+              {/* Имя — из колонок отчёта, а не из разрезов: после смены отбора
+                  выбранный уровень может перестать быть разрезом (одно значение),
+                  и чип показывал служебное имя поля — «reason» (14.10.2026). */}
+              {columns[fields.indexOf(поле)] ?? поле}
               <button type="button" disabled={i === 0}
                 onClick={() => поставить(переставить(уровни, i, i - 1))}
                 aria-label="Переместить уровень выше" title="Выше"

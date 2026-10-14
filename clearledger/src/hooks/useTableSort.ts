@@ -15,9 +15,11 @@ export type SortMap<T> = Record<string, (row: T) => Значение>
 /**
  * Сортировка списка по выбранному столбцу.
  *
- * Возвращает отсортированные строки, текущее состояние и переключатель: первый клик
- * по столбцу сортирует по убыванию (менеджеру нужен верх списка — где больше всего),
- * второй разворачивает, третий возвращает исходный порядок панели.
+ * Возвращает отсортированные строки, текущее состояние и переключатель. Первый клик
+ * по числовому столбцу сортирует по убыванию (менеджеру нужен верх списка — где
+ * больше всего), по текстовому — по алфавиту: «Станция» первым кликом от «Я» к «А»
+ * читалась как поломка (14.10.2026). Второй клик разворачивает, третий возвращает
+ * исходный порядок панели.
  */
 export function useTableSort<T>(
   rows: T[],
@@ -32,9 +34,13 @@ export function useTableSort<T>(
   }, [rows, map, sort])
 
   const toggle = (key: string) => {
+    const get = map[key]
+    const образец = get ? rows.map(get).find((v) => v !== null && v !== undefined && v !== '') : undefined
+    const первое: SortDir = typeof образец === 'string' ? 'asc' : 'desc'
+    const второе: SortDir = первое === 'asc' ? 'desc' : 'asc'
     setSort((prev) => {
-      if (prev.key !== key) return { key, dir: 'desc' }
-      if (prev.dir === 'desc') return { key, dir: 'asc' }
+      if (prev.key !== key) return { key, dir: первое }
+      if (prev.dir === первое) return { key, dir: второе }
       return { key: null, dir: 'desc' }
     })
   }

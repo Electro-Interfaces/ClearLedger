@@ -66,6 +66,27 @@ export function diceCoefficient(a: string, b: string): number {
  * Без неё в интерфейсе появляется «5 пункта» — мелочь, по которой человек
  * решает, что систему писали наспех, и начинает не доверять остальному.
  */
+/** Строка для поиска: регистр, «ё» и знак номера не мешают совпадению. */
+function дляПоиска(s: string): string {
+  return s.toLowerCase().replace(/ё/g, 'е').replace(/№/g, ' ')
+}
+
+/**
+ * Поиск по строке таблицы: каждое слово запроса должно найтись хоть в одном поле.
+ * «Омск ТП 82» находит «ТП 8244» в Омске, «№168» — станцию 168, «Березовка» —
+ * «Берёзовку». Раньше пять экранов «Мониторинга» искали всей фразой в одном поле,
+ * и запрос из двух слов не находил ничего (14.10.2026).
+ */
+export function matchesSearch(
+  query: string,
+  fields: (string | number | null | undefined)[],
+): boolean {
+  const слова = дляПоиска(query).split(/\s+/).filter(Boolean)
+  if (!слова.length) return true
+  const текст = дляПоиска(fields.filter((v) => v !== null && v !== undefined).join(' \u0001 '))
+  return слова.every((с) => текст.includes(с))
+}
+
 export function plural(n: number, one: string, few: string, many: string): string {
   const abs = Math.abs(n) % 100
   if (abs > 10 && abs < 20) return many

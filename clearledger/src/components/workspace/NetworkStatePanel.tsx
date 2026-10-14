@@ -37,6 +37,7 @@ import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { cn } from '@/lib/utils'
+import { matchesSearch } from '@/lib/textUtils'
 import { getNetworkState, type NetworkState, type NetworkStationRow } from '@/services/opsService'
 import { getNetworkOpenWork } from '@/services/spaceObjectsService'
 
@@ -175,10 +176,8 @@ export function NetworkStatePanel() {
     if (факт === 'silent') все = все.filter((r) => r.silentDays === null || r.silentDays > 7)
     if (факт === 'loss') все = все.filter((r) => r.loss > 0)
     if (факт === 'mismatch') все = все.filter((r) => r.mismatch)
-    const текст = поиск.trim().toLowerCase()
-    if (!текст) return все
-    return все.filter((r) => [r.name, r.number, r.code, r.city, r.region]
-      .some((v) => (v ?? '').toLowerCase().includes(текст)))
+    if (!поиск.trim()) return все
+    return все.filter((r) => matchesSearch(поиск, [r.name, r.number, r.code, r.city, r.region]))
   }, [q.data, поиск, состояние, регионОтбора, безЗаявки, поЗаявкам, факт])
 
   const таблица = useTableSort(строки, сортировка)

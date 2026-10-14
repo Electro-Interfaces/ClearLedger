@@ -35,6 +35,7 @@ import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { cn } from '@/lib/utils'
+import { matchesSearch } from '@/lib/textUtils'
 import {
   getNetworkVendors, type VendorRow, type VendorStationRow,
 } from '@/services/opsService'
@@ -181,10 +182,8 @@ export function NetworkVendorsPanel() {
 
   const строки = useMemo(() => {
     const все = q.data?.vendors ?? []
-    const текст = поиск.trim().toLowerCase()
-    if (!текст) return все
-    return все.filter((r) => [r.vendor, ...r.models]
-      .some((v) => (v ?? '').toLowerCase().includes(текст)))
+    if (!поиск.trim()) return все
+    return все.filter((r) => matchesSearch(поиск, [r.vendor, ...r.models]))
   }, [q.data, поиск])
 
   const таблица = useTableSort(строки, сортировка)

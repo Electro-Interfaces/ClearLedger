@@ -35,6 +35,7 @@ import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { cn } from '@/lib/utils'
+import { matchesSearch } from '@/lib/textUtils'
 import { getOpsTickets, type TicketRow } from '@/services/opsService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -161,10 +162,8 @@ export function OpsTicketsPanel() {
     if (статус !== 'all') все = все.filter((r) => (r.statusLabel ?? r.status) === статус)
     if (марка !== 'all') все = все.filter((r) => r.brand === марка)
     if (регион !== 'all') все = все.filter((r) => r.region === регион)
-    const текст = поиск.trim().toLowerCase()
-    if (!текст) return все
-    return все.filter((r) => [r.number, r.title, r.station, r.stationNumber, r.brand, r.city]
-      .some((v) => (v ?? '').toLowerCase().includes(текст)))
+    if (!поиск.trim()) return все
+    return все.filter((r) => matchesSearch(поиск, [r.number, r.title, r.station, r.stationNumber, r.brand, r.city]))
   }, [q.data, разрез, статус, марка, регион, поиск])
 
   const сортировка = useMemo(() => ({

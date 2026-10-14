@@ -33,6 +33,9 @@ export function sortRows<T>(
     if (typeof va === 'boolean' && typeof vb === 'boolean') {
       return (Number(va) - Number(vb)) * sign
     }
-    return String(va).localeCompare(String(vb), 'ru') * sign
+    // Числа внутри строк — числами: номер «168» стоит перед «1694», «ТП 82» — перед
+    // «ТП 5215». Без `numeric` сравнение шло по символам, и таблица по номеру
+    // выглядела перемешанной (жалоба РусГидро 14.10.2026).
+    return String(va).localeCompare(String(vb), 'ru', { numeric: true, sensitivity: 'base' }) * sign
   })
 }

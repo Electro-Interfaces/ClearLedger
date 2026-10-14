@@ -33,6 +33,7 @@ import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { cn } from '@/lib/utils'
+import { matchesSearch } from '@/lib/textUtils'
 import {
   getNetworkReliability, type NetworkReliability, type ReliabilityRow,
 } from '@/services/opsService'
@@ -124,10 +125,8 @@ export function NetworkReliabilityPanel() {
     if (разрез === 'clients') все = все.filter((r) => r.clientsLost > 0)
     if (регионОтбора !== 'all') все = все.filter((r) => r.region === регионОтбора)
     if (маркаОтбора !== 'all') все = все.filter((r) => r.brand === маркаОтбора)
-    const текст = поиск.trim().toLowerCase()
-    if (!текст) return все
-    return все.filter((r) => [r.name, r.number, r.code, r.city, r.region, r.brand, r.model]
-      .some((v) => (v ?? '').toLowerCase().includes(текст)))
+    if (!поиск.trim()) return все
+    return все.filter((r) => matchesSearch(поиск, [r.name, r.number, r.code, r.city, r.region, r.brand, r.model]))
   }, [q.data, поиск, регионОтбора, маркаОтбора, разрез, порог])
 
   const таблица = useTableSort(строки, сортировка)

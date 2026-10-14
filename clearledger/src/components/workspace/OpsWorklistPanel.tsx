@@ -45,6 +45,7 @@ import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { cn } from '@/lib/utils'
+import { matchesSearch } from '@/lib/textUtils'
 import { getOpsWorklist, type WorklistRow } from '@/services/opsService'
 
 const nf = new Intl.NumberFormat('ru-RU')
@@ -149,17 +150,18 @@ export function OpsWorklistPanel() {
     if (неВзятые && q.data?.workKnown) все = все.filter((r) => !r.openTickets)
     if (причина !== 'all') все = все.filter((r) => r.reasons.some((p) => p.kind === причина))
     if (регионОтбора !== 'all') все = все.filter((r) => r.region === регионОтбора)
-    const текст = поиск.trim().toLowerCase()
-    if (!текст) return все
-    return все.filter((r) => [r.name, r.number, r.code, r.city, r.region]
-      .some((v) => (v ?? '').toLowerCase().includes(текст)))
+    if (!поиск.trim()) return все
+    return все.filter((r) => matchesSearch(поиск, [r.name, r.number, r.code, r.city, r.region,
+      r.lastTicketNumber, ...r.reasons.map((p) => `${p.label} ${p.note ?? ''}`)]))
   }, [q.data, поиск, причина, регионОтбора, неВзятые])
 
   const сортировка = useMemo(() => ({
     number: (r: WorklistRow) => r.number ?? r.code,
     name: (r: WorklistRow) => r.name,
     region: (r: WorklistRow) => r.region,
-    loss: (r: WorklistRow) => r.lossPerMonth,
+    // Ноль показан «—»: при сортировке он пустой, а не самый маленький,
+    // иначе по возрастанию наверх всплывают станции без цены.
+    loss: (r: WorklistRow) => r.lossPerMonth || null,
     silent: (r: WorklistRow) => r.silentDays,
     failed: (r: WorklistRow) => r.failedVisitsPct,
     clients: (r: WorklistRow) => r.clientsLost,
@@ -343,15 +345,17 @@ export function OpsWorklistPanel() {
 
           {вид === 'pivot' ? (
             <ReportPivot
-              fields={['region', 'reason', 'taken', 'city', 'stations', 'loss', 'clients']}
-              columns={['Регион', 'Причина', 'В работе', 'Город', 'Станций',
+              // Первая мера — деньги: по ней упорядочены группы и считается доля.
+              // «Станций» убрано: это то же число, что «Строк» сводной. Причина —
+              // главная (первая) у станции: сумма по нескольким задвоила бы деньги.
+              fields={['region', 'reason', 'taken', 'city', 'loss', 'clients']}
+              columns={['Регион', 'Главная причина', 'В работе', 'Город',
                         'Цена ₽/мес', 'Ушло клиентов']}
               rows={таблица.rows.map((r) => ({
                 region: r.region ?? '— регион не указан',
                 reason: СЛОВО_ПРИЧИНЫ[r.reasons[0]?.kind ?? ''] ?? 'молчит',
                 taken: !d.workKnown ? 'неизвестно' : r.openTickets ? 'взята' : 'никем не взята',
                 city: r.city ?? '— город не указан',
-                stations: 1,
                 loss: r.lossPerMonth,
                 clients: r.clientsLost,
               }))} />
