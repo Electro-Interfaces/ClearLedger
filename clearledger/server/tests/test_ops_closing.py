@@ -180,3 +180,43 @@ def test_period_collects_then_goes_to_review():
     assert auto_status("2026-07-01", "2026-08-05", max_due_day=10) == "collecting"
     assert auto_status("2026-07-01", "2026-08-13", max_due_day=10) == "collecting"
     assert auto_status("2026-07-01", "2026-08-20", max_due_day=10) == "review"
+
+
+def _energy_term():
+    import uuid
+    return SimpleNamespace(id=uuid.uuid4(), cost_item='energy', estimate_basis=None, vat_pct=None,
+                           variable_kind='metered_kwh', tariff_rub=None,
+                           amount_gross=None, amount_net=None)
+
+
+def _ctx(energy, sold, sold_until):
+    from app.services.ops_expectations import ExpandCtx
+    ctx = ExpandCtx()
+    ctx.energy = {'L': [SimpleNamespace(period=p, intake_kwh=q, meter_curr=None, meter_prev=None,
+                                        ktrans=None, tariff_rub_kwh=t) for p, q, t in energy]}
+    ctx.sold, ctx.sold_until = {'L': set(sold)}, sold_until
+    return ctx
+
+
+def test_old_volume_is_not_an_estimate():
+    """Объём полугодовой давности не служит оценкой — строка уходит в «нет базы»."""
+    from app.services.ops_expectations import estimate
+    energy = [('2026-06-01', None, 7.33), ('2026-02-01', 20490, None)]
+    ctx = _ctx(energy, ['2026-06-01', '2026-07-01'], '2026-10-01')
+    assert estimate(ctx, _energy_term(), '2026-08-01', 'L')['basis'] == 'none'
+    # Свежий объём (не старше 4 месяцев) — по-прежнему оценка.
+    energy = [('2026-06-01', None, 7.33), ('2026-05-01', 460, None)]
+    est = estimate(_ctx(energy, ['2026-06-01', '2026-07-01'], '2026-10-01'),
+                   _energy_term(), '2026-08-01', 'L')
+    assert est['basis'] == 'metered_prev' and est['gross'] == round(460 * 7.33, 2)
+
+
+def test_silent_station_gets_no_energy_estimate():
+    """Два месяца без продаж — прежний объём к станции не относится."""
+    from app.services.ops_expectations import estimate
+    energy = [('2026-06-01', None, 11.26), ('2026-05-01', 5000, None)]
+    assert estimate(_ctx(energy, ['2026-01-01'], '2026-10-01'),
+                    _energy_term(), '2026-08-01', 'L')['basis'] == 'none'
+    # Сессии за эти месяцы ещё не загружены — молчанием не считаем.
+    assert estimate(_ctx(energy, [], '2026-05-01'),
+                    _energy_term(), '2026-08-01', 'L')['basis'] == 'metered_prev'

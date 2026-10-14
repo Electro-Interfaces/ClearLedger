@@ -904,8 +904,8 @@ def build_cards(
         cost = objects.get("idle_cost_amount") or 0
         card("obj_idle_cost", "Платим за точки, которые не продают",
              f"{idle} {plural(idle, 'точка', 'точки', 'точек')} без единой сессии "
-             f"за {t['obj_silent_days']:.0f} дней, а начисления по ним идут: "
-             f"{money(cost)} ₽ за два месяца.",
+             f"за {t['obj_silent_days']:.0f} дней, а расходы по договорам идут: "
+             f"ожидаем {money(cost)} ₽ за два прошлых месяца.",
              count=idle, level="alert", link="/pulse/business?view=objects")
 
     # ── Эксплуатация: хозяйство вокруг сети ─────────────────────────────────
@@ -1111,7 +1111,10 @@ with a as (
               and ch.doc_due_on::date < current_date) as late_docs
   from ops_period_charges ch
   where ch.company_id = :cid
-    and ch.period >= to_char(current_date - interval '2 month', 'YYYY-MM-01')
+    -- Два последних ПОЛНЫХ месяца, как сказано в подписи. Было «с 1-го числа
+    -- позапрошлого месяца» — три периода с текущим целиком (14.10.2026).
+    and ch.period >= to_char(date_trunc('month', current_date) - interval '2 month', 'YYYY-MM-01')
+    and ch.period < to_char(date_trunc('month', current_date), 'YYYY-MM-01')
   group by ch.location_id
 )
 select sl.id, sl.name, coalesce(sl.code, '') as code,
@@ -2303,7 +2306,7 @@ async def pulse_export(
         await assert_company_item(company_id, current_user, db, "pulse", "business.objects")
         o = await _objects_snapshot(db, cid)
         rows = [["Точка", "Код", "Признаки", "Под вопросом, ₽", "Выручка недели, ₽",
-                 "Было неделей раньше, ₽", "Начислено за 2 мес, ₽", "Без документа",
+                 "Было неделей раньше, ₽", "Ожидаем по договорам за 2 мес, ₽", "Без документа",
                  "Последняя сессия"]]
         rows += [[p["name"], p["code"],
                   " · ".join(OBJ_FLAG_LABELS.get(f, f) for f in p["flags"]),
@@ -2655,7 +2658,7 @@ async def pulse_objects(
              note=f"из {s['total']} с движением", state="warn" if s["pain_count"] else None,
              higher_is_better=False),
         _kpi("idle", "Платим, но не продают", s["idle_cost_count"],
-             note=f"{money(s['idle_cost_amount'])} ₽ за два месяца",
+             note=f"ожидаем {money(s['idle_cost_amount'])} ₽ по договорам за два прошлых месяца",
              state="warn" if s["idle_cost_count"] >= OBJ_IDLE_COST_MIN else None,
              higher_is_better=False),
         _kpi("at_risk", "Под вопросом, ₽", round(s["at_risk_total"]),
