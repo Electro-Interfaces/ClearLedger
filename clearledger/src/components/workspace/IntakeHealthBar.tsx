@@ -45,7 +45,9 @@ export function IntakeHealthBar({ compact }: {
   const тишина = d.level !== 'ok'
   const поля = d.lostFields ?? []
   const сироты = d.payments?.orphans ?? 0
-  if (!тишина && !поля.length && !сироты) return null
+  // Компактная полоса показывает только тишину выгрузки: графы и платежи она
+  // прячет, и без этого условия оставалась пустая рамка (14.10.2026).
+  if (!тишина && (compact || (!поля.length && !сироты))) return null
 
   const тревога = d.level === 'alarm'
 

@@ -419,7 +419,13 @@ export function WorkspaceFilterBar() {
           последний элемент уезжал под «Сбросить» — со скрытой полосой прокрутки
           это читается как наложение («Сбросить так и налезает», 24.08.2026). */}
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-        {coreMode !== 'projects' && <PeriodControl />}
+        {/* «Мониторинг» (energy) живёт срезом на день — своё поле «на день» на
+            экране; общий период ни один его экран не читает, и кнопка спорила
+            с датой экрана, ничего не меняя (14.10.2026). У fuel в этом режиме
+            «Договоры и аренда» — там период остаётся. */}
+        {coreMode !== 'projects'
+          && !(coreMode === 'operations' && company.profileId === 'energy')
+          && <PeriodControl />}
         {isOffice ? null : (
           <WorkspaceScopeControl onAdvanced={() => { setSection('scope'); setOpen(true) }} />
         )}
