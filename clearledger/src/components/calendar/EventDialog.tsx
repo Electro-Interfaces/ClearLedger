@@ -218,6 +218,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     const отмечены = (event?.attendees ?? []).filter((a) => a.is_host).map((a) => a.user_id)
     return отмечены.length ? отмечены : (event?.organizer_id ?? user?.id ? [event?.organizer_id ?? user!.id] : [])
   })
+  const организаторИмя = event?.attendees.find((a) => a.user_id === event.organizer_id)?.name
+    ?? (event ? 'Организатор' : `${user?.name ?? 'Вы'} (вы)`)
   const ведущий = (id: string) => hosts.includes(id)
   const отметитьВедущего = (id: string, on: boolean) =>
     setHosts((было) => (on ? [...было.filter((x) => x !== id), id] : было.filter((x) => x !== id)))
@@ -772,22 +774,31 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
               : мой ? <>
                 <Input aria-label="Найти участника" placeholder="Имя сотрудника" value={peopleSearch} onChange={e => setPeopleSearch(e.target.value)} className="text-base sm:text-sm" />
                 <p className="text-sm text-muted-foreground">Организатор участвует обязательно. Остальных можно позвать для сведения.</p>
+                {/* Организатора в списке не было вовсе (его добавляет сервер), и
+                    человек не видел ни себя, ни того, что он ведущий (МАГ,
+                    15.10.2026). Теперь он первой строкой, с именем. */}
                 {conference.trim() && (
-                  <div className="space-y-1 rounded-md border border-border p-2">
-                    <label className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={ведущий(организаторId)} onChange={e => отметитьВедущего(организаторId, e.target.checked)} />
-                      Организатор — ведущий видеоконференции
-                    </label>
-                    <p className="text-xs text-muted-foreground">Ведущего ждут участники и гости, он впускает гостей. Отметьте «ведущий» у участников ниже, чтобы передать роль. Если через 5 минут после начала ведущего нет, первый вошедший откроет комнату сам.</p>
-                    {!hosts.some(id => id === организаторId || attendees.includes(id)) && (
-                      <p className="text-xs text-amber-700 dark:text-amber-400">Ведущий не выбран — им будет организатор.</p>
-                    )}
-                  </div>
+                  <p className="text-xs text-muted-foreground">Ведущий видеоконференции — по умолчанию организатор. Чтобы передать роль, отметьте участника и поставьте у него «ведущий». Ведущего ждут, он впускает гостей; если через 5 минут после начала его нет, первый вошедший откроет комнату сам.</p>
+                )}
+                {conference.trim() && !hosts.some(id => id === организаторId || attendees.includes(id)) && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">Ведущий не выбран — им будет организатор.</p>
                 )}
                 {peopleQ.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить сотрудников. <button className="underline" onClick={() => void peopleQ.refetch()}>Повторить</button></p>}
                 <div className="max-h-48 overflow-y-auto rounded-md border border-border px-2 lg:max-h-64">
                   {peopleQ.isLoading && <p role="status" className="py-2 text-sm">Загружаются сотрудники…</p>}
                   {!peopleQ.isLoading && !peopleQ.isError && !люди.length && <p className="py-2 text-sm text-muted-foreground">Сотрудники не найдены</p>}
+                  <div className="flex min-h-11 items-center gap-2 border-b border-border/60 py-1">
+                    <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-sm">
+                      <input type="checkbox" checked disabled aria-label="Организатор участвует всегда" />
+                      <span className="break-words">{организаторИмя}<span className="text-muted-foreground"> · организатор</span></span>
+                    </label>
+                    {conference.trim() && (
+                      <label className="flex shrink-0 items-center gap-1 text-xs" title="Ведущий видеоконференции: его ждут, он впускает гостей">
+                        <input type="checkbox" checked={ведущий(организаторId)} onChange={e => отметитьВедущего(организаторId, e.target.checked)} />
+                        ведущий
+                      </label>
+                    )}
+                  </div>
                   {люди.map(person => <div key={person.id} className="flex min-h-11 items-center gap-2 border-b border-border/60 py-1 last:border-0">
                     <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-sm">
                       <input type="checkbox" checked={attendees.includes(person.id)} onChange={e => {
