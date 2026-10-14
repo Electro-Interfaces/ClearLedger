@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -832,7 +833,9 @@ async def recording_ingest(
     """
     from app.services import file_store
 
-    if not settings.conf_ingest_token or token != settings.conf_ingest_token:
+    # Сравнение за постоянное время: по времени ответа `!=` секрет подбирается посимвольно.
+    if (not settings.conf_ingest_token or len(settings.conf_ingest_token) < 16
+            or not secrets.compare_digest(str(token or ""), settings.conf_ingest_token)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Ключ приёма не подошёл")
     сессия = await _сессия_записи(db, room, file.filename)
     if сессия is None:
@@ -900,6 +903,9 @@ async def recordings_list(
         .order_by(ConfSession.started_at.desc()).limit(limit))).scalars().all()
     доступные = [s for s in сессии if await _можно_смотреть(db, s, current_user)]
     люди = await _people(db, {s.started_by for s in доступные if s.started_by})
+    админ = await _админ(db, cid, current_user)
+    организаторы = {e.id: e.organizer_id for e in (await db.execute(select(CalendarEvent).where(
+        CalendarEvent.id.in_([s.event_id for s in доступные if s.event_id])))).scalars()}
     return {"recordings": [{
         "session_id": str(s.id),
         "event_id": str(s.event_id) if s.event_id else None,
@@ -911,7 +917,49 @@ async def recordings_list(
         "file_url": f"/api/files/{s.recording_file_id}",
         "started_by": (люди.get(s.started_by).name if люди.get(s.started_by) else None),
         "subject_ref": s.subject_ref,
+        "can_remove": админ or current_user.id in (s.started_by, организаторы.get(s.event_id)),
     } for s in доступные]}
+
+
+@router.post("/recordings/{session_id}/remove")
+async def recording_remove(
+    session_id: str,
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Удалить запись конференции: файл с диска и из хранилища.
+
+    Удаляет тот, кто конференцию собрал или назначил, и администратор
+    пространства: запись — его разговор, а не общая библиотека. Приглашённый
+    смотрит, но не удаляет. Сама конференция остаётся в «Истории» — уходит
+    только файл (замечание МАГа 14.10.2026: удалить было нечем).
+    """
+    from pathlib import Path
+
+    from app.models import SourceFile
+
+    cid = await _company(company_id, current_user, db)
+    s = await db.get(ConfSession, _uuid(session_id, "session_id"))
+    if s is None or s.company_id != cid or s.recording_file_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Запись не найдена")
+    ev = await db.get(CalendarEvent, s.event_id) if s.event_id else None
+    if not (await _админ(db, cid, current_user)
+            or current_user.id in (s.started_by, ev.organizer_id if ev else None)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Удалить запись может организатор или администратор")
+    файл = await db.get(SourceFile, s.recording_file_id)
+    s.recording_file_id = None
+    s.recording_path = None
+    s.recording_seconds = None
+    await db.flush()
+    путь = файл.storage_path if файл else None
+    if файл is not None:
+        await db.delete(файл)
+    await db.commit()
+    if путь:
+        Path(путь).unlink(missing_ok=True)
+    return {"removed": True}
 
 
 async def authorize_conf_recording_download(db: AsyncSession, user: User,

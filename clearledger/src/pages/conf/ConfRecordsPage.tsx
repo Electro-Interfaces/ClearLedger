@@ -6,8 +6,8 @@
  * переслать, поэтому право проверяется и при скачивании, а не только здесь.
  */
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Download, FileVideo, Loader2 } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Download, FileVideo, Loader2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -32,6 +32,19 @@ export default function ConfRecordsPage() {
       setОткрываю(null)
     }
   }
+
+  // Удаление — в два нажатия: файл уходит насовсем, а кнопка стоит рядом со «Смотреть».
+  const [удаляю, setУдаляю] = useState<string | null>(null)
+  const qc = useQueryClient()
+  const удалить = useMutation({
+    mutationFn: (id: string) => conf.removeRecording(companyId, id),
+    onSuccess: () => {
+      toast.success('Запись удалена')
+      setУдаляю(null)
+      void qc.invalidateQueries({ queryKey: ['conf-records', companyId] })
+    },
+    onError: (e: Error) => toast.error(e.message || 'Запись не удалилась'),
+  })
 
   const записи = useQuery({
     queryKey: ['conf-records', companyId],
@@ -60,7 +73,24 @@ export default function ConfRecordsPage() {
               {з.recording_seconds ? ` · запись ${длительность(з.recording_seconds)}` : ''}
               {пред && ` · ${пред.имя}`}
             </p>
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-2">
+              {з.can_remove && (удаляю === з.session_id ? (
+                <>
+                  <span className="text-xs text-muted-foreground">Удалить насовсем?</span>
+                  <Button size="sm" variant="destructive" disabled={удалить.isPending}
+                    onClick={() => удалить.mutate(з.session_id)}>
+                    {удалить.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Удалить
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setУдаляю(null)}>Нет</Button>
+                </>
+              ) : (
+                <Button size="sm" variant="ghost" className="h-8 px-2"
+                  title="Удалить запись" aria-label={`Удалить запись: ${з.title}`}
+                  onClick={() => setУдаляю(з.session_id)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              ))}
               {/* Качаем с пропуском и отдаём браузеру готовый файл: прямая
                   ссылка приходит к серверу без пропуска, и вместо записи
                   открывалось «Требуется авторизация» (замечание МАГа 10.09.2026). */}

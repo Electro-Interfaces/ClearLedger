@@ -199,6 +199,8 @@ export interface ConfRecording {
   file_url: string
   started_by?: string | null
   subject_ref?: string | null
+  /** Удалить может организатор или администратор пространства. */
+  can_remove?: boolean
 }
 
 export interface ConfStats {
@@ -299,4 +301,8 @@ export async function joinRoom(companyId: string, roomId: string): Promise<Meeti
     вкладка?.close()
     throw e
   }
+}
+
+export async function removeRecording(companyId: string, sessionId: string) {
+  return post(`/api/conf/recordings/${sessionId}/remove?company_id=${encodeURIComponent(companyId)}`, {})
 }

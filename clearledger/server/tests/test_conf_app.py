@@ -324,3 +324,40 @@ async def test_пустая_постоянная_комната_закрывае
     p.last_seen_at = сейчас - timedelta(minutes=6)
     await db.flush()
     assert not (await карточка())['live']
+
+
+async def test_запись_удаляет_организатор_но_не_приглашённый(db, tmp_path, monkeypatch):
+    """Запись убирает тот, кто собрал, — файл уходит с диска, созыв остаётся."""
+    from pathlib import Path
+
+    from app.models import SourceFile
+    from app.routers.conf_router import recording_remove, recordings_list
+    from app.services import file_store
+
+    monkeypatch.setenv('UPLOAD_DIR', str(tmp_path))
+    company, хозяин, зван, _ = await люди(db)
+    файл = file_store.put(db, company.id, b'mp4', file_name='r.mp4', mime='video/mp4')
+    await db.flush()
+    s = ConfSession(company_id=company.id, room='ledger-rm', title='Разбор',
+                    started_by=хозяин.id, recording_file_id=файл.id)
+    db.add(s)
+    await db.flush()
+    cid = str(company.id)
+
+    своё = [з for з in (await recordings_list(company_id=cid, limit=50, db=db,
+                                              current_user=хозяин))['recordings']
+            if з['session_id'] == str(s.id)]
+    assert своё and своё[0]['can_remove']
+
+    # Не участник и не организатор — запись ему даже не видна, удалить нельзя.
+    with pytest.raises(HTTPException) as отказ:
+        await recording_remove(str(s.id), company_id=cid, db=db, current_user=зван)
+    assert отказ.value.status_code == 403
+
+    путь = Path(файл.storage_path)
+    assert путь.exists()
+    await recording_remove(str(s.id), company_id=cid, db=db, current_user=хозяин)
+    assert not путь.exists()
+    assert s.recording_file_id is None
+    assert await db.get(SourceFile, файл.id) is None
+    assert await db.get(ConfSession, s.id) is not None
