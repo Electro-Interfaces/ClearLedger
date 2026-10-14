@@ -87,17 +87,26 @@ def _когда(ev: CalendarEvent, starts_at: datetime | None = None) -> str:
 
 
 async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, повод: str,
-                    было: datetime | None = None) -> dict[str, int]:
-    """Сообщить участникам и гостям, что встреча отменена или перенесена.
+                    было: datetime | None = None, только: set | None = None,
+                    кроме: set | None = None) -> dict[str, int]:
+    """Сообщить участникам, что их позвали, встречу отменили или перенесли.
 
-    `повод` — `cancel` или `move`; для переноса `было` — прежнее начало.
-    Тот, кто действует, извещение себе не получает: он и так знает.
+    `повод` — `invite`, `cancel` или `move`; для переноса `было` — прежнее
+    начало. `только` — известить лишь этих людей (новые участники), `кроме` —
+    всех, кроме них. Гостям приглашение уходит своим путём (`/guests`), здесь
+    они получают только отмену и перенос. Тот, кто действует, извещение себе
+    не получает: он и так знает.
     """
     from app.services import email_service, ics
 
     отмена = повод == "cancel"
     когда = _когда(ev)
-    if отмена:
+    if повод == "invite":
+        тема = f"Приглашение: {ev.title} — {когда}"
+        строка = (f"{кто.name} зовёт на встречу «{ev.title}» {когда}."
+                  + (f"\nГде: {ev.location}" if ev.location else "")
+                  + (f"\nСсылка на видеовстречу: {ev.conference_url}" if ev.conference_url else ""))
+    elif отмена:
         тема = f"Отменено: {ev.title} — {когда}"
         строка = (f"Встреча «{ev.title}» {когда} отменена"
                   + (f": {ev.cancel_reason}" if ev.cancel_reason else "") + ".")
@@ -110,7 +119,9 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
     люди = (await db.execute(select(User).join(
         CalendarAttendee, CalendarAttendee.user_id == User.id).where(
         CalendarAttendee.event_id == ev.id, User.id != кто.id))).scalars().all()
-    гости = (await db.execute(select(CalendarGuest).where(
+    люди = [ч for ч in люди if (только is None or ч.id in только)
+            and not (кроме and ч.id in кроме)]
+    гости = [] if повод == "invite" else (await db.execute(select(CalendarGuest).where(
         CalendarGuest.event_id == ev.id))).scalars().all()
 
     свои = [(ч.email, ч.name) for ч in люди if ч.email]
@@ -135,8 +146,8 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
     чатом = письмом = 0
     for человек in люди:
         try:
-            await в_личку(db, ev.company_id, кто, человек,
-                          ("❌ " if отмена else "🕑 ") + строка, тема)
+            значок = "📅 " if повод == "invite" else "❌ " if отмена else "🕑 "
+            await в_личку(db, ev.company_id, кто, человек, значок + строка, тема)
             чатом += 1
         except Exception:
             log.warning("Извещение в чат %s по встрече %s не ушло", человек.id, ev.id,

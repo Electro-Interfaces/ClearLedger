@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useHref } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { EventReminder } from './EventReminder'
-import { Bell, BookmarkPlus, ChevronDown, ListPlus, Loader2, Repeat, Video, X } from 'lucide-react'
+import { Bell, BookmarkPlus, ChevronDown, Copy, ListPlus, Loader2, Repeat, Video, X } from 'lucide-react'
 import { findSlots } from '@/lib/slots'
 import { GuestPanel } from '@/components/calendar/GuestPanel'
 import { PollPanel } from '@/components/calendar/PollPanel'
@@ -127,6 +127,13 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   /** За сколько минут до начала напомнить себе; null — не напоминать. */
   const [напомнитьЗа, setНапомнитьЗа] = useState<number | null>(null)
   const [cancelReason, setCancelReason] = useState('')
+  // «Создать видеоконференцию»: ссылка появлялась только после «Начать
+  // видеовстречу» в уже собранной встрече и в приглашение не попадала
+  // (РусГидро, 15.10.2026). Новой встрече номер выдаём заранее — комната
+  // считается от него, и ссылка видна сразу.
+  const [заранееId, setЗаранееId] = useState<string | null>(null)
+  const [своя, setСвоя] = useState(false)
+  const [видеоИдёт, setВидеоИдёт] = useState(false)
   useEffect(() => { setEvent(initialEvent) }, [initialEvent?.id])
   const notifyChanged = () => {
     for (const key of ['calendar', 'events', 'calendar-event', 'calendar-summary', 'calendar-busy', 'pulse-my-meetings', 'reminders']) {
@@ -151,6 +158,10 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     setConfBusy(true)
     try {
       const m = await startEventMeeting(companyId, event.id)
+      // Поле формы живёт своим состоянием и обновляется только при смене
+      // встречи: без этой строки карточка показывала пустую ссылку, а
+      // «Сохранить» отправлял пустое поле и стирал комнату (15.10.2026).
+      if (!conference.trim()) setConference(m.guest_url)
       try { await navigator.clipboard.writeText(m.guest_url) } catch { /* буфер недоступен */ }
       toast.success('Вы ведущий — ссылка для участников скопирована', { description: m.guest_url })
       await refreshEvent()
@@ -159,6 +170,32 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
       toast.error(/503|не настроен/i.test(msg) ? 'Видеоконференции не настроены'
         : 'Не удалось открыть видеовстречу')
     } finally { setConfBusy(false) }
+  }
+
+  const создатьВидео = async () => {
+    if (видеоИдёт) return
+    setВидеоИдёт(true)
+    try {
+      if (!event) {
+        const id = заранееId ?? crypto.randomUUID()
+        const r = await workService.videoLink(companyId, id)
+        setЗаранееId(id)
+        setConference(r.url)
+      } else {
+        const обновлена = await workService.eventAction(companyId, event.id, { video: true })
+        setEvent(обновлена)
+        setConference(обновлена.conference_url ?? '')
+        notifyChanged()
+      }
+      toast.success('Видеоконференция создана — ссылку можно скопировать')
+    } catch (e) {
+      const msg = (e as Error).message || ''
+      toast.error(/503|не настроен/i.test(msg) ? 'Видеоконференции не настроены' : 'Не удалось создать видеоконференцию')
+    } finally { setВидеоИдёт(false) }
+  }
+  const копироватьВидео = async () => {
+    try { await navigator.clipboard.writeText(conference.trim()); toast.success('Ссылка на видеовстречу скопирована') }
+    catch { toast.error('Не удалось скопировать ссылку. Проверьте разрешение браузера.') }
   }
 
   const [title, setTitle] = useState(event?.title ?? initialTitle ?? '')
@@ -182,8 +219,11 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   // Круг встречи — тот же словарь, что у поручения. Без выбора всё уходило в
   // `company`, и встреча, которую человек считал разговором пятерых,
   // публиковалась всей компании.
+  // Новая встреча по умолчанию видна только участникам: «вся компания» для
+  // разговора пятерых — странное начало (МАГ, 15.10.2026). Событие компании
+  // («весь день компании») — для всех, ради этого его и заводят.
   const [visibility, setVisibility] = useState<EventVisibility>(
-    () => event?.visibility ?? 'company')
+    () => event?.visibility ?? (companyDay ? 'company' : 'private'))
 
   // Смена встречи в родителе (открыли другую) — перезаполняем поля.
   useEffect(() => {
@@ -314,6 +354,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
           subjectRef: subjectRef || undefined,
           recurrence: ПОВТОРЫ.find((r) => r.key === повтор)?.rule ?? null,
           recurrenceUntil: повтор === 'none' ? null : (until || null),
+          id: заранееId ?? undefined,
         })
         // Напоминание себе — сразу, тем же нажатием: иначе человек собирает
         // встречу, закрывает окно и открывает его заново, чтобы «напомнить».
@@ -485,13 +526,34 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
               <Input id={fieldId + "-location"} className="text-base sm:text-sm" value={location} onChange={(e) => setLocation(e.target.value)}
                 disabled={!мой} placeholder="Переговорная, адрес" />
             </div>
-            {(!phone || more) && <div className="space-y-1.5">
+            {/* Видеовстреча — не «подробность»: на телефоне её тоже собирают
+                сразу, а за «Подробнее» кнопку не находили (15.10.2026). */}
+            <div className="min-w-0 space-y-1.5">
               <Label htmlFor={fieldId + "-conference"} className="flex items-center gap-1.5">
                 <Video className="h-3.5 w-3.5" />Ссылка на видеовстречу
               </Label>
-              <Input id={fieldId + "-conference"} className="text-base sm:text-sm" value={conference} onChange={(e) => setConference(e.target.value)}
-                disabled={!мой} placeholder="https://…" />
-            </div>}
+              {мой && !conference.trim() && !своя ? (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <Button type="button" variant="outline" className="w-full whitespace-normal" disabled={видеоИдёт} onClick={создатьВидео}>
+                    {видеоИдёт ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Video className="mr-2 h-4 w-4" />}
+                    Создать видеоконференцию
+                  </Button>
+                  <button type="button" className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+                    onClick={() => setСвоя(true)}>или своя ссылка (Zoom, Teams)</button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <Input id={fieldId + "-conference"} className="min-w-0 flex-1 text-base sm:text-sm" value={conference}
+                    onChange={(e) => setConference(e.target.value)} disabled={!мой} placeholder="https://…" />
+                  {conference.trim() && (
+                    <Button type="button" variant="outline" size="icon" className="shrink-0"
+                      title="Копировать ссылку" aria-label="Копировать ссылку на видеовстречу" onClick={копироватьВидео}>
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
 
@@ -795,15 +857,9 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             try { await navigator.clipboard.writeText(new URL(eventHref, window.location.origin).href); toast.success('Ссылка на встречу скопирована') }
             catch { toast.error('Не удалось скопировать ссылку. Проверьте разрешение браузера.') }
           }}>Ссылка на карточку</Button>
-          {/* «Ссылка на встречу» копировала адрес карточки календаря, а не комнаты:
-              человек пересылал её, и участник попадал в календарь вместо
-              конференции (РусГидро, 14.10.2026). Теперь две кнопки и два смысла. */}
-          {event!.status !== 'cancelled' && event!.conference_url && /^https?:\/\//i.test(event!.conference_url) && (
-            <Button variant="outline" onClick={async () => {
-              try { await navigator.clipboard.writeText(event!.conference_url!); toast.success('Ссылка на видеовстречу скопирована') }
-              catch { toast.error('Не удалось скопировать ссылку. Проверьте разрешение браузера.') }
-            }}>Ссылка на видеовстречу</Button>
-          )}
+          {/* «Ссылка на встречу» копировала адрес карточки календаря, а не комнаты
+              (РусГидро, 14.10.2026). Ссылка на видеовстречу копируется значком в
+              своей строке, здесь — только адрес карточки. */}
           {/* Своя комната — своя кнопка: сервер подписывает вход ведущим, иначе
               Jitsi держит всех на «ждём организатора». Чужую ссылку (Zoom,
               Teams) открываем как есть — ведущего там назначаем не мы. */}
@@ -839,7 +895,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
 </div>
         {cancelConfirm && мой && <section aria-label="Отмена встречи" className="space-y-2 rounded-md border border-destructive/40 p-3">
           <p className="text-sm font-medium">{event?.recurrence ? 'Отменить эту встречу и будущие встречи серии?' : 'Отменить встречу?'}</p>
-          <p className="text-sm text-muted-foreground">Отмена останется видна в календаре участников. Личные напоминания о встрече будут сняты.</p>
+          <p className="text-sm text-muted-foreground">Участники получат сообщение и письмо об отмене, встреча уйдёт из их календарей. Личные напоминания о встрече будут сняты.</p>
           <Input aria-label="Причина отмены" placeholder="Причина отмены — необязательно" value={cancelReason} onChange={e => setCancelReason(e.target.value)} className="text-base sm:text-sm" />
           <div className="flex flex-wrap gap-2"><Button variant="destructive" disabled={отменить.isPending} onClick={() => отменить.mutate(cancelReason.trim())}>Подтвердить отмену</Button><Button variant="ghost" disabled={отменить.isPending} onClick={() => setCancelConfirm(false)}>Не отменять</Button></div>
         </section>}

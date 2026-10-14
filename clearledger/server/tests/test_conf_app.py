@@ -457,3 +457,71 @@ async def test_протокол_черновик_сохранение_и_рас�
     assert s.protocol and 'Поручения:' in (s.note or '')
     t = await recording_transcript(str(s.id), company_id=cid, db=db, current_user=хозяин)
     assert not t['draft']
+
+
+async def test_встреча_из_календаря_с_видео_и_приглашением(db, jitsi_key, monkeypatch):
+    """РусГидро 15.10: в «Новой встрече» ссылка на видео не создавалась, а
+    позванные из календаря не получали ничего."""
+    from app.routers.work_router import EventAction, EventIn, calendar_action, calendar_create
+    from app.services import email_service
+
+    письма = []
+
+    async def не_слать(to, **поля):
+        письма.append((to, поля['method']))
+        return True
+    monkeypatch.setattr(email_service, 'send_meeting_invite', не_слать)
+    company, хозяин, зван, чужой = await люди(db)
+    начало = (datetime.now(timezone.utc) + timedelta(days=3)).replace(microsecond=0)
+    ev = await calendar_create(EventIn(company_id=str(company.id), title='Видео из календаря',
+                                       starts_at=начало, ends_at=начало + timedelta(hours=1),
+                                       attendee_ids=[str(зван.id)], video=True),
+                               db=db, current_user=хозяин)
+    assert ev['conference_url'] and '/ledger-' in ev['conference_url'], 'ссылка на комнату не создана'
+    assert any(m.startswith('📅') and 'Видео из календаря' in m and '/ledger-' in m
+               for m in await _сообщения(db, зван)), 'приглашения в чат нет'
+    assert (зван.email, 'REQUEST') in письма
+
+    # Добавили человека — приглашение уходит ему, а не всем повторно.
+    до = len(await _сообщения(db, зван))
+    await calendar_action(ev['id'], EventAction(company_id=str(company.id),
+                                                attendee_ids=[str(зван.id), str(чужой.id)]),
+                          db=db, current_user=хозяин)
+    assert any(m.startswith('📅') for m in await _сообщения(db, чужой))
+    assert len(await _сообщения(db, зван)) == до, 'старому участнику пришло повторное приглашение'
+
+    # Без флажка ссылки нет: чужую не подставляем.
+    без = await calendar_create(EventIn(company_id=str(company.id), title='Без видео',
+                                        starts_at=начало, ends_at=начало + timedelta(hours=1)),
+                                db=db, current_user=хозяин)
+    assert not без['conference_url']
+
+
+async def test_видеоконференция_до_сохранения_та_же_комната(db, jitsi_key):
+    """«Создать видеоконференцию» в новой встрече: ссылка до сохранения ведёт в
+    ту же комнату, куда потом входят из карточки."""
+    from app.routers.work_router import EventIn, calendar_create, calendar_video_link
+    from app.services import jitsi
+
+    company, хозяин, _, _ = await люди(db)
+    номер = str(uuid.uuid4())
+    ссылка = (await calendar_video_link(company_id=str(company.id), event_id=номер,
+                                        db=db, current_user=хозяин))['url']
+    assert '/ledger-' in ссылка
+    начало = (datetime.now(timezone.utc) + timedelta(days=4)).replace(microsecond=0)
+    ev = await calendar_create(EventIn(id=номер, company_id=str(company.id), title='Заранее',
+                                       starts_at=начало, ends_at=начало + timedelta(hours=1),
+                                       conference_url=ссылка), db=db, current_user=хозяин)
+    assert ev['id'] == номер and ev['conference_url'] == ссылка
+    from app.models import CalendarEvent
+    assert ссылка.endswith(jitsi.event_room(await db.get(CalendarEvent, uuid.UUID(номер))))
+
+    # Собранной встрече ссылку здесь не выдаём — и номер повторно не занять.
+    with pytest.raises(HTTPException) as отказ:
+        await calendar_video_link(company_id=str(company.id), event_id=номер, db=db, current_user=хозяин)
+    assert отказ.value.status_code == 409
+    with pytest.raises(HTTPException) as отказ:
+        await calendar_create(EventIn(id=номер, company_id=str(company.id), title='Повтор',
+                                      starts_at=начало, ends_at=начало + timedelta(hours=1)),
+                              db=db, current_user=хозяин)
+    assert отказ.value.status_code == 409

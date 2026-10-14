@@ -499,7 +499,14 @@ export async function calendarBusy(companyId: string, from: string, to: string,
   })
 }
 
+/** Ссылка на видеокомнату ещё не собранной встречи — под заранее выданный номер. */
+export async function videoLink(companyId: string, eventId: string) {
+  return get<{ url: string }>('/api/work/calendar/video-link', { company_id: companyId, event_id: eventId })
+}
+
 export async function createEvent(companyId: string, data: {
+  /** Номер, выданный заранее (под него уже создана ссылка на видеокомнату). */
+  id?: string
   title: string; startsAt: string; endsAt: string
   description?: string; location?: string; conferenceUrl?: string
   allDay?: boolean; tz?: string; attendeeIds?: string[]; subjectRef?: string
@@ -509,8 +516,11 @@ export async function createEvent(companyId: string, data: {
   /** От чьего имени собираем: помощник ведёт календарь владельца. */
   onBehalfOf?: string
   recurrence?: Recurrence | null; recurrenceUntil?: string | null
+  /** Создать видеовстречу пространства: ссылку на комнату ставит сервер. */
+  video?: boolean
 }) {
   return post<CalendarEvent>('/api/work/calendar', {
+    id: data.id || undefined,
     company_id: companyId, title: data.title,
     starts_at: data.startsAt, ends_at: data.endsAt,
     description: data.description || undefined,
@@ -525,6 +535,7 @@ export async function createEvent(companyId: string, data: {
     subject_ref: data.subjectRef || undefined,
     recurrence: data.recurrence ?? undefined,
     recurrence_until: data.recurrenceUntil || undefined,
+    video: data.video || undefined,
   })
 }
 
@@ -695,6 +706,8 @@ export async function eventAction(companyId: string, id: string, data: {
    *  они стоят в чужих календарях. */
   recurrence?: Recurrence | Record<string, never> | null
   recurrenceUntil?: string | null
+  /** Создать видеовстречу пространства: ссылку на комнату ставит сервер. */
+  video?: boolean
 }) {
   return post<CalendarEvent>(`/api/work/calendar/${id}`, {
     company_id: companyId, title: data.title,
@@ -709,6 +722,7 @@ export async function eventAction(companyId: string, id: string, data: {
     recurrence: data.recurrence ?? undefined,
     recurrence_until: data.recurrenceUntil,
     response: data.response, comment: data.comment,
+    video: data.video || undefined,
   })
 }
 

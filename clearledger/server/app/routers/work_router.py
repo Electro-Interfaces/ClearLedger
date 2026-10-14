@@ -941,6 +941,10 @@ async def reminder_action(
 class EventIn(BaseModel):
     """Встреча: время, место, кого зовём."""
     company_id: str
+    # Номер встречи, выданный заранее: под него «Создать видеоконференцию»
+    # в новой встрече получает ссылку на комнату ещё до сохранения
+    # (`/calendar/video-link`), а комната считается от номера.
+    id: str | None = None
     title: str = Field(min_length=1, max_length=300)
     starts_at: datetime
     ends_at: datetime
@@ -949,6 +953,11 @@ class EventIn(BaseModel):
     tz: str = "Europe/Moscow"
     location: str | None = None
     conference_url: str | None = None
+    # Создать видеовстречу пространства: сервер сам ставит гостевую ссылку на
+    # постоянную комнату встречи, без входа ведущим. Раньше ссылка появлялась
+    # только после «Начать видеовстречу» в уже собранной встрече — в
+    # приглашение она не попадала (РусГидро, 15.10.2026).
+    video: bool = False
     visibility: str = Field("company", pattern="^(company|private|personal)$")
     subject_ref: str | None = None
     # Кого зовём. Пара «идентификатор — обязательность»: необязательный участник
@@ -992,6 +1001,11 @@ class EventAction(BaseModel):
     tz: str | None = None
     cancel: bool | None = None
     cancel_reason: str | None = None
+    # Создать видеовстречу пространства: сервер сам ставит гостевую ссылку на
+    # постоянную комнату встречи, без входа ведущим. Раньше ссылка появлялась
+    # только после «Начать видеовстречу» в уже собранной встрече — в
+    # приглашение она не попадала (РусГидро, 15.10.2026).
+    video: bool = False
     # Правка серии: пустой словарь снимает повторение (созданные встречи
     # остаются — они уже стоят в чужих календарях).
     recurrence: dict | None = None
@@ -1439,6 +1453,36 @@ async def calendar_feed(token: str, db: AsyncSession = Depends(get_db)):
                              "Cache-Control": "no-store"})
 
 
+@router.get("/calendar/video-link")
+async def calendar_video_link(
+    company_id: str = Query(...),
+    event_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Ссылка на видеокомнату встречи, которую ещё только собирают.
+
+    Кнопка «Создать видеоконференцию» в новой встрече: ссылка нужна сразу —
+    скопировать, вставить в приглашение, — а комната считается от номера
+    встречи, которого до сохранения нет. Номер выдаёт интерфейс заранее и
+    передаёт его же при создании. Для уже собранной встречи ссылку здесь не
+    отдаём: её комната закрыта правами встречи, ссылку даёт её карточка.
+    Объявлена до `/calendar/{event_id}`, иначе путь съел бы её как номер.
+    """
+    from app.models import CalendarEvent
+    from app.services import jitsi
+
+    if not settings.jitsi_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "Видеоконференции не настроены")
+    await _assert_work(company_id, current_user, db)
+    eid = _uuid_or_400(event_id, "event_id")
+    if await db.get(CalendarEvent, eid) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Встреча уже собрана")
+    комната = jitsi.room_for(f"event:{eid}")
+    return {"url": jitsi.meeting_urls(комната, current_user.name)["guest_url"]}
+
+
 @router.get("/calendar/{event_id}/ics")
 async def calendar_ics(
     event_id: str,
@@ -1540,6 +1584,20 @@ async def calendar_meeting(
     return urls
 
 
+async def _видеовстреча(db: AsyncSession, ev, нужна: bool, кто: User) -> None:
+    """Поставить встрече гостевую ссылку её постоянной комнаты.
+
+    Только если просили и ссылки ещё нет: чужую (Zoom, Teams) не подменяем.
+    Конференции в пространстве не настроены — молча оставляем без ссылки.
+    """
+    from app.services import jitsi
+
+    if not нужна or ev.conference_url or not settings.jitsi_enabled:
+        return
+    ev.conference_url = jitsi.meeting_urls(jitsi.event_room(ev), кто.name)["guest_url"]
+    await jitsi.share_series_url(db, ev)
+
+
 @router.post("/calendar", status_code=status.HTTP_201_CREATED)
 async def calendar_create(
     payload: EventIn,
@@ -1565,7 +1623,11 @@ async def calendar_create(
         организатор = владелец
         await log_audit(db, actor=current_user, company_id=cid,
                         action="calendar.on_behalf", target=str(владелец))
+    заранее = _uuid_or_400(payload.id, "id") if payload.id else None
+    if заранее and await db.get(CalendarEvent, заранее) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Встреча с этим номером уже есть")
     ev = CalendarEvent(
+        **({"id": заранее} if заранее else {}),
         company_id=cid, organizer_id=организатор, title=payload.title.strip(),
         description=payload.description or None,
         starts_at=payload.starts_at, ends_at=payload.ends_at,
@@ -1576,6 +1638,7 @@ async def calendar_create(
         recurrence_until=payload.recurrence_until)
     db.add(ev)
     await db.flush()
+    await _видеовстреча(db, ev, payload.video, current_user)
 
     необязательные = {_uuid_or_400(i, "optional_ids") for i in payload.optional_ids}
     ids = ({организатор, current_user.id}
@@ -1597,6 +1660,11 @@ async def calendar_create(
             response="accepted" if uid == организатор else "pending"))
     await db.flush()
     parts = await _attendees(db, [ev.id])
+    await db.commit()
+    # Позванные узнают о встрече сразу, а не когда откроют календарь: прежде
+    # приглашение уходило только из «Конференций» (РусГидро, 15.10.2026).
+    from app.services import meeting_notice
+    await meeting_notice.известить(db, ev, current_user, "invite")
     await db.commit()
     return _event_out(ev, parts.get(ev.id, []), current_user.id)
 
@@ -1739,6 +1807,8 @@ async def calendar_action(
         значение = getattr(payload, поле)
         if значение is not None:
             setattr(ev, поле, значение.strip() or None)
+    await _видеовстреча(db, ev, bool(payload.video), current_user)
+    новые: set = set()
 
     if payload.attendee_ids is not None or payload.optional_ids is not None or ev.visibility == 'personal':
         хотим = {ev.organizer_id} | ({_uuid_or_400(i, "attendee_ids") for i in payload.attendee_ids}
@@ -1751,6 +1821,7 @@ async def calendar_action(
             UserCompany.company_id == cid, UserCompany.user_id.in_(хотим)))).scalars())
         хотим &= свои
         есть = {a.user_id: a for a in parts}
+        новые = хотим - set(есть) - {ev.organizer_id}
         for uid in хотим - set(есть):
             db.add(CalendarAttendee(event_id=ev.id, user_id=uid,
                                     role='optional' if uid in необязательные and uid != ev.organizer_id else 'required',
@@ -1783,10 +1854,14 @@ async def calendar_action(
     await db.flush()
     parts = (await _attendees(db, [ev.id])).get(ev.id, [])
     await db.commit()
+    from app.services import meeting_notice
     if время_сдвинулось:
         # Перенос, как и отмена, доходит до людей сам (РусГидро, 14.10.2026).
-        from app.services import meeting_notice
-        await meeting_notice.известить(db, ev, current_user, "move", было=было)
+        await meeting_notice.известить(db, ev, current_user, "move", было=было,
+                                       кроме=новые)
+    if новые:
+        await meeting_notice.известить(db, ev, current_user, "invite", только=новые)
+    if время_сдвинулось or новые:
         await db.commit()
     return _event_out(ev, parts, current_user.id)
 
