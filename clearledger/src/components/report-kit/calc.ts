@@ -2,9 +2,11 @@ import { useSyncExternalStore } from 'react'
 import type { Cell } from './format'
 
 export type PinItem = { id: number; label: string; value: number; money: boolean }
-type ToolsState = { expr: string; pins: PinItem[] }
+export type PickMode = 'sum' | 'sub' | 'mul' | 'div' | 'avg'
+export type HistoryItem = { id: number; expr: string; value: number }
+type ToolsState = { expr: string; pins: PinItem[]; mode: PickMode; history: HistoryItem[] }
 
-let tools: ToolsState = { expr: '', pins: [] }
+let tools: ToolsState = { expr: '', pins: [], mode: 'sum', history: [] }
 const subs = new Set<() => void>()
 const set = (patch: Partial<ToolsState>) => {
   tools = { ...tools, ...patch }
@@ -23,6 +25,28 @@ export const useTools = () =>
 const text = (n: number) => String(Math.round(n * 100) / 100).replace('.', ',')
 
 export const setExpr = (expr: string) => set({ expr })
+export const setPickMode = (mode: PickMode) => set({ mode })
+
+export const textOf = text
+
+export function commitExpr() {
+  const value = evaluate(tools.expr)
+  if (value === null) return
+  const expr = tools.expr.trim()
+  const done = text(value)
+  if (expr === done) return
+  set({ expr: done, history: [{ id: Date.now(), expr, value: Math.round(value * 100) / 100 }, ...tools.history].slice(0, 8) })
+}
+
+export function pickResult(values: number[], mode: PickMode): number | null {
+  if (!values.length) return null
+  if (mode === 'sum') return values.reduce((a, b) => a + b, 0)
+  if (mode === 'avg') return values.reduce((a, b) => a + b, 0) / values.length
+  if (mode === 'mul') return values.reduce((a, b) => a * b, 1)
+  if (mode === 'sub') return values.slice(1).reduce((a, b) => a - b, values[0])
+  if (values.slice(1).some((v) => v === 0)) return null
+  return values.slice(1).reduce((a, b) => a / b, values[0])
+}
 
 export function feedNumber(n: number) {
   const e = tools.expr.trim()
@@ -40,6 +64,8 @@ export function evaluate(expr: string): number | null {
   const src = expr.replace(/\s+/g, '').replace(/,/g, '.').replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-')
   if (!src) return null
   let at = 0
+  let pct = false
+  let factors = 0
   const peek = () => src[at]
   const number = (): number => {
     if (peek() === '(') {
@@ -56,22 +82,32 @@ export function evaluate(expr: string): number | null {
     const m = /^\d+(\.\d+)?/.exec(src.slice(at))
     if (!m) throw new Error('number')
     at += m[0].length
+    if (peek() === '%') {
+      at++
+      pct = true
+      return Number(m[0]) / 100
+    }
     return Number(m[0])
   }
   const product = (): number => {
+    let n = 1
     let v = number()
     while (peek() === '*' || peek() === '/') {
       const op = src[at++]
       const r = number()
       v = op === '*' ? v * r : v / r
+      n++
     }
+    factors = n
     return v
   }
   const sum = (): number => {
     let v = product()
     while (peek() === '+' || peek() === '-') {
       const op = src[at++]
-      const r = product()
+      pct = false
+      let r = product()
+      if (pct && factors === 1) r = v * r
       v = op === '+' ? v + r : v - r
     }
     return v

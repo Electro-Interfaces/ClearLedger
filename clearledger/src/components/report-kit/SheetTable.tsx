@@ -18,7 +18,7 @@ export type Cols = {
   bars?: number[]
 }
 export type Filters = Record<number, Filt>
-export type Picked = { key: string; label: string; value: Cell }
+export type Picked = { key: string; label: string; value: Cell; row?: string }
 export type Mark = {
   has: (row: number) => boolean
   set: (rows: number[], on: boolean) => void
@@ -101,6 +101,8 @@ export function SheetTable({
   mark,
   empty,
   tableAttrs,
+  rowTitle,
+  onHeadPick,
 }: {
   head: string[]
   rows: Cell[][]
@@ -126,6 +128,8 @@ export function SheetTable({
   mark?: Mark
   empty?: ReactNode
   tableAttrs?: Record<string, string>
+  rowTitle?: (row: number) => string
+  onHeadPick?: (col: number) => void
 }) {
   const [sort, setSort] = useState<Sort>(null)
   const size = usePageSize() || Math.max(1, rows.length)
@@ -337,6 +341,7 @@ export function SheetTable({
   }, [current?.id, page])
 
   const toggle = (col: number) => {
+    if (onHeadPick && numeric[col]) return onHeadPick(col)
     setPage(0)
     setSort((s) =>
       s?.col !== col ? { col, dir: numeric[col] ? -1 : 1 } : s.dir === (numeric[col] ? -1 : 1) ? { col, dir: numeric[col] ? 1 : -1 } : null,
@@ -500,12 +505,13 @@ export function SheetTable({
                         <button
                           type="button"
                           onClick={() => toggle(i)}
-                          title={onCols ? `Сортировать по «${head[i]}». Чтобы переставить столбец, перетащите заголовок` : `Сортировать по «${head[i]}»`}
+                          title={onHeadPick && numeric[i] ? `Вставить «${head[i]}» в формулу` : onCols ? `Сортировать по «${head[i]}». Чтобы переставить столбец, перетащите заголовок` : `Сортировать по «${head[i]}»`}
                           className={cn(
                             'inline-flex h-full min-w-0 flex-1 items-center gap-1 rounded-md text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
                             onCols ? 'px-1.5' : 'px-3',
                             numeric[i] && 'flex-row-reverse',
                             on && 'text-foreground',
+                            onHeadPick && numeric[i] && 'text-primary underline decoration-dotted underline-offset-4',
                           )}
                         >
                           <span className={cn('min-w-0', w && 'truncate')}>{head[i]}</span>
@@ -644,7 +650,7 @@ export function SheetTable({
                             ...sized(w),
                             ...(bar ? { backgroundImage: `linear-gradient(to right, color-mix(in srgb, var(--color-primary) 16%, transparent) ${bar}%, transparent ${bar}%)` } : {}),
                           }}
-                          onClick={onPick ? () => onPick({ key: id, label: head[i], value: v }) : undefined}
+                          onClick={onPick ? () => onPick({ key: id, label: head[i], value: v, row: rowTitle?.(x.i) }) : undefined}
                           aria-selected={onPick ? !!picked : undefined}
                           className={cn(
                             'whitespace-nowrap border-b border-di-outline-variant/40 px-3 py-2',
@@ -719,7 +725,7 @@ export function SheetTable({
                       <td
                         key={i}
                         style={{ ...st.style, ...sized(w) }}
-                        onClick={pickable ? () => onPick({ key: `t:${i}`, label: `Итого, ${head[i]}`, value: foot[i] }) : undefined}
+                        onClick={pickable ? () => onPick({ key: `t:${i}`, label: head[i], value: foot[i], row: 'Итого' }) : undefined}
                         className={cn(
                           'sticky bottom-0 z-10 whitespace-nowrap border-t border-di-outline-variant px-3 py-2.5 font-semibold text-foreground',
                           st.className,

@@ -533,6 +533,7 @@ export function OpsWorklistPanel() {
                 onRow={(order, pos) => setКарточка({ order, pos })}
                 onView={setПорядок}
                 render={ячейка}
+                rowTitle={(i) => строки[i]?.name ?? ''}
                 rowClass={(i) => (workKnown && !строки[i]?.openTickets ? 'bg-red-500/5' : undefined)}
                 mark={отметка}
                 empty={пустоСписка}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { deriveTotals, feedNumber, withCalc, type CalcCol } from './calc'
+import { deriveTotals, withCalc, type CalcCol } from './calc'
 import type { Cell } from './format'
 import { closePanel, setRail, useRail } from './rail'
 import { keepRow, type Cols, type Filters, type Picked } from './SheetTable'
@@ -58,7 +58,8 @@ export function useReportKit({
   const [at, setAt] = useState(0)
   const [hits, setHits] = useState(0)
   const [picks, setPicks] = useState<{ rows: Cell[][]; map: Map<string, Picked> }>({ rows, map: new Map() })
-  const { panel } = useRail()
+  const [miss, setMiss] = useState<string | null>(null)
+  const { panel, insert } = useRail()
 
   useEffect(() => {
     setRail({ available: true, title, tools: ready, pivot, help })
@@ -77,12 +78,14 @@ export function useReportKit({
   const picking = panel === 'calc'
   const onPick = useCallback(
     (c: Picked) => {
+      if (typeof c.value !== 'number') {
+        setMiss(c.label)
+        return
+      }
+      setMiss(null)
       const next = new Map(sel)
       if (next.has(c.key)) next.delete(c.key)
-      else {
-        next.set(c.key, c)
-        if (typeof c.value === 'number') feedNumber(c.value)
-      }
+      else next.set(c.key, c)
       setPicks({ rows, map: next })
     },
     [sel, rows],
@@ -109,6 +112,7 @@ export function useReportKit({
       onHits: setHits,
       selected: picking ? selected : undefined,
       onPick: picking ? onPick : undefined,
+      onHeadPick: panel === 'formula' && insert ? (col: number) => insert(`[${sheet.head[col]}]`) : undefined,
       derive,
     },
     tools: {
@@ -116,7 +120,16 @@ export function useReportKit({
       report: title,
       onClose: closePanel,
       sel: [...sel.values()],
-      onClearSel: () => setPicks({ rows, map: new Map() }),
+      onClearSel: () => {
+        setMiss(null)
+        setPicks({ rows, map: new Map() })
+      },
+      onRemoveSel: (key: string) => {
+        const next = new Map(sel)
+        next.delete(key)
+        setPicks({ rows, map: next })
+      },
+      miss,
       head: sheet.head,
       cols,
       onCols: setCols,

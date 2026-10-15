@@ -1,13 +1,16 @@
 import {
   ArrowDown, ArrowLeftRight, ArrowUp, Calculator, ChevronDown, ChevronUp, CircleHelp, ClipboardList, Columns3, Delete,
-  Plus, SquareFunction, TextSearch, X,
+  Copy, Plus, SquareFunction, TextSearch, X,
 } from 'lucide-react'
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { addPin, calcValue, checkCalc, dropPin, evaluate, feedNumber, refsOf, setExpr, useTools, type CalcCol, type CalcTotal } from './calc'
+import {
+  addPin, calcValue, checkCalc, commitExpr, dropPin, evaluate, feedNumber, pickResult, refsOf, setExpr, setPickMode, textOf, useTools,
+  type CalcCol, type CalcTotal, type PickMode,
+} from './calc'
 import { isMoney, num2, qty, type Cell } from './format'
-import type { Panel } from './rail'
+import { setRail, type Panel } from './rail'
 import type { Cols, Picked } from './SheetTable'
 
 const TITLE: Record<Panel, { title: string; icon: typeof Calculator }> = {
@@ -21,7 +24,6 @@ const TITLE: Record<Panel, { title: string; icon: typeof Calculator }> = {
 }
 
 const num = (v: number, money = false) => (money ? num2(v) : qty(Math.round(v * 100) / 100))
-const KEYS = ['7', '8', '9', '÷', '4', '5', '6', '×', '1', '2', '3', '−', '0', ',', '(', ')']
 const field = 'w-full rounded-lg border border-di-outline-variant bg-di-surface-lowest px-3 text-sm text-foreground outline-none focus:border-primary'
 
 function Shell({ panel, report, onClose, children }: { panel: Panel; report: string; onClose: () => void; children: ReactNode }) {
@@ -51,75 +53,166 @@ function Shell({ panel, report, onClose, children }: { panel: Panel; report: str
   )
 }
 
-function Selection({ sel, onClear, report }: { sel: Picked[]; onClear: () => void; report: string }) {
-  const picked = sel.filter((x) => typeof x.value === 'number')
-  const nums = picked.map((x) => x.value as number)
-  const money = !!picked.length && picked.every((x) => isMoney(x.label))
-  const sum = nums.reduce((a, b) => a + b, 0)
+const MODES: { key: PickMode; label: string; sign: string; hint: string }[] = [
+  { key: 'sum', label: 'Сумма', sign: '+', hint: 'Складывает выделенное' },
+  { key: 'sub', label: 'Разность', sign: '−', hint: 'Из первого выделенного вычитает остальные по порядку щелчков' },
+  { key: 'mul', label: 'Произв.', sign: '×', hint: 'Перемножает выделенное' },
+  { key: 'div', label: 'Частное', sign: '÷', hint: 'Первое выделенное делит на остальные по порядку щелчков' },
+  { key: 'avg', label: 'Среднее', sign: 'ср', hint: 'Среднее по выделенному' },
+]
+
+function copy(text: string) {
+  void navigator.clipboard?.writeText(text).catch(() => undefined)
+}
+
+function Selection({ sel, miss, onRemove, onClear, report }: {
+  sel: Picked[]; miss: string | null; onRemove: (key: string) => void; onClear: () => void; report: string
+}) {
+  const { mode } = useTools()
+  const nums = sel.map((x) => x.value as number)
+  const money = !!sel.length && sel.every((x) => isMoney(x.label))
+  const m = MODES.find((x) => x.key === mode)!
+  const result = pickResult(nums, mode)
+  const shown = (v: number) => (v < 0 && mode !== 'sum' ? `(${num(v, money)})` : num(v, money))
+  const formula = mode === 'avg'
+    ? `(${nums.map((v) => shown(v)).join(' + ')}) ÷ ${nums.length}`
+    : nums.map((v) => shown(v)).join(` ${m.sign} `)
   const stat = (label: string, value: string) => (
     <div>
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="text-[15px] font-bold tabular-nums text-foreground">{value}</dd>
+      <dd className="text-sm font-semibold tabular-nums text-foreground">{value}</dd>
     </div>
   )
+  const sum = nums.reduce((a, b) => a + b, 0)
   return (
-    <section aria-label="Выделение" className="rounded-lg bg-di-surface-low p-3">
+    <section aria-label="Выделенное" className="flex flex-col gap-2.5 rounded-lg bg-di-surface-low p-3">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-foreground">Выделенное</h3>
+        {!!sel.length && (
+          <button type="button" onClick={onClear} className="text-xs font-semibold text-primary hover:underline">
+            Снять выделение
+          </button>
+        )}
+      </div>
+      <div role="radiogroup" aria-label="Действие с выделенным" className="grid grid-cols-5 gap-1 rounded-lg bg-di-surface p-1">
+        {MODES.map((x) => (
+          <button
+            key={x.key}
+            type="button"
+            role="radio"
+            aria-checked={mode === x.key}
+            title={x.hint}
+            onClick={() => setPickMode(x.key)}
+            className={cn(
+              'flex h-11 flex-col items-center justify-center rounded-md text-xs font-semibold leading-none transition-colors',
+              mode === x.key ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-di-surface-high hover:text-foreground',
+            )}
+          >
+            <span className="text-base">{x.sign}</span>
+            <span className="mt-0.5">{x.label}</span>
+          </button>
+        ))}
+      </div>
       {!sel.length ? (
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Щёлкайте по ячейкам таблицы: здесь появятся сумма, среднее и количество по выделенному. Пока панель открыта, щелчок выделяет
-          ячейку, а не открывает карточку строки.
+          Щёлкайте по числам в таблице — они встанут сюда по порядку, результат считается сразу: по умолчанию сумма, выше можно
+          переключить на разность, произведение, частное или среднее. Повторный щелчок снимает число. Пока калькулятор открыт,
+          щелчок по строке не открывает её карточку.
         </p>
       ) : (
         <>
-          <dl className="grid grid-cols-3 gap-x-3 gap-y-2">
-            {stat('Сумма', nums.length ? num(sum, money) : '0')}
-            {stat('Среднее', nums.length ? num(sum / nums.length, money) : '0')}
-            {stat('Ячеек', `${sel.length}${nums.length < sel.length ? `, чисел ${nums.length}` : ''}`)}
-            {nums.length > 1 && stat('Минимум', num(Math.min(...nums), money))}
-            {nums.length > 1 && stat('Максимум', num(Math.max(...nums), money))}
-          </dl>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" disabled={!nums.length} onClick={() => setExpr(String(Math.round(sum * 100) / 100).replace('.', ','))}>
-              Сумму в калькулятор
-            </Button>
+          <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
+            {sel.map((x, k) => (
+              <li key={x.key} className="flex items-center gap-2 rounded-md bg-di-surface-mid px-2 py-1 text-xs">
+                <span className="w-4 shrink-0 text-center text-muted-foreground">{k === 0 ? '' : m.sign === 'ср' ? '+' : m.sign}</span>
+                <span className="min-w-0 flex-1 truncate text-di-on-surface-variant" title={`${x.row ?? ''} · ${x.label}`}>
+                  {x.row ? `${x.row} · ` : ''}{x.label}
+                </span>
+                <span className="shrink-0 font-semibold tabular-nums text-foreground">{num(x.value as number, isMoney(x.label))}</span>
+                <button
+                  type="button"
+                  onClick={() => onRemove(x.key)}
+                  aria-label={`Убрать ${num(x.value as number)}`}
+                  className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-di-surface-high hover:text-foreground"
+                >
+                  <X className="size-3.5" aria-hidden />
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="rounded-md border border-di-outline-variant/60 bg-di-surface-mid px-3 py-2">
+            <div className="break-words text-xs tabular-nums text-muted-foreground">{formula} =</div>
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-xs text-muted-foreground">{m.label === 'Произв.' ? 'Произведение' : m.label}</span>
+              <output className="font-headline text-2xl font-extrabold tabular-nums text-foreground">
+                {result === null ? 'деление на 0' : num(result, money && mode !== 'mul' && mode !== 'div')}
+              </output>
+            </div>
+          </div>
+          {sel.length > 1 && (
+            <dl className="grid grid-cols-4 gap-x-2">
+              {stat('Сумма', num(sum, money))}
+              {stat('Среднее', num(sum / nums.length, money))}
+              {stat('Мин.', num(Math.min(...nums), money))}
+              {stat('Макс.', num(Math.max(...nums), money))}
+            </dl>
+          )}
+          <div className="flex flex-wrap gap-2">
             <Button
-              variant="outline"
               size="sm"
-              disabled={!nums.length}
-              onClick={() => addPin(`${report}: сумма ${nums.length} ячеек${picked[0] ? `, ${picked[0].label}` : ''}`, sum, money)}
+              disabled={result === null}
+              onClick={() => result !== null && addPin(`${report}: ${m.label.toLowerCase()} ${nums.length} чисел — ${formula}`, result, money)}
             >
               <ClipboardList className="size-3.5" aria-hidden /> Отложить
             </Button>
-            <Button variant="ghost" size="sm" onClick={onClear}>
-              Снять выделение
+            <Button variant="outline" size="sm" disabled={result === null} onClick={() => result !== null && setExpr(textOf(result))}>
+              В калькулятор
+            </Button>
+            <Button variant="outline" size="sm" disabled={result === null} onClick={() => result !== null && copy(textOf(result))} title="Скопировать результат">
+              <Copy className="size-3.5" aria-hidden />
             </Button>
           </div>
         </>
       )}
+      {miss && <p className="text-xs text-amber-700 dark:text-amber-400">«{miss}» — не число, в расчёт не взято.</p>}
     </section>
   )
 }
 
+const KEYS = ['C', '(', ')', '÷', '7', '8', '9', '×', '4', '5', '6', '−', '1', '2', '3', '+', '0', ',', '%', '⌫']
+
 function Calc({ report }: { report: string }) {
-  const { expr } = useTools()
+  const { expr, history } = useTools()
   const value = evaluate(expr)
-  const press = (k: string) => setExpr(/[÷×−+]/.test(k) ? `${expr.trimEnd()} ${k} ` : `${expr}${k}`)
+  const press = (k: string) => {
+    if (k === 'C') return setExpr('')
+    if (k === '⌫') return setExpr(expr.trimEnd().slice(0, -1).trimEnd())
+    setExpr(/[÷×−+]/.test(k) ? `${expr.trimEnd()} ${k} ` : `${expr}${k}`)
+  }
   const key = 'h-10 rounded-lg text-lg font-semibold transition-colors'
-  const op = 'bg-di-surface-high text-primary hover:bg-di-surface-highest'
   return (
     <section aria-label="Калькулятор" className="flex flex-col gap-2.5">
+      <h3 className="text-sm font-semibold text-foreground">Калькулятор</h3>
       <input
         value={expr}
         onChange={(e) => setExpr(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && value !== null && setExpr(String(Math.round(value * 100) / 100).replace('.', ','))}
+        onKeyDown={(e) => e.key === 'Enter' && commitExpr()}
         placeholder="0"
         aria-label="Выражение"
         inputMode="decimal"
-        className={cn(field, 'h-11 text-right text-lg')}
+        className={cn(field, 'h-11 text-right text-lg tabular-nums')}
       />
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-xs text-muted-foreground">{expr.trim() && value === null ? 'Выражение не закончено' : 'Результат'}</span>
-        <output className="font-headline text-2xl font-extrabold tabular-nums text-foreground">{value === null ? '0' : num(value)}</output>
+        <span className="flex items-baseline gap-2">
+          <output className="font-headline text-2xl font-extrabold tabular-nums text-foreground">{value === null ? '0' : num(value)}</output>
+          {value !== null && (
+            <button type="button" onClick={() => copy(textOf(value))} title="Скопировать результат" aria-label="Скопировать результат"
+              className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-di-surface-high hover:text-foreground">
+              <Copy className="size-3.5" aria-hidden />
+            </button>
+          )}
+        </span>
       </div>
       <div className="grid grid-cols-4 gap-1.5">
         {KEYS.map((k) => (
@@ -127,37 +220,47 @@ function Calc({ report }: { report: string }) {
             key={k}
             type="button"
             onClick={() => press(k)}
-            className={cn(key, /\d|,/.test(k) ? 'bg-di-surface-lowest text-foreground hover:bg-di-surface-high' : op)}
+            aria-label={k === '⌫' ? 'Стереть символ' : k === 'C' ? 'Очистить' : undefined}
+            className={cn(
+              key,
+              /\d|,/.test(k)
+                ? 'bg-di-surface-lowest text-foreground hover:bg-di-surface-high'
+                : k === 'C' || k === '⌫'
+                  ? 'bg-di-surface-high text-di-on-surface-variant hover:bg-di-surface-highest'
+                  : 'bg-di-surface-high text-primary hover:bg-di-surface-highest',
+            )}
           >
-            {k}
+            {k === '⌫' ? <Delete className="mx-auto size-5" aria-hidden /> : k}
           </button>
         ))}
-        <button type="button" onClick={() => setExpr('')} className={cn(key, 'bg-di-surface-high text-di-on-surface-variant hover:bg-di-surface-highest')}>
-          C
-        </button>
         <button
           type="button"
-          onClick={() => setExpr(expr.trimEnd().slice(0, -1).trimEnd())}
-          aria-label="Стереть символ"
-          className={cn(key, 'grid place-items-center bg-di-surface-high text-di-on-surface-variant hover:bg-di-surface-highest')}
-        >
-          <Delete className="size-5" aria-hidden />
-        </button>
-        <button type="button" onClick={() => press('+')} className={cn(key, op)}>
-          +
-        </button>
-        <button
-          type="button"
-          onClick={() => value !== null && setExpr(String(Math.round(value * 100) / 100).replace('.', ','))}
+          onClick={commitExpr}
           disabled={value === null}
-          className={cn(key, 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40')}
+          className={cn(key, 'col-span-4 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40')}
         >
           =
         </button>
       </div>
-      <Button variant="outline" size="sm" disabled={value === null} onClick={() => value !== null && addPin(`${report}: расчёт ${expr.trim()}`, value)}>
+      <Button variant="outline" size="sm" disabled={value === null} onClick={() => value !== null && addPin(`${report}: ${expr.trim()}`, value)}>
         <ClipboardList className="size-3.5" aria-hidden /> Отложить результат
       </Button>
+      {!!history.length && (
+        <div>
+          <div className="mb-1 text-xs text-muted-foreground">Недавние вычисления — щелчок подставляет результат</div>
+          <ul className="flex flex-col gap-0.5">
+            {history.map((h) => (
+              <li key={h.id}>
+                <button type="button" onClick={() => feedNumber(h.value)}
+                  className="flex w-full items-baseline justify-between gap-2 rounded px-1.5 py-1 text-left text-xs hover:bg-di-surface-high">
+                  <span className="min-w-0 truncate text-muted-foreground">{h.expr} =</span>
+                  <span className="shrink-0 font-semibold tabular-nums text-foreground">{num(h.value)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   )
 }
@@ -215,18 +318,31 @@ function Formulas({ head, rows, calcs, onCalcs, example }: { head: string[]; row
   const used = (c: CalcCol) => calcs.find((x) => x.id !== c.id && refsOf(x.expr).includes(c.name))
 
   const put = (s: string) => {
-    if (!edit) return
     const el = area.current
-    const a = el?.selectionStart ?? edit.expr.length
-    const b = el?.selectionEnd ?? edit.expr.length
     const pad = /[+−×÷]/.test(s) ? ` ${s} ` : s
-    const expr = edit.expr.slice(0, a) + pad + edit.expr.slice(b)
-    setEdit({ ...edit, expr })
+    let caret = 0
+    setEdit((was) => {
+      if (!was) return was
+      const a = el ? el.selectionStart : was.expr.length
+      const b = el ? el.selectionEnd : a
+      caret = a + pad.length
+      return { ...was, expr: was.expr.slice(0, a) + pad + was.expr.slice(b) }
+    })
     requestAnimationFrame(() => {
       el?.focus()
-      el?.setSelectionRange(a + pad.length, a + pad.length)
+      el?.setSelectionRange(caret, caret)
     })
   }
+  const putRef = useRef(put)
+  useLayoutEffect(() => {
+    putRef.current = put
+  })
+  const editing = !!edit
+  useEffect(() => {
+    if (!editing) return
+    setRail({ insert: (s: string) => putRef.current(s) })
+    return () => setRail({ insert: null })
+  }, [editing])
   const save = () => {
     setTried(true)
     if (!edit || err) return
@@ -373,6 +489,8 @@ export function ReportTools({
   onClose,
   sel,
   onClearSel,
+  onRemoveSel,
+  miss,
   head,
   cols,
   onCols,
@@ -395,6 +513,8 @@ export function ReportTools({
   onClose: () => void
   sel: Picked[]
   onClearSel: () => void
+  onRemoveSel: (key: string) => void
+  miss: string | null
   head: string[]
   cols: Cols
   onCols: (c: Cols) => void
@@ -430,7 +550,7 @@ export function ReportTools({
 
       {panel === 'calc' && (
         <>
-          <Selection sel={sel} onClear={onClearSel} report={report} />
+          <Selection sel={sel} miss={miss} onRemove={onRemoveSel} onClear={onClearSel} report={report} />
           <Calc report={report} />
         </>
       )}
