@@ -19,8 +19,15 @@
  * инженер отметил нарушение по осмотру — это не отказы, денег они пока не
  * теряют и наверх не всплывают. Но выезд стоит дороже самой работы: раз машина
  * едет на станцию, везти надо всё, что по ней накопилось.
+ *
+ * ТАБЛИЦА С ИНСТРУМЕНТАМИ (report-kit, 15.10.2026). Список — общий набор
+ * `@/components/report-kit`, перенесённый из отчётов КП СДО: меню столбца
+ * (сортировка, закрепление, фильтр по значениям, полоски), Σ в шапке, карточка
+ * строки, а в правой рельсе — калькулятор, свои столбцы, поиск, столбцы,
+ * сравнение и отложенные цифры. Плитки и быстрые отборы сверху остались: они
+ * отвечают «что смотреть», набор — «как разобрать увиденное».
  */
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { OpsSnapshotNotice } from './OpsSnapshotNotice'
 import {
@@ -29,24 +36,26 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { StationLink } from '@/components/common/StationLink'
 import { IntakeHealthBar } from '@/components/workspace/IntakeHealthBar'
 import { BulkTicketDialog } from '@/components/locations/BulkTicketDialog'
-import { SortTh } from '@/components/workspace/SortableTh'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { ReportPivot } from '@/components/workspace/ReportPivot'
-import { useTableSort } from '@/hooks/useTableSort'
+import {
+  ReportTools, RowCard, SheetTable, ToolPanel, ToolStrip, qty, useReportKit,
+  type Cell, type Mark,
+} from '@/components/report-kit'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
+import { useSupportContext } from '@/contexts/SupportContext'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
-import { getOpsWorklist, type WorklistRow } from '@/services/opsService'
+import { getOpsWorklist, type OpsWorklist, type WorklistRow } from '@/services/opsService'
 
 const nf = new Intl.NumberFormat('ru-RU')
 
@@ -84,6 +93,46 @@ const СЛОВО_ПРИЧИНЫ: Record<string, string> = {
 const ПРОФИЛАКТИКА = ['meter', 'service', 'check']
 
 /**
+ * Столбцы таблицы. Порядок — номер столбца в строке: на него опираются
+ * сохранённые настройки вида (`report-kit.v1:cols:ops-today.v1`), поэтому новый
+ * столбец дописывается в конец, а смена смысла столбца — новый `ВИД`.
+ */
+const ВИД = 'ops-today.v1'
+const С = {
+  номер: 0, станция: 1, город: 2, регион: 3, что: 4, главная: 5, зарядка: 6,
+  молчит: 7, впустую: 8, ушло: 9, приездов: 10, цена: 11, заявок: 12, работа: 13,
+} as const
+const ШАПКА = ['№', 'Станция', 'Город', 'Регион', 'Что со станцией', 'Главная причина',
+  'Последняя зарядка', 'Молчит, дн', 'Приездов впустую, %', 'Ушло клиентов',
+  'Приездов в сутки', 'Цена ₽/мес', 'Открытых заявок', 'В работе']
+/** Скрыты по умолчанию — видны в карточке строки и включаются в «Столбцах». */
+const СКРЫТЫ = [С.город, С.главная, С.молчит, С.впустую, С.ушло, С.заявок]
+/** Столбцы, по которым шапка предлагает сводную: столбец → поле сводной. */
+const СВОДНАЯ_ПО: Record<number, string> = { [С.регион]: 'Регион', [С.главная]: 'Главная причина', [С.работа]: 'В работе', [С.город]: 'Город' }
+const ПОЛЕ_СВОДНОЙ: Record<number, string> = { [С.регион]: 'region', [С.главная]: 'reason', [С.работа]: 'taken', [С.город]: 'city' }
+
+const датаМск = (iso: string, год: boolean) => new Date(iso).toLocaleDateString('ru-RU',
+  { day: '2-digit', month: '2-digit', ...(год ? { year: 'numeric' } : {}), timeZone: 'Europe/Moscow' })
+
+function вРаботе(r: WorklistRow, workKnown: boolean) {
+  if (!workKnown) return 'неизвестно'
+  if (!r.openTickets) return 'не взята'
+  return r.lastTicketNumber ?? `${r.openTickets} заявк.`
+}
+
+function строкаТаблицы(r: WorklistRow, workKnown: boolean): Cell[] {
+  return [
+    r.number ?? r.code ?? '', r.name, r.city ?? '', r.region ?? '',
+    r.reasons.map((p) => p.label + (p.note ? ` · ${p.note}` : '')).join('; '),
+    СЛОВО_ПРИЧИНЫ[r.reasons[0]?.kind ?? ''] ?? 'молчит',
+    r.lastSessionAt ? датаМск(r.lastSessionAt, true) : '',
+    r.silentDays ?? '', r.failedVisitsPct ?? '', r.clientsLost,
+    r.visitsPerDay ?? '', r.lossPerMonth || '',
+    workKnown ? r.openTickets : '', вРаботе(r, workKnown),
+  ]
+}
+
+/**
  * Плитка показателя. С `onClick` она же — фильтр списка снизу: человек смотрит
  * на число «13 просрочено» и хочет увидеть эти тринадцать, а не искать их
  * селектами. Активная подсвечена рамкой, повторное нажатие снимает отбор.
@@ -116,6 +165,7 @@ function Плитка({ icon: Icon, label, value, hint, tone, onClick, active }:
 export function OpsWorklistPanel() {
   const { companyId } = useCompany()
   const { regionIds } = useFilters()
+  const { openInteraction } = useSupportContext()
   const экран = useRef<HTMLDivElement>(null)
   const [поиск, setПоиск] = useState('')
   const [причина, setПричина] = useState('all')
@@ -124,8 +174,11 @@ export function OpsWorklistPanel() {
   // утренний список должен начинаться с того, чего не делает никто.
   const [неВзятые, setНеВзятые] = useState(true)
   const [вид, setВид] = useState('list')
+  const [первыйУровень, setПервыйУровень] = useState<number | null>(null)
   const [отмечены, setОтмечены] = useState<Set<string>>(new Set())
-  const [пачка, setПачка] = useState(false)
+  const [пачка, setПачка] = useState<{ id: string; name: string; number: string | null }[] | null>(null)
+  const [карточка, setКарточка] = useState<{ order: number[]; pos: number } | null>(null)
+  const [порядок, setПорядок] = useState<number[]>([])
   // День, НА который смотрим. Пусто — граница данных (последняя загруженная
   // сессия). Разбор «почему 3 сентября встала половина региона» по сегодняшнему
   // срезу невозможен: тот день в нём уже не виден.
@@ -155,21 +208,104 @@ export function OpsWorklistPanel() {
       r.lastTicketNumber, ...r.reasons.map((p) => `${p.label} ${p.note ?? ''}`)]))
   }, [q.data, поиск, причина, регионОтбора, неВзятые])
 
-  const сортировка = useMemo(() => ({
-    number: (r: WorklistRow) => r.number ?? r.code,
-    name: (r: WorklistRow) => r.name,
-    region: (r: WorklistRow) => r.region,
-    // Ноль показан «—»: при сортировке он пустой, а не самый маленький,
-    // иначе по возрастанию наверх всплывают станции без цены.
-    loss: (r: WorklistRow) => r.lossPerMonth || null,
-    silent: (r: WorklistRow) => r.silentDays,
-    failed: (r: WorklistRow) => r.failedVisitsPct,
-    clients: (r: WorklistRow) => r.clientsLost,
-    last: (r: WorklistRow) => r.lastSessionAt ?? null,
-    visits: (r: WorklistRow) => r.visitsPerDay,
-    work: (r: WorklistRow) => r.openTickets || null,
-  }), [])
-  const таблица = useTableSort(строки, сортировка)
+  const workKnown = !!q.data?.workKnown
+  const ячейки = useMemo(() => строки.map((r) => строкаТаблицы(r, workKnown)), [строки, workKnown])
+  const итог = useMemo<Cell[]>(() => {
+    const t: Cell[] = ШАПКА.map(() => '')
+    t[С.номер] = 'Итого'
+    t[С.станция] = `${qty(строки.length)} станций`
+    t[С.ушло] = строки.reduce((s, r) => s + r.clientsLost, 0)
+    t[С.цена] = строки.reduce((s, r) => s + (r.lossPerMonth || 0), 0)
+    if (workKnown) t[С.заявок] = строки.reduce((s, r) => s + r.openTickets, 0)
+    return t
+  }, [строки, workKnown])
+
+  const данныеПо = q.data ? new Date(q.data.asOf).toLocaleString('ru-RU',
+    { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }) : ''
+  const отбор = [
+    неВзятые && 'никем не взято',
+    причина !== 'all' && (СЛОВО_ПРИЧИНЫ[причина] ?? причина),
+    регионОтбора !== 'all' && регионОтбора,
+    поиск.trim() && `поиск «${поиск.trim()}»`,
+  ].filter(Boolean) as string[]
+
+  const набор = useReportKit({
+    id: ВИД,
+    title: 'На сегодня',
+    head: ШАПКА,
+    rows: ячейки,
+    total: итог,
+    hide: СКРЫТЫ,
+    ready: !!q.data,
+    pivot: вид === 'pivot',
+    share: `Эксплуатация → Мониторинг → «На сегодня», данные по ${данныеПо} МСК`
+      + `${наДень ? `, на день ${наДень}` : ''}`
+      + `${отбор.length ? `; отбор: ${отбор.join(', ')}` : ''}; станций в списке: ${строки.length}`,
+  })
+
+  const отметка = useMemo<Mark>(() => ({
+    has: (i) => отмечены.has(строки[i]?.locationId),
+    set: (rows, on) => setОтмечены((было) => {
+      const стало = new Set(было)
+      for (const i of rows) {
+        const id = строки[i]?.locationId
+        if (!id) continue
+        if (on) стало.add(id); else стало.delete(id)
+      }
+      return стало
+    }),
+    label: (i) => строки[i]?.name ?? '',
+  }), [отмечены, строки])
+
+  const ячейка = useCallback((i: number, c: number) => {
+    const r = строки[i]
+    if (!r) return undefined
+    if (c === С.номер) return <span className="font-mono text-xs text-muted-foreground">{r.number ?? r.code ?? '—'}</span>
+    if (c === С.станция) return (
+      <span className="font-medium">
+        <StationLink station={r.locationId}>{r.name}</StationLink>
+        {r.city && <span className="ml-1.5 text-xs font-normal text-muted-foreground">{r.city}</span>}
+      </span>
+    )
+    // Причин может быть несколько: станция и молчит, и до этого отправляла людей
+    // ни с чем — в наряде это один выезд.
+    if (c === С.что) return (
+      <div className="flex flex-wrap gap-1">
+        {r.reasons.map((p, k) => (
+          <span key={`${p.kind}-${k}`} className={cn('rounded px-1.5 py-0.5 text-xs', ЦВЕТ_ПРИЧИНЫ[p.kind])}>
+            {p.label}
+            {p.note && <span className="ml-1 opacity-70">· {p.note}</span>}
+          </span>
+        ))}
+      </div>
+    )
+    // Дата, а не «молчит N дн»: по ней инженер сверяется с клиентом и
+    // оператором. Год печатается, только когда он не текущий.
+    if (c === С.зарядка) return r.lastSessionAt
+      ? <span className="text-muted-foreground" title={r.clientsLost ? `ушло клиентов за квартал: ${r.clientsLost}` : undefined}>
+          {датаМск(r.lastSessionAt, new Date(r.lastSessionAt).getFullYear() !== new Date().getFullYear())}
+        </span>
+      : undefined
+    if (c === С.цена) return r.lossPerMonth ? <span className="font-medium">{money(r.lossPerMonth)}</span> : undefined
+    if (c === С.работа) {
+      if (!workKnown) return <span className="text-xs">неизвестно</span>
+      if (!r.openTickets) return <span className="text-xs text-red-600 dark:text-red-400">не взята</span>
+      return (
+        <a href={`/support/customer/tickets/${r.lastTicketId}`} className="text-xs text-primary hover:underline">
+          {r.lastTicketNumber ?? `${r.openTickets} заявк.`}
+          {r.breachedTickets > 0 && <span className="ml-1 text-red-600 dark:text-red-400">срок сорван</span>}
+        </a>
+      )
+    }
+    return undefined
+  }, [строки, workKnown])
+
+  const видимые = useMemo(() => {
+    const cols = набор.table.cols
+    const head = набор.sheet.head
+    const order = cols.order.length === head.length ? cols.order : head.map((_, i) => i)
+    return order.filter((i) => !cols.hidden.includes(i))
+  }, [набор.table.cols, набор.sheet.head])
 
   if (q.isLoading) {
     return <div className="flex justify-center py-12">
@@ -184,8 +320,20 @@ export function OpsWorklistPanel() {
 
   const d = q.data
   const t = d.totals
-  const данныеПо = new Date(d.asOf).toLocaleString('ru-RU',
-    { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' })
+  const отфильтрованы = набор.kept.length !== строки.length
+  const вСводную = набор.kept.map((i) => строки[i])
+  const поля = ['region', 'reason', 'taken', 'city', 'loss', 'clients']
+  const подписи = ['Регион', 'Главная причина', 'В работе', 'Город', 'Цена ₽/мес', 'Ушло клиентов']
+  const первоеПоле = первыйУровень !== null ? ПОЛЕ_СВОДНОЙ[первыйУровень] : null
+  const сдвиг = первоеПоле ? поля.indexOf(первоеПоле) : -1
+  const поляСводной = сдвиг > 0 ? [поля[сдвиг], ...поля.filter((_, k) => k !== сдвиг)] : поля
+  const подписиСводной = сдвиг > 0 ? [подписи[сдвиг], ...подписи.filter((_, k) => k !== сдвиг)] : подписи
+  const строкаКарточки = карточка ? строки[карточка.order[карточка.pos]] : null
+  const пустоСписка = ПРОФИЛАКТИКА.includes(причина)
+    ? 'Сроков по этому отбору нет — либо они не заполнены'
+    : неВзятые
+      ? 'Всё, что видно, уже взято в работу'
+      : 'Работы по этому отбору нет'
 
   return (
     <div ref={экран} className="space-y-3 p-3">
@@ -329,160 +477,266 @@ export function OpsWorklistPanel() {
             <Input value={поиск} onChange={(e) => setПоиск(e.target.value)}
               placeholder="Номер, название, город…" className="h-7 w-52 text-xs" />
             {отмечены.size > 0 && (
-              <Button size="sm" className="h-7 text-xs" onClick={() => setПачка(true)}>
+              <Button size="sm" className="h-7 text-xs"
+                onClick={() => setПачка(строки.filter((r) => отмечены.has(r.locationId))
+                  .map((r) => ({ id: r.locationId, name: r.name, number: r.number ?? r.code })))}>
                 Завести заявки ({отмечены.size})
               </Button>
             )}
             <span className="text-xs text-muted-foreground">
-              строк: {nf.format(таблица.rows.length)}
+              строк: {nf.format(отфильтрованы ? набор.kept.length : строки.length)}
             </span>
           </div>
 
-          <PanelViewTabs value={вид} onChange={setВид} label={null} tabs={[
-            { k: 'list', label: 'Список' },
-            { k: 'pivot', label: 'Сводная' },
-          ]} />
+          <div className="flex flex-wrap items-center gap-2">
+            <PanelViewTabs value={вид} onChange={setВид} label={null} tabs={[
+              { k: 'list', label: 'Список' },
+              { k: 'pivot', label: 'Сводная' },
+            ]} />
+          </div>
+
+          {/* Телефон и планшет: рельсы нет, те же кнопки — полосой над таблицей. */}
+          <ToolStrip onDiscuss={(text) => {
+            void navigator.clipboard?.writeText(text).catch(() => undefined)
+            openInteraction('chat')
+          }} />
 
           {вид === 'pivot' ? (
-            <ReportPivot
-              // Первая мера — деньги: по ней упорядочены группы и считается доля.
-              // «Станций» убрано: это то же число, что «Строк» сводной. Причина —
-              // главная (первая) у станции: сумма по нескольким задвоила бы деньги.
-              fields={['region', 'reason', 'taken', 'city', 'loss', 'clients']}
-              columns={['Регион', 'Главная причина', 'В работе', 'Город',
-                        'Цена ₽/мес', 'Ушло клиентов']}
-              rows={таблица.rows.map((r) => ({
-                region: r.region ?? '— регион не указан',
-                reason: СЛОВО_ПРИЧИНЫ[r.reasons[0]?.kind ?? ''] ?? 'молчит',
-                taken: !d.workKnown ? 'неизвестно' : r.openTickets ? 'взята' : 'никем не взята',
-                city: r.city ?? '— город не указан',
-                loss: r.lossPerMonth,
-                clients: r.clientsLost,
-              }))} />
+            <div className="space-y-2">
+              {/* Фильтры столбцов списка действуют и на сводную: иначе одна и та
+                  же цифра на двух вкладках расходилась бы без объяснения. */}
+              {отфильтрованы && (
+                <div className="rounded-md bg-primary/5 px-3 py-1.5 text-xs text-muted-foreground">
+                  Сводная собрана по {nf.format(набор.kept.length)} из {nf.format(строки.length)} станций: фильтр по{' '}
+                  {Object.keys(набор.filters).map((k) => `«${набор.sheet.head[Number(k)]}»`).join(', ')}.{' '}
+                  <button type="button" className="font-semibold text-primary hover:underline" onClick={() => набор.setFilters({})}>
+                    Снять
+                  </button>
+                </div>
+              )}
+              <ReportPivot
+                key={поляСводной[0]}
+                // Первая мера — деньги: по ней упорядочены группы и считается доля.
+                // «Станций» убрано: это то же число, что «Строк» сводной. Причина —
+                // главная (первая) у станции: сумма по нескольким задвоила бы деньги.
+                fields={поляСводной}
+                columns={подписиСводной}
+                rows={вСводную.map((r) => ({
+                  region: r.region ?? '— регион не указан',
+                  reason: СЛОВО_ПРИЧИНЫ[r.reasons[0]?.kind ?? ''] ?? 'молчит',
+                  taken: !d.workKnown ? 'неизвестно' : r.openTickets ? 'взята' : 'никем не взята',
+                  city: r.city ?? '— город не указан',
+                  loss: r.lossPerMonth,
+                  clients: r.clientsLost,
+                }))} />
+            </div>
           ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm"
-              {...exportRows('На сегодня',
-                ['Номер', 'Станция', 'Регион', 'Что со станцией', 'Молчит',
-                 'Приездов впустую %', 'Ушло клиентов', 'Приездов в сутки',
-                 'Цена ₽/мес', 'Открытых заявок', 'Заявка'],
-                таблица.rows.map((r) => [
-                  r.number ?? r.code, r.name, r.region,
-                  r.reasons.map((p) => p.label).join('; '),
-                  r.silentDays ?? '', r.failedVisitsPct ?? '', r.clientsLost,
-                  r.visitsPerDay ?? '',
-                  r.lossPerMonth || '', r.openTickets, r.lastTicketNumber ?? '',
-                ]))}>
-              <thead>
-                <tr className="border-b border-border text-xs text-muted-foreground">
-                  <th className="w-8 p-1.5">
-                    <Checkbox
-                      checked={!!таблица.rows.length && таблица.rows.every((r) => отмечены.has(r.locationId))}
-                      onCheckedChange={(v) => setОтмечены(v
-                        ? new Set(таблица.rows.map((r) => r.locationId))
-                        : new Set())}
-                      aria-label="Отметить все строки" />
-                  </th>
-                  <SortTh sortKey="number" sort={таблица.sort} onSort={таблица.toggle}>№</SortTh>
-                  <SortTh sortKey="name" sort={таблица.sort} onSort={таблица.toggle}>Станция</SortTh>
-                  <SortTh sortKey="region" sort={таблица.sort} onSort={таблица.toggle}>Регион</SortTh>
-                  <SortTh>Что со станцией</SortTh>
-                  <SortTh sortKey="last" sort={таблица.sort} onSort={таблица.toggle} align="right">Последняя зарядка</SortTh>
-                  <SortTh sortKey="visits" sort={таблица.sort} onSort={таблица.toggle} align="right">Приездов в сутки</SortTh>
-                  <SortTh sortKey="loss" sort={таблица.sort} onSort={таблица.toggle} align="right">Цена ₽/мес</SortTh>
-                  <SortTh sortKey="work" sort={таблица.sort} onSort={таблица.toggle}>В работе</SortTh>
-                </tr>
-              </thead>
-              <tbody>
-                {таблица.rows.map((r) => (
-                  <tr key={r.locationId}
-                    className={cn('border-b border-border/40',
-                      !r.openTickets && 'bg-red-500/5')}>
-                    <td className="p-1.5">
-                      <Checkbox checked={отмечены.has(r.locationId)}
-                        onCheckedChange={(v) => setОтмечены((было) => {
-                          const стало = new Set(было)
-                          if (v) стало.add(r.locationId); else стало.delete(r.locationId)
-                          return стало
-                        })}
-                        aria-label={`Отметить ${r.name}`} />
-                    </td>
-                    <td className="p-1.5 font-mono text-xs text-muted-foreground">
-                      {r.number ?? r.code ?? '—'}
-                    </td>
-                    <td className="max-w-[240px] truncate p-1.5 font-medium" title={r.name}>
-                      <StationLink station={r.locationId}>{r.name}</StationLink>
-                      {r.city && <span className="ml-1.5 text-xs text-muted-foreground">{r.city}</span>}
-                    </td>
-                    <td className="p-1.5 text-muted-foreground">{r.region ?? '—'}</td>
-                    {/* Причин может быть несколько: станция и молчит, и до этого
-                        отправляла людей ни с чем — в наряде это один выезд. */}
-                    <td className="p-1.5">
-                      <div className="flex flex-wrap gap-1">
-                        {r.reasons.map((p, i) => (
-                          <span key={`${p.kind}-${i}`}
-                            className={cn('rounded px-1.5 py-0.5 text-xs', ЦВЕТ_ПРИЧИНЫ[p.kind])}>
-                            {p.label}
-                            {p.note && <span className="ml-1 opacity-70">· {p.note}</span>}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    {/* Дата, а не «молчит N дн»: по ней инженер сверяется с клиентом
-                        и оператором. Ушедшие клиенты — в подсказке, сводной и выгрузке. */}
-                    <td className="p-1.5 text-right tabular-nums text-muted-foreground"
-                      title={r.clientsLost ? `ушло клиентов за квартал: ${r.clientsLost}` : undefined}>
-                      {r.lastSessionAt
-                        ? new Date(r.lastSessionAt).toLocaleDateString('ru-RU',
-                          { day: '2-digit', month: '2-digit', timeZone: 'Europe/Moscow' })
-                        : '—'}
-                    </td>
-                    {/* Загруженность площадки: при равных деньгах вперёд идёт
-                        та, где больше людей, а у профилактики это вообще
-                        единственный разумный порядок. */}
-                    <td className="p-1.5 text-right tabular-nums text-muted-foreground">
-                      {r.visitsPerDay ? r.visitsPerDay.toLocaleString('ru-RU') : '—'}
-                    </td>
-                    <td className="p-1.5 text-right font-medium tabular-nums">
-                      {r.lossPerMonth ? money(r.lossPerMonth) : '—'}
-                    </td>
-                    <td className="p-1.5 text-xs">
-                      {!d.workKnown ? <span>неизвестно</span> : r.openTickets ? (
-                        <a href={`/support/customer/tickets/${r.lastTicketId}`}
-                          className="text-primary hover:underline">
-                          {r.lastTicketNumber ?? `${r.openTickets} заявк.`}
-                          {r.breachedTickets > 0 && (
-                            <span className="ml-1 text-red-600 dark:text-red-400">срок сорван</span>
-                          )}
-                        </a>
-                      ) : (
-                        <span className="text-red-600 dark:text-red-400">не взята</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {!таблица.rows.length && (
-                  <tr>
-                    <td colSpan={9} className="p-6 text-center text-sm text-muted-foreground">
-                      {ПРОФИЛАКТИКА.includes(причина)
-                        ? 'Сроков по этому отбору нет — либо они не заполнены'
-                        : неВзятые
-                          ? 'Всё, что видно, уже взято в работу'
-                          : 'Работы по этому отбору нет'}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+            <SheetTable
+                {...набор.table}
+                caption={<>Работа на {наДень ? наДень.split('-').reverse().join('.') : 'сегодня'}</>}
+                lines={[`данные по ${данныеПо} МСК`, ...отбор]}
+                groupBy={СВОДНАЯ_ПО}
+                onGroup={(c) => { setПервыйУровень(c); setВид('pivot') }}
+                onRow={(order, pos) => setКарточка({ order, pos })}
+                onView={setПорядок}
+                render={ячейка}
+                rowClass={(i) => (workKnown && !строки[i]?.openTickets ? 'bg-red-500/5' : undefined)}
+                mark={отметка}
+                empty={пустоСписка}
+                // Выгрузка — видимые столбцы в порядке человека, строки в порядке
+                // таблицы с фильтрами: Excel получает то, что на экране.
+                tableAttrs={exportRows('На сегодня',
+                  видимые.map((c) => набор.sheet.head[c]),
+                  порядок.map((i) => видимые.map((c) => набор.sheet.rows[i]?.[c] ?? '')))}
+              />
           )}
         </CardContent>
       </Card>
 
-      <BulkTicketDialog open={пачка} onClose={() => { setПачка(false); setОтмечены(new Set()) }}
-        stations={таблица.rows.filter((r) => отмечены.has(r.locationId)).map((r) => ({
-          id: r.locationId, name: r.name, number: r.number ?? r.code,
-        }))} />
+      <ToolPanel>
+        <ReportTools
+          {...набор.tools}
+          searchHint="Номер, название, регион, причина или число"
+          formulaExample="Например, Цена на клиента"
+          help={<WorklistHelp />}
+          compare={<WorklistCompare companyId={companyId} region={регион} base={наДень || d.dataThrough?.slice(0, 10) || ''} now={d} />}
+        />
+      </ToolPanel>
+
+      <RowCard
+        report="На сегодня"
+        head={набор.sheet.head}
+        row={карточка ? набор.sheet.rows[карточка.order[карточка.pos]] ?? null : null}
+        title={строкаКарточки?.name}
+        at={карточка?.pos ?? 0}
+        of={карточка?.order.length ?? 0}
+        onStep={(dir) => setКарточка((k) => (k ? { ...k, pos: Math.min(Math.max(k.pos + dir, 0), k.order.length - 1) } : k))}
+        onClose={() => setКарточка(null)}
+        extra={строкаКарточки && (
+          <div className="flex flex-wrap items-center gap-2">
+            <StationLink station={строкаКарточки.locationId}
+              className="rounded-md border border-border px-2.5 py-1.5 text-sm no-underline">
+              Открыть станцию
+            </StationLink>
+            {строкаКарточки.lastTicketId && (
+              <a href={`/support/customer/tickets/${строкаКарточки.lastTicketId}`}
+                className="rounded-md border border-border px-2.5 py-1.5 text-sm text-primary hover:bg-accent">
+                Заявка {строкаКарточки.lastTicketNumber ?? ''}
+              </a>
+            )}
+            <Button size="sm" variant="outline" onClick={() => setПачка([{
+              id: строкаКарточки.locationId, name: строкаКарточки.name,
+              number: строкаКарточки.number ?? строкаКарточки.code,
+            }])}>
+              Завести заявку
+            </Button>
+          </div>
+        )}
+      />
+
+      <BulkTicketDialog open={!!пачка} onClose={() => { setПачка(null); setОтмечены(new Set()) }}
+        stations={пачка ?? []} />
     </div>
+  )
+}
+
+function WorklistHelp() {
+  const абзац = 'text-sm leading-relaxed text-di-on-surface-variant'
+  return (
+    <div className="space-y-3">
+      <p className={абзац}>
+        «На сегодня» — список станций, по которым есть работа: молчат, отказывают, сорван срок заявки, неисправен разъём,
+        кончаются поверка и ТО. Сверху — плитки-отборы, ниже — таблица. Порядок по умолчанию — по деньгам, которые станция
+        теряет за месяц, потом по ушедшим клиентам и загруженности площадки.
+      </p>
+      <p className={абзац}>
+        <b>Таблица.</b> Наведите на заголовок: стрелка сортирует, Σ считает сумму, среднее, минимум и максимум, ▾ открывает
+        меню — закрепить столбцы слева, скрыть, полоски величины и фильтр по значениям («не взята» в «В работе», нужный регион).
+        Заголовок можно перетащить, край — потянуть. Щелчок по строке открывает её карточку, ↑ ↓ и Enter работают с клавиатуры.
+      </p>
+      <p className={абзац}>
+        <b>Инструменты справа.</b> «Счёт» — калькулятор: пока он открыт, щелчок по ячейке добавляет число. «Формулы» — свой
+        столбец из других, например цена на одного ушедшего клиента. «Поиск» подсвечивает совпадения по всем страницам.
+        «Столбцы» включают скрытое: город, «молчит, дн», долю приездов впустую, число заявок. «Сравнить» показывает, что
+        изменилось со вчера или за неделю. «Цифры» — отложенные для сверки числа. «Обсудить» копирует описание экрана с отбором
+        и открывает чат.
+      </p>
+      <p className={абзац}>
+        Отметьте строки флажками — появится «Завести заявки». Значок у «Региона», «Главной причины» и «В работе» открывает
+        сводную сразу с этим уровнем.
+      </p>
+    </div>
+  )
+}
+
+const сдвигДня = (iso: string, дней: number) => {
+  const d = new Date(`${iso}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - дней)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * «Сравнить» для рабочего листа: тот же список на день раньше или неделю назад.
+ * Периода у экрана нет, поэтому сравниваются два среза — что появилось в работе
+ * и что из неё ушло. Регион отбора действует на оба среза, быстрые отборы и
+ * фильтры столбцов — нет: сравнивается весь список.
+ */
+function WorklistCompare({ companyId, region, base, now }: { companyId: string; region?: string; base: string; now: OpsWorklist }) {
+  const [дней, setДней] = useState<number | null>(null)
+  const день = base && дней ? сдвигДня(base, дней) : ''
+  const q = useQuery({
+    queryKey: ['ops-worklist', companyId, region ?? '', день],
+    queryFn: () => getOpsWorklist(companyId, { region, asOf: день }),
+    enabled: !!companyId && !!день,
+    staleTime: 60_000,
+  })
+  const было = q.data
+  const разница = useMemo(() => {
+    if (!было) return null
+    const прежние = new Map(было.rows.map((r) => [r.locationId, r]))
+    const теперь = new Set(now.rows.map((r) => r.locationId))
+    const новые = now.rows.filter((r) => !прежние.has(r.locationId)).sort((a, b) => b.lossPerMonth - a.lossPerMonth)
+    const ушли = было.rows.filter((r) => !теперь.has(r.locationId)).sort((a, b) => b.lossPerMonth - a.lossPerMonth)
+    return { новые, ушли }
+  }, [было, now])
+  const ряды: { label: string; cur: number | null; prev: number | null; деньги?: boolean }[] = было ? [
+    { label: 'Станций в списке', cur: now.totals.rows, prev: было.totals.rows },
+    { label: 'Никем не взято', cur: now.totals.notTaken, prev: было.totals.notTaken },
+    { label: 'Срок заявки сорван', cur: now.totals.breached, prev: было.totals.breached },
+    { label: 'Неисправен разъём', cur: now.totals.connector ?? 0, prev: было.totals.connector ?? 0 },
+    { label: 'Поверка и ТО', cur: now.totals.meter + now.totals.service, prev: было.totals.meter + было.totals.service },
+    { label: 'Цена бездействия, ₽/мес', cur: now.totals.lossPerMonth, prev: было.totals.lossPerMonth, деньги: true },
+  ] : []
+  const список = (title: string, rows: WorklistRow[]) => (
+    <div>
+      <h3 className="mb-1.5 text-sm font-semibold text-foreground">{title}: {nf.format(rows.length)}</h3>
+      {!rows.length ? <p className="text-xs text-muted-foreground">Нет.</p> : (
+        <ul className="flex flex-col divide-y divide-di-outline-variant/50">
+          {rows.slice(0, 8).map((r) => (
+            <li key={r.locationId} className="flex items-baseline justify-between gap-3 py-1.5 text-xs">
+              <span className="min-w-0 truncate">
+                <StationLink station={r.locationId}>{r.name}</StationLink>
+                <span className="ml-1 text-muted-foreground">{СЛОВО_ПРИЧИНЫ[r.reasons[0]?.kind ?? ''] ?? ''}</span>
+              </span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">{money(r.lossPerMonth)}</span>
+            </li>
+          ))}
+          {rows.length > 8 && <li className="py-1.5 text-xs text-muted-foreground">и ещё {nf.format(rows.length - 8)}</li>}
+        </ul>
+      )}
+    </div>
+  )
+  return (
+    <>
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        Тот же список на более ранний день: что прибавилось в работе и что из неё ушло. Регион отбора действует на оба среза,
+        быстрые отборы и фильтры столбцов — нет.
+      </p>
+      <div className="flex gap-2">
+        {[[1, 'С прошлым днём'], [7, 'С неделей назад']].map(([n, label]) => (
+          <Button key={n} size="sm" variant={дней === n ? 'default' : 'outline'} disabled={!base}
+            onClick={() => setДней(n as number)}>
+            {label}
+          </Button>
+        ))}
+      </div>
+      {q.isFetching && <div className="flex justify-center py-4"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>}
+      {q.isError && <p role="alert" className="text-sm font-medium text-red-700 dark:text-red-400">Список на {день} собрать не удалось.</p>}
+      {было && !q.isFetching && разница && (
+        <>
+          <p className="text-xs text-di-on-surface-variant">
+            Сейчас — {base.split('-').reverse().join('.')}, было — {день.split('-').reverse().join('.')}
+          </p>
+          <ul className="flex flex-col divide-y divide-di-outline-variant/50">
+            {ряды.map((r) => {
+              const дельта = r.cur != null && r.prev != null ? r.cur - r.prev : null
+              const показ = (v: number | null) => (v == null ? '—' : r.деньги ? money(v) : nf.format(v))
+              return (
+                <li key={r.label} className="py-2 first:pt-0">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm text-di-on-surface-variant">{r.label}</span>
+                    <span className={cn('whitespace-nowrap text-sm font-bold tabular-nums',
+                      дельта && дельта > 0 ? 'text-red-700 dark:text-red-400' : дельта && дельта < 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-foreground')}>
+                      {дельта == null ? '—' : `${дельта > 0 ? '+' : дельта < 0 ? '−' : ''}${показ(Math.abs(дельта))}`}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 flex items-baseline justify-between gap-3 text-xs text-muted-foreground">
+                    <span>сейчас <span className="font-semibold text-foreground">{показ(r.cur)}</span></span>
+                    <span>было {показ(r.prev)}</span>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+          {было.workKnown === false && (
+            <p className="text-xs text-muted-foreground">
+              На прошлый день история заявок не восстанавливается, поэтому «никем не взято» там неизвестно.
+            </p>
+          )}
+          {список('Появились в работе', разница.новые)}
+          {список('Ушли из работы', разница.ушли)}
+        </>
+      )}
+    </>
   )
 }
