@@ -178,9 +178,13 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
       ) : (
       <Header task={t} companyId={companyId} onBack={onBack} live={live} busy={act.isPending}
         onRename={(title) => act.mutate({ companyId, title })}
-        onStage={(code) => act.mutate({ companyId, stageCode: code, note: note || undefined })}
-        onDone={() => act.mutate({ companyId, status: 'done', note: note || undefined })}
-        onCancel={() => setCancelAsk(true)} />
+        // Закрытую работу этап возвращает в работу: одно действие, а не «сначала
+        // переоткрой, потом двигай» (просьба МАГа 15.10.2026).
+        onStage={(code) => act.mutate({
+          companyId, stageCode: code, status: live ? undefined : 'open', note: note || undefined,
+        })}
+        onDone={live ? () => act.mutate({ companyId, status: 'done', note: note || undefined }) : undefined}
+        onCancel={live ? () => setCancelAsk(true) : undefined} />
       )}
 
       <div className="flex min-h-0 flex-1">
@@ -193,15 +197,17 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           {t.route.map((s, i) => (
             <span key={s.code} className="flex items-center gap-1">
               {i > 0 && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />}
-              <button type="button" disabled={!live || act.isPending}
+              <button type="button" disabled={act.isPending}
+                title={live ? undefined : 'Вернуть в работу на этот этап'}
                 onClick={() => act.mutate({
-                  companyId, stageCode: s.code, note: note || undefined,
+                  companyId, stageCode: s.code, status: live ? undefined : 'open',
+                  note: note || undefined,
                 })}
                 className={cn('h-7 rounded-full px-3 text-xs transition-colors',
                   s.code === t.stage_code
                     ? 'bg-primary font-medium text-primary-foreground'
                     : 'bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground',
-                  !live && 'cursor-default opacity-60')}>
+                  !live && 'opacity-60 hover:opacity-100')}>
                 {s.name}
               </button>
             </span>
@@ -655,7 +661,7 @@ function Header({ task, companyId, onRename, onBack, live, busy, onStage, onDone
       <div className="flex items-center gap-2">
         {/* Та же строка представления, что у документа (этап 13е): человек,
             перешедший из ленты работы, читает одни и те же слова. */}
-        {live && onStage ? (
+        {onStage ? (
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span className="font-mono text-[13px] font-semibold text-foreground">
               {tasksService.taskKey(task)}
@@ -674,11 +680,13 @@ function Header({ task, companyId, onRename, onBack, live, busy, onStage, onDone
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-56">
-                <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">Перевести</DropdownMenuLabel>
+                <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">
+                  {live ? 'Перевести' : 'Вернуть в работу'}
+                </DropdownMenuLabel>
                 {task.route.map((st) => (
-                  <DropdownMenuItem key={st.code} disabled={st.code === task.stage_code}
+                  <DropdownMenuItem key={st.code} disabled={live && st.code === task.stage_code}
                     onSelect={() => onStage(st.code)}>
-                    {st.name}{st.code === task.stage_code ? ' · сейчас' : ''}
+                    {st.name}{st.code === task.stage_code ? (live ? ' · сейчас' : ' · был') : ''}
                   </DropdownMenuItem>
                 ))}
                 {onDone && (

@@ -445,6 +445,17 @@ async def test_закрытая_задача_по_маршруту_не_ходи
         "company_id": cid, "stage_code": "fix"})
     assert r.status_code == 409, "закрытая задача поехала по маршруту"
 
+    # Вернуть и поставить на этап — одним действием, как из карточки закрытой работы.
+    r = await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "status": "open", "stage_code": "fix"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "open" and r.json()["closed_at"] is None
+    assert r.json()["stage"] == "Устранение"
+    await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "stage_code": "diag"})
+    await auth_client.post(f"/api/tasks/{t['id']}/action", json={
+        "company_id": cid, "status": "done"})
+
     # Переоткрытие снимает отметку закрытия и возвращает движение.
     r = await auth_client.post(f"/api/tasks/{t['id']}/action", json={
         "company_id": cid, "status": "open", "note": "вернули"})
