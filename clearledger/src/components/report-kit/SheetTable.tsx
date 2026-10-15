@@ -578,6 +578,7 @@ export function SheetTable({
                     </th>
                   )
                 })}
+                <th aria-hidden className="sticky top-0 z-10 w-full border-b border-di-outline-variant bg-di-surface-low p-0" />
               </tr>
             </thead>
             <tbody
@@ -683,12 +684,13 @@ export function SheetTable({
                         </td>
                       )
                     })}
+                    <td aria-hidden className={cn('w-full border-b border-di-outline-variant/40 p-0', tint, active && '!bg-di-surface-high')} />
                   </tr>
                 )
               })}
               {!slice.length && (
                 <tr>
-                  <td colSpan={view.length + (mark ? 1 : 0)} className="p-6 text-center text-sm text-muted-foreground">
+                  <td colSpan={view.length + (mark ? 2 : 1)} className="p-6 text-center text-sm text-muted-foreground">
                     {nFilters > 0 && rows.length ? (
                       <>
                         Фильтры столбцов не оставили ни одной строки.{' '}
@@ -731,6 +733,7 @@ export function SheetTable({
                       </td>
                     )
                   })}
+                  <td aria-hidden className="sticky bottom-0 z-10 w-full border-t border-di-outline-variant bg-di-surface-low p-0" />
                 </tr>
               </tfoot>
             )}

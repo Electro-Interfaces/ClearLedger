@@ -410,7 +410,7 @@ export function ReportTools({
   searchHint: string
   formulaExample: string
   compare: ReactNode
-  help: ReactNode
+  help?: ReactNode
 }) {
   const order = cols.order.length === head.length ? cols.order : head.map((_, i) => i)
   const move = (pos: number, to: number) => {

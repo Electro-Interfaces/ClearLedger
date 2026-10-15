@@ -18,6 +18,7 @@ import { getInfoContext, getInfoArticle } from '@/services/infoService'
 import { appCodeForPath, productForPath, productLabel } from '@/config/spaceProducts'
 import { useCompany } from '@/contexts/CompanyContext'
 import { Markdown } from './Markdown'
+import { useRail } from '@/components/report-kit'
 
 export function InfoContextPanel({ companyId, onClose, embedded = false }: {
   companyId: string; onClose: () => void; embedded?: boolean
@@ -27,6 +28,16 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
   const navigate = useNavigate()
   const { company } = useCompany()
   const [openId, setOpenId] = useState<string | null>(null)
+  // Помощь самого экрана (как читать таблицу, что умеют инструменты) — здесь же,
+  // а не отдельной кнопкой рядом с «Инфо»: вопрос «как тут работать» один
+  // (решение МАГа 15.10.2026).
+  const screen = useRail()
+  const screenHelp = screen.available && screen.help ? (
+    <details open className="mb-3 rounded-md border border-primary/30 bg-primary/5 p-2.5">
+      <summary className="cursor-pointer text-xs font-semibold">Этот экран · {screen.title}</summary>
+      <div className="pt-2">{screen.help}</div>
+    </details>
+  ) : null
 
   // Контекст = приложение по маршруту + раздел рабочей области из `?sub=`.
   // Приложение — не только продукт разреза: «Управление» и «Данные» тоже реестровые,
@@ -106,7 +117,15 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
               </>
             )
         ) : ctx.isLoading ? (
-          <div className="flex justify-center py-8"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+          <>{screenHelp}<div className="flex justify-center py-8"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div></>
+        ) : ctx.data?.empty && screenHelp ? (
+          <>
+            {screenHelp}
+            <button type="button" onClick={() => { onClose(); navigate('/info') }}
+              className="w-full px-2 py-1 text-left text-[11px] text-muted-foreground hover:text-foreground">
+              Всё знание пространства →
+            </button>
+          </>
         ) : ctx.data?.empty ? (
           <div className="space-y-2 text-xs text-muted-foreground">
             <p>Для этой рабочей области пояснений пока нет.</p>
@@ -122,6 +141,7 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
           </div>
         ) : (
           <div className="space-y-1.5">
+            {screenHelp}
             {(ctx.data?.items ?? []).map((a) => (
               <button key={a.id} type="button" onClick={() => setOpenId(a.id)}
                 className="w-full rounded-md border border-border px-2 py-1.5 text-left hover:border-primary/50">

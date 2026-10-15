@@ -27,6 +27,8 @@ export type InteractionSection =
   | 'chat' | 'tasks' | 'calendar' | 'notes' | 'tickets' | 'help' | 'auditor'
   // Контекстные инструменты экрана: есть в рельсе, только пока открыт их раздел.
   | 'now' | 'step'
+  // Инструменты таблицы экрана (report-kit): панель открывается в той же области.
+  | 'report'
 export type InteractionMode = 'modal' | 'dock'
 
 interface InteractionState {

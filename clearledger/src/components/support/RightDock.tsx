@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
 import {
-  Bot, CalendarDays, CalendarPlus, Compass, HelpCircle, LifeBuoy, ListChecks, Maximize2, MessageCircle, NotebookPen, Video, X,
+  Bot, CalendarDays, CalendarPlus, Compass, HelpCircle, LifeBuoy, ListChecks, Maximize2, MessageCircle, NotebookPen, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -34,9 +34,8 @@ import { InfoContextPanel } from '@/components/info/InfoContextPanel'
 import { AuditorPanel } from '@/components/auditor/AuditorPanel'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useDocsApp } from '@/hooks/useDocsApp'
-import { startMeeting } from '@/services/conferenceService'
 import { ProjectNowPanel, ProjectStepPanel, useProjectRailContext } from '@/components/sites/ProjectRailPanels'
-import { ToolButtons, closePanel, useRail } from '@/components/report-kit'
+import { ReportSlot, ToolButtons, closePanel, setRail, useRail, type Panel } from '@/components/report-kit'
 
 type Tab = {
   key: InteractionSection; label: string; icon: typeof MessageCircle
@@ -48,6 +47,9 @@ type Tab = {
 const TABS: Tab[] = [
   // Календарь и записная книжка — то, во что заглядывают поверх работы, а не то,
   // ради чего уходят с экрана: «свободен ли четверг» и «записать, пока помню».
+  // «Поддержка» — наверху и акцентом вместо «Встречи» (решение МАГа 15.10.2026):
+  // встречу заводят кнопкой «Конференция» в шапке, а обращение — отсюда.
+  { key: 'tickets', label: 'Поддержка', icon: LifeBuoy, primary: true },
   { key: 'calendar', label: 'Календарь', icon: CalendarDays, primary: true },
   { key: 'notes', label: 'Записи', icon: NotebookPen, primary: true },
   { key: 'chat', label: 'Чат', icon: MessageCircle },
@@ -55,7 +57,6 @@ const TABS: Tab[] = [
   // «Аудитор» стоит рядом с «Инфо» осознанно: и то, и другое отвечает на вопрос
   // «что здесь происходит», только справка знает продукт, а аудитор — данные.
   { key: 'auditor', label: 'Аудитор', icon: Bot },
-  { key: 'tickets', label: 'Поддержка', icon: LifeBuoy },
   { key: 'help', label: 'Инфо', icon: HelpCircle },
 ]
 
@@ -126,27 +127,6 @@ export function RightDock() {
   // «Аудитор» — по включённости продукта: пространство без него не должно показывать
   // вкладку, которая ответит «сервис не настроен».
   const tasksOn = useDocsApp()
-  const [confBusy, setConfBusy] = useState(false)
-
-  /** Создать встречу и отдать гостевую ссылку. Тот же вызов, что у кнопки шапки:
-   *  второй способ завести конференцию разошёлся бы с первым. */
-  async function startConference() {
-    if (confBusy) return
-    setConfBusy(true)
-    try {
-      const m = await startMeeting()
-      try { await navigator.clipboard.writeText(m.guest_url) } catch { /* буфер недоступен */ }
-      toast.success('Конференция создана — гостевая ссылка скопирована',
-                    { description: m.guest_url })
-    } catch (e) {
-      const msg = (e as Error).message || ''
-      toast.error(/503|не настроен/i.test(msg)
-        ? 'Видеоконференции не настроены'
-        : 'Не удалось создать конференцию')
-    } finally {
-      setConfBusy(false)
-    }
-  }
   const { canApp, appName } = useCompany()
   const projectCtx = useProjectRailContext()
   const reportRail = useRail()
@@ -158,6 +138,25 @@ export function RightDock() {
     .map((t) => (t.key === 'auditor' ? { ...t, label: appName('auditor', t.label) } : t))
 
   const dockOpen = !!section && mode === 'dock'
+
+  // Инструмент таблицы живёт, пока открыта его область: закрыли док или открыли
+  // в нём другое — панель инструмента гаснет вместе с подсветкой кнопки.
+  useEffect(() => {
+    if (isMobile) return
+    if (reportRail.panel && !(dockOpen && section === 'report')) closePanel()
+    if (!reportRail.panel && dockOpen && section === 'report') closeInteraction()
+  }, [isMobile, reportRail.panel, dockOpen, section, closeInteraction])
+
+  /** Инструмент таблицы — в ту же область слева от рельсы, что чат и «Инфо». */
+  const openTool = useCallback((p: Panel) => {
+    if (reportRail.panel === p && dockOpen && section === 'report') {
+      closeInteraction()
+      return
+    }
+    setRail({ panel: p })
+    openInteraction('report')
+    setWidth((w) => (w < 380 ? 380 : w))
+  }, [reportRail.panel, dockOpen, section, openInteraction, closeInteraction])
 
   /** «Обсудить»: описание экрана с отбором — в буфер, чат — справа. Беседу
    *  человек выбирает сам: адресата у таблицы нет. */
@@ -235,41 +234,30 @@ export function RightDock() {
   }
 
   // ── Десктоп: док (если открыт) + рейл, который виден ВСЕГДА ──
-  // Рейл не исчезает при открытом доке: в нём живёт экосистемная зона (стол,
-  // приложения, Центр управления), а она должна быть на месте в любом состоянии.
-  // Прикладные вкладки при открытом доке уезжают в его шапку — чтобы не двоились.
+  // Рельса не уходит и не сворачивается, когда открыта область (решение МАГа
+  // 15.10.2026): нажатое открывается левее, а кнопки остаются на своих местах —
+  // соседнюю область открывают одним нажатием, не закрывая текущую.
   return (
     <>
       {dockOpen && (
         <div className="relative flex h-full shrink-0 flex-col border-l border-border/50 bg-card" style={{ width }}>
           <div onMouseDown={onDragStart}
             className="absolute left-0 top-0 z-10 h-full w-1 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40" />
-          <DockHead tabs={tabs} section={section} badgeOf={badgeOf}
-            onTab={openFromRail} onPop={() => setInteractionMode('modal')} onClose={closeInteraction} />
+          {/* У инструмента таблицы своя шапка с названием и крестиком. */}
+          {section !== 'report' && (
+            <DockHead tabs={tabs.filter((t) => t.key === section)} section={section} badgeOf={badgeOf}
+              onTab={openFromRail} onPop={() => setInteractionMode('modal')} onClose={closeInteraction} />
+          )}
           <DockBody section={section} />
         </div>
       )}
 
-      {/* Колонка видна всегда, но занимает место только когда в ней есть кнопки:
-          при открытом доке они уезжают в его шапку, и во всю ширину висела бы
-          пустая полоса. */}
-      <div data-zone="Взаимодействие: встреча, календарь, записи, чат, заявки, инфо"
+      {/* Кнопок больше, чем помещается по высоте на ноутбуке: колонка листается. */}
+      <div data-zone="Взаимодействие: поддержка, календарь, записи, чат, Трек, инфо"
         data-zone-side
-        className={cn('flex h-full shrink-0 flex-col items-center border-l border-border/50 bg-card transition-[width] duration-200',
-          dockOpen ? 'w-3' : 'w-[72px] gap-1 py-3')}>
-        {!dockOpen && (
+        className="flex h-full w-[72px] shrink-0 flex-col items-center gap-1 overflow-y-auto border-l border-border/50 bg-card py-3 scrollbar-hide">
+        {(
           <>
-            {/* Конференция — не область, а действие: она создаёт встречу и отдаёт
-                гостевую ссылку. Место наверху, потому что её именно начинают. */}
-            {canApp('conf') && (
-              <button onClick={startConference} disabled={confBusy}
-                title="Видеоконференция — создать и скопировать ссылку"
-                onDragOver={(e) => { e.dataTransfer.dropEffect = 'none' }}
-                className={cn(RAIL_PRIMARY, confBusy && 'opacity-60')}>
-                <Video className="pointer-events-none size-5" />
-                <span className="pointer-events-none">Встреча</span>
-              </button>
-            )}
             {tabs.filter((t) => t.primary).map((t) => (
               <RailButton key={t.key} tab={t} active={section === t.key} badge={badgeOf(t.key)}
                 primary onClick={() => openFromRail(t.key)} />
@@ -294,11 +282,10 @@ export function RightDock() {
                   onClick={() => openFromRail(t.key)} />
               ))}
             </>}
-            {/* Инструменты таблицы открытого экрана (report-kit): панель плавает
-                поверх экрана и таблицу не сжимает. */}
+            {/* Инструменты таблицы открытого экрана (report-kit). */}
             {reportRail.available && <>
               <div className="my-2 h-px w-8 bg-primary/40" role="separator" />
-              <ToolButtons onDiscuss={discuss} />
+              <ToolButtons onDiscuss={discuss} onOpen={openTool} />
             </>}
           </>
         )}
@@ -475,6 +462,7 @@ function DockBody({ section }: { section: InteractionSection }) {
       {section === 'help' && <InfoDockPanel />}
       {section === 'now' && <ProjectNowPanel />}
       {section === 'step' && <ProjectStepPanel />}
+      {section === 'report' && <ReportSlot />}
     </div>
   )
 }

@@ -1,10 +1,19 @@
-import { useSyncExternalStore } from 'react'
+import { useSyncExternalStore, type ReactNode } from 'react'
 
 export type Tool = 'calc' | 'formula' | 'search' | 'columns' | 'compare' | 'pins'
 export type Panel = 'help' | Tool
-export type RailState = { available: boolean; title: string; panel: Panel | null; tools: boolean; pivot: boolean; share: string }
+export type RailState = {
+  available: boolean
+  title: string
+  panel: Panel | null
+  tools: boolean
+  pivot: boolean
+  share: string
+  help: ReactNode
+  slot: HTMLElement | null
+}
 
-let state: RailState = { available: false, title: '', panel: null, tools: false, pivot: false, share: '' }
+let state: RailState = { available: false, title: '', panel: null, tools: false, pivot: false, share: '', help: null, slot: null }
 const subs = new Set<() => void>()
 
 export function setRail(patch: Partial<RailState>) {

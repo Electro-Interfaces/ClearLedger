@@ -1,14 +1,16 @@
 import {
-  ArrowLeftRight, Calculator, CircleHelp, ClipboardList, Columns3, MessageSquareShare, SquareFunction, TextSearch, type LucideIcon,
+  ArrowLeftRight, Calculator, ClipboardList, Columns3, MessageSquareShare, SquareFunction, TextSearch, type LucideIcon,
 } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { useMaxWidth } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
-import { closePanel, getRail, togglePanel, useRail, type Panel } from './rail'
+import { closePanel, getRail, setRail, togglePanel, useRail, type Panel } from './rail'
 
 type Item = { key: Panel; short: string; label: string; icon: LucideIcon; table?: boolean }
 
 const TOOLS: Item[] = [
-  { key: 'calc', short: 'Счёт', label: 'Калькулятор и сумма по выделению', icon: Calculator, table: true },
+  { key: 'calc', short: 'Калькулятор', label: 'Калькулятор и сумма по выделению', icon: Calculator, table: true },
   { key: 'formula', short: 'Формулы', label: 'Свои столбцы: формулы из других столбцов', icon: SquareFunction, table: true },
   { key: 'search', short: 'Поиск', label: 'Поиск по таблице', icon: TextSearch, table: true },
   { key: 'columns', short: 'Столбцы', label: 'Столбцы: показать, скрыть, порядок', icon: Columns3, table: true },
@@ -29,7 +31,7 @@ function ToolButton({ icon: Icon, short, label, on, off, onClick, strip }: {
       title={off ?? label}
       className={cn(
         'relative flex shrink-0 flex-col items-center justify-center gap-1 rounded-lg px-1 py-1.5 text-center text-xs leading-tight transition-colors disabled:cursor-not-allowed disabled:opacity-35',
-        strip ? 'min-h-[52px] min-w-14' : 'min-h-[52px] w-16',
+        strip ? 'min-h-[52px] min-w-14' : 'min-h-[52px] w-[70px] tracking-tight',
         on ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-foreground',
       )}
     >
@@ -41,26 +43,21 @@ function ToolButton({ icon: Icon, short, label, on, off, onClick, strip }: {
   )
 }
 
-export function ToolButtons({ strip, onDiscuss }: { strip?: boolean; onDiscuss?: (text: string) => void }) {
+export function ToolButtons({ strip, onDiscuss, onOpen }: {
+  strip?: boolean
+  onDiscuss?: (text: string) => void
+  onOpen?: (p: Panel) => void
+}) {
   const rail = useRail()
   if (!rail.available) return null
   const open = (p: Panel) => {
+    if (onOpen) return onOpen(p)
     togglePanel(p)
     if (strip) requestAnimationFrame(() => document.getElementById('report-kit-panel')?.scrollIntoView({ block: 'start', behavior: 'smooth' }))
   }
   const why = !rail.tools ? 'Инструменты включатся, когда таблица соберётся' : undefined
-  const rule = strip ? <span className="mx-1 w-px self-stretch bg-border" aria-hidden /> : <span className="my-1 h-px w-8 bg-border" aria-hidden />
   return (
     <>
-      <ToolButton
-        icon={CircleHelp}
-        short="Помощь"
-        label={`Помощь по экрану: ${rail.title}`}
-        on={rail.panel === 'help'}
-        onClick={() => open('help')}
-        strip={strip}
-      />
-      {rule}
       {TOOLS.map((x) => (
         <ToolButton
           key={x.key}
@@ -98,23 +95,23 @@ export function ToolStrip({ onDiscuss }: { onDiscuss?: (text: string) => void })
   )
 }
 
+export function ReportSlot() {
+  return <div ref={(el) => setRail({ slot: el })} className="h-full overflow-y-auto" />
+}
+
 export function ToolPanel({ children }: { children: ReactNode }) {
-  const { panel } = useRail()
+  const { panel, slot } = useRail()
+  const narrow = useMaxWidth(1024)
   useEffect(() => {
-    if (!panel) return
+    if (!panel || !narrow) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closePanel()
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [panel])
+  }, [panel, narrow])
   if (!panel) return null
+  if (!narrow) return slot ? createPortal(children, slot) : null
   return (
-    <div
-      id="report-kit-panel"
-      className={cn(
-        'scroll-mt-4 rounded-xl border border-di-outline-variant/70 bg-di-surface-mid',
-        'lg:fixed lg:right-[84px] lg:top-[calc(var(--header-height)+12px)] lg:z-40 lg:max-h-[calc(100dvh-var(--header-height)-24px)] lg:w-[360px] lg:overflow-y-auto lg:shadow-xl',
-      )}
-    >
+    <div id="report-kit-panel" className="scroll-mt-4 rounded-xl border border-di-outline-variant/70 bg-di-surface-mid">
       {children}
     </div>
   )
