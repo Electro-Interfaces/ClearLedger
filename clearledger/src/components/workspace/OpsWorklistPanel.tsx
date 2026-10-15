@@ -99,9 +99,13 @@ const ПРОФИЛАКТИКА = ['meter', 'service', 'check']
 const ВИД = 'ops-today.v1'
 const КЛЮЧ_ФИЛЬТРОВ = 'report-kit.v1:filters-open:ops-today'
 
-function Поле({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * Поле фильтра — своей ширины, а не доли сетки: в сетке на шесть колонок
+ * селекты шириной по тексту разъезжались по всему экрану (МАГ, 15.10.2026).
+ */
+function Поле({ label, w, children }: { label: string; w: string; children: React.ReactNode }) {
   return (
-    <div className="flex min-w-0 flex-col gap-1">
+    <div className={cn('flex min-w-0 flex-col gap-1', w)}>
       <span className="text-xs font-medium text-muted-foreground">{label}</span>
       {children}
     </div>
@@ -380,23 +384,19 @@ export function OpsWorklistPanel() {
 
   return (
     <div ref={экран} className="space-y-3 p-3">
-      <OpsSnapshotNotice data={d} />
+      {/* Срез данных — только когда он отстал: дата среза и так в подписи
+          таблицы, а постоянная плашка над плитками — шум (МАГ, 15.10.2026). */}
+      {(!d.dataThrough || (d.dataLagHours ?? 0) >= 24) && <OpsSnapshotNotice data={d} />}
       {/* Если выгрузка молчит — сказать это первым, до всяких чисел: список
           работы построен на последнем загруженном дне. */}
       {/* Только «выгрузка не приходила»: платежи без сессии и пропавшие графы —
           вопрос к данным и экономисту, инженер их не исправит (МАГ, 30.09.2026). */}
       <IntakeHealthBar compact />
 
-      <Card>
-        <CardContent className="space-y-3 p-3">
-          <div>
-            <div className="text-sm font-semibold">На сегодня</div>
-            <div className="text-xs text-muted-foreground">
-              данные по {данныеПо} · МСК{наДень && ` · на день ${наДень.split('-').reverse().join('.')}`}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      {/* Только плитки — они же переключатели списка. Заголовок, «Как собран
+          список» и пропуски сроков сняты по замечанию МАГа 15.10.2026: дата
+          среза есть в подписи таблицы, пояснение — в «Инфо». */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
             {/* Плитки — это и есть фильтры списка: нажатие показывает ровно те
                 строки, про которые число. */}
             <Плитка icon={ClipboardCheck} label="Станций в списке" value={nf.format(t.rows)}
@@ -447,41 +447,24 @@ export function OpsWorklistPanel() {
             )}
           </div>
 
-          <details className="text-xs text-muted-foreground">
-            <summary className="cursor-pointer">Как собран список</summary>
-            <p className="pt-1">{d.note}</p>
-          </details>
-          {d.dataGaps.length > 0 && <details className="text-xs">
-            <summary className="cursor-pointer text-muted-foreground">Сроки поверки и ТО не заполнены у {nf.format(d.dataGaps.length)} станций — заполнить</summary>
-            <p className="text-xs text-muted-foreground py-2">Откройте карточку станции → Сервис → Осмотр. В блоке «Метрология и обслуживание» нажмите «Править» и заполните сроки. Впереди — площадки с большим числом попыток зарядки.</p>
-            <div className="max-h-72 overflow-auto space-y-2">
-              {d.dataGaps.map((r) => <div key={r.locationId} className="text-xs flex flex-wrap gap-2">
-                <StationLink station={r.locationId}>№{r.number ?? r.code} · {r.name}</StationLink>
-                <span>{r.region ?? 'регион не указан'} · без поверки: {r.meterUnknown}, без ТО: {r.serviceUnknown}</span>
-              </div>)}
-            </div>
-          </details>}
-        </CardContent>
-      </Card>
-
       <Card>
         <CardContent className="space-y-3 p-3">
           {/* Фильтры сворачиваются, как в отчётах КП СДО: развёрнуты — подписанные
               поля, свёрнуты — одна строка с тем, что сейчас отобрано. */}
           {фильтрыОткрыты && (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-              <Поле label="В работе">
+            <div className="flex flex-wrap items-end gap-3">
+              <Поле label="В работе" w="w-44">
                 <Select value={неВзятые ? 'free' : 'all'} onValueChange={(v) => setНеВзятые(v === 'free')}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="free">Никем не взято</SelectItem>
                     <SelectItem value="all">Все станции</SelectItem>
                   </SelectContent>
                 </Select>
               </Поле>
-              <Поле label="Причина">
+              <Поле label="Причина" w="w-52">
                 <Select value={причина} onValueChange={setПричина}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Любая причина</SelectItem>
                     <SelectItem value="silent">Молчит</SelectItem>
@@ -494,9 +477,9 @@ export function OpsWorklistPanel() {
                   </SelectContent>
                 </Select>
               </Поле>
-              <Поле label="Регион">
+              <Поле label="Регион" w="w-52">
                 <Select value={регионОтбора} onValueChange={setРегионОтбора}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Все регионы</SelectItem>
                     {регионыСписком.map((р) => (
@@ -505,11 +488,11 @@ export function OpsWorklistPanel() {
                   </SelectContent>
                 </Select>
               </Поле>
-              <Поле label="Поиск">
+              <Поле label="Поиск" w="w-64">
                 <Input value={поиск} onChange={(e) => setПоиск(e.target.value)}
                   placeholder="Номер, название, город…" className="h-9 text-sm" />
               </Поле>
-              <Поле label="На день">
+              <Поле label="На день" w="w-56">
                 <div className="flex gap-1">
                   <Input type="date" value={наДень}
                     max={d.dataThrough?.slice(0, 10)}
@@ -523,7 +506,7 @@ export function OpsWorklistPanel() {
                   )}
                 </div>
               </Поле>
-              <Поле label="Строк на странице">
+              <Поле label="Строк на странице" w="w-32">
                 <PageSizeField bare />
               </Поле>
             </div>
@@ -675,8 +658,13 @@ function WorklistHelp() {
         <b>Инструменты справа.</b> «Калькулятор»: пока он открыт, щелчок по ячейке добавляет число. «Формулы» — свой
         столбец из других, например цена на одного ушедшего клиента. «Поиск» подсвечивает совпадения по всем страницам.
         «Столбцы» включают скрытое: город, «молчит, дн», долю приездов впустую, число заявок. «Сравнить» показывает, что
-        изменилось со вчера или за неделю. «Цифры» — отложенные для сверки числа. «Обсудить» копирует описание экрана с отбором
-        и открывает чат.
+        изменилось со вчера или за неделю. «Цифры» — отложенные для сверки числа.
+      </p>
+      <p className={абзац}>
+        <b>Данные.</b> Сессии — на выбранный день (МСК), статусы станций и разъёмов — по выгрузке витрины АСУиМ, она
+        приходит раз в сутки; дата среза — в подписи таблицы. Плашка над плитками появляется, только если выгрузка отстала
+        больше чем на сутки. Сроки поверки и ТО заполняются в карточке станции → Сервис → Осмотр, блок «Метрология и
+        обслуживание».
       </p>
       <p className={абзац}>
         Отметьте строки флажками — появится «Завести заявки». Значок у «Региона», «Главной причины» и «В работе» открывает
