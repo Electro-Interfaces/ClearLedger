@@ -62,13 +62,17 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
   async function startConference() {
     if (confBusy) return
     setConfBusy(true)
+    // Вкладку — синхронно по клику, до запросов: открытая после `await` браузер
+    // молча блокирует как попап, и кнопка выглядела нерабочей (15.10.2026).
+    const вкладка = window.open('about:blank', '_blank')
     try {
       const m = await createMeeting(companyId, { title: '', notify: false })
-      await joinMeeting(companyId, m.id)
+      await joinMeeting(companyId, m.id, вкладка)
       try { await navigator.clipboard.writeText(m.guest_url || '') } catch { /* буфер недоступен */ }
       toast.success('Конференция создана — ссылка для участников скопирована',
         { description: m.guest_url || undefined })
     } catch (e) {
+      вкладка?.close()
       const msg = (e as Error).message || ''
       toast.error(/503|не настроен/i.test(msg) ? 'Видеоконференции не настроены' : 'Не удалось создать конференцию')
     } finally {
