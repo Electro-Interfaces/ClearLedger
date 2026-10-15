@@ -1,4 +1,4 @@
-export const REPORT_KIT_VERSION = '1.1.0'
+export const REPORT_KIT_VERSION = '1.2.0'
 
 export { SheetTable, keepRow, footer, compareCells, type Cols, type Filters, type Filt, type Picked, type Mark } from './SheetTable'
 export { ReportTools } from './ReportTools'
