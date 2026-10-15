@@ -53,22 +53,30 @@ type Узел = {
 export function разрезыИМеры(fields: string[], columns: string[], rows: Строка[]) {
   const разрезы: { поле: string; имя: string }[] = []
   const меры: { поле: string; имя: string }[] = []
+  // Почему колонка не стала разрезом — показывается под чипами. Без этого
+  // человек видит три разреза при двадцати столбцах и не понимает, куда
+  // делись остальные (МАГ, 15.10.2026).
+  const мимо: { имя: string; почему: string }[] = []
   fields.forEach((поле, i) => {
     const имя = columns[i] ?? поле
-    const значения = rows.map((r) => r[поле])
-    const числовых = значения.filter((v) => typeof v === 'number').length
-    if (числовых > rows.length / 2) {
+    const непустые = rows.map((r) => r[поле]).filter((v) => v !== null && v !== undefined && v !== '')
+    // Мера — по непустым: «Молчит, дн» заполнено только у молчащих станций, и
+    // доля чисел от всех строк выкидывала колонку из мер.
+    const числовых = непустые.filter((v) => typeof v === 'number').length
+    if (числовых > 0 && числовых > непустые.length / 2) {
       меры.push({ поле, имя })
       return
     }
-    const непустые = значения.filter((v) => v !== null && v !== undefined && v !== '')
-    if (непустые.length === 0) return
+    if (непустые.length === 0) { мимо.push({ имя, почему: 'пусто' }); return }
     const уникальных = new Set(непустые.map(String)).size
-    if (уникальных < 2 || уникальных >= непустые.length) return
-    if (уникальных > 12 && уникальных > непустые.length * 0.6) return
+    if (уникальных < 2) { мимо.push({ имя, почему: `у всех «${String(непустые[0])}»` }); return }
+    if (уникальных >= непустые.length) { мимо.push({ имя, почему: 'у каждой строки своё' }); return }
+    if (уникальных > 12 && уникальных > непустые.length * 0.6) {
+      мимо.push({ имя, почему: `${уникальных} разных значений` }); return
+    }
     разрезы.push({ поле, имя })
   })
-  return { разрезы, меры }
+  return { разрезы, меры, мимо }
 }
 
 function собрать(rows: Строка[], уровни: string[], меры: string[]): {
@@ -134,7 +142,7 @@ export function ReportPivot({ fields, columns, rows }: {
   columns: string[]
   rows: Строка[]
 }) {
-  const { разрезы, меры } = useMemo(
+  const { разрезы, меры, мимо } = useMemo(
     () => разрезыИМеры(fields, columns, rows), [fields, columns, rows])
   // Первый разрез включён сразу: пустая сводная выглядит поломкой, а не
   // приглашением выбрать уровень.
@@ -238,6 +246,11 @@ export function ReportPivot({ fields, columns, rows }: {
             </span>
           )}
         </div>
+        {мимо.length > 0 && (
+          <div className="mt-2 text-[11px] text-muted-foreground">
+            Не разрезы: {мимо.map((м) => `«${м.имя}» — ${м.почему}`).join('; ')}.
+          </div>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-border/50">
