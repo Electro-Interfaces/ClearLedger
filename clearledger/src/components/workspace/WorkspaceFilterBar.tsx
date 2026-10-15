@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ru } from 'date-fns/locale'
 import { useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import {
   CalendarDays, ChevronDown, Database, RefreshCw, RotateCcw,
   SlidersHorizontal, type LucideIcon,
@@ -361,6 +362,7 @@ export function WorkspaceFilterBar() {
   // который на цифры экрана не влияет (замечание МАГа 25.08.2026). Период и
   // область учёта, наоборот, работают в «Магазине» так же, как в «Топливе».
   const { coreMode } = useWorkspace()
+  const [searchParams] = useSearchParams()
   const топливныйКонтур = isFuel && !STORE_MODES.includes(coreMode)
   const stations = getStsStationsFromLocations()
   const queryClient = useQueryClient()
@@ -423,8 +425,11 @@ export function WorkspaceFilterBar() {
             экране; общий период ни один его экран не читает, и кнопка спорила
             с датой экрана, ничего не меняя (14.10.2026). У fuel в этом режиме
             «Договоры и аренда» — там период остаётся. */}
+        {/* 15.10.2026: «На сегодня» берёт день среза из конца периода — там
+            период снова нужен (МАГ: «выбор периода есть на всех экранах»). */}
         {coreMode !== 'projects'
-          && !(coreMode === 'operations' && company.profileId === 'energy')
+          && !(coreMode === 'operations' && company.profileId === 'energy'
+            && (searchParams.get('sub') ?? 'ops_worklist') !== 'ops_worklist')
           && <PeriodControl />}
         {isOffice ? null : (
           <WorkspaceScopeControl onAdvanced={() => { setSection('scope'); setOpen(true) }} />

@@ -22,10 +22,18 @@ function useFloating(anchor: HTMLElement, width: number, onClose: () => void) {
   useLayoutEffect(() => {
     close.current = onClose
   })
+  // Окно — сбоку от столбца, а не под стрелкой: снизу оно обрезалось и
+  // закрывало сам столбец, по которому сортируют и фильтруют (МАГ, 15.10.2026).
+  // Справа, если помещается, иначе слева; по высоте — от шапки до низа окна.
   useLayoutEffect(() => {
-    const r = anchor.getBoundingClientRect()
-    const top = r.bottom + 6
-    setPos({ top, left: Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8), max: window.innerHeight - top - 12 })
+    const r = (anchor.closest('th') ?? anchor).getBoundingClientRect()
+    const справа = r.right + 6
+    const слева = r.left - 6 - width
+    const left = справа + width <= window.innerWidth - 8 ? справа
+      : слева >= 8 ? слева
+        : Math.min(Math.max(8, r.right - width), window.innerWidth - width - 8)
+    const top = Math.max(8, Math.min(r.top, window.innerHeight - 320))
+    setPos({ top, left, max: window.innerHeight - top - 8 })
   }, [anchor, width])
   useEffect(() => {
     box.current?.querySelector<HTMLElement>('button, input')?.focus()
@@ -289,7 +297,7 @@ export function ColumnMenu({
                   Снять все
                 </button>
               </div>
-              <ul className="max-h-56 overflow-y-auto">
+              <ul className="max-h-[60vh] overflow-y-auto">
                 {shown.map((v) => (
                   <li key={v.value}>
                     <label className="flex min-h-9 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 text-sm hover:bg-di-surface-high">

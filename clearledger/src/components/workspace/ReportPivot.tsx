@@ -162,6 +162,35 @@ export function ReportPivot({ fields, columns, rows }: {
     () => собрать(rows, уровни, ключМер ? ключМер.split(',') : []),
     [rows, уровни, ключМер])
 
+  // Свёрнутые группы. Помнятся, пока не поменялся набор уровней: при другой
+  // группировке пути другие, и старые свёртки ничего не значат.
+  const ключУровней = уровни.join('|')
+  const [свёртка, setСвёртка] = useState<{ к: string; пути: Set<string> }>({ к: '', пути: new Set() })
+  const свёрнуты = свёртка.к === ключУровней ? свёртка.пути : new Set<string>()
+  const свернуть = (пути: Set<string>) => setСвёртка({ к: ключУровней, пути })
+  const родители = узлы.filter((у) => у.естьДети)
+  // «До уровня N»: открыты группы выше N-го уровня, остальные свёрнуты.
+  const доУровня = (n: number) => свернуть(new Set(родители.filter((у) => у.уровень >= n - 1).map((у) => у.путь)))
+  const глубина = (() => {
+    for (let n = 1; n <= уровни.length; n++) {
+      const надо = родители.filter((у) => у.уровень >= n - 1)
+      if (надо.length === свёрнуты.size && надо.every((у) => свёрнуты.has(у.путь))) return n
+    }
+    return 0
+  })()
+  const видимые: Узел[] = []
+  let скрытоПод: string | null = null
+  for (const у of узлы) {
+    if (скрытоПод !== null && у.путь.startsWith(скрытоПод + '/')) continue
+    скрытоПод = свёрнуты.has(у.путь) ? у.путь : null
+    видимые.push(у)
+  }
+  const переключить = (путь: string) => {
+    const след = new Set(свёрнуты)
+    if (след.has(путь)) след.delete(путь); else след.add(путь)
+    свернуть(след)
+  }
+
   if (разрезы.length === 0) {
     return (
       <div className="rounded-lg border border-border/50 px-3 py-6 text-center text-sm text-muted-foreground">
@@ -235,7 +264,8 @@ export function ReportPivot({ fields, columns, rows }: {
             </span>
           ))}
           {свободные.length > 0 && уровни.length < МАКСИМУМ && (
-            <span className="ml-2 flex flex-wrap gap-1.5">
+            <span className="ml-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">добавить уровень:</span>
               {свободные.map((р) => (
                 <button key={р.поле} type="button"
                   onClick={() => поставить([...уровни, р.поле])}
@@ -246,9 +276,38 @@ export function ReportPivot({ fields, columns, rows }: {
             </span>
           )}
         </div>
-        {мимо.length > 0 && (
-          <div className="mt-2 text-[11px] text-muted-foreground">
-            Не разрезы: {мимо.map((м) => `«${м.имя}» — ${м.почему}`).join('; ')}.
+        {/* Откуда список разрезов — вопрос МАГа 15.10.2026: разрез — любой
+            столбец таблицы, где значения повторяются; числовые столбцы идут
+            суммами в колонки. Остальное перечислено с причиной. */}
+        <div className="mt-2 text-[11px] text-muted-foreground">
+          Разрезы — столбцы таблицы с повторяющимися значениями, числа — суммами в колонках.{' '}
+          {свободные.length === 0 && уровни.length > 0 && 'Все доступные разрезы уже в группировке. '}
+          {мимо.length > 0 && <>Не разрезы: {мимо.map((м) => `«${м.имя}» — ${м.почему}`).join('; ')}.</>}
+        </div>
+        {родители.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <Button variant="outline" size="sm" className="h-7 text-xs"
+              disabled={свёрнуты.size === 0} onClick={() => свернуть(new Set())}>
+              Развернуть все
+            </Button>
+            <Button variant="outline" size="sm" className="h-7 text-xs"
+              disabled={глубина === 1} onClick={() => доУровня(1)}>
+              Свернуть все
+            </Button>
+            {уровни.length > 1 && (
+              <span role="group" aria-label="Раскрыть до уровня" className="ml-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+                до уровня
+                {уровни.map((поле, i) => (
+                  <button key={поле} type="button" aria-pressed={глубина === i + 1}
+                    title={`Раскрыть до уровня ${i + 1}: ${columns[fields.indexOf(поле)] ?? поле}`}
+                    onClick={() => доУровня(i + 1)}
+                    className={`size-7 rounded border text-xs ${глубина === i + 1
+                      ? 'border-primary bg-primary/15 text-primary' : 'border-border/60 hover:bg-accent/30'}`}>
+                    {i + 1}
+                  </button>
+                ))}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -273,13 +332,14 @@ export function ReportPivot({ fields, columns, rows }: {
                 как обычные значения, и «где суммарное по группе» спрашивали
                 снова и снова (20.09.2026). Теперь узлы верхних уровней выделены
                 фоном и насыщенностью — чем выше уровень, тем заметнее. */}
-            {узлы.map((у) => (
+            {видимые.map((у) => (
               <tr key={у.путь}
-                className={`border-t border-border/30 hover:bg-accent/20 ${
+                onClick={у.естьДети ? () => переключить(у.путь) : undefined}
+                className={`border-t border-border/30 hover:bg-accent/20 ${у.естьДети ? 'cursor-pointer ' : ''}${
                   у.естьДети && у.уровень === 0 ? 'bg-muted/40 font-semibold'
                     : у.естьДети ? 'bg-muted/20 font-medium' : ''}`}>
                 <td className="px-3 py-1.5" style={{ paddingLeft: 12 + у.уровень * 18 }}>
-                  {у.естьДети && <ChevronRight className="mr-1 inline size-3 text-muted-foreground" />}
+                  {у.естьДети && <ChevronRight className={`mr-1 inline size-3 text-muted-foreground transition-transform ${свёрнуты.has(у.путь) ? '' : 'rotate-90'}`} />}
                   {у.имя}
                   {у.естьДети && (
                     <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
