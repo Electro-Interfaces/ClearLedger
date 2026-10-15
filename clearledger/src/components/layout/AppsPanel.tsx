@@ -65,7 +65,9 @@ export function AppsPanelSurface() {
   const { open, close } = useAppsPanel()
   if (!open) return null
   return (
-    <div className="absolute inset-0 z-40 flex flex-col bg-background/95 backdrop-blur-sm">
+    // z-50: выше карточки станции (z-40) — иначе «Приложения» открывались под
+    // ней и нажатие выглядело как «ничего не происходит» (15.10.2026).
+    <div className="absolute inset-0 z-50 flex flex-col bg-background/95 backdrop-blur-sm">
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2 sm:px-6">
         <div className="min-w-0">
           <div className="text-sm font-semibold">Приложения пространства</div>

@@ -40,7 +40,6 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { StationLink } from '@/components/common/StationLink'
-import { useStationCard } from '@/contexts/StationCardContext'
 import { IntakeHealthBar } from '@/components/workspace/IntakeHealthBar'
 import { BulkTicketDialog } from '@/components/locations/BulkTicketDialog'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
@@ -48,7 +47,7 @@ import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { ReportPivot } from '@/components/workspace/ReportPivot'
 import {
-  PageSizeField, RelatedLink, ReportTools, RowCard, SheetTable, ToolPanel, ToolStrip, qty, useReportKit,
+  PageSizeField, RelatedLink, RelatedReport, ReportTools, RowCard, SheetTable, ToolPanel, ToolStrip, qty, useReportKit,
   type Cell, type Mark,
 } from '@/components/report-kit'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -56,7 +55,9 @@ import { useFilters } from '@/contexts/FilterContext'
 import { daysAgoISO } from '@/components/workspace/analytics/periodPresets'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
-import { getOpsWorklist, type OpsWorklist, type WorklistRow } from '@/services/opsService'
+import {
+  getOpsTickets, getOpsWorklist, getStationHistory, getStationVisits, type OpsWorklist, type WorklistRow,
+} from '@/services/opsService'
 
 const nf = new Intl.NumberFormat('ru-RU')
 
@@ -124,14 +125,18 @@ const ШАПКА = ['№', 'Станция', 'Город', 'Регион', 'Чт
 const СКРЫТЫ = [С.город, С.главная, С.молчит, С.впустую, С.ушло, С.заявок]
 /** Столбцы, по которым шапка предлагает сводную: столбец → поле сводной. */
 const СВОДНАЯ_ПО: Record<number, string> = { [С.регион]: 'Регион', [С.главная]: 'Главная причина', [С.работа]: 'В работе', [С.город]: 'Город' }
-/** Связанные отчёты карточки строки — разделы карточки станции (ключи `LEGACY_TAB_MAP`). */
-const СВЯЗАННЫЕ = [
-  { вкладка: 'passport', имя: 'Паспорт', подсказка: 'оборудование, адрес, владелец' },
-  { вкладка: 'diagnostics', имя: 'Диагностика', подсказка: 'разъёмы и ошибки по витрине' },
-  { вкладка: 'work', имя: 'Приезды', подсказка: 'сессии зарядки по дням' },
-  { вкладка: 'sales', имя: 'Продажи', подсказка: 'выручка и энергия' },
-  { вкладка: 'service', имя: 'Заявки', подсказка: 'все заявки по станции' },
-]
+/**
+ * Отчёты-расшифровки карточки строки: каждый раскрывает значения строки и
+ * открывается окном поверх (МАГ, 15.10.2026). Переходов на другие экраны из
+ * карточки нет — закрыл окно и остался на своей строке.
+ */
+const РАСШИФРОВКИ = [
+  { вид: 'visits', имя: 'Приезды за 90 дней', подсказка: 'откуда «Приездов в сутки», «Ушло клиентов», «Приездов впустую»' },
+  { вид: 'breaks', имя: 'Перерывы в работе за 90 дней', подсказка: 'откуда «Молчит, дн» и «Последняя зарядка»' },
+  { вид: 'days', имя: 'Работа по дням за 90 дней', подсказка: 'сессии, энергия и выручка — основа «Цены ₽/мес»' },
+  { вид: 'tickets', имя: 'Заявки станции за год', подсказка: 'откуда «Открытых заявок» и «В работе»' },
+] as const
+type Расшифровка = (typeof РАСШИФРОВКИ)[number]['вид']
 
 /**
  * Не идут в сводную: номер и станция у каждой строки свои, «Что со станцией» —
@@ -194,7 +199,6 @@ function Плитка({ icon: Icon, label, value, hint, tone, onClick, active }:
 export function OpsWorklistPanel() {
   const { companyId } = useCompany()
   const { regionIds, period } = useFilters()
-  const станция = useStationCard()
   const экран = useRef<HTMLDivElement>(null)
   const [поиск, setПоиск] = useState('')
   const [причина, setПричина] = useState('all')
@@ -209,6 +213,7 @@ export function OpsWorklistPanel() {
   const [карточка, setКарточка] = useState<{ order: number[]; pos: number } | null>(null)
   const [порядок, setПорядок] = useState<number[]>([])
   const [возврат, setВозврат] = useState(false)
+  const [расшифровка, setРасшифровка] = useState<Расшифровка | null>(null)
   // День, НА который смотрим, — конец общего периода в строке фильтра (МАГ,
   // 15.10.2026: период выбирается там же, где на всех экранах, а не своим полем).
   // Период по вчера или по сегодня — граница данных (последняя загруженная
@@ -615,44 +620,101 @@ export function OpsWorklistPanel() {
       <RowCard
         report="На сегодня"
         head={набор.sheet.head}
-        // Связанный отчёт и «Завести заявку» открываются поверх, а окно строки
-        // прячется и возвращается, когда их закрыли: человек не уходит со своей
-        // строки (МАГ, 15.10.2026).
-        row={карточка && !(возврат && (станция.открыта || пачка))
+        // «Завести заявку» открывается поверх, а окно строки прячется и
+        // возвращается, когда её закрыли: человек не уходит со своей строки.
+        row={карточка && !(возврат && пачка)
           ? набор.sheet.rows[карточка.order[карточка.pos]] ?? null : null}
         title={строкаКарточки?.name}
         at={карточка?.pos ?? 0}
         of={карточка?.order.length ?? 0}
         onStep={(dir) => setКарточка((k) => (k ? { ...k, pos: Math.min(Math.max(k.pos + dir, 0), k.order.length - 1) } : k))}
         onClose={() => { setКарточка(null); setВозврат(false) }}
-        // Связанные отчёты — разделы карточки станции, открытые сразу на нужном
-        // месте, и заявка. Окно строки закрывается: карточка станции открывается
-        // в рабочей области и под окном её не видно.
         extra={строкаКарточки && (
-          <div className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/60">
-            {СВЯЗАННЫЕ.map((с) => (
-              <RelatedLink key={с.вкладка} label={`${с.имя} станции ${строкаКарточки.number ?? строкаКарточки.code ?? ''}`.trim()}
-                hint={с.подсказка}
-                onClick={() => { setВозврат(true); станция.open(строкаКарточки.locationId, с.вкладка) }} />
-            ))}
-            {строкаКарточки.lastTicketId && (
-              <RelatedLink label={`Заявка ${строкаКарточки.lastTicketNumber ?? ''}`.trim()}
-                hint={строкаКарточки.breachedTickets > 0 ? 'срок сорван' : 'последняя открытая'}
-                onClick={() => window.location.assign(`/support/customer/tickets/${строкаКарточки.lastTicketId}`)} />
-            )}
-            <RelatedLink label="Завести заявку" hint="на выезд по этой станции"
-              icon={<ClipboardCheck className="size-4" aria-hidden />}
-              onClick={() => {
-                setВозврат(true)
-                setПачка([{ id: строкаКарточки.locationId, name: строкаКарточки.name, number: строкаКарточки.number ?? строкаКарточки.code }])
-              }} />
+          <div className="space-y-5">
+            <div className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/60">
+              {РАСШИФРОВКИ.map((р) => (
+                <RelatedLink key={р.вид} label={р.имя} hint={р.подсказка} onClick={() => setРасшифровка(р.вид)} />
+              ))}
+            </div>
+            <div>
+              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Действия</div>
+              <div className="overflow-hidden rounded-lg border border-border/60">
+                <RelatedLink label="Завести заявку" hint="на выезд по этой станции"
+                  icon={<ClipboardCheck className="size-4" aria-hidden />}
+                  onClick={() => {
+                    setВозврат(true)
+                    setПачка([{ id: строкаКарточки.locationId, name: строкаКарточки.name, number: строкаКарточки.number ?? строкаКарточки.code }])
+                  }} />
+              </div>
+            </div>
           </div>
         )}
       />
+      <WorklistDrill вид={карточка ? расшифровка : null} row={строкаКарточки} onClose={() => setРасшифровка(null)} />
 
       <BulkTicketDialog open={!!пачка} onClose={() => { setПачка(null); setОтмечены(new Set()) }}
         stations={пачка ?? []} />
     </div>
+  )
+}
+
+const мск = (iso: string | null) => iso ? new Date(iso).toLocaleString('ru-RU',
+  { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }) : ''
+
+/** Окно-расшифровка строки: данные станции из тех же API, что карточка станции. */
+function WorklistDrill({ вид, row, onClose }: { вид: Расшифровка | null; row: WorklistRow | null; onClose: () => void }) {
+  const { companyId } = useCompany()
+  const id = row?.locationId ?? ''
+  const надо = (...в: Расшифровка[]) => !!companyId && !!id && !!вид && в.includes(вид)
+  const визиты = useQuery({
+    queryKey: ['drill-visits', companyId, id],
+    queryFn: () => getStationVisits(companyId, id, { days: 90 }),
+    enabled: надо('visits'), staleTime: 60_000,
+  })
+  const история = useQuery({
+    queryKey: ['drill-history', companyId, id],
+    queryFn: () => getStationHistory(companyId, id, 90),
+    enabled: надо('breaks', 'days'), staleTime: 60_000,
+  })
+  // Заявки — срез региона станции, отбор по станции здесь: отдельного запроса
+  // «заявки одной станции» у сервера нет.
+  const заявки = useQuery({
+    queryKey: ['drill-tickets', companyId, row?.region ?? ''],
+    queryFn: () => getOpsTickets(companyId, { days: 365, region: row?.region ?? undefined, limit: 5000 }),
+    enabled: надо('tickets'), staleTime: 60_000,
+  })
+  const имя = РАСШИФРОВКИ.find((р) => р.вид === вид)?.имя ?? ''
+  const подпись = row ? `${row.name}${row.number ? ` · № ${row.number}` : ''}` : ''
+  let head: string[] = []
+  let rows: Cell[][] = []
+  let q: { isLoading: boolean; isError: boolean } = визиты
+  let note: string | undefined
+  if (вид === 'visits') {
+    const d = визиты.data
+    const картина = new Map(d?.patterns.map((p) => [p.key, p.label]) ?? [])
+    head = ['Начало', 'Минут у станции', 'Попыток', 'Зарядился', 'кВт·ч', 'Выручка, ₽', 'Клиент', 'Карта', 'Как прошло']
+    rows = (d?.visits ?? []).map((v) => [мск(v.startedAt), v.minutesAtStation ?? '', v.attempts, v.charged ? 'да' : 'нет',
+      v.energyKwh, v.revenue, v.clientName ?? v.client ?? '', v.card ?? '', картина.get(v.pattern) ?? v.pattern])
+    note = d?.note
+  } else if (вид === 'breaks') {
+    q = история
+    head = ['С', 'По', 'Дней']
+    rows = (история.data?.breaks ?? []).map((b) => [мск(b.from), b.ongoing ? 'идёт сейчас' : мск(b.to), b.days])
+    note = история.data?.note
+  } else if (вид === 'days') {
+    q = история
+    head = ['День', 'Сессий', 'Неудачных', 'кВт·ч', 'Выручка, ₽']
+    rows = [...(история.data?.days_series ?? [])].reverse()
+      .map((s) => [s.day.split('-').reverse().join('.'), s.sessions, s.failed, s.energyKwh, s.revenue])
+  } else if (вид === 'tickets') {
+    q = заявки
+    head = ['№', 'Заявка', 'Статус', 'Заведена', 'Дней', 'Срок', 'Исполнитель']
+    rows = (заявки.data?.rows ?? []).filter((t) => t.locationId === id)
+      .map((t) => [t.number, t.title, t.statusLabel, мск(t.createdAt), t.ageDays ?? '', t.slaBreached ? 'сорван' : '', t.assignee ?? ''])
+  }
+  return (
+    <RelatedReport open={!!вид && !!row} title={имя} subtitle={подпись} head={head} rows={rows}
+      loading={q.isLoading} error={q.isError} note={note} onClose={onClose} />
   )
 }
 

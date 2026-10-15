@@ -26,6 +26,7 @@ import {
   createContext, useCallback, useContext, useMemo, useState, type ReactNode,
 } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useLocation } from 'react-router-dom'
 import { LocationCockpitModal } from '@/components/locations/LocationCockpitModal'
 import { useCompany } from '@/contexts/CompanyContext'
 import { loadLocations } from '@/services/locationService'
@@ -54,6 +55,19 @@ export function StationCardProvider({ children }: { children: ReactNode }) {
   // Раздел, с которого открыть карточку (ключ `LEGACY_TAB_MAP`): «Связанные
   // отчёты» строки ведут сразу в заявки, приезды, диагностику.
   const [вкладка, setВкладка] = useState<string | undefined>()
+  // Карточка висит поверх рабочей области на уровне всего пространства: при
+  // переходе на другой экран она должна закрываться, иначе остаётся поверх
+  // нового экрана и уйти из неё некуда (МАГ, 15.10.2026).
+  // Экран — путь, раздел и пункт; `f=` (отбор) фильтр переписывает сам, и по
+  // нему карточка закрывалась бы на ровном месте.
+  const { pathname, search } = useLocation()
+  const пары = new URLSearchParams(search)
+  const экран = `${pathname}|${пары.get('mode') ?? ''}|${пары.get('sub') ?? ''}`
+  const [где, setГде] = useState(экран)
+  if (где !== экран) {
+    setГде(экран)
+    if (открыта) setОткрыта(null)
+  }
 
   const реестр = useQuery({
     queryKey: ['locations', companyId],
