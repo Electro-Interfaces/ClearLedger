@@ -31,7 +31,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { OpsSnapshotNotice } from './OpsSnapshotNotice'
 import {
-  AlertTriangle, ClipboardCheck, ClipboardX, Gauge, Loader2, Plug, Users,
+  AlertTriangle, ChevronDown, ClipboardCheck, ClipboardX, Gauge, Loader2, Plug, Users,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -47,7 +47,7 @@ import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { ReportPivot } from '@/components/workspace/ReportPivot'
 import {
-  ReportTools, RowCard, SheetTable, ToolPanel, ToolStrip, qty, useReportKit,
+  PageSizeField, ReportTools, RowCard, SheetTable, ToolPanel, ToolStrip, qty, useReportKit,
   type Cell, type Mark,
 } from '@/components/report-kit'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -97,6 +97,16 @@ const ПРОФИЛАКТИКА = ['meter', 'service', 'check']
  * столбец дописывается в конец, а смена смысла столбца — новый `ВИД`.
  */
 const ВИД = 'ops-today.v1'
+const КЛЮЧ_ФИЛЬТРОВ = 'report-kit.v1:filters-open:ops-today'
+
+function Поле({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  )
+}
 const С = {
   номер: 0, станция: 1, город: 2, регион: 3, что: 4, главная: 5, зарядка: 6,
   молчит: 7, впустую: 8, ушло: 9, приездов: 10, цена: 11, заявок: 12, работа: 13,
@@ -181,6 +191,13 @@ export function OpsWorklistPanel() {
   // сессия). Разбор «почему 3 сентября встала половина региона» по сегодняшнему
   // срезу невозможен: тот день в нём уже не виден.
   const [наДень, setНаДень] = useState('')
+  const [фильтрыОткрыты, setФильтрыОткрыты] = useState(() => {
+    try { return localStorage.getItem(КЛЮЧ_ФИЛЬТРОВ) === '1' } catch { return false }
+  })
+  const переключитьФильтры = (v: boolean) => {
+    setФильтрыОткрыты(v)
+    try { localStorage.setItem(КЛЮЧ_ФИЛЬТРОВ, v ? '1' : '0') } catch { /* хранилище недоступно */ }
+  }
 
   const регион = регионОтбора !== 'all' ? регионОтбора : regionIds.length ? regionIds.join('|') : undefined
   const q = useQuery({
@@ -239,6 +256,15 @@ export function OpsWorklistPanel() {
     help: ПОМОЩЬ,
   })
 
+  const сброс = () => {
+    setНеВзятые(true)
+    setПричина('all')
+    setРегионОтбора('all')
+    setПоиск('')
+    setНаДень('')
+    набор.setFilters({})
+  }
+
   const отметка = useMemo<Mark>(() => ({
     has: (i) => отмечены.has(строки[i]?.locationId),
     set: (rows, on) => setОтмечены((было) => {
@@ -276,10 +302,10 @@ export function OpsWorklistPanel() {
       </div>
     )
     // Дата, а не «молчит N дн»: по ней инженер сверяется с клиентом и
-    // оператором. Год печатается, только когда он не текущий.
+    // оператором. Год — всегда (МАГ, 15.10.2026): дата без года читается как ошибка.
     if (c === С.зарядка) return r.lastSessionAt
       ? <span className="text-muted-foreground" title={r.clientsLost ? `ушло клиентов за квартал: ${r.clientsLost}` : undefined}>
-          {датаМск(r.lastSessionAt, new Date(r.lastSessionAt).getFullYear() !== new Date().getFullYear())}
+          {датаМск(r.lastSessionAt, true)}
         </span>
       : undefined
     if (c === С.цена) return r.lossPerMonth ? <span className="font-medium">{money(r.lossPerMonth)}</span> : undefined
@@ -342,30 +368,10 @@ export function OpsWorklistPanel() {
 
       <Card>
         <CardContent className="space-y-3 p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-sm font-semibold">На сегодня</div>
-              <div className="text-xs text-muted-foreground">
-                данные по {данныеПо}
-                 · МСК
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="text-xs text-muted-foreground" htmlFor="worklist-asof">
-                на день
-              </label>
-              <Input id="worklist-asof" type="date" value={наДень}
-                max={d.dataThrough?.slice(0, 10)}
-                onChange={(e) => setНаДень(e.target.value)}
-                className="h-7 w-36 text-xs" />
-              {наДень && (
-                <Button size="sm" variant="ghost" className="h-7 text-xs"
-                  onClick={() => setНаДень('')}>
-                  К последним данным
-                </Button>
-              )}
-              <ExportButton title="Работа на сегодня" subtitle={`данные по ${данныеПо}`}
-                getEl={() => экран.current} />
+          <div>
+            <div className="text-sm font-semibold">На сегодня</div>
+            <div className="text-xs text-muted-foreground">
+              данные по {данныеПо} · МСК{наДень && ` · на день ${наДень.split('-').reverse().join('.')}`}
             </div>
           </div>
 
@@ -438,57 +444,102 @@ export function OpsWorklistPanel() {
       </Card>
 
       <Card>
-        <CardContent className="space-y-2 p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant={неВзятые ? 'default' : 'outline'}
-              className="h-7 text-xs" onClick={() => setНеВзятые(!неВзятые)}>
-              Никем не взято
-            </Button>
-            <Select value={причина} onValueChange={setПричина}>
-              <SelectTrigger className="h-7 w-48 text-xs">
-                <SelectValue placeholder="Причина" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Любая причина</SelectItem>
-                <SelectItem value="silent">Молчит</SelectItem>
-                <SelectItem value="failing">Отказывает</SelectItem>
-                <SelectItem value="breached">Срок заявки сорван</SelectItem>
-                <SelectItem value="meter">Поверка счётчика</SelectItem>
-                <SelectItem value="service">Просрочено ТО</SelectItem>
-                <SelectItem value="check">Нарушение по осмотру</SelectItem>
-                <SelectItem value="connector">Неисправен разъём</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={регионОтбора} onValueChange={setРегионОтбора}>
-              <SelectTrigger className="h-7 w-52 text-xs">
-                <SelectValue placeholder="Регион" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все регионы</SelectItem>
-                {регионыСписком.map((р) => (
-                  <SelectItem key={р} value={р}>{р}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input value={поиск} onChange={(e) => setПоиск(e.target.value)}
-              placeholder="Номер, название, город…" className="h-7 w-52 text-xs" />
-            {отмечены.size > 0 && (
-              <Button size="sm" className="h-7 text-xs"
-                onClick={() => setПачка(строки.filter((r) => отмечены.has(r.locationId))
-                  .map((r) => ({ id: r.locationId, name: r.name, number: r.number ?? r.code })))}>
-                Завести заявки ({отмечены.size})
+        <CardContent className="space-y-3 p-3">
+          {/* Фильтры сворачиваются, как в отчётах КП СДО: развёрнуты — подписанные
+              поля, свёрнуты — одна строка с тем, что сейчас отобрано. */}
+          {фильтрыОткрыты && (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+              <Поле label="В работе">
+                <Select value={неВзятые ? 'free' : 'all'} onValueChange={(v) => setНеВзятые(v === 'free')}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="free">Никем не взято</SelectItem>
+                    <SelectItem value="all">Все станции</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Поле>
+              <Поле label="Причина">
+                <Select value={причина} onValueChange={setПричина}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Любая причина</SelectItem>
+                    <SelectItem value="silent">Молчит</SelectItem>
+                    <SelectItem value="failing">Отказывает</SelectItem>
+                    <SelectItem value="breached">Срок заявки сорван</SelectItem>
+                    <SelectItem value="meter">Поверка счётчика</SelectItem>
+                    <SelectItem value="service">Просрочено ТО</SelectItem>
+                    <SelectItem value="check">Нарушение по осмотру</SelectItem>
+                    <SelectItem value="connector">Неисправен разъём</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Поле>
+              <Поле label="Регион">
+                <Select value={регионОтбора} onValueChange={setРегионОтбора}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Все регионы</SelectItem>
+                    {регионыСписком.map((р) => (
+                      <SelectItem key={р} value={р}>{р}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Поле>
+              <Поле label="Поиск">
+                <Input value={поиск} onChange={(e) => setПоиск(e.target.value)}
+                  placeholder="Номер, название, город…" className="h-9 text-sm" />
+              </Поле>
+              <Поле label="На день">
+                <div className="flex gap-1">
+                  <Input type="date" value={наДень}
+                    max={d.dataThrough?.slice(0, 10)}
+                    onChange={(e) => setНаДень(e.target.value)}
+                    className="h-9 text-sm" />
+                  {наДень && (
+                    <Button size="sm" variant="ghost" className="h-9 px-2 text-xs" title="К последним данным"
+                      onClick={() => setНаДень('')}>
+                      Сегодня
+                    </Button>
+                  )}
+                </div>
+              </Поле>
+              <Поле label="Строк на странице">
+                <PageSizeField bare />
+              </Поле>
+            </div>
+          )}
+          <div className={cn('flex flex-wrap items-center justify-between gap-2', фильтрыОткрыты && 'border-t border-border/60 pt-3')}>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <button type="button" onClick={() => переключитьФильтры(!фильтрыОткрыты)} aria-expanded={фильтрыОткрыты}
+                className="-ml-1 inline-flex h-8 items-center gap-1.5 rounded-md px-1.5 text-sm font-semibold text-primary hover:bg-accent">
+                <ChevronDown className={cn('size-4 transition-transform', фильтрыОткрыты && 'rotate-180')} />
+                {фильтрыОткрыты ? 'Свернуть фильтры' : 'Фильтры'}
+              </button>
+              {!фильтрыОткрыты && отбор.map((о) => (
+                <span key={о} className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">{о}</span>
+              ))}
+              <PanelViewTabs value={вид} onChange={setВид} label={null} tabs={[
+                { k: 'list', label: 'Список' },
+                { k: 'pivot', label: 'Сводная' },
+              ]} />
+              <span className="text-xs text-muted-foreground">
+                строк: {nf.format(отфильтрованы ? набор.kept.length : строки.length)}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {отмечены.size > 0 && (
+                <Button size="sm" className="h-8 text-xs"
+                  onClick={() => setПачка(строки.filter((r) => отмечены.has(r.locationId))
+                    .map((r) => ({ id: r.locationId, name: r.name, number: r.number ?? r.code })))}>
+                  Завести заявки ({отмечены.size})
+                </Button>
+              )}
+              <ExportButton title="Работа на сегодня" subtitle={`данные по ${данныеПо}`}
+                getEl={() => экран.current} />
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={сброс}
+                disabled={!отбор.length && наДень === '' && !Object.keys(набор.filters).length}>
+                Сброс
               </Button>
-            )}
-            <span className="text-xs text-muted-foreground">
-              строк: {nf.format(отфильтрованы ? набор.kept.length : строки.length)}
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <PanelViewTabs value={вид} onChange={setВид} label={null} tabs={[
-              { k: 'list', label: 'Список' },
-              { k: 'pivot', label: 'Сводная' },
-            ]} />
+            </div>
           </div>
 
           {/* Телефон и планшет: рельсы нет, те же кнопки — полосой над таблицей. */}
@@ -534,7 +585,6 @@ export function OpsWorklistPanel() {
                 onView={setПорядок}
                 render={ячейка}
                 rowTitle={(i) => строки[i]?.name ?? ''}
-                rowClass={(i) => (workKnown && !строки[i]?.openTickets ? 'bg-red-500/5' : undefined)}
                 mark={отметка}
                 empty={пустоСписка}
                 // Выгрузка — видимые столбцы в порядке человека, строки в порядке

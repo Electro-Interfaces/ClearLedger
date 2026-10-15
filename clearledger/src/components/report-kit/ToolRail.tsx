@@ -5,6 +5,7 @@ import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
+import { useTools } from './calc'
 import { closePanel, setRail, togglePanel, useRail, type Panel } from './rail'
 
 type Item = { key: Panel; short: string; label: string; icon: LucideIcon; table?: boolean }
@@ -18,8 +19,8 @@ const TOOLS: Item[] = [
   { key: 'pins', short: 'Цифры', label: 'Отложенные цифры', icon: ClipboardList },
 ]
 
-function ToolButton({ icon: Icon, short, label, on, off, onClick, strip }: {
-  icon: LucideIcon; short: string; label: string; on?: boolean; off?: string; onClick: () => void; strip?: boolean
+function ToolButton({ icon: Icon, short, label, on, off, onClick, strip, badge = 0 }: {
+  icon: LucideIcon; short: string; label: string; on?: boolean; off?: string; onClick: () => void; strip?: boolean; badge?: number
 }) {
   return (
     <button
@@ -39,12 +40,18 @@ function ToolButton({ icon: Icon, short, label, on, off, onClick, strip }: {
       <span className="pointer-events-none" aria-hidden>
         {short}
       </span>
+      {badge > 0 && (
+        <span className="pointer-events-none absolute right-0.5 top-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground">
+          {badge}
+        </span>
+      )}
     </button>
   )
 }
 
 export function ToolButtons({ strip, onOpen }: { strip?: boolean; onOpen?: (p: Panel) => void }) {
   const rail = useRail()
+  const { pins } = useTools()
   if (!rail.available) return null
   const open = (p: Panel) => {
     if (onOpen) return onOpen(p)
@@ -64,6 +71,7 @@ export function ToolButtons({ strip, onOpen }: { strip?: boolean; onOpen?: (p: P
           off={why ?? (rail.pivot && x.table ? 'Работает в виде «Список»' : undefined)}
           onClick={() => open(x.key)}
           strip={strip}
+          badge={x.key === 'pins' ? pins.length : 0}
         />
       ))}
     </>

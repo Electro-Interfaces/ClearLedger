@@ -38,17 +38,18 @@ export function usePageSize() {
   )
 }
 
-export function PageSizeField() {
+export function PageSizeField({ bare }: { bare?: boolean }) {
   const value = usePageSize()
   const opts = PRESETS.includes(value) || value === 0 ? PRESETS : [...PRESETS, value].sort((a, b) => a - b)
   return (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span>Строк на странице</span>
+    <label className={bare ? 'flex' : 'flex items-center gap-2 text-xs text-muted-foreground'}>
+      {!bare && <span>Строк на странице</span>}
       <select
         value={value}
         onChange={(e) => setSize(Number(e.target.value))}
         title="Действует во всех таблицах с инструментами"
-        className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary"
+        aria-label="Строк на странице"
+        className={bare ? 'h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground outline-none focus:border-primary' : 'h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus:border-primary'}
       >
         {opts.map((n) => (
           <option key={n} value={n}>

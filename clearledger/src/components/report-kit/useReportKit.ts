@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { deriveTotals, withCalc, type CalcCol } from './calc'
+import { deriveTotals, setPicked, withCalc, type CalcCol } from './calc'
 import type { Cell } from './format'
 import { closePanel, setRail, useRail } from './rail'
 import { keepRow, type Cols, type Filters, type Picked } from './SheetTable'
@@ -84,13 +84,18 @@ export function useReportKit({
       }
       setMiss(null)
       const next = new Map(sel)
-      if (next.has(c.key)) next.delete(c.key)
-      else next.set(c.key, c)
+      const added = !next.has(c.key)
+      if (added) next.set(c.key, c)
+      else next.delete(c.key)
       setPicks({ rows, map: next })
+      setPicked([...next.values()].map((x) => x.value as number), added ? (c.value as number) : undefined)
     },
     [sel, rows],
   )
   const selected = useMemo(() => new Set(sel.keys()), [sel])
+  useEffect(() => {
+    if (!sel.size) setPicked([])
+  }, [sel])
   const kept = useMemo(() => sheet.rows.map((r, i) => (keepRow(r, filters) ? i : -1)).filter((i) => i >= 0), [sheet.rows, filters])
 
   return {
@@ -123,11 +128,13 @@ export function useReportKit({
       onClearSel: () => {
         setMiss(null)
         setPicks({ rows, map: new Map() })
+        setPicked([])
       },
       onRemoveSel: (key: string) => {
         const next = new Map(sel)
         next.delete(key)
         setPicks({ rows, map: next })
+        setPicked([...next.values()].map((x) => x.value as number))
       },
       miss,
       head: sheet.head,

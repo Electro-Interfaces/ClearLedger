@@ -1,12 +1,13 @@
 import {
   ArrowDown, ArrowLeftRight, ArrowUp, Calculator, ChevronDown, ChevronUp, CircleHelp, ClipboardList, Columns3, Delete,
-  Copy, Plus, SquareFunction, TextSearch, X,
+  Copy, History, Plus, SquareFunction, TextSearch, X,
 } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
-  addPin, calcValue, checkCalc, commitExpr, dropPin, evaluate, feedNumber, pickResult, refsOf, setExpr, setPickMode, textOf, useTools,
+  addPin, calcValue, checkCalc, commitExpr, dropPin, evaluate, feedNumber, refsOf, remember, setExpr, setPickMode, textOf, useTools,
   type CalcCol, type CalcTotal, type PickMode,
 } from './calc'
 import { isMoney, num2, qty, type Cell } from './format'
@@ -54,47 +55,47 @@ function Shell({ panel, report, onClose, children }: { panel: Panel; report: str
 }
 
 const MODES: { key: PickMode; label: string; sign: string; hint: string }[] = [
-  { key: 'sum', label: 'Сумма', sign: '+', hint: 'Складывает выделенное' },
-  { key: 'sub', label: 'Разность', sign: '−', hint: 'Из первого выделенного вычитает остальные по порядку щелчков' },
-  { key: 'mul', label: 'Произв.', sign: '×', hint: 'Перемножает выделенное' },
-  { key: 'div', label: 'Частное', sign: '÷', hint: 'Первое выделенное делит на остальные по порядку щелчков' },
+  { key: 'sum', label: 'Сумма', sign: '+', hint: 'Выделенное складывается' },
+  { key: 'sub', label: 'Разность', sign: '−', hint: 'Из первого выделенного вычитаются остальные по порядку щелчков' },
+  { key: 'mul', label: 'Произв.', sign: '×', hint: 'Выделенное перемножается' },
+  { key: 'div', label: 'Частное', sign: '÷', hint: 'Первое выделенное делится на остальные по порядку щелчков' },
   { key: 'avg', label: 'Среднее', sign: 'ср', hint: 'Среднее по выделенному' },
 ]
 
 function copy(text: string) {
-  void navigator.clipboard?.writeText(text).catch(() => undefined)
+  void navigator.clipboard?.writeText(text).then(
+    () => toast.success(`Скопировано: ${text}`),
+    () => toast.error('Буфер обмена недоступен'),
+  )
 }
 
-function Selection({ sel, miss, onRemove, onClear, report }: {
+const KEYS = ['C', '(', ')', '÷', '7', '8', '9', '×', '4', '5', '6', '−', '1', '2', '3', '+', '0', ',', '%', '⌫']
+
+function CalcPanel({ sel, miss, onRemove, onClear, report }: {
   sel: Picked[]; miss: string | null; onRemove: (key: string) => void; onClear: () => void; report: string
 }) {
-  const { mode } = useTools()
-  const nums = sel.map((x) => x.value as number)
+  const { expr, mode, history } = useTools()
+  const [showHistory, setShowHistory] = useState(false)
+  const value = evaluate(expr)
   const money = !!sel.length && sel.every((x) => isMoney(x.label))
-  const m = MODES.find((x) => x.key === mode)!
-  const result = pickResult(nums, mode)
-  const shown = (v: number) => (v < 0 && mode !== 'sum' ? `(${num(v, money)})` : num(v, money))
-  const formula = mode === 'avg'
-    ? `(${nums.map((v) => shown(v)).join(' + ')}) ÷ ${nums.length}`
-    : nums.map((v) => shown(v)).join(` ${m.sign} `)
-  const stat = (label: string, value: string) => (
-    <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="text-sm font-semibold tabular-nums text-foreground">{value}</dd>
-    </div>
-  )
+  const nums = sel.map((x) => x.value as number)
   const sum = nums.reduce((a, b) => a + b, 0)
+  const press = (k: string) => {
+    if (k === 'C') return setExpr('')
+    if (k === '⌫') return setExpr(expr.trimEnd().slice(0, -1).trimEnd())
+    setExpr(/[÷×−+]/.test(k) ? `${expr.trimEnd()} ${k} ` : `${expr}${k}`)
+  }
+  const keep = () => {
+    if (value === null) return
+    const what = expr.trim()
+    addPin(`${report}: ${what}`, value, money)
+    remember(what, value)
+    toast.success(`Отложено в «Цифры»: ${num(value, money)}`, { description: what })
+  }
+  const key = 'h-10 rounded-lg text-lg font-semibold transition-colors'
   return (
-    <section aria-label="Выделенное" className="flex flex-col gap-2.5 rounded-lg bg-di-surface-low p-3">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-foreground">Выделенное</h3>
-        {!!sel.length && (
-          <button type="button" onClick={onClear} className="text-xs font-semibold text-primary hover:underline">
-            Снять выделение
-          </button>
-        )}
-      </div>
-      <div role="radiogroup" aria-label="Действие с выделенным" className="grid grid-cols-5 gap-1 rounded-lg bg-di-surface p-1">
+    <section aria-label="Калькулятор" className="flex flex-col gap-2.5">
+      <div role="radiogroup" aria-label="Как считать выделенное" className="grid grid-cols-5 gap-1 rounded-lg bg-di-surface-low p-1">
         {MODES.map((x) => (
           <button
             key={x.key}
@@ -113,18 +114,23 @@ function Selection({ sel, miss, onRemove, onClear, report }: {
           </button>
         ))}
       </div>
+
       {!sel.length ? (
         <p className="text-xs leading-relaxed text-muted-foreground">
-          Щёлкайте по числам в таблице — они встанут сюда по порядку, результат считается сразу: по умолчанию сумма, выше можно
-          переключить на разность, произведение, частное или среднее. Повторный щелчок снимает число. Пока калькулятор открыт,
-          щелчок по строке не открывает её карточку.
+          Щёлкайте по числам в таблице — они сразу встают в строку калькулятора: по умолчанию складываются, выше можно переключить
+          действие. Повторный щелчок по ячейке снимает число. Пока калькулятор открыт, щелчок по строке не открывает её карточку.
         </p>
       ) : (
-        <>
-          <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto">
-            {sel.map((x, k) => (
-              <li key={x.key} className="flex items-center gap-2 rounded-md bg-di-surface-mid px-2 py-1 text-xs">
-                <span className="w-4 shrink-0 text-center text-muted-foreground">{k === 0 ? '' : m.sign === 'ср' ? '+' : m.sign}</span>
+        <div className="rounded-lg bg-di-surface-low p-2">
+          <div className="mb-1 flex items-center justify-between gap-2 px-1 text-xs text-muted-foreground">
+            <span>Выделено чисел: {sel.length}</span>
+            <button type="button" onClick={onClear} className="font-semibold text-primary hover:underline">
+              Снять выделение
+            </button>
+          </div>
+          <ul className="flex max-h-36 flex-col gap-0.5 overflow-y-auto">
+            {sel.map((x) => (
+              <li key={x.key} className="flex items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-di-surface-mid">
                 <span className="min-w-0 flex-1 truncate text-di-on-surface-variant" title={`${x.row ?? ''} · ${x.label}`}>
                   {x.row ? `${x.row} · ` : ''}{x.label}
                 </span>
@@ -133,87 +139,56 @@ function Selection({ sel, miss, onRemove, onClear, report }: {
                   type="button"
                   onClick={() => onRemove(x.key)}
                   aria-label={`Убрать ${num(x.value as number)}`}
-                  className="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-di-surface-high hover:text-foreground"
+                  className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground hover:bg-di-surface-high hover:text-foreground"
                 >
-                  <X className="size-3.5" aria-hidden />
+                  <X className="size-3" aria-hidden />
                 </button>
               </li>
             ))}
           </ul>
-          <div className="rounded-md border border-di-outline-variant/60 bg-di-surface-mid px-3 py-2">
-            <div className="break-words text-xs tabular-nums text-muted-foreground">{formula} =</div>
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-xs text-muted-foreground">{m.label === 'Произв.' ? 'Произведение' : m.label}</span>
-              <output className="font-headline text-2xl font-extrabold tabular-nums text-foreground">
-                {result === null ? 'деление на 0' : num(result, money && mode !== 'mul' && mode !== 'div')}
-              </output>
-            </div>
-          </div>
           {sel.length > 1 && (
-            <dl className="grid grid-cols-4 gap-x-2">
-              {stat('Сумма', num(sum, money))}
-              {stat('Среднее', num(sum / nums.length, money))}
-              {stat('Мин.', num(Math.min(...nums), money))}
-              {stat('Макс.', num(Math.max(...nums), money))}
-            </dl>
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 border-t border-di-outline-variant/50 px-1 pt-1.5 text-xs text-muted-foreground">
+              <span>сумма <b className="tabular-nums text-foreground">{num(sum, money)}</b></span>
+              <span>среднее <b className="tabular-nums text-foreground">{num(sum / nums.length, money)}</b></span>
+              <span>мин <b className="tabular-nums text-foreground">{num(Math.min(...nums), money)}</b></span>
+              <span>макс <b className="tabular-nums text-foreground">{num(Math.max(...nums), money)}</b></span>
+            </div>
           )}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              disabled={result === null}
-              onClick={() => result !== null && addPin(`${report}: ${m.label.toLowerCase()} ${nums.length} чисел — ${formula}`, result, money)}
-            >
-              <ClipboardList className="size-3.5" aria-hidden /> Отложить
-            </Button>
-            <Button variant="outline" size="sm" disabled={result === null} onClick={() => result !== null && setExpr(textOf(result))}>
-              В калькулятор
-            </Button>
-            <Button variant="outline" size="sm" disabled={result === null} onClick={() => result !== null && copy(textOf(result))} title="Скопировать результат">
-              <Copy className="size-3.5" aria-hidden />
-            </Button>
-          </div>
-        </>
+        </div>
       )}
       {miss && <p className="text-xs text-amber-700 dark:text-amber-400">«{miss}» — не число, в расчёт не взято.</p>}
-    </section>
-  )
-}
 
-const KEYS = ['C', '(', ')', '÷', '7', '8', '9', '×', '4', '5', '6', '−', '1', '2', '3', '+', '0', ',', '%', '⌫']
-
-function Calc({ report }: { report: string }) {
-  const { expr, history } = useTools()
-  const value = evaluate(expr)
-  const press = (k: string) => {
-    if (k === 'C') return setExpr('')
-    if (k === '⌫') return setExpr(expr.trimEnd().slice(0, -1).trimEnd())
-    setExpr(/[÷×−+]/.test(k) ? `${expr.trimEnd()} ${k} ` : `${expr}${k}`)
-  }
-  const key = 'h-10 rounded-lg text-lg font-semibold transition-colors'
-  return (
-    <section aria-label="Калькулятор" className="flex flex-col gap-2.5">
-      <h3 className="text-sm font-semibold text-foreground">Калькулятор</h3>
-      <input
-        value={expr}
-        onChange={(e) => setExpr(e.target.value)}
-        onKeyDown={(e) => e.key === 'Enter' && commitExpr()}
-        placeholder="0"
-        aria-label="Выражение"
-        inputMode="decimal"
-        className={cn(field, 'h-11 text-right text-lg tabular-nums')}
-      />
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-xs text-muted-foreground">{expr.trim() && value === null ? 'Выражение не закончено' : 'Результат'}</span>
-        <span className="flex items-baseline gap-2">
-          <output className="font-headline text-2xl font-extrabold tabular-nums text-foreground">{value === null ? '0' : num(value)}</output>
-          {value !== null && (
-            <button type="button" onClick={() => copy(textOf(value))} title="Скопировать результат" aria-label="Скопировать результат"
-              className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-di-surface-high hover:text-foreground">
-              <Copy className="size-3.5" aria-hidden />
-            </button>
-          )}
-        </span>
+      <div className="rounded-lg border border-di-outline-variant bg-di-surface-lowest focus-within:border-primary">
+        <textarea
+          value={expr}
+          rows={2}
+          onChange={(e) => setExpr(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return
+            e.preventDefault()
+            commitExpr()
+          }}
+          placeholder="0"
+          aria-label="Выражение"
+          inputMode="decimal"
+          className="block w-full resize-none bg-transparent px-3 pt-2 text-right text-sm leading-snug tabular-nums text-di-on-surface-variant outline-none"
+        />
+        <div className="flex items-center justify-between gap-2 px-3 pb-2">
+          <span className="text-xs text-muted-foreground">{expr.trim() && value === null ? 'выражение не закончено' : '='}</span>
+          <span className="flex items-center gap-1">
+            <output className="font-headline text-2xl font-extrabold tabular-nums text-foreground">
+              {value === null ? '0' : num(value, money)}
+            </output>
+            {value !== null && (
+              <button type="button" onClick={() => copy(textOf(value))} title="Скопировать результат" aria-label="Скопировать результат"
+                className="grid size-7 place-items-center rounded text-muted-foreground hover:bg-di-surface-high hover:text-foreground">
+                <Copy className="size-3.5" aria-hidden />
+              </button>
+            )}
+          </span>
+        </div>
       </div>
+
       <div className="grid grid-cols-4 gap-1.5">
         {KEYS.map((k) => (
           <button
@@ -242,12 +217,21 @@ function Calc({ report }: { report: string }) {
           =
         </button>
       </div>
-      <Button variant="outline" size="sm" disabled={value === null} onClick={() => value !== null && addPin(`${report}: ${expr.trim()}`, value)}>
-        <ClipboardList className="size-3.5" aria-hidden /> Отложить результат
-      </Button>
-      {!!history.length && (
-        <div>
-          <div className="mb-1 text-xs text-muted-foreground">Недавние вычисления — щелчок подставляет результат</div>
+
+      <div className="flex gap-2">
+        <Button className="flex-1" disabled={value === null} onClick={keep} title="Результат уйдёт в «Цифры» — список для сверки">
+          <ClipboardList className="size-4" aria-hidden /> Отложить в «Цифры»
+        </Button>
+        <Button variant="outline" onClick={() => setShowHistory((v) => !v)} aria-expanded={showHistory} title="Недавние вычисления">
+          <History className="size-4" aria-hidden /> {history.length || ''}
+        </Button>
+      </div>
+
+      {showHistory && (
+        <div className="rounded-lg bg-di-surface-low p-2">
+          <div className="mb-1 px-1 text-xs text-muted-foreground">
+            {history.length ? 'История — щелчок подставляет результат в строку' : 'История пуста: сюда попадает каждое «=» и «Отложить».'}
+          </div>
           <ul className="flex flex-col gap-0.5">
             {history.map((h) => (
               <li key={h.id}>
@@ -549,10 +533,7 @@ export function ReportTools({
       {panel === 'help' && help}
 
       {panel === 'calc' && (
-        <>
-          <Selection sel={sel} miss={miss} onRemove={onRemoveSel} onClear={onClearSel} report={report} />
-          <Calc report={report} />
-        </>
+        <CalcPanel sel={sel} miss={miss} onRemove={onRemoveSel} onClear={onClearSel} report={report} />
       )}
 
       {panel === 'pins' && <Pins />}

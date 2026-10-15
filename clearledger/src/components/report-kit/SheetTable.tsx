@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Filter, GripVertical, Pin, Rows3, Sigma } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Filter, Pin, Rows3, Sigma } from 'lucide-react'
 import {
   useEffect, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode,
@@ -358,7 +358,6 @@ export function SheetTable({
   const slice = sorted.slice(from, from + size)
   const markedAll = !!mark && !!sorted.length && sorted.every((x) => mark.has(x.i))
   const markIcon = 'size-3.5 shrink-0 text-primary'
-  const reveal = 'opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-70'
   const headBtn = 'grid h-8 w-8 shrink-0 place-items-center rounded-md text-primary hover:bg-di-surface-highest'
 
   return (
@@ -489,7 +488,7 @@ export function SheetTable({
                       }}
                       onDragEnd={() => setDrag(null)}
                       className={cn(
-                        'sticky top-0 z-10 whitespace-nowrap border-b border-di-outline-variant bg-di-surface-low p-0',
+                        'sticky top-0 z-10 border-b border-di-outline-variant bg-di-surface-low p-0 align-bottom',
                         st.className,
                         numeric[i] ? 'text-right' : 'text-left',
                         onCols && 'cursor-grab active:cursor-grabbing',
@@ -500,71 +499,78 @@ export function SheetTable({
                           (view.indexOf(drag.from) < view.indexOf(i) ? 'shadow-[inset_-3px_0_0_var(--color-primary)]' : 'shadow-[inset_3px_0_0_var(--color-primary)]'),
                       )}
                     >
-                      <div className="group flex h-10 items-center transition-colors focus-within:bg-di-surface-high hover:bg-di-surface-high">
-                        {onCols && <GripVertical className="ml-1 size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-70" aria-hidden />}
+                      <div className="group relative flex min-h-10 items-stretch transition-colors focus-within:bg-di-surface-high hover:bg-di-surface-high">
                         <button
                           type="button"
                           onClick={() => toggle(i)}
                           title={onHeadPick && numeric[i] ? `Вставить «${head[i]}» в формулу` : onCols ? `Сортировать по «${head[i]}». Чтобы переставить столбец, перетащите заголовок` : `Сортировать по «${head[i]}»`}
                           className={cn(
-                            'inline-flex h-full min-w-0 flex-1 items-center gap-1 rounded-md text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
-                            onCols ? 'px-1.5' : 'px-3',
-                            numeric[i] && 'flex-row-reverse',
+                            'flex min-w-0 flex-1 items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium leading-tight text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary',
+                            numeric[i] ? 'flex-row-reverse text-right' : 'text-left',
                             on && 'text-foreground',
                             onHeadPick && numeric[i] && 'text-primary underline decoration-dotted underline-offset-4',
                           )}
                         >
-                          <span className={cn('min-w-0', w && 'truncate')}>{head[i]}</span>
+                          <span className={cn('min-w-0 [overflow-wrap:normal] [word-break:keep-all]', w && 'truncate')}>{head[i]}</span>
                           {k === pin - 1 && <Pin className={markIcon} aria-label="Закреплено" />}
                           {filters?.[i] && <Filter className={markIcon} aria-label="Есть фильтр" />}
-                          <Icon className={cn('size-3.5 shrink-0', on ? 'text-primary' : 'opacity-0 group-hover:opacity-60')} aria-hidden />
+                          {on && <Icon className="size-3.5 shrink-0 text-primary" aria-hidden />}
                         </button>
-                        {onGroup && groupBy?.[i] ? (
-                          <button
-                            type="button"
-                            onClick={() => onGroup(i)}
-                            aria-label={`Сводная по «${head[i]}»`}
-                            title={`Открыть сводную: первый уровень — ${groupBy[i].toLowerCase()}`}
-                            className={cn(headBtn, reveal)}
-                          >
-                            <Rows3 className="size-3.5" aria-hidden />
-                          </button>
-                        ) : onCols && numeric[i] ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              const anchor = e.currentTarget
-                              setStats((s) => (s?.col === i ? null : { col: i, anchor }))
-                            }}
-                            aria-label={`Итоги по столбцу «${head[i]}»`}
-                            aria-haspopup="dialog"
-                            aria-expanded={stats?.col === i}
-                            title="Сумма, среднее, минимум, максимум, количество"
-                            className={cn(headBtn, stats?.col === i ? 'bg-di-surface-highest' : reveal)}
-                          >
-                            <Sigma className="size-3.5" aria-hidden />
-                          </button>
-                        ) : (
-                          groupBy && <span className="w-8 shrink-0" aria-hidden />
-                        )}
                         {onCols && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              const anchor = e.currentTarget
-                              setMenu((m) => (m?.col === i ? null : { col: i, anchor }))
-                            }}
-                            aria-label={`Меню столбца «${head[i]}»`}
-                            aria-haspopup="dialog"
-                            aria-expanded={menu?.col === i}
-                            title="Сортировка, закрепить, скрыть, фильтр"
+                          <div
                             className={cn(
-                              'mr-1 grid h-8 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-di-surface-highest hover:text-foreground',
-                              menu?.col === i ? 'bg-di-surface-highest text-foreground' : reveal,
+                              'absolute inset-y-0 flex items-center gap-0.5 bg-di-surface-high px-0.5 transition-opacity',
+                              numeric[i] ? 'left-0' : 'right-0',
+                              menu?.col === i || stats?.col === i
+                                ? 'opacity-100'
+                                : 'pointer-events-none opacity-0 group-focus-within:pointer-events-auto group-focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100',
                             )}
                           >
-                            <ChevronDown className="size-4" aria-hidden />
-                          </button>
+                            {!on && <Icon className="mx-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+                            {onGroup && groupBy?.[i] ? (
+                              <button
+                                type="button"
+                                onClick={() => onGroup(i)}
+                                aria-label={`Сводная по «${head[i]}»`}
+                                title={`Открыть сводную: первый уровень — ${groupBy[i].toLowerCase()}`}
+                                className={headBtn}
+                              >
+                                <Rows3 className="size-3.5" aria-hidden />
+                              </button>
+                            ) : numeric[i] ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  const anchor = e.currentTarget
+                                  setStats((s) => (s?.col === i ? null : { col: i, anchor }))
+                                }}
+                                aria-label={`Итоги по столбцу «${head[i]}»`}
+                                aria-haspopup="dialog"
+                                aria-expanded={stats?.col === i}
+                                title="Сумма, среднее, минимум, максимум, количество"
+                                className={cn(headBtn, stats?.col === i && 'bg-di-surface-highest')}
+                              >
+                                <Sigma className="size-3.5" aria-hidden />
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                const anchor = e.currentTarget
+                                setMenu((m) => (m?.col === i ? null : { col: i, anchor }))
+                              }}
+                              aria-label={`Меню столбца «${head[i]}»`}
+                              aria-haspopup="dialog"
+                              aria-expanded={menu?.col === i}
+                              title="Сортировка, закрепить, скрыть, фильтр"
+                              className={cn(
+                                'grid h-8 w-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-di-surface-highest hover:text-foreground',
+                                menu?.col === i && 'bg-di-surface-highest text-foreground',
+                              )}
+                            >
+                              <ChevronDown className="size-4" aria-hidden />
+                            </button>
+                          </div>
                         )}
                       </div>
                       {onCols && (

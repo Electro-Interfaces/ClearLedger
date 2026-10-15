@@ -4,9 +4,9 @@ import type { Cell } from './format'
 export type PinItem = { id: number; label: string; value: number; money: boolean }
 export type PickMode = 'sum' | 'sub' | 'mul' | 'div' | 'avg'
 export type HistoryItem = { id: number; expr: string; value: number }
-type ToolsState = { expr: string; pins: PinItem[]; mode: PickMode; history: HistoryItem[] }
+type ToolsState = { expr: string; auto: string; picked: number[]; pins: PinItem[]; mode: PickMode; history: HistoryItem[] }
 
-let tools: ToolsState = { expr: '', pins: [], mode: 'sum', history: [] }
+let tools: ToolsState = { expr: '', auto: '', picked: [], pins: [], mode: 'sum', history: [] }
 const subs = new Set<() => void>()
 const set = (patch: Partial<ToolsState>) => {
   tools = { ...tools, ...patch }
@@ -25,7 +25,37 @@ export const useTools = () =>
 const text = (n: number) => String(Math.round(n * 100) / 100).replace('.', ',')
 
 export const setExpr = (expr: string) => set({ expr })
-export const setPickMode = (mode: PickMode) => set({ mode })
+
+const SIGN: Record<PickMode, string> = { sum: '+', sub: '−', mul: '×', div: '÷', avg: '+' }
+const term = (v: number) => (v < 0 ? `(${text(v)})` : text(v))
+
+export function pickedExpr(values: number[], mode: PickMode) {
+  if (!values.length) return ''
+  const body = values.map(term).join(` ${SIGN[mode]} `)
+  return mode === 'avg' && values.length > 1 ? `(${body}) ÷ ${values.length}` : body
+}
+
+const isAuto = () => !tools.expr.trim() || tools.expr === tools.auto
+
+export function setPicked(values: number[], added?: number) {
+  if (isAuto()) {
+    const expr = pickedExpr(values, tools.mode)
+    return set({ picked: values, expr, auto: expr })
+  }
+  if (added === undefined) return set({ picked: values })
+  const e = tools.expr.trimEnd()
+  set({ picked: values, expr: /[+\-−×÷(]$/.test(e) ? `${e} ${term(added)}` : `${e} ${SIGN[tools.mode === 'avg' ? 'sum' : tools.mode]} ${term(added)}` })
+}
+
+export function setPickMode(mode: PickMode) {
+  if (!isAuto()) return set({ mode })
+  const expr = pickedExpr(tools.picked, mode)
+  set({ mode, expr, auto: expr })
+}
+
+export function remember(expr: string, value: number) {
+  set({ history: [{ id: Date.now(), expr, value: Math.round(value * 100) / 100 }, ...tools.history].slice(0, 20) })
+}
 
 export const textOf = text
 
@@ -35,7 +65,8 @@ export function commitExpr() {
   const expr = tools.expr.trim()
   const done = text(value)
   if (expr === done) return
-  set({ expr: done, history: [{ id: Date.now(), expr, value: Math.round(value * 100) / 100 }, ...tools.history].slice(0, 8) })
+  remember(expr, value)
+  set({ expr: done, auto: '' })
 }
 
 export function pickResult(values: number[], mode: PickMode): number | null {
