@@ -348,8 +348,10 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
     !поиск.trim() || п.name.toLocaleLowerCase('ru').includes(поиск.trim().toLocaleLowerCase('ru'))),
     [люди.data, поиск])
 
+  // Вкладку комнаты «сейчас» открывает клик (см. кнопку), а не onSuccess: открытая
+  // после `await` браузер молча блокирует как попап (15.10.2026).
   const созвать = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (_вкладка: Window | null) => {
       const m = await conf.createMeeting(companyId, {
       title: тема,
       startsAt: сейчас ? undefined : new Date(начало).toISOString(),
@@ -367,7 +369,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
         { description: 'Приложите их из карточки конференции' })
       return m
     },
-    onSuccess: async (m) => {
+    onSuccess: async (m, вкладка) => {
       try { localStorage.setItem('conf-email-copy', почтой ? '1' : '0') } catch { /* приватный режим */ }
       const д = m.delivery
       const позвали = [
@@ -379,14 +381,14 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
         { description: позвали ? `Позвали: ${позвали}` : 'Ссылка в карточке конференции' })
       if (сейчас) {
         try {
-          const вход = await conf.joinMeeting(companyId, m.id)
+          const вход = await conf.joinMeeting(companyId, m.id, вкладка)
           копировать(вход.guest_url)
-        } catch { /* войдёт из списка */ }
+        } catch { вкладка?.close() /* войдёт из списка */ }
       }
       onCreated()
     },
-    onError: (e: Error) => toast.error(/503|не настроен/i.test(e.message || '')
-      ? 'Конференции не настроены' : 'Не удалось создать конференцию'),
+    onError: (e: Error, вкладка) => { вкладка?.close(); toast.error(/503|не настроен/i.test(e.message || '')
+      ? 'Конференции не настроены' : 'Не удалось создать конференцию') },
   })
 
   return (
@@ -560,7 +562,7 @@ export function NewTalkDialog({ companyId, plan = false, onClose, onCreated }: {
 
         <DialogFooter className="shrink-0 flex-col gap-2 border-t border-border px-6 py-4 sm:flex-row">
           <Button variant="ghost" onClick={onClose}>Отмена</Button>
-          <Button disabled={созвать.isPending} onClick={() => созвать.mutate()}>
+          <Button disabled={созвать.isPending} onClick={() => созвать.mutate(сейчас ? window.open('about:blank', '_blank') : null)}>
             {созвать.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {созвать.isPending && файлы.length ? 'Прикладываем материалы…'
             : сейчас ? 'Начать и позвать' : 'Назначить и позвать'}

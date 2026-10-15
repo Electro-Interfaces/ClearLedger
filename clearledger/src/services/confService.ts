@@ -163,8 +163,10 @@ export function следитьЗаВкладкой(companyId: string, sessionId:
   }, { once: true })
 }
 
-export async function joinMeeting(companyId: string, eventId: string): Promise<MeetingUrls> {
-  const вкладка = window.open('about:blank', '_blank')
+// `вкладка` передаёт тот, кто до входа сам ждёт ответа (создать и войти): открыть её
+// он обязан синхронно по клику, иначе она будет заблокирована как попап.
+export async function joinMeeting(companyId: string, eventId: string,
+  вкладка: Window | null = window.open('about:blank', '_blank')): Promise<MeetingUrls> {
   if (вкладка) вкладка.opener = null
   try {
     const m = await post<MeetingUrls & { session_id: string; moderator: boolean }>(

@@ -13,6 +13,7 @@
  * один каталог, один порядок слоёв, никакого второго списка приложений.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { X } from 'lucide-react'
 import { EcosystemHomePage } from '@/pages/EcosystemHomePage'
 
@@ -34,6 +35,12 @@ export function AppsPanelProvider({ children }: { children: React.ReactNode }) {
   const close = useCallback(() => setOpen(false), [])
   const toggle = useCallback(() => setOpen((v) => !v), [])
   const api = useMemo(() => ({ open, toggle, close }), [open, toggle, close])
+
+  // Ушли на другой экран — откуда угодно (шапка, рельса, меню), а не только плашкой:
+  // панель закрывается. Иначе она оставалась поверх нового экрана, и переход
+  // выглядел как «ничего не произошло» («Все конференции» из шапки, 15.10.2026).
+  const { pathname } = useLocation()
+  useEffect(() => { setOpen(false) }, [pathname])
 
   // Esc — выход из режима, как и везде в пространстве: открытая поверх работы
   // панель обязана закрываться тем же жестом, что и любое временное окно.
