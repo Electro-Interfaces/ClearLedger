@@ -447,7 +447,9 @@ export function OpsWorklistPanel() {
             )}
           </div>
 
-      <Card>
+      {/* py-0: свои поля карточки (py-6) плюс p-3 содержимого давали пустую
+          полосу над строкой фильтров (МАГ, 15.10.2026). */}
+      <Card className="py-0">
         <CardContent className="space-y-3 p-3">
           {/* Фильтры сворачиваются, как в отчётах КП СДО: развёрнуты — подписанные
               поля, свёрнуты — одна строка с тем, что сейчас отобрано. */}
@@ -518,9 +520,8 @@ export function OpsWorklistPanel() {
                 <ChevronDown className={cn('size-4 transition-transform', фильтрыОткрыты && 'rotate-180')} />
                 {фильтрыОткрыты ? 'Свернуть фильтры' : 'Фильтры'}
               </button>
-              {!фильтрыОткрыты && отбор.map((о) => (
-                <span key={о} className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">{о}</span>
-              ))}
+              {/* Чипов отбора здесь нет: тот же отбор — строкой в подписи
+                  таблицы, второй раз он только занимал место (МАГ, 15.10.2026). */}
               <PanelViewTabs value={вид} onChange={setВид} label={null} tabs={[
                 { k: 'list', label: 'Список' },
                 { k: 'pivot', label: 'Сводная' },

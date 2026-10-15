@@ -170,7 +170,7 @@ export function WorkspaceTabBar() {
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom" sideOffset={6}>
-            {expanded ? 'Вернуть меню и боковые панели' : 'Рабочая область на всю ширину: меню и боковые панели скрываются'}
+            {expanded ? 'Вернуть шапку, меню и строку фильтров' : 'Отчёт на весь экран: шапка, меню и строка фильтров скрываются, правая рельса остаётся'}
           </TooltipContent>
         </Tooltip>
       </div>

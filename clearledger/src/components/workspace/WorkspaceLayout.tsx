@@ -8,6 +8,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Copy, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useMaxWidth } from '@/hooks/use-mobile'
+import { useExpandedWorkspace } from '@/hooks/useExpandedWorkspace'
 import { EmptyState } from '@/components/common/EmptyState'
 import { PRODUCT_SETUP_NOTE } from '@/config/spaceProducts'
 import { useAppEnabled } from '@/hooks/useCompanyRegistry'
@@ -210,15 +211,18 @@ function DesktopWorkspace() {
   const { coreMode, lastReconcileResult } = useWorkspace()
   const reconResult = lastReconcileResult as { summary: { totalMstoVolume: number; totalMstoSum: number; totalMstoCount: number; totalTfVolume: number; totalTfSum: number; totalShiftNonCashVolume: number; mstoVsTfVolumeDiff: number; matched: number; mismatch: number; hasErrors: boolean } } | null
   const fmtN = (n: number) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(n)
+  // Развёрнутый экран: без меню разделов и строки фильтров — только отчёт и
+  // правая рельса. Отбор при этом действует, он просто не на виду.
+  const [expanded] = useExpandedWorkspace()
 
   return (
     <div className="h-full min-h-0 overflow-hidden flex">
       {/* Вертикальное меню разделов — во всю высоту рабочего стола, слева от строки фильтров */}
-      <WorkspaceModeSidebar />
+      {!expanded && <WorkspaceModeSidebar />}
 
       {/* === Правая колонка === — строка фильтров сверху, над рабочей областью */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-        <WorkspaceToolbar />
+        {!expanded && <WorkspaceToolbar />}
 
         {/* === Рабочая область === — единый слой на всю ширину */}
         <div className="flex-1 min-h-0 bg-background flex flex-col overflow-hidden">
