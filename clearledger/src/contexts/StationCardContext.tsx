@@ -34,7 +34,7 @@ import type { ServiceLocation } from '@/types/location'
 
 interface StationCardValue {
   /** Открыть карточку по коду, номеру, идентификатору или названию станции. */
-  open: (значение: string | null | undefined) => void
+  open: (значение: string | null | undefined, вкладка?: string) => void
   /** Есть ли такая станция в реестре: ссылку рисуем только когда есть куда вести. */
   has: (значение: string | null | undefined) => boolean
   /** Найти объект, не открывая карточку: имя, адрес, паспорт для подсказки. */
@@ -49,6 +49,9 @@ export function StationCardProvider({ children }: { children: ReactNode }) {
   const { companyId } = useCompany()
   const [включён, setВключён] = useState(false)
   const [открыта, setОткрыта] = useState<ServiceLocation | null>(null)
+  // Раздел, с которого открыть карточку (ключ `LEGACY_TAB_MAP`): «Связанные
+  // отчёты» строки ведут сразу в заявки, приезды, диагностику.
+  const [вкладка, setВкладка] = useState<string | undefined>()
 
   const реестр = useQuery({
     queryKey: ['locations', companyId],
@@ -66,9 +69,9 @@ export function StationCardProvider({ children }: { children: ReactNode }) {
   const value = useMemo<StationCardValue>(() => ({
     find,
     has: (значение) => find(значение) !== null,
-    open: (значение) => {
+    open: (значение, раздел) => {
       const станция = find(значение)
-      if (станция) setОткрыта(станция)
+      if (станция) { setВкладка(раздел); setОткрыта(станция) }
     },
     // setState с тем же значением React отбрасывает, поэтому таблица на пятьсот
     // строк не превращается в пятьсот перерисовок.
@@ -78,7 +81,9 @@ export function StationCardProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={value}>
       {children}
-      <LocationCockpitModal location={открыта} onClose={() => setОткрыта(null)} />
+      {/* key: раздел читается карточкой один раз при открытии. */}
+      <LocationCockpitModal key={открыта ? `${открыта.id}:${вкладка ?? ''}` : ''}
+        location={открыта} initialTab={вкладка} onClose={() => setОткрыта(null)} />
     </Ctx.Provider>
   )
 }

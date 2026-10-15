@@ -40,6 +40,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { StationLink } from '@/components/common/StationLink'
+import { useStationCard } from '@/contexts/StationCardContext'
 import { IntakeHealthBar } from '@/components/workspace/IntakeHealthBar'
 import { BulkTicketDialog } from '@/components/locations/BulkTicketDialog'
 import { ExportButton } from '@/components/workspace/analytics/ExportButton'
@@ -47,7 +48,7 @@ import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { ReportPivot } from '@/components/workspace/ReportPivot'
 import {
-  PageSizeField, ReportTools, RowCard, SheetTable, ToolPanel, ToolStrip, qty, useReportKit,
+  PageSizeField, RelatedLink, ReportTools, RowCard, SheetTable, ToolPanel, ToolStrip, qty, useReportKit,
   type Cell, type Mark,
 } from '@/components/report-kit'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -123,6 +124,15 @@ const ШАПКА = ['№', 'Станция', 'Город', 'Регион', 'Чт
 const СКРЫТЫ = [С.город, С.главная, С.молчит, С.впустую, С.ушло, С.заявок]
 /** Столбцы, по которым шапка предлагает сводную: столбец → поле сводной. */
 const СВОДНАЯ_ПО: Record<number, string> = { [С.регион]: 'Регион', [С.главная]: 'Главная причина', [С.работа]: 'В работе', [С.город]: 'Город' }
+/** Связанные отчёты карточки строки — разделы карточки станции (ключи `LEGACY_TAB_MAP`). */
+const СВЯЗАННЫЕ = [
+  { вкладка: 'passport', имя: 'Паспорт', подсказка: 'оборудование, адрес, владелец' },
+  { вкладка: 'diagnostics', имя: 'Диагностика', подсказка: 'разъёмы и ошибки по витрине' },
+  { вкладка: 'work', имя: 'Приезды', подсказка: 'сессии зарядки по дням' },
+  { вкладка: 'sales', имя: 'Продажи', подсказка: 'выручка и энергия' },
+  { вкладка: 'service', имя: 'Заявки', подсказка: 'все заявки по станции' },
+]
+
 /**
  * Не идут в сводную: номер и станция у каждой строки свои, «Что со станцией» —
  * список причин с пометками (разрез по нему — «Главная причина»). Столбцы в
@@ -184,6 +194,7 @@ function Плитка({ icon: Icon, label, value, hint, tone, onClick, active }:
 export function OpsWorklistPanel() {
   const { companyId } = useCompany()
   const { regionIds, period } = useFilters()
+  const станция = useStationCard()
   const экран = useRef<HTMLDivElement>(null)
   const [поиск, setПоиск] = useState('')
   const [причина, setПричина] = useState('all')
@@ -607,24 +618,27 @@ export function OpsWorklistPanel() {
         of={карточка?.order.length ?? 0}
         onStep={(dir) => setКарточка((k) => (k ? { ...k, pos: Math.min(Math.max(k.pos + dir, 0), k.order.length - 1) } : k))}
         onClose={() => setКарточка(null)}
+        // Связанные отчёты — разделы карточки станции, открытые сразу на нужном
+        // месте, и заявка. Окно строки закрывается: карточка станции открывается
+        // в рабочей области и под окном её не видно.
         extra={строкаКарточки && (
-          <div className="flex flex-wrap items-center gap-2">
-            <StationLink station={строкаКарточки.locationId}
-              className="rounded-md border border-border px-2.5 py-1.5 text-sm no-underline">
-              Открыть станцию
-            </StationLink>
+          <div className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/60">
+            {СВЯЗАННЫЕ.map((с) => (
+              <RelatedLink key={с.вкладка} label={`${с.имя} станции ${строкаКарточки.number ?? строкаКарточки.code ?? ''}`.trim()}
+                hint={с.подсказка}
+                onClick={() => { setКарточка(null); станция.open(строкаКарточки.locationId, с.вкладка) }} />
+            ))}
             {строкаКарточки.lastTicketId && (
-              <a href={`/support/customer/tickets/${строкаКарточки.lastTicketId}`}
-                className="rounded-md border border-border px-2.5 py-1.5 text-sm text-primary hover:bg-accent">
-                Заявка {строкаКарточки.lastTicketNumber ?? ''}
-              </a>
+              <RelatedLink label={`Заявка ${строкаКарточки.lastTicketNumber ?? ''}`.trim()}
+                hint={строкаКарточки.breachedTickets > 0 ? 'срок сорван' : 'последняя открытая'}
+                onClick={() => window.location.assign(`/support/customer/tickets/${строкаКарточки.lastTicketId}`)} />
             )}
-            <Button size="sm" variant="outline" onClick={() => setПачка([{
-              id: строкаКарточки.locationId, name: строкаКарточки.name,
-              number: строкаКарточки.number ?? строкаКарточки.code,
-            }])}>
-              Завести заявку
-            </Button>
+            <RelatedLink label="Завести заявку" hint="на выезд по этой станции"
+              icon={<ClipboardCheck className="size-4" aria-hidden />}
+              onClick={() => {
+                setКарточка(null)
+                setПачка([{ id: строкаКарточки.locationId, name: строкаКарточки.name, number: строкаКарточки.number ?? строкаКарточки.code }])
+              }} />
           </div>
         )}
       />

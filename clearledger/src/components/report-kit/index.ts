@@ -2,7 +2,7 @@ export const REPORT_KIT_VERSION = '1.2.0'
 
 export { SheetTable, keepRow, footer, compareCells, type Cols, type Filters, type Filt, type Picked, type Mark } from './SheetTable'
 export { ReportTools } from './ReportTools'
-export { RowCard } from './RowCard'
+export { RelatedLink, RowCard } from './RowCard'
 export { ToolButtons, ToolStrip, ToolPanel, ReportSlot } from './ToolRail'
 export { useReportKit, STORAGE_PREFIX } from './useReportKit'
 export { useRail, setRail, togglePanel, closePanel, type Panel, type Tool } from './rail'
