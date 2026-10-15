@@ -41,6 +41,8 @@ interface StationCardValue {
   find: (значение: string | null | undefined) => ServiceLocation | null
   /** «На этом экране есть ссылки на станции» — сигнал загрузить реестр. */
   нужен: () => void
+  /** Карточка сейчас открыта: окно, из которого её открыли, ждёт возврата. */
+  открыта: boolean
 }
 
 const Ctx = createContext<StationCardValue | null>(null)
@@ -76,7 +78,8 @@ export function StationCardProvider({ children }: { children: ReactNode }) {
     // setState с тем же значением React отбрасывает, поэтому таблица на пятьсот
     // строк не превращается в пятьсот перерисовок.
     нужен: () => setВключён(true),
-  }), [find])
+    открыта: открыта !== null,
+  }), [find, открыта])
 
   return (
     <Ctx.Provider value={value}>
@@ -101,5 +104,6 @@ export function useStationCard(): StationCardValue {
     has: () => false,
     find: () => null,
     нужен: () => {},
+    открыта: false,
   }
 }

@@ -53,7 +53,7 @@ import {
 } from '@/components/report-kit'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
-import { todayISO } from '@/components/workspace/analytics/periodPresets'
+import { daysAgoISO } from '@/components/workspace/analytics/periodPresets'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
 import { getOpsWorklist, type OpsWorklist, type WorklistRow } from '@/services/opsService'
@@ -208,11 +208,14 @@ export function OpsWorklistPanel() {
   const [пачка, setПачка] = useState<{ id: string; name: string; number: string | null }[] | null>(null)
   const [карточка, setКарточка] = useState<{ order: number[]; pos: number } | null>(null)
   const [порядок, setПорядок] = useState<number[]>([])
+  const [возврат, setВозврат] = useState(false)
   // День, НА который смотрим, — конец общего периода в строке фильтра (МАГ,
   // 15.10.2026: период выбирается там же, где на всех экранах, а не своим полем).
-  // Период по сегодня — граница данных (последняя загруженная сессия). Разбор
-  // «почему 3 сентября встала половина региона» — период, кончающийся 3-м.
-  const наДень = period.to >= todayISO() ? '' : period.to
+  // Период по вчера или по сегодня — граница данных (последняя загруженная
+  // сессия): выгрузка приходит раз в сутки, и «по вчера» — это и есть последние
+  // данные, а не срез на вчера с подписью «Работа на 14.10». Разбор «почему
+  // 3 сентября встала половина региона» — период, кончающийся 3-м.
+  const наДень = period.to >= daysAgoISO(1) ? '' : period.to
   const [фильтрыОткрыты, setФильтрыОткрыты] = useState(() => {
     try { return localStorage.getItem(КЛЮЧ_ФИЛЬТРОВ) === '1' } catch { return false }
   })
@@ -612,12 +615,16 @@ export function OpsWorklistPanel() {
       <RowCard
         report="На сегодня"
         head={набор.sheet.head}
-        row={карточка ? набор.sheet.rows[карточка.order[карточка.pos]] ?? null : null}
+        // Связанный отчёт и «Завести заявку» открываются поверх, а окно строки
+        // прячется и возвращается, когда их закрыли: человек не уходит со своей
+        // строки (МАГ, 15.10.2026).
+        row={карточка && !(возврат && (станция.открыта || пачка))
+          ? набор.sheet.rows[карточка.order[карточка.pos]] ?? null : null}
         title={строкаКарточки?.name}
         at={карточка?.pos ?? 0}
         of={карточка?.order.length ?? 0}
         onStep={(dir) => setКарточка((k) => (k ? { ...k, pos: Math.min(Math.max(k.pos + dir, 0), k.order.length - 1) } : k))}
-        onClose={() => setКарточка(null)}
+        onClose={() => { setКарточка(null); setВозврат(false) }}
         // Связанные отчёты — разделы карточки станции, открытые сразу на нужном
         // месте, и заявка. Окно строки закрывается: карточка станции открывается
         // в рабочей области и под окном её не видно.
@@ -626,7 +633,7 @@ export function OpsWorklistPanel() {
             {СВЯЗАННЫЕ.map((с) => (
               <RelatedLink key={с.вкладка} label={`${с.имя} станции ${строкаКарточки.number ?? строкаКарточки.code ?? ''}`.trim()}
                 hint={с.подсказка}
-                onClick={() => { setКарточка(null); станция.open(строкаКарточки.locationId, с.вкладка) }} />
+                onClick={() => { setВозврат(true); станция.open(строкаКарточки.locationId, с.вкладка) }} />
             ))}
             {строкаКарточки.lastTicketId && (
               <RelatedLink label={`Заявка ${строкаКарточки.lastTicketNumber ?? ''}`.trim()}
@@ -636,7 +643,7 @@ export function OpsWorklistPanel() {
             <RelatedLink label="Завести заявку" hint="на выезд по этой станции"
               icon={<ClipboardCheck className="size-4" aria-hidden />}
               onClick={() => {
-                setКарточка(null)
+                setВозврат(true)
                 setПачка([{ id: строкаКарточки.locationId, name: строкаКарточки.name, number: строкаКарточки.number ?? строкаКарточки.code }])
               }} />
           </div>
