@@ -14,9 +14,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
 import {
-  Bot, CalendarDays, CalendarPlus, Compass, HelpCircle, LifeBuoy, ListChecks, Maximize2, MessageCircle, NotebookPen, X,
+  Bot, CalendarDays, CalendarPlus, Compass, HelpCircle, ListChecks, Maximize2, MessageCircle, NotebookPen, X,
 } from 'lucide-react'
-import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { useIsMobile, useMaxWidth } from '@/hooks/use-mobile'
 import { MobileShell } from '@/components/common/MobileShell'
@@ -47,9 +46,8 @@ type Tab = {
 const TABS: Tab[] = [
   // Календарь и записная книжка — то, во что заглядывают поверх работы, а не то,
   // ради чего уходят с экрана: «свободен ли четверг» и «записать, пока помню».
-  // «Поддержка» — наверху и акцентом вместо «Встречи» (решение МАГа 15.10.2026):
-  // встречу заводят кнопкой «Конференция» в шапке, а обращение — отсюда.
-  { key: 'tickets', label: 'Поддержка', icon: LifeBuoy, primary: true },
+  // «Встречи» и «Поддержки» в рельсе нет (решение МАГа 15.10.2026): обе есть в
+  // шапке, а повтор кнопки в двух местах только удлиняет колонку.
   { key: 'calendar', label: 'Календарь', icon: CalendarDays, primary: true },
   { key: 'notes', label: 'Записи', icon: NotebookPen, primary: true },
   { key: 'chat', label: 'Чат', icon: MessageCircle },
@@ -157,18 +155,6 @@ export function RightDock() {
     openInteraction('report')
     setWidth((w) => (w < 380 ? 380 : w))
   }, [reportRail.panel, dockOpen, section, openInteraction, closeInteraction])
-
-  /** «Обсудить»: описание экрана с отбором — в буфер, чат — справа. Беседу
-   *  человек выбирает сам: адресата у таблицы нет. */
-  const discuss = useCallback(async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.success('Описание экрана скопировано — вставьте его в нужную беседу')
-    } catch {
-      toast.message(text)
-    }
-    openInteraction('chat')
-  }, [openInteraction])
 
   // Esc — первое, что нажимают, чтобы убрать панель с глаз. Слушатель живёт,
   // только пока док открыт: иначе он ловил бы Esc у диалогов и меню.
@@ -285,7 +271,7 @@ export function RightDock() {
             {/* Инструменты таблицы открытого экрана (report-kit). */}
             {reportRail.available && <>
               <div className="my-2 h-px w-8 bg-primary/40" role="separator" />
-              <ToolButtons onDiscuss={discuss} onOpen={openTool} />
+              <ToolButtons onOpen={openTool} />
             </>}
           </>
         )}

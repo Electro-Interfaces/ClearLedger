@@ -8,12 +8,11 @@ export type RailState = {
   panel: Panel | null
   tools: boolean
   pivot: boolean
-  share: string
   help: ReactNode
   slot: HTMLElement | null
 }
 
-let state: RailState = { available: false, title: '', panel: null, tools: false, pivot: false, share: '', help: null, slot: null }
+let state: RailState = { available: false, title: '', panel: null, tools: false, pivot: false, help: null, slot: null }
 const subs = new Set<() => void>()
 
 export function setRail(patch: Partial<RailState>) {

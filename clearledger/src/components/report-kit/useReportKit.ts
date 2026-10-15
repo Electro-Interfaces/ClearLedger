@@ -38,7 +38,6 @@ export function useReportKit({
   hide,
   ready,
   pivot = false,
-  share = '',
   help = null,
 }: {
   id: string
@@ -49,7 +48,6 @@ export function useReportKit({
   hide?: number[]
   ready: boolean
   pivot?: boolean
-  share?: string
   help?: ReactNode
 }) {
   const defaultCols = useMemo<Cols>(() => ({ order: [], hidden: hide ?? [] }), [hide])
@@ -63,9 +61,9 @@ export function useReportKit({
   const { panel } = useRail()
 
   useEffect(() => {
-    setRail({ available: true, title, tools: ready, pivot, share, help })
-  }, [title, ready, pivot, share, help])
-  useEffect(() => () => setRail({ available: false, panel: null, tools: false, pivot: false, share: '', help: null }), [])
+    setRail({ available: true, title, tools: ready, pivot, help })
+  }, [title, ready, pivot, help])
+  useEffect(() => () => setRail({ available: false, panel: null, tools: false, pivot: false, help: null }), [])
 
   const sheet = useMemo(() => withCalc({ head, rows, total }, calcs), [head, rows, total, calcs])
   const derive = useMemo(() => deriveTotals(sheet.head, calcs), [sheet.head, calcs])

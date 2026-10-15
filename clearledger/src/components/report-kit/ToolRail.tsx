@@ -1,11 +1,11 @@
 import {
-  ArrowLeftRight, Calculator, ClipboardList, Columns3, MessageSquareShare, SquareFunction, TextSearch, type LucideIcon,
+  ArrowLeftRight, Calculator, ClipboardList, Columns3, SquareFunction, TextSearch, type LucideIcon,
 } from 'lucide-react'
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
-import { closePanel, getRail, setRail, togglePanel, useRail, type Panel } from './rail'
+import { closePanel, setRail, togglePanel, useRail, type Panel } from './rail'
 
 type Item = { key: Panel; short: string; label: string; icon: LucideIcon; table?: boolean }
 
@@ -43,11 +43,7 @@ function ToolButton({ icon: Icon, short, label, on, off, onClick, strip }: {
   )
 }
 
-export function ToolButtons({ strip, onDiscuss, onOpen }: {
-  strip?: boolean
-  onDiscuss?: (text: string) => void
-  onOpen?: (p: Panel) => void
-}) {
+export function ToolButtons({ strip, onOpen }: { strip?: boolean; onOpen?: (p: Panel) => void }) {
   const rail = useRail()
   if (!rail.available) return null
   const open = (p: Panel) => {
@@ -70,33 +66,22 @@ export function ToolButtons({ strip, onDiscuss, onOpen }: {
           strip={strip}
         />
       ))}
-      {onDiscuss && (
-        <ToolButton
-          icon={MessageSquareShare}
-          short="Обсудить"
-          label="Обсудить в чате: описание экрана с отбором копируется для вставки"
-          off={why}
-          onClick={() => {
-            closePanel()
-            onDiscuss(getRail().share)
-          }}
-          strip={strip}
-        />
-      )}
     </>
   )
 }
 
-export function ToolStrip({ onDiscuss }: { onDiscuss?: (text: string) => void }) {
+export function ToolStrip() {
   return (
     <div className="-mx-1 flex items-stretch gap-1 overflow-x-auto px-1 pb-1 lg:hidden" role="toolbar" aria-label="Инструменты таблицы">
-      <ToolButtons strip onDiscuss={onDiscuss} />
+      <ToolButtons strip />
     </div>
   )
 }
 
+const slotRef = (el: HTMLDivElement | null) => setRail({ slot: el })
+
 export function ReportSlot() {
-  return <div ref={(el) => setRail({ slot: el })} className="h-full overflow-y-auto" />
+  return <div ref={slotRef} className="h-full overflow-y-auto" />
 }
 
 export function ToolPanel({ children }: { children: ReactNode }) {

@@ -602,7 +602,7 @@ export function SheetTable({
                     onClick={
                       onRow &&
                       ((e) => {
-                        if ((e.target as HTMLElement).closest(INTERACTIVE)) return
+                        if (onPick || (e.target as HTMLElement).closest(INTERACTIVE)) return
                         open(from + n)
                       })
                     }

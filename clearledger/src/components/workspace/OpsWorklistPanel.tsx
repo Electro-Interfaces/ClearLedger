@@ -52,7 +52,6 @@ import {
 } from '@/components/report-kit'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
-import { useSupportContext } from '@/contexts/SupportContext'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
 import { getOpsWorklist, type OpsWorklist, type WorklistRow } from '@/services/opsService'
@@ -165,7 +164,6 @@ function Плитка({ icon: Icon, label, value, hint, tone, onClick, active }:
 export function OpsWorklistPanel() {
   const { companyId } = useCompany()
   const { regionIds } = useFilters()
-  const { openInteraction } = useSupportContext()
   const экран = useRef<HTMLDivElement>(null)
   const [поиск, setПоиск] = useState('')
   const [причина, setПричина] = useState('all')
@@ -239,9 +237,6 @@ export function OpsWorklistPanel() {
     ready: !!q.data,
     pivot: вид === 'pivot',
     help: ПОМОЩЬ,
-    share: `Эксплуатация → Мониторинг → «На сегодня», данные по ${данныеПо} МСК`
-      + `${наДень ? `, на день ${наДень}` : ''}`
-      + `${отбор.length ? `; отбор: ${отбор.join(', ')}` : ''}; станций в списке: ${строки.length}`,
   })
 
   const отметка = useMemo<Mark>(() => ({
@@ -497,10 +492,7 @@ export function OpsWorklistPanel() {
           </div>
 
           {/* Телефон и планшет: рельсы нет, те же кнопки — полосой над таблицей. */}
-          <ToolStrip onDiscuss={(text) => {
-            void navigator.clipboard?.writeText(text).catch(() => undefined)
-            openInteraction('chat')
-          }} />
+          <ToolStrip />
 
           {вид === 'pivot' ? (
             <div className="space-y-2">
