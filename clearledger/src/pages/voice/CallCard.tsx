@@ -17,9 +17,10 @@ import { Button } from '@/components/ui/button'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as voice from '@/services/voiceService'
 import {
-  ИСХОД, ОБСЛУЖИЛ, ЭТАП, дата, когда, оператор, плохойИсход, сек, время,
+  ДЕЙСТВИЕ_АУДИТА, ИСХОД, ОБСЛУЖИЛ, ЭТАП, дата, когда, ктоСделал, оператор, плохойИсход, сек, время,
 } from './format'
 import { ReasonDialog, Flags, NodeError } from './parts'
+import { RetentionActions } from './RetentionActions'
 
 type Причина = { что: 'number' } | { что: 'transcript' } | { что: 'recording'; id: string }
 
@@ -189,6 +190,7 @@ export function CallCard({ contactId, onBack }: { contactId: string; onBack?: ()
                 ))}
               </ol>
             )}
+            <RetentionActions к={к} />
           </section>
 
           <section className="space-y-1 border-t border-border pt-3">
@@ -200,7 +202,7 @@ export function CallCard({ contactId, onBack }: { contactId: string; onBack?: ()
             {кто.data?.items.map(з => (
               <p key={з.id} className="text-xs">
                 <span className="text-muted-foreground">{когда(з.at)}</span>
-                {' · '}{з.actor.name ?? з.actor.sub ?? 'служебный вход'} {ДЕЙСТВИЕ[з.action] ?? з.action}
+                {' · '}{ктоСделал(з.actor)} {ДЕЙСТВИЕ[з.action] ?? ДЕЙСТВИЕ_АУДИТА[з.action] ?? з.action}
                 {з.reason && <span className="text-muted-foreground"> · «{з.reason}»</span>}
               </p>
             ))}

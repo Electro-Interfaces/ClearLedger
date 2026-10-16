@@ -43,7 +43,7 @@ const ВКЛАДКИ = [
   { key: 'enrichment', name: 'Подсказки', поля: ['/liveEnrichment'] },
 ] as const
 
-interface Части {
+export interface Части {
   п: Паспорт
   ч: Черновик<Паспорт>
   поставить: (ключи: string[], значение: unknown) => void
@@ -359,9 +359,9 @@ function RetentionTab({ п, ч, поставить }: Части) {
   )
 }
 
-// ——— Подсказки ———
+// ——— Подсказки (и экран «Распознавание и подсказки») ———
 
-function EnrichmentTab({ п, ч, поставить }: Части) {
+export function EnrichmentTab({ п, ч, поставить }: Части) {
   const e = п.liveEnrichment ?? {}
   return (
     <div>
