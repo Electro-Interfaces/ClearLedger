@@ -15,7 +15,7 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import CompanyScope, assert_company_member, get_current_user
+from app.auth import CompanyScope, assert_company_member, get_current_user, visit_company
 from app.database import get_db
 from app.models import User, UserCompany
 
@@ -47,6 +47,10 @@ async def scope_company_id(user: User, db: AsyncSession) -> uuid.UUID:
     ref = _active_company.get()
     if ref:
         return await assert_company_member(ref, user, db)
+    # Сессия по пропуску открыта в одну компанию: умолчание учётки — не её.
+    visit = visit_company()
+    if visit is not None:
+        return visit
     if user.company_id is not None:
         return user.company_id
     # Умолчания нет — но если членство ровно одно, выбирать не из чего, и
@@ -100,6 +104,9 @@ async def get_owned(
 
     obj = await db.get(model, obj_id)
     if obj is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
+    visit = visit_company()
+    if visit is not None and obj.company_id != visit:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Не найдено")
     if current_user.is_superadmin:
         return obj

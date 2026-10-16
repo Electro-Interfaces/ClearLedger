@@ -16,6 +16,7 @@ import base64
 import json
 import secrets
 import time
+import uuid
 from typing import Any
 
 import jwt
@@ -75,8 +76,19 @@ def find_app(code: str) -> dict[str, str] | None:
     return next((a for a in sso_apps() if a["code"] == code), None)
 
 
-def sign_sso_token(*, user, company_id, companies: list[dict[str, Any]], aud: str) -> str | None:
-    """RS256 handoff-токен для приложения-аудитории `aud`. None, если SSO выключен."""
+def new_jti() -> str:
+    """Идентификатор токена (`jti`, Я-10): по нему приёмник отсекает повтор и находит
+    выдачу в своём журнале. Случайный — номер по порядку выдавал бы, сколько их было."""
+    return uuid.uuid4().hex
+
+
+def sign_sso_token(*, user, company_id, companies: list[dict[str, Any]], aud: str,
+                   roles: list[str] | None = None) -> str | None:
+    """RS256 handoff-токен для приложения-аудитории `aud`. None, если SSO выключен.
+
+    `roles` — роли человека В ПРИЛОЖЕНИИ `aud` в текущей компании (Я-10,
+    `services/app_roles.py`): приложению не нужно угадывать их по роли в
+    пространстве. None — клейм не ставится (как раньше)."""
     key = _private_key()
     if not key:
         return None
@@ -97,10 +109,13 @@ def sign_sso_token(*, user, company_id, companies: list[dict[str, Any]], aud: st
         "cid": cid,                                      # текущая компания
         "adm": is_admin,                                 # админ контейнера (для рельса приложения)
         "companies": companies,                          # [{id, slug, role}]
+        "jti": new_jti(),
         "iat": now,
         "nbf": now - 10,
         "exp": now + settings.sso_token_ttl_seconds,
     }
+    if roles is not None:
+        payload["roles"] = roles                         # роли в приложении `aud`
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})
 
 
@@ -128,6 +143,8 @@ def sign_visit_token(*, user, space_code: str, self_code: str,
         # Откуда пришёл: по этому коду принимающая сторона находит свою запись о
         # нас и проверяет, что связь включена и не отозвана.
         "space": self_code,
+        # Пропуск одноразовый: принимающая сторона помнит предъявленные `jti`.
+        "jti": new_jti(),
         "iat": now,
         "nbf": now - 10,
         "exp": now + ttl_seconds,
@@ -147,7 +164,7 @@ def sign_vendor_token(*, user, company_id: str, self_code: str, vendor_code: str
         "iss": settings.sso_issuer, "aud": f"vendor:{vendor_code}",
         "sub": str(user.id), "email": user.email, "company_id": company_id,
         "space": self_code, "operation": operation, "demo_id": demo_id,
-        "iat": now, "nbf": now - 10, "exp": now + 120,
+        "jti": new_jti(), "iat": now, "nbf": now - 10, "exp": now + 120,
     }, key, algorithm="RS256", headers={"kid": settings.sso_kid})
 
 
@@ -168,6 +185,7 @@ def sign_service_token(*, aud: str, scope: str, ttl_seconds: int = 120,
         "aud": aud,
         "sub": f"service:{scope}",
         "svc": scope,
+        "jti": new_jti(),
         "iat": now,
         "nbf": now - 10,
         "exp": now + ttl_seconds,
@@ -177,6 +195,30 @@ def sign_service_token(*, aud: str, scope: str, ttl_seconds: int = 120,
     if actor_id is not None:
         payload["actor"] = actor_id
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})
+
+
+# Области служебного токена Ядра для API узла «Телефонии» (Я-10). Узел открывает
+# такому токену только свои ручки без ПДн: статистику и здоровье — `voice.stats`,
+# журнал доступа — `voice.audit` (ContactHub node/src/space.ts).
+VOICE_SERVICE_SCOPES = {
+    "voice.stats": "статистика, здоровье и метрики узла — без ПДн",
+    "voice.audit": "журнал доступа узла к ПДн",
+}
+
+
+def sign_voice_service_token(*, scope: str, company_id: str,
+                             actor_id: str | None = None) -> str | None:
+    """Служебный токен для API узла «Телефонии» компании (`aud=voice`).
+
+    Компания обязательна: узел пускает только свою (`cid` из его настройки), и
+    токен без неё ему бесполезен. Чужая область — ошибка вызывающего кода, а не
+    отказ узла через сеть."""
+    if scope not in VOICE_SERVICE_SCOPES:
+        raise ValueError(f"Неизвестная область «Телефонии»: {scope}")
+    if not company_id:
+        raise ValueError("Служебному токену «Телефонии» нужна компания")
+    return sign_service_token(aud="voice", scope=scope, company_id=str(company_id),
+                              actor_id=actor_id)
 
 
 def public_jwks() -> dict[str, Any]:

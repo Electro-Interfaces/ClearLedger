@@ -262,7 +262,12 @@ async def authorize(
     cid = company_id or (str(user.company_id) if user.company_id
                          else (companies[0]["id"] if companies else None))
 
-    token = sso.sign_sso_token(user=user, company_id=cid, companies=companies, aud=app)
+    # Роль в приложении — в самом токене (Я-10): приложению не нужно ждать проекцию
+    # людей, чтобы понять, кем человек у него работает.
+    from app.services.app_roles import app_roles
+    roles = await app_roles(db, user, cid, app)
+    token = sso.sign_sso_token(user=user, company_id=cid, companies=companies, aud=app,
+                               roles=roles)
     url = f"{target['base_url']}{target['callback']}#token={token}"
     # Переход в приложение — часть истории активности человека: без этой записи журнал
     # знает только вход в Ядро, а «когда заходил в Координатор» ответить нечем.
@@ -279,8 +284,9 @@ async def authorize(
 # браузер сам ходит в API узла (`/voice/api/v1`, кромка стека проксирует на узел) и
 # предъявляет короткий токен Ядра. Handoff здесь не годится: переходить некуда, токен
 # нужен на каждый запрос, и экран сам берёт новый, когда старый на исходе. Узел сверяет
-# подпись по JWKS пространства и пускает только администратора компании (клеймы `cid` и
-# `companies`), поэтому состав клеймов тот же, что у handoff-токена.
+# подпись по JWKS пространства и пускает только администратора «Телефонии»: клейм `roles`
+# (Я-10, роль из `app_roles["voice"]` или администратор компании); узлы, ещё не знающие
+# `roles`, смотрят `companies` — состав клеймов тот же, что у handoff-токена.
 TOKEN_APPS = {"voice"}
 
 
@@ -314,8 +320,11 @@ async def app_token(
         .where(UserCompany.user_id == user.id)
     )).all()
     companies = [{"id": str(c.id), "slug": c.slug, "role": uc.role} for uc, c in rows]
-    token = sso.sign_sso_token(user=user, company_id=str(cid), companies=companies, aud=app)
-    return {"token": token, "expires_in": settings.sso_token_ttl_seconds}
+    from app.services.app_roles import app_roles
+    roles = await app_roles(db, user, cid, app)
+    token = sso.sign_sso_token(user=user, company_id=str(cid), companies=companies, aud=app,
+                               roles=roles)
+    return {"token": token, "expires_in": settings.sso_token_ttl_seconds, "roles": roles}
 
 
 @router.get("/jwks.json")

@@ -22,6 +22,7 @@ import logging
 import json
 import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from typing import Any
 
@@ -30,18 +31,19 @@ from fastapi import (
 )
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
 from app.auth import (
-    assert_company_member, get_company_by_api_key, get_current_user, token_for,
-    hash_password,
+    VISIT_SCOPE, VISIT_SESSION_MINUTES, assert_company_member, get_company_by_api_key,
+    get_current_user, token_for, hash_password,
 )
 from app.database import get_db
 from app.models import (
     Company, PartnerAttachment, PartnerMessage, PartnerSpace, PartnerTopic,
-    SourceFile, Task, TaskEvent, User, UserCompany,
+    SourceFile, SsoUsedToken, Task, TaskEvent, User, UserCompany,
 )
 from app.services import file_store, partner_bridge, sso, support_mirror
 
@@ -676,19 +678,36 @@ async def accept_visit(
     Учётка гостя всё же появляется — иначе его действия некому приписать в
     журнале. Но заводит её вход, а не человек руками, и помечена она как инженер
     платформы: в составе пространства такой участник виден отдельной группой.
+
+    Пропуск открывает одну компанию и один раз (16.10.2026):
+      * компания — из аудитории пропуска (`space:<slug>`), а запись о выдавшем
+        пространстве ищется только у неё. Раньше запись искалась по коду среди
+        всех компаний контейнера, и пропуск к одной мог пройти по записи другой;
+      * `jti` запоминается (`sso_used_tokens`): перехваченная ссылка второй раз
+        не входит;
+      * сессия по пропуску — своя (`scp=visit`, `auth.VISIT_SCOPE`): только эта
+        компания, час, и закрывается, как только связь с пространством выключат.
+        Учётка находится по адресу из чужого пропуска, и полная сессия открыла
+        бы гостю всё, что у этой учётки есть здесь помимо визита;
+      * суперадмин платформы по пропуску не входит: его права — на весь контейнер.
     """
     code = payload.space.strip()
     if not code:
         raise HTTPException(403, VISIT_REFUSED)
 
+    slug = _visit_target(payload.token)
+    company = (await db.execute(select(Company).where(Company.slug == slug))).scalars().first() \
+        if slug else None
+    if company is None:
+        raise HTTPException(403, VISIT_REFUSED)
     partner = (await db.execute(select(PartnerSpace).where(
+        PartnerSpace.company_id == company.id,
         PartnerSpace.code == code, PartnerSpace.role == "vendor",
         PartnerSpace.is_active.is_(True),
     ))).scalars().first()
     if partner is None:
         raise HTTPException(403, VISIT_REFUSED)
 
-    company = await db.get(Company, partner.company_id)
     try:
         keys = await _jwks_cached(partner)
     except partner_bridge.BridgeError:
@@ -701,6 +720,7 @@ async def accept_visit(
     email = str(claims.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(403, VISIT_REFUSED)
+    await _use_once(db, claims, token=payload.token, scope=str(partner.id))
 
     guest = (await db.execute(select(User).where(User.email == email))).scalars().first()
     if guest is not None and not await _bridge_guest(guest, db):
@@ -730,9 +750,13 @@ async def accept_visit(
     await log_audit(db, actor=guest, company_id=company.id, action="partner.guest_in",
                     target=partner.code)
     await db.commit()
+    expires = datetime.now(timezone.utc) + timedelta(minutes=VISIT_SESSION_MINUTES)
     return {
-        "access_token": token_for(guest),
+        "access_token": token_for(
+            guest, expires_at=expires,
+            extra={"scp": VISIT_SCOPE, "cid": str(company.id), "pvs": str(partner.id)}),
         "token_type": "bearer",
+        "expires_at": expires.isoformat(),
         "company_id": str(company.id),
         "space": company.slug,
         "name": guest.name,
@@ -743,7 +767,6 @@ async def accept_visit(
 # подписью) помогают подбирать пропуск, а человеку всё равно нужен новый.
 VISIT_REFUSED = "Пропуск не принят — запросите новый в своём пространстве"
 VISIT_MAX_TTL = 300          # пропуск живёт минуты: выписан — сразу предъявлен
-_seen_visits: dict[str, float] = {}
 _jwks_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 
 
@@ -767,15 +790,54 @@ async def _jwks_cached(partner: PartnerSpace) -> dict[str, Any]:
     return keys
 
 
+def _visit_target(token: str) -> str | None:
+    """Код пространства из аудитории пропуска (`space:<slug>`) — ДО проверки подписи.
+
+    Нужен, только чтобы найти компанию и её запись о выдавшем пространстве; сама
+    аудитория потом проверяется подписью в `_verify_visit`."""
+    from jwt import PyJWTError, decode
+
+    try:
+        aud = decode(token, options={"verify_signature": False}).get("aud")
+    except PyJWTError:
+        raise HTTPException(403, VISIT_REFUSED)
+    if isinstance(aud, str) and aud.startswith("space:") and len(aud) > 6:
+        return aud[6:]
+    return None
+
+
+async def _use_once(db: AsyncSession, claims: dict[str, Any], *, token: str, scope: str) -> None:
+    """Отметить пропуск предъявленным; второй раз — отказ.
+
+    Ключ — выдавшее пространство и `jti`: номера разных пространств не пересекаются,
+    и чужое пространство не может «сжечь» пропуск этого. Пропуск без `jti` (его
+    выписывает пространство на версии до 17.10.2026) отмечается отпечатком самого
+    пропуска. Отметки в базе, а не в памяти воркера: повтор не пройдёт и на соседнем.
+    Отметки старше срока пропуска стираются здесь же."""
+    import hashlib
+
+    jti = str(claims.get("jti") or "")
+    if not jti or len(jti) > 40:
+        jti = hashlib.sha256(token.encode()).hexdigest()[:40]
+    now = datetime.now(timezone.utc)
+    await db.execute(delete(SsoUsedToken).where(SsoUsedToken.expires_at < now))
+    done = await db.execute(pg_insert(SsoUsedToken).values(
+        jti=f"{scope}:{jti}", kind="visit",
+        expires_at=datetime.fromtimestamp(int(claims["exp"]), timezone.utc),
+    ).on_conflict_do_nothing(index_elements=["jti"]))
+    if done.rowcount == 0:
+        raise HTTPException(403, VISIT_REFUSED)
+
+
 def _verify_visit(token: str, jwks: dict[str, Any], *, audience: str) -> dict[str, Any]:
     """Проверить пропуск публичным ключом выдавшего пространства.
 
-    Обязательны срок и момент выписки, срок — не больше `VISIT_MAX_TTL`; один пропуск
-    предъявляется один раз (по `jti`, а у пропусков без него — по отпечатку самого
-    пропуска): перехваченный пропуск повторно не войдёт.
+    Ключ — строго по `kid`: стеки экосистемы публикуют его в JWKS всегда
+    (`sso.public_jwks`), и пропуск без `kid` или с чужим не проверяется «первым
+    попавшимся» ключом. Выдавший — издатель экосистемы (`iss`, `sso_issuer`).
+    Обязательны срок и момент выписки, срок — не больше `VISIT_MAX_TTL`. Один пропуск
+    предъявляется один раз — это `_use_once` в самом входе.
     """
-    import hashlib
-    import time
     from jwt import PyJWTError, decode, get_unverified_header
     from jwt.algorithms import RSAAlgorithm
 
@@ -783,30 +845,22 @@ def _verify_visit(token: str, jwks: dict[str, Any], *, audience: str) -> dict[st
         kid = get_unverified_header(token).get("kid")
     except PyJWTError:
         raise HTTPException(403, VISIT_REFUSED)
+    if not kid:
+        raise HTTPException(403, VISIT_REFUSED)
     keys = jwks.get("keys") or []
-    # Ключ по kid, а при единственном — он же: `kid` у стеков совпадает по
-    # соглашению имени, и упереться в него значило бы не пустить никого.
-    jwk = next((k for k in keys if k.get("kid") == kid), keys[0] if len(keys) == 1 else None)
+    jwk = next((k for k in keys if k.get("kid") == kid), None)
     if jwk is None:
         raise HTTPException(403, VISIT_REFUSED)
     try:
-        claims = decode(token, RSAAlgorithm.from_jwk(json.dumps(jwk)), algorithms=["RS256"],
-                        audience=audience, options={"require": ["exp", "iat", "aud"]})
+        claims = decode(token, RSAAlgorithm.from_jwk(json.dumps(jwk)),
+                        algorithms=["RS256"], audience=audience,
+                        issuer=sso.settings.sso_issuer,
+                        options={"require": ["exp", "iat", "iss", "aud"]})
     except PyJWTError as e:
         logger.info("Пропуск отклонён: %s", e)
         raise HTTPException(403, VISIT_REFUSED)
     if int(claims["exp"]) - int(claims["iat"]) > VISIT_MAX_TTL:
         raise HTTPException(403, VISIT_REFUSED)
-    now = time.time()
-    for k, until in list(_seen_visits.items()):
-        if until < now:
-            _seen_visits.pop(k, None)
-    key = str(claims.get("jti") or hashlib.sha256(token.encode()).hexdigest())
-    if key in _seen_visits:
-        raise HTTPException(403, VISIT_REFUSED)
-    # ponytail: память воркера — при нескольких воркерах повтор возможен на соседнем
-    # в пределах срока пропуска (минуты); общий журнал jti в базе, если станет важно.
-    _seen_visits[key] = float(claims["exp"]) + 60
     return claims
 
 

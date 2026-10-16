@@ -18,11 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit import log_audit
 from app.auth import (
     GATE_COOKIE,
+    VISIT_SCOPE,
     clear_gate_cookie,
+    current_token_claims,
     gate_ok,
     set_gate_cookie,
     bearer_scheme,
-    decode_token,
     token_for,
     get_current_user,
     hash_password,
@@ -394,14 +395,20 @@ async def register(
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    current_user: User = Depends(get_current_user),
-):
+async def refresh_token(current_user: User = Depends(get_current_user)):
     """Продлить сессию — новый JWT с тем же моментом входа по паролю: продление не
-    тянет сессию дальше `MAX_SESSION_DAYS` от настоящего входа (аудит 07.10.2026)."""
-    payload = decode_token(credentials.credentials) if credentials else {}
-    token = token_for(current_user, payload.get("at"))
+    тянет сессию дальше `MAX_SESSION_DAYS` от настоящего входа (аудит 07.10.2026).
+
+    Сессия по пропуску (`scp=visit`) продлением не становится обычной и не
+    растягивается: новый токен несёт ту же область и тот же срок, что и старый."""
+    claims = current_token_claims() or {}
+    if claims.get("scp") == VISIT_SCOPE:
+        token = token_for(
+            current_user, claims.get("at"),
+            extra={k: claims[k] for k in ("scp", "cid", "pvs") if k in claims},
+            expires_at=datetime.fromtimestamp(int(claims["exp"]), timezone.utc))
+    else:
+        token = token_for(current_user, claims.get("at"))
     return TokenResponse(
         access_token=token,
         user=_user_response(current_user),
