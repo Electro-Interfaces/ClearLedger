@@ -151,6 +151,7 @@ function HealthLine({ снимок }: { снимок: voice.NowSnapshot }) {
         : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
       <p className="min-w-0 flex-1">
         {кроме.length ? <>Узел работает, кроме: {кроме.join('; ')}.</> : 'Узел работает: транк на связи, контакт-центр принимает звонки.'}
+        {' '}<Link to="/voice/health" className="text-primary underline-offset-2 hover:underline">Состояние узла</Link>
       </p>
     </div>
   )

@@ -162,6 +162,9 @@ export const ТРЕВОГА: Record<Alert['code'], string> = {
   disk_low: 'На диске записей мало места',
   delivery_stuck: 'События не доходят до получателя больше суток',
   backup_stale: 'Резервная копия узла давно не делалась',
+  asr_down: 'Распознавание речи недоступно: подсказок оператору нет, расшифровки не пишутся',
+  cert_expiring: 'Скоро истекает сертификат узла',
+  cert_expired: 'Истёк сертификат узла: связь с пространством или контакт-центром может не устанавливаться',
 }
 
 /** Подробность тревоги словами — из `detail` без ПДн. */
@@ -172,6 +175,11 @@ export function подробностьТревоги(a: Alert) {
     case 'disk_low': return d.freePct != null ? `свободно ${d.freePct} %` : null
     case 'backup_stale': return d.ageH != null ? `последняя удачная — ${d.ageH} ч назад` : null
     case 'delivery_stuck': return d.oldestSec != null ? `старейшее событие ждёт ${сек(Number(d.oldestSec))}` : null
+    case 'cert_expiring':
+    case 'cert_expired': {
+      const certs = (a.detail.certs ?? []) as { name?: string; daysLeft?: number | null }[]
+      return certs.length ? certs.map(c => (c.daysLeft != null && c.daysLeft >= 0 ? `${c.name}: ${c.daysLeft} дн.` : `${c.name}: истёк`)).join('; ') : null
+    }
     default: return null
   }
 }
@@ -204,4 +212,80 @@ export function деньФайла(когда: string | number) {
 export const ПРИСУТСТВИЕ: Record<string, string> = {
   available: 'готов', ready: 'готов', online: 'трубка на связи', away: 'отошёл', break: 'перерыв',
   offline: 'не на связи', unknown: 'неизвестно', wrapup: 'постобработка',
+}
+
+/** Действие журнала доступа словами (node-admin-api.yaml, `AuditEntry.action`). */
+export const ДЕЙСТВИЕ_АУДИТА: Record<string, string> = {
+  'call.view': 'открыл карточку звонка',
+  'call.number': 'открыл номер целиком',
+  'call.search_number': 'искал по номеру',
+  'journal.export': 'выгрузил журнал звонков',
+  'recording.ticket': 'открыл запись',
+  'recording.play': 'прослушал запись',
+  'recording.download': 'скачал запись',
+  'recording.delete': 'удалил запись досрочно',
+  'transcript.read': 'открыл расшифровку',
+  'retention.hold': 'запретил удаление по сроку',
+  'retention.release': 'снял запрет удаления',
+  'callback.cancel': 'снял обратный звонок',
+  'config.import': 'импорт настроек из файла',
+  'config.draft': 'завёл черновик настроек',
+  'config.draft_delete': 'удалил черновик настроек',
+  'config.apply': 'применил настройки',
+  'config.rollback': 'откатил настройки',
+  'config.targets': 'изменил цели перевода',
+  'sound.upload': 'загрузил звук',
+  'sound.delete': 'удалил звук',
+  'cc.invite': 'пригласил контакт-центр',
+  'cc.activate': 'включил контакт-центр',
+  'cc.state': 'сменил состояние контакт-центра',
+  'cc.operator': 'изменил допуск оператора КЦ',
+  'webhook.add': 'добавил получателя событий',
+  'webhook.delete': 'удалил получателя событий',
+  'reconciliation.upload': 'загрузил детализацию оператора связи',
+  'purge.run': 'удалил по сроку хранения',
+}
+
+/** Кто сделал: человек — по имени, иначе вид входа. */
+export function ктоСделал(a?: { sub?: string; name?: string | null; kind?: string } | null) {
+  if (!a) return '—'
+  if (a.name) return a.name
+  if (a.kind === 'node') return 'узел'
+  if (a.kind === 'service') return `система ${a.sub ?? ''}`.trim()
+  if (a.kind === 'cc') return 'контакт-центр'
+  return a.sub ?? '—'
+}
+
+/** Части узла словами, в порядке экрана: сначала то, без чего линия не принимается. */
+export const ЧАСТЬ: Record<string, string> = {
+  trunk: 'SIP-транк',
+  ari: 'Asterisk',
+  cc: 'Связь с контакт-центром',
+  db: 'База узла',
+  asr: 'Распознавание речи',
+  llm: 'Языковая модель',
+  disk: 'Диск записей',
+  cert: 'Сертификаты',
+  backup: 'Резервная копия',
+  node: 'Процесс узла',
+}
+
+export const СОСТОЯНИЕ_ЧАСТИ: Record<string, string> = {
+  up: 'работает',
+  warn: 'работает, нужно внимание',
+  down: 'не работает',
+  unknown: 'не удалось проверить',
+  off: 'выключено',
+  started: 'запущен',
+  stopped: 'остановлен',
+}
+
+/** Байты словами: 1,4 ГБ. */
+export function объём(b?: number | null) {
+  if (b == null) return '—'
+  const ед = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ']
+  let v = b
+  let i = 0
+  while (v >= 1024 && i < ед.length - 1) { v /= 1024; i++ }
+  return `${v.toLocaleString('ru-RU', { maximumFractionDigits: v < 10 && i > 0 ? 1 : 0 })} ${ед[i]}`
 }

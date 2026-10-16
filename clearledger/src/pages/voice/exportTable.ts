@@ -26,7 +26,9 @@ function скачать(blob: Blob, имя: string) {
 
 const вCSV = (v: Ячейка) => {
   if (v == null) return ''
-  const s = typeof v === 'number' ? String(v).replace('.', ',') : v
+  // Текст, начинающийся с = + - @, Excel принял бы за формулу: в выгрузку попадают причины
+  // доступа и адреса, которые вводили люди, — ставим апостроф, как узел в своей выгрузке.
+  const s = typeof v === 'number' ? String(v).replace('.', ',') : /^[=+\-@\t\r]/.test(v) ? `'${v}` : v
   return /[";\n\r]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s
 }
 
