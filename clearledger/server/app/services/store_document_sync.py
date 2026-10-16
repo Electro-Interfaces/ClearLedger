@@ -56,9 +56,12 @@ log = logging.getLogger("clearledger.document_sync")
 # Даже без видимых изменений реестр пересобирается не реже этого: у части
 # источников нет отметки времени, их правку на месте отпечаток не заметит.
 НЕ_РЕЖЕ_ЧАСОВ = 6
-# Пакеты, которые станции шлют ежечасно и которые документов реестра не
-# порождают: по ним пересборка шла бы почти каждый такт.
-ЧАСТЫЕ_ПАКЕТЫ = ("stock", "stock-moves", "chain", "cash_state")
+# Пакеты станций, которые документов реестра не порождают (проверено по живой
+# базе gig 16.10.2026: в них только stock_snapshot, stock_moves, cash_state,
+# item_draft, price_change, catalog_digest, mrc_fact). Первые четыре станции шлют
+# ежечасно — по ним пересборка шла бы почти каждый такт.
+БЕЗ_ДОКУМЕНТОВ = ("stock", "stock-moves", "chain", "cash_state",
+                  "station-nsi", "station-catalog", "station-mrc")
 
 # Что видел такт этого воркера: компания → (отпечаток источников, когда собирал).
 _прошлый: dict[uuid.UUID, tuple[tuple, float]] = {}
@@ -73,10 +76,10 @@ async def отпечаток_источников(db: AsyncSession, company_id: 
     строка = (await db.execute(text("""
         SELECT
           (SELECT count(*) || '/' || coalesce(max(received_at)::text, '')
-             FROM edge_packets WHERE company_id = :c AND kind <> ALL(:частые)),
+             FROM edge_packets WHERE company_id = :c AND kind <> ALL(:без_документов)),
           (SELECT count(*) || '/' || coalesce(max(r.received_at)::text, '')
              FROM edge_packet_revisions r JOIN edge_packets p ON p.id = r.edge_packet_id
-            WHERE r.company_id = :c AND p.kind <> ALL(:частые)),
+            WHERE r.company_id = :c AND p.kind <> ALL(:без_документов)),
           (SELECT count(*) || '/' || coalesce(max(updated_at)::text, '')
              FROM data_entries WHERE company_id = :c),
           (SELECT count(*) || '/' || coalesce(max(received_at)::text, '')
@@ -89,8 +92,14 @@ async def отпечаток_источников(db: AsyncSession, company_id: 
              FROM accounting_docs WHERE company_id = :c),
           (SELECT count(*) FROM accounting_source_links WHERE company_id = :c),
           (SELECT count(*) || '/' || coalesce(max(updated_at)::text, '')
-             FROM export_packets WHERE company_id = :c)
-    """), {"c": company_id, "частые": list(ЧАСТЫЕ_ПАКЕТЫ)})).one()
+             FROM export_packets WHERE company_id = :c),
+          -- не адаптер, но та же сверка: бух-надстройку везёт статус станции
+          (SELECT count(*) || '/' || coalesce(max(updated_at)::text, '')
+             FROM store_doc_meta WHERE company_id = :c),
+          -- каталог: по нему чеки и смены получают НДС и карантин
+          (SELECT count(*) || '/' || coalesce(max(updated_at)::text, '')
+             FROM edge.item WHERE company_id = :c)
+    """), {"c": company_id, "без_документов": list(БЕЗ_ДОКУМЕНТОВ)})).one()
     return tuple(строка)
 
 
@@ -154,6 +163,7 @@ async def сверить_компанию(db: AsyncSession, company_id: uuid.UUI
         # минуты (heartbeat переписывает payload целиком), поэтому — в лог.
         await db.rollback()
         итог["detail"] = f"реестр требует полной пересборки: {exc}"
+        итог["conflict"] = True
         log.warning("сверка документов компании %s: %s", company_id, итог["detail"])
         return итог
     except Exception as exc:  # noqa: BLE001 — такт не должен умирать
@@ -180,55 +190,71 @@ async def пора_сверять(db: AsyncSession, company_id: uuid.UUID) -> tu
 async def tick() -> int:
     """Один проход по компаниям со станциями. Возвращает число сверенных."""
     сверено = 0
-    # Замок держим на отдельном соединении: сверка коммитит по ходу, а сессия
-    # после commit отдаёт соединение в пул — сессионный замок, взятый через неё,
-    # остался бы висеть на чужом соединении, и следующие такты не шли бы вовсе.
-    async with engine.connect() as замок:
-        # Оба воркера будятся на одной границе такта, сверяет один.
-        if not (await замок.execute(text("SELECT pg_try_advisory_lock(:k)"),
-                                    {"k": ЛОК})).scalar():
-            return 0
-        await замок.commit()
-        try:
-            async with async_session_factory() as db:
-                компании = (await db.execute(
-                    select(EdgeAgent.company_id).distinct())).scalars().all()
-            for cid in компании:
-                # Своя сессия на компанию: сбой одной не отравляет сверку других.
-                async with async_session_factory() as db:
-                    try:
-                        отпечаток = await пора_сверять(db, cid)
-                        if отпечаток is None:
-                            continue
-                        начало = time.monotonic()
-                        итог = await сверить_компанию(db, cid)
-                        # Запоминаем и неудачную попытку: конфликт ревизий
-                        # повторять каждые десять минут — минута работы впустую;
-                        # следующая попытка — на новых данных или по сроку.
-                        _прошлый[cid] = (отпечаток, time.monotonic())
-                        сверено += 1
-                        # Длительность — в лог каждый раз: пересборка идёт по
-                        # всей компании, её цену надо видеть, а не угадывать.
-                        log.info("сверка документов %s за %.1f с: %s",
-                                 cid, time.monotonic() - начало, итог["detail"])
-                    except Exception:  # noqa: BLE001 — одна компания не валит такт
-                        await db.rollback()
-                        log.exception("сверка документов компании %s не удалась", cid)
-            return сверено
-        finally:
-            await замок.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": ЛОК})
-            await замок.commit()
+    async with async_session_factory() as db:
+        компании = (await db.execute(
+            select(EdgeAgent.company_id).distinct())).scalars().all()
+    for cid in компании:
+        # Своя сессия на компанию: сбой одной не отравляет сверку других.
+        async with async_session_factory() as db:
+            try:
+                отпечаток = await пора_сверять(db, cid)
+                if отпечаток is None:
+                    continue
+                начало = time.monotonic()
+                итог = await сверить_компанию(db, cid)
+                # Конфликт ревизий запоминаем как сверку: повторять его
+                # каждые десять минут — минута работы впустую, он ждёт
+                # человека или новых данных. Временный сбой (таймаут,
+                # обрыв) не запоминаем — повторится на следующем такте.
+                if итог["rebuilt"] or итог.get("conflict"):
+                    _прошлый[cid] = (отпечаток, time.monotonic())
+                сверено += 1
+                # Длительность — в лог каждый раз: пересборка идёт по
+                # всей компании, её цену надо видеть, а не угадывать.
+                log.info("сверка документов %s за %.1f с: %s",
+                         cid, time.monotonic() - начало, итог["detail"])
+            except Exception:  # noqa: BLE001 — одна компания не валит такт
+                await db.rollback()
+                log.exception("сверка документов компании %s не удалась", cid)
+    return сверено
 
 
 async def run_forever() -> None:
-    """Фоновый цикл — поднимается из lifespan приложения."""
+    """Фоновый цикл — поднимается из lifespan приложения.
+
+    Сверяет один воркер — ведущий: он берёт замок на отдельном соединении и
+    держит, пока жив. Второй каждую границу такта пробует его взять и сверяет,
+    только если ведущий умер. Память о прошлых сверках (_прошлый) у каждого
+    воркера своя; при сверке по очереди каждое изменение пересобиралось бы
+    дважды. Замок не через сессию: сессия после commit отдаёт соединение в пул,
+    и сессионный замок оставался бы висеть на чужом соединении.
+    """
     шаг = ТАКТ_МИНУТ * 60
     log.info("Сверка документов со станциями запущена (такт %d мин)", ТАКТ_МИНУТ)
     while True:
-        # Будимся на границе такта, а не через «шаг» от своего старта: граница у
-        # обоих воркеров общая, замок достаётся одному, второй такт пропускает.
-        await asyncio.sleep(шаг - time.time() % шаг)
         try:
-            await tick()
-        except Exception:  # noqa: BLE001 — сверка не критична для API
-            log.exception("Сбой такта сверки документов")
+            async with engine.connect() as замок:
+                ведущий = False
+                while True:
+                    await asyncio.sleep(шаг - time.time() % шаг)
+                    if not ведущий:
+                        ведущий = bool((await замок.execute(
+                            text("SELECT pg_try_advisory_lock(:k)"), {"k": ЛОК})).scalar())
+                        if ведущий:
+                            log.info("Сверка документов: этот воркер ведущий")
+                    else:
+                        # Соединение живо — замок по-прежнему наш. Умерло —
+                        # исключение, переподключаемся и пробуем заново.
+                        await замок.execute(text("SELECT 1"))
+                    await замок.commit()
+                    if not ведущий:
+                        continue
+                    try:
+                        await tick()
+                    except Exception:  # noqa: BLE001 — сверка не критична для API
+                        log.exception("Сбой такта сверки документов")
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — соединение замка оборвалось
+            log.exception("Сверка документов: соединение замка потеряно")
+            await asyncio.sleep(60)

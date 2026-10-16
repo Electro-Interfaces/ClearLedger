@@ -1871,6 +1871,38 @@ async def test_document_sync_rebuilds_only_on_new_data(monkeypatch):
     assert await store_document_sync.пора_сверять(None, cid) == отпечаток, "по сроку — сверяем"
 
 
+@pytest.mark.asyncio
+async def test_document_sync_retries_failure_but_not_conflict(monkeypatch):
+    """Временный сбой повторяется на следующем такте, конфликт ревизий — нет."""
+    cid = uuid.uuid4()
+
+    class Factory:
+        async def __aenter__(self):
+            return SyncSession((cid,))
+
+        async def __aexit__(self, *_exc):
+            return False
+
+    async def пора(_db, _cid):
+        return ("отпечаток",)
+
+    итоги = [{"rebuilt": False, "detail": "реестр не собран"},
+             {"rebuilt": False, "conflict": True, "detail": "реестр требует полной пересборки"}]
+
+    async def компания(_db, _cid):
+        return итоги.pop(0)
+
+    monkeypatch.setattr(store_document_sync, "async_session_factory", Factory)
+    monkeypatch.setattr(store_document_sync, "пора_сверять", пора)
+    monkeypatch.setattr(store_document_sync, "сверить_компанию", компания)
+    monkeypatch.setattr(store_document_sync, "_прошлый", {})
+
+    await store_document_sync.tick()
+    assert cid not in store_document_sync._прошлый, "сбой не запоминаем"
+    await store_document_sync.tick()
+    assert cid in store_document_sync._прошлый, "конфликт запоминаем"
+
+
 class StatusSession:
     """Сессия для бух-статусов: последний снимок станции и что добавлено."""
 
