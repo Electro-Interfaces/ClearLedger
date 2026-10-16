@@ -1770,72 +1770,120 @@ async def test_edge_documents_without_number_dedupe_by_body_not_by_packet():
 class SyncSession:
     """Сессия для сверки документов: помнит, что её просили сделать."""
 
-    def __init__(self, собран=None):
-        self.собран = собран
+    def __init__(self, станции=(208,)):
+        self.станции = list(станции)
         self.rolled_back = False
+        self.commits = 0
 
     async def execute(self, statement, _parameters=None):
-        return ListResult([self.собран])
+        return ListResult(self.станции)
 
     async def rollback(self):
         self.rolled_back = True
 
-
-@pytest.mark.asyncio
-async def test_document_sync_skips_when_registry_is_fresh(monkeypatch):
-    """Реестр собирается на всю компанию — не на каждый стук станции."""
-    вызовы = []
-
-    async def rebuild(*_args, **_kwargs):
-        вызовы.append("rebuild")
-        return {"records": 1}
-
-    monkeypatch.setattr(store_document_sync, "rebuild_store_document_projection", rebuild)
-    свежий = datetime.now(timezone.utc)
-    итог = await store_document_sync.сверить_документы(
-        SyncSession(свежий), uuid.uuid4(), 208)
-    assert вызовы == []
-    assert итог["rebuilt"] is False and "свежий" in итог["detail"]
+    async def commit(self):
+        self.commits += 1
 
 
 @pytest.mark.asyncio
-async def test_document_sync_never_breaks_the_exchange(monkeypatch):
-    """Сверка не имеет права уронить обмен: станция потеряла бы задания."""
+async def test_document_sync_failed_rebuild_touches_no_station(monkeypatch):
+    """Реестр не собрался — такт не падает и станциям ничего не кладёт."""
+    станции = []
 
     async def rebuild(*_args, **_kwargs):
         raise RuntimeError("база недоступна")
 
+    async def station(_db, _cid, station_id):
+        станции.append(station_id)
+        return {}
+
     monkeypatch.setattr(store_document_sync, "rebuild_store_document_projection", rebuild)
-    session = SyncSession(None)
-    итог = await store_document_sync.сверить_документы(session, uuid.uuid4(), 208)
+    monkeypatch.setattr(store_document_sync, "сверить_станцию", station)
+    session = SyncSession()
+    итог = await store_document_sync.сверить_компанию(session, uuid.uuid4())
     assert итог["rebuilt"] is False
     assert "не собран" in итог["detail"]
     assert session.rolled_back is True
+    assert станции == []
 
 
 @pytest.mark.asyncio
 async def test_document_sync_queues_snapshot_after_rebuild(monkeypatch):
-    """Собрали реестр — сразу кладём станции свежий снимок заголовков."""
+    """Собрали реестр — каждой станции компании свежий снимок заголовков."""
 
     async def rebuild(*_args, **_kwargs):
         return {"records": 1313}
 
     async def queue(_db, _company_id, station_id):
-        assert station_id == 208
         return SimpleNamespace(payload={"headers": [{"kind": "purchase"}] * 116}), True
+
+    async def statuses(_db, _company_id, _station_id):
+        return 7
 
     monkeypatch.setattr(store_document_sync, "rebuild_store_document_projection", rebuild)
     monkeypatch.setattr(store_document_sync, "queue_onec_document_snapshot", queue)
-    итог = await store_document_sync.сверить_документы(
-        SyncSession(None), uuid.uuid4(), 208)
-    assert итог["rebuilt"] is True and итог["snapshot"] is True
-    assert итог["headers"] == 116
+    monkeypatch.setattr(store_document_sync, "queue_document_status", statuses)
+    session = SyncSession((208, 8))
+    итог = await store_document_sync.сверить_компанию(session, uuid.uuid4())
+    assert итог["rebuilt"] is True
+    assert set(итог["stations"]) == {208, 8}
+    assert итог["stations"][208]["snapshot"] is True
+    assert итог["stations"][208]["headers"] == 116
+    assert итог["stations"][8]["statuses"] == 7
+    assert session.commits == 3, "реестр и каждая станция — своим коммитом"
 
 
-def test_exchange_with_station_triggers_document_sync():
-    """Сверка живёт в обмене, а не в отдельном планировщике."""
+def test_exchange_with_station_does_not_rebuild_registry():
+    """Выдача заданий не ждёт пересборку реестра (аварии 10.10 и 14.10.2026)."""
     source = inspect.getsource(edge_router.downlink)
-    assert "сверить_документы" in source
+    assert "сверить_документы" not in source and "сверить_компанию" not in source
+    assert "rebuild" not in source
+
+
+def test_document_sync_runs_on_its_own_schedule():
+    """Сверка поднимается своим тактом, а не ждёт, когда станция придёт за заданиями."""
+    source = inspect.getsource(main.lifespan)
+    assert "store_document_sync import run_forever" in source
+
+
+class StatusSession:
+    """Сессия для бух-статусов: последний снимок станции и что добавлено."""
+
+    def __init__(self, прежний=None):
+        self.прежний = прежний
+        self.added = []
+        self.deleted = 0
+
+    async def execute(self, statement, _parameters=None):
+        if "DELETE" in str(statement):
+            self.deleted += 1
+            return ListResult([])
+        if "edge_downlink" in str(statement):
+            return ListResult([self.прежний] if self.прежний is not None else [])
+        return ListResult([])
+
+    def add(self, row):
+        self.added.append(row)
+
+
+@pytest.mark.asyncio
+async def test_document_status_same_snapshot_is_not_queued_again():
+    """Сверка идёт тактом: тот же снимок статусов станции второй раз не едет."""
+    from app.services.document_status_downlink import queue_document_status
+
+    первая = StatusSession()
+    assert await queue_document_status(первая, uuid.uuid4(), 208) == 0
+    assert len(первая.added) == 1
+    payload = первая.added[0].payload
+    assert payload["items"] == [] and payload["content_hash"]
+
+    повтор = StatusSession(прежний=payload)
+    await queue_document_status(повтор, uuid.uuid4(), 208)
+    assert повтор.added == [] and повтор.deleted == 0
+
+    другой = StatusSession(прежний={"items": [], "content_hash": "старый"})
+    await queue_document_status(другой, uuid.uuid4(), 208)
+    assert len(другой.added) == 1 and другой.deleted == 1
 
 
 def test_ноль_в_номере_смены_не_создаёт_ложную_группу():

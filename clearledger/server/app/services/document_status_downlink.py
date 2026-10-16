@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 
 from sqlalchemy import or_, select, text
@@ -29,6 +31,9 @@ async def queue_document_status(
 
     Идемпотентно: несёт полный снимок (не «изменилось X»), прежнее невыданное
     задание того же вида снимаем — станции нужна последняя картина, а не история.
+    Снимок, совпадающий с последним поставленным, не ставим: сверка идёт тактом,
+    и без этого станция по слабому каналу получала бы одно и то же каждые
+    десять минут.
     """
     from ..models import EdgeDownlink
     from ..models import StoreDocMeta as M
@@ -80,6 +85,19 @@ async def queue_document_status(
         "meta_status": r.meta_status,
     } for r in строки]
 
+    отпечаток = hashlib.sha256(json.dumps(
+        items, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    прежний = (await session.execute(
+        select(EdgeDownlink.payload)
+        .where(EdgeDownlink.company_id == company_id,
+               EdgeDownlink.station_id == station_id,
+               EdgeDownlink.kind == "document_status",
+               EdgeDownlink.cancelled_at.is_(None))
+        .order_by(EdgeDownlink.created_at.desc()).limit(1)
+    )).scalar()
+    if (прежний or {}).get("content_hash") == отпечаток:
+        return len(items)
+
     await session.execute(text("""
         DELETE FROM edge_downlink
          WHERE company_id = :c AND station_id = :s AND kind = 'document_status'
@@ -87,6 +105,6 @@ async def queue_document_status(
     """), {"c": str(company_id), "s": station_id})
     session.add(EdgeDownlink(
         company_id=company_id, station_id=station_id,
-        kind="document_status", payload={"items": items},
+        kind="document_status", payload={"items": items, "content_hash": отпечаток},
     ))
     return len(items)

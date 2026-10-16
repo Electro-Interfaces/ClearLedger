@@ -294,6 +294,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:  # noqa: BLE001 — автопризнание не критично для API
         logger.warning(f"Автопризнание заявок на карточки не запущено: {e}")
 
+    # Сверка документов со станциями: реестр центра и снимки заголовков станциям.
+    # Своим тактом, а не в выдаче заданий — агент ходит за ними только когда они
+    # есть, и реестр без заданий стоял сутками (16.10.2026).
+    documents_task: asyncio.Task | None = None
+    try:
+        from app.services.store_document_sync import run_forever as _documents
+        documents_task = asyncio.create_task(_documents())
+    except Exception as e:  # noqa: BLE001 — сверка не критична для API
+        logger.warning(f"Сверка документов со станциями не запущена: {e}")
+
     # Чтение боевой БП: реестр документов 1С не должен устаревать молча. Раз в
     # сутки в тихий час — соединение там одно на всех, днём оно занято людьми.
     onec_read_task: asyncio.Task | None = None
@@ -334,6 +344,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         prices_task.cancel()
     if drafts_task is not None:
         drafts_task.cancel()
+    if documents_task is not None:
+        documents_task.cancel()
     if mail_task is not None:
         mail_task.cancel()
     if tasks_task is not None:
