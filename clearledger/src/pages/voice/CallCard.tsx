@@ -39,6 +39,14 @@ const ДЕЙСТВИЕ: Record<string, string> = {
 
 const СТОРОНА: Record<string, string> = { caller: 'звонящий', operator: 'оператор', consult: 'консультация' }
 
+/** Короткое уточнение к этапу: чья запись, какой итог. Остальные подробности этапов служебные. */
+function уточнение(э: { stage: string; detail?: Record<string, unknown> | null }) {
+  const d = э.detail ?? {}
+  if (э.stage.startsWith('recording_') && typeof d.side === 'string') return СТОРОНА[d.side.replace(/\d+$/, '')] ?? null
+  if (э.stage === 'disposition' && typeof d.code === 'string') return d.code
+  return null
+}
+
 export function CallCard({ contactId, onBack }: { contactId: string; onBack?: () => void }) {
   const { companyId } = useCompany()
   const qc = useQueryClient()
@@ -129,7 +137,10 @@ export function CallCard({ contactId, onBack }: { contactId: string; onBack?: ()
                 {к.stages.map((э, i) => (
                   <li key={`${э.stage}-${i}`} className="flex gap-3 text-sm">
                     <span className="w-16 shrink-0 font-mono text-xs leading-5 text-muted-foreground">{время(э.at)}</span>
-                    <span>{ЭТАП[э.stage] ?? <span className="font-mono text-xs">{э.stage}</span>}</span>
+                    <span>
+                      {ЭТАП[э.stage] ?? <span className="font-mono text-xs">{э.stage}</span>}
+                      {уточнение(э) && <span className="text-muted-foreground"> · {уточнение(э)}</span>}
+                    </span>
                   </li>
                 ))}
               </ol>

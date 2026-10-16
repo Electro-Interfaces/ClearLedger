@@ -174,7 +174,7 @@ export function CheckResult<B>({ ч, подписи, последствия, п�
           <form className="flex flex-wrap items-center gap-2 pt-1"
             onSubmit={async e => { e.preventDefault(); if (можно && await ч.применить(зачем.trim())) setЗачем('') }}>
             <Input value={зачем} onChange={e => setЗачем(e.target.value)} maxLength={500}
-              aria-label="Зачем меняем" placeholder="Зачем меняем — попадёт в журнал изменений" className="min-w-60 flex-1" />
+              aria-label="Зачем меняем" placeholder="Зачем меняем — попадёт в журнал изменений" className="min-w-0 basis-60 flex-1" />
             <Button type="submit" disabled={!можно || ч.применяем}>
               <CheckCircle2 />{ч.применяем ? 'Применяем…' : `Применить r${ч.черновик?.version}`}
             </Button>

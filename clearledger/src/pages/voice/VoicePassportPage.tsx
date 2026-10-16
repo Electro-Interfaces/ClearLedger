@@ -143,7 +143,7 @@ function PresentationTab({ п, ч, поставить }: Части) {
     <div>
       <Field имя="Приветствие оператора" подсказка="Что оператор говорит, взяв трубку" было={ч.было('/presentation/greeting')}>
         <TextInput значение={п.presentation.greeting} onChange={v => поставить(['presentation', 'greeting'], v)}
-          подпись="Приветствие оператора" className="min-w-72 flex-1" />
+          подпись="Приветствие оператора" className="min-w-0 basis-72 flex-1" />
       </Field>
       <Field имя="Название для оператора" подсказка="Как оператор называет компанию" было={ч.было('/presentation/brandName')}>
         <TextInput значение={п.presentation.brandName} onChange={v => поставить(['presentation', 'brandName'], v)} подпись="Название" />
@@ -187,7 +187,7 @@ function DispositionTab({ п, ч, поставить }: Части) {
           {коды.filter(к => к !== 'no_disposition').map(к => (
             <div key={к} className="flex flex-wrap items-center gap-2">
               <span className="w-36 truncate font-mono text-xs" title={к}>{к}</span>
-              <TextInput значение={списокИз(обязательные[к])} подпись={`Обязательные поля для ${к}`} моно className="min-w-48 flex-1"
+              <TextInput значение={списокИз(обязательные[к])} подпись={`Обязательные поля для ${к}`} моно className="min-w-0 basis-48 flex-1"
                 onChange={v => {
                   const list = списокВ(v)
                   const next = { ...обязательные }

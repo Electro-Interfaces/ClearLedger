@@ -205,7 +205,7 @@ export default function VoiceTargetsPage() {
               )}
               <form className="flex flex-wrap items-center gap-2" onSubmit={e => { e.preventDefault(); if (годно) void записать() }}>
                 <Input value={зачем} onChange={e => setЗачем(e.target.value)} maxLength={500} aria-label="Зачем меняем"
-                  placeholder="Зачем меняем — попадёт в журнал изменений" className="min-w-60 flex-1" />
+                  placeholder="Зачем меняем — попадёт в журнал изменений" className="min-w-0 basis-60 flex-1" />
                 <Button type="submit" disabled={!годно || идёт}>{идёт ? 'Записываем…' : 'Записать во все три места'}</Button>
                 <Button type="button" variant="ghost" onClick={() => { setСтроки(изДанных(цели.data)); setСУзла([]) }}>Вернуть как было</Button>
               </form>

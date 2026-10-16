@@ -27,11 +27,13 @@ export function Heading({ имя, подпись, children }: { имя: string; 
 }
 
 /** Число с подписью; `пояснение` расшифровывает сокращение (SL, ASA) в подсказке. */
-export function Stat({ имя, значение, пояснение, тон }: {
+export function Stat({ имя, значение, пояснение, тон, подпись }: {
   имя: string
   значение: string
   пояснение?: string
   тон?: 'warning' | 'destructive' | 'success'
+  /** строка под числом: из чего оно складывается */
+  подпись?: string
 }) {
   return (
     <div title={пояснение} className="min-w-28">
@@ -41,6 +43,7 @@ export function Stat({ имя, значение, пояснение, тон }: {
         тон === 'success' && 'text-success')}>
         {значение}
       </p>
+      {подпись && <p className="max-w-48 text-xs text-muted-foreground">{подпись}</p>}
     </div>
   )
 }

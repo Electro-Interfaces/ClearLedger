@@ -242,7 +242,7 @@ function VersionCard({ вид, в, строки }: {
       {в.state === 'retired' && !вид.экран && (
         <form className="flex flex-wrap items-center gap-2" onSubmit={e => { e.preventDefault(); if (зачем.trim().length >= 3) void откатить() }}>
           <Input value={зачем} onChange={e => setЗачем(e.target.value)} maxLength={500} aria-label="Зачем возвращаем"
-            placeholder="Зачем возвращаем — попадёт в журнал изменений" className="min-w-60 flex-1" />
+            placeholder="Зачем возвращаем — попадёт в журнал изменений" className="min-w-0 basis-60 flex-1" />
           <Button type="submit" variant="outline" size="sm" disabled={идёт || зачем.trim().length < 3}>
             <RotateCcw />Вернуть r{в.version}
           </Button>
