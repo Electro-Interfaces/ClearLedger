@@ -512,7 +512,6 @@ async def access_catalog(db: AsyncSession, company_id) -> list[dict[str, Any]]:
     (`app:module`). Объединяет реестр (Ledger с модулями, Support) и сервисы рабочего
     стола (Чат/Заявки/Конференции), чтобы роль могла давать права на ВСЮ систему, а
     не только на модули Ledger. Показываем лишь подключённое компании."""
-    from app.config import get_settings
     from app.services import sso
 
     tree: list[dict[str, Any]] = []
@@ -534,8 +533,8 @@ async def access_catalog(db: AsyncSession, company_id) -> list[dict[str, Any]]:
             tree.append({"app": a["code"], "name": a["name"], "icon": a.get("icon", ""), "modules": []})
             known.add(a["code"])
 
-    # Чат — платформенный сервис (плитка по флагу), тоже гейтится ролью.
-    if get_settings().chat_enabled and "chat" not in known:
+    # Чат — платформенный сервис, тоже гейтится ролью.
+    if "chat" not in known:
         tree.append({"app": "chat", "name": "Чат", "icon": "messages-square", "modules": []})
 
     return tree
