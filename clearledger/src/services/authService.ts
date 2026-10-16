@@ -40,6 +40,8 @@ export interface AuthUser {
   /** Рабочее окно, «09:00». Вне его регламентное ждёт, а не будит. */
   work_start?: string
   work_end?: string
+  /** Куда присылать уведомления о поручениях: secretary | notices | email. */
+  task_notify?: string[]
   /**
    * Место человека в пространстве — заполняет администратор.
    * party_type: internal — сотрудник организации пространства,

@@ -18,6 +18,7 @@ import { SearchPicker } from '@/components/tasks/SearchPicker'
 import * as workService from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -36,6 +37,7 @@ type Draft = {
   tz: string
   workStart: string
   workEnd: string
+  notify: string[]
   theme: ThemePreference
   level: UiLevel
   send: SendMode
@@ -59,6 +61,16 @@ const ПОЯСА: { id: string; label: string }[] = [
   { id: 'Asia/Magadan', label: 'Магадан (UTC+11)' },
   { id: 'Asia/Kamchatka', label: 'Петропавловск-Камчатский (UTC+12)' },
 ]
+
+/** Куда приходят уведомления о поручениях. Порядок — как на сервере
+ *  (`notify.TASK_CHANNELS`), иначе сравнение черновика с профилем врёт. */
+const КАНАЛЫ: { id: string; label: string; hint: string }[] = [
+  { id: 'secretary', label: 'Чат «Секретарь»', hint: 'Там же, где напоминания и сводка дня.' },
+  { id: 'notices', label: 'Чат «Уведомления»', hint: 'Отдельный канал только для поручений.' },
+  { id: 'email', label: 'Почта', hint: 'Письмом на адрес, которым вы входите.' },
+]
+const КАНАЛЫ_ПО_УМОЛЧАНИЮ = ['secretary', 'email']
+const порядокКаналов = (list: string[]) => КАНАЛЫ.map((k) => k.id).filter((id) => list.includes(id))
 
 /** Кем человек приходится этому пространству. Заполняет администратор. */
 const УЧАСТИЕ: Record<string, { label: string; hint: string }> = {
@@ -177,6 +189,7 @@ export function PersonalSettings() {
     tz: user?.tz ?? 'Europe/Moscow',
     workStart: user?.work_start ?? '09:00',
     workEnd: user?.work_end ?? '18:00',
+    notify: порядокКаналов(user?.task_notify ?? КАНАЛЫ_ПО_УМОЛЧАНИЮ),
     theme: themePref,
     level,
     send: sendMode,
@@ -202,6 +215,7 @@ export function PersonalSettings() {
     || draft.tz !== (user?.tz ?? 'Europe/Moscow')
     || draft.workStart !== (user?.work_start ?? '09:00')
     || draft.workEnd !== (user?.work_end ?? '18:00')
+    || draft.notify.join() !== порядокКаналов(user?.task_notify ?? КАНАЛЫ_ПО_УМОЛЧАНИЮ).join()
     || draft.theme !== themePref || draft.level !== level || draft.send !== sendMode
     || !!draft.photo || draft.photoRemoved
 
@@ -228,7 +242,7 @@ export function PersonalSettings() {
       // разъехаться с тем, что человек видит на других устройствах.
       const тело: {
         name?: string; avatarUrl?: string; phoneMobile?: string; phoneOffice?: string
-        tz?: string; workStart?: string; workEnd?: string
+        tz?: string; workStart?: string; workEnd?: string; taskNotify?: string[]
       } = {}
       if (имя !== (user?.name ?? '')) тело.name = имя
       if (draft.mobile.trim() !== (user?.phone_mobile ?? '')) тело.phoneMobile = draft.mobile.trim()
@@ -236,6 +250,9 @@ export function PersonalSettings() {
       if (draft.tz !== (user?.tz ?? 'Europe/Moscow')) тело.tz = draft.tz
       if (draft.workStart !== (user?.work_start ?? '09:00')) тело.workStart = draft.workStart
       if (draft.workEnd !== (user?.work_end ?? '18:00')) тело.workEnd = draft.workEnd
+      if (draft.notify.join() !== порядокКаналов(user?.task_notify ?? КАНАЛЫ_ПО_УМОЛЧАНИЮ).join()) {
+        тело.taskNotify = draft.notify
+      }
       if (draft.photoRemoved) тело.avatarUrl = ''
       else if (draft.photo) тело.avatarUrl = (await chat.uploadAttachment(draft.photo, company.id)).fileUrl
       if (Object.keys(тело).length) {
@@ -384,6 +401,36 @@ export function PersonalSettings() {
               <Input id="pers-we" type="time" value={draft.workEnd}
                 onChange={(e) => set('workEnd', e.target.value)} />
             </div>
+          </div>
+        </div>
+
+        {/* Канал поручений выбирает сам человек: кто-то живёт в чате, кто-то в почте.
+            Снять все галочки нельзя — поручение тогда не дошло бы никуда. */}
+        <div className="space-y-3 border-t pt-5">
+          <div>
+            <h3 className="text-sm font-medium">Уведомления о поручениях</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Куда сообщать, когда вам поручили задачу, передали её, упомянули вас или
+              ответили по задаче. Можно выбрать несколько.
+            </p>
+          </div>
+          <div className="space-y-2">
+            {КАНАЛЫ.map((k) => {
+              const on = draft.notify.includes(k.id)
+              const last = on && draft.notify.length === 1
+              return (
+                <label key={k.id} className={cn('flex items-start gap-2 text-sm', last ? 'cursor-default' : 'cursor-pointer')}>
+                  <Checkbox className="mt-0.5" checked={on} disabled={last}
+                    title={last ? 'Нужен хотя бы один канал' : undefined}
+                    onCheckedChange={(v) => set('notify', порядокКаналов(
+                      v === true ? [...draft.notify, k.id] : draft.notify.filter((x) => x !== k.id)))} />
+                  <span>
+                    {k.label}
+                    <span className="block text-xs text-muted-foreground">{k.hint}</span>
+                  </span>
+                </label>
+              )
+            })}
           </div>
         </div>
 

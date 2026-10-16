@@ -14,7 +14,7 @@ from app.models import (
     Organization, ServiceLocation, Task, TaskChecklistItem, TaskEvent,
     TaskTemplate, TaskType, User, UserCompany,
 )
-from app.services import doc_approvals, task_mail, work_state
+from app.services import doc_approvals, work_state
 
 
 class ProcessTemplateError(ValueError):
@@ -293,11 +293,13 @@ async def launch_task(
         if text_item:
             db.add(TaskChecklistItem(
                 task_id=task.id, text=text_item[:500], position=(index + 1) * 10))
-    if person is not None and person.id != actor.id and person.email:
-        task_mail.send_notice_async(
-            [person.email], f"Вам поручена задача №{task.number}: {task.title}",
+    if person is not None and person.id != actor.id:
+        from app.services import notify
+
+        await notify.tell(
+            db, cid, [person], f"Вам поручена задача №{task.number}: {task.title}",
             f"Поручил: {actor.name or actor.email}\n\n{task.description or ''}".strip(),
-        )
+            task)
     return task, {
         "state": "task",
         "started": True,

@@ -201,19 +201,25 @@ async def run_recurrences(db, now: datetime) -> int:
         if task is not None:
             made += 1
             person = await db.get(User, task.assignee_id) if task.assignee_id else None
-            if person is not None and person.email:
-                task_mail.send_notice_async(
-                    [person.email], f"Задача №{task.number}: {task.title}",
-                    f"Задача поставлена по расписанию «{tpl.name}».")
+            if person is not None:
+                from app.services import notify
+
+                await notify.tell(
+                    db, task.company_id, [person], f"Задача №{task.number}: {task.title}",
+                    f"Задача поставлена по расписанию «{tpl.name}».", task)
     return made
+
+
+def task_path(t) -> str:
+    """Адрес карточки задачи. Личная запись открывается своим адресом."""
+    return f"/tasks/{t.id}" if t.visibility == "personal" else f"/docs/company?view=errands&task={t.id}"
 
 
 def task_link(t) -> str:
     """«№68 «Название»» ссылкой на карточку: чат рисует `[текст](адрес)` кликабельным,
-    push получает голый текст. Личная запись открывается своим адресом."""
-    path = f"/tasks/{t.id}" if t.visibility == "personal" else f"/docs/company?view=errands&task={t.id}"
+    push получает голый текст."""
     title = (t.title or "").replace("]", ")")
-    return f"[№{t.number} «{title}»]({path})"
+    return f"[№{t.number} «{title}»]({task_path(t)})"
 
 
 async def run_due_reminders(db, now: datetime, bucket: digest.Bucket) -> int:

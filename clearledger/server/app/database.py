@@ -4931,6 +4931,8 @@ async def create_all() -> None:
             " calendar_feed_token VARCHAR(64)",
             "CREATE UNIQUE INDEX IF NOT EXISTS users_calendar_feed_token_uq"
             " ON users (calendar_feed_token) WHERE calendar_feed_token IS NOT NULL",
+            # Куда человек просит присылать уведомления о поручениях (16.10.2026).
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS task_notify JSONB",
         ):
             await conn.execute(_sa.text(stmt))
 

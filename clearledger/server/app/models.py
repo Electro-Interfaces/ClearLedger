@@ -127,6 +127,10 @@ class User(Base):
     mail_only: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # Куда присылать уведомления о поручениях: ["secretary", "notices", "email"]
+    # в любом сочетании. Выбирает сам человек в личных настройках; NULL —
+    # умолчание `notify.TASK_CHANNELS_DEFAULT`.
+    task_notify: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # Версия входа: кладётся в JWT и сверяется на каждом запросе. Смена пароля, «выйти
     # со всех устройств» и сброс сессий админом поднимают её — выданные токены гаснут.
     token_version: Mapped[int] = mapped_column(

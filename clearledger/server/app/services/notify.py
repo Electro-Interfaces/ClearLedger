@@ -69,7 +69,8 @@ async def _secretary(db: AsyncSession, company_id: uuid.UUID) -> User:
 async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
                         text: str, *, edit_message_id: uuid.UUID | None = None,
                         ttl: int | None = None,
-                        urgency: str = "normal") -> uuid.UUID | None:
+                        urgency: str = "normal",
+                        room_kind: str | None = None) -> uuid.UUID | None:
     """Сообщение лично человеку — мимо подписок компании.
 
     `dispatch` рассылает по `NotificationRule` в общую комнату «Оповещения», и
@@ -84,6 +85,9 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
     напоминание в ленте Slack. Пропавшее сообщение (комнату почистили) не
     считается ошибкой — пишем новое.
 
+    `room_kind=NOTICES_ROOM_KIND` — не в беседу с Секретарём, а в личный канал
+    «Уведомления»: человек сам попросил держать поручения отдельно от напоминаний.
+
     Возвращает идентификатор сообщения: он и есть то, что правят в следующий
     раз. `None` — доставка не состоялась.
     """
@@ -95,18 +99,25 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
     mine = select(ChatParticipant.room_id).where(ChatParticipant.user_id == user.id)
     room = (await db.execute(
         select(ChatRoom).where(
-            ChatRoom.company_id == company_id, ChatRoom.type == "direct",
+            ChatRoom.company_id == company_id,
+            *((ChatRoom.type == "channel", ChatRoom.kind == room_kind,
+               ChatRoom.is_active.is_(True)) if room_kind
+              else (ChatRoom.type == "direct",)),
             ChatRoom.id.in_(mine),
             ChatRoom.id.in_(select(ChatParticipant.room_id).where(
                 ChatParticipant.user_id == secretary.id))).limit(1))).scalar_one_or_none()
     if room is None:
-        room = ChatRoom(company_id=company_id, type="direct", name=None,
+        # Канал, а не беседа: писать в «Уведомления» некому, отвечает человек в
+        # самой задаче. Владелец — Секретарь, поэтому поле ввода у человека закрыто.
+        room = ChatRoom(company_id=company_id, type="channel" if room_kind else "direct",
+                        kind=room_kind, name=NOTICES_ROOM_TITLE if room_kind else None,
                         created_by=secretary.id)
         db.add(room)
         await db.flush()
         db.add_all([
             ChatParticipant(room_id=room.id, user_id=user.id),
-            ChatParticipant(room_id=room.id, user_id=secretary.id),
+            ChatParticipant(room_id=room.id, user_id=secretary.id,
+                            role="owner" if room_kind else "member"),
         ])
         await db.flush()
 
@@ -141,6 +152,58 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
     except Exception as e:  # noqa: BLE001
         logger.debug("Напоминание не ушло в push: %s", e)
     return message.id
+
+
+# ---------------------------------------------------------------------------
+# Уведомления о поручениях: канал выбирает сам человек (личные настройки)
+# ---------------------------------------------------------------------------
+TASK_CHANNELS = ("secretary", "notices", "email")
+# Чат — туда, где человек работает; письмо — прежнее поведение, его не отнимаем.
+TASK_CHANNELS_DEFAULT = ("secretary", "email")
+NOTICES_ROOM_KIND = "notices"
+NOTICES_ROOM_TITLE = "Уведомления"
+
+
+def task_channels(user: User) -> set[str]:
+    """Куда человеку присылать уведомления о поручениях.
+
+    Почтовый участник в пространство не заходит и чата не видит — ему только
+    письмо, что бы ни стояло в настройке.
+    """
+    if user.mail_only:
+        return {"email"}
+    return set(user.task_notify or TASK_CHANNELS_DEFAULT) & set(TASK_CHANNELS)
+
+
+async def tell(db: AsyncSession, company_id: uuid.UUID, people, subject: str,
+               text: str, task=None) -> None:
+    """Уведомление о поручении — в каналы, которые выбрал каждый получатель.
+
+    Письма уходят в фоне (`task_mail`), сообщения чата пишутся в сессию
+    вызывающего: коммит за ним. Каждое сообщение — в своей точке сохранения,
+    чтобы сбой чата не сорвал ни письмо, ни работу вызывающего.
+    """
+    from app.services import task_mail
+
+    chat_text = f"{subject}\n{text}" if text else subject
+    if task is not None:
+        from app.services.task_scheduler import task_path
+
+        chat_text += f"\n[Открыть задачу]({task_path(task)})"
+    emails: list[str] = []
+    for person in people:
+        channels = task_channels(person)
+        if "email" in channels and person.email:
+            emails.append(person.email)
+        for code, kind in (("secretary", None), ("notices", NOTICES_ROOM_KIND)):
+            if code not in channels:
+                continue
+            try:
+                async with db.begin_nested():
+                    await notify_person(db, company_id, person, chat_text, room_kind=kind)
+            except Exception as e:  # noqa: BLE001 — чат не должен ронять поручение
+                logger.warning("Уведомление о поручении в чат (%s) не ушло: %s", code, e)
+    task_mail.send_notice_async(emails, subject, text)
 
 
 # ---------------------------------------------------------------------------

@@ -6021,6 +6021,14 @@ async def create_errand(
                     to_value=f"task:{t.id}", note=payload.title.strip()))
     await db.commit()
     await db.refresh(t)
+    person = await db.get(User, assignee_id)
+    if person is not None and person.id != current_user.id:
+        from app.services import notify
+
+        await notify.tell(db, cid, [person], f"Вам поручена задача №{t.number}: {t.title}",
+                          f"Поручил: {current_user.name or current_user.email}\n"
+                          f"По документу {label}", t)
+        await db.commit()
     return {"task_id": str(t.id), "number": t.number}
 
 

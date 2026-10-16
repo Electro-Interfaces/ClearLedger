@@ -34,6 +34,7 @@ from app.database import get_db
 from app.services import oversight
 from app.models import Company, Counterparty, User, UserCompany
 from app.services import email_service
+from app.services import notify
 from app.utils import resolve_company_id
 from app.schemas import (
     CompanyBrief,
@@ -565,6 +566,7 @@ async def get_me(
         tz=current_user.tz,
         work_start=current_user.work_start.strftime("%H:%M"),
         work_end=current_user.work_end.strftime("%H:%M"),
+        task_notify=sorted(notify.task_channels(current_user)),
         position=членство[0].position if членство else None,
         party_type=членство[0].party_type if членство else None,
         party_org=орг,

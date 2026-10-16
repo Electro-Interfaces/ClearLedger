@@ -3053,6 +3053,8 @@ class MyProfileBody(BaseModel):
     tz: str | None = None
     workStart: str | None = None   # «09:00»
     workEnd: str | None = None     # «18:00»
+    # Куда присылать уведомления о поручениях: secretary | notices | email.
+    taskNotify: list[str] | None = None
 
 
 @router.patch("/me")
@@ -3102,6 +3104,16 @@ async def update_me(
     if current_user.work_start >= current_user.work_end:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Рабочий день должен заканчиваться позже, чем начинается")
+    if body.taskNotify is not None:
+        from app.services import notify
+
+        каналы = [c for c in notify.TASK_CHANNELS if c in body.taskNotify]
+        # Ни одного канала — поручение не дойдёт никуда, и человек узнает о нём
+        # по просрочке. Выключить можно лишнее, но не всё.
+        if not каналы:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Выберите хотя бы один канал для поручений")
+        current_user.task_notify = каналы
     await db.commit()
     return {"ok": True, "name": current_user.name, "avatarUrl": current_user.avatar_url,
             "tz": current_user.tz,

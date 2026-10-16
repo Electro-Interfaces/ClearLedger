@@ -43,7 +43,7 @@ from app.models import (
     User, UserCompany,
 )
 from app.services import (
-    partner_bridge, placement, process_templates, space_connectors, task_mail,
+    notify, partner_bridge, placement, process_templates, space_connectors, task_mail,
     task_scheduler, work_query, work_state,
 )
 
@@ -710,7 +710,7 @@ _MENTION = re.compile(r"@([\w.-]{2,60})", re.UNICODE)
 
 
 async def _watch_mentions(db: AsyncSession, cid: uuid.UUID, task: Task,
-                          note: str | None, actor: User) -> list[tuple[str, str | None]]:
+                          note: str | None, actor: User) -> list[tuple[str, User]]:
     """Упомянутые в реплике `@имя` попадают в наблюдатели.
 
     Имя ищем по началу слова: люди пишут «@Петров», а в реестре «Петров Иван».
@@ -723,11 +723,11 @@ async def _watch_mentions(db: AsyncSession, cid: uuid.UUID, task: Task,
     if not handles:
         return []
     people = (await db.execute(
-        select(User.id, User.name, User.email).join(
-            UserCompany, UserCompany.user_id == User.id)
-        .where(UserCompany.company_id == cid))).all()
-    added: list[tuple[str, str | None]] = []
-    for uid, name, email in people:
+        select(User).join(UserCompany, UserCompany.user_id == User.id)
+        .where(UserCompany.company_id == cid))).scalars().all()
+    added: list[tuple[str, User]] = []
+    for person in people:
+        uid, name, email = person.id, person.name, person.email
         hay = f"{name or ''} {email or ''}".lower()
         if not any(hay.startswith(h) or f" {h}" in hay or (email or "").lower().startswith(h)
                    for h in handles):
@@ -735,7 +735,7 @@ async def _watch_mentions(db: AsyncSession, cid: uuid.UUID, task: Task,
         if await db.get(TaskWatcher, (task.id, uid)) is not None:
             continue
         db.add(TaskWatcher(task_id=task.id, user_id=uid, reason="mention", added_by=actor.id))
-        added.append((name or str(uid), email))
+        added.append((name or str(uid), person))
     return added
 
 
@@ -1717,12 +1717,13 @@ async def create_task(
                          to_value=person.name))
     await db.commit()
     await db.refresh(t)
-    # Поручение письмом: человек узнаёт о задаче, не заходя в систему. Себе не
-    # пишем — тот, кто поставил задачу на себя, о ней уже знает.
-    if person is not None and person.id != current_user.id and person.email:
-        task_mail.send_notice_async(
-            [person.email], f"Вам поручена задача №{t.number}: {t.title}",
-            _errand_text(t, current_user, None))
+    # Поручение — туда, куда человек просил (личные настройки): чат «Секретарь»,
+    # «Уведомления», письмо. Себе не пишем — тот, кто поставил задачу на себя,
+    # о ней уже знает.
+    if person is not None and person.id != current_user.id:
+        await notify.tell(db, cid, [person], f"Вам поручена задача №{t.number}: {t.title}",
+                          _errand_text(t, current_user, None), t)
+        await db.commit()
     names = await _names(db, [t])
     extras = await _extras(db, [t])
     return _task_out(t, route, names[t.id], extras[t.id])
@@ -2470,7 +2471,7 @@ async def task_action(
             work_state.apply_stage(t, route, payload.stage_code)
             logged = True
 
-    new_assignee_email: str | None = None
+    new_assignee: User | None = None
     if payload.assignee_id is not None:
         new_id = _uuid_or_400(payload.assignee_id, "assignee_id") if payload.assignee_id else None
         if new_id is not None and await db.get(UserCompany, (new_id, cid)) is None:
@@ -2479,9 +2480,9 @@ async def task_action(
             was = (await db.get(User, t.assignee_id)).name if t.assignee_id else None
             new_person = await db.get(User, new_id) if new_id else None
             now_name = new_person.name if new_person else None
-            # Себе письмо не шлём: человек только что нажал кнопку и всё видит.
+            # Себе не шлём: человек только что нажал кнопку и всё видит.
             if new_person is not None and new_person.id != current_user.id:
-                new_assignee_email = new_person.email
+                new_assignee = new_person
             db.add(TaskEvent(task_id=t.id, kind="assign", user_id=current_user.id,
                              from_value=was, to_value=now_name, note=payload.note))
             t.assignee_id = new_id
@@ -2686,25 +2687,25 @@ async def task_action(
         out["warning"] = f"У задачи осталось открытых подзадач: {out['subtasks']['open']}"
     if mentioned:
         out["mentioned"] = [n for n, _ in mentioned]
-        task_mail.send_notice_async(
-            [e for _, e in mentioned if e],
+        await notify.tell(
+            db, cid, [u for _, u in mentioned],
             f"Вас упомянули в задаче №{t.number}: {t.title}",
-            f"{current_user.name or 'Коллега'} написал:\n\n{payload.note or ''}")
-    if new_assignee_email:
-        task_mail.send_notice_async(
-            [new_assignee_email], f"Вам поручена задача №{t.number}: {t.title}",
-            _errand_text(t, current_user, payload.note))
+            f"{current_user.name or 'Коллега'} написал:\n\n{payload.note or ''}", t)
+    if new_assignee is not None:
+        await notify.tell(db, cid, [new_assignee], f"Вам поручена задача №{t.number}: {t.title}",
+                          _errand_text(t, current_user, payload.note), t)
     # Наблюдатель подписался, чтобы знать судьбу работы, а узнавал о ней последним:
     # письма уходили только упомянутым и новому исполнителю. Шлём на закрытии и на
     # передаче — на двух событиях, ради которых за задачей и следят. Реплики сюда не
     # входят намеренно: для «позовите меня в обсуждение» есть упоминание.
-    await _notify_watchers(db, t, current_user, payload, mentioned,
-                           handed_over=bool(new_assignee_email))
+    await _notify_watchers(db, cid, t, current_user, payload, mentioned,
+                           handed_over=new_assignee is not None)
+    await db.commit()
     return out
 
 
-async def _notify_watchers(db: AsyncSession, t: Task, actor: User,
-                          payload: TaskAction, mentioned: list[tuple[str, str]],
+async def _notify_watchers(db: AsyncSession, cid: uuid.UUID, t: Task, actor: User,
+                          payload: TaskAction, mentioned: list[tuple[str, User]],
                           *, handed_over: bool = False) -> None:
     """Письмо наблюдателям: работа закрыта или сменила исполнителя.
 
@@ -2720,12 +2721,11 @@ async def _notify_watchers(db: AsyncSession, t: Task, actor: User,
     closing = payload.status in ("done", "cancelled")
     if not closing and not handed_over:
         return
-    already = {email for _, email in mentioned if email}
-    already.add(actor.email)
+    already = {u.id for _, u in mentioned} | {actor.id}
     rows = (await db.execute(
-        select(User.email).join(TaskWatcher, TaskWatcher.user_id == User.id)
+        select(User).join(TaskWatcher, TaskWatcher.user_id == User.id)
         .where(TaskWatcher.task_id == t.id))).scalars().all()
-    targets = sorted({email for email in rows if email and email not in already})
+    targets = [u for u in rows if u.id not in already]
     if not targets:
         return
     if closing:
@@ -2737,13 +2737,12 @@ async def _notify_watchers(db: AsyncSession, t: Task, actor: User,
         body = f"Передал: {actor.name or actor.email}"
     if payload.note:
         body = f"{body}\n\n{payload.note}"
-    task_mail.send_notice_async(targets, subject, body)
+    await notify.tell(db, cid, targets, subject, body, t)
 
 
 def _errand_text(t: Task, author: User, note: str | None) -> str:
-    """Письмо «вам поручено»: что, к какому сроку и от кого."""
-    lines = [f"Задача №{t.number}: {t.title}",
-             f"Поручил: {author.name or 'коллега'}"]
+    """Текст «вам поручено»: от кого и к какому сроку. Номер и название — в теме."""
+    lines = [f"Поручил: {author.name or 'коллега'}"]
     if t.due_at:
         lines.append(f"Срок: {t.due_at.strftime('%d.%m.%Y')}")
     if note:
@@ -3995,12 +3994,13 @@ async def inbound_email(
 
     # Свои узнают об ответе письмом: внешний участник пишет редко, и ждать его
     # ответа, поглядывая в карточку, никто не станет.
-    people = (await db.execute(select(User.email).where(
+    people = (await db.execute(select(User).where(
         User.id.in_([i for i in (t.assignee_id, t.author_id) if i]),
         User.mail_only.is_(False)))).scalars().all()
-    task_mail.send_notice_async(
-        list(people), f"Ответ по задаче №{t.number}: {t.title}",
-        f"{ev.actor_name} ответил письмом:\n\n{text}")
+    await notify.tell(
+        db, t.company_id, people, f"Ответ по задаче №{t.number}: {t.title}",
+        f"{ev.actor_name} ответил письмом:\n\n{text}", t)
+    await db.commit()
     return {"ok": True, "eventId": str(ev.id)}
 
 # ---------------------------------------------------------------------------
