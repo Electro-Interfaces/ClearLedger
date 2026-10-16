@@ -13,7 +13,11 @@
 Четыре причины, и это не список всех бед сети, а список того, что решается
 выездом или звонком сегодня:
 
-- **молчит** — станция числится рабочей, энергии нет дольше недели;
+- **нет зарядок** — станция числится рабочей, а зарядок с энергией нет дольше
+  недели (у зарабатывавшей — дольше двух своих обычных интервалов). Это не про
+  электроснабжение и не про связь: связь — по статусу витрины АСУиМ;
+- **попытки без энергии** — за неделю клиенты пробовали заряжаться после
+  последней удачной зарядки и не получили ни киловатт-часа;
 - **отказывает** — станция на связи, но каждый пятый приезд кончается ничем;
 - **не взята в работу** — беду видно, а заявки по ней нет. Это не отдельная
   беда, а признак первых двух, и поэтому он не строка, а пометка на строке;
@@ -53,6 +57,7 @@ from app.models import Region, ServiceLocation, StationCheck
 from app.services.network_reliability import network_reliability
 from app.services.network_state import network_state
 from app.services.station_checklist import ITEM_BY_KEY
+from app.services.station_status_days import status_now
 from app.services.station_scope import обслуживаем
 from app.services.ops_monitor_context import region_matches
 from app.services.station_upkeep import network_upkeep
@@ -68,6 +73,15 @@ from app.services.station_upkeep import network_upkeep
 # отбрасываем: станция, которая никогда не зарабатывала, тоже может стоять из-за
 # того, что её не запустили.
 ДЕНЬГИ_ЗАМЕТНЫЕ = 5_000.0
+
+
+_СЛОВО_СТАТУСА = {"no_link": "нет связи", "disabled": "отключена", "working": "на связи",
+                  "not_working": "не работает"}
+
+
+def _с_дня(day: str, open_start: bool) -> str:
+    """«с 14.09» — либо «с 11.09 и раньше», если серия идёт с первой книги."""
+    return f"с {day[8:10]}.{day[5:7]}" + (" и раньше" if open_start else "")
 
 
 def _вес(строка: dict[str, Any]) -> tuple:
@@ -109,6 +123,9 @@ async def ops_worklist(
 
     парк = {r["locationId"]: r for r in состояние["stations"]}
     строки: dict[str, dict[str, Any]] = {}
+    # Статус станции и разъёмов по книге витрины АСУиМ с датой начала: он
+    # отвечает, КУДА идти — звонить по связи, выяснять, кто отключил, или ехать.
+    срез_статусов, статусы = await status_now(db, company_id, as_of)
 
     def строка(loc_id: str, источник: dict[str, Any]) -> dict[str, Any]:
         s = строки.get(loc_id)
@@ -135,6 +152,7 @@ async def ops_worklist(
                 "breachedTickets": int(w.get("breached") or 0),
                 "lastTicketId": w.get("lastId"),
                 "lastTicketNumber": w.get("lastNumber"),
+                "lastSessionAt": (парк.get(loc_id) or источник).get("lastSessionAt"),
             }
             строки[loc_id] = s
         return s
@@ -148,13 +166,40 @@ async def ops_worklist(
         s = строка(r["locationId"], r)
         s["silentDays"] = дней
         s["lossPerMonth"] = float(r.get("loss") or 0)
+        тишина = (("нет сессий в загруженной истории" if not r.get("attemptsEver") else "попытки есть, энергии не было") if дней is None
+                  else f"не заряжала {дней} дн")
+        ст = статусы.get(r["locationId"])
+        # Со статусом витрины причина говорит, что делать: «нет связи» — звонок
+        # и проверка канала, «отключена» — выяснить, кто и зачем, «на связи» —
+        # станция видна, а энергии нет, это выезд.
+        if ст and ст["status"] in _СЛОВО_СТАТУСА:
+            метка = f"{_СЛОВО_СТАТУСА[ст['status']]} {_с_дня(ст['since'], ст['openStart'])}"
+            if ст["status"] == "working":
+                метка = f"на связи, не заряжала {дней} дн" if дней is not None else "на связи, " + тишина
+            s["reasons"].append({"kind": "silent", "label": метка,
+                                 "note": тишина if ст["status"] != "working" else None})
+        else:
+            s["reasons"].append({
+                "kind": "silent",
+                "label": тишина,
+                # Расхождение витрины и факта называем словами: инженеру важно не
+                # «жёлтая строка», а что именно не сходится.
+                "note": r.get("statusRaw") or ("числится рабочей" if r.get("mismatch") else None),
+            })
+
+    # ── попытки без энергии ──
+    # Станция на связи, клиент приехал и уехал без тока — по такой станции едут,
+    # даже если до «недели без зарядок» она не дотянула.
+    for r in состояние.get("stations", []):
+        n = r.get("dryAttempts") or 0
+        if not n or r.get("silentDays") is None:
+            continue
+        s = строка(r["locationId"], r)
+        s["silentDays"] = r.get("silentDays")
         s["reasons"].append({
-            "kind": "silent",
-            "label": (("нет сессий в загруженной истории" if not r.get("attemptsEver") else "попытки есть, энергии не было") if дней is None
-                      else f"молчит {дней} дн"),
-            # Расхождение витрины и факта называем словами: инженеру важно не
-            # «жёлтая строка», а что именно не сходится.
-            "note": r.get("statusRaw") or ("числится рабочей" if r.get("mismatch") else None),
+            "kind": "dry",
+            "label": f"попыток без энергии: {n}",
+            "note": "последняя " + date.fromisoformat(r["lastDryAt"][:10]).strftime("%d.%m"),
         })
 
     # ── отказывает ──
@@ -175,6 +220,23 @@ async def ops_worklist(
             "label": f"{r.get('failedVisitsPct')} % приездов впустую",
             "note": (f"{r.get('attemptsPerVisit')} попыток на приезд"
                      if (r.get("attemptsPerVisit") or 0) >= 2 else None),
+        })
+
+    # ── неисправен разъём ──
+    # Станция на связи и продаёт, но один разъём две книги подряд в «Ошибке» или
+    # «Недоступен»: клиент с этим типом разъёма уезжает. У станции без связи
+    # статус разъёма застывает, поэтому здесь только станции на связи.
+    for loc_id, ст in статусы.items():
+        if not ст["faults"] or loc_id not in парк:
+            continue
+        s = строка(loc_id, парк[loc_id])
+        f = ст["faults"]
+        s["reasons"].append({
+            "kind": "connector",
+            "label": (f"разъём {f[0]['no']} — {f[0]['status']} {_с_дня(f[0]['since'], f[0]['openStart'])}"
+                      if len(f) == 1 else f"неисправно разъёмов: {len(f)}"),
+            "note": ("; ".join(f"№{x['no']} {x['status']} {_с_дня(x['since'], x['openStart'])}" for x in f)
+                     if len(f) > 1 else "станция на связи, остальные разъёмы работают"),
         })
 
     # ── поверка счётчика и ТО ──
@@ -306,7 +368,10 @@ async def ops_worklist(
         "dataLagHours": состояние.get("dataLagHours"),
         "dataThrough": состояние.get("dataThrough"),
         "requestedDate": состояние.get("requestedDate"),
-        "snapshotNote": состояние.get("snapshotNote"),
+        "snapshotNote": (f"Сессии — на выбранный день (МСК). Статусы станций и разъёмов — по выгрузке "
+                         f"витрины АСУиМ на {срез_статусов[8:10]}.{срез_статусов[5:7]}, она приходит раз в сутки."
+                         if срез_статусов else состояние.get("snapshotNote")),
+        "statusDay": срез_статусов,
         "dataGaps": sorted(пробелы.values(), key=lambda r: -(r.get("sessions90d") or 0)),
         "threshold": порог,
         "totals": {
@@ -317,6 +382,7 @@ async def ops_worklist(
             "meter": sum(1 for s in список if any(r["kind"] == "meter" for r in s["reasons"])),
             "service": sum(1 for s in список if any(r["kind"] == "service" for r in s["reasons"])),
             "check": sum(1 for s in список if any(r["kind"] == "check" for r in s["reasons"])),
+            "connector": sum(1 for s in список if any(r["kind"] == "connector" for r in s["reasons"])),
             # Станции, у которых сроки не заполнены вовсе — хоть поверка, хоть
             # ТО. Считаем СТАНЦИИ, а не пропуски: сумма двух незаполненных полей
             # давала 1072 при 537 станциях и читалась как размер беды вдвое.

@@ -131,6 +131,38 @@ async def network_state(
             .group_by(ChargeSession.location_id))).all()
     }
 
+    # Обычный ритм станции: медиана интервалов между днями с отпущенной энергией за
+    # окно. Станция, которая заряжает раз в 10 дней, на третий день тишины не
+    # «потеря» — это её обычная неделя (Михайловская 14, жалоба РусГидро 16.10.2026).
+    # Так же сделано у документов на «Закрытии периода».
+    дни_зарядок: dict[str, list] = {}
+    for loc, день in (await db.execute(
+            select(ChargeSession.location_id, func.date(ChargeSession.started_at))
+            .where(ChargeSession.company_id == company_id,
+                   ChargeSession.location_id.is_not(None),
+                   ChargeSession.started_at >= окно,
+                   ChargeSession.started_at <= сейчас,
+                   ChargeSession.energy_kwh > 0)
+            .distinct())).all():
+        дни_зарядок.setdefault(str(loc), []).append(день)
+    ритм: dict[str, int] = {}
+    for loc, дни in дни_зарядок.items():
+        дни.sort()
+        интервалы = sorted((b - a).days for a, b in zip(дни, дни[1:]))
+        if интервалы:
+            ритм[loc] = интервалы[len(интервалы) // 2]
+
+    # Попытки без энергии за неделю: клиент приезжал, станция на связи, а тока не
+    # дала. Это сигнал сильнее любой тишины — его и ищут инженеры.
+    пустые = dict((str(loc), (int(n), last)) for loc, n, last in (await db.execute(
+        select(ChargeSession.location_id, func.count(), func.max(ChargeSession.started_at))
+        .where(ChargeSession.company_id == company_id,
+               ChargeSession.location_id.is_not(None),
+               ChargeSession.started_at > сейчас - timedelta(days=НЕДЕЛЯ),
+               ChargeSession.started_at <= сейчас,
+               func.coalesce(ChargeSession.energy_kwh, 0) <= 0)
+        .group_by(ChargeSession.location_id))).all())
+
     попытки = dict((str(loc), (last, int(total))) for loc, last, total in (await db.execute(
         select(ChargeSession.location_id, func.max(ChargeSession.started_at), func.count())
         .where(ChargeSession.company_id == company_id, ChargeSession.started_at <= сейчас)
@@ -157,6 +189,11 @@ async def network_state(
         w = работа.get(str(s.id), {})
         последняя = последние.get(str(s.id))
         дней = _возраст(последняя, сейчас)
+        пустых, пустая = пустые.get(str(s.id), (0, None))
+        # Считаем только попытки ПОСЛЕ последней зарядки: если потом станция отдала
+        # ток, неудача была у клиента, а не у неё.
+        if пустая is None or (последняя is not None and пустая <= последняя):
+            пустых = 0
         деньги_в_месяц = round(w.get("деньги", 0) / ОКНО_ДЕНЕГ * 30, 2)
         статус = s.operational_status or "unknown"
         строки.append({
@@ -175,6 +212,9 @@ async def network_state(
             "lastAttemptAt": попытки[str(s.id)][0].isoformat() if str(s.id) in попытки else None,
             "attemptsEver": попытки.get(str(s.id), (None, 0))[1],
             "silentDays": дней,
+            "typicalGap": ритм.get(str(s.id)),
+            "dryAttempts": пустых,
+            "lastDryAt": пустая.isoformat() if пустых else None,
             "sessions90d": w.get("сессий", 0),
             "sessions7d": w.get("сессий_7д", 0),
             "revenuePerMonth": деньги_в_месяц,
@@ -190,7 +230,10 @@ async def network_state(
     # расхождение, но 158 тыс. ₽ в месяц она приносить перестала — и в списке
     # должна стоять выше сотни мелких расхождений (МАГ, 19.09.2026).
     for r in строки:
-        замолчала = r["silentDays"] is None or r["silentDays"] >= ПОТЕРЯ_С_ДНЯ
+        # Порог — не меньше двух обычных интервалов станции: редкая станция на
+        # третий день тишины ещё ничего не потеряла.
+        порог = max(ПОТЕРЯ_С_ДНЯ, 2 * (r["typicalGap"] or 0))
+        замолчала = r["silentDays"] is None or r["silentDays"] >= порог
         r["loss"] = round(r["revenuePerMonth"], 2) if (
             замолчала and r["revenuePerMonth"] > 0 and r["lifeStatus"] != "closed"
             and r["status"] != "decommissioned") else 0.0

@@ -603,7 +603,7 @@ export async function getStationObligations(
 
 /** Причина, по которой станция попала в рабочий лист. */
 export interface WorkReason {
-  kind: 'silent' | 'failing' | 'breached' | 'meter' | 'service' | 'check'
+  kind: 'silent' | 'dry' | 'failing' | 'breached' | 'meter' | 'service' | 'check'
   label: string
   note?: string | null
 }
