@@ -1846,6 +1846,31 @@ def test_document_sync_runs_on_its_own_schedule():
     assert "store_document_sync import run_forever" in source
 
 
+@pytest.mark.asyncio
+async def test_document_sync_rebuilds_only_on_new_data(monkeypatch):
+    """Пересборка стоит минуту: без новых данных такт её не запускает, но не реже срока."""
+    cid = uuid.uuid4()
+    отпечаток = ("1748/2026-10-16", "10020/2026-10-16")
+    сейчас = [1000.0]
+
+    async def источники(_db, _cid):
+        return отпечаток
+
+    monkeypatch.setattr(store_document_sync, "отпечаток_источников", источники)
+    monkeypatch.setattr(store_document_sync.time, "monotonic", lambda: сейчас[0])
+    monkeypatch.setattr(store_document_sync, "_прошлый", {})
+
+    assert await store_document_sync.пора_сверять(None, cid) == отпечаток, "первый такт сверяет"
+    store_document_sync._прошлый[cid] = (отпечаток, сейчас[0])
+    сейчас[0] += 600
+    assert await store_document_sync.пора_сверять(None, cid) is None, "ничего нового — не сверяем"
+    отпечаток = ("1749/2026-10-16", "10020/2026-10-16")
+    assert await store_document_sync.пора_сверять(None, cid) == отпечаток, "пришёл пакет — сверяем"
+    store_document_sync._прошлый[cid] = (отпечаток, сейчас[0])
+    сейчас[0] += store_document_sync.НЕ_РЕЖЕ_ЧАСОВ * 3600
+    assert await store_document_sync.пора_сверять(None, cid) == отпечаток, "по сроку — сверяем"
+
+
 class StatusSession:
     """Сессия для бух-статусов: последний снимок станции и что добавлено."""
 
