@@ -104,6 +104,7 @@ export const ОБСЛУЖИЛ: Record<string, string> = {
 export const ЭТАП: Record<string, string> = {
   arrived: 'звонок поступил',
   answered: 'узел ответил',
+  card_ready: 'карточка звонящего готова',
   rules: 'правила приёма',
   waiting: 'встал в очередь',
   queue_announced: 'объявлена позиция',
@@ -115,6 +116,16 @@ export const ЭТАП: Record<string, string> = {
   offer: 'предложен оператору',
   offer_failed: 'оператор не принял',
   connected: 'соединён с оператором',
+  agent_announced: 'оператору объявлена линия',
+  enrich_started: 'началась живая расшифровка',
+  enrich_unavailable: 'живая расшифровка недоступна',
+  recording_started: 'запись началась',
+  recording_paused: 'запись на паузе',
+  recording_resumed: 'запись продолжена',
+  recording_finished: 'запись закончилась',
+  recording_failed: 'запись не удалась',
+  opch: 'действие в пульте оператора',
+  cc_command: 'команда контакт-центра',
   hold: 'на удержании',
   unhold: 'снят с удержания',
   hold_timeout: 'удержание дольше предела',
@@ -136,8 +147,10 @@ export const ЭТАП: Record<string, string> = {
   agent_lost: 'пульт оператора пропал',
   escalation_requested: 'запрошен старший',
   operator_hangup: 'оператор положил трубку',
+  disposition: 'оператор записал итог',
   fallback: 'запасной сценарий',
   cc_event_rejected: 'узел отклонил событие КЦ',
+  node_restart: 'узел перезапустился, разговор сохранён',
   interrupted: 'прерван перезапуском узла',
   ended: 'звонок закончен',
 }
@@ -179,6 +192,15 @@ export function началоДня(сдвигДней = 0) {
 }
 
 /** Присутствие оператора словами (канал оператора и реестр допуска КЦ). */
+/**
+ * Местная дата «ГГГГ-ММ-ДД» для имени файла. `toISOString().slice(0, 10)` дал бы дату в UTC:
+ * местная полночь в Москве — это ещё вчерашний день по UTC.
+ */
+export function деньФайла(когда: string | number) {
+  const d = new Date(когда)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export const ПРИСУТСТВИЕ: Record<string, string> = {
   available: 'готов', ready: 'готов', online: 'трубка на связи', away: 'отошёл', break: 'перерыв',
   offline: 'не на связи', unknown: 'неизвестно', wrapup: 'постобработка',

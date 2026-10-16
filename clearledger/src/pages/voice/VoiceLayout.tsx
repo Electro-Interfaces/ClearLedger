@@ -9,7 +9,7 @@
  * Перед разделами оболочка спрашивает у узла `/me`: пускает ли он этого человека.
  * Отказ узла объясняется здесь, один раз, а не в каждом разделе отдельно.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen, PhoneOff } from 'lucide-react'
@@ -19,6 +19,9 @@ import { cn } from '@/lib/utils'
 import * as voice from '@/services/voiceService'
 import { EmptyBlock } from '@/pages/conf/EmptyBlock'
 import { VOICE_GROUPS, VOICE_VIEWS, voicePath, voiceViewFor } from './views'
+
+/** Меньше этой ширины меню разделов (240 px) оставило бы экрану меньше 480 px. */
+const ТЕСНО = 720
 
 export function VoiceLayout() {
   const { companyId } = useCompany()
@@ -31,6 +34,25 @@ export function VoiceLayout() {
   useEffect(() => {
     try { localStorage.setItem('voice-rail', свёрнута ? 'closed' : 'open') } catch { /* приватный режим */ }
   }, [свёрнута])
+
+  // Сколько места у «Телефонии» на самом деле, а не у окна: при открытой боковой панели пространства
+  // на 800 px экрану оставалось около 250 px, и формы уезжали за край. В тесноте меню разделов
+  // свёрнуто и раскрывается поверх экрана, не сжимая его.
+  const корень = useRef<HTMLDivElement>(null)
+  const [ширина, setШирина] = useState(0)
+  const [поверх, setПоверх] = useState(false)
+  useEffect(() => {
+    const el = корень.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([e]) => {
+      const w = Math.round(e.contentRect.width)
+      setШирина(w)
+      if (w >= ТЕСНО) setПоверх(false)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [узкий])
+  const тесно = ширина > 0 && ширина < ТЕСНО
 
   const кто = useQuery({
     queryKey: ['voice-me', companyId],
@@ -69,45 +91,60 @@ export function VoiceLayout() {
     )
   }
 
-  return (
-    <div className="flex h-full min-h-0">
-      {свёрнута ? (
-        <nav aria-label="Разделы Телефонии"
-          className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-card px-1 py-3">
-          <button type="button" onClick={() => setСвёрнута(false)}
-            title="Развернуть меню раздела" aria-label="Развернуть меню раздела"
-            className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground">
-            <PanelLeftOpen className="h-4 w-4" />
-          </button>
-        </nav>
-      ) : (
-        <nav aria-label="Разделы Телефонии"
-          className="flex w-60 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card px-2.5 py-3">
-          <div className="flex items-center justify-end px-1 pb-1">
-            <button type="button" onClick={() => setСвёрнута(true)}
-              title="Свернуть меню" aria-label="Свернуть меню раздела"
-              className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground">
-              <PanelLeftClose className="h-4 w-4" />
+  const открыть = () => (тесно ? setПоверх(true) : setСвёрнута(false))
+  const закрыть = () => (тесно ? setПоверх(false) : setСвёрнута(true))
+
+  const рельса = (
+    <nav aria-label="Разделы Телефонии"
+      className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-border bg-card px-1 py-3">
+      <button type="button" onClick={открыть} aria-expanded={тесно ? поверх : undefined}
+        title="Развернуть меню раздела" aria-label="Развернуть меню раздела"
+        className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground">
+        <PanelLeftOpen className="h-4 w-4" />
+      </button>
+    </nav>
+  )
+
+  const меню = (
+    <nav aria-label={тесно ? 'Меню разделов Телефонии' : 'Разделы Телефонии'}
+      onKeyDown={e => { if (тесно && e.key === 'Escape') setПоверх(false) }}
+      className={cn('flex w-60 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card px-2.5 py-3',
+        тесно && 'absolute inset-y-0 left-0 z-20 shadow-lg')}>
+      <div className="flex items-center justify-end px-1 pb-1">
+        <button type="button" onClick={закрыть}
+          title="Свернуть меню" aria-label="Свернуть меню раздела"
+          className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground">
+          <PanelLeftClose className="h-4 w-4" />
+        </button>
+      </div>
+      {VOICE_GROUPS.map(г => (
+        <div key={г.key} className="pb-2">
+          <p className={cn('px-3 pb-1 pt-2 text-xs text-muted-foreground', г.key === 'pbx' && 'opacity-70')}>
+            {г.label}
+          </p>
+          {VOICE_VIEWS.filter(v => v.group === г.key).map(v => (
+            <button key={v.key} type="button" onClick={() => { navigate(voicePath(v)); setПоверх(false) }}
+              title={v.hint} aria-current={v.key === активный.key ? 'page' : undefined}
+              className={cn('flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors',
+                v.key === активный.key
+                  ? 'bg-primary/10 font-medium text-primary'
+                  : г.key === 'pbx' ? 'text-muted-foreground hover:bg-accent/50' : 'text-foreground hover:bg-accent/50')}>
+              <span className="min-w-0 flex-1 truncate">{v.label}</span>
             </button>
-          </div>
-          {VOICE_GROUPS.map(г => (
-            <div key={г.key} className="pb-2">
-              <p className={cn('px-3 pb-1 pt-2 text-xs text-muted-foreground', г.key === 'pbx' && 'opacity-70')}>
-                {г.label}
-              </p>
-              {VOICE_VIEWS.filter(v => v.group === г.key).map(v => (
-                <button key={v.key} type="button" onClick={() => navigate(voicePath(v))}
-                  title={v.hint} aria-current={v.key === активный.key ? 'page' : undefined}
-                  className={cn('flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm transition-colors',
-                    v.key === активный.key
-                      ? 'bg-primary/10 font-medium text-primary'
-                      : г.key === 'pbx' ? 'text-muted-foreground hover:bg-accent/50' : 'text-foreground hover:bg-accent/50')}>
-                  <span className="min-w-0 flex-1 truncate">{v.label}</span>
-                </button>
-              ))}
-            </div>
           ))}
-        </nav>
+        </div>
+      ))}
+    </nav>
+  )
+
+  return (
+    <div ref={корень} className="relative flex h-full min-h-0">
+      {тесно || свёрнута ? рельса : меню}
+      {тесно && поверх && (
+        <>
+          <div aria-hidden="true" className="absolute inset-0 z-10 bg-background/40" onClick={() => setПоверх(false)} />
+          {меню}
+        </>
       )}
       <div className="min-w-0 flex-1 overflow-y-auto">
         {содержимое}

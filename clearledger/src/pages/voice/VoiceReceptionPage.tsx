@@ -121,7 +121,7 @@ function HoursTab({ т, ч, поставить }: Части) {
       <Field имя="Линия" подсказка="Код линии меняется только перезапуском узла" было={ч.было('/lineName')}>
         <span className="rounded-md border border-border px-2 py-1 font-mono text-xs">{т.lineId}</span>
         <TextInput значение={т.lineName} onChange={v => поставить(['lineName'], v)} подпись="Название линии"
-          placeholder="Название линии для контакт-центра" className="min-w-56 flex-1" />
+          placeholder="Название линии для контакт-центра" className="min-w-0 basis-56 flex-1" />
       </Field>
 
       <Field имя="Часы приёма" было={ч.было('/hours')}
@@ -365,9 +365,9 @@ function FallbackTab({ т, ч, поставить, целиПаспорта }: �
                   <option value="forward">переадресация</option>
                 </select>
                 {ц.action === 'message'
-                  ? <TextInput значение={звукиИз(ц.sounds)} подпись={`Звуки цели ${c}`} моно className="min-w-48 flex-1"
+                  ? <TextInput значение={звукиИз(ц.sounds)} подпись={`Звуки цели ${c}`} моно className="min-w-0 basis-48 flex-1"
                       onChange={v => поставить(['targets', c], { action: 'message', sounds: звукиВ(v ?? '') ?? [] })} />
-                  : <TextInput значение={ц.endpoint} подпись={`Куда звонить, цель ${c}`} моно className="min-w-48 flex-1"
+                  : <TextInput значение={ц.endpoint} подпись={`Куда звонить, цель ${c}`} моно className="min-w-0 basis-48 flex-1"
                       placeholder="PJSIP/<трубка> или PJSIP/<номер>@<транк>"
                       onChange={v => поставить(['targets', c], { action: 'forward', endpoint: v ?? '' })} />}
                 {где
@@ -408,7 +408,7 @@ function TopicsTab({ т, ч, поставить }: Части) {
             <Input value={x.code} onChange={e => править(i, 'code', e.target.value.trim())} aria-label="Код темы"
               placeholder="код" className="h-9 w-36 font-mono text-xs" />
             <Input value={x.name} onChange={e => править(i, 'name', e.target.value)} aria-label="Название темы"
-              placeholder="Название" className="h-9 min-w-48 flex-1" />
+              placeholder="Название" className="h-9 min-w-0 basis-48 flex-1" />
             <Input value={x.category ?? ''} onChange={e => править(i, 'category', e.target.value || undefined)} aria-label="Категория темы"
               placeholder="Категория" className="h-9 w-40" />
             <RemoveButton что={`тему ${x.name || x.code}`} onClick={() => поставить(['topics'], темы.filter((_, n) => n !== i))} />

@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils'
 import * as voice from '@/services/voiceService'
 import { EmptyBlock } from '@/pages/conf/EmptyBlock'
 import { скачатьCSV, скачатьExcel, type Лист } from './exportTable'
-import { началоДня, оператор, процент, сек, число } from './format'
+import { деньФайла, началоДня, оператор, процент, сек, число } from './format'
 import { Heading, NodeError, Stat } from './parts'
 import { кудаУшли, поВремени, поГруппам } from './statsMath'
 
@@ -114,7 +114,10 @@ export default function VoiceStatsPage() {
     ]
   }
 
-  const файл = `телефония-статистика-${from.slice(0, 10)}`
+  // Имя файла — местные дни периода (to в период не входит): по UTC начало дня — ещё вчера.
+  const первыйДень = деньФайла(from)
+  const последнийДень = деньФайла(Date.parse(to) - 1)
+  const файл = `телефония-статистика-${первыйДень === последнийДень ? первыйДень : `${первыйДень}_${последнийДень}`}`
   async function выгрузить(как: 'csv' | 'xlsx') {
     try {
       if (как === 'csv') скачатьCSV(файл, листы()); else await скачатьExcel(файл, листы())
@@ -159,7 +162,10 @@ export default function VoiceStatsPage() {
           <section aria-label="Показатели" className="flex flex-wrap gap-x-8 gap-y-3 rounded-xl border border-border bg-card p-4">
             <Stat имя="Поступило" значение={число(m.arrived)} пояснение={пояснение('arrived')} />
             <Stat имя="Вне часов" значение={число(m.afterHours)} пояснение={пояснение('afterHours')} />
-            <Stat имя="В очередь" значение={число(m.offered)} пояснение={пояснение('offered')} />
+            {/* Перевод с другой линии ставит звонок в очередь ещё раз: «в очередь» бывает больше «поступило». */}
+            <Stat имя="В очередь" значение={число(m.offered)}
+              пояснение={(m.transferredIn ?? 0) > 0 ? `${пояснение('offered') ?? ''}. ${пояснение('transferredIn') ?? ''}` : пояснение('offered')}
+              подпись={(m.transferredIn ?? 0) > 0 ? `из них ${число(m.transferredIn)} переводом с другой линии` : undefined} />
             <Stat имя="Отвечено" значение={число(m.answered)} пояснение={пояснение('answered')} />
             <Stat имя="SL — ответили вовремя" значение={процент(m.slPct)} пояснение={пояснение('slPct')} />
             <Stat имя="ASA — среднее ожидание" значение={сек(m.asaSec)}

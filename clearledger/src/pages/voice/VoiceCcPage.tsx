@@ -199,7 +199,7 @@ function ConnectionCard({ к }: { к: voice.CcConnection }) {
               : 'Приостановить? Контакт-центр перестанет получать звонки, пока вы не возобновите.'}
           </span>
           <Input value={причина} onChange={e => setПричина(e.target.value)} maxLength={200} aria-label="Причина"
-            placeholder="причина — попадёт в журнал изменений" className="h-9 min-w-56 flex-1" />
+            placeholder="причина — попадёт в журнал изменений" className="h-9 min-w-0 basis-56 flex-1" />
           <Button type="submit" variant={действие === 'revoked' ? 'destructive' : 'default'} size="sm" disabled={идёт}>
             {действие === 'revoked' ? 'Отозвать' : 'Приостановить'}
           </Button>
@@ -217,7 +217,7 @@ function ConnectionCard({ к }: { к: voice.CcConnection }) {
           <form className="flex flex-wrap items-center gap-2"
             onSubmit={e => { e.preventDefault(); if (совпал) void сделать(() => voice.ccActivate(companyId, к.id, безПробелов(отпечаток)), 'Подключение включено') }}>
             <Input value={отпечаток} onChange={e => setОтпечаток(e.target.value)} aria-label="Отпечаток от контакт-центра"
-              placeholder="отпечаток, который сообщил контакт-центр" className="h-9 min-w-64 flex-1 font-mono text-xs" />
+              placeholder="отпечаток, который сообщил контакт-центр" className="h-9 min-w-0 basis-64 flex-1 font-mono text-xs" />
             <Button type="submit" size="sm" disabled={!совпал || идёт}>Совпал — включить</Button>
           </form>
           {!!отпечаток && !совпал && <p className="text-xs text-warning">Не совпадает. Не включайте, пока не выясните, откуда другой ключ.</p>}
