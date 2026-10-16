@@ -3,6 +3,7 @@ JWT-аутентификация: создание токена, верифик�
 """
 
 import uuid
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -36,9 +37,13 @@ def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
 
-def create_access_token(user_id: str, email: str) -> str:
-    """Создаёт JWT access-токен."""
-    expire = datetime.now(timezone.utc) + timedelta(
+def create_access_token(user_id: str, email: str, *, extra: dict | None = None,
+                        expires_at: datetime | None = None) -> str:
+    """Создаёт JWT access-токен.
+
+    `extra` и `expires_at` — для сессии с областью действия (вход инженера по
+    пропуску, `VISIT_SCOPE`): у неё своя компания и свой срок."""
+    expire = expires_at or datetime.now(timezone.utc) + timedelta(
         minutes=settings.access_token_expire_minutes
     )
     payload = {
@@ -46,8 +51,86 @@ def create_access_token(user_id: str, email: str) -> str:
         "email": email,
         "exp": expire,
         "iat": datetime.now(timezone.utc),
+        **(extra or {}),
     }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
+
+
+# ── Сессия инженера по пропуску ──────────────────────────────────────────────
+#
+# Инженер поставщика входит в пространство клиента по пропуску (space_bridge_router,
+# `/eco/partner/visit`). Раньше пропуск менялся на обычный токен на сутки: без
+# компании, без связи с подключением, и выключение подключения не закрывало уже
+# открытые сессии. Теперь сессия помечена областью: `scp=visit`, компания `cid`,
+# подключение `pvs`. На каждом запросе подключение сверяется заново, а доступ к
+# компаниям, кроме `cid`, закрыт, даже если учётка с этим адресом состоит где-то ещё.
+VISIT_SCOPE = "visit"
+VISIT_SESSION_MINUTES = 60
+
+# Компания сессии по пропуску на время запроса; None — обычная сессия.
+_visit_company: ContextVar[uuid.UUID | None] = ContextVar("visit_company", default=None)
+# Клеймы токена текущего запроса: нужны `/auth/refresh`, чтобы не превратить
+# сессию с областью в обычную.
+_token_claims: ContextVar[dict | None] = ContextVar("token_claims", default=None)
+
+
+def visit_company() -> uuid.UUID | None:
+    """Компания, которой ограничена сессия по пропуску; None — ограничения нет."""
+    return _visit_company.get()
+
+
+def current_token_claims() -> dict | None:
+    return _token_claims.get()
+
+
+def _install_visit_scope() -> None:
+    """Сессия по пропуску видит только своё членство — во всех запросах сразу.
+
+    Учётка гостя находится по адресу из чужого пропуска, и у неё могут быть членства
+    в других компаниях контейнера. Проверка `assert_company_member` их закрывает, но
+    членство читают ещё десятки ручек напрямую (`require_company_admin`, списки
+    компаний, чаты). Поэтому сужение — на уровне ORM, как скоуп объектов
+    (`scope.install_orm_scope`): пока запрос идёт по пропуску, любое чтение
+    `user_companies` видит только компанию пропуска. Ставится при импорте, а не в
+    lifespan: без него сессия по пропуску не должна существовать ни минуты.
+    """
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session, with_loader_criteria
+
+    @event.listens_for(Session, "do_orm_execute")
+    def _apply(state):  # noqa: ANN001 — сигнатура события SQLAlchemy
+        if not state.is_select or state.is_column_load or state.is_relationship_load:
+            return
+        cid = _visit_company.get()
+        if cid is None:
+            return
+        state.statement = state.statement.options(
+            with_loader_criteria(UserCompany, UserCompany.company_id == cid,
+                                 include_aliases=True))
+
+
+_install_visit_scope()
+
+
+async def _check_visit(payload: dict, user: User, db: AsyncSession) -> uuid.UUID:
+    """Сессия по пропуску жива, пока включено подключение, выдавшее пропуск."""
+    from app.models import PartnerSpace
+
+    denied = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                           detail="Сессия по пропуску закрыта")
+    try:
+        cid = uuid.UUID(str(payload.get("cid")))
+        pid = uuid.UUID(str(payload.get("pvs")))
+    except (TypeError, ValueError):
+        raise denied
+    partner = await db.get(PartnerSpace, pid)
+    if (partner is None or partner.company_id != cid or partner.role != "vendor"
+            or not partner.is_active or user.is_superadmin):
+        raise denied
+    m = await db.get(UserCompany, (user.id, cid))
+    if m is None:
+        raise denied
+    return cid
 
 
 def decode_token(token: str) -> dict:
@@ -107,6 +190,16 @@ async def get_current_user(
             detail="Пользователь не найден",
         )
 
+    _token_claims.set(payload)
+    if payload.get("scp") == VISIT_SCOPE:
+        _visit_company.set(await _check_visit(payload, user, db))
+    elif payload.get("scp"):
+        # Область, которой здесь не знают, — не повод пускать без ограничений.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Невалидный токен: неизвестная область")
+    else:
+        _visit_company.set(None)
+
     await _touch_presence(user, db)
     return user
 
@@ -155,6 +248,13 @@ async def assert_company_member(
     from app.scope import _as_ids, set_request_organization, set_request_scope
 
     cid = await resolve_company_id(company_ref, db)  # 400, если нет такой компании
+    # Сессия по пропуску открыта ровно в одну компанию — раньше всех прочих правил.
+    visit = _visit_company.get()
+    if visit is not None and cid != visit:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Нет доступа к компании",
+        )
     if user.is_superadmin:
         set_request_scope(None)
         return cid
@@ -347,6 +447,59 @@ def CompanyModuleScope(module_key: str, query_param: str = "company_id"):
     return _dep
 
 
+# Области именных ключей. Ключ с областью открывает только ручки своей области,
+# ключ без области — общие машинные ручки, как раньше (get_company_by_api_key).
+KEY_SCOPES = {
+    # Узел «Телефонии» у заказчика: кто звонит и что у него сейчас (ContactHub, Я-1, Я-2).
+    "voice.identify": "Узел «Телефонии»: опознание звонящего и сводка клиента",
+    # Внешняя система заказчика (мониторинг, BI) меняет ключ на служебный токен
+    # `aud=voice` и с ним читает API узла без ПДн (`sso.VOICE_SERVICE_SCOPES`).
+    "voice.stats": "Система: статистика, здоровье и метрики узла «Телефонии»",
+    "voice.audit": "Система: журнал доступа узла «Телефонии» к ПДн",
+}
+
+
+async def _named_key(raw: str, db: AsyncSession):
+    import hashlib
+
+    from app.models import SpaceInboundKey
+    key_hash = hashlib.sha256(raw.encode()).hexdigest()
+    return (await db.execute(
+        select(SpaceInboundKey).where(
+            SpaceInboundKey.key_hash == key_hash,
+            SpaceInboundKey.revoked_at.is_(None),
+        )
+    )).scalar_one_or_none()
+
+
+def CompanyByKeyScope(scope: str):
+    """Зависимость: именной ключ с областью `scope` → (компания, ключ).
+
+    Легаси-ключ компании и ключи без области сюда не проходят: они общие, а ручки
+    с областью отдают то, что общему потребителю не положено (ПДн звонящего)."""
+    assert scope in KEY_SCOPES, scope
+
+    async def _dep(
+        x_cloud_api_key: str = Header(..., alias="X-Cloud-API-Key"),
+        db: AsyncSession = Depends(get_db),
+    ):
+        named = await _named_key(x_cloud_api_key, db) if x_cloud_api_key else None
+        if named is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="Невалидный API-ключ")
+        if scope not in (named.scopes or []):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail=f"Ключ выдан без области {scope}")
+        company = await db.get(Company, named.company_id)
+        if company is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="Невалидный API-ключ")
+        named.last_used_at = datetime.now(timezone.utc)
+        return company, named
+
+    return _dep
+
+
 async def get_company_by_api_key(
     x_cloud_api_key: str = Header(..., alias="X-Cloud-API-Key"),
     db: AsyncSession = Depends(get_db),
@@ -358,6 +511,7 @@ async def get_company_by_api_key(
     Сначала именные ключи (space_inbound_keys, по SHA256-хешу: видно, КТО ходит,
     и любого можно отозвать отдельно), затем легаси-ключ компании — он один на
     всех и остаётся, пока настроенные внешние узлы не переведены на именные.
+    Ключ с областью (`KEY_SCOPES`) сюда не проходит: он выдан под свои ручки.
     """
     if not x_cloud_api_key:
         raise HTTPException(
@@ -365,17 +519,12 @@ async def get_company_by_api_key(
             detail="Требуется X-Cloud-API-Key",
         )
 
-    import hashlib
-    from datetime import datetime, timezone
-
-    from app.models import SpaceInboundKey
-    key_hash = hashlib.sha256(x_cloud_api_key.encode()).hexdigest()
-    named = (await db.execute(
-        select(SpaceInboundKey).where(
-            SpaceInboundKey.key_hash == key_hash,
-            SpaceInboundKey.revoked_at.is_(None),
+    named = await _named_key(x_cloud_api_key, db)
+    if named is not None and named.scopes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Ключ выдан для другой области",
         )
-    )).scalar_one_or_none()
     if named is not None:
         named.last_used_at = datetime.now(timezone.utc)
         company = await db.get(Company, named.company_id)

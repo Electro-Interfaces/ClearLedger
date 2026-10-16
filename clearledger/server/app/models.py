@@ -11,6 +11,7 @@ from sqlalchemy import (
     Boolean,
     CHAR,
     CheckConstraint,
+    Computed,
     Date,
     DateTime,
     Float,
@@ -120,6 +121,13 @@ class User(Base):
     # (диспетчерская, приёмная), поэтому это два разных поля, а не одно.
     phone_mobile: Mapped[str | None] = mapped_column(String(40), nullable=True)
     phone_office: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Те же телефоны в E.164 — по ним узел «Телефонии» узнаёт своего сотрудника
+    # (Я-3). Считает база (`services/phone_e164.py`): кто бы ни правил телефон,
+    # нормализованный идёт следом. Писать в эти колонки нельзя.
+    phone_mobile_e164: Mapped[str | None] = mapped_column(
+        String(16), Computed("phone_to_e164(phone_mobile)", persisted=True), nullable=True)
+    phone_office_e164: Mapped[str | None] = mapped_column(
+        String(16), Computed("phone_to_e164(phone_office)", persisted=True), nullable=True)
     # Человек живёт в своей почте и в пространство не заходит: сообщения чатов
     # уходят ему письмом, а ответ возвращается в ленту. Учётка нужна только чтобы
     # он был участником комнаты и автором сообщений — вход ею невозможен
@@ -287,9 +295,33 @@ class SpaceInboundKey(Base):
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     key_prefix: Mapped[str] = mapped_column(String(12), nullable=False)
     station_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Области ключа (`auth.KEY_SCOPES`). Пусто — ключ общего назначения, как раньше:
+    # открывает машинные ручки `/api/eco/*`. С областью — только ручки этой области:
+    # ключ узла «Телефонии» читает ПДн звонящих и не должен открывать ничего,
+    # кроме опознания, а общий ключ не должен открывать опознание.
+    scopes: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# SsoUsedToken — предъявленные одноразовые токены (защита от повтора)
+# ---------------------------------------------------------------------------
+class SsoUsedToken(Base):
+    """Одноразовый токен, который уже предъявлен: пропуск инженера в пространство.
+
+    Пропуск живёт две минуты, и без этой отметки его можно было предъявить
+    сколько угодно раз за это время — перехваченная ссылка входила наравне с
+    хозяином. `jti` уникален, вставка второй раз не проходит. Строки старше
+    срока токена чистит сам вход: хранить их дольше незачем.
+    """
+    __tablename__ = "sso_used_tokens"
+
+    jti: Mapped[str] = mapped_column(String(80), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # ---------------------------------------------------------------------------
@@ -1057,6 +1089,10 @@ class Counterparty(Base):
     legal_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     actual_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Телефон в E.164 для опознания звонящего (Я-3): считает база из `phone`
+    # (`services/phone_e164.py`), писать нельзя.
+    phone_e164: Mapped[str | None] = mapped_column(
+        String(16), Computed("phone_to_e164(phone)", persisted=True), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     director_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     director_position: Mapped[str | None] = mapped_column(String(150), nullable=True)
@@ -1214,6 +1250,9 @@ class CounterpartyContact(Base):
     # contract | tech | comm | other
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="other")
     phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Телефон в E.164 (Я-3): считает база из `phone`, писать нельзя.
+    phone_e164: Mapped[str | None] = mapped_column(
+        String(16), Computed("phone_to_e164(phone)", persisted=True), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

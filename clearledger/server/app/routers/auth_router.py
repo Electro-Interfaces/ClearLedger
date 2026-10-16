@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
 from app.auth import (
+    VISIT_SCOPE,
+    current_token_claims,
     create_access_token,
     get_current_user,
     hash_password,
@@ -300,8 +302,18 @@ async def register(
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(current_user: User = Depends(get_current_user)):
-    """Продлить сессию — выдаёт новый JWT на основе текущего валидного."""
-    token = create_access_token(str(current_user.id), current_user.email)
+    """Продлить сессию — выдаёт новый JWT на основе текущего валидного.
+
+    Сессия по пропуску (`scp=visit`) продлением не становится обычной и не
+    растягивается: новый токен несёт ту же область и тот же срок, что и старый."""
+    claims = current_token_claims() or {}
+    if claims.get("scp") == VISIT_SCOPE:
+        token = create_access_token(
+            str(current_user.id), current_user.email,
+            extra={k: claims[k] for k in ("scp", "cid", "pvs") if k in claims},
+            expires_at=datetime.fromtimestamp(int(claims["exp"]), timezone.utc))
+    else:
+        token = create_access_token(str(current_user.id), current_user.email)
     return TokenResponse(
         access_token=token,
         user=_user_response(current_user),

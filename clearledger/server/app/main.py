@@ -483,6 +483,9 @@ app.include_router(dedup_ingest_router.router, prefix=API_PREFIX)  # приём 
 app.include_router(edge_router.router, prefix=API_PREFIX)  # приём пакетов edge-агентов АЗС по X-Cloud-API-Key
 app.include_router(eco_events_router.router, prefix=API_PREFIX)  # обратный канал приложений
 app.include_router(space_events_router.router, prefix=API_PREFIX)  # подписки на исходящие события и очередь
+from app.routers import voice_router
+app.include_router(voice_router.router, prefix=API_PREFIX)  # «Телефония»: кто звонит — узлу по ключу voice.identify
+app.include_router(voice_router.keys_router, prefix=API_PREFIX)  # «Телефония»: ключи систем для API узла
 app.include_router(ocr_router.router, prefix=API_PREFIX)
 app.include_router(fuel_router.router, prefix=API_PREFIX)
 app.include_router(fuel_mappings_router.router, prefix=API_PREFIX)

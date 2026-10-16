@@ -58,6 +58,31 @@ CONF_MIGRATION_DDL = (
     "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS conf_room_id UUID",
 )
 
+# «Телефония»: узел заказчика спрашивает Ядро, кто звонит (ContactHub, Я-1…Я-3).
+# Телефоны справочников — свободный текст, поэтому рядом лежит их E.164, который
+# считает сама база (генерируемые колонки на `phone_to_e164`, services/phone_e164.py):
+# ADD COLUMN заполняет колонку для всех строк сразу, отдельный пересчёт не нужен.
+VOICE_CORE_MIGRATION_DDL = (
+    "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS phone_e164 VARCHAR(16) "
+    "GENERATED ALWAYS AS (phone_to_e164(phone)) STORED",
+    "ALTER TABLE counterparty_contacts ADD COLUMN IF NOT EXISTS phone_e164 VARCHAR(16) "
+    "GENERATED ALWAYS AS (phone_to_e164(phone)) STORED",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_mobile_e164 VARCHAR(16) "
+    "GENERATED ALWAYS AS (phone_to_e164(phone_mobile)) STORED",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_office_e164 VARCHAR(16) "
+    "GENERATED ALWAYS AS (phone_to_e164(phone_office)) STORED",
+    "CREATE INDEX IF NOT EXISTS ix_counterparties_phone_e164 "
+    "ON counterparties (company_id, phone_e164) WHERE phone_e164 IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_counterparty_contacts_phone_e164 "
+    "ON counterparty_contacts (company_id, phone_e164) WHERE phone_e164 IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_users_phone_mobile_e164 "
+    "ON users (phone_mobile_e164) WHERE phone_mobile_e164 IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_users_phone_office_e164 "
+    "ON users (phone_office_e164) WHERE phone_office_e164 IS NOT NULL",
+    # Области именного ключа: ключ узла открывает только опознание (auth.KEY_SCOPES).
+    "ALTER TABLE space_inbound_keys ADD COLUMN IF NOT EXISTS scopes JSONB",
+)
+
 STORE_RECEIPT_MIGRATION_DDL = (
     "DROP TRIGGER IF EXISTS store_receipt_stock_movement_immutable_trg "
     "ON store_receipt_stock_movements",
@@ -1930,7 +1955,12 @@ ACCOUNTING_REVISION_MIGRATION_DDL = (
 
 async def create_all() -> None:
     """Создаёт все таблицы (если не существуют) + инкрементальные миграции."""
+    from app.services.phone_e164 import PHONE_FUNCTION_DDL
+
     async with engine.begin() as conn:
+        # Функция — раньше таблиц: на ней стоят генерируемые колонки телефонов,
+        # и в новой базе create_all заводит их сразу вместе с таблицей.
+        await conn.execute(text(PHONE_FUNCTION_DDL))
         await conn.run_sync(Base.metadata.create_all)
 
     # Инкрементальные миграции для существующих таблиц
@@ -5047,6 +5077,10 @@ async def create_all() -> None:
             "CREATE INDEX IF NOT EXISTS ix_market_scenario_company "
             "ON market_scenarios (company_id, status, check_on)",
         ):
+            await conn.execute(_sa.text(stmt))
+
+        # v2.88: «Телефония» — опознание звонящего узлом заказчика (Я-1…Я-3).
+        for stmt in VOICE_CORE_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
     await _ensure_active_group_readiness(engine)

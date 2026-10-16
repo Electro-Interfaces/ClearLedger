@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
-from app.auth import get_current_user
+from app.auth import KEY_SCOPES, get_current_user
 from app.database import get_db
 from app.models import EdgeAgent, SpaceInboundKey, User
 from app.routers.users_router import require_company_admin
@@ -34,6 +34,9 @@ class InboundKeyCreate(BaseModel):
     # стоит организация с договором, за агентом — мы сами, и в истории документа
     # это должно различаться (этап 8 «Трека»).
     actor_kind: str = Field("partner", pattern="^(partner|agent)$")
+    # Области ключа (auth.KEY_SCOPES). Пусто — общий ключ машинных ручек, как раньше.
+    # Ключ узла «Телефонии» — `["voice.identify"]`: он открывает только опознание.
+    scopes: list[str] | None = None
 
 
 @router.get("")
@@ -50,6 +53,7 @@ async def list_keys(
     return {"keys": [{
         "id": str(k.id), "consumer": k.consumer, "prefix": k.key_prefix,
         "actor_kind": k.actor_kind,
+        "scopes": k.scopes or [],
         "station_id": k.station_id,
         "created_at": k.created_at.isoformat() if k.created_at else None,
         "last_used_at": k.last_used_at.isoformat() if k.last_used_at else None,
@@ -65,6 +69,12 @@ async def create_key(
 ):
     """Выдать ключ потребителю. Сам ключ — только в этом ответе, дальше лишь хеш."""
     cid = await require_company_admin(payload.company_id, current_user, db)
+    scopes = sorted(set(payload.scopes or []))
+    unknown = [x for x in scopes if x not in KEY_SCOPES]
+    if unknown:
+        raise HTTPException(422, f"Неизвестная область ключа: {', '.join(unknown)}")
+    if scopes and payload.station_id is not None:
+        raise HTTPException(422, "Ключ станции выдаётся без области")
     if payload.station_id is not None:
         agent = (await db.execute(select(EdgeAgent.id).where(
             EdgeAgent.company_id == cid,
@@ -84,15 +94,16 @@ async def create_key(
         id=uuid.uuid4(), company_id=cid, consumer=payload.consumer.strip(),
         actor_kind=payload.actor_kind,
         key_hash=hashlib.sha256(raw.encode()).hexdigest(), key_prefix=raw[:8],
-        station_id=payload.station_id,
+        station_id=payload.station_id, scopes=scopes or None,
     )
     db.add(key)
     await log_audit(db, actor=current_user, company_id=cid,
-                    action="inbound_key.create", target=key.consumer)
+                    action="inbound_key.create", target=key.consumer,
+                    details={"scopes": scopes} if scopes else None)
     await db.flush()
     return {"id": str(key.id), "consumer": key.consumer, "key": raw,
             "prefix": key.key_prefix, "station_id": key.station_id,
-            "actor_kind": key.actor_kind}
+            "actor_kind": key.actor_kind, "scopes": scopes}
 
 
 @router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT)

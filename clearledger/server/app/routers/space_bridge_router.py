@@ -21,6 +21,7 @@ import base64
 import json
 import secrets
 import uuid
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from typing import Any
 
@@ -29,18 +30,19 @@ from fastapi import (
 )
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
 from app.auth import (
-    assert_company_member, create_access_token, get_company_by_api_key, get_current_user,
-    hash_password,
+    VISIT_SCOPE, VISIT_SESSION_MINUTES, assert_company_member, create_access_token,
+    get_company_by_api_key, get_current_user, hash_password,
 )
 from app.database import get_db
 from app.models import (
     Company, PartnerAttachment, PartnerMessage, PartnerSpace, PartnerTopic,
-    SourceFile, Task, TaskEvent, User, UserCompany,
+    SourceFile, SsoUsedToken, Task, TaskEvent, User, UserCompany,
 )
 from app.services import file_store, partner_bridge, sso, support_mirror
 
@@ -674,27 +676,52 @@ async def accept_visit(
     Учётка гостя всё же появляется — иначе его действия некому приписать в
     журнале. Но заводит её вход, а не человек руками, и помечена она как инженер
     платформы: в составе пространства такой участник виден отдельной группой.
+
+    Пропуск открывает одну компанию и один раз (16.10.2026):
+      * компания — из аудитории пропуска (`space:<slug>`), а запись о выдавшем
+        пространстве ищется только у неё. Раньше запись искалась по коду среди
+        всех компаний контейнера, и пропуск к одной мог пройти по записи другой;
+      * `jti` запоминается (`sso_used_tokens`): перехваченная ссылка второй раз
+        не входит;
+      * сессия по пропуску — своя (`scp=visit`, `auth.VISIT_SCOPE`): только эта
+        компания, час, и закрывается, как только связь с пространством выключат.
+        Учётка находится по адресу из чужого пропуска, и полная сессия открыла
+        бы гостю всё, что у этой учётки есть здесь помимо визита;
+      * суперадмин платформы по пропуску не входит: его права — на весь контейнер.
     """
     code = payload.space.strip()
     if not code:
         raise HTTPException(400, "Не указано пространство, выдавшее пропуск")
 
+    slug = _visit_target(payload.token)
+    company = (await db.execute(select(Company).where(Company.slug == slug))).scalars().first() \
+        if slug else None
+    if company is None:
+        raise HTTPException(403, "Пропуск выписан не в это пространство")
     partner = (await db.execute(select(PartnerSpace).where(
+        PartnerSpace.company_id == company.id,
         PartnerSpace.code == code, PartnerSpace.role == "vendor",
         PartnerSpace.is_active.is_(True),
     ))).scalars().first()
     if partner is None:
         raise HTTPException(403, f"Пространство «{code}» здесь не заведено как поставщик")
 
-    company = await db.get(Company, partner.company_id)
-    keys = await partner_bridge.partner_jwks(partner)
+    try:
+        keys = await partner_bridge.partner_jwks(partner)
+    except partner_bridge.BridgeError as e:
+        raise HTTPException(502, f"Ключи пространства «{code}» не получены: {e}") from e
     claims = _verify_visit(payload.token, keys, audience=f"space:{company.slug}")
+    if claims.get("space") != code:
+        raise HTTPException(403, "Пропуск выписан другим пространством")
 
     email = str(claims.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(400, "В пропуске нет адреса сотрудника")
+    await _use_once(db, claims, scope=str(partner.id))
 
     guest = (await db.execute(select(User).where(User.email == email))).scalars().first()
+    if guest is not None and guest.is_superadmin:
+        raise HTTPException(403, "Суперадминистратор платформы по пропуску не входит")
     if guest is None:
         # Пароля у такой учётки нет по смыслу: входят по пропуску, а не паролем.
         # Случайный хеш вместо пустого — чтобы «войти никак» не значило «войти без пароля».
@@ -716,17 +743,65 @@ async def accept_visit(
     await log_audit(db, actor=guest, company_id=company.id, action="partner.guest_in",
                     target=partner.code)
     await db.commit()
+    expires = datetime.now(timezone.utc) + timedelta(minutes=VISIT_SESSION_MINUTES)
     return {
-        "access_token": create_access_token(str(guest.id), guest.email),
+        "access_token": create_access_token(
+            str(guest.id), guest.email, expires_at=expires,
+            extra={"scp": VISIT_SCOPE, "cid": str(company.id), "pvs": str(partner.id)}),
         "token_type": "bearer",
+        "expires_at": expires.isoformat(),
         "company_id": str(company.id),
         "space": company.slug,
         "name": guest.name,
     }
 
 
+# Дольше пропуск не живёт: выдаём на две минуты, запас — на расхождение часов.
+VISIT_MAX_TTL = 300
+
+
+def _visit_target(token: str) -> str | None:
+    """Код пространства из аудитории пропуска (`space:<slug>`) — ДО проверки подписи.
+
+    Нужен, только чтобы найти компанию и её запись о выдавшем пространстве; сама
+    аудитория потом проверяется подписью в `_verify_visit`."""
+    from jwt import PyJWTError, decode
+
+    try:
+        aud = decode(token, options={"verify_signature": False}).get("aud")
+    except PyJWTError as e:
+        raise HTTPException(400, f"Пропуск не читается: {e}") from e
+    if isinstance(aud, str) and aud.startswith("space:") and len(aud) > 6:
+        return aud[6:]
+    return None
+
+
+async def _use_once(db: AsyncSession, claims: dict[str, Any], *, scope: str) -> None:
+    """Отметить пропуск предъявленным; второй раз — отказ.
+
+    Ключ — выдавшее пространство и `jti`: номера разных пространств не пересекаются,
+    и чужое пространство не может «сжечь» пропуск этого. Отметки старше срока
+    пропуска стираются здесь же."""
+    jti = str(claims.get("jti") or "")
+    if not jti or len(jti) > 40:
+        raise HTTPException(403, "В пропуске нет номера (jti): повтор не отличить от первого входа")
+    now = datetime.now(timezone.utc)
+    await db.execute(delete(SsoUsedToken).where(SsoUsedToken.expires_at < now))
+    done = await db.execute(pg_insert(SsoUsedToken).values(
+        jti=f"{scope}:{jti}", kind="visit",
+        expires_at=datetime.fromtimestamp(int(claims["exp"]), timezone.utc),
+    ).on_conflict_do_nothing(index_elements=["jti"]))
+    if done.rowcount == 0:
+        raise HTTPException(403, "Пропуск уже использован")
+
+
 def _verify_visit(token: str, jwks: dict[str, Any], *, audience: str) -> dict[str, Any]:
-    """Проверить пропуск публичным ключом выдавшего пространства."""
+    """Проверить пропуск публичным ключом выдавшего пространства.
+
+    Ключ — строго по `kid`: стеки экосистемы публикуют его в JWKS всегда
+    (`sso.public_jwks`), и пропуск без `kid` или с чужим не проверяется «первым
+    попавшимся» ключом. Выдавший — издатель экосистемы (`iss`, `sso_issuer`); срок
+    пропуска — не дольше `VISIT_MAX_TTL`."""
     from jwt import PyJWTError, decode, get_unverified_header
     from jwt.algorithms import RSAAlgorithm
 
@@ -734,17 +809,22 @@ def _verify_visit(token: str, jwks: dict[str, Any], *, audience: str) -> dict[st
         kid = get_unverified_header(token).get("kid")
     except PyJWTError as e:
         raise HTTPException(400, f"Пропуск не читается: {e}") from e
+    if not kid:
+        raise HTTPException(403, "Пропуск подписан без указания ключа (kid)")
     keys = jwks.get("keys") or []
-    # Ключ по kid, а при единственном — он же: `kid` у стеков совпадает по
-    # соглашению имени, и упереться в него значило бы не пустить никого.
-    jwk = next((k for k in keys if k.get("kid") == kid), keys[0] if len(keys) == 1 else None)
+    jwk = next((k for k in keys if k.get("kid") == kid), None)
     if jwk is None:
         raise HTTPException(403, "Ключ, которым подписан пропуск, у пространства не найден")
     try:
-        return decode(token, RSAAlgorithm.from_jwk(json.dumps(jwk)),
-                      algorithms=["RS256"], audience=audience)
+        claims = decode(token, RSAAlgorithm.from_jwk(json.dumps(jwk)),
+                        algorithms=["RS256"], audience=audience,
+                        issuer=sso.settings.sso_issuer,
+                        options={"require": ["exp", "iat", "iss", "aud"]})
     except PyJWTError as e:
         raise HTTPException(403, f"Пропуск отклонён: {e}") from e
+    if int(claims["exp"]) - int(claims["iat"]) > VISIT_MAX_TTL:
+        raise HTTPException(403, "Пропуск выписан на слишком долгий срок")
+    return claims
 
 
 @router.post("/eco/support/mail-reply")
