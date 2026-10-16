@@ -10,7 +10,7 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { Check, Copy, KeyRound, Plus, Trash2, Webhook } from 'lucide-react'
+import { AlertTriangle, Check, Copy, KeyRound, Plus, Trash2, Webhook } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -91,6 +91,9 @@ function Hooks() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   const список = useQuery({ queryKey: ['voice-webhooks', companyId], queryFn: () => voice.webhooks(companyId) })
+  // Без WEBHOOK_ALLOWED_HOSTS узел вебхуки не шлёт и получателя не примет: говорим это до попытки.
+  const узел = useQuery({ queryKey: ['voice-node', companyId], queryFn: () => voice.nodeInfo(companyId), refetchInterval: 5 * 60_000 })
+  const выключены = узел.data?.features?.webhooks === false
   const [адрес, setАдрес] = useState('')
   const [типы, setТипы] = useState<voice.EventType[]>(ПО_УМОЛЧАНИЮ)
   const [секрет, setСекрет] = useState<{ url: string; secret: string } | null>(null)
@@ -102,7 +105,7 @@ function Hooks() {
 
   async function добавить(e: React.FormEvent) {
     e.preventDefault()
-    if (!годен || !типы.length) return
+    if (!годен || !типы.length || выключены) return
     setИдёт(true)
     try {
       const w = await voice.addWebhook(companyId, адрес.trim(), типы)
@@ -121,6 +124,18 @@ function Hooks() {
       {секрет && (
         <ShownOnce заголовок="Секрет подписи" значение={секрет.secret} onClose={() => setСекрет(null)}
           текст={`Передайте секрет тем, кто настраивает приём на ${секрет.url}. Им система проверяет подпись каждого события. Секрет показывается один раз.`} />
+      )}
+
+      {выключены && (
+        <div role="status" className="flex gap-2 rounded-xl border border-warning/50 bg-warning/5 p-4 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+          <div className="space-y-1">
+            <p className="font-medium">Вебхуки на узле выключены: WEBHOOK_ALLOWED_HOSTS не задан</p>
+            <p className="text-muted-foreground">
+              Получателя добавить нельзя, и события никуда не уходят. Белый список хостов задаёт тот, кто ставит узел: после него и перезапуска узла можно добавлять получателей.
+            </p>
+          </div>
+        </div>
       )}
 
       <form onSubmit={добавить} className="space-y-3 rounded-xl border border-border bg-card p-4">
@@ -148,7 +163,7 @@ function Hooks() {
             })}
           </div>
         </fieldset>
-        <Button type="submit" size="sm" disabled={!годен || !типы.length || идёт}><Plus />{идёт ? 'Добавляем…' : 'Добавить'}</Button>
+        <Button type="submit" size="sm" disabled={!годен || !типы.length || идёт || выключены}><Plus />{идёт ? 'Добавляем…' : 'Добавить'}</Button>
       </form>
 
       {список.isLoading && <p role="status" className="text-sm">Читаем получателей у узла…</p>}
