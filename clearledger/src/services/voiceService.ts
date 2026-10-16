@@ -100,6 +100,8 @@ function словами(status: number, code: string, detail?: string) {
   if (code === 'forbidden' && detail === 'role') return 'Нужна роль администратора компании: «Телефонию» настраивает только он'
   if (code === 'forbidden' && detail === 'company') return 'Узел обслуживает другую компанию пространства'
   if (code === 'sound_in_use') return `Звук ещё звучит${detail ? ` (${detail})` : ''}: сначала уберите его из правил приёма`
+  // Узел различает «вебхуки выключены совсем» и «этот адрес не в списке» только текстом — показываем его.
+  if (code === 'host_not_allowed' && detail) return `${detail[0].toUpperCase()}${detail.slice(1)}. Белый список хостов задаёт тот, кто ставит узел`
   if (status === 412) return ОШИБКИ.precondition_failed
   return ОШИБКИ[code] ?? detail ?? `Узел ответил ошибкой ${status}`
 }
