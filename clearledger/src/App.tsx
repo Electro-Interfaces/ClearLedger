@@ -39,6 +39,18 @@ const ConfTalksPage = lazy(() => import('@/pages/conf/ConfTalksPage'))
 const ConfHistoryPage = lazy(() => import('@/pages/conf/ConfHistoryPage'))
 const ConfRecordsPage = lazy(() => import('@/pages/conf/ConfRecordsPage'))
 const ConfStatsPage = lazy(() => import('@/pages/conf/ConfStatsPage'))
+// «Телефония» — экраны узла связи заказчика (ContactHub/docs/voice-screens.md).
+const VoiceLayout = lazy(() => import('@/pages/voice/VoiceLayout').then((m) => ({ default: m.VoiceLayout })))
+const VoiceNowPage = lazy(() => import('@/pages/voice/VoiceNowPage'))
+const VoiceCallsPage = lazy(() => import('@/pages/voice/VoiceCallsPage'))
+const VoiceCallbacksPage = lazy(() => import('@/pages/voice/VoiceCallbacksPage'))
+const VoiceStatsPage = lazy(() => import('@/pages/voice/VoiceStatsPage'))
+const VoiceReceptionPage = lazy(() => import('@/pages/voice/VoiceReceptionPage'))
+const VoicePassportPage = lazy(() => import('@/pages/voice/VoicePassportPage'))
+const VoiceTargetsPage = lazy(() => import('@/pages/voice/VoiceTargetsPage'))
+const VoiceCcPage = lazy(() => import('@/pages/voice/VoiceCcPage'))
+const VoiceVersionsPage = lazy(() => import('@/pages/voice/VoiceVersionsPage'))
+const VoiceStubPage = lazy(() => import('@/pages/voice/VoiceStubPage'))
 const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ default: m.ChannelsPage })))
 const ChannelDetailPage = lazy(() => import('@/pages/ChannelDetailPage').then((m) => ({ default: m.ChannelDetailPage })))
 const SourcesPage = lazy(() => import('@/pages/SourcesPage').then((m) => ({ default: m.SourcesPage })))
@@ -368,6 +380,26 @@ const router = createBrowserRouter([
               { path: 'history', element: <LazyPage><ConfHistoryPage /></LazyPage> },
               { path: 'records', element: <LazyPage><ConfRecordsPage /></LazyPage> },
               { path: 'stats', element: <LazyPage><ConfStatsPage /></LazyPage> },
+            ],
+          },
+          // «Телефония»: узел связи заказчика. Данные звонков живут в узле, Ядро их не видит:
+          // экраны ходят в API узла через кромку стека (`/voice/api/v1`) с токеном `aud=voice`.
+          {
+            path: '/voice',
+            element: <RequireApp code="voice"><LazyPage><VoiceLayout /></LazyPage></RequireApp>,
+            children: [
+              { index: true, element: <LazyPage><VoiceNowPage /></LazyPage> },
+              { path: 'calls', element: <LazyPage><VoiceCallsPage /></LazyPage> },
+              { path: 'callbacks', element: <LazyPage><VoiceCallbacksPage /></LazyPage> },
+              { path: 'stats', element: <LazyPage><VoiceStatsPage /></LazyPage> },
+              { path: 'reception', element: <LazyPage><VoiceReceptionPage /></LazyPage> },
+              { path: 'passport', element: <LazyPage><VoicePassportPage /></LazyPage> },
+              { path: 'targets', element: <LazyPage><VoiceTargetsPage /></LazyPage> },
+              { path: 'cc', element: <LazyPage><VoiceCcPage /></LazyPage> },
+              { path: 'versions', element: <LazyPage><VoiceVersionsPage /></LazyPage> },
+              // Разделы следующей волны и АТС — заставка с тем, что в них будет.
+              ...['sounds', 'enrichment', 'webhooks', 'audit', 'retention', 'health', 'extensions', 'outbound']
+                .map((path) => ({ path, element: <LazyPage><VoiceStubPage /></LazyPage> })),
             ],
           },
           { path: '/messages', element: <LazyPage><MessagesPage /></LazyPage> },

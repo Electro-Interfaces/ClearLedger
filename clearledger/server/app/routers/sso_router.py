@@ -58,6 +58,9 @@ INTERNAL_ROUTES = {"admin": "/admin", "ledger": "/workspace", "chat": "/messages
                    "books": "/books", "revenue": "/revenue", "econ": "/economy",
                    # «Периметр» — обязательства и имущество вне баланса, все три слоя.
                    "perimeter": "/perimeter",
+                   # «Телефония» — экраны коммутационного узла заказчика; данные звонков
+                   # живут в узле, экраны берут у Ядра только пропуск (`/sso/token`).
+                   "voice": "/voice",
                    # Аудитор: панель сквозная (шапка и правый док), а плитка ведёт на
                    # его страницу — каталог навыков и разговор во всю ширину.
                    "auditor": "/auditor"}
@@ -82,10 +85,11 @@ INTERNAL_LAYERS = {"admin": "admin", "data": "admin", "info": "admin", "connect"
                    "books": "app", "revenue": "app", "auditor": "service",
                    # «Сайт» — рабочее место, а не служебная кухня: витрину и кабинет
                    # ведёт человек по своему делу, как бухгалтерию или реализацию.
-                   "site": "app", "elsy": "app"}
+                   "site": "app", "elsy": "app", "voice": "app"}
 # Порядок в списке: сначала управление, потом приложения, сервисы — в конце.
 INTERNAL_SORT = {"admin": 5, "pulse": 8, "ledger": 10, "projects": 12, "ops": 14, "sales": 16,
                  "corp": 17, "shop": 18, "marketing": 19, "support": 20, "netlink": 22,
+                 "voice": 23,
                  "finance": 25, "accounting": 26,
                  "books": 20, "revenue": 21,
                  "chat": 30, "auditor": 31, "docs": 32, "site": 33, "elsy": 34,
@@ -267,6 +271,51 @@ async def authorize(
                         action="sso.handoff", target=app)
         await db.commit()
     return {"url": url, "app": app, "mode": "sso", "expires_in": settings.sso_token_ttl_seconds}
+
+
+# ─── Пропуск в API приложения ─────────────────────────────────────────────────
+#
+# «Телефония» живёт экранами в этом SPA, а данными — в коммутационном узле у заказчика:
+# браузер сам ходит в API узла (`/voice/api/v1`, кромка стека проксирует на узел) и
+# предъявляет короткий токен Ядра. Handoff здесь не годится: переходить некуда, токен
+# нужен на каждый запрос, и экран сам берёт новый, когда старый на исходе. Узел сверяет
+# подпись по JWKS пространства и пускает только администратора компании (клеймы `cid` и
+# `companies`), поэтому состав клеймов тот же, что у handoff-токена.
+TOKEN_APPS = {"voice"}
+
+
+@router.get("/token")
+async def app_token(
+    app: str = Query(..., description="код приложения, в API которого идёт браузер"),
+    company_id: str = Query(..., description="компания, от имени которой идёт запрос"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Короткий токен Ядра (RS256, ~5 мин) для API приложения `app` в компании.
+
+    В журнал не пишется: экран берёт токен каждые несколько минут, а доступ к звонкам,
+    записям и номерам пишет в свой журнал сам узел.
+    """
+    if app not in TOKEN_APPS:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Неизвестное приложение: {app}")
+    if not settings.sso_enabled:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "SSO не настроен (нет ключа подписи)")
+    cid = await assert_company_member(company_id, user, db)
+    # Выключенный компании продукт пропуска не получает: прямой вызов ручки не должен
+    # обходить состав поставки, как его не обходит маршрут экрана.
+    from app.services import app_registry
+    enabled = {a["code"]: a["enabled"] for a in await app_registry.company_apps(db, cid)}
+    if not enabled.get(app, False):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Приложение не подключено компании")
+    rows = (await db.execute(
+        select(UserCompany, Company)
+        .join(Company, Company.id == UserCompany.company_id)
+        .where(UserCompany.user_id == user.id)
+    )).all()
+    companies = [{"id": str(c.id), "slug": c.slug, "role": uc.role} for uc, c in rows]
+    token = sso.sign_sso_token(user=user, company_id=str(cid), companies=companies, aud=app)
+    return {"token": token, "expires_in": settings.sso_token_ttl_seconds}
 
 
 @router.get("/jwks.json")
