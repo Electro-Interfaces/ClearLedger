@@ -27,6 +27,12 @@ import { ActiveFilterChips } from '@/components/common/ActiveFilterChips'
 import { AdvancedOnly } from '@/components/common/AdvancedOnly'
 import { formatPeriod as fmtPeriod } from '@/lib/formatDate'
 import { cn } from '@/lib/utils'
+import { useRail } from '@/components/report-kit/rail'
+
+function ReportStatusLine() {
+  const { status } = useRail()
+  return status ? <div className="ml-auto flex min-w-40 flex-1 justify-end px-2 text-right">{status}</div> : null
+}
 
 /** Границы квартала со сдвигом: 0 — текущий, -1 — прошлый. */
 function quarterBounds(offset: number): { from: string; to: string } {
@@ -466,6 +472,7 @@ export function WorkspaceFilterBar() {
         ) : null}
       </div>
 
+      <ReportStatusLine />
       <div className="ml-auto flex shrink-0 items-center gap-1 border-l border-border/50 pl-1.5">
         {count > 0 ? (
           <Button

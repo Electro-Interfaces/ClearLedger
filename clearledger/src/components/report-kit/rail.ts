@@ -9,11 +9,12 @@ export type RailState = {
   tools: boolean
   pivot: boolean
   help: ReactNode
+  status: ReactNode
   slot: HTMLElement | null
   insert: ((s: string) => void) | null
 }
 
-let state: RailState = { available: false, title: '', panel: null, tools: false, pivot: false, help: null, slot: null, insert: null }
+let state: RailState = { available: false, title: '', panel: null, tools: false, pivot: false, help: null, status: null, slot: null, insert: null }
 const subs = new Set<() => void>()
 
 export function setRail(patch: Partial<RailState>) {

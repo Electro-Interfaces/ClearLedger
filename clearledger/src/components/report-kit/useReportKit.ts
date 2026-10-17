@@ -39,6 +39,7 @@ export function useReportKit({
   ready,
   pivot = false,
   help = null,
+  status = null,
 }: {
   id: string
   title: string
@@ -49,6 +50,7 @@ export function useReportKit({
   ready: boolean
   pivot?: boolean
   help?: ReactNode
+  status?: ReactNode
 }) {
   const defaultCols = useMemo<Cols>(() => ({ order: [], hidden: hide ?? [] }), [hide])
   const [cols, setCols] = useStored<Cols>(`${STORAGE_PREFIX}:cols:${id}`, defaultCols)
@@ -62,9 +64,9 @@ export function useReportKit({
   const { panel, insert } = useRail()
 
   useEffect(() => {
-    setRail({ available: true, title, tools: ready, pivot, help })
-  }, [title, ready, pivot, help])
-  useEffect(() => () => setRail({ available: false, panel: null, tools: false, pivot: false, help: null }), [])
+    setRail({ available: true, title, tools: ready, pivot, help, status })
+  }, [title, ready, pivot, help, status])
+  useEffect(() => () => setRail({ available: false, panel: null, tools: false, pivot: false, help: null, status: null }), [])
 
   const sheet = useMemo(() => withCalc({ head, rows, total }, calcs), [head, rows, total, calcs])
   const derive = useMemo(() => deriveTotals(sheet.head, calcs), [sheet.head, calcs])

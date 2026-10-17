@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { PanelViewTabs } from './PanelViewTabs'
 import { ReportPivot } from './ReportPivot'
-import { OpsSnapshotNotice } from './OpsSnapshotNotice'
+import { OpsSnapshotStatus } from './OpsSnapshotNotice'
 import { ExportButton } from './analytics/ExportButton'
 import { exportRows } from './analytics/exportRows'
 import { daysAgoISO } from './analytics/periodPresets'
@@ -102,6 +102,13 @@ export function NetworkVendorsPanel() {
     queryFn: () => getNetworkVendors(companyId, { vendor: '*', days: окно, region: регион, asOf: наДень || undefined }),
     enabled: !!companyId && вид === 'pivot', staleTime: 60_000,
   })
+  const loaded = !!q.data && !q.isError
+  const dataThrough = q.data?.dataThrough ?? null
+  const dataLagHours = q.data?.dataLagHours ?? null
+  const snapshotNote = q.data?.snapshotNote
+  const status = useMemo(() => loaded ? <OpsSnapshotStatus dataThrough={dataThrough}
+    dataLagHours={dataLagHours} snapshotNote={snapshotNote} /> : null,
+  [loaded, dataThrough, dataLagHours, snapshotNote])
   const исходные = q.data?.vendors ?? []
   const строки = useMemo(() => (q.data?.vendors ?? []).filter((r) => {
     if (отбор === 'bad' && !r.badStations) return false
@@ -112,7 +119,7 @@ export function NetworkVendorsPanel() {
   const ячейки = useMemo(() => строки.map(строка), [строки])
   const итог = useMemo(() => итоги(строки, окно), [строки, окно])
   const набор = useReportKit({ id: 'ops-vendors.v1', title: 'Производители', head: ШАПКА,
-    rows: ячейки, total: итог, hide: СКРЫТЫ, ready: !!q.data, pivot: вид === 'pivot', help: ПОМОЩЬ })
+    rows: ячейки, total: итог, hide: СКРЫТЫ, ready: !!q.data, pivot: вид === 'pivot', help: ПОМОЩЬ, status })
   const оставлены = useMemo(() => набор.kept.map((i) => строки[i]), [набор.kept, строки])
   const маркиСводной = useMemo(() => new Set(оставлены.map((r) => r.vendor)), [оставлены])
   const сводная = useMemo(() => (qВсе.data?.stations ?? []).filter((r) => маркиСводной.has(r.vendor)).map((r) => ({
@@ -164,7 +171,6 @@ export function NetworkVendorsPanel() {
   const малоЗаряжает = исходные.filter((r) => r.active > 0 && r.livePct < 50)
   const отборов = фильтры.length + Object.keys(набор.filters).length
   return <div ref={экран} className="flex flex-col gap-3 p-3">
-    {(!d.dataThrough || (d.dataLagHours ?? 0) >= 24) && <OpsSnapshotNotice data={d} />}
     <div className={TILE_ROW}>
       <Tile icon={Factory} label="Марок в парке" value={qty(d.totals.vendors)} hint={количество(d.totals.stations)}
         active={отбор === 'all'} onClick={() => переключить('all')} />
