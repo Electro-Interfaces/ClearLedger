@@ -515,7 +515,7 @@ export function SheetTable({
                             onHeadPick && numeric[i] && 'text-primary underline decoration-dotted underline-offset-4',
                           )}
                         >
-                          <span className={cn('min-w-0 [overflow-wrap:normal] [word-break:keep-all]', w && 'truncate')}>{head[i]}</span>
+                          <span className={cn('min-w-0 [overflow-wrap:normal] [word-break:keep-all]', (live?.col === i || cols?.width?.[i]) && 'truncate')}>{head[i]}</span>
                           {k === pin - 1 && <Pin className={markIcon} aria-label="Закреплено" />}
                           {filters?.[i] && <Filter className={markIcon} aria-label="Есть фильтр" />}
                           {on && <Icon className="size-3.5 shrink-0 text-primary" aria-hidden />}
