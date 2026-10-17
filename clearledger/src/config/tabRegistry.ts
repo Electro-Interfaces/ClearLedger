@@ -27,7 +27,8 @@ const PRODUCT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 // имя раздела спутается с другими продуктами («Статистика», «Версии», «Аудит»).
 const VOICE_TABS = [
   ['/voice', 'Телефония'], ['/voice/calls', 'Журнал звонков'], ['/voice/callbacks', 'Обратные звонки'],
-  ['/voice/stats', 'Статистика звонков'], ['/voice/reception', 'Правила приёма'],
+  ['/voice/stats', 'Статистика звонков'], ['/voice/report', 'Отчёт по линии за месяц'],
+  ['/voice/reception', 'Правила приёма'],
   ['/voice/passport', 'Паспорт для КЦ'], ['/voice/targets', 'Сотрудники и переводы'],
   ['/voice/sounds', 'Звуки линии'], ['/voice/enrichment', 'Распознавание и подсказки'],
   ['/voice/cc', 'Контакт-центры'], ['/voice/webhooks', 'Системы и вебхуки'],

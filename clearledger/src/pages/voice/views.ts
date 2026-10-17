@@ -40,6 +40,8 @@ export const VOICE_VIEWS: VoiceView[] = [
     hint: 'задачи «перезвонить»: от звонящего и от оператора' },
   { key: 'stats', path: 'stats', label: 'Статистика', group: 'work', wave: '2.3', ready: true,
     hint: 'все звонки линии, а не только дошедшие до контакт-центра' },
+  { key: 'report', path: 'report', label: 'Отчёт за месяц', group: 'work', wave: '2.6', ready: true,
+    hint: 'отчёт по линии для заказчика: пропущенные, время ответа, решённые с первого звонка; выпуск и выгрузка' },
 
   { key: 'reception', path: 'reception', label: 'Правила приёма', group: 'setup', wave: '2.2', ready: true,
     hint: 'часы, VIP, очередь и ожидание, обратный звонок, запасной сценарий' },

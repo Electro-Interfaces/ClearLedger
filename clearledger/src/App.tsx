@@ -397,8 +397,8 @@ const router = createBrowserRouter([
               { path: 'targets', element: <LazyPage><VoiceTargetsPage /></LazyPage> },
               { path: 'cc', element: <LazyPage><VoiceCcPage /></LazyPage> },
               { path: 'versions', element: <LazyPage><VoiceVersionsPage /></LazyPage> },
-              // Разделы следующей волны и АТС — заставка с тем, что в них будет.
-              ...['sounds', 'enrichment', 'webhooks', 'audit', 'retention', 'health', 'extensions', 'outbound']
+              // Экраны волн 2.5–2.6 (каждый своим куском сборки) и заставки разделов АТС — VoiceStubPage.
+              ...['report', 'sounds', 'enrichment', 'webhooks', 'audit', 'retention', 'health', 'extensions', 'outbound']
                 .map((path) => ({ path, element: <LazyPage><VoiceStubPage /></LazyPage> })),
             ],
           },

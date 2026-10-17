@@ -1,5 +1,5 @@
 /**
- * Раздел «Телефонии» по адресу, у которого нет своего маршрута в App.tsx: экраны волны 2.5
+ * Раздел «Телефонии» по адресу, у которого нет своего маршрута в App.tsx: экраны волн 2.5 и 2.6
  * (каждый — отдельным куском сборки) или заглушка с назначением и волной плана.
  * Пункт меню не прячем — человек видит, что здесь будет и когда.
  */
@@ -17,6 +17,7 @@ const ЭКРАНЫ: Record<string, React.LazyExoticComponent<() => React.JSX.Ele
   audit: lazy(() => import('./VoiceAuditPage')),
   retention: lazy(() => import('./VoiceRetentionPage')),
   health: lazy(() => import('./VoiceHealthPage')),
+  report: lazy(() => import('./VoiceReportPage')),
 }
 
 export default function VoiceStubPage() {

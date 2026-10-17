@@ -94,11 +94,14 @@ const ОШИБКИ: Record<string, string> = {
   target_not_message: 'Эта цель — переадресация на номер, у неё нет сообщения',
   host_not_allowed: 'Адрес не из белого списка узла (WEBHOOK_ALLOWED_HOSTS). Список задаёт тот, кто ставит узел',
   export_too_large: 'Слишком много строк для одной выгрузки: сузьте период',
+  month_not_finished: 'Месяц ещё идёт: выпустить отчёт можно после его конца',
 }
 
 function словами(status: number, code: string, detail?: string) {
   if (code === 'forbidden' && detail === 'role') return 'Нужна роль администратора компании: «Телефонию» настраивает только он'
   if (code === 'forbidden' && detail === 'company') return 'Узел обслуживает другую компанию пространства'
+  // Выпуск отчёта заново узел отклоняет тем же кодом, что доступ к ПДн без причины, — но речь о комментарии.
+  if (code === 'reason_required' && detail?.startsWith('comment')) return 'Для повторного выпуска нужен комментарий: зачем выпуск заново'
   if (code === 'sound_in_use') return `Звук ещё звучит${detail ? ` (${detail})` : ''}: сначала уберите его из правил приёма`
   // Узел различает «вебхуки выключены совсем» и «этот адрес не в списке» только текстом — показываем его.
   if (code === 'host_not_allowed' && detail) return `${detail[0].toUpperCase()}${detail.slice(1)}. Белый список хостов задаёт тот, кто ставит узел`
@@ -269,6 +272,14 @@ export interface Metrics {
   fcrPct?: number | null
   ccShare?: number | null
   noDisposition?: number
+  /** пропущено: кончились, ни разу не соединившись с человеком (оператор КЦ, сотрудник, переадресация) */
+  missed?: number
+  missedPct?: number | null
+  /** из пропущенных — дозвонились обратным звонком */
+  missedReached?: number
+  missedByReason?: Record<string, number>
+  /** переадресация запасного сценария, на которую ответили: не пропущено */
+  forwardAnswered?: number
 }
 
 export interface NowSnapshot {
@@ -516,6 +527,96 @@ export const statsSeries = (cid: string, q: StatsQuery & { interval: '15m' | '1h
 
 export const statsOperators = (cid: string, q: { from: string; to: string; line?: string }) =>
   дай<{ operator: OperatorRef; metrics: Metrics }[]>(cid, '/stats/operators', q)
+
+// ——— Отчёт за месяц (волна 6 узла) ———
+
+/** Показатель первой таблицы отчёта (схема `MonthlyKpi`). */
+export interface MonthlyKpi {
+  key: string
+  title: string
+  unit: 'шт' | '%' | 'с'
+  value: number | null
+  previous: number | null
+  target: { op: 'lt' | 'ge'; value: number; stub?: boolean; source?: string } | null
+  /** норма выполнена; `null` — нормы нет или делить не на что */
+  met: boolean | null
+}
+
+export interface Reconciliation {
+  id: string
+  format?: string
+  period?: { from?: string; to?: string }
+  uploadedAt?: string
+  carrierRows?: number
+  badRows?: number
+  matched?: number
+  /** есть у оператора связи, нет у узла — потеря */
+  onlyCarrier?: number
+  onlyNode?: number
+  durationMismatch?: number
+}
+
+/** Отчёт по линии за календарный месяц (схема `MonthlyReport`); номеров и других ПДн в нём нет. */
+export interface MonthlyReport {
+  month: string
+  /** месяц словами: «сентябрь 2026» */
+  title: string
+  customer?: string
+  lineId: string
+  lineName?: string
+  tz: string
+  period: { from: string; to: string }
+  builtAt?: string
+  status: 'current' | 'preliminary' | 'issued'
+  version: number | null
+  issuedAt?: string | null
+  issuedBy?: string | null
+  comment?: string | null
+  params: { slaTargetSec?: number; fcrWindowMin?: number; shortAbandonSec?: number; callbackDueSec?: number; alertSlPct?: number }
+  kpis: MonthlyKpi[]
+  metrics: Metrics
+  previous?: { month: string; metrics: Metrics } | null
+  outcomes: { key: string; title: string; count: number; pct: number | null }[]
+  answeredWithin?: { sec: number; answered: number; pct: number | null }[]
+  days: { date: string; metrics: Metrics }[]
+  hours: { hour: number; metrics: Metrics }[]
+  topics: { topic: string; metrics: Metrics }[]
+  reconciliations?: Reconciliation[]
+  availability?: { restarts: number; downMin: Record<string, number>; downs?: Record<string, number>; until?: string } | null
+}
+
+export interface MonthlyReportList {
+  /** последняя версия каждого выпущенного отчёта, новые месяцы первыми */
+  items: { month: string; lineId: string; version: number; issuedAt: string; issuedBy: string | null; comment: string | null;
+    arrived: number; missedPct: number | null; slPct: number | null }[]
+  /** текущий месяц по поясу линии */
+  current: string
+  /** месяц первого звонка в журнале; `null` — звонков не было */
+  first: string | null
+  lines: { lineId: string; name: string }[]
+}
+
+export const monthlyList = (cid: string, line?: string) => дай<MonthlyReportList>(cid, '/stats/monthly', { line })
+
+export const monthlyReport = (cid: string, month: string, line?: string) =>
+  дай<MonthlyReport>(cid, `/stats/monthly/${encodeURIComponent(month)}`, { line })
+
+/** Выпустить отчёт за закончившийся месяц новой версией; повторный выпуск — только с комментарием. */
+export async function issueMonthly(cid: string, month: string, o: { comment?: string; line?: string }) {
+  return (await запрос<MonthlyReport>(cid, `/stats/monthly/${encodeURIComponent(month)}/issue`,
+    { method: 'POST', body: { comment: o.comment || undefined, line: o.line || undefined } })).data
+}
+
+/**
+ * Отчёт файлом: `csv` — для Excel (UTF-8 с BOM, разделитель `;`), `html` — страница A4 для печати.
+ * Узел отдаёт вложение с токеном в заголовке, поэтому файл берём запросом; имя — из ответа узла.
+ * Каждая выгрузка — строка `report.export` в журнале доступа.
+ */
+export async function monthlyExport(cid: string, month: string, format: 'csv' | 'html', line?: string) {
+  const res = await отправить(cid, `/stats/monthly/${encodeURIComponent(month)}/export`, { query: { format, line } })
+  const имя = /filename="?([^";]+)"?/i.exec(res.headers.get('content-disposition') ?? '')?.[1]
+  return { blob: await res.blob(), имя: имя ?? `report_${line ?? 'line'}_${month}.${format}` }
+}
 
 // ——— Настройки с версиями ———
 

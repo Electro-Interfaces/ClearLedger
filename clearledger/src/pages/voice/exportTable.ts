@@ -13,7 +13,8 @@ export interface Лист {
   строки: Ячейка[][]
 }
 
-function скачать(blob: Blob, имя: string) {
+/** Отдать файл браузеру на сохранение под именем `имя`. */
+export function скачать(blob: Blob, имя: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
