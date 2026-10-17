@@ -66,6 +66,7 @@ export function CallCard({ contactId, onBack }: { contactId: string; onBack?: ()
   })
 
   const к = карточка.data
+  const заявки = Object.values(к?.ticketRefs ?? {}).map((r) => r.ticket?.number ?? r.ticket?.id).filter((x) => x != null).map(String)
 
   async function открыть(п: Причина, текст: string) {
     try {
@@ -127,7 +128,7 @@ export function CallCard({ contactId, onBack }: { contactId: string; onBack?: ()
             {!!к.holdSec && <><dt className="text-muted-foreground">Удержание</dt><dd>{сек(к.holdSec)}</dd></>}
             {к.topic && <><dt className="text-muted-foreground">Тема</dt><dd className="font-mono text-xs">{к.topic}</dd></>}
             {к.disposition?.note && <><dt className="text-muted-foreground">Итог</dt><dd>{к.disposition.note}</dd></>}
-            {к.disposition?.ticketRef && <><dt className="text-muted-foreground">Заявка</dt><dd className="font-mono text-xs">{к.disposition.ticketRef}</dd></>}
+            {заявки.length > 0 && <><dt className="text-muted-foreground">Заявка</dt><dd className="font-mono text-xs">{заявки.join(', ')}</dd></>}
             {к.retentionHold && <><dt className="text-muted-foreground">Не удалять</dt><dd>до {дата(к.retentionHold)}</dd></>}
           </dl>
 

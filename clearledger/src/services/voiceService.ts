@@ -435,13 +435,14 @@ export interface CallCard extends CallRow {
     fields?: Record<string, unknown>
     createTicket?: boolean
     note?: string | null
-    ticketRef?: string | null
     by?: OperatorRef
     at?: string
   } | null
   recordings?: Recording[]
   callbacks?: Callback[]
   delivered?: Record<string, string>
+  /** ответы приёмников итогов: номер заявки и обращения «Поддержки» по id вебхука */
+  ticketRefs?: Record<string, { ticket: { id: string | number; number?: string } | null; threadId?: string | number }>
   retentionHold?: string | null
 }
 
