@@ -1,4 +1,4 @@
-export const REPORT_KIT_VERSION = '1.2.0'
+export const REPORT_KIT_VERSION = '1.3.0'
 
 export { SheetTable, keepRow, footer, compareCells, type Cols, type Filters, type Filt, type Picked, type Mark } from './SheetTable'
 export { ReportTools } from './ReportTools'
@@ -10,3 +10,4 @@ export { useRail, setRail, togglePanel, closePanel, type Panel, type Tool } from
 export { withCalc, evaluate, type CalcCol } from './calc'
 export { showCell, qty, num2, plural, type Cell } from './format'
 export { PageSizeField, usePageSize } from './PageSize'
+export { Tile, TILE_ROW } from './Tile'

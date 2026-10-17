@@ -31,7 +31,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { OpsSnapshotNotice } from './OpsSnapshotNotice'
 import {
-  AlertTriangle, ChevronDown, ClipboardCheck, ClipboardX, Gauge, Loader2, Plug, Users,
+  AlertTriangle, ChevronDown, ClipboardCheck, ClipboardX, Gauge, Loader2, Plug,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -47,7 +47,7 @@ import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { ReportPivot } from '@/components/workspace/ReportPivot'
 import {
-  PageSizeField, RelatedLink, RelatedReport, ReportTools, RowCard, SheetTable, ToolPanel, ToolStrip, qty, useReportKit,
+  PageSizeField, RelatedLink, RelatedReport, ReportTools, RowCard, SheetTable, TILE_ROW, Tile as Плитка, ToolPanel, ToolStrip, qty, useReportKit,
   type Cell, type Mark,
 } from '@/components/report-kit'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -168,36 +168,6 @@ function строкаТаблицы(r: WorklistRow, workKnown: boolean): Cell[] 
     r.visitsPerDay ?? '', r.lossPerMonth || '',
     workKnown ? r.openTickets : '', вРаботе(r, workKnown),
   ]
-}
-
-/**
- * Плитка показателя. С `onClick` она же — фильтр списка снизу: человек смотрит
- * на число «13 просрочено» и хочет увидеть эти тринадцать, а не искать их
- * селектами. Активная подсвечена рамкой, повторное нажатие снимает отбор.
- */
-function Плитка({ icon: Icon, label, value, hint, tone, onClick, active }: {
-  icon: typeof Users; label: string; value: string; hint?: string; tone?: string
-  onClick?: () => void; active?: boolean
-}) {
-  const внутри = (
-    <>
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Icon className="size-3.5" />{label}
-      </div>
-      <div className={cn('mt-0.5 text-lg font-semibold tabular-nums', tone)}>{value}</div>
-      {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
-    </>
-  )
-  const вид = cn('rounded-lg border bg-card px-3 py-2 text-left',
-    active ? 'border-primary ring-1 ring-primary/40' : 'border-border/60')
-  if (!onClick) return <div data-kpi className={вид}>{внутри}</div>
-  return (
-    <button type="button" data-kpi onClick={onClick}
-      aria-pressed={!!active}
-      className={cn(вид, 'transition-colors hover:border-primary/60')}>
-      {внутри}
-    </button>
-  )
 }
 
 export function OpsWorklistPanel() {
@@ -420,7 +390,7 @@ export function OpsWorklistPanel() {
       {/* Только плитки — они же переключатели списка. Заголовок, «Как собран
           список» и пропуски сроков сняты по замечанию МАГа 15.10.2026: дата
           среза есть в подписи таблицы, пояснение — в «Инфо». */}
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
+          <div className={TILE_ROW}>
             {/* Плитки — это и есть фильтры списка: нажатие показывает ровно те
                 строки, про которые число. */}
             <Плитка icon={ClipboardCheck} label="Станций в списке" value={nf.format(t.rows)}
