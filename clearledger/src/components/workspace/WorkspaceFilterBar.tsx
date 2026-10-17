@@ -432,10 +432,10 @@ export function WorkspaceFilterBar() {
             с датой экрана, ничего не меняя (14.10.2026). У fuel в этом режиме
             «Договоры и аренда» — там период остаётся. */}
         {/* Отчёты мониторинга берут день среза из конца периода.
-            Окно 30/90/180 дней выбирается в фильтрах отчёта. */}
+            Окно истории выбирается в фильтрах отчёта. */}
         {coreMode !== 'projects'
           && !(coreMode === 'operations' && company.profileId === 'energy'
-            && !['ops_worklist', 'ops_vendors', 'ops_reliability', 'ops_state'].includes(searchParams.get('sub') ?? 'ops_worklist'))
+            && !['ops_worklist', 'ops_vendors', 'ops_reliability', 'ops_state', 'ops_tickets'].includes(searchParams.get('sub') ?? 'ops_worklist'))
           && <PeriodControl />}
         {isOffice ? null : (
           <WorkspaceScopeControl onAdvanced={() => { setSection('scope'); setOpen(true) }} />
