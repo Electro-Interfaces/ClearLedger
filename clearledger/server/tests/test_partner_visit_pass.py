@@ -8,6 +8,7 @@
     компаниях, переживает отключение связи и продлением становится обычной;
   * суперадмин платформы входит по пропуску чужого пространства.
 """
+import contextlib
 import json
 import time
 import uuid
@@ -30,6 +31,32 @@ KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _JWK = json.loads(RSAAlgorithm.to_jwk(KEY.public_key()))
 _JWK["kid"] = sso.settings.sso_kid
 JWKS = {"keys": [_JWK]}
+
+
+@contextlib.asynccontextmanager
+async def without_late_commit():
+    """Запросы без фиксации из get_db: на стенде она идёт уже после отправки ответа.
+
+    Всё, что ручка обещает ответом (ключ работает, пропуск сгорел, ключ отозван), должно
+    быть зафиксировано ею самой до ответа. Здесь get_db в конце откатывает, а не
+    коммитит, и запись, оставленная на его фиксацию, теряется так же, как в том окне.
+    """
+    import app.database as _db
+    from app.database import get_db
+    from app.main import app
+
+    async def _rollback_db():
+        async with _db.async_session_factory() as s:
+            try:
+                yield s
+            finally:
+                await s.rollback()
+
+    app.dependency_overrides[get_db] = _rollback_db
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 def _pass(code: str, slug: str, email: str, *, kid=sso.settings.sso_kid, **over) -> str:
@@ -150,3 +177,16 @@ async def test_superadmin_does_not_enter_by_pass(client: AsyncClient, vendor):
     r = await client.post("/api/eco/partner/visit", json={
         "token": _pass(code, "rushydro", "admin@clearledger.ru"), "space": code})
     assert r.status_code == 403 and "Суперадминистратор" in r.json()["detail"]
+
+
+async def test_used_pass_is_fixed_before_reply(client: AsyncClient, vendor):
+    """Отметка пропуска фиксируется до ответа: повтор не проходит и в окне до фиксации get_db."""
+    code, _ids, _jwks = vendor
+    token = _pass(code, "rushydro", f"once-{uuid.uuid4().hex[:6]}@elsyplus.ru")
+    async with without_late_commit():
+        first = await client.post("/api/eco/partner/visit", json={"token": token, "space": code})
+        assert first.status_code == 200, first.text
+        again = await client.post("/api/eco/partner/visit", json={"token": token, "space": code})
+        assert again.status_code == 403 and "использован" in again.json()["detail"]
+        me = await client.get("/api/auth/me", headers=_h(first.json()["access_token"]))
+        assert me.status_code == 200, "гость и членство зафиксированы до ответа"
