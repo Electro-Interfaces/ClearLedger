@@ -85,7 +85,7 @@ function строка(r: TicketRow): Cell[] {
 }
 function итоги(rows: TicketRow[]): Cell[] {
   const cells: Cell[] = ШАПКА.map(() => '')
-  cells[0] = 'Итого'; cells[1] = qty(rows.length) + ' заявок'; cells[С.часы] = среднее(rows)
+  cells[0] = 'Итого'; cells[1] = qty(rows.length) + ' ' + plural(rows.length, 'заявка', 'заявки', 'заявок'); cells[С.часы] = среднее(rows)
   return cells
 }
 function группаСтрока(rows: TicketRow[], name = 'Итого'): Cell[] {
