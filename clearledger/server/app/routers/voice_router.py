@@ -345,7 +345,9 @@ async def create_voice_key(
     db.add(key)
     await log_audit(db, actor=user, company_id=cid, action="voice_key.create",
                     target=key.consumer, details={"scopes": scopes})
-    await db.flush()
+    # Фиксация до ответа: get_db коммитит уже после отправки ответа, а ключ из ответа
+    # должен работать сразу (и отзыв ниже — не пропускать обмен следующей же секундой).
+    await db.commit()
     return {"id": str(key.id), "consumer": key.consumer, "key": raw,
             "prefix": key.key_prefix, "scopes": scopes}
 
@@ -371,6 +373,7 @@ async def revoke_voice_key(
         key.revoked_at = datetime.now(timezone.utc)
         await log_audit(db, actor=user, company_id=cid, action="voice_key.revoke",
                         target=key.consumer)
+        await db.commit()
 
 
 @router.post("/voice/token")
