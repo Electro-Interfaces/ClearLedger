@@ -1,12 +1,19 @@
 /**
- * Разделы «Телефонии» — один источник для левой рельсы, выпадающего списка на
- * телефоне и маршрутов (docs/voice-app.html ContactHub, §4 «Карта разделов»).
+ * Разделы «Телефонии» — один источник для левой рельсы пространства (`AppSidebar`,
+ * на узком экране — та же рельса в шторке) и маршрутов (docs/voice-app.html
+ * ContactHub, §4 «Карта разделов»).
  *
  * Группы — по частоте: работа каждый день, настройка по событию, подключения
  * редко, контроль по необходимости. Раздел, экран которого ещё не собран, в меню
  * всё равно стоит: открывается заглушка с назначением и волной — человек видит,
  * что здесь будет, а не гадает, куда делся пункт.
  */
+import type { LucideIcon } from 'lucide-react'
+import {
+  Archive, BarChart3, Building2, Cable, FileBarChart, GitCompare, Hash, Headset, History,
+  IdCard, ListChecks, PhoneCall, PhoneOutgoing, Radio, ScrollText, Settings2, ShieldCheck,
+  Sparkles, Stethoscope, Users, Volume2, Webhook, Briefcase, Eye,
+} from 'lucide-react'
 
 export type VoiceGroup = 'work' | 'setup' | 'links' | 'control' | 'pbx'
 
@@ -75,6 +82,18 @@ export const VOICE_VIEWS: VoiceView[] = [
   { key: 'outbound', path: 'outbound', label: 'Исходящие', group: 'pbx', wave: null, ready: false,
     hint: 'исходящие звонки и номер, который видит собеседник' },
 ]
+
+/** Иконки групп и пунктов: в свёрнутой рельсе пространства видна только иконка. */
+export const VOICE_GROUP_ICONS: Record<VoiceGroup, LucideIcon> = {
+  work: Briefcase, setup: Settings2, links: Cable, control: Eye, pbx: Building2,
+}
+
+export const VOICE_VIEW_ICONS: Record<string, LucideIcon> = {
+  now: Radio, calls: ScrollText, callbacks: PhoneCall, stats: BarChart3, report: FileBarChart,
+  reconcile: GitCompare, reception: ListChecks, passport: IdCard, targets: Users, sounds: Volume2,
+  enrichment: Sparkles, cc: Headset, webhooks: Webhook, versions: History, audit: ShieldCheck,
+  retention: Archive, health: Stethoscope, extensions: Hash, outbound: PhoneOutgoing,
+}
 
 export const voicePath = (v: VoiceView) => (v.path ? `/voice/${v.path}` : '/voice')
 

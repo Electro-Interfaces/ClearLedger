@@ -38,6 +38,10 @@ import { productModuleAllowed, productHasModule } from '@/config/productAccess'
 import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
 import { useActiveMode } from '@/contexts/ActiveModeContext'
 import { ELSY_VIEWS, elsyView } from '@/config/elsyViews'
+import {
+  VOICE_GROUPS, VOICE_GROUP_ICONS, VOICE_VIEWS, VOICE_VIEW_ICONS, voicePath, voiceViewFor,
+  type VoiceGroup,
+} from '@/pages/voice/views'
 
 /** Пункт левого меню. Общий для Учёта и Управления — вид навигации один на приложения.
  *  `active` — переопределить подсветку: у разделов рабочей области адрес один и тот же,
@@ -99,6 +103,59 @@ export function NavItem({ to, icon: Icon, label, end, collapsed, onNavigate, act
         {collapsed && <TooltipContent side="right">{label}</TooltipContent>}
       </Tooltip>
     </SidebarMenuItem>
+  )
+}
+
+/**
+ * Сворачиваемая группа рельсы: «Данные» и «1С» Учёта, группы «Телефонии».
+ * Одна на всех, чтобы группы приложений выглядели и вели себя одинаково.
+ * В свёрнутой рельсе: с `collapsedTo` — одна иконка группы (ведёт к первому
+ * пункту), без него — иконки всех пунктов.
+ */
+function NavGroup({ icon: Icon, label, open, onOpenChange, collapsed, collapsedTo, children }: {
+  icon: React.ComponentType<{ className?: string }>; label: string
+  open: boolean; onOpenChange: (open: boolean) => void
+  collapsed?: boolean; collapsedTo?: string; children: React.ReactNode
+}) {
+  if (collapsed) {
+    return (
+      <SidebarMenu>
+        {collapsedTo ? <NavItem to={collapsedTo} icon={Icon} label={label} collapsed /> : children}
+      </SidebarMenu>
+    )
+  }
+  return (
+    <Collapsible open={open} onOpenChange={onOpenChange}>
+      <CollapsibleTrigger asChild>
+        <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
+          <span className="flex items-center gap-1.5">
+            <Icon className="h-3 w-3" />
+            {label}
+          </span>
+          <ChevronDown className={`h-3 w-3 transition-transform ${open ? '' : '-rotate-90'}`} />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <SidebarMenu>{children}</SidebarMenu>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
+
+/** Группа «Телефонии»: раскрыта или свёрнута — привычка человека, помним в браузере.
+ *  «АТС компании» (ступень 2, экраны-заглушки) приходит свёрнутой. */
+function VoiceNavGroup({ group, label, activeKey, collapsed, onNavigate }: {
+  group: VoiceGroup; label: string; activeKey: string; collapsed?: boolean; onNavigate?: () => void
+}) {
+  const [open, toggle] = useSectionOpen(`voice-${group}`, group !== 'pbx')
+  return (
+    <NavGroup icon={VOICE_GROUP_ICONS[group]} label={label} open={open}
+      onOpenChange={(next) => { if (next !== open) toggle() }} collapsed={collapsed}>
+      {VOICE_VIEWS.filter((v) => v.group === group).map((v) => (
+        <NavItem key={v.key} to={voicePath(v)} icon={VOICE_VIEW_ICONS[v.key] ?? Layers} label={v.label}
+          collapsed={collapsed} onNavigate={onNavigate} active={v.key === activeKey} />
+      ))}
+    </NavGroup>
   )
 }
 
@@ -445,6 +502,27 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
     )
   }
 
+  // «Телефония» — разделы узла заказчика группами по частоте (pages/voice/views.ts).
+  // Раньше у приложения была своя вторая колонка разделов рядом с этой рельсой;
+  // решение МАГа 17.10.2026 — группы здесь, рабочая область целиком под экран.
+  if (pathname === '/voice' || pathname.startsWith('/voice/')) {
+    const activeKey = voiceViewFor(pathname).key
+    return (
+      <>
+        {VOICE_GROUPS.map((g, i) => (
+          <Fragment key={g.key}>
+            {i > 0 && <SidebarSeparator className="my-2" />}
+            <SidebarGroup className="py-0">
+              <VoiceNavGroup group={g.key} label={g.label} activeKey={activeKey}
+                collapsed={collapsed} onNavigate={onNavigate} />
+            </SidebarGroup>
+          </Fragment>
+        ))}
+        {spaceBlock}
+      </>
+    )
+  }
+
   // «Сайт» — рабочее место того, кто ведёт витрину. Семь экранов стояли вкладками
   // в шапке рабочей области: за каждым приходят отдельно, значит по канону это
   // пункты рельсы, а не углы одного разбора (SPACE.md §4).
@@ -587,30 +665,12 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
           <>
             <SidebarSeparator className="my-2" />
             <SidebarGroup className="py-0">
-              {collapsed ? (
-                <SidebarMenu>
-                  <NavItem to={oneCPages[0].to} icon={Database} label="Обмен с 1С" collapsed />
-                </SidebarMenu>
-              ) : (
-                <Collapsible open={oneCOpen} onOpenChange={setOneCOpen}>
-                  <CollapsibleTrigger asChild>
-                    <button className="flex w-full items-center justify-between px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/60 transition-colors hover:text-muted-foreground">
-                      <span className="flex items-center gap-1.5">
-                        <Database className="h-3 w-3" />
-                        Обмен с 1С
-                      </span>
-                      <ChevronDown className={`h-3 w-3 transition-transform ${oneCOpen ? '' : '-rotate-90'}`} />
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <SidebarMenu>
-                      {oneCPages.map((item) => (
-                        <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
-                      ))}
-                    </SidebarMenu>
-                  </CollapsibleContent>
-                </Collapsible>
-              )}
+              <NavGroup icon={Database} label="Обмен с 1С" open={oneCOpen} onOpenChange={setOneCOpen}
+                collapsed={collapsed} collapsedTo={oneCPages[0].to}>
+                {oneCPages.map((item) => (
+                  <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
+                ))}
+              </NavGroup>
             </SidebarGroup>
           </>
         )}
@@ -674,30 +734,12 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
       {/* ДАННЫЕ section (бывш. «Загрузка») */}
       {dataNav.length > 0 && (
       <SidebarGroup className="py-0">
-        {collapsed ? (
-          <SidebarMenu>
-            <NavItem to={dataNav[0].to} icon={Layers} label="Данные" collapsed />
-          </SidebarMenu>
-        ) : (
-          <Collapsible open={dataOpen} onOpenChange={setDataOpen}>
-            <CollapsibleTrigger asChild>
-              <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
-                <span className="flex items-center gap-1.5">
-                  <Layers className="h-3 w-3" />
-                  Данные
-                </span>
-                <ChevronDown className={`h-3 w-3 transition-transform ${dataOpen ? '' : '-rotate-90'}`} />
-              </button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <SidebarMenu>
-                {dataNav.map((item) => (
-                  <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
-                ))}
-              </SidebarMenu>
-            </CollapsibleContent>
-          </Collapsible>
-        )}
+        <NavGroup icon={Layers} label="Данные" open={dataOpen} onOpenChange={setDataOpen}
+          collapsed={collapsed} collapsedTo={dataNav[0].to}>
+          {dataNav.map((item) => (
+            <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
+          ))}
+        </NavGroup>
       </SidebarGroup>
       )}
 
@@ -706,30 +748,12 @@ function SidebarNavBody({ collapsed = false, onNavigate }: {
         <>
           <SidebarSeparator className="my-2" />
           <SidebarGroup className="py-0">
-            {collapsed ? (
-              <SidebarMenu>
-                <NavItem to="/1c/connection" icon={Database} label="1С" collapsed />
-              </SidebarMenu>
-            ) : (
-              <Collapsible open={oneCOpen} onOpenChange={setOneCOpen}>
-                <CollapsibleTrigger asChild>
-                  <button className="flex items-center justify-between w-full px-3 py-1.5 text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest hover:text-muted-foreground transition-colors">
-                    <span className="flex items-center gap-1.5">
-                      <Database className="h-3 w-3" />
-                      1С
-                    </span>
-                    <ChevronDown className={`h-3 w-3 transition-transform ${oneCOpen ? '' : '-rotate-90'}`} />
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <SidebarMenu>
-                    {oneCNav.map((item) => (
-                      <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
-                    ))}
-                  </SidebarMenu>
-                </CollapsibleContent>
-              </Collapsible>
-            )}
+            <NavGroup icon={Database} label="1С" open={oneCOpen} onOpenChange={setOneCOpen}
+              collapsed={collapsed} collapsedTo="/1c/connection">
+              {oneCNav.map((item) => (
+                <NavItem key={item.to} {...item} collapsed={collapsed} onNavigate={onNavigate} />
+              ))}
+            </NavGroup>
           </SidebarGroup>
         </>
       )}
