@@ -1,4 +1,5 @@
 import { Loader2 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { showCell, type Cell } from './format'
 
@@ -8,7 +9,7 @@ import { showCell, type Cell } from './format'
  * нет (МАГ, 15.10.2026: «открываются ещё в одном окне сверху, чтобы я мог его
  * закрыть и остаться там, где был»).
  */
-export function RelatedReport({ open, title, subtitle, head, rows, loading, error, note, onClose }: {
+export function RelatedReport({ open, title, subtitle, head, rows, loading, error, note, onClose, children }: {
   open: boolean
   title: string
   subtitle?: string
@@ -18,6 +19,7 @@ export function RelatedReport({ open, title, subtitle, head, rows, loading, erro
   error?: boolean
   note?: string
   onClose: () => void
+  children?: ReactNode
 }) {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -36,7 +38,7 @@ export function RelatedReport({ open, title, subtitle, head, rows, loading, erro
           ) : rows.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">За это окно записей нет</p>
           ) : (
-            <table className="w-full text-sm">
+            children ?? <table className="w-full text-sm">
               <thead className="sticky top-0 bg-background text-xs text-muted-foreground">
                 <tr>
                   {head.map((h) => <th key={h} className="whitespace-nowrap border-b border-border/60 px-3 py-2 text-left font-medium">{h}</th>)}

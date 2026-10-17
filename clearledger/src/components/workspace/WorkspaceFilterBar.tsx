@@ -425,11 +425,11 @@ export function WorkspaceFilterBar() {
             экране; общий период ни один его экран не читает, и кнопка спорила
             с датой экрана, ничего не меняя (14.10.2026). У fuel в этом режиме
             «Договоры и аренда» — там период остаётся. */}
-        {/* 15.10.2026: «На сегодня» берёт день среза из конца периода — там
-            период снова нужен (МАГ: «выбор периода есть на всех экранах»). */}
+        {/* «На сегодня» и «Производители» берут день среза из конца периода.
+            Окно 30/90/180 дней у производителей выбирается в фильтрах отчёта. */}
         {coreMode !== 'projects'
           && !(coreMode === 'operations' && company.profileId === 'energy'
-            && (searchParams.get('sub') ?? 'ops_worklist') !== 'ops_worklist')
+            && !['ops_worklist', 'ops_vendors'].includes(searchParams.get('sub') ?? 'ops_worklist'))
           && <PeriodControl />}
         {isOffice ? null : (
           <WorkspaceScopeControl onAdvanced={() => { setSection('scope'); setOpen(true) }} />
