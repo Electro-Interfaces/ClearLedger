@@ -110,7 +110,7 @@ export function ObjectsView() {
                     </span>
                     {p.cost > 0 && (
                       <span>
-                        начислено за два месяца: <span className="tabular-nums text-foreground">{fmtNum(p.cost, '₽')}</span>
+                        ожидаем по договорам за два прошлых месяца: <span className="tabular-nums text-foreground">{fmtNum(p.cost, '₽')}</span>
                       </span>
                     )}
                     {!!p.late_docs && <span>без документа: {p.late_docs}</span>}

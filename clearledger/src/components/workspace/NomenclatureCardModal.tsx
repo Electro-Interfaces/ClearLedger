@@ -9,11 +9,9 @@ import { useQuery } from '@tanstack/react-query'
 import { ResponsiveContainer, BarChart, Bar, XAxis, Tooltip } from 'recharts'
 import {
   Barcode, Package, Wallet, ShoppingCart, PackagePlus, ArrowLeftRight,
-  ClipboardList, Trash2, ChefHat, ShieldAlert, TrendingUp, History, Download,
+  ClipboardList, Trash2, ChefHat, ShieldAlert, TrendingUp,
 } from 'lucide-react'
-import {
-  getStoreItemMoves, getStoreSkuCard, скачатьИсториюТовара, type SkuMovementRow,
-} from '@/services/storeService'
+import { getStoreSkuCard, type SkuMovementRow } from '@/services/storeService'
 import { ItemPassportSection } from './ItemPassportSection'
 import { fmtMoney } from '@/services/analyticsService'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
@@ -50,71 +48,6 @@ function Section({ icon: Icon, title, right, children }: {
       </div>
       {children}
     </div>
-  )
-}
-
-/**
- * История товара по журналу движений станций: остаток на начало, каждое
- * движение с остатком после него, остаток на конец — как «История движений»
- * в карточке на станции. Минус в ведомости разбирают по ней.
- */
-function ИсторияПоЖурналу({ guid, companyId, dateFrom, dateTo, stations }: {
-  guid: string; companyId: string; dateFrom: string; dateTo: string; stations?: string[]
-}) {
-  const q = useQuery({
-    queryKey: ['store-item-moves', companyId, guid, dateFrom, dateTo, stations?.join(',') ?? ''],
-    queryFn: () => getStoreItemMoves(guid, dateFrom, dateTo, stations),
-  })
-  const [грузится, грузить] = useState(false)
-  const д = q.data
-  const скачать = async () => {
-    грузить(true)
-    try { await скачатьИсториюТовара(guid, dateFrom, dateTo, stations) } finally { грузить(false) }
-  }
-  return (
-    <Section icon={History} title={`История по журналу станций · ${dateFrom} – ${dateTo}`}
-      right={
-        <button type="button" onClick={скачать} disabled={грузится || !д?.rows.length}
-          className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
-          <Download className="h-3 w-3" /> Выгрузить в Excel
-        </button>
-      }>
-      {q.isLoading ? <div className="text-xs text-muted-foreground">Считаем…</div>
-        : !д?.rows.length ? <div className="text-xs text-muted-foreground">За период движений нет</div> : (
-          <>
-            <div className="mb-1.5 text-[11px] text-muted-foreground">
-              На начало {nf(д.opening, 3)} · движений {д.moves} · на конец {nf(д.closing, 3)}
-              {Object.entries(д.loaded_through).map(([ст, по]) => (
-                <span key={ст}> · журнал АЗС №{ст} в центре по {по}</span>
-              ))}
-            </div>
-            <div className="max-h-72 overflow-auto"><table className="w-full text-xs">
-              <thead className="text-muted-foreground">
-                <tr>
-                  <th className="py-1 pr-2 text-left font-normal">АЗС · место</th>
-                  <th className="py-1 pr-2 text-left font-normal">Когда</th>
-                  <th className="py-1 pr-2 text-left font-normal">Вид · документ</th>
-                  <th className="py-1 pr-2 text-right font-normal">Кол-во</th>
-                  <th className="py-1 text-right font-normal">Остаток</th>
-                </tr>
-              </thead>
-              <tbody>
-                {д.rows.map((r, i) => (
-                  <tr key={i} className={`border-b border-border/20 last:border-0 ${r.kind ? 'bg-muted/30 font-medium' : ''}`}>
-                    <td className="py-1 pr-2 whitespace-nowrap text-muted-foreground">№{r.station_id} · {r.place}</td>
-                    <td className="py-1 pr-2 whitespace-nowrap">{r.at}</td>
-                    <td className="py-1 pr-2" title={r.note ?? ''}>{r.doc_kind}{r.doc_number ? ` · ${r.doc_number}` : ''}</td>
-                    <td className={`py-1 pr-2 text-right tabular-nums ${(r.quantity ?? 0) < 0 ? 'text-red-400/80' : ''}`}>
-                      {r.quantity == null ? '' : nf(r.quantity, 3)}
-                    </td>
-                    <td className="py-1 text-right tabular-nums">{nf(r.balance, 3)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table></div>
-          </>
-        )}
-    </Section>
   )
 }
 
@@ -385,11 +318,6 @@ export function NomenclatureCardModal({ guid, companyId, dateFrom, dateTo, stati
                 )}
               </Section>
             </div>
-            )}
-
-            {активна === 'moves' && (
-              <ИсторияПоЖурналу guid={guid} companyId={companyId} dateFrom={dateFrom}
-                dateTo={dateTo} stations={stations} />
             )}
 
             {/* История цен (переоценки) */}

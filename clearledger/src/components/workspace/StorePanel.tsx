@@ -42,7 +42,7 @@ import { NetworkReportPanel } from './NetworkReportPanel'
  */
 const СЕТЕВЫЕ_ОТЧЁТЫ = new Set([
   'turnover', 'no-cost', 'pay-mix', 'vat-book', 'purchase-diff', 'abc', 'purchases',
-  'goods-report', 'stock-on-date',
+  'goods-report',
 ])
 import { StoreRecipeVersionsPanel } from './StoreRecipeVersionsPanel'
 import { StoreCateringPanel } from './StoreCateringPanel'

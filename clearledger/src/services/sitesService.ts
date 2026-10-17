@@ -133,6 +133,8 @@ export interface GateItem {
   waiveReason?: string | null
   /** Можно ли снимать обязательность с этого пункта вообще. */
   waivable?: boolean
+  /** Пункт снимается кнопкой «не требуется» — её нажимает ОКС (схемы 3.2–3.6). */
+  notNeeded?: boolean
   documentState?: 'file' | 'approved' | 'signed'
   needsConfirmation?: boolean
   confirmedBy?: string | null
@@ -198,6 +200,21 @@ export interface SiteDetail extends SiteRow {
   inputPriceKwth: number | null
   smrCost: number | null
   longTermContract: boolean | null
+  // условия аренды и площадки (предложения отдела развития 09.10.2026)
+  contractKind: string | null
+  rentVariable: boolean | null
+  rentRevenuePct: number | null
+  rentIndexationPct: number | null
+  contractTermMonths: number | null
+  contractRegistration: boolean | null
+  contractRegistrationBy: string | null
+  rentComment: string | null
+  freeAccess: boolean | null
+  accessHours: string | null
+  internetKind: string | null
+  parkingKind: string | null
+  parkingFloor: string | null
+  conditionsComment: string | null
   hasVideo: boolean | null
   hasMobile: boolean | null
   ownerContact: string | null
@@ -207,6 +224,7 @@ export interface SiteDetail extends SiteRow {
   routeCode: string | null
   /** Вправе ли ЭТОТ человек снимать обязательность с пунктов чек-листа. */
   mayWaive?: boolean
+  mayNotNeeded?: boolean
 }
 
 export interface SiteEvent {

@@ -324,6 +324,18 @@ function NextStepBar({ site, onGoTab, onPlanStep }: {
             {nextLabel ? `, дальше «${nextLabel}»` : ''}
           </span>
         )}
+        {/* Автоперехода нет намеренно; готовность к переходу — кнопкой с любой вкладки. */}
+        {gate.canAdvance && nextLabel && site.kind !== 'integration' && (
+          <button type="button"
+            onClick={() => {
+              onGoTab('work')
+              setTimeout(() => document.querySelector('[data-zone="Перевод на следующую стадию"]')
+                ?.scrollIntoView({ block: 'center' }), 150)
+            }}
+            className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-emerald-700">
+            Перевести дальше
+          </button>
+        )}
       </div>
       {lead && (
         <div className="mt-1 flex flex-wrap items-center gap-2 text-muted-foreground">
