@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, FileText } from 'lucide-react'
-import { useEffect, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { showCell, type Cell } from './format'
@@ -32,21 +32,27 @@ export function RowCard({
   onStep: (d: 1 | -1) => void
   onClose: () => void
 }) {
-  useEffect(() => {
-    if (!row) return
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).closest('input, textarea, select')) return
-      if (e.key === 'ArrowDown' && at < of - 1) onStep(1)
-      if (e.key === 'ArrowUp' && at > 0) onStep(-1)
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [row, at, of, onStep])
+  const opener = useRef<HTMLElement | null>(null)
   const facts = row ? head.map((h, i) => [h, row[i]] as const).filter(([, v]) => v !== '') : []
-  const подпись = 'mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
+  const подпись = 'mb-2 text-xs font-semibold text-muted-foreground'
   return (
     <Dialog open={!!row} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="flex max-h-[90vh] w-[calc(100vw-2rem)] max-w-[1400px] flex-col gap-0 p-0 sm:max-w-[1400px]">
+      <DialogContent className="flex max-h-[90vh] w-[calc(100vw-2rem)] max-w-[1400px] flex-col gap-0 p-0 sm:max-w-[1400px]"
+        onOpenAutoFocus={() => { opener.current = document.activeElement as HTMLElement | null }}
+        onCloseAutoFocus={(e) => {
+          e.preventDefault()
+          if (opener.current?.isConnected) opener.current.focus({ preventScroll: true })
+        }}
+        onKeyDown={(e) => {
+          const target = e.target as HTMLElement
+          if (e.defaultPrevented || target.closest('[role="dialog"]') !== e.currentTarget
+            || target.closest('input, textarea, select, [role="combobox"], [contenteditable="true"]')) return
+          if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+          e.preventDefault()
+          e.stopPropagation()
+          if (e.key === 'ArrowDown' && at < of - 1) onStep(1)
+          if (e.key === 'ArrowUp' && at > 0) onStep(-1)
+        }}>
         <DialogHeader className="border-b border-border/60 px-6 py-4">
           <DialogTitle>{title || 'Строка таблицы'}</DialogTitle>
           <DialogDescription>
@@ -58,9 +64,9 @@ export function RowCard({
             <div className={подпись}>В таблице</div>
             <dl className="divide-y divide-border/50 rounded-lg border border-border/60">
               {facts.map(([h, v]) => (
-                <div key={h} className="flex items-baseline justify-between gap-4 px-4 py-2.5 text-sm">
+                <div key={h} className="flex flex-col gap-1 px-4 py-2.5 text-sm sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
                   <dt className="text-muted-foreground">{h}</dt>
-                  <dd className="text-right text-foreground tabular-nums">{showCell(v, h)}</dd>
+                  <dd className="min-w-0 break-words text-foreground tabular-nums sm:text-right">{showCell(v, h)}</dd>
                 </div>
               ))}
             </dl>

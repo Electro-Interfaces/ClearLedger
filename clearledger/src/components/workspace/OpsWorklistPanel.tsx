@@ -31,7 +31,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { OpsSnapshotNotice } from './OpsSnapshotNotice'
 import {
-  AlertTriangle, ChevronDown, ClipboardCheck, ClipboardX, Gauge, Loader2, Plug,
+  AlertTriangle, ChevronDown, ClipboardCheck, ClipboardX, Gauge, Loader2, Plug, X,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -110,10 +110,10 @@ const КЛЮЧ_ФИЛЬТРОВ = 'report-kit.v1:filters-open:ops-today'
  * Поле фильтра — своей ширины, а не доли сетки: в сетке на шесть колонок
  * селекты шириной по тексту разъезжались по всему экрану (МАГ, 15.10.2026).
  */
-function Поле({ label, w, children }: { label: string; w: string; children: React.ReactNode }) {
+function Поле({ label, id, w, children }: { label: string; id: string; w: string; children: React.ReactNode }) {
   return (
     <div className={cn('flex min-w-0 flex-col gap-1', w)}>
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      <label htmlFor={id} className="text-xs font-medium text-muted-foreground">{label}</label>
       {children}
     </div>
   )
@@ -127,6 +127,7 @@ const ШАПКА = ['№', 'Станция', 'Город', 'Регион', 'Чт
   'Приездов в сутки', 'Цена ₽/мес', 'Открытых заявок', 'В работе']
 /** Скрыты по умолчанию — видны в карточке строки и включаются в «Столбцах». */
 const СКРЫТЫ = [С.город, С.главная, С.молчит, С.впустую, С.ушло, С.заявок]
+const ШИРИНЫ = { [С.номер]: 96, [С.станция]: 240, [С.регион]: 172, [С.что]: 320 }
 /** Столбцы, по которым шапка предлагает сводную: столбец → поле сводной. */
 const СВОДНАЯ_ПО: Record<number, string> = { [С.регион]: 'Регион', [С.главная]: 'Главная причина', [С.работа]: 'В работе', [С.город]: 'Город' }
 /**
@@ -261,12 +262,15 @@ export function OpsWorklistPanel() {
   })
 
   const сброс = () => {
-    setНеВзятые(true)
+    setНеВзятые(false)
     setПричина('all')
     setРегионОтбора('all')
     setПоиск('')
     набор.setFilters({})
   }
+
+  const выбранные = useMemo(() => набор.kept.map((i) => строки[i])
+    .filter((r) => отмечены.has(r.locationId)), [набор.kept, строки, отмечены])
 
   const отметка = useMemo<Mark>(() => ({
     has: (i) => отмечены.has(строки[i]?.locationId),
@@ -279,17 +283,20 @@ export function OpsWorklistPanel() {
       }
       return стало
     }),
-    label: (i) => строки[i]?.name ?? '',
+    label: (i) => {
+      const r = строки[i]
+      return r ? `станцию №${r.number ?? r.code}, ${r.name}` : ''
+    },
   }), [отмечены, строки])
 
   const ячейка = useCallback((i: number, c: number) => {
     const r = строки[i]
     if (!r) return undefined
-    if (c === С.номер) return <span className="font-mono text-xs text-muted-foreground">{r.number ?? r.code ?? '—'}</span>
+    if (c === С.номер) return <span className="block truncate font-mono text-xs text-muted-foreground">{r.number ?? r.code ?? '—'}</span>
     if (c === С.станция) return (
-      <span className="font-medium">
+      <span className="block whitespace-normal break-words font-medium">
         <StationLink station={r.locationId}>{r.name}</StationLink>
-        {r.city && <span className="ml-1.5 text-xs font-normal text-muted-foreground">{r.city}</span>}
+        {r.city && <span className="block text-xs font-normal text-muted-foreground">{r.city}</span>}
       </span>
     )
     // Причин может быть несколько: станция и молчит, и до этого отправляла людей
@@ -338,8 +345,11 @@ export function OpsWorklistPanel() {
     </div>
   }
   if (q.error || !q.data) {
-    return <div className="p-8 text-center text-sm text-muted-foreground">
-      Не удалось собрать список работы
+    return <div role="alert" className="flex flex-col items-center gap-3 p-8 text-center text-sm text-muted-foreground">
+      <p>Не удалось собрать список работы</p>
+      <Button variant="outline" size="sm" onClick={() => void q.refetch()} disabled={q.isFetching}>
+        {q.isFetching ? 'Загрузка…' : 'Повторить загрузку'}
+      </Button>
     </div>
   }
 
@@ -370,10 +380,12 @@ export function OpsWorklistPanel() {
     }))
   })
   const строкаКарточки = карточка ? строки[карточка.order[карточка.pos]] : null
-  const пустоСписка = ПРОФИЛАКТИКА.includes(причина)
+  const пустоСписка = поиск.trim()
+    ? 'По вашему запросу станции не найдены. Измените поиск или сбросьте фильтры.'
+    : ПРОФИЛАКТИКА.includes(причина)
     ? 'Сроков по этому отбору нет — либо они не заполнены'
     : неВзятые
-      ? 'Всё, что видно, уже взято в работу'
+      ? 'Станций без открытой заявки по этому отбору нет.'
       : 'Работы по этому отбору нет'
 
   return (
@@ -449,18 +461,18 @@ export function OpsWorklistPanel() {
               поля, свёрнуты — одна строка с тем, что сейчас отобрано. */}
           {фильтрыОткрыты && (
             <div className="flex flex-wrap items-end gap-3">
-              <Поле label="В работе" w="w-44">
+              <Поле label="В работе" id="ops-today-work" w="w-44">
                 <Select value={неВзятые ? 'free' : 'all'} onValueChange={(v) => setНеВзятые(v === 'free')}>
-                  <SelectTrigger className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="ops-today-work" className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="free">Никем не взято</SelectItem>
                     <SelectItem value="all">Все станции</SelectItem>
                   </SelectContent>
                 </Select>
               </Поле>
-              <Поле label="Причина" w="w-52">
+              <Поле label="Причина" id="ops-today-reason" w="w-52">
                 <Select value={причина} onValueChange={setПричина}>
-                  <SelectTrigger className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="ops-today-reason" className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Любая причина</SelectItem>
                     <SelectItem value="silent">Нет зарядок</SelectItem>
@@ -474,9 +486,9 @@ export function OpsWorklistPanel() {
                   </SelectContent>
                 </Select>
               </Поле>
-              <Поле label="Регион" w="w-52">
+              <Поле label="Регион" id="ops-today-region" w="w-52">
                 <Select value={регионОтбора} onValueChange={setРегионОтбора}>
-                  <SelectTrigger className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="ops-today-region" className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Все регионы</SelectItem>
                     {регионыСписком.map((р) => (
@@ -485,12 +497,12 @@ export function OpsWorklistPanel() {
                   </SelectContent>
                 </Select>
               </Поле>
-              <Поле label="Поиск" w="w-64">
-                <Input value={поиск} onChange={(e) => setПоиск(e.target.value)}
+              <Поле label="Поиск" id="ops-today-search" w="w-64">
+                <Input id="ops-today-search" value={поиск} onChange={(e) => setПоиск(e.target.value)}
                   placeholder="Номер, название, город…" className="h-9 text-sm" />
               </Поле>
-              <Поле label="Строк на странице" w="w-32">
-                <PageSizeField bare />
+              <Поле label="Строк на странице" id="ops-today-page-size" w="w-32">
+                <PageSizeField bare id="ops-today-page-size" />
               </Поле>
             </div>
           )}
@@ -503,7 +515,7 @@ export function OpsWorklistPanel() {
                 {/* Свёрнутые фильтры не должны выглядеть пустыми: число установленных
                     — на кнопке, сами они — в подписи таблицы (МАГ, 15.10.2026). */}
                 {!фильтрыОткрыты && отбор.length + Object.keys(набор.filters).length > 0 && (
-                  <span className="rounded-full bg-primary px-1.5 text-[11px] font-semibold leading-5 text-primary-foreground">
+                  <span className="rounded-full bg-primary px-1.5 text-xs font-semibold leading-5 text-primary-foreground">
                     {отбор.length + Object.keys(набор.filters).length}
                   </span>
                 )}
@@ -519,18 +531,23 @@ export function OpsWorklistPanel() {
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {отмечены.size > 0 && (
+              {выбранные.length > 0 && (
+                <>
                 <Button size="sm" className="h-8 text-xs"
-                  onClick={() => setПачка(строки.filter((r) => отмечены.has(r.locationId))
+                  onClick={() => setПачка(выбранные
                     .map((r) => ({ id: r.locationId, name: r.name, number: r.number ?? r.code })))}>
-                  Завести заявки ({отмечены.size})
+                  Завести заявки ({выбранные.length})
                 </Button>
+                <Button variant="ghost" size="icon" aria-label="Снять отметки строк" onClick={() => setОтмечены(new Set())}>
+                  <X />
+                </Button>
+                </>
               )}
               <ExportButton title="Работа на сегодня" subtitle={`данные по ${данныеПо}`}
                 getEl={() => экран.current} />
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={сброс}
                 disabled={!отбор.length && !Object.keys(набор.filters).length}>
-                Сброс
+                Сбросить фильтры
               </Button>
             </div>
           </div>
@@ -563,6 +580,7 @@ export function OpsWorklistPanel() {
           ) : (
             <SheetTable
                 {...набор.table}
+                defaultWidths={ШИРИНЫ}
                 caption={<>Работа на {наДень ? наДень.split('-').reverse().join('.') : 'сегодня'}</>}
                 lines={[`данные по ${данныеПо} МСК`, ...отбор]}
                 groupBy={СВОДНАЯ_ПО}
@@ -599,7 +617,7 @@ export function OpsWorklistPanel() {
         // возвращается, когда её закрыли: человек не уходит со своей строки.
         row={карточка && !(возврат && пачка)
           ? набор.sheet.rows[карточка.order[карточка.pos]] ?? null : null}
-        title={строкаКарточки?.name}
+        title={строкаКарточки ? `${строкаКарточки.name} · №${строкаКарточки.number ?? строкаКарточки.code}` : undefined}
         at={карточка?.pos ?? 0}
         of={карточка?.order.length ?? 0}
         onStep={(dir) => setКарточка((k) => (k ? { ...k, pos: Math.min(Math.max(k.pos + dir, 0), k.order.length - 1) } : k))}
@@ -612,7 +630,7 @@ export function OpsWorklistPanel() {
               ))}
             </div>
             <div>
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Действия</div>
+              <div className="mb-2 text-xs font-semibold text-muted-foreground">Действия</div>
               <div className="overflow-hidden rounded-lg border border-border/60">
                 <RelatedLink label="Завести заявку" hint="на выезд по этой станции"
                   icon={<ClipboardCheck className="size-4" aria-hidden />}
@@ -745,12 +763,12 @@ function WorklistCompare({ companyId, region, base, now }: { companyId: string; 
   const [дней, setДней] = useState<number | null>(null)
   const день = base && дней ? сдвигДня(base, дней) : ''
   const q = useQuery({
-    queryKey: ['ops-worklist', companyId, region ?? '', день],
+    queryKey: ['ops-worklist-compare', companyId, region ?? '', день],
     queryFn: () => getOpsWorklist(companyId, { region, asOf: день }),
     enabled: !!companyId && !!день,
     staleTime: 60_000,
   })
-  const было = q.data
+  const было = день ? q.data : undefined
   const разница = useMemo(() => {
     if (!было) return null
     const прежние = new Map(было.rows.map((r) => [r.locationId, r]))
@@ -800,6 +818,7 @@ function WorklistCompare({ companyId, region, base, now }: { companyId: string; 
           </Button>
         ))}
       </div>
+      {!день && <p className="text-sm text-muted-foreground">Выберите, с каким днём сравнить список.</p>}
       {q.isFetching && <div className="flex justify-center py-4"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>}
       {q.isError && <p role="alert" className="text-sm font-medium text-red-700 dark:text-red-400">Список на {день} собрать не удалось.</p>}
       {было && !q.isFetching && разница && (

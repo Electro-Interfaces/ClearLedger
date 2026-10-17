@@ -38,13 +38,14 @@ export function usePageSize() {
   )
 }
 
-export function PageSizeField({ bare }: { bare?: boolean }) {
+export function PageSizeField({ bare, id }: { bare?: boolean; id?: string }) {
   const value = usePageSize()
   const opts = PRESETS.includes(value) || value === 0 ? PRESETS : [...PRESETS, value].sort((a, b) => a - b)
   return (
     <label className={bare ? 'flex' : 'flex items-center gap-2 text-xs text-muted-foreground'}>
       {!bare && <span>Строк на странице</span>}
       <select
+        id={id}
         value={value}
         onChange={(e) => setSize(Number(e.target.value))}
         title="Действует во всех таблицах с инструментами"

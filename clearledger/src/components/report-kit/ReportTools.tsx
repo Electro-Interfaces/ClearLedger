@@ -174,10 +174,10 @@ function CalcPanel({ sel, miss, onRemove, onClear, report }: {
           className="block w-full resize-none bg-transparent px-3 pt-2 text-right text-sm leading-snug tabular-nums text-di-on-surface-variant outline-none"
         />
         <div className="flex items-center justify-between gap-2 px-3 pb-2">
-          <span className="text-xs text-muted-foreground">{expr.trim() && value === null ? 'выражение не закончено' : '='}</span>
+          <span className="text-xs text-muted-foreground">{expr.trim() && value === null ? 'Проверьте выражение и делители' : '='}</span>
           <span className="flex items-center gap-1">
             <output className="font-headline text-2xl font-extrabold tabular-nums text-foreground">
-              {value === null ? '0' : num(value, money)}
+              {value === null ? '—' : num(value, money)}
             </output>
             {value !== null && (
               <button type="button" onClick={() => copy(textOf(value))} title="Скопировать результат" aria-label="Скопировать результат"

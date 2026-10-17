@@ -80,7 +80,7 @@ export function ToolButtons({ strip, onOpen }: { strip?: boolean; onOpen?: (p: P
 
 export function ToolStrip() {
   return (
-    <div className="-mx-1 flex items-stretch gap-1 overflow-x-auto px-1 pb-1 lg:hidden" role="toolbar" aria-label="Инструменты таблицы">
+    <div className="-mx-1 flex items-stretch gap-1 overflow-x-auto px-1 pb-1 min-[1025px]:hidden" role="toolbar" aria-label="Инструменты таблицы">
       <ToolButtons strip />
     </div>
   )
