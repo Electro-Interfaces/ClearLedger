@@ -37,7 +37,7 @@ import { ExportButton } from '@/components/workspace/analytics/ExportButton'
 import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { daysAgoISO, isoLocal } from '@/components/workspace/analytics/periodPresets'
 import {
-  PageSizeField, RelatedLink, RelatedReport, ReportTools, RowCard, SheetTable, TILE_ROW, Tile, ToolPanel, ToolStrip, qty, useReportKit,
+  PageSizeField, RelatedLink, RelatedReport, ReportTools, RowCard, SheetTable, TILE_ROW, Tile, ToolPanel, ToolStrip, plural, qty, useReportKit,
   type Cell,
 } from '@/components/report-kit'
 import { useFilters } from '@/contexts/FilterContext'
@@ -403,6 +403,7 @@ function StockView({ companyId, range, warehouses, root }: ViewProps) {
   const gone = section('gone')
   const pick = (t: StockTable) => setTable(table === t ? 'places' : t)
   const state = (k: string) => sum(d.groups, (g) => (g.section === 'gone' ? 0 : g.byState[k] ?? 0))
+  const spareStores = new Set(d.spares.map((s) => s.locationId)).size
   return (
     <>
       <div className={TILE_ROW}>
@@ -419,9 +420,12 @@ function StockView({ companyId, range, warehouses, root }: ViewProps) {
         <Tile icon={PackageX} label="Выбыло" value={nf.format(gone + d.inOperation)}
           hint={`в эксплуатацию ${nf.format(d.inOperation)} · списано и возвращено ${nf.format(gone)}`}
           active={table === 'gone'} onClick={() => pick('gone')} />
-        <Tile icon={Package} label="ЗИП, позиций" value={nf.format(d.spares.length)}
-          hint={`на ${nf.format(new Set(d.spares.map((s) => s.locationId)).size)} складах`}
-          active={table === 'spares'} onClick={() => pick('spares')} />
+        {/* ЗИП — плиткой, только когда он есть: «0 на 0 складах» читается как поломка. */}
+        {(d.spares.length > 0 || table === 'spares') && (
+          <Tile icon={Package} label="ЗИП, позиций" value={nf.format(d.spares.length)}
+            hint={`на ${nf.format(spareStores)} ${plural(spareStores, 'складе', 'складах', 'складах')}`}
+            active={table === 'spares'} onClick={() => pick('spares')} />
+        )}
       </div>
       <KitSheet key={table} companyId={companyId} sheet={sheet} root={root}
         lines={[
@@ -553,7 +557,8 @@ function OsvView({ companyId, range, warehouses, root }: ViewProps) {
       // Ноль — пустая клетка, как в ведомости 1С.
       rows: list.map((r) => [r.account, label.get(r.account) ?? '', r.placeName, r.itemName, r.unitLabel, ...OSV_KEYS.map((k) => r[k] || '')]),
       total: ['Итого', '', '', `${qty(list.length)} строк`, '', ...OSV_KEYS.map((k) => (k.endsWith('s') ? round2(sum(list, (r) => r[k])) : ''))],
-      groupBy: { 0: 'Счёт', 2: 'Склад / место', 3: 'Номенклатура' }, noPivot: [1],
+      // Название счёта уже начинается с кода («07 — …»): по умолчанию скрыто, есть в карточке строки.
+      hide: [1], groupBy: { 0: 'Счёт', 2: 'Склад / место', 3: 'Номенклатура' }, noPivot: [1],
       render: (i, c) => (c === 3 && list[i]?.item.startsWith('text:')
         ? <span className={AMBER} title="Без номенклатуры — модель из карточки">{list[i].itemName}</span> : undefined),
       rowTitle: (i) => (list[i] ? `${list[i].account} · ${list[i].placeName} · ${list[i].itemName}` : ''),
@@ -572,7 +577,7 @@ function OsvView({ companyId, range, warehouses, root }: ViewProps) {
           hint={`на конец, без 01.01 · ${money.format(sum(stock, (a) => a.zs))} ₽`}
           active={account === STOCK_ACCOUNTS} onClick={() => setAccount(STOCK_ACCOUNTS)} />
         {d.accounts.map((a) => (
-          <Tile key={a.account} icon={Layers} label={`${a.account} · ${a.label}`} value={nf.format(a.zq)}
+          <Tile key={a.account} icon={Layers} label={a.label} value={nf.format(a.zq)}
             hint={a.zs ? `на конец ${money.format(a.zs)} ₽` : `приход ${nf.format(a.dq)} · расход ${nf.format(a.cq)}`}
             active={account === a.account} onClick={() => setAccount(account === a.account ? STOCK_ACCOUNTS : a.account)} />
         ))}
@@ -587,7 +592,7 @@ function OsvView({ companyId, range, warehouses, root }: ViewProps) {
         ]}
         fields={<>
           <Pick label="Счёт" all="Все счета" value={account} onChange={setAccount} w="w-72"
-            opts={[{ id: STOCK_ACCOUNTS, name: 'Складские счета (без 01.01)' }, ...d.accounts.map((a) => ({ id: a.account, name: `${a.account} · ${a.label}` }))]} />
+            opts={[{ id: STOCK_ACCOUNTS, name: 'Складские счета (без 01.01)' }, ...d.accounts.map((a) => ({ id: a.account, name: a.label }))]} />
           <Pick label="Склад" all="Все места" value={locationId} onChange={setLocationId} opts={warehouses} />
         </>}
         chosen={(account !== STOCK_ACCOUNTS ? 1 : 0) + (locationId ? 1 : 0)}
@@ -687,8 +692,10 @@ function TurnoverView({ companyId, range, warehouses, root }: ViewProps) {
           active={table === 'moved'} onClick={() => pick('moved')} />
         <Tile icon={History} label="Без истории движений" value={nf.format(noHistory)} hint="единиц: дают только остаток"
           tone={noHistory ? AMBER : undefined} active={table === 'nohist'} onClick={() => pick('nohist')} />
-        <Tile icon={Package} label="ЗИП, позиций" value={nf.format(d.spares.length)} hint="с остатком или движением"
-          active={table === 'spares'} onClick={() => pick('spares')} />
+        {(d.spares.length > 0 || table === 'spares') && (
+          <Tile icon={Package} label="ЗИП, позиций" value={nf.format(d.spares.length)} hint="с остатком или движением"
+            active={table === 'spares'} onClick={() => pick('spares')} />
+        )}
       </div>
       <KitSheet key={table === 'spares' ? 'spares' : 'eq'} companyId={companyId} sheet={sheet} root={root}
         lines={[
@@ -840,11 +847,12 @@ function RepairsView({ companyId, root }: ViewProps) {
     }
   }, [d, overdueOnly])
   if (!d || !sheet) return <Pending q={q} />
+  const holders = new Set(d.items.map((r) => r.holder ?? '')).size
   return (
     <>
       <div className={TILE_ROW}>
         <Tile icon={Wrench} label="В ремонте" value={nf.format(d.items.length)}
-          hint={`у ${nf.format(new Set(d.items.map((r) => r.holder ?? '')).size)} подрядчиков`}
+          hint={`у ${nf.format(holders)} ${plural(holders, 'подрядчика', 'подрядчиков', 'подрядчиков')}`}
           active={!overdueOnly} onClick={() => setOverdueOnly(false)} />
         <Tile icon={AlertTriangle} label="Дольше планового срока" value={nf.format(d.overdue)} hint="плановый возврат прошёл"
           tone={d.overdue ? 'text-red-600 dark:text-red-400' : undefined}
