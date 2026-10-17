@@ -100,7 +100,9 @@ async def create_key(
     await log_audit(db, actor=current_user, company_id=cid,
                     action="inbound_key.create", target=key.consumer,
                     details={"scopes": scopes} if scopes else None)
-    await db.flush()
+    # Фиксация до ответа: get_db коммитит уже после отправки ответа, а ключ из ответа
+    # должен работать сразу, отозванный — перестать сразу же.
+    await db.commit()
     return {"id": str(key.id), "consumer": key.consumer, "key": raw,
             "prefix": key.key_prefix, "station_id": key.station_id,
             "actor_kind": key.actor_kind, "scopes": scopes}
@@ -125,3 +127,4 @@ async def revoke_key(
     key.revoked_at = datetime.now(timezone.utc)
     await log_audit(db, actor=current_user, company_id=cid,
                     action="inbound_key.revoke", target=key.consumer)
+    await db.commit()
