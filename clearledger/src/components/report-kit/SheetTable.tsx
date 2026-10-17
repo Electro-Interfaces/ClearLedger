@@ -103,6 +103,7 @@ export function SheetTable({
   tableAttrs,
   rowTitle,
   onHeadPick,
+  defaultWidths,
 }: {
   head: string[]
   rows: Cell[][]
@@ -130,6 +131,7 @@ export function SheetTable({
   tableAttrs?: Record<string, string>
   rowTitle?: (row: number) => string
   onHeadPick?: (col: number) => void
+  defaultWidths?: Record<number, number>
 }) {
   const [sort, setSort] = useState<Sort>(null)
   const size = usePageSize() || Math.max(1, rows.length)
@@ -170,7 +172,7 @@ export function SheetTable({
     order.splice(order.indexOf(to) + (right ? 1 : 0), 0, from)
     patch({ order })
   }
-  const widthOf = (i: number) => (live?.col === i ? live.w : cols?.width?.[i])
+  const widthOf = (i: number) => (live?.col === i ? live.w : cols?.width?.[i] ?? defaultWidths?.[i])
   const pin = Math.min(cols?.pin ?? 0, view.length)
 
   useLayoutEffect(() => {
@@ -347,11 +349,13 @@ export function SheetTable({
       s?.col !== col ? { col, dir: numeric[col] ? -1 : 1 } : s.dir === (numeric[col] ? -1 : 1) ? { col, dir: numeric[col] ? 1 : -1 } : null,
     )
   }
-  const open = (pos: number) =>
+  const open = (pos: number) => {
+    tableRef.current?.tBodies[0]?.rows[pos - from]?.focus({ preventScroll: true })
     onRow?.(
       sorted.map((x) => x.i),
       pos,
     )
+  }
   const pages = Math.max(1, Math.ceil(sorted.length / size))
   const at = Math.min(page, pages - 1)
   const from = at * size
@@ -421,7 +425,7 @@ export function SheetTable({
             e.preventDefault()
           }}
           onKeyDown={(e) => {
-            if ((e.target as HTMLElement).closest('input, select, textarea')) return
+            if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return
             if (e.key === 'Escape' && cur !== null) return setCur(null)
             if (e.key === 'Enter' && cur !== null && onRow) {
               e.preventDefault()
@@ -618,7 +622,12 @@ export function SheetTable({
                         open(from + n)
                       })
                     }
-                    onKeyDown={onRow && ((e) => e.key === 'Enter' && e.target === e.currentTarget && open(from + n))}
+                    onKeyDown={onRow && ((e) => {
+                      if (e.key !== 'Enter' || e.target !== e.currentTarget) return
+                      e.preventDefault()
+                      e.stopPropagation()
+                      open(from + n)
+                    })}
                     className={cn('group/row outline-none hover:bg-di-surface-high/70', onRow && 'focus-visible:bg-di-surface-high', onRow && !wide && !pin && 'cursor-pointer')}
                   >
                     {mark && (
@@ -684,7 +693,13 @@ export function SheetTable({
                                     : !numeric[i] && 'text-di-on-surface-variant',
                           )}
                         >
-                          {custom !== undefined ? (
+                          {onPick && typeof v === 'number' ? (
+                            <button type="button" aria-pressed={!!picked}
+                              aria-label={`${head[i]}: ${showCell(v, head[i])}, ${rowTitle?.(x.i) ?? `строка ${from + n + 1}`}`}
+                              className="w-full rounded-sm text-right focus-visible:outline-2 focus-visible:outline-primary">
+                              {custom ?? showCell(v, head[i])}
+                            </button>
+                          ) : custom !== undefined ? (
                             custom
                           ) : v === '' ? (
                             <span className="text-muted-foreground/60" aria-label="нет данных">
@@ -741,7 +756,13 @@ export function SheetTable({
                           selected?.has(`t:${i}`) ? 'bg-di-surface-highest shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-primary)_50%,transparent)]' : 'bg-di-surface-low',
                         )}
                       >
-                        {showCell(foot[i], head[i])}
+                        {pickable ? (
+                          <button type="button" aria-pressed={!!selected?.has(`t:${i}`)}
+                            aria-label={`Итого, ${head[i]}: ${showCell(foot[i], head[i])}`}
+                            className="w-full rounded-sm text-right focus-visible:outline-2 focus-visible:outline-primary">
+                            {showCell(foot[i], head[i])}
+                          </button>
+                        ) : showCell(foot[i], head[i])}
                       </td>
                     )
                   })}
