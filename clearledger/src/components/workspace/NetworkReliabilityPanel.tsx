@@ -1,410 +1,331 @@
-/**
- * «Надёжность» — вторая половина рабочего дня инженера.
- *
- * «Состояние сети» отвечает, работает ли станция вообще. Здесь — про станции,
- * которые в сети и даже показывают сессии, а клиент уезжает ни с чем.
- *
- * Считаем ПРИЕЗДАМИ, а не попытками. CPO пишет каждое втыкание разъёма отдельной
- * строкой: человек, у которого схватилось с третьего раза, даёт три сессии — две
- * с ошибкой и одну рабочую. По сессиям это «27 % брака», по приездам — 9,8 %
- * тех, кто уехал ни с чем. Первое описывает железо, второе — клиента, и для
- * разговора об эксплуатации верно второе.
- *
- * Рядом — попытки на приезд: визит удался, но с четвёртого раза (у худших
- * станций так и есть) — это станция «работает» с испорченным впечатлением.
- */
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { OpsSnapshotNotice } from './OpsSnapshotNotice'
-import { AlertTriangle, BatteryWarning, Loader2, Users, Zap } from 'lucide-react'
+import { AlertTriangle, BatteryWarning, ChevronDown, ChevronRight, Loader2, Users, Zap } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
-import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
-import { ReportPivot } from '@/components/workspace/ReportPivot'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { StationLink } from '@/components/common/StationLink'
-import { SortTh } from '@/components/workspace/SortableTh'
-import { ExportButton } from '@/components/workspace/analytics/ExportButton'
-import { exportRows } from '@/components/workspace/analytics/exportRows'
-import { useTableSort } from '@/hooks/useTableSort'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
+import { getNetworkReliability, type NetworkReliability, type ReliabilityRow } from '@/services/opsService'
 import {
-  getNetworkReliability, type NetworkReliability, type ReliabilityRow,
-} from '@/services/opsService'
+  PageSizeField, RelatedLink, RelatedReport, ReportTools, RowCard, SheetTable,
+  TILE_ROW, Tile, ToolPanel, ToolStrip, qty, useReportKit, type Cell,
+} from '@/components/report-kit'
+import { PanelViewTabs } from './PanelViewTabs'
+import { ReportPivot } from './ReportPivot'
+import { OpsSnapshotStatus } from './OpsSnapshotNotice'
+import { ExportButton } from './analytics/ExportButton'
+import { exportRows } from './analytics/exportRows'
+import { daysAgoISO } from './analytics/periodPresets'
 
-const nf = new Intl.NumberFormat('ru-RU')
-const ОКНА = [30, 90, 180] as const
+const С = { номер: 0, станция: 1, регион: 2, марка: 3, модель: 4, приездов: 5,
+  безЗарядки: 6, отказПроц: 7, попыток: 8, пустыхПроц: 9, кВтч: 10, ушло: 11,
+  сессий: 12, ошибок: 13, ошибокПроц: 14, пустых: 15, энергия: 16, выручка: 17,
+  клиентов: 18, задетых: 19, последняя: 20 }
+const ШАПКА = ['№', 'Станция', 'Регион', 'Марка', 'Модель', 'Приездов', 'Приездов без зарядки',
+  'Без зарядки, %', 'Попыток / приезд', 'Без энергии, %', 'кВт·ч / попытку', 'Ушло клиентов',
+  'Попыток всего', 'Ошибок', 'Ошибок, %', 'Попыток без энергии', 'Энергия, кВт·ч',
+  'Выручка, ₽', 'Клиентов', 'Столкнулись с отказом', 'Последняя сессия']
+const СКРЫТЫ = [С.модель, С.пустыхПроц, С.сессий, С.ошибок, С.ошибокПроц, С.пустых,
+  С.энергия, С.выручка, С.клиентов, С.задетых, С.последняя]
+const СОСТАВ_СТОЛБЦОВ = { order: [], hidden: СКРЫТЫ }
+const ШИРИНЫ = { [С.номер]: 70, [С.станция]: 230, [С.регион]: 190, [С.марка]: 110,
+  [С.приездов]: 110, [С.безЗарядки]: 130, [С.отказПроц]: 115, [С.попыток]: 120, [С.кВтч]: 120, [С.ушло]: 115 }
+const РЕГ_ШАПКА = ['Регион', 'Станций', 'Приездов', 'Приездов без зарядки', 'Без зарядки, %', 'Станций с частыми отказами']
+const РЕГ_СКРЫТЫ: number[] = []
+const РЕГ_ШИРИНЫ = { 0: 280, 1: 100, 2: 120, 3: 150, 4: 130, 5: 160 }
+const ПОКАЗАТЬ = { all: 'Все станции списка', failed: 'Есть приезды без зарядки', bad: 'Частые отказы', attempts: 'От двух попыток на приезд', clients: 'Столкнулись с отказом', lost: 'Ушли клиенты' }
+const КЛЮЧ_ФИЛЬТРОВ = 'report-kit.v1:filters-open:ops-reliability'
+type Отбор = keyof typeof ПОКАЗАТЬ
+type Настройки = { days: number; search: string; region: string; brand: string; filter: Отбор; view: string }
+const дата = (s: string) => new Date(s).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })
+const сумма = (rows: ReliabilityRow[], key: keyof ReliabilityRow) => rows.reduce((n, r) => n + (Number(r[key]) || 0), 0)
+const доля = (n: number, all: number, digits = 1): Cell => all ? Math.round(n / all * 10 ** digits) / 10 ** digits : ''
+const процент = (n: number, all: number): Cell => доля(n * 100, all)
 
-/** Плитка показателя; с `onClick` — ещё и фильтр списка снизу. */
-function Плитка({ icon: Icon, label, value, hint, tone, onClick, active }: {
-  icon: typeof Zap; label: string; value: string; hint?: string; tone?: string
-  onClick?: () => void; active?: boolean
-}) {
-  const внутри = (
-    <>
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Icon className="size-3.5" />{label}
-      </div>
-      <div className={cn('mt-0.5 text-lg font-semibold tabular-nums', tone)}>{value}</div>
-      {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
-    </>
-  )
-  const вид = cn('rounded-lg border bg-card px-3 py-2 text-left',
-    active ? 'border-primary ring-1 ring-primary/40' : 'border-border/60')
-  if (!onClick) return <div data-kpi className={вид}>{внутри}</div>
-  return (
-    <button type="button" data-kpi onClick={onClick} aria-pressed={!!active}
-      className={cn(вид, 'transition-colors hover:border-primary/60')}>
-      {внутри}
-    </button>
-  )
+function строка(r: ReliabilityRow): Cell[] {
+  return [r.number ?? r.code ?? '', r.name, r.region ?? '', r.brand ?? '', r.model ?? '',
+    r.visits, r.visitsFailed, r.failedVisitsPct, r.attemptsPerVisit, r.emptyPct, r.kwhPerSession,
+    r.clientsLost, r.sessions, r.failed, r.failedPct, r.empty, r.energyKwh, r.revenue,
+    r.clients, r.clientsAffected, r.lastSessionAt ? дата(r.lastSessionAt) : '']
+}
+function итоги(rows: ReliabilityRow[]): Cell[] {
+  const visits = сумма(rows, 'visits'), sessions = сумма(rows, 'sessions')
+  return ['Итого', rows.length + ' станций', '', '', '', visits, сумма(rows, 'visitsFailed'),
+    процент(сумма(rows, 'visitsFailed'), visits), доля(sessions, visits, 2), процент(сумма(rows, 'empty'), sessions),
+    доля(сумма(rows, 'energyKwh'), sessions, 2), сумма(rows, 'clientsLost'), sessions, сумма(rows, 'failed'),
+    процент(сумма(rows, 'failed'), sessions), сумма(rows, 'empty'), сумма(rows, 'energyKwh'), сумма(rows, 'revenue'),
+    сумма(rows, 'clients'), сумма(rows, 'clientsAffected'), '']
+}
+function поРегионам(rows: ReliabilityRow[], threshold: number) {
+  const groups = new Map<string, ReliabilityRow[]>()
+  rows.forEach((r) => {
+    const name = r.region || 'Регион не указан', group = groups.get(name)
+    if (group) group.push(r); else groups.set(name, [r])
+  })
+  return [...groups].map(([name, stations]) => {
+    const visits = сумма(stations, 'visits'), failed = сумма(stations, 'visitsFailed')
+    return { name, stations, cells: [name, stations.length, visits, failed, процент(failed, visits),
+      stations.filter((r) => r.failedVisitsPct >= threshold).length] as Cell[] }
+  }).sort((a, b) => Number(b.cells[4]) - Number(a.cells[4]))
+}
+function Поле({ id, label, children, className }: { id: string; label: string; children: ReactNode; className: string }) {
+  return <div className={cn('flex min-w-0 flex-col gap-1', className)}>
+    <label htmlFor={id} className="text-xs font-medium text-muted-foreground">{label}</label>{children}
+  </div>
 }
 
 export function NetworkReliabilityPanel() {
   const { companyId } = useCompany()
-  const { regionIds } = useFilters()
-  const экран = useRef<HTMLDivElement>(null)
-  const [окно, setОкно] = useState<number>(90)
-  const [поиск, setПоиск] = useState('')
-  const [регионОтбора, setРегионОтбора] = useState('all')
-  const [маркаОтбора, setМаркаОтбора] = useState('all')
-  const [вид, setВид] = useState('list')
-  // Окно можно закончить не «сегодня», а выбранным днём: «как станции работали
-  // в августе» — это тот же расчёт, сдвинутый назад.
-  const [наДень, setНаДень] = useState('')
-  // Разрез по показателю: нажатие на плитку показывает ровно те станции, про
-  // которые это число. Иначе «61 станция хуже 20 %» остаётся числом, к которому
-  // надо самому подбирать сортировку.
-  const [разрез, setРазрез] = useState<'all' | 'bad' | 'attempts' | 'clients'>('all')
-
-  const регион = регионОтбора !== 'all' ? регионОтбора : regionIds.length ? regionIds.join('|') : undefined
+  const { regionIds, period } = useFilters()
+  const [settings, setSettings] = useState<Настройки>({ days: 90, search: '', region: 'all', brand: 'all', filter: 'all', view: 'list' })
+  const region = regionIds.length ? regionIds.join('|') : undefined
+  const asOf = period.to >= daysAgoISO(1) ? '' : period.to
   const q = useQuery({
-    queryKey: ['ops-reliability', companyId, окно, регион ?? '', наДень],
-    queryFn: () => getNetworkReliability(companyId, {
-      days: окно, region: регион, asOf: наДень || undefined }),
-    enabled: !!companyId,
-    staleTime: 60_000,
+    queryKey: ['ops-reliability', companyId, settings.days, region ?? '', asOf],
+    queryFn: () => getNetworkReliability(companyId, { days: settings.days, region, asOf: asOf || undefined }),
+    enabled: !!companyId, staleTime: 60_000,
   })
-
-  const сортировка = useMemo(() => ({
-    name: (r: ReliabilityRow) => r.name,
-    number: (r: ReliabilityRow) => r.number ?? r.code,
-    region: (r: ReliabilityRow) => r.region,
-    visits: (r: ReliabilityRow) => r.visits,
-    failedVisits: (r: ReliabilityRow) => r.failedVisitsPct,
-    attempts: (r: ReliabilityRow) => r.attemptsPerVisit,
-    empty: (r: ReliabilityRow) => r.emptyPct,
-    clients: (r: ReliabilityRow) => r.clientsLost,
-    kwh: (r: ReliabilityRow) => r.kwhPerSession,
-  }), [])
-
-  // Значения отбора — из самой выборки: список марок в сети меняется, и свой
-  // справочник разошёлся бы с ним на первой же поставке.
-  const [регионыСписком, маркиСписком] = useMemo(() => {
-    const рег = new Set<string>()
-    const мар = new Set<string>()
-    for (const r of q.data?.stations ?? []) {
-      if (r.region) рег.add(r.region)
-      if (r.brand) мар.add(r.brand)
-    }
-    const по = (a: string, b: string) => a.localeCompare(b, 'ru')
-    return [[...рег].sort(по), [...мар].sort(по)]
-  }, [q.data])
-
-  const порог = q.data?.threshold ?? 20
-  const строки = useMemo(() => {
-    let все = q.data?.stations ?? []
-    if (разрез === 'bad') все = все.filter((r) => r.failedVisitsPct >= порог)
-    if (разрез === 'attempts') все = все.filter((r) => r.attemptsPerVisit >= 2)
-    if (разрез === 'clients') все = все.filter((r) => r.clientsLost > 0)
-    if (регионОтбора !== 'all') все = все.filter((r) => r.region === регионОтбора)
-    if (маркаОтбора !== 'all') все = все.filter((r) => r.brand === маркаОтбора)
-    if (!поиск.trim()) return все
-    return все.filter((r) => matchesSearch(поиск, [r.name, r.number, r.code, r.city, r.region, r.brand, r.model]))
-  }, [q.data, поиск, регионОтбора, маркаОтбора, разрез, порог])
-
-  const таблица = useTableSort(строки, сортировка)
-
-  const сортРегионов = useMemo(() => ({
-    region: (g: NetworkReliability['regions'][number]) => g.region,
-    stations: (g: NetworkReliability['regions'][number]) => g.stations,
-    visits: (g: NetworkReliability['regions'][number]) => g.visits,
-    failed: (g: NetworkReliability['regions'][number]) => g.failedVisitsPct,
-    bad: (g: NetworkReliability['regions'][number]) => g.bad,
-  }), [])
-  const регионы = useTableSort(q.data?.regions ?? [], сортРегионов,
-    { key: 'failed', dir: 'desc' })
-
-  if (q.isLoading) {
-    return <div className="flex justify-center py-12">
-      <Loader2 className="size-5 animate-spin text-muted-foreground" />
-    </div>
-  }
-  if (q.error || !q.data) {
-    return <div className="p-8 text-center text-sm text-muted-foreground">
-      Не удалось посчитать надёжность
-    </div>
-  }
-
-  const d = q.data
-  const t = d.totals
-
-  return (
-    <div ref={экран} className="space-y-3 p-3">
-      <OpsSnapshotNotice data={d} />
-      <p className="text-xs text-muted-foreground">Парк: {d.totals.populationStations} · с сессиями за окно: {d.totals.stations} · в списке с {d.minSessions}+ визитами: {d.totals.stationsCounted}.</p>
-      {d.trend && <p className="rounded-md border p-2 text-sm">Последние 7 дней данных: {d.trend.current.failed} из {d.trend.current.visits} приездов без зарядки ({d.trend.current.failedPct} %). Предыдущие 7: {d.trend.previous.failed} из {d.trend.previous.visits} ({d.trend.previous.failedPct} %). Изменение: {d.trend.deltaPp > 0 ? '+' : ''}{d.trend.deltaPp} п.п.</p>}
-      <Card>
-        <CardContent className="space-y-3 p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="text-sm font-semibold">Надёжность станций</div>
-              <div className="text-xs text-muted-foreground">
-                окно {d.days} дней по {d.asOf.slice(0, 10).split('-').reverse().join('.')}
-                {' · '}станции с {d.minSessions}+ приездами
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {ОКНА.map((w) => (
-                <Button key={w} size="sm" variant={окно === w ? 'default' : 'outline'}
-                  className="h-7 px-2 text-xs" onClick={() => setОкно(w)}>
-                  {w} дн
-                </Button>
-              ))}
-              <label className="text-xs text-muted-foreground" htmlFor="rel-asof">
-                на день
-              </label>
-              <Input id="rel-asof" type="date" value={наДень}
-                max={d.dataThrough?.slice(0, 10)}
-                onChange={(e) => setНаДень(e.target.value)}
-                className="h-7 w-36 text-xs" />
-              {наДень && (
-                <Button size="sm" variant="ghost" className="h-7 text-xs"
-                  onClick={() => setНаДень('')}>
-                  К последним данным
-                </Button>
-              )}
-              <ExportButton title="Надёжность станций"
-                subtitle={`окно ${d.days} дней по ${d.asOf.slice(0, 10)}`}
-                getEl={() => экран.current} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-            {/* Плитки — фильтры списка: нажатие показывает те станции, про
-                которые это число (20.09.2026). */}
-            <Плитка icon={Zap} label="Приездов клиентов" value={nf.format(t.visits)}
-              hint={`станций в счёте ${nf.format(t.stationsCounted)}`}
-              active={разрез === 'all'} onClick={() => setРазрез('all')} />
-            <Плитка icon={AlertTriangle} label="Уехали ни с чем"
-              value={`${t.failedVisitsPct} %`}
-              hint={`${nf.format(t.visitsFailed)} приездов`}
-              tone="text-red-600 dark:text-red-400"
-              active={разрез === 'bad'}
-              onClick={() => setРазрез(разрез === 'bad' ? 'all' : 'bad')} />
-            <Плитка icon={BatteryWarning} label="Попыток на приезд"
-              value={String(t.attemptsPerVisit)}
-              hint={`${nf.format(t.sessions)} попыток всего`}
-              tone={t.attemptsPerVisit >= 2 ? 'text-amber-600 dark:text-amber-400' : undefined}
-              active={разрез === 'attempts'}
-              onClick={() => setРазрез(разрез === 'attempts' ? 'all' : 'attempts')} />
-            <Плитка icon={AlertTriangle} label={`Станций хуже ${d.threshold} %`}
-              value={nf.format(t.badStations)}
-              tone="text-red-600 dark:text-red-400"
-              active={разрез === 'bad'}
-              onClick={() => setРазрез(разрез === 'bad' ? 'all' : 'bad')} />
-            <Плитка icon={Users} label="Задето клиентов" value={nf.format(t.clientsAffected)}
-              hint="столкнулись с отказом"
-              active={разрез === 'clients'}
-              onClick={() => setРазрез(разрез === 'clients' ? 'all' : 'clients')} />
-          </div>
-
-          <p className="text-xs text-muted-foreground">{d.note}</p>
-        </CardContent>
-      </Card>
-
-      {d.regions.length > 1 && (
-        <Card>
-          <CardContent className="p-3">
-            <div className="mb-2 text-sm font-semibold">Где отказывает чаще</div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm" data-export-name="Регионы">
-                <thead>
-                  <tr className="border-b border-border text-xs text-muted-foreground">
-                    <SortTh sortKey="region" sort={регионы.sort} onSort={регионы.toggle}>Регион</SortTh>
-                    <SortTh sortKey="stations" sort={регионы.sort} onSort={регионы.toggle} align="right">Станций</SortTh>
-                    <SortTh sortKey="visits" sort={регионы.sort} onSort={регионы.toggle} align="right">Приездов</SortTh>
-                    <SortTh sortKey="failed" sort={регионы.sort} onSort={регионы.toggle} align="right">Ни с чем</SortTh>
-                    <SortTh sortKey="bad" sort={регионы.sort} onSort={регионы.toggle} align="right">Станций за порогом</SortTh>
-                  </tr>
-                </thead>
-                <tbody>
-                  {регионы.rows.map((g) => (
-                    <tr key={g.region} className="border-b border-border/40">
-                      <td className="p-1.5">{g.region}</td>
-                      <td className="p-1.5 text-right tabular-nums">{nf.format(g.stations)}</td>
-                      <td className="p-1.5 text-right tabular-nums">{nf.format(g.visits)}</td>
-                      <td className="p-1.5 text-right font-medium tabular-nums">
-                        {g.failedVisitsPct} %
-                      </td>
-                      <td className="p-1.5 text-right tabular-nums">{nf.format(g.bad)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card>
-        <CardContent className="space-y-2 p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={регионОтбора} onValueChange={setРегионОтбора}>
-              <SelectTrigger className="h-7 w-52 text-xs">
-                <SelectValue placeholder="Регион" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все регионы</SelectItem>
-                {регионыСписком.map((р) => (
-                  <SelectItem key={р} value={р}>{р}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={маркаОтбора} onValueChange={setМаркаОтбора}>
-              <SelectTrigger className="h-7 w-44 text-xs">
-                <SelectValue placeholder="Марка" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все марки</SelectItem>
-                {маркиСписком.map((м) => (
-                  <SelectItem key={м} value={м}>{м}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input value={поиск} onChange={(e) => setПоиск(e.target.value)}
-              placeholder="Номер, название, марка…" className="h-7 w-56 text-xs" />
-            {(регионОтбора !== 'all' || маркаОтбора !== 'all' || поиск || разрез !== 'all') && (
-              <Button size="sm" variant="ghost" className="h-7 text-xs"
-                onClick={() => {
-                  setРегионОтбора('all'); setМаркаОтбора('all')
-                  setПоиск(''); setРазрез('all')
-                }}>
-                Сбросить
-              </Button>
-            )}
-            <span className="text-xs text-muted-foreground">
-              строк: {nf.format(таблица.rows.length)}
-            </span>
-          </div>
-
-          <PanelViewTabs value={вид} onChange={setВид} label={null} tabs={[
-            { k: 'list', label: 'Список' },
-            { k: 'pivot', label: 'Сводная' },
-          ]} />
-
-          {вид === 'pivot' ? (
-            /* Сводная отвечает на вопрос уровнем выше строки: отказы кучкуются
-               по региону, по марке или всё-таки по отдельным станциям. */
-            <ReportPivot
-              fields={['region', 'brand', 'model', 'severity', 'stations',
-                       'visits', 'visitsFailed', 'clientsLost']}
-              columns={['Регион', 'Марка', 'Модель', 'Оценка', 'Станций',
-                        'Приездов', 'Ни с чем', 'Ушло клиентов']}
-              rows={таблица.rows.map((r) => ({
-                region: r.region ?? '— регион не указан',
-                brand: r.brand ?? '— марка не указана',
-                model: r.model ?? '— модель не указана',
-                severity: r.failedVisitsPct >= d.threshold ? `хуже ${d.threshold} %`
-                  : r.failedVisitsPct >= d.threshold / 2 ? 'настораживает' : 'в норме',
-                stations: 1,
-                visits: r.visits,
-                visitsFailed: r.visitsFailed,
-                clientsLost: r.clientsLost,
-              }))} />
-          ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm"
-              {...exportRows('Надёжность',
-                ['Номер', 'Станция', 'Регион', 'Приездов', 'Уехали ни с чем',
-                 'Ни с чем %', 'Попыток на приезд', 'Пустых %', 'кВтч на попытку',
-                 'Клиентов ушло'],
-                таблица.rows.map((r) => [
-                  r.number ?? r.code, r.name, r.region, r.visits, r.visitsFailed,
-                  r.failedVisitsPct, r.attemptsPerVisit, r.emptyPct,
-                  r.kwhPerSession, r.clientsLost,
-                ]))}>
-              <thead>
-                <tr className="border-b border-border text-xs text-muted-foreground">
-                  <SortTh sortKey="number" sort={таблица.sort} onSort={таблица.toggle}>№</SortTh>
-                  <SortTh sortKey="name" sort={таблица.sort} onSort={таблица.toggle}>Станция</SortTh>
-                  <SortTh sortKey="region" sort={таблица.sort} onSort={таблица.toggle}>Регион</SortTh>
-                  <SortTh sortKey="visits" sort={таблица.sort} onSort={таблица.toggle} align="right">Приездов</SortTh>
-                  <SortTh sortKey="failedVisits" sort={таблица.sort} onSort={таблица.toggle} align="right">Ни с чем</SortTh>
-                  <SortTh sortKey="attempts" sort={таблица.sort} onSort={таблица.toggle} align="right">Попыток / приезд</SortTh>
-                  <SortTh sortKey="empty" sort={таблица.sort} onSort={таблица.toggle} align="right">Пустых</SortTh>
-                  <SortTh sortKey="kwh" sort={таблица.sort} onSort={таблица.toggle} align="right">кВтч / попытку</SortTh>
-                  <SortTh sortKey="clients" sort={таблица.sort} onSort={таблица.toggle} align="right">Ушло клиентов</SortTh>
-                </tr>
-              </thead>
-              <tbody>
-                {таблица.rows.map((r) => (
-                  <tr key={r.locationId}
-                    className={cn('border-b border-border/40',
-                      r.failedVisitsPct >= d.threshold && 'bg-red-500/5')}>
-                    <td className="p-1.5 font-mono text-xs text-muted-foreground">
-                      {r.number ?? r.code ?? '—'}
-                    </td>
-                    <td className="max-w-[240px] truncate p-1.5 font-medium" title={r.name}>
-                      <StationLink station={r.locationId}>{r.name}</StationLink>
-                      {r.city && <span className="ml-1.5 text-xs text-muted-foreground">{r.city}</span>}
-                    </td>
-                    <td className="p-1.5 text-muted-foreground">{r.region ?? '—'}</td>
-                    <td className="p-1.5 text-right tabular-nums">{nf.format(r.visits)}</td>
-                    <td className={cn('p-1.5 text-right font-medium tabular-nums',
-                      r.failedVisitsPct >= d.threshold && 'text-red-600 dark:text-red-400')}>
-                      {r.failedVisitsPct} %
-                      <span className="ml-1 text-xs font-normal text-muted-foreground">
-                        {nf.format(r.visitsFailed)}
-                      </span>
-                    </td>
-                    {/* Четыре втыкания разъёма на приезд — станция «работает», но
-                        человек запомнит именно это. */}
-                    <td className={cn('p-1.5 text-right tabular-nums',
-                      r.attemptsPerVisit >= 2 && 'text-amber-600 dark:text-amber-400')}>
-                      {r.attemptsPerVisit}
-                    </td>
-                    <td className="p-1.5 text-right tabular-nums text-muted-foreground">
-                      {r.emptyPct} %
-                    </td>
-                    {/* Ноль энергии на попытку — самый показательный признак: клиент
-                        подъезжает, а станция не отдаёт ничего. */}
-                    <td className={cn('p-1.5 text-right tabular-nums',
-                      r.kwhPerSession < 1 && 'text-red-600 dark:text-red-400')}>
-                      {r.kwhPerSession}
-                    </td>
-                    <td className="p-1.5 text-right tabular-nums">{nf.format(r.clientsLost)}</td>
-                  </tr>
-                ))}
-                {!таблица.rows.length && (
-                  <tr>
-                    <td colSpan={9} className="p-6 text-center text-sm text-muted-foreground">
-                      Станций с достаточным числом приездов не нашлось
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  )
+  if (q.isLoading) return <div className="flex justify-center py-12"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+  if (q.isError || !q.data) return <div role="alert" className="flex flex-col items-center gap-3 p-8 text-sm text-muted-foreground">
+    <p>Не удалось посчитать надёжность станций.</p>
+    <Button variant="outline" onClick={() => void q.refetch()} disabled={q.isFetching}>Повторить загрузку</Button>
+  </div>
+  return <ReliabilityReport key={settings.view === 'regions' ? 'regions' : 'stations'} data={q.data}
+    settings={settings} change={(patch) => setSettings((s) => ({ ...s, ...patch }))} companyId={companyId} region={region} />
 }
+
+function ReliabilityReport({ data: d, settings: s, change, companyId, region }: {
+  data: NetworkReliability; settings: Настройки; change: (patch: Partial<Настройки>) => void; companyId: string; region?: string
+}) {
+  const экран = useRef<HTMLDivElement>(null)
+  const [фильтрыОткрыты, setФильтрыОткрыты] = useState(() => {
+    try { return localStorage.getItem(КЛЮЧ_ФИЛЬТРОВ) === '1' } catch { return false }
+  })
+  const [карточка, setКарточка] = useState<{ order: number[]; pos: number } | null>(null)
+  const [разбор, setРазбор] = useState<'region' | 'brand' | null>(null)
+  const [порядок, setПорядок] = useState<number[]>([])
+  const [открыты, setОткрыты] = useState<Set<string>>(new Set())
+  const раскрыть = useCallback((name: string) => setОткрыты((was) => {
+    const next = new Set(was)
+    if (next.has(name)) next.delete(name); else next.add(name)
+    return next
+  }), [])
+  const [регионы, марки] = useMemo(() => [
+    [...new Set(d.stations.flatMap((r) => r.region ? [r.region] : []))].sort((a, b) => a.localeCompare(b, 'ru')),
+    [...new Set(d.stations.flatMap((r) => r.brand ? [r.brand] : []))].sort((a, b) => a.localeCompare(b, 'ru')),
+  ], [d.stations])
+  const выбранРегион = регионы.includes(s.region) ? s.region : 'all'
+  const строки = useMemo(() => d.stations.filter((r) => {
+    if (s.filter === 'failed' && !r.visitsFailed) return false
+    if (s.filter === 'bad' && r.failedVisitsPct < d.threshold) return false
+    if (s.filter === 'attempts' && r.attemptsPerVisit < 2) return false
+    if (s.filter === 'clients' && !r.clientsAffected) return false
+    if (s.filter === 'lost' && !r.clientsLost) return false
+    if (выбранРегион !== 'all' && r.region !== выбранРегион) return false
+    if (s.brand !== 'all' && r.brand !== s.brand) return false
+    return !s.search.trim() || matchesSearch(s.search, [r.number, r.code, r.name, r.city, r.region, r.brand, r.model])
+  }), [d.stations, d.threshold, s.filter, s.brand, s.search, выбранРегион])
+  const группы = useMemo(() => поРегионам(строки, d.threshold), [строки, d.threshold])
+  const регионыВид = s.view === 'regions'
+  const ячейки = useMemo(() => регионыВид ? группы.map((g) => g.cells) : строки.map(строка), [регионыВид, группы, строки])
+  const total = useMemo(() => регионыВид ? ['Итого', строки.length, сумма(строки, 'visits'), сумма(строки, 'visitsFailed'),
+    процент(сумма(строки, 'visitsFailed'), сумма(строки, 'visits')), строки.filter((r) => r.failedVisitsPct >= d.threshold).length] as Cell[] : итоги(строки), [регионыВид, строки, d.threshold])
+  const status = useMemo(() => <OpsSnapshotStatus dataThrough={d.dataThrough} dataLagHours={d.dataLagHours} snapshotNote={d.snapshotNote} />,
+    [d.dataThrough, d.dataLagHours, d.snapshotNote])
+  const help = useMemo(() => <div className="flex flex-col gap-3 text-sm leading-relaxed text-muted-foreground">
+    {ПОМОЩЬ}<p>{d.note}</p><p>Парк: {qty(d.totals.populationStations)} станций; с сессиями за окно: {qty(d.totals.stations)};
+      в списке с {d.minSessions}+ приездами: {qty(d.totals.stationsCounted)}.</p>
+  </div>, [d.note, d.totals.populationStations, d.totals.stations, d.totals.stationsCounted, d.minSessions])
+  const набор = useReportKit({ id: регионыВид ? 'ops-reliability-regions.v1' : 'ops-reliability.v1', title: 'Надёжность',
+    head: регионыВид ? РЕГ_ШАПКА : ШАПКА, rows: ячейки, total, hide: регионыВид ? РЕГ_СКРЫТЫ : СКРЫТЫ,
+    ready: true, pivot: s.view === 'pivot', help, status })
+  const оставлены = useMemo(() => набор.kept.map((i) => строки[i]), [набор.kept, строки])
+  const видимые = useMemo(() => {
+    const { cols, head } = набор.table
+    return (cols.order.length === head.length ? cols.order : head.map((_, i) => i)).filter((i) => !cols.hidden.includes(i))
+  }, [набор.table.cols, набор.table.head])
+  const ячейка = useCallback((i: number, c: number) => {
+    if (регионыВид) {
+      const g = группы[i]
+      if (c === 0 && g) return <span className="flex items-center gap-1.5">
+        <button type="button" aria-label={(открыты.has(g.name) ? 'Свернуть станции ' : 'Раскрыть станции ') + g.name}
+          aria-expanded={открыты.has(g.name)} onClick={(e) => { e.stopPropagation(); раскрыть(g.name) }}
+          className="grid size-8 shrink-0 place-items-center rounded-md text-primary hover:bg-accent">
+          {открыты.has(g.name) ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+        </button><span className="whitespace-normal font-medium">{g.name}</span></span>
+      return undefined
+    }
+    const r = строки[i]
+    if (c === С.станция) return <span className="whitespace-normal break-words font-medium">{r.name}</span>
+    if (c === С.отказПроц) return <span className={cn(r.failedVisitsPct >= d.threshold && 'font-semibold text-destructive')}>{qty(r.failedVisitsPct)} %</span>
+    return undefined
+  }, [регионыВид, группы, открыты, раскрыть, строки, d.threshold])
+  const фильтры = [s.filter !== 'all' && ПОКАЗАТЬ[s.filter], выбранРегион !== 'all' && выбранРегион,
+    s.brand !== 'all' && s.brand, s.search.trim() && 'поиск «' + s.search.trim() + '»'].filter(Boolean) as string[]
+  const отборов = фильтры.length + Object.keys(набор.filters).length
+  const сброс = () => { change({ search: '', region: 'all', brand: 'all', filter: 'all' }); набор.setFilters({}) }
+  const выбрать = (filter: Отбор) => { change({ filter: s.filter === filter ? 'all' : filter }); набор.setFilters({}) }
+  const выбранная = карточка ? строки[карточка.order[карточка.pos]] : null
+  const расшифровка = выбранная && разбор ? d.stations.filter((r) => разбор === 'brand' ? r.brand === выбранная.brand : r.region === выбранная.region) : []
+  const подпись = d.days + ' дней по ' + дата(d.asOf) + ' · МСК · от ' + d.minSessions + ' приездов'
+  return <div ref={экран} className="flex flex-col gap-3 p-3">
+    <div className={TILE_ROW}>
+      <Tile icon={Zap} label="Приездов клиентов" value={qty(d.totals.visits)} hint={qty(d.totals.stations) + ' станций с сессиями'}
+        active={s.filter === 'all'} onClick={() => выбрать('all')} />
+      <Tile icon={AlertTriangle} label="Приездов без зарядки" value={qty(d.totals.failedVisitsPct) + ' %'} hint={qty(d.totals.visitsFailed) + ' приездов'}
+        active={s.filter === 'failed'} onClick={() => выбрать('failed')} />
+      <Tile icon={BatteryWarning} label="Попыток на приезд" value={qty(d.totals.attemptsPerVisit)} hint={qty(d.totals.sessions) + ' попыток всего'}
+        active={s.filter === 'attempts'} onClick={() => выбрать('attempts')} />
+      <Tile icon={AlertTriangle} label="Станций с частыми отказами" value={qty(d.totals.badStations)} hint={'без зарядки от ' + qty(d.threshold) + ' % приездов'}
+        active={s.filter === 'bad'} onClick={() => выбрать('bad')} />
+      <Tile icon={Users} label="Столкнулись с отказом" value={qty(d.totals.clientsAffected)} hint="сумма клиентов по станциям"
+        active={s.filter === 'clients'} onClick={() => выбрать('clients')} />
+    </div>
+    <Card className="py-0"><CardContent className="flex flex-col gap-3 p-3">
+      {фильтрыОткрыты && <div className="flex flex-wrap items-end gap-3">
+        <Поле id="reliability-window" label="Окно анализа" className="w-36"><Select value={String(s.days)} onValueChange={(v) => change({ days: Number(v) })}>
+          <SelectTrigger id="reliability-window" className="h-9 w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>{[30, 90, 180].map((n) => <SelectItem key={n} value={String(n)}>{n} дней</SelectItem>)}</SelectContent>
+        </Select></Поле>
+        <Поле id="reliability-show" label="Показать" className="w-60"><Select value={s.filter} onValueChange={(v) => change({ filter: v as Отбор })}>
+          <SelectTrigger id="reliability-show" className="h-9 w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>{Object.entries(ПОКАЗАТЬ).map(([key, text]) => <SelectItem key={key} value={key}>{text}</SelectItem>)}</SelectContent>
+        </Select></Поле>
+        <Поле id="reliability-region" label="Регион" className="w-52"><Select value={выбранРегион} onValueChange={(v) => change({ region: v })}>
+          <SelectTrigger id="reliability-region" className="h-9 w-full"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="all">Все регионы контура</SelectItem>{регионы.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+        </Select></Поле>
+        <Поле id="reliability-brand" label="Марка" className="w-40"><Select value={s.brand} onValueChange={(v) => change({ brand: v })}>
+          <SelectTrigger id="reliability-brand" className="h-9 w-full"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="all">Все марки</SelectItem>{марки.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+        </Select></Поле>
+        <Поле id="reliability-search" label="Найти станцию" className="w-56"><Input id="reliability-search" value={s.search}
+          onChange={(e) => change({ search: e.target.value })} placeholder="Номер, название, марка…" className="h-9" /></Поле>
+        <Поле id="reliability-page" label="Строк на странице" className="w-32"><PageSizeField bare id="reliability-page" /></Поле>
+      </div>}
+      <div className={cn('flex flex-wrap items-center justify-between gap-2', фильтрыОткрыты && 'border-t border-border/60 pt-3')}>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" aria-expanded={фильтрыОткрыты} onClick={() => {
+            const next = !фильтрыОткрыты; setФильтрыОткрыты(next)
+            try { localStorage.setItem(КЛЮЧ_ФИЛЬТРОВ, next ? '1' : '0') } catch { /* хранилище недоступно */ }
+          }} className="inline-flex h-8 items-center gap-1.5 rounded-md px-1.5 text-sm font-semibold text-primary hover:bg-accent">
+            <ChevronDown className={cn('size-4 transition-transform', фильтрыОткрыты && 'rotate-180')} />
+            {фильтрыОткрыты ? 'Свернуть фильтры' : 'Фильтры'}
+            {!фильтрыОткрыты && отборов > 0 && <span className="rounded-full bg-primary px-1.5 text-xs leading-5 text-primary-foreground">{отборов}</span>}
+          </button>
+          <PanelViewTabs label={null} value={s.view} onChange={(view) => change({ view })} tabs={[
+            { k: 'list', label: 'Список' }, { k: 'regions', label: 'По регионам' }, { k: 'pivot', label: 'Сводная' },
+          ]} />
+          <span className="text-xs text-muted-foreground">{регионыВид ? 'регионов' : 'станций'}: {qty(набор.kept.length)}</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <ExportButton title="Надёжность" subtitle={подпись} getEl={() => экран.current} />
+          <Button size="sm" variant="outline" onClick={сброс} disabled={!отборов}>Сбросить фильтры</Button>
+        </div>
+      </div>
+      <ToolStrip />
+      {s.view === 'pivot' ? <ReportPivot fields={['region', 'brand', 'model', 'severity', 'stations', 'visits', 'visitsFailed', 'clientsLost']}
+        columns={['Регион', 'Марка', 'Модель', 'Оценка', 'Станций', 'Приездов', 'Без зарядки', 'Ушло клиентов']}
+        rows={оставлены.map((r) => ({ region: r.region || 'Регион не указан', brand: r.brand || 'Марка не указана',
+          model: r.model || 'Модель не указана', severity: r.failedVisitsPct >= d.threshold ? 'Частые отказы' : r.failedVisitsPct >= d.threshold / 2 ? 'Требует внимания' : 'Ниже порога',
+          stations: 1, visits: r.visits, visitsFailed: r.visitsFailed, clientsLost: r.clientsLost }))} />
+        : <SheetTable {...набор.table} caption={регионыВид ? 'Надёжность по регионам' : 'Надёжность станций'} lines={[подпись, ...фильтры]}
+          defaultWidths={регионыВид ? РЕГ_ШИРИНЫ : ШИРИНЫ} render={ячейка} onView={setПорядок}
+          rowTitle={(i) => регионыВид ? группы[i]?.name ?? '' : строки[i]?.name ?? ''}
+          onRow={(order, pos) => регионыВид ? раскрыть(группы[order[pos]].name) : setКарточка({ order, pos })}
+          expand={регионыВид ? (i) => открыты.has(группы[i]?.name) ? <StationSubset key={группы[i].name} rows={группы[i].stations} caption={'Станции · ' + группы[i].name} lines={[подпись]} /> : null : undefined}
+          derive={(t) => {
+            const kept = регионыВид ? набор.kept.flatMap((i) => группы[i].stations) : оставлены
+            const values = регионыВид ? ['Итого', kept.length, сумма(kept, 'visits'), сумма(kept, 'visitsFailed'),
+              процент(сумма(kept, 'visitsFailed'), сумма(kept, 'visits')), kept.filter((r) => r.failedVisitsPct >= d.threshold).length] : итоги(kept)
+            const fixed = t.map((v, i) => i < values.length ? values[i] : v)
+            return набор.table.derive ? набор.table.derive(fixed) : fixed
+          }}
+          empty="По этому отбору станции не найдены. Измените поиск или сбросьте фильтры."
+          tableAttrs={exportRows(регионыВид ? 'Регионы' : 'Станции', видимые.map((c) => набор.sheet.head[c]),
+            порядок.map((i) => видимые.map((c) => набор.sheet.rows[i]?.[c] ?? '')))} />}
+    </CardContent></Card>
+    <ToolPanel><ReportTools {...набор.tools} searchHint="Номер, станция, регион или число" formulaExample="Например, Доля успешных приездов"
+      compare={<ReliabilityCompare companyId={companyId} region={region} now={d} />} /></ToolPanel>
+    <RowCard report="Надёжность" head={набор.sheet.head} title={выбранная?.name}
+      row={карточка ? набор.sheet.rows[карточка.order[карточка.pos]] ?? null : null}
+      at={карточка?.pos ?? 0} of={карточка?.order.length ?? 0}
+      onStep={(dir) => { setРазбор(null); setКарточка((v) => v ? { ...v, pos: Math.max(0, Math.min(v.pos + dir, v.order.length - 1)) } : v) }}
+      onClose={() => { setКарточка(null); setРазбор(null) }} extra={выбранная && <div className="flex flex-col gap-3">
+        <div className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/60">
+          <RelatedLink label="Станции региона" hint={выбранная.region || 'Регион не указан'} onClick={() => setРазбор('region')} />
+          {выбранная.brand && <RelatedLink label="Станции производителя" hint={выбранная.brand} onClick={() => setРазбор('brand')} />}
+        </div>
+        <div className="text-sm"><StationLink station={выбранная.locationId}>Открыть карточку станции</StationLink></div>
+      </div>} />
+    <RelatedReport open={!!разбор && !!выбранная} title={разбор === 'brand' ? 'Станции производителя' : 'Станции региона'}
+      subtitle={подпись} head={ШАПКА} rows={расшифровка.map(строка)} onClose={() => setРазбор(null)}
+      note="Полный состав списка с достаточным числом приездов за тот же срез; локальные отборы основной таблицы не применяются.">
+      <StationSubset rows={расшифровка} caption={разбор === 'brand' ? выбранная?.brand || 'Марка не указана' : выбранная?.region || 'Регион не указан'} lines={[подпись]} />
+    </RelatedReport>
+  </div>
+}
+
+function StationSubset({ rows, caption, lines }: { rows: ReliabilityRow[]; caption: string; lines: string[] }) {
+  const [order, setOrder] = useState<number[]>([])
+  const cells = useMemo(() => rows.map(строка), [rows])
+  return <SheetTable head={ШАПКА} rows={cells} caption={caption} lines={lines} cols={СОСТАВ_СТОЛБЦОВ}
+    defaultWidths={ШИРИНЫ} onView={setOrder} render={(i, c) => c === С.станция ? <StationLink station={rows[i].locationId}>{rows[i].name}</StationLink> : undefined}
+    tableAttrs={exportRows(caption, ШАПКА.filter((_, i) => !СКРЫТЫ.includes(i)),
+      order.map((i) => cells[i].filter((_, c) => !СКРЫТЫ.includes(c))))} />
+}
+
+function ReliabilityCompare({ companyId, region, now }: { companyId: string; region?: string; now: NetworkReliability }) {
+  const [offset, setOffset] = useState<number | null>(null)
+  const date = new Date(now.asOf.slice(0, 10) + 'T12:00:00Z')
+  date.setUTCDate(date.getUTCDate() - (offset ?? 0))
+  const past = offset ? date.toISOString().slice(0, 10) : ''
+  const q = useQuery({ queryKey: ['ops-reliability-compare', companyId, now.days, region ?? '', past],
+    queryFn: () => getNetworkReliability(companyId, { days: now.days, region, asOf: past }), enabled: !!past && !!companyId, staleTime: 60_000 })
+  return <div className="flex flex-col gap-3">
+    <p className="text-xs text-muted-foreground">Весь выбранный контур. Плитки, локальный поиск, марка и фильтры столбцов не применяются. Состав парка текущий в обоих срезах.</p>
+    {now.trend && <div className="flex flex-col gap-1 rounded-md border p-3 text-sm">
+      <p className="font-medium">Последние 7 дней данных</p>
+      <p>{qty(now.trend.current.failed)} из {qty(now.trend.current.visits)} приездов без зарядки · {qty(now.trend.current.failedPct)} %</p>
+      <p className="text-muted-foreground">Предыдущие 7 дней: {qty(now.trend.previous.failed)} из {qty(now.trend.previous.visits)} · {qty(now.trend.previous.failedPct)} %</p>
+      <p>Изменение: {now.trend.deltaPp > 0 ? '+' : ''}{qty(now.trend.deltaPp)} п.п.</p>
+    </div>}
+    <div className="flex flex-wrap gap-2">{[[1, 'День назад'], [7, 'Неделю назад'], [now.days, 'Предыдущее окно']].map(([n, label]) =>
+      <Button key={String(n) + label} size="sm" variant={offset === n ? 'default' : 'outline'} onClick={() => setOffset(Number(n))}>{label}</Button>)}</div>
+    {!past ? <p className="text-sm text-muted-foreground">Выберите срез для сравнения.</p> : q.isFetching ? <Loader2 className="size-5 animate-spin" />
+      : q.isError ? <div role="alert" className="flex flex-col gap-2 text-sm"><p>Не удалось загрузить прошлый срез.</p><Button variant="outline" onClick={() => void q.refetch()}>Повторить</Button></div>
+        : q.data && <>
+          <p className="text-xs text-muted-foreground">{дата(now.asOf)} / {дата(q.data.asOf)} · окно {now.days} дней.</p>
+          <dl className="divide-y divide-border/60">{[
+            ['Приездов', now.totals.visits, q.data.totals.visits], ['Без зарядки, %', now.totals.failedVisitsPct, q.data.totals.failedVisitsPct],
+            ['Попыток на приезд', now.totals.attemptsPerVisit, q.data.totals.attemptsPerVisit], ['Станций с частыми отказами', now.totals.badStations, q.data.totals.badStations],
+          ].map(([label, current, previous]) => <div key={label} className="flex flex-col gap-1 py-2 text-sm"><dt>{label}</dt>
+            <dd className="text-muted-foreground">в срезе {qty(Number(current))} · было {qty(Number(previous))}
+              <span className="ml-2 font-semibold text-foreground">{Number(current) - Number(previous) > 0 ? '+' : ''}{qty(Math.round((Number(current) - Number(previous)) * 100) / 100)}{label === 'Без зарядки, %' ? ' п.п.' : ''}</span>
+            </dd></div>)}</dl>
+        </>}
+  </div>
+}
+
+const ПОМОЩЬ = <>
+  <p>Надёжность считается по приездам клиентов. Несколько попыток подряд входят в один приезд.
+    Процент без зарядки показывает, какая доля приездов закончилась без энергии.</p>
+  <p>Плитки относятся ко всему выбранному контуру, включая станции с малым числом приездов.
+    В списке и региональных группах только станции с достаточным числом приездов. Поэтому итог списка может отличаться от плиток.
+    Плитки отбирают станции: безуспешные приезды, частые отказы от порога отчёта, от двух попыток на приезд или ушедшие клиенты.
+    Повторное нажатие снимает отбор. Счёт клиентов по разным станциям допускает повтор одного человека.</p>
+  <p>Конец общего «Периода» задаёт дату среза. Сегодня и вчера показывают последние загруженные данные.
+    Окно 30, 90 или 180 дней выбирается в фильтрах; начало общего периода его не меняет.
+    Состав парка и паспортные статусы текущие, история состава не восстановлена.</p>
+  <p>«По регионам» группирует отобранные станции. Строка региона или стрелка раскрывает их прямо в таблице.
+    В списке щелчок по строке или Enter открывает её показатели и связанные отчёты. Расшифровка открывается поверх, после закрытия карточка остаётся.</p>
+  <p>В «Сводной» доступны регион, марка, модель и оценка. Фильтры столбцов списка действуют на сводную.
+    Настройки столбцов и формулы у регионов и станций раздельные. Проценты и средние в итогах считаются из общих числителей и знаменателей.</p>
+  <p>Недельная динамика и прошлые срезы доступны в «Сравнить». Калькулятор, формулы, поиск, столбцы и отложенные цифры работают как на остальных отчётах.
+    Excel выгружает видимые столбцы и все строки отбора в текущем порядке, включая раскрытые регионы.</p>
+</>
