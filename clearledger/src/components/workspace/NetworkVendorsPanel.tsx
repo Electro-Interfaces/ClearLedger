@@ -17,6 +17,7 @@ import {
 } from '@/components/report-kit'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
+import { useMonitorScope } from './useMonitorScope'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
 import { StationLink } from '@/components/common/StationLink'
@@ -69,6 +70,7 @@ function Поле({ id, label, children, className }: { id: string; label: strin
 }
 
 export function NetworkVendorsPanel() {
+  const scope = useMonitorScope()
   const { companyId } = useCompany()
   const { regionIds, period } = useFilters()
   const экран = useRef<HTMLDivElement>(null)
@@ -93,13 +95,13 @@ export function NetworkVendorsPanel() {
   const локальныйРегион = regionIds.length && !regionIds.includes(регионОтбора) ? 'all' : регионОтбора
   const регион = локальныйРегион !== 'all' ? локальныйРегион : regionIds.length ? regionIds.join('|') : undefined
   const q = useQuery({
-    queryKey: ['ops-vendors', companyId, окно, регион ?? '', наДень],
-    queryFn: () => getNetworkVendors(companyId, { days: окно, region: регион, asOf: наДень || undefined }),
+    queryKey: ['ops-vendors', companyId, окно, регион ?? '', наДень, scope],
+    queryFn: () => getNetworkVendors(companyId, { ...scope, days: окно, region: регион, asOf: наДень || undefined }),
     enabled: !!companyId, staleTime: 60_000,
   })
   const qВсе = useQuery({
-    queryKey: ['ops-vendor-stations-all', companyId, окно, регион ?? '', наДень],
-    queryFn: () => getNetworkVendors(companyId, { vendor: '*', days: окно, region: регион, asOf: наДень || undefined }),
+    queryKey: ['ops-vendor-stations-all', companyId, окно, регион ?? '', наДень, scope],
+    queryFn: () => getNetworkVendors(companyId, { ...scope, vendor: '*', days: окно, region: регион, asOf: наДень || undefined }),
     enabled: !!companyId && вид === 'pivot', staleTime: 60_000,
   })
   const loaded = !!q.data && !q.isError
@@ -260,11 +262,12 @@ export function NetworkVendorsPanel() {
 function VendorInlineStations({ vendor, days, region, asOf, threshold }: {
   vendor: string; days: number; region?: string; asOf?: string; threshold: number
 }) {
+  const scope = useMonitorScope()
   const { companyId } = useCompany()
   const [order, setOrder] = useState<number[]>([])
   const q = useQuery({
-    queryKey: ['ops-vendor-stations', companyId, vendor, days, region ?? '', asOf ?? ''],
-    queryFn: () => getNetworkVendors(companyId, { vendor, days, region, asOf }),
+    queryKey: ['ops-vendor-stations', companyId, vendor, days, region ?? '', asOf ?? '', scope],
+    queryFn: () => getNetworkVendors(companyId, { ...scope, vendor, days, region, asOf }),
     enabled: !!companyId, staleTime: 60_000,
   })
   const stations = q.data?.stations ?? []
@@ -299,10 +302,11 @@ const СТАНЦИИ_ШИРИНЫ = { 0: 84, 1: 230, 2: 160, 3: 250, 4: 180 }
 function VendorDrill({ vendor, kind, days, region, asOf, threshold, onClose }: {
   vendor: string; kind: Разбор | null; days: number; region?: string; asOf?: string; threshold: number; onClose: () => void
 }) {
+  const scope = useMonitorScope()
   const { companyId } = useCompany()
   const q = useQuery({
-    queryKey: ['ops-vendor-stations', companyId, vendor, days, region ?? '', asOf ?? ''],
-    queryFn: () => getNetworkVendors(companyId, { vendor, days, region, asOf }),
+    queryKey: ['ops-vendor-stations', companyId, vendor, days, region ?? '', asOf ?? '', scope],
+    queryFn: () => getNetworkVendors(companyId, { ...scope, vendor, days, region, asOf }),
     enabled: !!companyId && !!vendor && !!kind, staleTime: 60_000,
   })
   const stations = (q.data?.stations ?? []).filter((r) => kind === 'bad' ? сОтказами(r, threshold) : kind === 'silent' ? нетЗарядок(r) : true)
@@ -327,12 +331,13 @@ function VendorDrill({ vendor, kind, days, region, asOf, threshold, onClose }: {
 }
 
 function VendorCompare({ companyId, days, region, now }: { companyId: string; days: number; region?: string; now: NetworkVendors }) {
+  const scope = useMonitorScope()
   const [offset, setOffset] = useState<number | null>(null)
   const d = new Date(now.asOf.slice(0, 10) + 'T12:00:00Z')
   d.setUTCDate(d.getUTCDate() - (offset ?? 0))
   const past = offset ? d.toISOString().slice(0, 10) : ''
-  const q = useQuery({ queryKey: ['ops-vendors-compare', companyId, days, region ?? '', past],
-    queryFn: () => getNetworkVendors(companyId, { days, region, asOf: past }), enabled: !!companyId && !!past, staleTime: 60_000 })
+  const q = useQuery({ queryKey: ['ops-vendors-compare', companyId, days, region ?? '', past, scope],
+    queryFn: () => getNetworkVendors(companyId, { ...scope, days, region, asOf: past }), enabled: !!companyId && !!past, staleTime: 60_000 })
   return <div className="flex flex-col gap-3">
     <p className="text-xs text-muted-foreground">Весь список марок региона за одинаковое окно. Поиск, плитки и фильтры столбцов не применяются.</p>
     <div className="flex flex-wrap gap-2">{[[1, 'День назад'], [7, 'Неделю назад'], [days, 'Предыдущее окно']].map(([n, label]) =>

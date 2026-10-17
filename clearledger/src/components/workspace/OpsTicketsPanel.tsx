@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { StationLink } from '@/components/common/StationLink'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
+import { useMonitorScope } from './useMonitorScope'
 import { useStationCard } from '@/contexts/StationCardContext'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
@@ -110,13 +111,14 @@ function Поле({ id, label, children, className }: { id: string; label: strin
 }
 
 export function OpsTicketsPanel() {
+  const scope = useMonitorScope()
   const { companyId } = useCompany()
   const { regionIds, period } = useFilters()
   const [settings, setSettings] = useState<Настройки>({ days: 90, view: 'list', group: 'status', mode: 'open', search: '', cuts: {} })
   const region = regionIds.length ? regionIds.join('|') : undefined
   const asOf = period.to >= todayISO() ? '' : period.to
-  const q = useQuery({ queryKey: ['ops-tickets-report', companyId, settings.days, region ?? '', asOf],
-    queryFn: () => getOpsTickets(companyId, { days: settings.days, region, asOf: asOf || undefined, limit: 5000 }),
+  const q = useQuery({ queryKey: ['ops-tickets-report', companyId, settings.days, region ?? '', asOf, scope],
+    queryFn: () => getOpsTickets(companyId, { ...scope, days: settings.days, region, asOf: asOf || undefined, limit: 5000 }),
     enabled: !!companyId, staleTime: 60_000, retry: false })
   if (q.isLoading) return <div className="flex justify-center py-12"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
   if (q.isError || !q.data) return <div role="alert" className="flex flex-col items-center gap-3 p-8 text-sm text-muted-foreground">
@@ -300,11 +302,12 @@ function TicketSubset({ rows, caption, lines }: { rows: TicketRow[]; caption: st
 }
 
 function TicketsCompare({ companyId, region, now }: { companyId: string; region?: string; now: OpsTickets }) {
+  const scope = useMonitorScope()
   const [offset, setOffset] = useState<number | null>(null)
   const date = new Date(now.asOf.slice(0, 10) + 'T12:00:00Z'); date.setUTCDate(date.getUTCDate() - (offset ?? 0))
   const past = offset ? date.toISOString().slice(0, 10) : ''
-  const q = useQuery({ queryKey: ['ops-tickets-compare', companyId, region ?? '', now.days, past],
-    queryFn: () => getOpsTickets(companyId, { region, days: now.days, asOf: past, limit: 5000 }), enabled: !!past && !!companyId, staleTime: 60_000, retry: false })
+  const q = useQuery({ queryKey: ['ops-tickets-compare', companyId, region ?? '', now.days, past, scope],
+    queryFn: () => getOpsTickets(companyId, { ...scope, region, days: now.days, asOf: past, limit: 5000 }), enabled: !!past && !!companyId, staleTime: 60_000, retry: false })
   return <div className="flex flex-col gap-3"><p className="text-xs text-muted-foreground">Сравнивается история за одинаковые окна по всему контуру, без локальных отборов.
     Статусы заявок текущие в обоих окнах, история статусов не восстановлена. Это не число открытых заявок в прошлом.</p>
     <div className="flex flex-wrap gap-2">{[[7, 'Неделю назад'], [now.days, 'Предыдущее окно']].map(([n, label]) =>

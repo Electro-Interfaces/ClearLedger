@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { StationLink } from '@/components/common/StationLink'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
+import { useMonitorScope } from './useMonitorScope'
 import { useStationCard } from '@/contexts/StationCardContext'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
@@ -81,14 +82,15 @@ function Поле({ id, label, children, className }: { id: string; label: strin
 }
 
 export function NetworkReliabilityPanel() {
+  const scope = useMonitorScope()
   const { companyId } = useCompany()
   const { regionIds, period } = useFilters()
   const [settings, setSettings] = useState<Настройки>({ days: 90, search: '', region: 'all', brand: 'all', filter: 'all', view: 'list' })
   const region = regionIds.length ? regionIds.join('|') : undefined
   const asOf = period.to >= daysAgoISO(1) ? '' : period.to
   const q = useQuery({
-    queryKey: ['ops-reliability', companyId, settings.days, region ?? '', asOf],
-    queryFn: () => getNetworkReliability(companyId, { days: settings.days, region, asOf: asOf || undefined }),
+    queryKey: ['ops-reliability', companyId, settings.days, region ?? '', asOf, scope],
+    queryFn: () => getNetworkReliability(companyId, { ...scope, days: settings.days, region, asOf: asOf || undefined }),
     enabled: !!companyId, staleTime: 60_000,
   })
   if (q.isLoading) return <div className="flex justify-center py-12"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
@@ -284,12 +286,13 @@ function StationSubset({ rows, caption, lines }: { rows: ReliabilityRow[]; capti
 }
 
 function ReliabilityCompare({ companyId, region, now }: { companyId: string; region?: string; now: NetworkReliability }) {
+  const scope = useMonitorScope()
   const [offset, setOffset] = useState<number | null>(null)
   const date = new Date(now.asOf.slice(0, 10) + 'T12:00:00Z')
   date.setUTCDate(date.getUTCDate() - (offset ?? 0))
   const past = offset ? date.toISOString().slice(0, 10) : ''
-  const q = useQuery({ queryKey: ['ops-reliability-compare', companyId, now.days, region ?? '', past],
-    queryFn: () => getNetworkReliability(companyId, { days: now.days, region, asOf: past }), enabled: !!past && !!companyId, staleTime: 60_000 })
+  const q = useQuery({ queryKey: ['ops-reliability-compare', companyId, now.days, region ?? '', past, scope],
+    queryFn: () => getNetworkReliability(companyId, { ...scope, days: now.days, region, asOf: past }), enabled: !!past && !!companyId, staleTime: 60_000 })
   return <div className="flex flex-col gap-3">
     <p className="text-xs text-muted-foreground">Весь выбранный контур. Плитки, локальный поиск, марка и фильтры столбцов не применяются. Состав парка текущий в обоих срезах.</p>
     {now.trend && <div className="flex flex-col gap-1 rounded-md border p-3 text-sm">

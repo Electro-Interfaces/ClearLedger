@@ -64,6 +64,7 @@ async def network_reliability(
     region: str | None = None,
     min_sessions: int = МИНИМУМ_ПОПЫТОК,
     as_of: date | None = None,
+    location_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Надёжность станций за окно: срывы, пустые зарядки, задетые клиенты.
 
@@ -118,7 +119,7 @@ async def network_reliability(
     for (loc, всего, срывов, пустых, клиентов, задетых,
          энергия, деньги, последняя, визитов, визитов_ок, клиентов_без_зарядки) in строки_бд:
         объект = объекты.get(str(loc))
-        if объект is None:
+        if объект is None or (location_ids is not None and str(loc) not in location_ids):
             continue
         if not обслуживаем(объект.owner):
             continue
@@ -222,7 +223,7 @@ async def network_reliability(
         "minSessions": min_sessions,
         "threshold": ПОРОГ_ОТКАЗОВ,
         "totals": {
-            "populationStations": sum(1 for s in объекты.values() if обслуживаем(s.owner) and region_matches(имена_регионов.get(s.region_id) or (s.extra_metadata or {}).get("federalSubject"), region)),
+            "populationStations": sum(1 for s in объекты.values() if (location_ids is None or str(s.id) in location_ids) and обслуживаем(s.owner) and region_matches(имена_регионов.get(s.region_id) or (s.extra_metadata or {}).get("federalSubject"), region)),
             "stations": len(строки),
             "stationsCounted": len(значимые),
             # Визиты — главный счёт: приездов всего, удалось, ушли ни с чем.

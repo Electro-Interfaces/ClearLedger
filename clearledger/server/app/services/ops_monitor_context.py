@@ -3,6 +3,8 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import text
 
+from app.services.session_scope import station_locations_sql
+
 MSK = timezone(timedelta(hours=3))
 
 
@@ -27,6 +29,16 @@ def monitor_context(boundary, as_of=None, now=None):
 
 def region_matches(value, selection):
     return not selection or (value or "— регион не указан") in selection.split("|")
+
+
+async def monitor_locations(db, company_id, location_ids=None, station_codes=None):
+    locations = {x for x in location_ids.split('|') if x} if location_ids else None
+    if station_codes:
+        rows = await db.execute(text('SELECT unnest(' + station_locations_sql() + ')::text'),
+                                {'stations': station_codes.split('|'), 'company_id': str(company_id)})
+        selected = set(rows.scalars().all())
+        locations = selected if locations is None else locations & selected
+    return locations
 
 
 async def visit_summary(db, company_id, start, end):

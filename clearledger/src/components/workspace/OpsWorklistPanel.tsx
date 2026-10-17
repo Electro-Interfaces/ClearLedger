@@ -52,6 +52,7 @@ import {
 } from '@/components/report-kit'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
+import { useMonitorScope } from './useMonitorScope'
 import { daysAgoISO } from '@/components/workspace/analytics/periodPresets'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
@@ -63,7 +64,7 @@ const nf = new Intl.NumberFormat('ru-RU')
 
 function money(v: number | null | undefined): string {
   if (!v) return '—'
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)} млн ₽`
+  if (v >= 1_000_000) return `${nf.format(Math.round(v / 100_000) / 10)} млн ₽`
   if (v >= 1_000) return `${nf.format(Math.round(v / 1_000))} тыс ₽`
   return `${nf.format(Math.round(v))} ₽`
 }
@@ -172,6 +173,7 @@ function строкаТаблицы(r: WorklistRow, workKnown: boolean): Cell[] 
 }
 
 export function OpsWorklistPanel() {
+  const scope = useMonitorScope()
   const { companyId } = useCompany()
   const { regionIds, period } = useFilters()
   const экран = useRef<HTMLDivElement>(null)
@@ -204,10 +206,11 @@ export function OpsWorklistPanel() {
     try { localStorage.setItem(КЛЮЧ_ФИЛЬТРОВ, v ? '1' : '0') } catch { /* хранилище недоступно */ }
   }
 
-  const регион = регионОтбора !== 'all' ? регионОтбора : regionIds.length ? regionIds.join('|') : undefined
+  const локальныйРегион = regionIds.length && !regionIds.includes(регионОтбора) ? 'all' : регионОтбора
+  const регион = локальныйРегион !== 'all' ? локальныйРегион : regionIds.length ? regionIds.join('|') : undefined
   const q = useQuery({
-    queryKey: ['ops-worklist', companyId, регион ?? '', наДень],
-    queryFn: () => getOpsWorklist(companyId, { region: регион, asOf: наДень || undefined }),
+    queryKey: ['ops-worklist', companyId, регион ?? '', наДень, scope],
+    queryFn: () => getOpsWorklist(companyId, { ...scope, region: регион, asOf: наДень || undefined }),
     enabled: !!companyId,
     staleTime: 60_000,
   })
@@ -222,11 +225,11 @@ export function OpsWorklistPanel() {
     let все = q.data?.rows ?? []
     if (неВзятые && q.data?.workKnown) все = все.filter((r) => !r.openTickets)
     if (причина !== 'all') все = все.filter((r) => r.reasons.some((p) => p.kind === причина))
-    if (регионОтбора !== 'all') все = все.filter((r) => r.region === регионОтбора)
+    if (локальныйРегион !== 'all') все = все.filter((r) => r.region === локальныйРегион)
     if (!поиск.trim()) return все
     return все.filter((r) => matchesSearch(поиск, [r.name, r.number, r.code, r.city, r.region,
       r.lastTicketNumber, ...r.reasons.map((p) => `${p.label} ${p.note ?? ''}`)]))
-  }, [q.data, поиск, причина, регионОтбора, неВзятые])
+  }, [q.data, поиск, причина, локальныйРегион, неВзятые])
 
   const workKnown = !!q.data?.workKnown
   const ячейки = useMemo(() => строки.map((r) => строкаТаблицы(r, workKnown)), [строки, workKnown])
@@ -241,11 +244,11 @@ export function OpsWorklistPanel() {
   }, [строки, workKnown])
 
   const данныеПо = q.data ? new Date(q.data.asOf).toLocaleString('ru-RU',
-    { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }) : ''
+    { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }) : ''
   const отбор = [
     неВзятые && 'никем не взято',
     причина !== 'all' && (СЛОВО_ПРИЧИНЫ[причина] ?? причина),
-    регионОтбора !== 'all' && регионОтбора,
+    локальныйРегион !== 'all' && локальныйРегион,
     поиск.trim() && `поиск «${поиск.trim()}»`,
   ].filter(Boolean) as string[]
 
@@ -487,7 +490,7 @@ export function OpsWorklistPanel() {
                 </Select>
               </Поле>
               <Поле label="Регион" id="ops-today-region" w="w-52">
-                <Select value={регионОтбора} onValueChange={setРегионОтбора}>
+                <Select value={локальныйРегион} onValueChange={setРегионОтбора}>
                   <SelectTrigger id="ops-today-region" className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Все регионы</SelectItem>
@@ -656,24 +659,25 @@ const мск = (iso: string | null) => iso ? new Date(iso).toLocaleString('ru-RU
 
 /** Окно-расшифровка строки: данные станции из тех же API, что карточка станции. */
 function WorklistDrill({ вид, row, onClose }: { вид: Расшифровка | null; row: WorklistRow | null; onClose: () => void }) {
+  const scope = useMonitorScope()
   const { companyId } = useCompany()
   const id = row?.locationId ?? ''
   const надо = (...в: Расшифровка[]) => !!companyId && !!id && !!вид && в.includes(вид)
   const визиты = useQuery({
-    queryKey: ['drill-visits', companyId, id],
+    queryKey: ['drill-visits', companyId, id, scope],
     queryFn: () => getStationVisits(companyId, id, { days: 90 }),
     enabled: надо('visits'), staleTime: 60_000,
   })
   const история = useQuery({
-    queryKey: ['drill-history', companyId, id],
+    queryKey: ['drill-history', companyId, id, scope],
     queryFn: () => getStationHistory(companyId, id, 90),
     enabled: надо('breaks', 'days'), staleTime: 60_000,
   })
   // Заявки — срез региона станции, отбор по станции здесь: отдельного запроса
   // «заявки одной станции» у сервера нет.
   const заявки = useQuery({
-    queryKey: ['drill-tickets', companyId, row?.region ?? ''],
-    queryFn: () => getOpsTickets(companyId, { days: 365, region: row?.region ?? undefined, limit: 5000 }),
+    queryKey: ['drill-tickets', companyId, row?.region ?? '', scope],
+    queryFn: () => getOpsTickets(companyId, { ...scope, days: 365, region: row?.region ?? undefined, limit: 5000 }),
     enabled: надо('tickets'), staleTime: 60_000,
   })
   const имя = РАСШИФРОВКИ.find((р) => р.вид === вид)?.имя ?? ''
@@ -760,11 +764,12 @@ const сдвигДня = (iso: string, дней: number) => {
  * фильтры столбцов — нет: сравнивается весь список.
  */
 function WorklistCompare({ companyId, region, base, now }: { companyId: string; region?: string; base: string; now: OpsWorklist }) {
+  const scope = useMonitorScope()
   const [дней, setДней] = useState<number | null>(null)
   const день = base && дней ? сдвигДня(base, дней) : ''
   const q = useQuery({
-    queryKey: ['ops-worklist-compare', companyId, region ?? '', день],
-    queryFn: () => getOpsWorklist(companyId, { region, asOf: день }),
+    queryKey: ['ops-worklist-compare', companyId, region ?? '', день, scope],
+    queryFn: () => getOpsWorklist(companyId, { ...scope, region, asOf: день }),
     enabled: !!companyId && !!день,
     staleTime: 60_000,
   })
