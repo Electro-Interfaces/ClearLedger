@@ -6,7 +6,7 @@
  * скролла страницы (как раньше решала `MainLayout.isWorkspace`).
  */
 import { matchPath } from 'react-router-dom'
-import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone, Activity, ListChecks, Handshake, Video } from 'lucide-react'
+import { Plug, HardHat, Gauge, BarChart3, Wallet, Database, LayoutDashboard, Building2, ShoppingCart, Megaphone, Activity, ListChecks, Handshake, Video, Phone } from 'lucide-react'
 import { SPACE_PRODUCTS, SPACE_PAGES, productLabel } from './spaceProducts'
 import type { ComponentType } from 'react'
 import {
@@ -20,6 +20,21 @@ const PRODUCT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   projects: HardHat, ops: Gauge, sales: BarChart3, corp: Building2, shop: ShoppingCart,
   marketing: Megaphone, finance: Wallet, data: Database,
 }
+
+// «Телефония» — приложение пространства со своей колонкой разделов и своим скроллом
+// (`pages/voice/VoiceLayout`), как «Конференции». Разделы повторяют `pages/voice/views.ts`:
+// новый раздел «Телефонии» добавляется и сюда. Имена вкладок уточнены там, где голое
+// имя раздела спутается с другими продуктами («Статистика», «Версии», «Аудит»).
+const VOICE_TABS = [
+  ['/voice', 'Телефония'], ['/voice/calls', 'Журнал звонков'], ['/voice/callbacks', 'Обратные звонки'],
+  ['/voice/stats', 'Статистика звонков'], ['/voice/reception', 'Правила приёма'],
+  ['/voice/passport', 'Паспорт для КЦ'], ['/voice/targets', 'Сотрудники и переводы'],
+  ['/voice/sounds', 'Звуки линии'], ['/voice/enrichment', 'Распознавание и подсказки'],
+  ['/voice/cc', 'Контакт-центры'], ['/voice/webhooks', 'Системы и вебхуки'],
+  ['/voice/versions', 'Версии «Телефонии»'], ['/voice/audit', 'Аудит доступа к звонкам'],
+  ['/voice/retention', 'Записи и хранение'], ['/voice/health', 'Состояние узла'],
+  ['/voice/extensions', 'Внутренние номера'], ['/voice/outbound', 'Исходящие звонки'],
+] as const
 
 // Пути с фиксированной высотой (h-full, без скролла страницы): рабочая область Учёта,
 // маршруты продуктов пространства и полноэкранные страницы.
@@ -39,6 +54,8 @@ const WORKSPACE_PATHS = new Set<string>([
   // «Конференции» — своя вторая колонка и свой скролл, как у «Трека»: без этого
   // раскладка получает второй паддинг и второй `overflow-y-auto` поверх своих.
   '/conf', '/conf/history', '/conf/records', '/conf/stats',
+  // «Телефония» — то же: без этих путей у её экранов двойной отступ и второй скролл.
+  ...VOICE_TABS.map(([to]) => to),
   // «Аудитор» — две колонки со своим скроллом внутри: разговор и каталог навыков.
   '/auditor',
   '/elsy',
@@ -82,6 +99,12 @@ for (const [to, label] of [['/docs', 'Трек'], ['/docs/company', 'Компа�
 for (const [to, label] of [['/conf', 'Конференции'], ['/conf/history', 'История конференций'],
   ['/conf/records', 'Записи конференций'], ['/conf/stats', 'Статистика конференций']] as const) {
   STATIC[to] = { to, icon: Video, label }
+}
+
+// «Телефония» — разделы табуются как обычные экраны: «Журнал звонков» или «Состояние
+// узла» закрепляют рядом и возвращаются к ним одним кликом.
+for (const [to, label] of VOICE_TABS) {
+  STATIC[to] = { to, icon: Phone, label }
 }
 
 // Продукты пространства: в меню Учёта их нет (открываются плиткой со стола), но вкладка
