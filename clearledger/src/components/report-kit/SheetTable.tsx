@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Filter, Pin, Rows3, Sigma } from 'lucide-react'
 import {
-  useEffect, useLayoutEffect, useMemo, useRef, useState,
+  Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode,
 } from 'react'
 import { Button } from '@/components/ui/button'
@@ -104,6 +104,7 @@ export function SheetTable({
   rowTitle,
   onHeadPick,
   defaultWidths,
+  expand,
 }: {
   head: string[]
   rows: Cell[][]
@@ -132,6 +133,7 @@ export function SheetTable({
   rowTitle?: (row: number) => string
   onHeadPick?: (col: number) => void
   defaultWidths?: Record<number, number>
+  expand?: (row: number) => ReactNode
 }) {
   const [sort, setSort] = useState<Sort>(null)
   const size = usePageSize() || Math.max(1, rows.length)
@@ -224,6 +226,7 @@ export function SheetTable({
   const startPan = (e: ReactPointerEvent<HTMLElement>) => {
     const el = box.current
     if (!el || !wide || e.pointerType !== 'mouse' || e.button !== 0) return
+    if ((e.target as HTMLElement).closest('table') !== tableRef.current) return
     if ((e.target as HTMLElement).closest(`[data-pinned], ${INTERACTIVE}`)) return
     const x0 = e.clientX
     const s0 = el.scrollLeft
@@ -350,7 +353,7 @@ export function SheetTable({
     )
   }
   const open = (pos: number) => {
-    tableRef.current?.tBodies[0]?.rows[pos - from]?.focus({ preventScroll: true })
+    tableRef.current?.tBodies[0]?.querySelector<HTMLTableRowElement>(':scope > tr[data-report-row="' + sorted[pos]?.i + '"]')?.focus({ preventScroll: true })
     onRow?.(
       sorted.map((x) => x.i),
       pos,
@@ -407,14 +410,15 @@ export function SheetTable({
         <div
           ref={box}
           tabIndex={0}
-          aria-label="Таблица: щёлкните по строке и двигайтесь стрелками, Enter открывает карточку строки"
+          aria-label={expand ? 'Группы: щёлкните по строке или нажмите Enter, чтобы раскрыть состав группы' : 'Таблица: щёлкните по строке и двигайтесь стрелками, Enter открывает карточку строки'}
           style={{ scrollPaddingLeft: fixedWidth }}
           onClickCapture={(e) => {
             const target = e.target as HTMLElement
+            if (target.closest('table') !== tableRef.current) return
             const td = target.closest<HTMLElement>('tbody td[data-pos]')
             if (!panned.current && td) setCur(Number(td.dataset.pos))
             if (target.closest(INTERACTIVE)) return
-            if (onRow && pin > 0 && td && !td.hasAttribute('data-pinned') && !onPick) {
+            if (onRow && !expand && pin > 0 && td && !td.hasAttribute('data-pinned') && !onPick) {
               e.stopPropagation()
               box.current?.focus({ preventScroll: true })
               return
@@ -425,7 +429,10 @@ export function SheetTable({
             e.preventDefault()
           }}
           onKeyDown={(e) => {
-            if ((e.target as HTMLElement).closest('input, select, textarea, button, a')) return
+            const target = e.target as HTMLElement
+            const nested = target.closest('table')
+            if (nested && nested !== tableRef.current) return
+            if (target.closest('input, select, textarea, button, a')) return
             if (e.key === 'Escape' && cur !== null) return setCur(null)
             if (e.key === 'Enter' && cur !== null && onRow) {
               e.preventDefault()
@@ -608,12 +615,15 @@ export function SheetTable({
               {slice.map((x, n) => {
                 const tint = rowClass?.(x.i)
                 const active = cur === from + n
+                const detail = expand?.(x.i)
                 const rowBg = cn('bg-di-surface-mid group-hover/row:bg-di-surface-high', active && '!bg-di-surface-high')
                 return (
+                  <Fragment key={x.i}>
                   <tr
-                    key={x.i}
+                    data-report-row={x.i}
                     ref={active ? activeRef : undefined}
                     aria-selected={active || undefined}
+                    aria-expanded={expand ? !!detail : undefined}
                     tabIndex={onRow ? 0 : undefined}
                     onClick={
                       onRow &&
@@ -713,6 +723,12 @@ export function SheetTable({
                     })}
                     <td aria-hidden className={cn('w-full border-b border-di-outline-variant/40 p-0', tint, active && '!bg-di-surface-high')} />
                   </tr>
+                  {detail && <tr>
+                    <td colSpan={view.length + (mark ? 2 : 1)} className="max-w-0 border-b border-di-outline-variant/60 bg-background px-3 py-3">
+                      {detail}
+                    </td>
+                  </tr>}
+                  </Fragment>
                 )
               })}
               {!slice.length && (

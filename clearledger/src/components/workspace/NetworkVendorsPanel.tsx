@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ChevronDown, Factory, Gauge, Loader2, PlugZap } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronRight, Factory, FileText, Gauge, Loader2, PlugZap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -19,6 +19,7 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
+import { StationLink } from '@/components/common/StationLink'
 import { getNetworkVendors, type NetworkVendors, type VendorRow, type VendorStationRow } from '@/services/opsService'
 
 const С = { марка: 0, станций: 1, заряжали: 2, живыхПроц: 3, безЗарядок: 4,
@@ -29,7 +30,7 @@ const ШАПКА = ['Марка', 'Станций', 'Заряжали за 2 с�
   'кВт·ч / станцию в сутки', 'Моделей', 'Модели', 'Энергия, кВт·ч', 'Выручка, ₽',
   'Действующих станций', 'Ни разу не заряжали', 'Средняя мощность, кВт']
 const СКРЫТЫ = [С.живыхПроц, С.неудачных, С.моделей, С.модели, С.энергия, С.выручка, С.действующих, С.ниРазу, С.мощность]
-const ШИРИНЫ = { [С.марка]: 170, [С.станций]: 90, [С.заряжали]: 130, [С.безЗарядок]: 130,
+const ШИРИНЫ = { [С.марка]: 220, [С.станций]: 90, [С.заряжали]: 130, [С.безЗарядок]: 130,
   [С.приездов]: 115, [С.отказПроц]: 115, [С.попыток]: 120, [С.плохих]: 125, [С.отдача]: 145 }
 const КЛЮЧ_ФИЛЬТРОВ = 'report-kit.v1:filters-open:ops-vendors'
 const ПОКАЗАТЬ = { all: 'Все марки', bad: 'Есть станции с отказами', silent: 'Без зарядок больше недели', low: 'Заряжает меньше половины' }
@@ -79,6 +80,12 @@ export function NetworkVendorsPanel() {
   const [карточка, setКарточка] = useState<{ order: number[]; pos: number } | null>(null)
   const [разбор, setРазбор] = useState<Разбор | null>(null)
   const [порядок, setПорядок] = useState<number[]>([])
+  const [открыты, setОткрыты] = useState<Set<string>>(new Set())
+  const раскрыть = useCallback((vendor: string) => setОткрыты((was) => {
+    const next = new Set(was)
+    if (next.has(vendor)) next.delete(vendor); else next.add(vendor)
+    return next
+  }), [])
   const [фильтрыОткрыты, setФильтрыОткрыты] = useState(() => {
     try { return localStorage.getItem(КЛЮЧ_ФИЛЬТРОВ) === '1' } catch { return false }
   })
@@ -121,11 +128,25 @@ export function NetworkVendorsPanel() {
   const ячейка = useCallback((i: number, c: number) => {
     const r = строки[i]
     if (!r) return undefined
-    if (c === С.марка) return <span className="block whitespace-normal break-words font-medium">{r.vendor}</span>
+    if (c === С.марка) return <span className="flex items-center gap-1.5">
+      <button type="button" aria-expanded={открыты.has(r.vendor)} aria-label={(открыты.has(r.vendor) ? 'Свернуть станции ' : 'Раскрыть станции ') + r.vendor}
+        onClick={(e) => { e.stopPropagation(); раскрыть(r.vendor) }} className="grid size-8 shrink-0 place-items-center rounded-md text-primary hover:bg-accent">
+        {открыты.has(r.vendor) ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+      </button>
+      <span className="min-w-0 flex-1 whitespace-normal break-words font-medium">{r.vendor}</span>
+      <button type="button" aria-label={'Карточка марки ' + r.vendor} title={'Карточка марки ' + r.vendor}
+        onClick={(e) => {
+          e.stopPropagation()
+          const order = порядок.includes(i) ? порядок : набор.kept
+          setКарточка({ order, pos: order.indexOf(i) })
+        }} className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground">
+        <FileText className="size-4" />
+      </button>
+    </span>
     if (c === С.заряжали) return <span>{qty(r.charging2d)}<span className="ml-1.5 text-xs text-muted-foreground">{r.active ? qty(r.livePct) + ' %' : '—'}</span></span>
     if (c === С.отказПроц && r.visits) return <span className={cn(r.failedVisitsPct >= (q.data?.threshold ?? 20) && 'font-semibold text-destructive')}>{qty(r.failedVisitsPct)} %</span>
     return undefined
-  }, [строки, q.data?.threshold])
+  }, [строки, q.data?.threshold, открыты, раскрыть, порядок, набор.kept])
   const сброс = () => { setПоиск(''); setРегионОтбора('all'); setОтбор('all'); набор.setFilters({}) }
   const переключить = (v: Отбор) => { setОтбор(v); setПоиск(''); набор.setFilters({}) }
   const фильтры = [отбор !== 'all' && ПОКАЗАТЬ[отбор], локальныйРегион !== 'all' && локальныйРегион,
@@ -203,7 +224,9 @@ export function NetworkVendorsPanel() {
               columns={['Марка', 'Модель', 'Регион', 'Как работает', 'Станций', 'Приездов', 'Без зарядки', 'кВт·ч', 'Выручка, ₽']} rows={сводная} /></div>
         : <SheetTable {...набор.table} caption="Производители" lines={[подпись, ...фильтры]} defaultWidths={ШИРИНЫ}
           render={ячейка} rowTitle={(i) => строки[i]?.vendor ?? ''} onView={setПорядок}
-          onRow={(order, pos) => setКарточка({ order, pos })}
+          onRow={(order, pos) => { const row = строки[order[pos]]; if (row) раскрыть(row.vendor) }}
+          expand={(i) => открыты.has(строки[i]?.vendor) ? <VendorInlineStations key={строки[i].vendor}
+            vendor={строки[i].vendor} days={окно} region={регион} asOf={наДень || undefined} threshold={d.threshold} /> : null}
           derive={(t) => {
             const weighted = итоги(оставлены, окно)
             const fixed = t.map((v, i) => i < weighted.length ? weighted[i] : v)
@@ -227,6 +250,45 @@ export function NetworkVendorsPanel() {
       asOf={наДень || undefined} threshold={d.threshold} onClose={() => setРазбор(null)} />
   </div>
 }
+
+function VendorInlineStations({ vendor, days, region, asOf, threshold }: {
+  vendor: string; days: number; region?: string; asOf?: string; threshold: number
+}) {
+  const { companyId } = useCompany()
+  const [order, setOrder] = useState<number[]>([])
+  const q = useQuery({
+    queryKey: ['ops-vendor-stations', companyId, vendor, days, region ?? '', asOf ?? ''],
+    queryFn: () => getNetworkVendors(companyId, { vendor, days, region, asOf }),
+    enabled: !!companyId, staleTime: 60_000,
+  })
+  const stations = q.data?.stations ?? []
+  const rows = useMemo<Cell[][]>(() => stations.map((r) => {
+    const state = r.silentDays === null ? 'Нет зарядок в истории' : r.silentDays <= 2 ? 'Заряжала за 2 суток'
+      : 'Без зарядок ' + qty(r.silentDays) + ' дн'
+    return [r.number ?? r.code ?? '', r.name, r.model ?? '',
+      state + (сОтказами(r, threshold) ? ' · частые отказы' : ''), r.region ?? '', r.visits,
+      r.visits ? r.failedVisitsPct : '', r.silentDays ?? '', r.energyKwh, r.revenue]
+  }), [stations, threshold])
+  if (q.isLoading) return <div role="status" className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+    <Loader2 className="size-4 animate-spin" />Загружаются станции {vendor}</div>
+  if (q.isError) return <div role="alert" className="flex items-center gap-3 p-3 text-sm">Не удалось загрузить станции {vendor}.
+    <Button variant="outline" onClick={() => void q.refetch()}>Повторить</Button></div>
+  return <SheetTable head={СТАНЦИИ_ШАПКА} rows={rows} caption={'Станции · ' + vendor} onView={setOrder}
+    tableAttrs={exportRows('Станции · ' + vendor, СТАНЦИИ_ШАПКА, order.map((i) => rows[i]))}
+    lines={[days + ' дней' + (q.data ? ' по ' + дата(q.data.asOf) : ''), 'по названию — карточка станции']}
+    defaultWidths={СТАНЦИИ_ШИРИНЫ}
+    render={(i, c) => {
+      const r = stations[i]
+      if (c === 0) return <span className="block truncate font-mono text-xs">{r.number ?? r.code ?? '—'}</span>
+      if (c === 1) return <span className="block whitespace-normal break-words"><StationLink station={r.locationId}>{r.name}</StationLink></span>
+      if (c === 3) return <span className="block whitespace-normal text-xs">{rows[i][c]}</span>
+      if (c === 6 && r.visits) return <span className={cn(сОтказами(r, threshold) && 'font-semibold text-destructive')}>{qty(r.failedVisitsPct)} %</span>
+      return undefined
+    }} empty="Станций этой марки в выборке нет" />
+}
+
+const СТАНЦИИ_ШАПКА = ['№', 'Станция', 'Модель', 'Как работает', 'Регион', 'Приездов', 'Без зарядки, %', 'Без зарядок, дн', 'Энергия, кВт·ч', 'Выручка, ₽']
+const СТАНЦИИ_ШИРИНЫ = { 0: 84, 1: 230, 2: 160, 3: 250, 4: 180 }
 
 function VendorDrill({ vendor, kind, days, region, asOf, threshold, onClose }: {
   vendor: string; kind: Разбор | null; days: number; region?: string; asOf?: string; threshold: number; onClose: () => void
@@ -294,8 +356,9 @@ const ПОМОЩЬ = <div className="flex flex-col gap-3 text-sm leading-relaxed
     как минимум каждый пятый без зарядки. Несколько попыток подряд считаются одним приездом.</p>
   <p>Итоги процентов считаются из общих числителей и знаменателей, не суммой процентов марок.
     Отдача — энергия на действующую станцию в сутки. Попытки на приезд и средняя мощность в итог не складываются.</p>
-  <p>Enter открывает карточку марки; справа — её станции и модели отдельными отчётами. Закрытие возвращает в карточку.
-    Во вложенной таблице можно сортировать станции и листать страницы; ограничения в 60 станций больше нет.</p>
+  <p>Строка производителя — группа. Щелчок по строке, стрелке слева или Enter раскрывает конкретные станции прямо под маркой.
+    Можно раскрыть несколько марок. В списке станций видны модель, регион, зарядки и отказы; по названию открывается карточка станции.
+    Значок документа справа от марки открывает её отдельную карточку с отчётами. Ограничения в 60 станций нет.</p>
   <p>Сводная строится по станциям выбранных марок: марка, модель, регион и давность зарядок.
     Фильтры столбцов списка ограничивают марки и в сводной. Формулы по маркам в станционную сводную не переносятся.</p>
   <p>Рельса: калькулятор, формулы, поиск по видимым ячейкам, столбцы, сравнение и отложенные цифры.
