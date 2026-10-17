@@ -42,6 +42,8 @@ export const VOICE_VIEWS: VoiceView[] = [
     hint: 'все звонки линии, а не только дошедшие до контакт-центра' },
   { key: 'report', path: 'report', label: 'Отчёт за месяц', group: 'work', wave: '2.6', ready: true,
     hint: 'отчёт по линии для заказчика: пропущенные, время ответа, решённые с первого звонка; выпуск и выгрузка' },
+  { key: 'reconcile', path: 'reconcile', label: 'Сверка с оператором', group: 'work', wave: '2.6', ready: true,
+    hint: 'детализация оператора связи против журнала узла: потерянные звонки и расхождения длительности' },
 
   { key: 'reception', path: 'reception', label: 'Правила приёма', group: 'setup', wave: '2.2', ready: true,
     hint: 'часы, VIP, очередь и ожидание, обратный звонок, запасной сценарий' },

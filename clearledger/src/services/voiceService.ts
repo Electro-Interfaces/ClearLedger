@@ -554,6 +554,38 @@ export interface Reconciliation {
   onlyCarrier?: number
   onlyNode?: number
   durationMismatch?: number
+  uploadedBy?: Actor
+  /** только расхождения; приходит в `GET /stats/reconciliations/{id}`, в списке его нет */
+  items?: ReconciliationItem[]
+}
+
+export interface ReconciliationItem {
+  kind: 'only_carrier' | 'only_node' | 'duration'
+  at: string
+  /** маской «•••0001»: полного номера сверка не хранит */
+  number?: string
+  contactId?: string | null
+  carrierSec?: number | null
+  nodeSec?: number | null
+}
+
+export type ReconciliationFormat = 'megafon_csv' | 'generic_csv'
+
+/** Последние 200 сверок, новые первыми, без расхождений. */
+export const reconciliations = (cid: string) => дай<{ items: Reconciliation[] }>(cid, '/stats/reconciliations')
+
+export const reconciliation = (cid: string, id: string) =>
+  дай<Reconciliation>(cid, `/stats/reconciliations/${encodeURIComponent(id)}`)
+
+/**
+ * Загрузить детализацию оператора связи (CSV до 10 МБ) и сверить с журналом узла.
+ * Файл узел не хранит: остаются итог и расхождения; загрузка — строка `reconciliation.upload` в журнале доступа.
+ */
+export async function uploadReconciliation(cid: string, b: { format: ReconciliationFormat; file: File }) {
+  const form = new FormData()
+  form.set('format', b.format)
+  form.set('file', b.file)
+  return (await запрос<Reconciliation>(cid, '/stats/reconciliations', { method: 'POST', form })).data
 }
 
 /** Отчёт по линии за календарный месяц (схема `MonthlyReport`); номеров и других ПДн в нём нет. */

@@ -564,7 +564,11 @@ function Reconciliations({ r }: { r: voice.MonthlyReport }) {
   const день = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', timeZone: r.tz }) : '—')
   return (
     <section aria-label="Сверка с оператором связи" className="min-w-0 space-y-2 rounded-xl border border-border bg-card p-4">
-      <h2 className="font-headline text-base font-semibold">Сверка с оператором связи</h2>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="mr-auto font-headline text-base font-semibold">Сверка с оператором связи</h2>
+        {!!сверки.length && <Link to="/voice/reconcile" className="text-xs text-primary underline-offset-2 hover:underline">Все сверки</Link>}
+        <Link to="/voice/reconcile" className="text-xs text-primary underline-offset-2 hover:underline">Загрузить детализацию</Link>
+      </div>
       {!сверки.length ? (
         <p className="text-sm text-muted-foreground">За месяц сверок с детализацией оператора связи не было.</p>
       ) : (
@@ -578,7 +582,11 @@ function Reconciliations({ r }: { r: voice.MonthlyReport }) {
             <tbody>
               {сверки.map(с => (
                 <tr key={с.id} className="border-t border-border/60">
-                  <td className="whitespace-nowrap py-1.5">{день(с.period?.from)} – {день(с.period?.to)}</td>
+                  <td className="whitespace-nowrap py-1.5">
+                    <Link to={`/voice/reconcile?id=${encodeURIComponent(с.id)}`} className="text-primary underline-offset-2 hover:underline">
+                      {день(с.period?.from)} – {день(с.period?.to)}
+                    </Link>
+                  </td>
                   <td className="whitespace-nowrap py-1.5 pl-3 text-right tabular-nums">{число(с.carrierRows)}</td>
                   <td className="whitespace-nowrap py-1.5 pl-3 text-right tabular-nums">{число(с.matched)}</td>
                   <td className={cn('whitespace-nowrap py-1.5 pl-3 text-right tabular-nums', (с.onlyCarrier ?? 0) > 0 && 'font-medium text-destructive')}>{число(с.onlyCarrier)}</td>
