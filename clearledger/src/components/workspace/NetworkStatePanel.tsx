@@ -10,6 +10,7 @@ import { BulkTicketDialog } from '@/components/locations/BulkTicketDialog'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
 import { useStationCard } from '@/contexts/StationCardContext'
+import { LOCATION_STATUS_META, type LocationStatus } from '@/types/location'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
 import { getNetworkState, type NetworkState, type NetworkStationRow } from '@/services/opsService'
@@ -55,7 +56,7 @@ function строка(r: NetworkStationRow, work: Работа): Cell[] {
   return [r.number ?? r.code ?? '', r.name, r.region ?? '', r.statusLabel, r.silentDays ?? 'ни разу', r.sessions7d,
     r.loss, ходРаботы(r, work), r.lastSessionAt ? дата(r.lastSessionAt) : '', r.city ?? '', work ? w?.open ?? 0 : '',
     w?.lastNumber ?? '', r.mismatch ? 'да' : 'нет', r.attention ? 'да' : 'нет', r.revenuePerMonth,
-    r.sessions90d, r.connectors ?? '', r.lifeStatus, r.statusRaw ?? '']
+    r.sessions90d, r.connectors ?? '', LOCATION_STATUS_META[r.lifeStatus as LocationStatus]?.label ?? r.lifeStatus, r.statusRaw ?? '']
 }
 function итоги(rows: NetworkStationRow[], work: Работа): Cell[] {
   return ['Итого', rows.length + ' станций', '', '', '', сумма(rows, 'sessions7d'), сумма(rows, 'loss'), '', '', '',
@@ -235,7 +236,8 @@ function StateReport({ data: d, settings: s, change, companyId, region, work, wo
         columns={['Регион', 'Состояние', 'Город', 'Давность', 'В работе', 'Станций', 'Недобираем, ₽/мес', 'Сессий за 7 дней']}
         rows={оставлены.map((r) => ({ region: r.region || 'Регион не указан', status: r.statusLabel, city: r.city || 'Город не указан',
           silence: r.silentDays === null ? 'Ни разу не заряжала' : r.silentDays <= 2 ? 'Заряжала за 2 суток' : r.silentDays <= 7 ? 'Без зарядок до недели' : 'Без зарядок больше недели',
-          work: ходРаботы(r, work), stations: 1, loss: r.loss, sessions7d: r.sessions7d }))} />
+          work: !work ? 'Неизвестно' : work.get(r.locationId)?.open ? 'Есть открытая заявка' : r.attention ? 'Не взята в работу' : 'Нет открытой заявки',
+          stations: 1, loss: r.loss, sessions7d: r.sessions7d }))} />
         : <SheetTable {...набор.table} caption={регионыВид ? 'Состояние сети по регионам' : 'Станции сети'} lines={[подпись, ...фильтры]}
           defaultWidths={регионыВид ? РЕГ_ШИРИНЫ : ШИРИНЫ} render={ячейка} onView={setПорядок}
           rowTitle={(i) => регионыВид ? группы[i]?.name ?? '' : строки[i]?.name ?? ''}
