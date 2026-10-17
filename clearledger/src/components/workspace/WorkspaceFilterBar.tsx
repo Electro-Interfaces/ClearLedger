@@ -435,7 +435,7 @@ export function WorkspaceFilterBar() {
             Окно 30/90/180 дней выбирается в фильтрах отчёта. */}
         {coreMode !== 'projects'
           && !(coreMode === 'operations' && company.profileId === 'energy'
-            && !['ops_worklist', 'ops_vendors', 'ops_reliability'].includes(searchParams.get('sub') ?? 'ops_worklist'))
+            && !['ops_worklist', 'ops_vendors', 'ops_reliability', 'ops_state'].includes(searchParams.get('sub') ?? 'ops_worklist'))
           && <PeriodControl />}
         {isOffice ? null : (
           <WorkspaceScopeControl onAdvanced={() => { setSection('scope'); setOpen(true) }} />
