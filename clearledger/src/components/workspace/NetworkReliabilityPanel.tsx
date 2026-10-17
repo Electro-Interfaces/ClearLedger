@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { StationLink } from '@/components/common/StationLink'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
+import { useStationCard } from '@/contexts/StationCardContext'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
 import { getNetworkReliability, type NetworkReliability, type ReliabilityRow } from '@/services/opsService'
@@ -25,13 +26,13 @@ import { daysAgoISO } from './analytics/periodPresets'
 const С = { номер: 0, станция: 1, регион: 2, марка: 3, модель: 4, приездов: 5,
   безЗарядки: 6, отказПроц: 7, попыток: 8, пустыхПроц: 9, кВтч: 10, ушло: 11,
   сессий: 12, ошибок: 13, ошибокПроц: 14, пустых: 15, энергия: 16, выручка: 17,
-  клиентов: 18, задетых: 19, последняя: 20 }
+  клиентов: 18, задетых: 19, последняя: 20, город: 21 }
 const ШАПКА = ['№', 'Станция', 'Регион', 'Марка', 'Модель', 'Приездов', 'Приездов без зарядки',
   'Без зарядки, %', 'Попыток / приезд', 'Без энергии, %', 'кВт·ч / попытку', 'Ушло клиентов',
   'Попыток всего', 'Ошибок', 'Ошибок, %', 'Попыток без энергии', 'Энергия, кВт·ч',
-  'Выручка, ₽', 'Клиентов', 'Столкнулись с отказом', 'Последняя сессия']
+  'Выручка, ₽', 'Клиентов', 'Столкнулись с отказом', 'Последняя сессия', 'Город']
 const СКРЫТЫ = [С.модель, С.пустыхПроц, С.сессий, С.ошибок, С.ошибокПроц, С.пустых,
-  С.энергия, С.выручка, С.клиентов, С.задетых, С.последняя]
+  С.энергия, С.выручка, С.клиентов, С.задетых, С.последняя, С.город]
 const СОСТАВ_СТОЛБЦОВ = { order: [], hidden: СКРЫТЫ }
 const ШИРИНЫ = { [С.номер]: 70, [С.станция]: 230, [С.регион]: 190, [С.марка]: 110,
   [С.приездов]: 110, [С.безЗарядки]: 130, [С.отказПроц]: 115, [С.попыток]: 120, [С.кВтч]: 120, [С.ушло]: 115 }
@@ -51,7 +52,7 @@ function строка(r: ReliabilityRow): Cell[] {
   return [r.number ?? r.code ?? '', r.name, r.region ?? '', r.brand ?? '', r.model ?? '',
     r.visits, r.visitsFailed, r.failedVisitsPct, r.attemptsPerVisit, r.emptyPct, r.kwhPerSession,
     r.clientsLost, r.sessions, r.failed, r.failedPct, r.empty, r.energyKwh, r.revenue,
-    r.clients, r.clientsAffected, r.lastSessionAt ? дата(r.lastSessionAt) : '']
+    r.clients, r.clientsAffected, r.lastSessionAt ? дата(r.lastSessionAt) : '', r.city ?? '']
 }
 function итоги(rows: ReliabilityRow[]): Cell[] {
   const visits = сумма(rows, 'visits'), sessions = сумма(rows, 'sessions')
@@ -59,7 +60,7 @@ function итоги(rows: ReliabilityRow[]): Cell[] {
     процент(сумма(rows, 'visitsFailed'), visits), доля(sessions, visits, 2), процент(сумма(rows, 'empty'), sessions),
     доля(сумма(rows, 'energyKwh'), sessions, 2), сумма(rows, 'clientsLost'), sessions, сумма(rows, 'failed'),
     процент(сумма(rows, 'failed'), sessions), сумма(rows, 'empty'), сумма(rows, 'energyKwh'), сумма(rows, 'revenue'),
-    сумма(rows, 'clients'), сумма(rows, 'clientsAffected'), '']
+    сумма(rows, 'clients'), сумма(rows, 'clientsAffected'), '', '']
 }
 function поРегионам(rows: ReliabilityRow[], threshold: number) {
   const groups = new Map<string, ReliabilityRow[]>()
@@ -103,6 +104,7 @@ function ReliabilityReport({ data: d, settings: s, change, companyId, region }: 
   data: NetworkReliability; settings: Настройки; change: (patch: Partial<Настройки>) => void; companyId: string; region?: string
 }) {
   const экран = useRef<HTMLDivElement>(null)
+  const станция = useStationCard()
   const [фильтрыОткрыты, setФильтрыОткрыты] = useState(() => {
     try { return localStorage.getItem(КЛЮЧ_ФИЛЬТРОВ) === '1' } catch { return false }
   })
@@ -161,7 +163,8 @@ function ReliabilityReport({ data: d, settings: s, change, companyId, region }: 
       return undefined
     }
     const r = строки[i]
-    if (c === С.станция) return <span className="whitespace-normal break-words font-medium">{r.name}</span>
+    if (c === С.станция) return <span className="whitespace-normal break-words"><span className="font-medium">{r.name}</span>
+      {r.city && <span className="ml-1.5 text-xs text-muted-foreground">{r.city}</span>}</span>
     if (c === С.отказПроц) return <span className={cn(r.failedVisitsPct >= d.threshold && 'font-semibold text-destructive')}>{qty(r.failedVisitsPct)} %</span>
     return undefined
   }, [регионыВид, группы, открыты, раскрыть, строки, d.threshold])
@@ -174,7 +177,7 @@ function ReliabilityReport({ data: d, settings: s, change, companyId, region }: 
   const расшифровка = выбранная && разбор ? d.stations.filter((r) => разбор === 'brand' ? r.brand === выбранная.brand : r.region === выбранная.region) : []
   const подпись = d.days + ' дней по ' + дата(d.asOf) + ' · МСК · от ' + d.minSessions + ' приездов'
   return <div ref={экран} className="flex flex-col gap-3 p-3">
-    <div className={TILE_ROW}>
+    <div className={cn(TILE_ROW, 'xl:grid-cols-5')}>
       <Tile icon={Zap} label="Приездов клиентов" value={qty(d.totals.visits)} hint={qty(d.totals.stations) + ' станций с сессиями'}
         active={s.filter === 'all'} onClick={() => выбрать('all')} />
       <Tile icon={AlertTriangle} label="Приездов без зарядки" value={qty(d.totals.failedVisitsPct) + ' %'} hint={qty(d.totals.visitsFailed) + ' приездов'}
@@ -253,7 +256,7 @@ function ReliabilityReport({ data: d, settings: s, change, companyId, region }: 
     <ToolPanel><ReportTools {...набор.tools} searchHint="Номер, станция, регион или число" formulaExample="Например, Доля успешных приездов"
       compare={<ReliabilityCompare companyId={companyId} region={region} now={d} />} /></ToolPanel>
     <RowCard report="Надёжность" head={набор.sheet.head} title={выбранная?.name}
-      row={карточка ? набор.sheet.rows[карточка.order[карточка.pos]] ?? null : null}
+      row={карточка && !станция.открыта ? набор.sheet.rows[карточка.order[карточка.pos]] ?? null : null}
       at={карточка?.pos ?? 0} of={карточка?.order.length ?? 0}
       onStep={(dir) => { setРазбор(null); setКарточка((v) => v ? { ...v, pos: Math.max(0, Math.min(v.pos + dir, v.order.length - 1)) } : v) }}
       onClose={() => { setКарточка(null); setРазбор(null) }} extra={выбранная && <div className="flex flex-col gap-3">
@@ -263,7 +266,7 @@ function ReliabilityReport({ data: d, settings: s, change, companyId, region }: 
         </div>
         <div className="text-sm"><StationLink station={выбранная.locationId}>Открыть карточку станции</StationLink></div>
       </div>} />
-    <RelatedReport open={!!разбор && !!выбранная} title={разбор === 'brand' ? 'Станции производителя' : 'Станции региона'}
+    <RelatedReport open={!!разбор && !!выбранная && !станция.открыта} title={разбор === 'brand' ? 'Станции производителя' : 'Станции региона'}
       subtitle={подпись} head={ШАПКА} rows={расшифровка.map(строка)} onClose={() => setРазбор(null)}
       note="Полный состав списка с достаточным числом приездов за тот же срез; локальные отборы основной таблицы не применяются.">
       <StationSubset rows={расшифровка} caption={разбор === 'brand' ? выбранная?.brand || 'Марка не указана' : выбранная?.region || 'Регион не указан'} lines={[подпись]} />
