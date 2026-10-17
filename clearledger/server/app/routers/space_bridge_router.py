@@ -720,7 +720,7 @@ async def accept_visit(
     email = str(claims.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(403, VISIT_REFUSED)
-    await _use_once(db, claims, token=payload.token, scope=str(partner.id))
+    await _use_once(db, claims, scope=str(partner.id))
 
     guest = (await db.execute(select(User).where(User.email == email))).scalars().first()
     if guest is not None and not await _bridge_guest(guest, db):
@@ -780,13 +780,14 @@ async def _bridge_guest(user: User, db: AsyncSession) -> bool:
 
 async def _jwks_cached(partner: PartnerSpace) -> dict[str, Any]:
     """Ключи партнёра — с кэшем на 10 минут: анонимная ручка не должна по каждому
-    запросу ходить к партнёру (это и нагрузка, и усилитель для перебора)."""
+    запросу ходить к партнёру (это и нагрузка, и усилитель для перебора). Ключ кэша —
+    запись, а не код: один код поставщика заведён у разных компаний со своими адресами."""
     import time
-    hit = _jwks_cache.get(partner.code)
+    hit = _jwks_cache.get(str(partner.id))
     if hit and time.monotonic() - hit[0] < 600:
         return hit[1]
     keys = await partner_bridge.partner_jwks(partner)
-    _jwks_cache[partner.code] = (time.monotonic(), keys)
+    _jwks_cache[str(partner.id)] = (time.monotonic(), keys)
     return keys
 
 
@@ -806,19 +807,17 @@ def _visit_target(token: str) -> str | None:
     return None
 
 
-async def _use_once(db: AsyncSession, claims: dict[str, Any], *, token: str, scope: str) -> None:
+async def _use_once(db: AsyncSession, claims: dict[str, Any], *, scope: str) -> None:
     """Отметить пропуск предъявленным; второй раз — отказ.
 
     Ключ — выдавшее пространство и `jti`: номера разных пространств не пересекаются,
-    и чужое пространство не может «сжечь» пропуск этого. Пропуск без `jti` (его
-    выписывает пространство на версии до 17.10.2026) отмечается отпечатком самого
-    пропуска. Отметки в базе, а не в памяти воркера: повтор не пройдёт и на соседнем.
+    и чужое пространство не может «сжечь» пропуск этого. Пропуск без `jti` не
+    принимается: пространство поставщика выпускается вместе с этим (решение 16.10.2026).
+    Отметки в базе, а не в памяти воркера: повтор не пройдёт и на соседнем.
     Отметки старше срока пропуска стираются здесь же."""
-    import hashlib
-
     jti = str(claims.get("jti") or "")
     if not jti or len(jti) > 40:
-        jti = hashlib.sha256(token.encode()).hexdigest()[:40]
+        raise HTTPException(403, VISIT_REFUSED)
     now = datetime.now(timezone.utc)
     await db.execute(delete(SsoUsedToken).where(SsoUsedToken.expires_at < now))
     done = await db.execute(pg_insert(SsoUsedToken).values(

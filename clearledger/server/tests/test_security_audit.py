@@ -75,21 +75,21 @@ def keys():
 
 def visit(priv, **claims):
     now = int(time.time())
-    base = {"aud": "space:rushydro", "email": "eng@desk.ru", "space": "desk", "iat": now, "exp": now + 120}
+    base = {"iss": space_bridge_router.sso.settings.sso_issuer, "aud": "space:rushydro",
+            "email": "eng@desk.ru", "space": "desk", "jti": "j1", "iat": now, "exp": now + 120}
     base.update(claims)
     return jwt.encode({k: v for k, v in base.items() if v is not None}, priv, algorithm="RS256", headers={"kid": "k1"})
 
 
-def test_пропуск_партнёра_срок_и_повтор(keys):
+def test_пропуск_партнёра_срок(keys):
+    # Повтор пропуска отсекает сам вход по журналу `sso_used_tokens` (`_use_once`) —
+    # это test_partner_visit_pass.py; здесь — подпись, срок и единый ответ на отказ.
     priv, jwks = keys
-    space_bridge_router._seen_visits.clear()
     tok = visit(priv)
     assert space_bridge_router._verify_visit(tok, jwks, audience="space:rushydro")["email"] == "eng@desk.ru"
-    with pytest.raises(HTTPException):  # второй раз тот же пропуск — нет
-        space_bridge_router._verify_visit(tok, jwks, audience="space:rushydro")
     now = int(time.time())
     for bad in (visit(priv, exp=None), visit(priv, iat=now, exp=now + 3600),
-                visit(priv, aud="space:gig")):
+                visit(priv, aud="space:gig"), visit(priv, iss="someone")):
         with pytest.raises(HTTPException) as e:
             space_bridge_router._verify_visit(bad, jwks, audience="space:rushydro")
         assert e.value.detail == space_bridge_router.VISIT_REFUSED  # без подробностей

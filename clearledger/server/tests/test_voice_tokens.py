@@ -66,7 +66,7 @@ def _h(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _login(client: AsyncClient, email: str, password: str = "secret123") -> str:
+async def _login(client: AsyncClient, email: str, password: str = "secret12345") -> str:
     r = await client.post("/api/auth/login", json={"email": email, "password": password})
     assert r.status_code == 200, r.text
     return r.json()["access_token"]
@@ -76,7 +76,7 @@ async def _user(client: AsyncClient, email: str, company: str, role: str) -> str
     admin = await _login(client, "admin@clearledger.ru", "admin123")
     r = await client.post("/api/users", headers=_h(admin), json={
         "company_id": company, "email": email, "name": email.split("@")[0],
-        "password": "secret123", "role": role})
+        "password": "secret12345", "role": role})
     assert r.status_code in (200, 201), r.text
     return await _login(client, email)
 

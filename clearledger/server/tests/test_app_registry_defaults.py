@@ -63,6 +63,13 @@ def test_coordinator_needs_explicit_enable():
     assert _default_app_on("support", "fuel") is False
 
 
+def test_voice_needs_explicit_enable():
+    # «Телефония» без узла у компании вела бы в «узел недоступен»: выпуск Ядра с ней
+    # ничего не меняет пользователям, пока компании не включат продукт явно.
+    for profile in [None, "", "office", *CARVED_PROFILES]:
+        assert _default_app_on("voice", profile) is False, profile
+
+
 def test_profile_names_belong_to_carved_products():
     """Имя продукта подменяется только там, где профиль его действительно получает."""
     for (code, profile), (name, desc) in _BY_PROFILE.items():

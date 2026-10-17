@@ -4,9 +4,12 @@
   * пропуск предъявляется второй раз (перехваченная ссылка входит наравне с хозяином);
   * пропуск без `kid`, от чужого издателя или на долгий срок принимается;
   * запись о поставщике ищется среди всех компаний контейнера, а не у той, куда пропуск;
-  * сессия по пропуску открывает всё, что есть у учётки с тем же адресом в других
-    компаниях, переживает отключение связи и продлением становится обычной;
-  * суперадмин платформы входит по пропуску чужого пространства.
+  * сессия по пропуску открывает другие компании, где эта учётка тоже гость,
+    переживает отключение связи и продлением становится обычной;
+  * пропуск входит под здешней учёткой с тем же адресом (сотрудник, суперадмин).
+
+Любой отказ — одним ответом `VISIT_REFUSED` (аудит 07.10.2026): подробности помогают
+подбирать пропуск, поэтому тесты сверяют только код ответа.
 """
 import contextlib
 import json
@@ -95,13 +98,10 @@ async def test_pass_is_one_company_and_once(client: AsyncClient, db: AsyncSessio
     code, ids, jwks = vendor
     tag = uuid.uuid4().hex[:6]
     email = f"engineer-{tag}@elsyplus.ru"
-    # Учётка с тем же адресом уже есть здесь — администратор другой компании (gig).
-    sa = (await client.post("/api/auth/login", json={
-        "email": "admin@clearledger.ru", "password": "admin123"})).json()["access_token"]
-    r = await client.post("/api/users", headers=_h(sa), json={
-        "company_id": "gig", "email": email, "name": "Двойник", "password": "secret123",
-        "role": "admin"})
-    assert r.status_code in (200, 201), r.text
+    # Тот же инженер уже бывал гостем в другой компании контейнера (gig).
+    r = await client.post("/api/eco/partner/visit", json={
+        "token": _pass(code, "gig", email), "space": code})
+    assert r.status_code == 200, r.text
 
     token = _pass(code, "rushydro", email)
     r = await client.post("/api/eco/partner/visit", json={"token": token, "space": code})
@@ -114,9 +114,9 @@ async def test_pass_is_one_company_and_once(client: AsyncClient, db: AsyncSessio
 
     # Второй раз тот же пропуск не входит.
     again = await client.post("/api/eco/partner/visit", json={"token": token, "space": code})
-    assert again.status_code == 403 and "использован" in again.json()["detail"]
+    assert again.status_code == 403, again.text
 
-    # Сессия видит только компанию пропуска, хотя учётка — админ в gig.
+    # Сессия видит только компанию пропуска, хотя учётка — гость и в gig.
     me = await client.get("/api/auth/me", headers=_h(session))
     assert me.status_code == 200, me.text
     assert [c["slug"] for c in me.json()["companies"]] == ["rushydro"]
@@ -124,10 +124,6 @@ async def test_pass_is_one_company_and_once(client: AsyncClient, db: AsyncSessio
                              headers=_h(session))).status_code == 403
     assert (await client.get("/api/voice/keys", params={"company_id": "gig"},
                              headers=_h(session))).status_code == 403
-    # Обычный вход той же учётки по-прежнему видит gig — сужена только сессия по пропуску.
-    own = (await client.post("/api/auth/login", json={"email": email, "password": "secret123"})).json()
-    assert (await client.get("/api/inbound-keys", params={"company_id": "gig"},
-                             headers=_h(own["access_token"]))).status_code == 200
 
     # Продление сохраняет область и срок.
     ref = await client.post("/api/auth/refresh", headers=_h(session))
@@ -154,29 +150,32 @@ async def test_pass_goes_to_its_company_record(client: AsyncClient, vendor):
     assert r.json()["space"] == "gig"
 
 
-@pytest.mark.parametrize("change, why", [
-    ({"kid": None}, "kid"),
-    ({"kid": "other/9"}, "не найден"),
-    ({"iss": "someone"}, "отклонён"),
-    ({"exp": int(time.time()) + 3600}, "долгий"),
-    ({"jti": None}, "jti"),
-    ({"space": "other"}, "другим пространством"),
-    ({"aud": "space:nowhere"}, "не в это пространство"),
-    ({"exp": int(time.time()) - 60}, "отклонён"),
+@pytest.mark.parametrize("change", [
+    {"kid": None},
+    {"kid": "other/9"},
+    {"iss": "someone"},
+    {"exp": int(time.time()) + 3600},
+    {"jti": None},
+    {"space": "other"},
+    {"aud": "space:nowhere"},
+    {"exp": int(time.time()) - 60},
 ])
-async def test_bad_passes_rejected(client: AsyncClient, vendor, change, why):
+async def test_bad_passes_rejected(client: AsyncClient, vendor, change):
+    from app.routers.space_bridge_router import VISIT_REFUSED
+
     code, _ids, _jwks = vendor
     token = _pass(code, "rushydro", f"bad-{uuid.uuid4().hex[:6]}@elsyplus.ru", **change)
     r = await client.post("/api/eco/partner/visit", json={"token": token, "space": code})
     assert r.status_code == 403, r.text
-    assert why in r.json()["detail"], r.json()
+    assert r.json()["detail"] == VISIT_REFUSED, r.json()
 
 
-async def test_superadmin_does_not_enter_by_pass(client: AsyncClient, vendor):
+async def test_local_account_does_not_enter_by_pass(client: AsyncClient, vendor):
+    """Адрес из пропуска совпал со здешней учёткой — суперадмином или сотрудником."""
     code, _ids, _jwks = vendor
     r = await client.post("/api/eco/partner/visit", json={
         "token": _pass(code, "rushydro", "admin@clearledger.ru"), "space": code})
-    assert r.status_code == 403 and "Суперадминистратор" in r.json()["detail"]
+    assert r.status_code == 409, r.text
 
 
 async def test_used_pass_is_fixed_before_reply(client: AsyncClient, vendor):
@@ -187,6 +186,6 @@ async def test_used_pass_is_fixed_before_reply(client: AsyncClient, vendor):
         first = await client.post("/api/eco/partner/visit", json={"token": token, "space": code})
         assert first.status_code == 200, first.text
         again = await client.post("/api/eco/partner/visit", json={"token": token, "space": code})
-        assert again.status_code == 403 and "использован" in again.json()["detail"]
+        assert again.status_code == 403, again.text
         me = await client.get("/api/auth/me", headers=_h(first.json()["access_token"]))
         assert me.status_code == 200, "гость и членство зафиксированы до ответа"
