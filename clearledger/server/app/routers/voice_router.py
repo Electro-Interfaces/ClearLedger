@@ -404,4 +404,7 @@ async def exchange_voice_key(
     if not token:
         raise HTTPException(503, "Единый вход не настроен: нет ключа подписи")
     named.last_used_at = datetime.now(timezone.utc)
+    # Фиксация до ответа, как у выдачи и отзыва: get_db коммитит уже после отправки
+    # ответа, а экран «Ключи систем» показывает время обмена сразу.
+    await db.commit()
     return {"token": token, "token_type": "bearer", "expires_in": 120, "scope": scope}

@@ -10,6 +10,7 @@
     выдаётся не администратором.
 """
 import base64
+import contextlib
 import uuid
 
 import jwt
@@ -24,6 +25,32 @@ from app.models import App, Company, SpaceInboundKey, User, UserCompany
 from app.services import app_registry, sso
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
+
+
+@contextlib.asynccontextmanager
+async def without_late_commit():
+    """Запросы без фиксации из get_db: на стенде она идёт уже после отправки ответа.
+
+    Всё, что ручка обещает ответом (ключ работает, пропуск сгорел, ключ отозван), должно
+    быть зафиксировано ею самой до ответа. Здесь get_db в конце откатывает, а не
+    коммитит, и запись, оставленная на его фиксацию, теряется так же, как в том окне.
+    """
+    import app.database as _db
+    from app.database import get_db
+    from app.main import app
+
+    async def _rollback_db():
+        async with _db.async_session_factory() as s:
+            try:
+                yield s
+            finally:
+                await s.rollback()
+
+    app.dependency_overrides[get_db] = _rollback_db
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.fixture
@@ -184,3 +211,39 @@ async def test_exchange_needs_voice_enabled(client: AsyncClient, db: AsyncSessio
                               headers=hdr)).status_code == 403
     assert (await client.get("/api/voice/keys", params={"company_id": "gig"},
                              headers=_h(admin))).status_code == 403
+
+
+async def test_keys_are_fixed_before_reply(client: AsyncClient, db: AsyncSession, sso_key):
+    """Выдача, обмен и отзыв ключа фиксируются до ответа (на стенде get_db коммитит после него).
+
+    Ловим: отозванный ключ ещё меняется на токен следующим же запросом, только что
+    выданный — не меняется, время обмена не появляется в списке."""
+    await _voice(db, "rushydro")
+    admin = await _user(client, f"late-admin-{uuid.uuid4().hex[:6]}@test.ru", "rushydro", "admin")
+    async with without_late_commit():
+        r = await client.post("/api/voice/keys", headers=_h(admin), json={
+            "company_id": "rushydro", "consumer": "Мониторинг", "scopes": ["voice.stats"]})
+        assert r.status_code == 201, r.text
+        issued = r.json()
+        hdr = {"X-Cloud-API-Key": issued["key"]}
+        assert (await client.post("/api/eco/voice/token", json={}, headers=hdr)).status_code == 200
+        row = next(k for k in (await client.get("/api/voice/keys", params={"company_id": "rushydro"},
+                                                headers=_h(admin))).json()["keys"]
+                   if k["id"] == issued["id"])
+        assert row["last_used_at"], "время обмена зафиксировано"
+        assert (await client.delete(f"/api/voice/keys/{issued['id']}", params={"company_id": "rushydro"},
+                                    headers=_h(admin))).status_code == 204
+        assert (await client.post("/api/eco/voice/token", json={}, headers=hdr)).status_code == 401
+
+        # Ключ узла из «Управления» — так же: выдан и сразу работает, отозван и сразу нет.
+        r = await client.post("/api/inbound-keys", headers=_h(admin), json={
+            "company_id": "rushydro", "consumer": "Узел", "actor_kind": "agent",
+            "scopes": ["voice.identify"]})
+        assert r.status_code == 201, r.text
+        node = {"X-Cloud-API-Key": r.json()["key"]}
+        assert (await client.post("/api/eco/identify", json={"value": "+79001234567"},
+                                  headers=node)).status_code == 200
+        assert (await client.delete(f"/api/inbound-keys/{r.json()['id']}", params={"company_id": "rushydro"},
+                                    headers=_h(admin))).status_code == 204
+        assert (await client.post("/api/eco/identify", json={"value": "+79001234567"},
+                                  headers=node)).status_code == 401
