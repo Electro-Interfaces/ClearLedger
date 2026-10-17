@@ -321,13 +321,17 @@ function Keys() {
     <div className="space-y-4 pt-2">
       {нет && (
         <div className="space-y-1 rounded-xl border border-border bg-card p-4 text-sm">
-          <p className="font-medium">Ключи систем выдаёт Ядро пространства, а в этом пространстве их выдача ещё не включена.</p>
+          <p className="font-medium">Ключи систем выдаёт Ядро пространства, а в этой версии Ядра их выдачи для «Телефонии» нет.</p>
           <p className="text-muted-foreground">
-            Она появится с доработкой Ядра для «Телефонии» (Я-10). Пока систему заказчика можно подключить к событиям узла на вкладке «Получатели событий».
+            Выдача появится после обновления Ядра пространства. Пока систему заказчика можно подключить к событиям узла на вкладке «Получатели событий».
           </p>
         </div>
       )}
-      {ключи.isError && <NodeError ошибка={ключи.error} что="прочитать ключи систем" />}
+      {ключи.isError && (
+        <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
+          Не удалось прочитать ключи систем: {ключи.error instanceof TypeError ? 'Ядро пространства не отвечает' : ключи.error instanceof Error ? ключи.error.message : 'неизвестная ошибка'}.
+        </div>
+      )}
       {выдан && (
         <ShownOnce заголовок={`Ключ для «${выдан.consumer}»`} значение={выдан.key} onClose={() => setВыдан(null)}
           текст="Передайте ключ тем, кто настраивает систему. Ключ показывается один раз; потерян — отзовите и выдайте новый." />
@@ -375,7 +379,7 @@ function Keys() {
               </div>
               {отозвать === k.id && (
                 <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-2">
-                  <span>Отозвать ключ? Система сразу перестанет получать данные.</span>
+                  <span>Отозвать ключ? Новый токен система уже не получит, а выданный доживёт свои две минуты.</span>
                   <Button size="sm" variant="destructive" onClick={() => void отозватьКлюч(k.id)}>Отозвать</Button>
                   <Button size="sm" variant="ghost" onClick={() => setОтозвать(null)}>Нет</Button>
                 </div>
@@ -388,8 +392,11 @@ function Keys() {
       <details className="rounded-xl border border-border bg-card p-4 text-sm">
         <summary className="cursor-pointer font-medium">Как система пользуется ключом</summary>
         <div className="space-y-1.5 pt-2 text-muted-foreground">
-          <p>Система меняет ключ на служебный токен Ядра — он живёт не дольше двух минут — и с ним спрашивает узел через пространство:
-            /voice/api/v1/stats/summary, /stats/series, /health или /audit, смотря что разрешено ключу.</p>
+          <p>Система меняет ключ на служебный токен Ядра: POST /api/eco/voice/token на адрес пространства с заголовком X-Cloud-API-Key и телом
+            {' {"scope": "voice.stats"}'} или {'{"scope": "voice.audit"}'}. Если у ключа одна область, её можно не указывать: тело {'{}'}.</p>
+          <p>В ответе — token, token_type «bearer», expires_in 120 и scope. Токен даёт одну область и живёт две минуты; с ним, в заголовке
+            Authorization: Bearer, система спрашивает узел через пространство: /voice/api/v1/stats/summary, /stats/series, /health или /audit.</p>
+          <p>В журнале доступа узла такой запрос записан под именем системы, для которой выдан ключ.</p>
           <p>Номеров звонящих, записей и расшифровок по ключу не получить: их открывает только администратор, по причине и с записью в журнал доступа.</p>
         </div>
       </details>
