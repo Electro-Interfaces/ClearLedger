@@ -21,7 +21,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import App, Company, SpaceInboundKey, User, UserCompany
+from app.models import App, AuditEvent, Company, SpaceInboundKey, User, UserCompany
 from app.services import app_registry, sso
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -89,12 +89,16 @@ async def _voice(db: AsyncSession, slug: str, enabled: bool = True) -> uuid.UUID
     return cid
 
 
-def _claims(token: str, pub) -> dict:
-    return jwt.decode(token, pub, algorithms=["RS256"], audience="voice")
+def _claims(token: str, pub, audience: str = "voice") -> dict:
+    return jwt.decode(token, pub, algorithms=["RS256"], audience=audience)
 
 
-async def test_voice_token_carries_role_and_jti(client: AsyncClient, db: AsyncSession, sso_key):
+async def test_voice_token_carries_role_jti_and_bounded_ttl(
+    client: AsyncClient, db: AsyncSession, sso_key, monkeypatch,
+):
     await _voice(db, "rushydro")
+    # Ошибка общего конфига не должна сделать браузерный пропуск в узел долгоживущим.
+    monkeypatch.setattr(sso.settings, "sso_token_ttl_seconds", 900)
     tag = uuid.uuid4().hex[:6]
     admin = await _user(client, f"voice-admin-{tag}@test.ru", "rushydro", "admin")
     plain = await _user(client, f"voice-user-{tag}@test.ru", "rushydro", "user")
@@ -110,18 +114,108 @@ async def test_voice_token_carries_role_and_jti(client: AsyncClient, db: AsyncSe
         r = await client.get("/api/sso/token", params={"app": "voice", "company_id": "rushydro"},
                              headers=_h(token))
         assert r.status_code == 200, r.text
+        assert set(r.json()) == {"token", "expires_in", "roles"}
+        assert r.json()["expires_in"] == 300
         assert r.json()["roles"] == roles
         c = _claims(r.json()["token"], sso_key)
         assert c["roles"] == roles and c["cid"] == str(cid)
+        assert c["exp"] - c["iat"] == r.json()["expires_in"]
         assert len(c["jti"]) == 32 and c["jti"] not in seen
         seen.add(c["jti"])
 
-    # Суперадмин роли в «Телефонии» не получает, даже состоя в компании.
+    # Суперадмин роли в «Телефонии» не получает даже при членстве и явном назначении.
+    superadmin = (await db.execute(select(User).where(
+        User.email == "admin@clearledger.ru"))).scalar_one()
+    membership = await db.get(UserCompany, (superadmin.id, cid))
+    if membership is None:
+        membership = UserCompany(user_id=superadmin.id, company_id=cid, role="admin")
+        db.add(membership)
+    membership.role = "admin"
+    membership.app_roles = {"voice": "admin"}
+    await db.commit()
     sa = await _login(client, "admin@clearledger.ru", "admin123")
     r = await client.get("/api/sso/token", params={"app": "voice", "company_id": "rushydro"},
                          headers=_h(sa))
-    if r.status_code == 200:
-        assert r.json()["roles"] == []
+    assert r.status_code == 200, r.text
+    assert r.json()["roles"] == []
+    assert _claims(r.json()["token"], sso_key)["roles"] == []
+
+
+async def test_voice_token_keeps_guard_statuses_and_messages(
+    client: AsyncClient, db: AsyncSession, sso_key, monkeypatch,
+):
+    await _voice(db, "rushydro")
+    await _voice(db, "gig")
+    tag = uuid.uuid4().hex[:6]
+    gig_admin = await _user(client, f"guard-admin-{tag}@test.ru", "gig", "admin")
+    gig_user = await _user(client, f"guard-user-{tag}@test.ru", "gig", "user")
+
+    cases = [
+        ({"app": "unknown", "company_id": "gig"}, gig_admin, 404,
+         "Неизвестное приложение: unknown"),
+        ({"app": "voice", "company_id": "not-a-company"}, gig_admin, 400,
+         "Невалидный company_id"),
+        ({"app": "voice", "company_id": str(uuid.uuid4())}, gig_admin, 400,
+         "Невалидный company_id"),
+        ({"app": "voice", "company_id": "rushydro"}, gig_user, 403,
+         "Нет доступа к компании"),
+    ]
+    for params, token, code, detail in cases:
+        response = await client.get("/api/sso/token", params=params, headers=_h(token))
+        assert response.status_code == code, response.text
+        assert response.json() == {"detail": detail}
+
+    await _voice(db, "gig", False)
+    response = await client.get(
+        "/api/sso/token", params={"app": "voice", "company_id": "gig"},
+        headers=_h(gig_admin),
+    )
+    assert response.status_code == 403, response.text
+    assert response.json() == {"detail": "Приложение не подключено компании"}
+
+    monkeypatch.setattr(sso.settings, "sso_signing_key", "")
+    response = await client.get(
+        "/api/sso/token", params={"app": "voice", "company_id": "gig"},
+        headers=_h(gig_admin),
+    )
+    assert response.status_code == 503, response.text
+    assert response.json() == {"detail": "SSO не настроен (нет ключа подписи)"}
+
+
+async def test_authorize_without_company_keeps_fallback_and_audit(
+    client: AsyncClient, db: AsyncSession, sso_key, monkeypatch,
+):
+    tag = uuid.uuid4().hex[:6]
+    email = f"handoff-{tag}@test.ru"
+    bearer = await _user(client, email, "rushydro", "user")
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+    cid = (await db.execute(select(Company.id).where(
+        Company.slug == "rushydro"))).scalar_one()
+    monkeypatch.setattr(sso, "find_app", lambda code: {
+        "code": code,
+        "base_url": "https://coordinator.test",
+        "callback": "/sso/callback",
+        "mode": "sso",
+    } if code == "coordinator" else None)
+
+    response = await client.get(
+        "/api/sso/authorize", params={"app": "coordinator"}, headers=_h(bearer),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["app"] == "coordinator" and body["mode"] == "sso"
+    token = body["url"].split("#token=", 1)[1]
+    claims = _claims(token, sso_key, "coordinator")
+    assert claims["cid"] == str(cid) == str(user.company_id)
+    assert claims["exp"] - claims["iat"] == body["expires_in"]
+
+    event = (await db.execute(select(AuditEvent).where(
+        AuditEvent.user_id == str(user.id),
+        AuditEvent.company_id == cid,
+        AuditEvent.action == "sso.handoff",
+        AuditEvent.details == "coordinator",
+    ))).scalar_one()
+    assert event.user_name == user.name
 
 
 async def test_service_tokens_have_jti_and_scope(sso_key):

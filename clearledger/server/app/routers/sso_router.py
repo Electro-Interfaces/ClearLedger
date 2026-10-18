@@ -8,7 +8,7 @@ localStorage), а НЕ браузерным редиректом — при ре
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -228,6 +228,38 @@ async def list_apps(
     }
 
 
+VOICE_TOKEN_TTL_SECONDS = 300
+
+
+async def _issue_app_token(
+    db: AsyncSession,
+    user: User,
+    company_id: uuid.UUID | str | None,
+    app_code: str,
+) -> tuple[str, list[str], int, uuid.UUID | str | None]:
+    """Собрать единые клеймы и выпустить пользовательский токен приложения."""
+    rows = (await db.execute(
+        select(UserCompany, Company)
+        .join(Company, Company.id == UserCompany.company_id)
+        .where(UserCompany.user_id == user.id)
+    )).all()
+    companies = [{"id": str(c.id), "slug": c.slug, "role": uc.role} for uc, c in rows]
+    cid = company_id or (str(user.company_id) if user.company_id
+                         else (companies[0]["id"] if companies else None))
+
+    # Роль в приложении — в самом токене (Я-10): приложению не нужно ждать проекцию
+    # людей, чтобы понять, кем человек у него работает.
+    from app.services.app_roles import app_roles
+    roles = await app_roles(db, user, cid, app_code)
+    ttl = (min(settings.sso_token_ttl_seconds, VOICE_TOKEN_TTL_SECONDS)
+           if app_code == "voice" else settings.sso_token_ttl_seconds)
+    token = cast(str, sso.sign_sso_token(
+        user=user, company_id=cid, companies=companies, aud=app_code,
+        roles=roles, ttl_seconds=ttl,
+    ))
+    return token, roles, ttl, cid
+
+
 @router.get("/authorize")
 async def authorize(
     app: str = Query(..., description="код приложения-получателя"),
@@ -253,21 +285,7 @@ async def authorize(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                             "SSO не настроен (нет ключа подписи)")
 
-    rows = (await db.execute(
-        select(UserCompany, Company)
-        .join(Company, Company.id == UserCompany.company_id)
-        .where(UserCompany.user_id == user.id)
-    )).all()
-    companies = [{"id": str(c.id), "slug": c.slug, "role": uc.role} for uc, c in rows]
-    cid = company_id or (str(user.company_id) if user.company_id
-                         else (companies[0]["id"] if companies else None))
-
-    # Роль в приложении — в самом токене (Я-10): приложению не нужно ждать проекцию
-    # людей, чтобы понять, кем человек у него работает.
-    from app.services.app_roles import app_roles
-    roles = await app_roles(db, user, cid, app)
-    token = sso.sign_sso_token(user=user, company_id=cid, companies=companies, aud=app,
-                               roles=roles)
+    token, _roles, ttl, cid = await _issue_app_token(db, user, company_id, app)
     url = f"{target['base_url']}{target['callback']}#token={token}"
     # Переход в приложение — часть истории активности человека: без этой записи журнал
     # знает только вход в Ядро, а «когда заходил в Координатор» ответить нечем.
@@ -275,7 +293,7 @@ async def authorize(
         await log_audit(db, actor=user, company_id=uuid.UUID(cid),
                         action="sso.handoff", target=app)
         await db.commit()
-    return {"url": url, "app": app, "mode": "sso", "expires_in": settings.sso_token_ttl_seconds}
+    return {"url": url, "app": app, "mode": "sso", "expires_in": ttl}
 
 
 # ─── Пропуск в API приложения ─────────────────────────────────────────────────
@@ -290,13 +308,19 @@ async def authorize(
 TOKEN_APPS = {"voice"}
 
 
-@router.get("/token")
+class AppTokenResponse(BaseModel):
+    token: str
+    expires_in: int
+    roles: list[str]
+
+
+@router.get("/token", response_model=AppTokenResponse)
 async def app_token(
     app: str = Query(..., description="код приложения, в API которого идёт браузер"),
     company_id: str = Query(..., description="компания, от имени которой идёт запрос"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
+) -> AppTokenResponse:
     """Короткий токен Ядра (RS256, ~5 мин) для API приложения `app` в компании.
 
     В журнал не пишется: экран берёт токен каждые несколько минут, а доступ к звонкам,
@@ -314,17 +338,8 @@ async def app_token(
     enabled = {a["code"]: a["enabled"] for a in await app_registry.company_apps(db, cid)}
     if not enabled.get(app, False):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Приложение не подключено компании")
-    rows = (await db.execute(
-        select(UserCompany, Company)
-        .join(Company, Company.id == UserCompany.company_id)
-        .where(UserCompany.user_id == user.id)
-    )).all()
-    companies = [{"id": str(c.id), "slug": c.slug, "role": uc.role} for uc, c in rows]
-    from app.services.app_roles import app_roles
-    roles = await app_roles(db, user, cid, app)
-    token = sso.sign_sso_token(user=user, company_id=str(cid), companies=companies, aud=app,
-                               roles=roles)
-    return {"token": token, "expires_in": settings.sso_token_ttl_seconds, "roles": roles}
+    token, roles, ttl, _cid = await _issue_app_token(db, user, cid, app)
+    return AppTokenResponse(token=token, expires_in=ttl, roles=roles)
 
 
 @router.get("/jwks.json")
