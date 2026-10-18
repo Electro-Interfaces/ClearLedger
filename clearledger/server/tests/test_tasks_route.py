@@ -483,11 +483,15 @@ async def test_поручение_внешнему_письмом(auth_client: A
     «на мне»); ответ с чужого адреса принимается; повторная доставка того же
     письма плодит дубли в ленте; ответ не возвращает мяч нам.
     """
+    from unittest.mock import AsyncMock
+
     from app.config import settings
+    from app.services import task_mail
     # Канал включаем на время проверки: без ящика ручка честно отвечает 409, и
     # это тоже часть договора — молча глотать поручения она не должна.
     monkeypatch.setattr(settings, "chat_mail_inbox", "space@dataworker.ru", raising=False)
     monkeypatch.setattr(settings, "smtp_host", "localhost", raising=False)
+    monkeypatch.setattr(task_mail, "send_notice", AsyncMock())
 
     me = await _me(auth_client)
     cid = seed_company_id(me)
@@ -519,12 +523,13 @@ async def test_поручение_внешнему_письмом(auth_client: A
     # а не токеном человека: своего поллера у задач нет и не будет.
     import uuid as _uuid
 
+    from app.auth import legacy_key_value
     from app.database import async_session_factory
     from app.models import Company
 
     async with async_session_factory() as db:
         company = await db.get(Company, _uuid.UUID(cid))
-        company.cloud_api_key = "test-space-key"
+        company.cloud_api_key = legacy_key_value("test-space-key")
         await db.commit()
     head = {"X-Cloud-API-Key": "test-space-key"}
 

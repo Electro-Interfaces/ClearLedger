@@ -127,17 +127,20 @@ def _reset_rate_limit():
 
 
 @pytest_asyncio.fixture(loop_scope="session")
-async def auth_client(client: AsyncClient) -> AsyncClient:
+async def auth_client(setup_database) -> AsyncGenerator[AsyncClient, None]:
     """HTTP-клиент с JWT-токеном (admin@clearledger.ru / admin123)."""
-    resp = await client.post(
-        "/api/auth/login",
-        json={"email": "admin@clearledger.ru", "password": "admin123"},
-    )
-    assert resp.status_code == 200, f"Login failed: {resp.text}"
-    token = resp.json()["access_token"]
-    client.headers["Authorization"] = f"Bearer {token}"
-    yield client
-    client.headers.pop("Authorization", None)
+    # Независимый клиент: запросы через `client` остаются анонимными, даже если
+    # тест одновременно использует обе фикстуры.
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/auth/login",
+            json={"email": "admin@clearledger.ru", "password": "admin123"},
+        )
+        assert resp.status_code == 200, f"Login failed: {resp.text}"
+        token = resp.json()["access_token"]
+        ac.headers["Authorization"] = f"Bearer {token}"
+        yield ac
 
 
 @pytest_asyncio.fixture(loop_scope="session")

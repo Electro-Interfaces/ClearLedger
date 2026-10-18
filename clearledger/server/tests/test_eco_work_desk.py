@@ -17,6 +17,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import legacy_key_value
 from app.models import ApprovalRequest, Company, Task
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -24,7 +25,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 async def _key(db: AsyncSession, cid: uuid.UUID, value: str) -> dict[str, str]:
     company = await db.get(Company, cid)
-    company.cloud_api_key = value
+    company.cloud_api_key = legacy_key_value(value)
     await db.commit()
     return {"X-Cloud-API-Key": value}
 

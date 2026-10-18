@@ -49,6 +49,9 @@ async def test_invalid_codes(auth_client, codes):
 
 
 async def test_foreign_company_and_anonymous_denied(auth_client, client):
+    assert client is not auth_client
+    assert 'Authorization' not in client.headers
     other = f'/api/sso/apps/favorites?company_id={uuid.uuid4()}'
     assert (await auth_client.get(other)).status_code in (400, 403)
     assert (await client.get(URL)).status_code == 401
+    assert (await client.put(URL, json={'codes': ['ops']})).status_code == 401
