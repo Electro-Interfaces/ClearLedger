@@ -68,15 +68,16 @@ export function SimulatePanel<B>({ kind, ч }: { kind: 'passport' | 'reception';
   const [идёт, setИдёт] = useState(false)
 
   const черновик = ч.черновик?.version
-  const версия = наЧерновике && черновик ? черновик : undefined
-  const несохранено = версия != null && (ч.сохранение === 'saving' || ч.сохранение === 'error')
 
   async function проверить(e: React.FormEvent) {
     e.preventDefault()
     setИдёт(true)
     try {
+      // При быстром нажатии правка ещё может ждать 800 мс автосохранения.
+      // Узел симулирует только сохранённую версию, поэтому сначала дожидаемся её номера.
+      const версияДляПримера = наЧерновике ? await ч.сохранить() : undefined
       setОтвет(await voice.simulate(companyId, kind,
-        { day: день, time: время, caller: звонящий, cc: кц, operators: операторы, nodeDown: узелЛежит }, версия))
+        { day: день, time: время, caller: звонящий, cc: кц, operators: операторы, nodeDown: узелЛежит }, версияДляПримера))
     } catch (err) {
       setОтвет(null)
       toast.error(err instanceof voice.VoiceError && err.code === 'config_invalid'
@@ -126,8 +127,6 @@ export function SimulatePanel<B>({ kind, ч }: { kind: 'passport' | 'reception';
             </label>
             <Button type="submit" size="sm" disabled={идёт || !время}>{идёт ? 'Считаем…' : 'Показать маршрут'}</Button>
           </form>
-          {несохранено && <p className="text-xs text-warning">Последняя правка ещё не сохранена у узла: пример посчитается по сохранённому черновику.</p>}
-
           {ответ && (
             <div className="space-y-3" aria-live="polite">
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">

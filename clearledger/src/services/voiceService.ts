@@ -8,6 +8,7 @@
 // Общий `apiClient` здесь не подходит: на 401 он разлогинивает человека из пространства.
 // Узел, не принявший токен, — это не истёкшая сессия Ядра, а повод выпустить новый токен.
 import { ApiError, del as coreDel, get as coreGet, post as corePost } from './apiClient'
+import { createVoiceAuth, type VoiceAccessToken } from '@/lib/voiceAuth'
 
 const CORE = import.meta.env.VITE_API_URL ?? ''
 /** Адрес API узла. На стенде задаётся прямо (`VITE_VOICE_API_URL`), в пространстве — тот же origin. */
@@ -15,16 +16,11 @@ const BASE: string = import.meta.env.VITE_VOICE_API_URL || `${CORE}/voice/api/v1
 
 // ——— Токен ———
 
-interface Пропуск { token: string; exp: number }
-
-const пропуски = new Map<string, Пропуск>()
-const выдачи = new Map<string, Promise<Пропуск>>()
-
 /**
  * Выпустить токен `aud=voice` для компании. В пространстве — ручка Ядра; на стенде без
  * Ядра — местный издатель токенов (`VITE_VOICE_DEV_TOKEN_URL`, только в dev-сборке).
  */
-async function выпустить(companyId: string): Promise<Пропуск> {
+async function выпустить(companyId: string): Promise<VoiceAccessToken> {
   const dev = import.meta.env.DEV ? import.meta.env.VITE_VOICE_DEV_TOKEN_URL as string | undefined : undefined
   if (dev) {
     const res = await fetch(`${dev}?cid=${encodeURIComponent(companyId)}`)
@@ -32,27 +28,35 @@ async function выпустить(companyId: string): Promise<Пропуск> {
     const r = await res.json() as { token: string; expires_in: number }
     return { token: r.token, exp: Date.now() + r.expires_in * 1000 }
   }
-  const r = await coreGet<{ token: string; expires_in: number }>('/api/sso/token',
-    { app: 'voice', company_id: companyId })
-  return { token: r.token, exp: Date.now() + r.expires_in * 1000 }
+  try {
+    const r = await coreGet<{ token: string; expires_in: number }>('/api/sso/token',
+      { app: 'voice', company_id: companyId })
+    return { token: r.token, exp: Date.now() + r.expires_in * 1000 }
+  } catch (e) {
+    // Ни экран, ни SSE не должны различать, на каком из двух шагов отказал вход:
+    // выдачу Ядра приводим к той же ошибке, что и ответ самого узла.
+    if (e instanceof ApiError) throw new VoiceError(e.status, 'token_issue', e.message)
+    throw e
+  }
+}
+
+const voiceAuth = createVoiceAuth({ issue: выпустить })
+
+/**
+ * Забыть все пропуски узлов при выходе или смене компании.
+ *
+ * Пропуск несёт субъект и роль того, кто его получил: новый пользователь
+ * той же компании не должен дожить с ним пятиминутный токен прежнего.
+ */
+export function resetVoiceAuth() {
+  voiceAuth.invalidate()
 }
 
 /** Токен для узла: из памяти, пока до конца срока больше минуты, иначе новый. */
-export async function voiceToken(companyId: string): Promise<Пропуск> {
-  const п = пропуски.get(companyId)
-  if (п && п.exp - Date.now() > 60_000) return п
-  let в = выдачи.get(companyId)
-  if (!в) {
-    в = выпустить(companyId).finally(() => выдачи.delete(companyId))
-    выдачи.set(companyId, в)
-  }
-  const н = await в
-  пропуски.set(companyId, н)
-  return н
-}
+export const voiceToken = voiceAuth.get
 
 function забыть(companyId: string) {
-  пропуски.delete(companyId)
+  voiceAuth.invalidate(companyId)
 }
 
 // ——— Ошибки ———
@@ -149,11 +153,11 @@ async function отправить(companyId: string, path: string, o: Опции
     method: o.method ?? 'GET', headers,
     body: o.form ?? (o.body !== undefined ? JSON.stringify(o.body) : undefined),
   })
-  if (res.status === 401 && повтор) {
-    // Токен мог истечь между выдачей и запросом (часы браузера, сон ноутбука): один
-    // повтор с новым. Второй отказ — уже настоящая проблема входа, её показываем.
+  if (res.status === 401) {
+    // Даже второй отвергнутый токен не оставляем в кэше: следующий ручной запрос
+    // начнёт с новой выдачи, но этот запрос всё равно повторяем только один раз.
     забыть(companyId)
-    return отправить(companyId, path, o, false)
+    if (повтор) return отправить(companyId, path, o, false)
   }
   if (!res.ok && !o.принять?.includes(res.status)) {
     let b: { error?: string; detail?: string; issues?: Issue[] } = {}
@@ -317,13 +321,21 @@ export function nowStream(cid: string, on: (e: NowEvent) => void, onState: (s: '
   const ctl = new AbortController()
   let пауза = 1000
 
-  async function раз() {
+  async function раз(повтор401 = true): Promise<void> {
     const { token } = await voiceToken(cid)
     const res = await fetch(адрес('/now/stream'), {
       headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
       signal: ctl.signal,
     })
-    if (res.status === 401) { забыть(cid); return }
+    if (res.status === 401) {
+      забыть(cid)
+      // Токен мог истечь между выдачей и открытием потока: сразу берём новый один раз.
+      // Второй 401 — уже не гонка срока: останавливаем поток, а не штормим Ядро выдачей.
+      if (повтор401) return раз(false)
+      let b: { error?: string; detail?: string } = {}
+      try { b = await res.json() } catch { /* без тела */ }
+      throw new VoiceError(res.status, b.error ?? 'invalid_token', словами(res.status, b.error ?? 'invalid_token', b.detail))
+    }
     if (!res.ok || !res.body) {
       let b: { error?: string; detail?: string } = {}
       try { b = await res.json() } catch { /* без тела */ }
@@ -360,7 +372,7 @@ export function nowStream(cid: string, on: (e: NowEvent) => void, onState: (s: '
       } catch (e) {
         if (ctl.signal.aborted) return
         // Отказ узла в правах не лечится переподключением — показываем и стоим.
-        if (e instanceof VoiceError && (e.status === 403 || e.status === 429)) { onState('failed', e); return }
+        if (e instanceof VoiceError && (e.status === 401 || e.status === 403 || e.status === 429)) { onState('failed', e); return }
         onState('reconnecting', e)
         await new Promise(r => setTimeout(r, пауза))
         пауза = Math.min(пауза * 2, 30_000)
