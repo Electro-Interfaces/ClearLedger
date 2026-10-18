@@ -45,6 +45,8 @@ export interface Черновик<B> {
   сохраненоВ: Date | null
   проверка: voice.Validation | null
   проверяем: boolean
+  /** Дождаться записи последней правки и вернуть версию черновика. */
+  сохранить: () => Promise<number | undefined>
   проверить: () => Promise<void>
   применяем: boolean
   применить: (comment: string) => Promise<boolean>
@@ -152,6 +154,12 @@ export function useDraft<B extends object>(kind: voice.ConfigKind): Чернов
     return ch ? показать(поУказателю(действующая.data?.body, path)) : undefined
   }, [изменено, действующая.data])
 
+  const сохранить = useCallback(async () => {
+    await сброс()
+    if (ждёт.current) throw new Error('Последняя правка не сохранена у узла')
+    return qc.getQueryData<voice.ConfigVersion<B> | null>([...ключ, 'draft'])?.version
+  }, [qc, ключ, сброс])
+
   async function проверить() {
     setПроверяем(true)
     try {
@@ -226,7 +234,7 @@ export function useDraft<B extends object>(kind: voice.ConfigKind): Чернов
     тело: основа,
     изменено, было, изменить,
     сохранение, сохраненоВ,
-    проверка, проверяем, проверить,
+    проверка, проверяем, сохранить, проверить,
     применяем, применить, отменить,
   }
 }

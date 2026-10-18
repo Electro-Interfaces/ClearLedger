@@ -15,6 +15,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { PhoneOff } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useMaxWidth } from '@/hooks/use-mobile'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as voice from '@/services/voiceService'
@@ -33,12 +34,16 @@ export function VoiceLayout() {
     queryKey: ['voice-me', companyId],
     queryFn: () => voice.me(companyId),
     enabled: !!companyId,
-    retry: 1,
+    // Повторяем только обрыв/временный 5xx. 403 role/company — окончательный ответ,
+    // а 401 уже один раз обновляет токен в voiceService: других скрытых повторов нет.
+    retry: (failureCount, error) => failureCount < 1 && voice.узелНедоступен(error),
     staleTime: 5 * 60_000,
   })
 
   // Ключ по компании: другой узел — экраны начинают с чистого листа, без чужой правки и выбранного звонка.
-  const содержимое = кто.isError ? <Refusal ошибка={кто.error} /> : <Outlet key={companyId} />
+  const содержимое = !companyId || кто.isLoading ? <AccessLoading />
+    : кто.isError ? <Refusal ошибка={кто.error} />
+      : <Outlet key={companyId} />
 
   // Пути «Телефонии» — полноэкранные (`WORKSPACE_PATHS`): оболочка не прокручивает, прокрутка своя.
   // На телефоне запас снизу под нижнюю навигацию и плашку установки, как у «Трека» и «Конференций».
@@ -66,6 +71,20 @@ export function VoiceLayout() {
         </select>
       </nav>
       {экран}
+    </div>
+  )
+}
+
+/** Пока узел проверяет пропуск, экран не пуст и не шлёт запросы раздела раньше `/me`. */
+function AccessLoading() {
+  return (
+    <div role="status" aria-label="Проверяем доступ к Телефонии" className="flex flex-col gap-4 p-4">
+      <span className="sr-only">Проверяем доступ к Телефонии…</span>
+      <Skeleton className="h-7 w-48" />
+      <Skeleton className="h-20 w-full rounded-xl" />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-24 rounded-xl" />)}
+      </div>
     </div>
   )
 }

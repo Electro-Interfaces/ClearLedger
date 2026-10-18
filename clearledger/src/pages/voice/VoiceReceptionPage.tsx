@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useCompany } from '@/contexts/CompanyContext'
+import { cn } from '@/lib/utils'
 import * as voice from '@/services/voiceService'
 import { EmptyBlock } from '@/pages/conf/EmptyBlock'
 import { CheckResult, DraftBar, Field, NumberInput } from './DraftParts'
@@ -27,6 +28,8 @@ import { useDraft, type Черновик } from './useDraft'
 import { More, RemoveButton, TextInput } from './FormBits'
 import { HoursEditor } from './HoursEditor'
 import { Heading, NodeError } from './parts'
+import { SimulatePanel } from './Simulate'
+import { ПРИЧИНА_ПРОПУСКА } from './format'
 import {
   КОМАНДЫ, ПОДПИСИ_ПРАВИЛ, УМОЛЧАНИЯ, звукиВ, звукиИз, кНомеру,
   type ПравилаПриёма, type Цель,
@@ -36,7 +39,7 @@ const ВКЛАДКИ = [
   { key: 'hours', name: 'Часы и линия', поля: ['/lineName', '/slaTargetSec', '/hours', '/greeting', '/mohClass', '/operators'] },
   { key: 'vip', name: 'VIP и повторы', поля: ['/vip', '/repeatWithinMin', '/priority'] },
   { key: 'queue', name: 'Очередь и ожидание', поля: ['/queueAnnounceFirstSec', '/queueAnnounceSec', '/queueAnnounceSound', '/agentLostSound'] },
-  { key: 'callback', name: 'Обратный звонок', поля: ['/callbackOfferSec', '/callbackLeadSec', '/callbackOfferSound', '/callbackConfirmSound', '/callbackRetryMin', '/callbackMaxAttempts', '/callbackRingSec', '/callbackDial', '/callbackCallerId'] },
+  { key: 'callback', name: 'Обратный звонок', поля: ['/callbackOfferSec', '/callbackLeadSec', '/callbackOfferSound', '/callbackConfirmSound', '/callbackRetryMin', '/callbackMaxAttempts', '/callbackRingSec', '/callbackDial', '/callbackCallerId', '/missedCallback'] },
   { key: 'fallback', name: 'Вне часов и запасной сценарий', поля: ['/afterHoursTarget', '/targets'] },
   { key: 'topics', name: 'Темы', поля: ['/topics'] },
   { key: 'controls', name: 'Пульт оператора', поля: ['/operatorControls'] },
@@ -83,6 +86,8 @@ export default function VoiceReceptionPage() {
           <CheckResult ч={ч} подписи={ПОДПИСИ_ПРАВИЛ} последствия={[
             'Применится без перезапуска узла: со следующего звонка. Звонки, которые уже идут, доживут по прежним правилам.',
           ]} />
+
+          <SimulatePanel kind="reception" ч={ч} />
 
           <Tabs value={вкладка} onValueChange={v => { const n = new URLSearchParams(params); n.set('tab', v); setParams(n, { replace: true }) }}>
             <TabsList>
@@ -298,6 +303,7 @@ function CallbackTab({ т, ч, поставить, потолок }: Части 
         <NumberInput значение={т.callbackRingSec} onChange={v => поставить(['callbackRingSec'], v)} единица="с"
           поУмолчанию={УМОЛЧАНИЯ.callbackRingSec} подпись="Звонит, секунд" целое={false} />
       </Field>
+      <MissedCallback т={т} ч={ч} поставить={поставить} />
       <Field имя="Номер, который видит звонящий" подсказка="Когда узел перезванивает" было={ч.было('/callbackCallerId')}>
         <TextInput значение={т.callbackCallerId} onChange={v => поставить(['callbackCallerId'], v)} подпись="Номер для перезвона"
           placeholder="+7 800 000-00-00" className="w-52 font-mono" />
@@ -317,6 +323,67 @@ function CallbackTab({ т, ч, поставить, потолок }: Части 
         </Field>
       </More>
     </div>
+  )
+}
+
+/** Причины пропуска, по которым правило заводит долг само, если причин не назвали (node rules.ts MISSED_DUTY_REASONS). */
+const ПРИЧИНЫ_ДОЛГА = ['after_hours', 'fallback', 'forward', 'before_queue', 'abandoned', 'interrupted', 'other']
+const ВСЕ_ПРИЧИНЫ = ['after_hours', 'fallback', 'forward', 'before_queue', 'abandoned_short', 'abandoned', 'interrupted', 'other']
+
+/**
+ * Правило «Перезвонить пропущенным» (волна 7): узел сам заводит долг перезвона по пропущенному звонку.
+ * Пропущенный — тот же, что в «Пропущено» статистики. Повтор того же номера присоединяется к открытому долгу.
+ */
+function MissedCallback({ т, ч, поставить }: Части) {
+  const m = т.missedCallback ?? {}
+  const вкл = m.enabled === true
+  const причины = m.reasons ?? ПРИЧИНЫ_ДОЛГА
+  const было = ч.было('/missedCallback') ?? ч.было('/missedCallback/enabled') ?? ч.было('/missedCallback/reasons')
+    ?? ч.было('/missedCallback/assignee') ?? ч.было('/missedCallback/delayMin')
+  return (
+    <Field имя="Перезвонить пропущенным" было={было}
+      подсказка="Узел сам заведёт долг перезвона по пропущенному звонку — он появится в «Нужен контакт». Повторный пропуск того же номера присоединится к открытому долгу.">
+      <div className="w-full space-y-2">
+        <label className="flex items-center gap-2 text-sm">
+          <Switch checked={вкл} onCheckedChange={v => поставить(['missedCallback', 'enabled'], v)} aria-label="Перезвонить пропущенным" />
+          {вкл ? 'включено' : 'выключено — долг заводят только звонящий, оператор и администратор'}
+        </label>
+        {вкл && (
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-muted-foreground">кто звонит</span>
+              <select value={m.assignee ?? 'cc'} onChange={e => поставить(['missedCallback', 'assignee'], e.target.value)}
+                aria-label="Кто перезванивает пропущенным" className="h-9 rounded-md border border-input bg-card px-2 text-sm">
+                <option value="cc">контакт-центр (без подключения — сотрудник)</option>
+                <option value="staff">сотрудник заказчика</option>
+              </select>
+              <span className="text-muted-foreground">через</span>
+              <NumberInput значение={m.delayMin} onChange={v => поставить(['missedCallback', 'delayMin'], v)} единица="мин"
+                поУмолчанию={0} подпись="Через сколько минут перезванивать" />
+            </div>
+            <fieldset className="space-y-1">
+              <legend className="text-xs text-muted-foreground">По каким пропущенным</legend>
+              <div className="flex flex-wrap gap-1.5">
+                {ВСЕ_ПРИЧИНЫ.map(r => {
+                  const есть = причины.includes(r)
+                  return (
+                    <button key={r} type="button" aria-pressed={есть}
+                      onClick={() => поставить(['missedCallback', 'reasons'], есть ? причины.filter(x => x !== r) : [...причины, r])}
+                      className={cn('rounded-md border px-2 py-1 text-xs transition-colors',
+                        есть ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-accent/50')}>
+                      {ПРИЧИНА_ПРОПУСКА[r] ?? r}
+                    </button>
+                  )
+                })}
+              </div>
+              {причины.includes('abandoned_short') && (
+                <p className="text-xs text-warning">Коротко брошенные обычно ошиблись номером: перезванивать им — лишние звонки.</p>
+              )}
+            </fieldset>
+          </>
+        )}
+      </div>
+    </Field>
   )
 }
 

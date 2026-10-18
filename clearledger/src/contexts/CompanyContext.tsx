@@ -136,10 +136,20 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const setCompanyId = useCallback((id: string) => {
     if (!user) return
     if (!companies.some((c) => c.id === id)) return  // валидация: id ∈ доступные
+    if (companyId === id) return
     localStorage.setItem(activeKey(user.id), id)
-    setApiCompany(id)  // синхронно — заголовок готов до рефетчей
+    // Готовим границу компаний до нового render. Если ждать effect, VoiceLayout
+    // успеет начать `/me` с новым companyId, а последующий reset выбросит уже
+    // выданный пропуск и дочерний экран выпустит второй.
+    setApiCompany(id)
+    if (companyId) {
+      qc.clear()
+      resetServiceCaches()
+    }
+    setServicesCompany(id)
+    prevId.current = id
     setCompanyIdState(id)
-  }, [user, companies])
+  }, [user, companies, companyId, qc])
 
   // Организации активной компании: список нужен и переключателю, и для сброса
   // выбора при смене компании — юрлицо одного клиента не должно утечь в другого.

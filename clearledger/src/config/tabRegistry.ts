@@ -26,7 +26,7 @@ const PRODUCT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
 // новый раздел «Телефонии» добавляется и сюда. Имена вкладок уточнены там, где голое
 // имя раздела спутается с другими продуктами («Статистика», «Версии», «Аудит»).
 const VOICE_TABS = [
-  ['/voice', 'Телефония'], ['/voice/calls', 'Журнал звонков'], ['/voice/callbacks', 'Обратные звонки'],
+  ['/voice', 'Телефония'], ['/voice/calls', 'Журнал звонков'], ['/voice/contact', 'Нужен контакт'], ['/voice/callbacks', 'Обратные звонки'],
   ['/voice/stats', 'Статистика звонков'], ['/voice/report', 'Отчёт по линии за месяц'], ['/voice/reconcile', 'Сверка с оператором связи'],
   ['/voice/reception', 'Правила приёма'],
   ['/voice/passport', 'Паспорт для КЦ'], ['/voice/targets', 'Сотрудники и переводы'],
