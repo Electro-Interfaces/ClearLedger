@@ -54,6 +54,7 @@ async def network_vendors(
     region: str | None = None,
     vendor: str | None = None,
     as_of: date | None = None,
+    location_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Сводка по производителям; с `vendor` — ещё и станции этой марки.
 
@@ -120,6 +121,8 @@ async def network_vendors(
     регионы_выборки: set[str] = set()
 
     for s in станции:
+        if location_ids is not None and str(s.id) not in location_ids:
+            continue
         рег = имена_регионов.get(s.region_id) or (
             (s.extra_metadata or {}).get("federalSubject") if s.extra_metadata else None)
         # Перечень регионов собираем ДО отбора: иначе выбранный на экране регион

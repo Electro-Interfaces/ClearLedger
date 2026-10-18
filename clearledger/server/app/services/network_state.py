@@ -74,6 +74,7 @@ async def network_state(
     region: str | None = None,
     only_problems: bool = False,
     as_of: date | None = None,
+    location_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Состояние сети: сводка, разрез по регионам и строки по станциям.
 
@@ -178,6 +179,8 @@ async def network_state(
 
     строки: list[dict[str, Any]] = []
     for s in станции:
+        if location_ids is not None and str(s.id) not in location_ids:
+            continue
         # Партнёрские станции (СНК) мы не обслуживаем: их простой — не наша
         # работа и не наш недобор. В продажах и деньгах они остаются.
         if not обслуживаем(s.owner):

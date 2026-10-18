@@ -30,6 +30,7 @@ from app.services import station_upkeep as up
 from app.services.station_checklist import ITEM_BY_KEY, checklist_meta
 from app.services.network_state import network_state
 from app.services.ops_worklist import ops_worklist
+from app.services.ops_monitor_context import monitor_locations
 from app.services import space_projection
 from app.services.ops_dashboard import (
     ops_balance, ops_completeness, ops_overview, ops_station,
@@ -38,12 +39,22 @@ from app.services.ops_dashboard import (
 router = APIRouter(prefix="/ops", tags=["Управленческий кокпит (ЭЗС)"])
 
 
+class MonitorScopeQ:
+    def __init__(self, location_ids: str | None = Query(None), station_codes: str | None = Query(None)):
+        self.location_ids = location_ids
+        self.station_codes = station_codes
+
+    async def resolve(self, db, company_id):
+        return await monitor_locations(db, company_id, self.location_ids, self.station_codes)
+
+
 @router.get("/network-state")
 async def get_network_state(
     company_id: str = Query(...),
     region: str | None = Query(None, description="фильтр: регион"),
     only_problems: bool = Query(False, description="только расхождения статуса и факта"),
     as_of: date | None = Query(None, description="состояние НА этот день (по умолчанию — граница данных)"),
+    scope: MonitorScopeQ = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -55,8 +66,9 @@ async def get_network_state(
     выручке самой станции.
     """
     cid = await assert_company_member(company_id, current_user, db)
+    location_ids = await scope.resolve(db, cid)
     return await network_state(db, cid, region=region, only_problems=only_problems,
-                               as_of=as_of)
+                               as_of=as_of, location_ids=location_ids)
 
 
 @router.get("/tickets")
@@ -66,6 +78,7 @@ async def get_ops_tickets(
     limit: int = Query(2000, ge=1, le=5000),
     region: str | None = Query(None),
     as_of: date | None = Query(None),
+    scope: MonitorScopeQ = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -75,8 +88,9 @@ async def get_ops_tickets(
     заявок в Ядре нет — разрез берётся у приложения в момент показа.
     """
     cid = await assert_company_member(company_id, current_user, db)
+    location_ids = await scope.resolve(db, cid)
     try:
-        return await ops_tickets.ops_tickets(db, cid, days=days, limit=limit, region=region, as_of=as_of)
+        return await ops_tickets.ops_tickets(db, cid, days=days, limit=limit, region=region, as_of=as_of, location_ids=location_ids)
     except space_projection.ProjectionError as e:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(e)) from e
 
@@ -101,6 +115,7 @@ async def get_ops_worklist(
     company_id: str = Query(...),
     region: str | None = Query(None, description="фильтр: регион"),
     as_of: date | None = Query(None, description="список НА этот день"),
+    scope: MonitorScopeQ = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -115,13 +130,14 @@ async def get_ops_worklist(
     «взято/не взято», и это честно сказано полем `workKnown`.
     """
     cid = await assert_company_member(company_id, current_user, db)
+    location_ids = await scope.resolve(db, cid)
     работа: dict | None = None
     try:
         свёртка = await space_projection.network_open_tickets(db, cid, "support")
         работа = {str(r.get("ecoObjectId")): r for r in свёртка.get("objects", [])}
     except space_projection.ProjectionError:
         работа = None
-    return await ops_worklist(db, cid, region=region, open_work=работа, as_of=as_of)
+    return await ops_worklist(db, cid, region=region, open_work=работа, as_of=as_of, location_ids=location_ids)
 
 
 @router.get("/vendors")
@@ -131,6 +147,7 @@ async def get_network_vendors(
     region: str | None = Query(None),
     vendor: str | None = Query(None, description="марка: вернуть ещё и её станции"),
     as_of: date | None = Query(None, description="окно заканчивается этим днём"),
+    scope: MonitorScopeQ = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -140,8 +157,9 @@ async def get_network_vendors(
     площадке — это вопрос к закупке и сервису, а не к выездной бригаде.
     """
     cid = await assert_company_member(company_id, current_user, db)
+    location_ids = await scope.resolve(db, cid)
     return await network_vendors(db, cid, days=days, region=region, vendor=vendor,
-                                 as_of=as_of)
+                                 as_of=as_of, location_ids=location_ids)
 
 
 @router.post("/contracts/{contract_id}/liability/parse")
@@ -479,6 +497,7 @@ async def get_network_reliability(
     region: str | None = Query(None),
     min_sessions: int = Query(10, ge=1, le=1000),
     as_of: date | None = Query(None, description="окно заканчивается этим днём"),
+    scope: MonitorScopeQ = Depends(),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -488,8 +507,9 @@ async def get_network_reliability(
     которые в сети, но клиент уезжает ни с чем.
     """
     cid = await assert_company_member(company_id, current_user, db)
+    location_ids = await scope.resolve(db, cid)
     return await network_reliability(db, cid, days=days, region=region,
-                                     min_sessions=min_sessions, as_of=as_of)
+                                     min_sessions=min_sessions, as_of=as_of, location_ids=location_ids)
 
 
 @router.get("/overview")

@@ -9,6 +9,7 @@ import { StationLink } from '@/components/common/StationLink'
 import { BulkTicketDialog } from '@/components/locations/BulkTicketDialog'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useFilters } from '@/contexts/FilterContext'
+import { useMonitorScope } from './useMonitorScope'
 import { useStationCard } from '@/contexts/StationCardContext'
 import { LOCATION_STATUS_META, type LocationStatus } from '@/types/location'
 import { cn } from '@/lib/utils'
@@ -83,13 +84,14 @@ function Поле({ id, label, children, className }: { id: string; label: strin
 }
 
 export function NetworkStatePanel() {
+  const scope = useMonitorScope()
   const { companyId } = useCompany()
   const { regionIds, period } = useFilters()
   const [settings, setSettings] = useState<Настройки>({ search: '', region: 'all', status: 'all', filter: 'attention', view: 'list' })
   const region = regionIds.length ? regionIds.join('|') : undefined
   const asOf = period.to >= daysAgoISO(1) ? '' : period.to
-  const q = useQuery({ queryKey: ['ops-network-state-report', companyId, region ?? '', asOf],
-    queryFn: () => getNetworkState(companyId, { region, asOf: asOf || undefined }), enabled: !!companyId, staleTime: 60_000 })
+  const q = useQuery({ queryKey: ['ops-network-state-report', companyId, region ?? '', asOf, scope],
+    queryFn: () => getNetworkState(companyId, { ...scope, region, asOf: asOf || undefined }), enabled: !!companyId, staleTime: 60_000 })
   const work = useQuery({ queryKey: ['network-open-work', companyId, asOf], queryFn: () => getNetworkOpenWork(companyId),
     enabled: !!companyId && !asOf, staleTime: 60_000, retry: false })
   const поЗаявкам = useMemo(() => !asOf && work.data && !work.isError
@@ -284,11 +286,12 @@ function StateSubset({ rows, work, caption, lines }: { rows: NetworkStationRow[]
 }
 
 function StateCompare({ companyId, region, now }: { companyId: string; region?: string; now: NetworkState }) {
+  const scope = useMonitorScope()
   const [offset, setOffset] = useState<number | null>(null)
   const date = new Date(now.asOf.slice(0, 10) + 'T12:00:00Z'); date.setUTCDate(date.getUTCDate() - (offset ?? 0))
   const past = offset ? date.toISOString().slice(0, 10) : ''
-  const q = useQuery({ queryKey: ['ops-state-compare', companyId, region ?? '', past],
-    queryFn: () => getNetworkState(companyId, { region, asOf: past }), enabled: !!past && !!companyId, staleTime: 60_000 })
+  const q = useQuery({ queryKey: ['ops-state-compare', companyId, region ?? '', past, scope],
+    queryFn: () => getNetworkState(companyId, { ...scope, region, asOf: past }), enabled: !!past && !!companyId, staleTime: 60_000 })
   return <div className="flex flex-col gap-3">
     <p className="text-xs text-muted-foreground">Весь выбранный контур без локальных отборов. Состав парка и паспортные статусы текущие в обоих срезах; история заявок не сравнивается.</p>
     <div className="flex flex-wrap gap-2">{[[1, 'День назад'], [7, 'Неделю назад'], [30, 'Месяц назад']].map(([n, label]) =>

@@ -257,10 +257,12 @@ export interface NetworkReliability extends OpsSnapshot {
 
 export async function getNetworkReliability(
   companyId: string,
-  options?: { days?: number; region?: string; minSessions?: number; asOf?: string },
+  options?: { locationIds?: string; stationCodes?: string; days?: number; region?: string; minSessions?: number; asOf?: string },
 ): Promise<NetworkReliability> {
   const params: Record<string, string> = { company_id: companyId }
   if (options?.days) params.days = String(options.days)
+  if (options?.locationIds) params.location_ids = options.locationIds
+  if (options?.stationCodes) params.station_codes = options.stationCodes
   if (options?.region) params.region = options.region
   if (options?.minSessions) params.min_sessions = String(options.minSessions)
   if (options?.asOf) params.as_of = options.asOf
@@ -336,10 +338,12 @@ export interface NetworkVendors extends OpsSnapshot {
 export async function getNetworkVendors(
   companyId: string,
   /** vendor: марка — её станции; «*» — станции всех марок (для сводной). */
-  options?: { days?: number; region?: string; vendor?: string; asOf?: string },
+  options?: { locationIds?: string; stationCodes?: string; days?: number; region?: string; vendor?: string; asOf?: string },
 ): Promise<NetworkVendors> {
   const params: Record<string, string> = { company_id: companyId }
   if (options?.days) params.days = String(options.days)
+  if (options?.locationIds) params.location_ids = options.locationIds
+  if (options?.stationCodes) params.station_codes = options.stationCodes
   if (options?.region) params.region = options.region
   if (options?.vendor) params.vendor = options.vendor
   if (options?.asOf) params.as_of = options.asOf
@@ -712,11 +716,13 @@ export interface OpsTickets extends OpsSnapshot {
 }
 
 export async function getOpsTickets(
-  companyId: string, options?: { days?: number; limit?: number; region?: string; asOf?: string },
+  companyId: string, options?: { locationIds?: string; stationCodes?: string; days?: number; limit?: number; region?: string; asOf?: string },
 ): Promise<OpsTickets> {
   const params: Record<string, string> = { company_id: companyId }
   if (options?.days) params.days = String(options.days)
   if (options?.limit) params.limit = String(options.limit)
+  if (options?.locationIds) params.location_ids = options.locationIds
+  if (options?.stationCodes) params.station_codes = options.stationCodes
   if (options?.region) params.region = options.region
   if (options?.asOf) params.as_of = options.asOf
   return get<OpsTickets>('/api/ops/tickets', params)
@@ -741,9 +747,11 @@ export async function getIntakeHealth(companyId: string): Promise<IntakeHealth> 
 }
 
 export async function getOpsWorklist(
-  companyId: string, options?: { region?: string; asOf?: string },
+  companyId: string, options?: { locationIds?: string; stationCodes?: string; region?: string; asOf?: string },
 ): Promise<OpsWorklist> {
   const params: Record<string, string> = { company_id: companyId }
+  if (options?.locationIds) params.location_ids = options.locationIds
+  if (options?.stationCodes) params.station_codes = options.stationCodes
   if (options?.region) params.region = options.region
   if (options?.asOf) params.as_of = options.asOf
   return get<OpsWorklist>('/api/ops/worklist', params)
@@ -752,9 +760,11 @@ export async function getOpsWorklist(
 export async function getNetworkState(
   companyId: string,
   /** `asOf` — состояние НА этот день (ISO), а не на границу данных. */
-  options?: { region?: string; onlyProblems?: boolean; asOf?: string },
+  options?: { locationIds?: string; stationCodes?: string; region?: string; onlyProblems?: boolean; asOf?: string },
 ): Promise<NetworkState> {
   const params: Record<string, string> = { company_id: companyId }
+  if (options?.locationIds) params.location_ids = options.locationIds
+  if (options?.stationCodes) params.station_codes = options.stationCodes
   if (options?.region) params.region = options.region
   if (options?.onlyProblems) params.only_problems = 'true'
   if (options?.asOf) params.as_of = options.asOf

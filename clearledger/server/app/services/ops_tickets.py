@@ -102,6 +102,7 @@ async def ops_tickets(
     db: AsyncSession, company_id: uuid.UUID, *,
     days: int = 90, limit: int = 2000, app_code: str = "support",
     region: str | None = None, as_of: date | None = None,
+    location_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Срез заявок с привязкой к реестру объектов."""
 
@@ -116,7 +117,7 @@ async def ops_tickets(
     }
     станции = {
         oid: s for oid, s in парк.items()
-        if region_matches(
+        if (location_ids is None or oid in location_ids) and region_matches(
             имена_регионов.get(s.region_id) or (s.extra_metadata or {}).get("federalSubject"), region)
     }
 
@@ -140,6 +141,8 @@ async def ops_tickets(
     for r in сырьё.get("rows", []):
         oid = str(r.get("ecoObjectId") or "")
         s = станции.get(oid)
+        if (region or location_ids is not None) and s is None:
+            continue
         рег = None
         if s is not None:
             рег = имена_регионов.get(s.region_id) or (

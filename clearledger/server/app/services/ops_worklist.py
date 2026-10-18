@@ -81,7 +81,7 @@ _СЛОВО_СТАТУСА = {"no_link": "нет связи", "disabled": "от�
 
 def _с_дня(day: str, open_start: bool) -> str:
     """«с 14.09» — либо «с 11.09 и раньше», если серия идёт с первой книги."""
-    return f"с {day[8:10]}.{day[5:7]}" + (" и раньше" if open_start else "")
+    return f"с {day[8:10]}.{day[5:7]}.{day[:4]}" + (" и раньше" if open_start else "")
 
 
 def _вес(строка: dict[str, Any]) -> tuple:
@@ -106,6 +106,7 @@ async def ops_worklist(
     region: str | None = None,
     open_work: dict[str, dict[str, Any]] | None = None,
     as_of: date | None = None,
+    location_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Список работы на сегодня.
 
@@ -117,9 +118,9 @@ async def ops_worklist(
     работа = (open_work or {}) if as_of is None else {}
 
     состояние = await network_state(db, company_id, region=region,
-                                    only_problems=False, as_of=as_of)
+                                    only_problems=False, as_of=as_of, location_ids=location_ids)
     надёжность = await network_reliability(db, company_id, days=ОКНО_ОТКАЗОВ,
-                                           region=region, min_sessions=0, as_of=as_of)
+                                           region=region, min_sessions=0, as_of=as_of, location_ids=location_ids)
 
     парк = {r["locationId"]: r for r in состояние["stations"]}
     строки: dict[str, dict[str, Any]] = {}
@@ -199,7 +200,7 @@ async def ops_worklist(
         s["reasons"].append({
             "kind": "dry",
             "label": f"попыток без энергии: {n}",
-            "note": "последняя " + date.fromisoformat(r["lastDryAt"][:10]).strftime("%d.%m"),
+            "note": "последняя " + date.fromisoformat(r["lastDryAt"][:10]).strftime("%d.%m.%Y"),
         })
 
     # ── отказывает ──
@@ -217,8 +218,8 @@ async def ops_worklist(
         s["clientsLost"] = r.get("clientsLost") or 0
         s["reasons"].append({
             "kind": "failing",
-            "label": f"{r.get('failedVisitsPct')} % приездов впустую",
-            "note": (f"{r.get('attemptsPerVisit')} попыток на приезд"
+            "label": f"{str(r.get('failedVisitsPct')).replace('.', ',')} % приездов впустую",
+            "note": (f"{str(r.get('attemptsPerVisit')).replace('.', ',')} попыток на приезд"
                      if (r.get("attemptsPerVisit") or 0) >= 2 else None),
         })
 
@@ -369,7 +370,7 @@ async def ops_worklist(
         "dataThrough": состояние.get("dataThrough"),
         "requestedDate": состояние.get("requestedDate"),
         "snapshotNote": (f"Сессии — на выбранный день (МСК). Статусы станций и разъёмов — по выгрузке "
-                         f"витрины АСУиМ на {срез_статусов[8:10]}.{срез_статусов[5:7]}, она приходит раз в сутки."
+                         f"витрины АСУиМ на {срез_статусов[8:10]}.{срез_статусов[5:7]}.{срез_статусов[:4]}, она приходит раз в сутки."
                          if срез_статусов else состояние.get("snapshotNote")),
         "statusDay": срез_статусов,
         "dataGaps": sorted(пробелы.values(), key=lambda r: -(r.get("sessions90d") or 0)),
