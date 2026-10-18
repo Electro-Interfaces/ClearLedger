@@ -9,7 +9,7 @@
 from app.access_catalog import system_roles_for
 from app.routers.sso_router import INTERNAL_ROUTES
 from app.services.app_registry import (
-    _ALWAYS_ON, _BY_PROFILE, _CARVED_BY_PROFILE, _default_app_on, carved_products,
+    _ALWAYS_ON, _APPS, _BY_PROFILE, _CARVED_BY_PROFILE, _default_app_on, carved_products,
 )
 
 CARVED_PROFILES = sorted(_CARVED_BY_PROFILE)
@@ -93,6 +93,18 @@ def test_system_roles_follow_carve():
             assert key.split(":")[0] in allowed, f"{profile}: {key}"
     plain = {k for r in system_roles_for("general") for k in (r["modules"] or [])}
     assert all(k.startswith("ledger") for k in plain)
+
+
+def test_works_roles_use_enabled_registry_apps():
+    """Шаблон works выдаёт существующие приложения; новых областей доступа нет."""
+    registry = {app["code"]: {code for code, _ in app["modules"]} for app in _APPS}
+    for role in system_roles_for("works"):
+        for key in role["modules"] or []:
+            app, _, module = key.partition(":")
+            assert app in registry, key
+            assert _default_app_on(app, "works"), key
+            if module:
+                assert module in registry[app], key
 
 
 def test_routes_match_frontend_map():
