@@ -47,6 +47,7 @@ export default function VoiceStatsPage() {
   const п = ПЕРИОДЫ.find(x => x.key === params.get('period')) ?? ПЕРИОДЫ[0]
   const период = п.key
   const толькоКЦ = params.get('cc') === '1'
+  const line = params.get('line') || undefined
   const поставить = (k: string, v: string | null) => {
     const n = new URLSearchParams(params)
     if (v) n.set(k, v); else n.delete(k)
@@ -56,7 +57,7 @@ export default function VoiceStatsPage() {
   const setТолькоКЦ = (v: boolean) => поставить('cc', v ? '1' : null)
   const назад = `/voice/stats${params.toString() ? `?${params}` : ''}`
   const servedByЗвонков = толькоКЦ ? 'cc' : undefined
-  const по = (metric: string) => журналПо(metric, { from, to, servedBy: servedByЗвонков, back: назад })
+  const по = (metric: string) => журналПо(metric, { from, to, line, servedBy: servedByЗвонков, back: назад })
   const from = п.from()
   const to = п.to()
   const длинный = Date.parse(to) - Date.parse(from) > 2 * 86_400_000
@@ -70,24 +71,24 @@ export default function VoiceStatsPage() {
     staleTime: Infinity,
   })
   const сводка = useQuery({
-    queryKey: ['voice-stats', companyId, 'summary', from, to, servedBy],
-    queryFn: () => voice.statsSummary(companyId, { from, to, tz: TZ, servedBy }),
+    queryKey: ['voice-stats', companyId, 'summary', from, to, servedBy, line],
+    queryFn: () => voice.statsSummary(companyId, { from, to, tz: TZ, servedBy, line }),
   })
   const ряд = useQuery({
-    queryKey: ['voice-stats', companyId, 'series', from, to, шаг],
-    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: шаг, groupBy: 'servedBy' }),
+    queryKey: ['voice-stats', companyId, 'series', from, to, шаг, line],
+    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: шаг, groupBy: 'servedBy', line }),
   })
   const темы = useQuery({
-    queryKey: ['voice-stats', companyId, 'topic', from, to],
-    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: '1mo', groupBy: 'topic,servedBy' }),
+    queryKey: ['voice-stats', companyId, 'topic', from, to, line],
+    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: '1mo', groupBy: 'topic,servedBy', line }),
   })
   const центры = useQuery({
-    queryKey: ['voice-stats', companyId, 'cc', from, to],
-    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: '1mo', groupBy: 'cc' }),
+    queryKey: ['voice-stats', companyId, 'cc', from, to, line],
+    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: '1mo', groupBy: 'cc', line }),
   })
   const операторы = useQuery({
-    queryKey: ['voice-stats', companyId, 'operators', from, to],
-    queryFn: () => voice.statsOperators(companyId, { from, to }),
+    queryKey: ['voice-stats', companyId, 'operators', from, to, line],
+    queryFn: () => voice.statsOperators(companyId, { from, to, line }),
   })
 
   const пояснение = useMemo(() => {
@@ -357,7 +358,7 @@ export default function VoiceStatsPage() {
                     {операторы.data.map(r => (
                       <tr key={`${r.operator.kind}:${r.operator.id}`} className="border-t border-border/60">
                         <td className="py-1.5">
-                          <Link to={`/voice/calls?${new URLSearchParams({ from, to, operator: `${r.operator.kind}:${r.operator.id}`, back: назад })}`}
+                          <Link to={`/voice/calls?${new URLSearchParams({ from, to, ...(line ? { line } : {}), operator: `${r.operator.kind}:${r.operator.id}`, back: назад })}`}
                             className="underline decoration-border underline-offset-4 hover:decoration-primary">{оператор(r.operator)}</Link>
                         </td>
                         <td className="py-1.5 text-right tabular-nums">{число(r.metrics.answered)}</td>

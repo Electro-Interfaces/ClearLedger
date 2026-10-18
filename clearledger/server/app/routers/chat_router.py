@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import (
-    APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status,
+    APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, Response, status,
 )
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete as sa_delete, func, or_, select, text
@@ -197,6 +197,9 @@ async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) 
     if room.company_id is not None and room.type != "direct":
         if room.company_id != await _company_of(user, db):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
+    if room.scope_ticket_id is not None:
+        from app.services.ticket_communications import assert_staff_room
+        await assert_staff_room(db, room, user)
     p = (await db.execute(select(ChatParticipant.id).where(
         ChatParticipant.room_id == room_id, ChatParticipant.user_id == user.id))).scalar_one_or_none()
     if p is None and not user.is_superadmin:
@@ -242,6 +245,16 @@ async def _history_from(room_id: uuid.UUID, user: User, db: AsyncSession) -> dat
     return (await db.execute(select(ChatParticipant.history_from).where(
         ChatParticipant.room_id == room_id,
         ChatParticipant.user_id == user.id))).scalar_one_or_none()
+
+
+async def _assert_ticket_message_visible(room, message, user, db):
+    """Закрытая история private ticket room не открывается через ID сообщения."""
+    if room.scope_ticket_id is not None:
+        if message is None:
+            raise HTTPException(404, "Сообщение не найдено")
+        since = await _history_from(room.id, user, db)
+        if since is not None and message.created_at < since:
+            raise HTTPException(404, "Сообщение не найдено")
 
 
 # Базовый набор чатов, который есть в пространстве с первого дня (концепция МАГа
@@ -1120,7 +1133,8 @@ async def list_messages(
     reply_ids = {m.reply_to for m in msgs if m.reply_to}
     replies = {}
     if reply_ids:
-        for r in (await db.execute(select(ChatMessage).where(ChatMessage.id.in_(reply_ids)))).scalars():
+        for r in (await db.execute(select(ChatMessage).where(ChatMessage.id.in_(reply_ids),
+                ChatMessage.created_at >= граница if граница is not None else text("true")))).scalars():
             replies[r.id] = r
     reactions = await _load_reactions([m.id for m in msgs], current_user.id, db)
     # Принадлежность авторов — одним запросом на всю страницу переписки.
@@ -1191,6 +1205,9 @@ async def send_message(
                 ChatMessage.id == reply_to))).scalar_one_or_none()
             if src_room != rid:
                 reply_to = None
+            elif room.scope_ticket_id is not None:
+                original = await db.get(ChatMessage, reply_to)
+                await _assert_ticket_message_visible(room, original, current_user, db)
     # Размер берём из карточки файла, а не со слов клиента: видео сжимается уже
     # после загрузки, и присланное число к моменту отправки успевает устареть в
     # двадцать раз.
@@ -1286,13 +1303,14 @@ async def react_message(
         rid, mid = uuid.UUID(room_id), uuid.UUID(message_id)
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
-    await _assert_participant(rid, current_user, db)
+    room = await _assert_participant(rid, current_user, db)
     emoji = (body.emoji or "").strip()[:16]
     if not emoji:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пустая реакция")
     msg = await db.get(ChatMessage, mid)
     if msg is None or msg.room_id != rid or msg.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
+    await _assert_ticket_message_visible(room, msg, current_user, db)
     existing = (await db.execute(select(ChatMessageReaction).where(
         ChatMessageReaction.message_id == mid,
         ChatMessageReaction.user_id == current_user.id))).scalar_one_or_none()
@@ -1344,9 +1362,10 @@ async def pin_message(
         msg = await db.get(ChatMessage, mid)
         if msg is None or msg.room_id != rid or msg.deleted_at is not None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
+        await _assert_ticket_message_visible(room, msg, current_user, db)
         room.pinned_message_id = mid
     await db.commit()
-    pinned = await _pinned_out(room, db)
+    pinned = await _pinned_out(room, db, await _history_from(rid, current_user, db))
     await manager.broadcast(f"chat:{rid}", {
         "type": "chat:pin", "roomId": str(rid),
         "pinnedMessage": pinned.model_dump() if pinned else None,
@@ -1367,10 +1386,11 @@ async def edit_message(
         rid, mid = uuid.UUID(room_id), uuid.UUID(message_id)
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
-    await _assert_participant(rid, current_user, db)
+    room = await _assert_participant(rid, current_user, db)
     msg = await db.get(ChatMessage, mid)
     if msg is None or msg.room_id != rid or msg.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
+    await _assert_ticket_message_visible(room, msg, current_user, db)
     if msg.user_id != current_user.id and not current_user.is_superadmin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Можно править только свои сообщения")
     content = (body.content or "").strip()
@@ -1402,6 +1422,7 @@ async def delete_message(
     msg = await db.get(ChatMessage, mid)
     if msg is None or msg.room_id != rid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
+    await _assert_ticket_message_visible(room, msg, current_user, db)
     my = (await db.execute(select(ChatParticipant.role).where(
         ChatParticipant.room_id == rid, ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
     can = (msg.user_id == current_user.id or current_user.is_superadmin
@@ -1561,7 +1582,13 @@ async def add_participant(
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     room = await _assert_participant(rid, current_user, db)
-    if room.audience == "internal":
+    if room.scope_ticket_id is not None:
+        from app.services.ticket_communications import assert_staff_room
+        person = await db.get(User, target)
+        if person is None:
+            raise HTTPException(403, "Участник недоступен")
+        await assert_staff_room(db, room, person, require_member=False)
+    elif room.audience == "internal":
         person = await db.get(User, target)
         if person is None or person.mail_only or not await _is_insider(person, room.company_id):
             raise HTTPException(403, "Внешних участников добавляют в отдельное обсуждение")
@@ -1702,6 +1729,8 @@ async def inbound_email(
     room = await db.get(ChatRoom, rid)
     if room is None or room.company_id != company.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Чат не найден")
+    if room.scope_ticket_id is not None:
+        raise HTTPException(403, "Чат заявки не принимает письма")
 
     email = (body.fromAddress or "").strip().lower()
     author = (await db.execute(
@@ -2046,7 +2075,9 @@ async def vote_poll(
     poll = await db.get(ChatPoll, pid)
     if poll is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Опрос не найден")
-    await _assert_participant(poll.room_id, current_user, db)
+    room = await _assert_participant(poll.room_id, current_user, db)
+    if room.scope_ticket_id is not None:
+        await _assert_ticket_message_visible(room, await db.get(ChatMessage, poll.message_id), current_user, db)
     if poll.closed_at is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Опрос завершён")
 
@@ -2095,7 +2126,9 @@ async def add_poll_option(
     poll = await db.get(ChatPoll, pid)
     if poll is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Опрос не найден")
-    await _assert_participant(poll.room_id, current_user, db)
+    room = await _assert_participant(poll.room_id, current_user, db)
+    if room.scope_ticket_id is not None:
+        await _assert_ticket_message_visible(room, await db.get(ChatMessage, poll.message_id), current_user, db)
     if poll.closed_at is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Опрос завершён")
     if not poll.allow_custom:
@@ -2291,7 +2324,8 @@ async def forward_message(
     src = await db.get(ChatMessage, mid)
     if src is None or src.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
-    await _assert_participant(src.room_id, current_user, db)
+    source_room = await _assert_participant(src.room_id, current_user, db)
+    await _assert_ticket_message_visible(source_room, src, current_user, db)
     origin = src.forwarded_from or src.user_name
 
     made: list[tuple[ChatMessage, ChatRoom]] = []
@@ -2350,6 +2384,7 @@ async def search_all_messages(
         .join(ChatParticipant, and_(ChatParticipant.room_id == ChatRoom.id,
                                     ChatParticipant.user_id == current_user.id))
         .where(ChatRoom.company_id == cid, ChatRoom.is_active.is_(True),
+               ChatRoom.scope_ticket_id.is_(None),  # скрытое обсуждение ищут только внутри карточки
                ChatMessage.deleted_at.is_(None),
                or_(ChatRoom.type == "direct", ChatRoom.scope_product == scope)
                if scope else text("true"),
@@ -2392,6 +2427,7 @@ async def ticket_from_message(
     if msg is None or msg.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
     room = await _assert_participant(msg.room_id, current_user, db)
+    await _assert_ticket_message_visible(room, msg, current_user, db)
     # Объект: явный выбор → привязка чата → «Офис» по умолчанию.
     object_id = (body.objectId or "").strip() or room.scope_object_id
     if not object_id:
@@ -2482,6 +2518,7 @@ async def task_from_message(
     if msg is None or msg.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
     room = await _assert_participant(msg.room_id, current_user, db)
+    await _assert_ticket_message_visible(room, msg, current_user, db)
     since = await _history_from(msg.room_id, current_user, db)
     if since and msg.created_at < since:
         raise HTTPException(404, "Сообщение не найдено")
@@ -2611,6 +2648,7 @@ async def process_from_message(
     if msg is None or msg.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Сообщение не найдено")
     room = await _assert_participant(msg.room_id, current_user, db)
+    await _assert_ticket_message_visible(room, msg, current_user, db)
     since = await _history_from(msg.room_id, current_user, db)
     if since and msg.created_at < since:
         raise HTTPException(404, "Сообщение не найдено")
@@ -2808,72 +2846,16 @@ async def ensure_ticket_room(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Чат заявки: скрытая группа «быстро обсудить и записать следующий шаг».
-
-    В общий список чатов не попадает — увидеть её можно только из карточки заявки.
-    Создаётся при первом обращении; участники — подключённые к заявке (автор,
-    исполнители; матч между схемами по email) плюс открывший."""
+    """Один private staff room; актуальный Support ACL и explicit membership."""
+    from app.services.ticket_communications import ensure_staff_room
     cid = await _company_of(current_user, db)
     try:
         tid = uuid.UUID(ticket_id)
     except (ValueError, TypeError):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
-
-    # Заявка — своей компании, и вызывающий к ней причастен. Без этой проверки чат
-    # заявки открывался ЛЮБОМУ сотруднику пространства по её id: комната скрытая, но
-    # ручка молча вписывала пришедшего в участники и отдавала всю переписку.
-    t = (await db.execute(text(
-        "select t.id, t.number, t.display_number, t.title, t.customer_user_id, "
-        "t.assigned_to, t.current_assignee_id, lower(cu.email) as customer_email, "
-        "lower(au.email) as assignee_email, lower(ca.email) as current_email "
-        "from public.tickets t "
-        "left join public.users cu on cu.id = t.customer_user_id "
-        "left join public.users au on au.id = t.assigned_to "
-        "left join public.users ca on ca.id = t.current_assignee_id "
-        "where t.id = :t"), {"t": str(tid)})).first()
-    if t is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
-    my_email = (current_user.email or "").lower()
-    related = bool(my_email) and my_email in {
-        t.customer_email, t.assignee_email, t.current_email} - {None}
-    if not (related or current_user.is_superadmin
-            or await _is_space_admin(current_user, cid, db)):
-        raise HTTPException(status.HTTP_403_FORBIDDEN,
-                            "Обсуждение заявки доступно её участникам")
-
-    existing = (await db.execute(select(ChatRoom).where(
-        ChatRoom.scope_ticket_id == tid, ChatRoom.company_id == cid,
-        ChatRoom.is_active.is_(True)))).scalar_one_or_none()
-    if existing is not None:
-        p = (await db.execute(select(ChatParticipant.id).where(
-            ChatParticipant.room_id == existing.id,
-            ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
-        if p is None:
-            db.add(ChatParticipant(room_id=existing.id, user_id=current_user.id, role="member"))
-            await db.commit()
-        return await get_room(str(existing.id), current_user, db)
-
-    num = t.display_number or (str(t.number) if t.number is not None else "")
-    room = ChatRoom(type="group", kind=None,
-                    name=f"Заявка {('№' + num) if num else ''}".strip(),
-                    company_id=cid, created_by=current_user.id, scope_ticket_id=tid)
-    db.add(room)
-    await db.flush()
-    db.add(ChatParticipant(room_id=room.id, user_id=current_user.id, role="owner"))
-    # Подключённые к заявке — люди Поддержки; в пространство их приводит email.
-    sup_ids = [x for x in (t.customer_user_id, t.assigned_to, t.current_assignee_id) if x]
-    if sup_ids:
-        emails = [e for (e,) in (await db.execute(text(
-            "select lower(email) from public.users where id = any(:ids)"),
-            {"ids": sup_ids})).all() if e]
-        if emails:
-            core_ids = (await db.execute(select(User.id).where(
-                func.lower(User.email).in_(emails),
-                User.id != current_user.id))).scalars().all()
-            for uid in core_ids:
-                if cid in await _member_ids(uid, db):
-                    db.add(ChatParticipant(room_id=room.id, user_id=uid, role="member"))
-    await db.commit()
+        raise HTTPException(400, "Невалидный ID")
+    room = await ensure_staff_room(db, cid, current_user, tid)
+    from app.services.ticket_communications import access
+    await access(db,cid,current_user,tid,event={"kind":"staff_chat","roomRef":f"core:chat:{room.id}"})
     return await get_room(str(room.id), current_user, db)
 
 
@@ -3167,7 +3149,7 @@ async def _ws_user(token: str) -> User | None:
 
 async def _ws_can_subscribe(user: User, channel: str, db: AsyncSession) -> bool:
     """Тенант-изоляция подписок: свой user-канал, своя компания, свои комнаты."""
-    if user.is_superadmin:
+    if user.is_superadmin and not channel.startswith("chat:"):
         return True
     if channel == f"user:{user.id}":
         return True
@@ -3219,6 +3201,10 @@ async def chat_ws(ws: WebSocket, token: str = Query(...)):
             elif mtype == "typing":
                 ch = data.get("channel", "")
                 if manager.is_subscribed(ws, ch):
+                    async with async_session_factory() as db:
+                        if not await _ws_can_subscribe(user,ch,db):
+                            manager.unsubscribe(ws,ch)
+                            continue
                     await manager.broadcast(ch, {"type": "chat:typing", "userId": str(user.id),
                                                  "userName": user.name}, exclude=ws)
     except WebSocketDisconnect:
@@ -3598,3 +3584,15 @@ async def admin_remove_participant(
     await log_audit(db, actor=current_user, company_id=cid, action="chat.participant_remove",
                     target=room.name or "чат", details={"roomId": str(rid), "userId": str(uid)})
     await db.commit()
+
+
+@router.post("/tickets/{ticket_id}/video")
+async def ticket_video_entry(ticket_id:uuid.UUID,response:Response,current_user:User=Depends(get_current_user),db:AsyncSession=Depends(get_db)):
+    response.headers["Cache-Control"]="no-store"
+    from app.services.support_scope import support_company_id
+    from app.routers.ticket_communications_router import ticket_video, TicketCompany
+    cid=await _company_of(current_user,db)
+    mapped=await support_company_id(db,cid)
+    if not mapped:
+        raise HTTPException(404,"Поддержка не подключена компании")
+    return await ticket_video(ticket_id,TicketCompany(supportCompanyId=mapped),current_user,db)
