@@ -980,6 +980,9 @@ async def execute_act(
             await db.commit()
         except Exception as exc:  # noqa: BLE001 — ошибка обязана остаться в акте
             await db.rollback()
+            # rollback сбрасывает загруженные атрибуты и при expire_on_commit=False.
+            # Пользователь нужен дальше для проверки lease, события и аудита.
+            await db.refresh(current_user)
             lease_owned = await db.scalar(select(DocDestructionAct.id).where(
                 DocDestructionAct.id == aid,
                 DocDestructionAct.company_id == cid,

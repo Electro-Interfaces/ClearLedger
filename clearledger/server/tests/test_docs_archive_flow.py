@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import hash_password
 from app.models import (
-    Company, DocAccessGrant, DocArchiveEvent, DocCard, DocCase,
+    AuditEvent, Company, DocAccessGrant, DocArchiveEvent, DocCard, DocCase,
     DocDestructionAct, DocDestructionItem, DocExport, DocKind, DocShareLink,
     DocVersion, MailAttachment, MailMessage, User, UserCompany,
 )
@@ -496,6 +496,24 @@ async def test_акт_уничтожения_требует_четырёх_ра�
     await db.refresh(stored_act)
     assert stored_act.status == "failed"
     assert stored_act.executed_by == users[2].id
+    await db.refresh(stored_item)
+    assert stored_item.status == "failed"
+    assert "Файл используется другой записью" in stored_item.error
+    assert stored_item.error in stored_act.error
+    failure_event = await db.scalar(select(DocArchiveEvent).where(
+        DocArchiveEvent.act_id == uuid.UUID(act_id),
+        DocArchiveEvent.kind == "act_execution_failed",
+    ))
+    assert failure_event.actor_id == users[2].id
+    assert failure_event.actor_name == users[2].name
+    assert stored_item.error in failure_event.payload["error"]
+    failure_audit = await db.scalar(select(AuditEvent).where(
+        AuditEvent.company_id == company.id,
+        AuditEvent.action == "doc.archive.act.execute",
+        AuditEvent.details.contains(act_id),
+    ))
+    assert failure_audit.user_id == str(users[2].id)
+    assert failure_audit.user_name == users[2].name
     shared_block = await client.post(
         f"/api/docs/archive/acts/{act_id}/execute", headers=third,
         json={"company_id": company_id},
@@ -717,12 +735,17 @@ async def test_акт_уничтожения_требует_четырёх_ра�
     await db.refresh(doc)
     await db.refresh(version)
     stored_act = await db.get(DocDestructionAct, uuid.UUID(act_id))
+    await db.refresh(stored_act)
     assert doc.retention_state == "destroyed"
     assert version.archive_purged_at is not None
     assert version.content_text is None
     assert doc.summary is None
     assert doc.attrs is None
     assert stored_act.sealed_sha256
+    assert stored_act.created_by == users[0].id
+    assert stored_act.approved_by == users[1].id
+    assert stored_act.executed_by == users[2].id
+    assert stored_act.backup_attested_by == users[3].id
     history = await client.get(
         f"/api/docs/{doc_id}/archive", headers=fourth,
         params={"company_id": company_id},
