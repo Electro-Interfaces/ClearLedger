@@ -128,17 +128,32 @@ async def test_voice_token_carries_role_jti_and_bounded_ttl(
         User.email == "admin@clearledger.ru"))).scalar_one()
     membership = await db.get(UserCompany, (superadmin.id, cid))
     if membership is None:
+        created_membership = True
+        previous_role = None
+        previous_app_roles = None
         membership = UserCompany(user_id=superadmin.id, company_id=cid, role="admin")
         db.add(membership)
+    else:
+        created_membership = False
+        previous_role = membership.role
+        previous_app_roles = dict(membership.app_roles) if membership.app_roles else membership.app_roles
     membership.role = "admin"
     membership.app_roles = {"voice": "admin"}
     await db.commit()
-    sa = await _login(client, "admin@clearledger.ru", "admin123")
-    r = await client.get("/api/sso/token", params={"app": "voice", "company_id": "rushydro"},
-                         headers=_h(sa))
-    assert r.status_code == 200, r.text
-    assert r.json()["roles"] == []
-    assert _claims(r.json()["token"], sso_key)["roles"] == []
+    try:
+        sa = await _login(client, "admin@clearledger.ru", "admin123")
+        r = await client.get("/api/sso/token", params={"app": "voice", "company_id": "rushydro"},
+                             headers=_h(sa))
+        assert r.status_code == 200, r.text
+        assert r.json()["roles"] == []
+        assert _claims(r.json()["token"], sso_key)["roles"] == []
+    finally:
+        if created_membership:
+            await db.delete(membership)
+        else:
+            membership.role = previous_role
+            membership.app_roles = previous_app_roles
+        await db.commit()
 
 
 async def test_voice_token_keeps_guard_statuses_and_messages(
