@@ -60,6 +60,8 @@ export interface ПравилаПриёма {
   callbackRingSec?: number
   callbackDial?: string
   callbackCallerId?: string
+  /** долг перезвона по пропущенным (волна 7): узел сам заводит задачу обратного звонка; по умолчанию выключено */
+  missedCallback?: { enabled?: boolean; reasons?: string[]; assignee?: 'cc' | 'staff'; delayMin?: number }
 }
 
 /** Что узел подставляет сам, если поля нет (node/src/rules.ts). */
@@ -130,6 +132,11 @@ export const ПОДПИСИ_ПРАВИЛ: Record<string, string> = {
   '/callbackRingSec': 'Сколько звонит набор',
   '/callbackDial': 'Строка набора',
   '/callbackCallerId': 'Номер, который видит звонящий',
+  '/missedCallback': 'Перезвонить пропущенным',
+  '/missedCallback/enabled': 'Перезвонить пропущенным: включено',
+  '/missedCallback/reasons': 'Перезвонить пропущенным: причины',
+  '/missedCallback/assignee': 'Перезвонить пропущенным: кто звонит',
+  '/missedCallback/delayMin': 'Перезвонить пропущенным: через',
   '/operatorControls': 'Пульт оператора',
   '/operatorControls/commands': 'Разрешённые команды пульта',
   '/operatorControls/staff': 'Сотрудники для перевода',

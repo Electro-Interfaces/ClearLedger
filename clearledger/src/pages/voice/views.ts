@@ -11,7 +11,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Archive, BarChart3, Building2, Cable, FileBarChart, GitCompare, Hash, Headset, History,
-  IdCard, ListChecks, PhoneCall, PhoneOutgoing, Radio, ScrollText, Settings2, ShieldCheck,
+  IdCard, ListChecks, PhoneCall, PhoneMissed, PhoneOutgoing, Radio, ScrollText, Settings2, ShieldCheck,
   Sparkles, Stethoscope, Users, Volume2, Webhook, Briefcase, Eye,
 } from 'lucide-react'
 
@@ -43,6 +43,8 @@ export const VOICE_VIEWS: VoiceView[] = [
     hint: 'принимается ли линия и кто ждёт' },
   { key: 'calls', path: 'calls', label: 'Журнал звонков', group: 'work', wave: '2.1', ready: true,
     hint: 'все звонки линии: найти звонок по последним цифрам номера' },
+  { key: 'contact', path: 'contact', label: 'Нужен контакт', group: 'work', wave: '2.7', ready: true,
+    hint: 'кому должны перезвонить: долг перезвона по пропущенным, у кого он и что с ним стало' },
   { key: 'callbacks', path: 'callbacks', label: 'Обратные звонки', group: 'work', wave: '2.3', ready: true,
     hint: 'задачи «перезвонить»: от звонящего и от оператора' },
   { key: 'stats', path: 'stats', label: 'Статистика', group: 'work', wave: '2.3', ready: true,
@@ -89,7 +91,7 @@ export const VOICE_GROUP_ICONS: Record<VoiceGroup, LucideIcon> = {
 }
 
 export const VOICE_VIEW_ICONS: Record<string, LucideIcon> = {
-  now: Radio, calls: ScrollText, callbacks: PhoneCall, stats: BarChart3, report: FileBarChart,
+  now: Radio, calls: ScrollText, contact: PhoneMissed, callbacks: PhoneCall, stats: BarChart3, report: FileBarChart,
   reconcile: GitCompare, reception: ListChecks, passport: IdCard, targets: Users, sounds: Volume2,
   enrichment: Sparkles, cc: Headset, webhooks: Webhook, versions: History, audit: ShieldCheck,
   retention: Archive, health: Stethoscope, extensions: Hash, outbound: PhoneOutgoing,

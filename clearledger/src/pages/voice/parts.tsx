@@ -4,6 +4,7 @@
  */
 import { useState, type ReactNode } from 'react'
 import { AlertTriangle, ShieldCheck } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -27,23 +28,40 @@ export function Heading({ имя, подпись, children }: { имя: string; 
 }
 
 /** Число с подписью; `пояснение` расшифровывает сокращение (SL, ASA) в подсказке. */
-export function Stat({ имя, значение, пояснение, тон, подпись }: {
+export function Stat({ имя, значение, пояснение, тон, подпись, ссылка, ещё }: {
   имя: string
   значение: string
   пояснение?: string
   тон?: 'warning' | 'destructive' | 'success'
   /** строка под числом: из чего оно складывается */
   подпись?: string
+  /** журнал звонков этого числа (волна 7); у доли — её числитель */
+  ссылка?: string
+  /** у доли — второй список: то, что тянет её вниз («позже цели SLA») */
+  ещё?: { текст: string; ссылка: string }
 }) {
+  const число = (
+    <p className={cn('font-headline text-xl font-semibold tabular-nums',
+      тон === 'warning' && 'text-warning', тон === 'destructive' && 'text-destructive',
+      тон === 'success' && 'text-success')}>
+      {значение}
+    </p>
+  )
   return (
     <div title={пояснение} className="min-w-28">
       <p className="text-xs text-muted-foreground">{имя}</p>
-      <p className={cn('font-headline text-xl font-semibold tabular-nums',
-        тон === 'warning' && 'text-warning', тон === 'destructive' && 'text-destructive',
-        тон === 'success' && 'text-success')}>
-        {значение}
-      </p>
+      {ссылка
+        ? (
+          <Link to={ссылка} aria-label={`${имя}: ${значение} — открыть звонки в журнале`}
+            className="-mx-1 inline-block rounded-md px-1 underline decoration-border decoration-1 underline-offset-4 transition-colors hover:bg-accent/50 hover:decoration-primary">
+            {число}
+          </Link>
+        )
+        : число}
       {подпись && <p className="max-w-48 text-xs text-muted-foreground">{подпись}</p>}
+      {ещё && (
+        <Link to={ещё.ссылка} className="block text-xs text-primary underline-offset-4 hover:underline">{ещё.текст}</Link>
+      )}
     </div>
   )
 }

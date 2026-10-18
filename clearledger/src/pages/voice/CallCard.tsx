@@ -21,8 +21,10 @@ import {
 } from './format'
 import { ReasonDialog, Flags, NodeError } from './parts'
 import { RetentionActions } from './RetentionActions'
+import { CallLegs } from './CallLegs'
+import { DebtFromCall } from './debt'
 
-type Причина = { что: 'number' } | { что: 'transcript' } | { что: 'recording'; id: string }
+type Причина = { что: 'number' } | { что: 'transcript' } | { что: 'recording'; id: string; offset?: number; leg?: number }
 
 const ДЕЙСТВИЕ: Record<string, string> = {
   'call.view': 'открыл карточку',
@@ -36,6 +38,10 @@ const ДЕЙСТВИЕ: Record<string, string> = {
   'retention.hold': 'запретил удаление',
   'retention.release': 'снял запрет удаления',
   'callback.cancel': 'снял обратный звонок',
+  'callback.create': 'завёл перезвон',
+  'callback.assign': 'передал перезвон',
+  'callback.attempt': 'отметил попытку перезвона',
+  'callback.close': 'закрыл долг перезвона',
 }
 
 const СТОРОНА: Record<string, string> = { caller: 'звонящий', operator: 'оператор', consult: 'консультация' }
@@ -54,7 +60,7 @@ export function CallCard({ contactId, onBack }: { contactId: string; onBack?: ()
   const [причина, setПричина] = useState<Причина | null>(null)
   const [номер, setНомер] = useState<string | null>(null)
   const [фразы, setФразы] = useState<voice.Segment[] | null>(null)
-  const [звук, setЗвук] = useState<{ id: string; url: string } | null>(null)
+  const [звук, setЗвук] = useState<{ id: string; url: string; offset: number; leg?: number } | null>(null)
 
   const карточка = useQuery({
     queryKey: ['voice-call', companyId, contactId],
@@ -77,7 +83,7 @@ export function CallCard({ contactId, onBack }: { contactId: string; onBack?: ()
         setФразы(t.segments)
         if (!t.segments.length) toast.info(t.purgedAt ? 'Расшифровка удалена по сроку хранения' : 'Расшифровки у этого звонка нет')
       } else {
-        setЗвук({ id: п.id, url: await voice.recordingTicket(companyId, contactId, п.id, текст) })
+        setЗвук({ id: п.id, url: await voice.recordingTicket(companyId, contactId, п.id, текст), offset: п.offset ?? 0, leg: п.leg })
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Узел не ответил')
@@ -114,6 +120,13 @@ export function CallCard({ contactId, onBack }: { contactId: string; onBack?: ()
             {к.identity && <p className="text-sm">{к.identity}</p>}
           </div>
 
+          {!!к.legs?.length && (
+            <CallLegs legs={к.legs} outcome={к.outcome}
+              звук={звук && звук.leg != null ? { ...звук, leg: звук.leg } : null}
+              onPlay={(id, offset, leg) => setПричина({ что: 'recording', id, offset, leg })}
+              onEnded={() => setЗвук(null)} />
+          )}
+
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
             <dt className="text-muted-foreground">Пришёл</dt><dd>{когда(к.startedAt)}</dd>
             <dt className="text-muted-foreground">Линия</dt><dd>{к.lineId}</dd>
@@ -132,9 +145,14 @@ export function CallCard({ contactId, onBack }: { contactId: string; onBack?: ()
             {к.retentionHold && <><dt className="text-muted-foreground">Не удалять</dt><dd>до {дата(к.retentionHold)}</dd></>}
           </dl>
 
+          <DebtFromCall к={к} />
+
           {!!к.stages?.length && (
-            <section className="space-y-1">
-              <h2 className="text-sm font-medium">Ход звонка</h2>
+            <details className="group space-y-1" open={!к.legs?.length}>
+              <summary className="cursor-pointer text-sm font-medium">
+                {к.legs?.length ? 'Технические этапы' : 'Ход звонка'}
+                <span className="ml-1 text-xs font-normal text-muted-foreground">· {к.stages.length}</span>
+              </summary>
               <ol className="space-y-0.5 border-l border-border pl-3">
                 {к.stages.map((э, i) => (
                   <li key={`${э.stage}-${i}`} className="flex gap-3 text-sm">
@@ -146,7 +164,7 @@ export function CallCard({ contactId, onBack }: { contactId: string; onBack?: ()
                   </li>
                 ))}
               </ol>
-            </section>
+            </details>
           )}
 
           <section className="space-y-2">
@@ -168,7 +186,7 @@ export function CallCard({ contactId, onBack }: { contactId: string; onBack?: ()
                     )}
                 </div>
                 {!з.purged && з.purgeAt && <p className="text-xs text-muted-foreground">Хранится до {дата(з.purgeAt)}</p>}
-                {звук?.id === з.id && (
+                {звук?.id === з.id && звук.leg == null && (
                   // Ссылка разовая: одно открытие за 60 с, повторное прослушивание — новый запрос с причиной.
                   <audio controls autoPlay src={звук.url} className="w-full" onEnded={() => setЗвук(null)} />
                 )}

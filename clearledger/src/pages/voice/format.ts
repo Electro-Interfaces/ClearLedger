@@ -289,3 +289,126 @@ export function объём(b?: number | null) {
   while (v >= 1024 && i < ед.length - 1) { v /= 1024; i++ }
   return `${v.toLocaleString('ru-RU', { maximumFractionDigits: v < 10 && i > 0 ? 1 : 0 })} ${ед[i]}`
 }
+
+// ——— Волна 7: показатель → звонки ———
+
+/**
+ * Журнал ровно тех обращений, из которых сложилось число плитки (`/calls?metric=`):
+ * тот же период и линия; `back` — откуда пришли, чтобы вернуться к той же плитке.
+ * Ссылка — адрес: её можно переслать, она откроет тот же список.
+ */
+export function журналПо(metric: string, о: { from: string; to: string; line?: string; servedBy?: string; back?: string }) {
+  const q = new URLSearchParams({ metric, from: о.from, to: о.to })
+  if (о.line) q.set('line', о.line)
+  if (о.servedBy) q.set('servedBy', о.servedBy)
+  if (о.back) q.set('back', о.back)
+  return `/voice/calls?${q}`
+}
+
+/** Причины пропуска (node stats.ts MISSED_REASONS) — для `missed:<причина>` и правила missedCallback. */
+export const ПРИЧИНА_ПРОПУСКА: Record<string, string> = {
+  after_hours: 'вне часов приёма',
+  callback: 'выбрал обратный звонок',
+  fallback: 'запасной сценарий без оператора',
+  forward: 'переадресация без ответа',
+  before_queue: 'положил трубку до очереди',
+  abandoned_short: 'коротко брошен в очереди',
+  abandoned: 'брошен в очереди',
+  interrupted: 'прерван перезапуском узла',
+  other: 'прочее',
+}
+
+/** Причины запасного сценария (`fallback:<причина>`). */
+export const ПРИЧИНА_ЗАПАСНОГО: Record<string, string> = {
+  max_wait: 'потолок ожидания',
+  kc_offline: 'КЦ не на связи',
+  no_command: 'КЦ не назначил оператора',
+  rule: 'правило',
+}
+
+/** Единица счёта показателя: обращение, отрезок на линии, задача перезвона. */
+export const ЕДИНИЦА: Record<string, string> = {
+  call: 'обращений',
+  segment: 'отрезков на линии',
+  task: 'задач перезвона',
+}
+
+// ——— Волна 7: участки звонка ———
+
+/** Участок словами: вид и роль. */
+export function участок(l: { kind: string; role?: string }) {
+  if (l.kind === 'talk') {
+    return ({
+      transfer: 'Разговор после перевода', staff_transfer: 'Переведён сотруднику', consult_transfer: 'Передан после консультации',
+      forward: 'Переадресация', callback: 'Обратный звонок',
+    } as Record<string, string>)[l.role ?? ''] ?? 'Разговор'
+  }
+  if (l.kind === 'attempt') return l.role === 'transfer' || l.role === 'staff_transfer' ? 'Перевод не состоялся' : 'Не ответил'
+  return ({
+    ivr: 'Приветствие', queue: 'Ждал', consult: 'Консультация', park: 'Парковка', fallback: 'Запасной сценарий',
+    dial: 'Набор обратного звонка',
+  } as Record<string, string>)[l.kind] ?? l.kind
+}
+
+/** Кто на участке: оператор КЦ — псевдонимом, сотрудник — подписью из правил или трубкой. */
+export function ктоНаУчастке(w?: { kind: string; id: string; label?: string | null; endpoint?: string } | null) {
+  if (!w) return null
+  if (w.kind === 'cc') return оператор({ kind: 'cc', id: w.id })
+  if (w.kind === 'line') return `линия ${w.id}`
+  const имя = w.label || w.id
+  return w.kind === 'external' ? `внешний номер ${имя}` : w.endpoint && w.endpoint !== имя ? `${имя} (${w.endpoint})` : имя
+}
+
+/** Чем кончился участок (node history.ts). */
+export const ИТОГ_УЧАСТКА: Record<string, string> = {
+  queued: 'встал в очередь',
+  answered: 'ответили',
+  abandoned: 'звонящий положил трубку',
+  fallback: 'ушёл в запасной сценарий',
+  callback: 'выбрал обратный звонок',
+  transferred: 'передан дальше',
+  requeued: 'вернули в очередь',
+  agent_lost: 'пульт оператора пропал',
+  transfer_line: 'переведён на другую линию',
+  completed: 'передал звонок',
+  returned: 'вернулся к звонящему',
+  caller_hangup: 'звонящий завершил',
+  operator_hangup: 'оператор завершил',
+  parked: 'припаркован',
+  park_timeout: 'парковка истекла',
+  unparked: 'снят с парковки',
+  ended: 'завершён',
+  node_restart: 'прерван перезапуском узла',
+  declined: 'отклонил',
+  busy: 'занят',
+  expired: 'не ответил вовремя',
+  unreachable: 'недоступен',
+  target_no_answer: 'не ответил',
+  canceled: 'отменено',
+  reached: 'дозвонились',
+  not_reached: 'не дозвонились',
+  failed: 'не удалось',
+}
+
+/** Участок, который человек ищет глазами: кто говорил, кто не ответил, куда ушло. Остальное — технические этапы. */
+export const ГЛАВНЫЙ_УЧАСТОК = new Set(['queue', 'attempt', 'talk', 'consult', 'fallback', 'dial'])
+
+// ——— Волна 7: долг перезвона ———
+
+export const ИСПОЛНИТЕЛЬ = (a?: { kind: 'cc' } | { kind: 'staff'; id?: string | null; name?: string | null } | null) =>
+  !a ? 'не назначен' : a.kind === 'cc' ? 'контакт-центр' : a.name || a.id || 'сотрудник'
+
+export const ИТОГ_ДОЛГА: Record<string, string> = {
+  reached: 'дозвонились',
+  not_reached: 'не дозвонились',
+  refused: 'отказ',
+  resolved: 'решено иначе',
+  canceled: 'снят',
+}
+
+export const КТО_ЗАВЁЛ: Record<string, string> = {
+  caller: 'звонящий',
+  operator: 'оператор',
+  space: 'администратор',
+  auto: 'правило',
+}

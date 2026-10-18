@@ -84,6 +84,9 @@ const ОШИБКИ: Record<string, string> = {
   config_invalid: 'Проверка при применении нашла ошибки, работает прежняя версия',
   callback_busy: 'Задача уже у оператора: идёт набор или разговор',
   callback_not_scheduled: 'Задача уже закрыта',
+  callback_closed: 'Долг уже закрыт',
+  callback_at_cc: 'Задача у контакт-центра: его попытки узел считает сам',
+  cc_unavailable: 'Контакт-центр не подключён или подключение приостановлено',
   retention_hold: 'Действует запрет удаления',
   call_in_progress: 'Звонок ещё идёт',
   precondition_failed: 'Настройки успели поменять: обновите экран и повторите',
@@ -409,12 +412,19 @@ export interface Recording {
   purgeAt?: string | null
 }
 
+export type CallbackResult = 'reached' | 'not_reached' | 'refused' | 'resolved' | 'canceled'
+
+/** Исполнитель долга перезвона (волна 7): КЦ или сотрудник заказчика; `null` — не назначен. */
+export type Assignee = { kind: 'cc' } | { kind: 'staff'; id?: string | null; name?: string | null }
+
 export interface Callback {
   id: string
   originContactId?: string
   callContactId?: string | null
+  lineId?: string
   state: 'scheduled' | 'dialing' | 'reached' | 'not_reached' | 'canceled'
-  source: 'caller' | 'operator'
+  /** волна 7: `space` — завёл администратор, `auto` — правило missedCallback */
+  source: 'caller' | 'operator' | 'space' | 'auto'
   number?: string
   dueAt?: string
   nextAt?: string | null
@@ -423,6 +433,40 @@ export interface Callback {
   overdue?: boolean
   createdAt: string
   closedAt?: string | null
+  /** чем кончился долг; `null` — открыт (волна 7) */
+  result?: CallbackResult | null
+  assignee?: Assignee | null
+  closeReason?: string | null
+  closedBy?: { sub?: string | null; name?: string | null } | null
+  /** обращений долга: исходное и склеенные повторы */
+  missedCalls?: number
+}
+
+export interface CallbackCard extends Callback {
+  note?: string | null
+  contacts: {
+    contactId: string
+    kind: 'origin' | 'repeat' | 'task' | 'reached'
+    startedAt?: string | null
+    endedAt?: string | null
+    outcome?: string | null
+  }[]
+}
+
+/** Участок звонка (волна 7, `legs`): кто, сколько, чем кончился, где в записи. */
+export interface Leg {
+  kind: 'ivr' | 'queue' | 'attempt' | 'talk' | 'consult' | 'park' | 'fallback' | 'dial'
+  who: { kind: 'cc' | 'staff' | 'external' | 'line'; id: string; label?: string | null; endpoint?: string } | null
+  role?: 'answer' | 'transfer' | 'staff_transfer' | 'consult_transfer' | 'forward' | 'callback'
+  lineId?: string
+  startedAt: string
+  endedAt: string | null
+  durationSec: number | null
+  holdSec?: number
+  conference?: boolean
+  result: string | null
+  detail?: Record<string, unknown>
+  recordings: { recordingId: string; side: 'caller' | 'operator'; offsetSec: number; durationSec: number | null }[]
 }
 
 export interface CallCard extends CallRow {
@@ -444,6 +488,7 @@ export interface CallCard extends CallRow {
   /** ответы приёмников итогов: номер заявки и обращения «Поддержки» по id вебхука */
   ticketRefs?: Record<string, { ticket: { id: string | number; number?: string } | null; threadId?: string | number }>
   retentionHold?: string | null
+  legs?: Leg[]
 }
 
 export interface CallsFilter {
@@ -453,11 +498,31 @@ export interface CallsFilter {
   outcome?: Outcome | ''
   number?: string
   flags?: string
+  /** волна 7: показатель `<ключ>[:<причина>]` — ровно обращения плитки */
+  metric?: string
+  servedBy?: ServedBy | ''
+  /** участник: `cc:<id>` или `staff:<трубка>` */
+  operator?: string
+  topic?: string
   cursor?: string
   limit?: number
 }
 
-export const calls = (cid: string, f: CallsFilter) => дай<Список<CallRow>>(cid, '/calls', { ...f })
+/** Ответ журнала с `metric`: число плитки, единица счёта и уникальные обращения. */
+export interface DrillMeta {
+  key: string
+  title?: string
+  reason?: string | null
+  unit: 'call' | 'segment' | 'task'
+  unitTitle?: string
+  from: string
+  to: string
+  total: number
+  calls: number
+}
+
+export const calls = (cid: string, f: CallsFilter) =>
+  дай<Список<CallRow & { count?: number }> & { metric?: DrillMeta }>(cid, '/calls', { ...f })
 
 export const call = (cid: string, contactId: string) =>
   дай<CallCard>(cid, `/calls/${encodeURIComponent(contactId)}`)
@@ -503,8 +568,33 @@ export const audit = (cid: string, q: { contactId?: string; action?: string; act
 
 // ——— Обратные звонки ———
 
-export const callbacks = (cid: string, q: { state?: Callback['state'] | ''; overdue?: boolean; from?: string; to?: string; cursor?: string; limit?: number }) =>
-  дай<Список<Callback>>(cid, '/callbacks', q)
+export const callbacks = (cid: string, q: {
+  state?: Callback['state'] | 'open' | ''; overdue?: boolean; result?: CallbackResult; assignee?: 'cc' | 'staff' | 'none'
+  line?: string; contactId?: string; from?: string; to?: string; cursor?: string; limit?: number
+}) => дай<Список<Callback>>(cid, '/callbacks', q)
+
+// ——— Долг перезвона (волна 7) ———
+
+const долг = (id: string, tail = '') => `/callbacks/${encodeURIComponent(id)}${tail}`
+
+export const callbackCard = (cid: string, id: string) => дай<CallbackCard>(cid, долг(id))
+
+/** Завести из завершённого входящего. Открытый долг номера уже есть — `merged: true`, обращение присоединено. */
+export async function createCallback(cid: string, b: { contactId: string; assignee?: Assignee; dueAt?: string; note?: string }) {
+  return (await запрос<{ merged: boolean; callback: CallbackCard }>(cid, '/callbacks', { method: 'POST', body: b })).data
+}
+
+export async function assignCallback(cid: string, id: string, assignee: Assignee, reason?: string) {
+  return (await запрос<CallbackCard>(cid, долг(id, '/assign'), { method: 'POST', body: { assignee, reason } })).data
+}
+
+export async function callbackAttempt(cid: string, id: string, result: 'reached' | 'not_reached', note?: string) {
+  return (await запрос<CallbackCard>(cid, долг(id, '/attempts'), { method: 'POST', body: { result, note } })).data
+}
+
+export async function closeCallback(cid: string, id: string, result: 'reached' | 'not_reached' | 'refused' | 'resolved', reason: string) {
+  return (await запрос<CallbackCard>(cid, долг(id, '/close'), { method: 'POST', body: { result, reason } })).data
+}
 
 export async function cancelCallback(cid: string, id: string, reason?: string) {
   return (await запрос<Callback>(cid, `/callbacks/${encodeURIComponent(id)}/cancel`,
@@ -708,6 +798,34 @@ export async function configValidate(cid: string, kind: ConfigKind, v: number) {
 /** Применить; `ifMatch` — ETag ДЕЙСТВУЮЩЕЙ версии. Прежняя версия здесь же — это откат. */
 export const configApply = (cid: string, kind: ConfigKind, v: number, ifMatch: string, comment: string) =>
   запрос<ConfigVersion>(cid, `${к(kind)}/versions/${v}/apply`, { method: 'POST', ifMatch, body: { comment } })
+
+// ——— Проверка правил на примере (волна 7) ———
+
+export interface SimulationRequest {
+  at?: string
+  day?: 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+  time?: string
+  caller?: 'normal' | 'vip' | 'repeat'
+  cc?: 'online' | 'offline' | 'none'
+  operators?: 'ready' | 'none'
+  nodeDown?: boolean
+}
+
+export interface Simulation {
+  versions: { passport?: number; reception?: number }
+  at: string
+  local: { date: string; time: string; day: string; dayRu?: string; tz: string }
+  decision: { vip?: boolean; repeat?: boolean; inHours?: boolean; priority?: number; ceilingSec?: number; fallbackTarget?: string | null } | null
+  steps: { atSec: number; step: string; title: string; detail?: Record<string, unknown> }[]
+  result: { kind: 'operator' | 'message' | 'forward'; by?: 'cc' | 'staff'; reason?: string; target?: Record<string, unknown>; atSec?: number }
+  notes: string[]
+}
+
+/** На действующих правилах (`v` не задан) или на черновике / версии `v` вида `kind`. Ничего не применяет и не звонит. */
+export async function simulate(cid: string, kind: 'passport' | 'reception', b: SimulationRequest, v?: number) {
+  return (await запрос<Simulation>(cid, v ? `${к(kind)}/versions/${v}/simulate` : `${к(kind)}/simulate`,
+    { method: 'POST', body: b })).data
+}
 
 export const configDiff = (cid: string, kind: ConfigKind, from: number, to?: number) =>
   дай<ConfigDiff>(cid, `${к(kind)}/diff`, { from, to })

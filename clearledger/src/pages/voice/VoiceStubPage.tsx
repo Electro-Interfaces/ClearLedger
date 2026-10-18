@@ -19,6 +19,7 @@ const ЭКРАНЫ: Record<string, React.LazyExoticComponent<() => React.JSX.Ele
   health: lazy(() => import('./VoiceHealthPage')),
   report: lazy(() => import('./VoiceReportPage')),
   reconcile: lazy(() => import('./VoiceReconcilePage')),
+  contact: lazy(() => import('./VoiceContactPage')),
 }
 
 export default function VoiceStubPage() {
