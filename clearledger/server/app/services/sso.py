@@ -83,7 +83,8 @@ def new_jti() -> str:
 
 
 def sign_sso_token(*, user, company_id, companies: list[dict[str, Any]], aud: str,
-                   roles: list[str] | None = None) -> str | None:
+                   roles: list[str] | None = None,
+                   ttl_seconds: int | None = None) -> str | None:
     """RS256 handoff-токен для приложения-аудитории `aud`. None, если SSO выключен.
 
     `roles` — роли человека В ПРИЛОЖЕНИИ `aud` в текущей компании (Я-10,
@@ -112,7 +113,7 @@ def sign_sso_token(*, user, company_id, companies: list[dict[str, Any]], aud: st
         "jti": new_jti(),
         "iat": now,
         "nbf": now - 10,
-        "exp": now + settings.sso_token_ttl_seconds,
+        "exp": now + (settings.sso_token_ttl_seconds if ttl_seconds is None else ttl_seconds),
     }
     if roles is not None:
         payload["roles"] = roles                         # роли в приложении `aud`

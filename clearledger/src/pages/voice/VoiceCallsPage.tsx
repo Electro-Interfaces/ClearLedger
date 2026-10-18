@@ -8,11 +8,17 @@
  *
  * Выбранный звонок живёт в адресе (`?id=`): ссылку на него можно переслать
  * коллеге, а с экрана «Сейчас» сюда ведёт «Карточка».
+ *
+ * Волна 7 (Р1): плитки «Статистики» и «Отчёта за месяц» открывают журнал с
+ * `metric=<показатель>[:причина]` и тем же периодом и линией — узел отбирает ровно
+ * обращения, из которых сложилось число, тем же расчётом. Отбор целиком в адресе:
+ * ссылку можно переслать, `back` возвращает к плитке. Участник (`operator`) —
+ * оператор КЦ или сотрудник, который отвечал или консультировал.
  */
 import { useState } from 'react'
-import { useInfiniteQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
-import { PhoneCall, Search } from 'lucide-react'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { Link, useSearchParams } from 'react-router-dom'
+import { ArrowLeft, PhoneCall, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -21,7 +27,7 @@ import { cn } from '@/lib/utils'
 import * as voice from '@/services/voiceService'
 import { EmptyBlock } from '@/pages/conf/EmptyBlock'
 import { CallCard } from './CallCard'
-import { ИСХОД, ФЛАГ, когда, началоДня, оператор, плохойИсход, сек } from './format'
+import { ЕДИНИЦА, ИСХОД, ОБСЛУЖИЛ, ПРИЧИНА_ЗАПАСНОГО, ПРИЧИНА_ПРОПУСКА, ФЛАГ, когда, началоДня, оператор, плохойИсход, сек, число } from './format'
 import { Heading, Flags, NodeError } from './parts'
 
 const ПЕРИОДЫ = [
@@ -33,33 +39,71 @@ const ПЕРИОДЫ = [
 
 const ФИЛЬТР_ФЛАГОВ = ['vip', 'repeat', 'after_hours', 'transferred', 'recorded']
 
+/** Узел режет период показателя по 15 минутам: «по сейчас» — вверх до четверти часа, ключ запроса не дрожит. */
+const ЧЕТВЕРТЬ = 15 * 60_000
+const сейчасДо15 = () => new Date(Math.ceil(Date.now() / ЧЕТВЕРТЬ) * ЧЕТВЕРТЬ).toISOString()
+
+/** «с 1 окт., 00:00 по 17 окт., 15:00» — период, пришедший ссылкой с плитки. */
+function отрезок(from: string, to?: string) {
+  const ф = (iso: string) => new Date(iso).toLocaleString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return to ? `с ${ф(from)} по ${ф(to)}` : `с ${ф(from)}`
+}
+
 export default function VoiceCallsPage() {
   const { companyId } = useCompany()
   const [params, setParams] = useSearchParams()
   const узкий = useMaxWidth(1024)
   const выбран = params.get('id')
 
-  const [период, setПериод] = useState<(typeof ПЕРИОДЫ)[number]['key']>('today')
+  const metric = params.get('metric') ?? ''
+  const участник = params.get('operator') ?? ''
+  const line = params.get('line') ?? ''
+  const servedBy = (params.get('servedBy') ?? '') as voice.ServedBy | ''
+  const topic = params.get('topic') ?? ''
+  const назад = params.get('back')
+  // Период: свой (from/to из ссылки плитки) или кнопкой. Показатель без конца периода считаем «по сейчас».
+  const свой = params.get('from')
+  const п = ПЕРИОДЫ.find(x => x.key === params.get('period')) ?? ПЕРИОДЫ[0]
+  const from = свой ?? п.from()
+  const to = свой ? params.get('to') ?? undefined : п.to() ?? (metric ? сейчасДо15() : undefined)
+
   const [исход, setИсход] = useState<voice.Outcome | ''>('')
   const [флаги, setФлаги] = useState<string[]>([])
   const [набор, setНабор] = useState('')
   const [номер, setНомер] = useState('')
-
-  const п = ПЕРИОДЫ.find(x => x.key === период) ?? ПЕРИОДЫ[0]
-  const from = п.from()
-  const to = п.to()
   const flags = флаги.join(',')
 
+  function поставить(изм: Record<string, string | null>, replace = true) {
+    const n = new URLSearchParams(params)
+    for (const [k, v] of Object.entries(изм)) { if (v) n.set(k, v); else n.delete(k) }
+    setParams(n, { replace })
+  }
+
   const журнал = useInfiniteQuery({
-    queryKey: ['voice-calls', companyId, from, to ?? '', исход, номер, flags],
+    queryKey: ['voice-calls', companyId, from, to ?? '', исход, номер, flags, metric, участник, line, servedBy, topic],
     queryFn: ({ pageParam }) => voice.calls(companyId, {
       from, to, outcome: исход, number: номер || undefined, flags: flags || undefined,
+      metric: metric || undefined, operator: участник || undefined, line: line || undefined,
+      servedBy: metric ? servedBy : undefined, topic: topic || undefined,
       cursor: pageParam || undefined, limit: 100,
     }),
     initialPageParam: '',
     getNextPageParam: last => last.next ?? undefined,
   })
   const строки = журнал.data?.pages.flatMap(p => p.items) ?? []
+  const мета = журнал.data?.pages[0]?.metric
+
+  // Участники за период — те, кто отвечал (статистика по операторам); выбранный из ссылки остаётся в списке.
+  const операторы = useQuery({
+    queryKey: ['voice-stats', companyId, 'operators', from, to ?? '', line || undefined],
+    queryFn: () => voice.statsOperators(companyId, { from, to: to ?? сейчасДо15(), line: line || undefined }),
+    staleTime: 60_000,
+  })
+  const участники = (операторы.data ?? []).map(r => ({ key: `${r.operator.kind}:${r.operator.id}`, имя: оператор(r.operator) }))
+  if (участник && !участники.some(x => x.key === участник)) {
+    const [kind, ...id] = участник.split(':')
+    участники.unshift({ key: участник, имя: оператор({ kind: kind === 'cc' ? 'cc' : 'staff', id: id.join(':') }) })
+  }
 
   const цифр = набор.replace(/\D/g, '').length
   function искать(e: React.FormEvent) {
@@ -69,9 +113,7 @@ export default function VoiceCallsPage() {
   }
 
   function открыть(id: string | null) {
-    const next = new URLSearchParams(params)
-    if (id) next.set('id', id); else next.delete('id')
-    setParams(next, { replace: !id })
+    поставить({ id }, !id)
   }
 
   if (узкий && выбран) return <CallCard contactId={выбран} onBack={() => открыть(null)} />
@@ -81,22 +123,44 @@ export default function VoiceCallsPage() {
       <div className="min-w-0 flex-1 space-y-4 overflow-y-auto p-4">
         <Heading имя="Журнал звонков" подпись="Все звонки линии, новые сверху. Номер — маской." />
 
+        {metric && <MetricBar metric={metric} мета={мета} from={from} to={to} line={line} servedBy={servedBy} назад={назад}
+          ошибка={журнал.isError} onReset={() => поставить({ metric: null, servedBy: null, back: null })} />}
+
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex gap-1 rounded-md border border-border p-0.5">
-            {ПЕРИОДЫ.map(x => (
-              <button key={x.key} type="button" onClick={() => setПериод(x.key)} aria-pressed={период === x.key}
-                className={cn('min-h-8 rounded px-3 text-sm transition-colors',
-                  период === x.key ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-accent/50')}>
-                {x.name}
-              </button>
-            ))}
+            {ПЕРИОДЫ.map(x => {
+              const вкл = !свой && п.key === x.key
+              return (
+                <button key={x.key} type="button" aria-pressed={вкл}
+                  onClick={() => поставить({ period: x.key === 'today' ? null : x.key, from: null, to: null })}
+                  className={cn('min-h-8 rounded px-3 text-sm transition-colors',
+                    вкл ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-accent/50')}>
+                  {x.name}
+                </button>
+              )
+            })}
           </div>
+          {свой && !metric && (
+            <span className="inline-flex min-h-8 items-center gap-1 rounded-md border border-primary/40 bg-primary/5 pl-2.5 text-sm text-primary">
+              {отрезок(from, to)}
+              <button type="button" aria-label="Снять свой период" onClick={() => поставить({ from: null, to: null })}
+                className="grid size-8 place-items-center rounded-md hover:bg-accent/50"><X className="size-4" /></button>
+            </span>
+          )}
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
             исход
             <select value={исход} onChange={e => setИсход(e.target.value as voice.Outcome | '')}
               className="h-9 rounded-md border border-input bg-card px-2 text-sm text-foreground">
               <option value="">любой</option>
               {(Object.keys(ИСХОД) as voice.Outcome[]).map(o => <option key={o} value={o}>{ИСХОД[o]}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            участник
+            <select value={участник} onChange={e => поставить({ operator: e.target.value || null })}
+              className="h-9 max-w-56 rounded-md border border-input bg-card px-2 text-sm text-foreground">
+              <option value="">любой</option>
+              {участники.map(x => <option key={x.key} value={x.key}>{x.имя}</option>)}
             </select>
           </label>
           <form onSubmit={искать} className="flex items-center gap-1.5">
@@ -124,13 +188,21 @@ export default function VoiceCallsPage() {
               </button>
             )
           })}
+          {topic && (
+            <span className="inline-flex items-center gap-1 rounded-md border border-primary bg-primary/10 pl-2 text-xs text-primary">
+              тема <span className="font-mono">{topic}</span>
+              <button type="button" aria-label="Снять отбор по теме" onClick={() => поставить({ topic: null })}
+                className="grid size-6 place-items-center rounded hover:bg-accent/50"><X className="size-3.5" /></button>
+            </span>
+          )}
         </div>
 
         {журнал.isLoading && <p role="status" className="text-sm">Читаем журнал узла…</p>}
         {журнал.isError && <NodeError ошибка={журнал.error} что="прочитать журнал" />}
         {журнал.isSuccess && строки.length === 0 && (
-          <EmptyBlock иконка={PhoneCall} текст="За этот период звонков нет"
-            подсказка="Журнал узла пишет каждый звонок линии: и отвеченные, и брошенные, и пришедшие вне часов." />
+          <EmptyBlock иконка={PhoneCall} текст={metric ? 'Звонков по этому показателю нет' : 'За этот период звонков нет'}
+            подсказка={metric ? 'Число плитки за этот период — ноль, или его сузили отборы исхода, номера и меток.'
+              : 'Журнал узла пишет каждый звонок линии: и отвеченные, и брошенные, и пришедшие вне часов.'} />
         )}
 
         {строки.length > 0 && (
@@ -144,6 +216,7 @@ export default function VoiceCallsPage() {
                   <th className="px-3 py-2 font-normal">Ожидание</th>
                   <th className="px-3 py-2 font-normal">Разговор</th>
                   <th className="px-3 py-2 font-normal">Оператор</th>
+                  {metric && <th className="whitespace-nowrap px-3 py-2 text-right font-normal" title="Сколько раз обращение вошло в число плитки">В числе</th>}
                 </tr>
               </thead>
               <tbody>
@@ -163,6 +236,11 @@ export default function VoiceCallsPage() {
                     <td className="px-3 py-2 tabular-nums">{сек(r.waitSec)}</td>
                     <td className="px-3 py-2 tabular-nums">{сек(r.talkSec)}</td>
                     <td className="px-3 py-2 text-muted-foreground">{оператор(r.operator)}</td>
+                    {metric && (
+                      <td className={cn('px-3 py-2 text-right tabular-nums', (r.count ?? 1) > 1 && 'font-medium')}>
+                        {r.count ?? 1}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -181,9 +259,58 @@ export default function VoiceCallsPage() {
           {выбран
             ? <CallCard key={выбран} contactId={выбран} />
             : <EmptyBlock иконка={PhoneCall} текст="Выберите звонок"
-                подсказка="Карточка покажет ход звонка по этапам, запись и расшифровку и то, кто их уже открывал." />}
+                подсказка="Карточка покажет, кто говорил со звонящим и сколько, записи участков и расшифровку, и кто их уже открывал." />}
         </aside>
       )}
     </div>
+  )
+}
+
+/**
+ * Плашка показателя: какое число открыто, сколько в нём единиц и сколько это обращений.
+ * У показателей по отрезкам и задачам строк меньше числа плитки — перевод на свою же линию
+ * и повтор не удваивают строку журнала; разница видна здесь и в столбце «В числе».
+ */
+function MetricBar({ metric, мета, from, to, line, servedBy, назад, ошибка, onReset }: {
+  metric: string
+  мета?: voice.DrillMeta
+  from: string
+  to?: string
+  line: string
+  servedBy: string
+  назад: string | null
+  ошибка: boolean
+  onReset: () => void
+}) {
+  const [ключ, причина] = metric.split(':')
+  const название = мета?.title ?? ключ
+  const уточнение = причина ? (ключ === 'fallback' ? ПРИЧИНА_ЗАПАСНОГО : ПРИЧИНА_ПРОПУСКА)[причина] ?? причина : null
+  const единица = мета ? ЕДИНИЦА[мета.unit] ?? мета.unitTitle ?? '' : ''
+  return (
+    <section aria-label="Отбор по показателю"
+      className="flex flex-wrap items-start gap-x-4 gap-y-2 rounded-xl border border-primary/35 bg-card p-3">
+      <div className="min-w-0 flex-1 basis-64 space-y-0.5">
+        <p className="text-sm">
+          <span className="font-medium">{название}</span>
+          {уточнение && <span> · {уточнение}</span>}
+          {мета && <span className="ml-2 font-headline text-base font-semibold tabular-nums">{число(мета.total)}</span>}
+          {мета && <span className="text-muted-foreground"> {единица}</span>}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {мета && (мета.unit !== 'call' || мета.total !== мета.calls) && <>обращений в списке: {число(мета.calls)} · </>}
+          {отрезок(мета?.from ?? from, мета?.to ?? to)}
+          {line && <> · линия <span className="font-mono">{line}</span></>}
+          {servedBy && <> · {ОБСЛУЖИЛ[servedBy] ?? servedBy}</>}
+        </p>
+        {мета?.unitTitle && мета.unit !== 'call' && <p className="text-xs text-muted-foreground">Единица счёта: {мета.unitTitle}.</p>}
+        {ошибка && <p className="text-xs text-destructive">Узел не отдал список по показателю: возможно, узел старше волны 7.</p>}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {назад?.startsWith('/voice/') && (
+          <Button asChild variant="outline" size="sm"><Link to={назад}><ArrowLeft />Вернуться</Link></Button>
+        )}
+        <Button variant="ghost" size="sm" onClick={onReset}>Снять отбор</Button>
+      </div>
+    </section>
   )
 }

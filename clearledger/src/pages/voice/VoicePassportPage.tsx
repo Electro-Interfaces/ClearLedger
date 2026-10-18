@@ -26,6 +26,7 @@ import { записать } from './draftDoc'
 import { More, RemoveButton, TextInput } from './FormBits'
 import { HoursEditor } from './HoursEditor'
 import { Heading, NodeError } from './parts'
+import { SimulatePanel } from './Simulate'
 import {
   ИМЯ_ОПЕРАТОРА, МАСКА, ПОДПИСИ_ПАСПОРТА, ПОЛЯ_КАРТОЧКИ, УМОЛЧАНИЯ_ПАСПОРТА, type Паспорт,
 } from './passport'
@@ -87,6 +88,8 @@ export default function VoicePassportPage() {
               ...(ломает ? [<span key="b" className="text-warning">Изменение ломающее: старшая принимаемая версия станет выше r{действует}. Операторы КЦ, у которых ещё прежний паспорт, получат отказ на свои команды, пока КЦ не обновится.</span>] : []),
             ]}
             подтверждение={ломает ? 'Понимаю: контакт-центр должен принять новую версию, иначе его команды будут отклонены' : undefined} />
+
+          <SimulatePanel kind="passport" ч={ч} />
 
           <Tabs value={вкладка} onValueChange={v => { const n = new URLSearchParams(params); n.set('tab', v); setParams(n, { replace: true }) }}>
             <TabsList>

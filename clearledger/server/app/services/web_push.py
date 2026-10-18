@@ -100,6 +100,12 @@ def push_room_async(room_id: uuid.UUID, title: str, body: str,
                            if uid != exclude_user_id
                            and not (mu is not None and mu > now)
                            and str(uid) not in online]
+                from app.models import ChatRoom
+                from app.services.ticket_communications import recipient_allowed
+                room = await db.get(ChatRoom, room_id)
+                if room is None:
+                    return
+                targets = [uid for uid in targets if await recipient_allowed(db, room, uid)]
                 if not targets:
                     return
                 subs = (await db.execute(select(ChatPushSubscription).where(

@@ -21,7 +21,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import App, Company, SpaceInboundKey, User, UserCompany
+from app.models import App, AppCompanyLink, AuditEvent, Company, SpaceInboundKey, User, UserCompany
 from app.services import app_registry, sso
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -89,12 +89,16 @@ async def _voice(db: AsyncSession, slug: str, enabled: bool = True) -> uuid.UUID
     return cid
 
 
-def _claims(token: str, pub) -> dict:
-    return jwt.decode(token, pub, algorithms=["RS256"], audience="voice")
+def _claims(token: str, pub, audience: str = "voice") -> dict:
+    return jwt.decode(token, pub, algorithms=["RS256"], audience=audience)
 
 
-async def test_voice_token_carries_role_and_jti(client: AsyncClient, db: AsyncSession, sso_key):
+async def test_voice_token_carries_role_jti_and_bounded_ttl(
+    client: AsyncClient, db: AsyncSession, sso_key, monkeypatch,
+):
     await _voice(db, "rushydro")
+    # Ошибка общего конфига не должна сделать браузерный пропуск в узел долгоживущим.
+    monkeypatch.setattr(sso.settings, "sso_token_ttl_seconds", 900)
     tag = uuid.uuid4().hex[:6]
     admin = await _user(client, f"voice-admin-{tag}@test.ru", "rushydro", "admin")
     plain = await _user(client, f"voice-user-{tag}@test.ru", "rushydro", "user")
@@ -110,18 +114,178 @@ async def test_voice_token_carries_role_and_jti(client: AsyncClient, db: AsyncSe
         r = await client.get("/api/sso/token", params={"app": "voice", "company_id": "rushydro"},
                              headers=_h(token))
         assert r.status_code == 200, r.text
+        assert set(r.json()) == {"token", "expires_in", "roles"}
+        assert r.json()["expires_in"] == 300
         assert r.json()["roles"] == roles
         c = _claims(r.json()["token"], sso_key)
         assert c["roles"] == roles and c["cid"] == str(cid)
+        assert c["exp"] - c["iat"] == r.json()["expires_in"]
         assert len(c["jti"]) == 32 and c["jti"] not in seen
         seen.add(c["jti"])
 
-    # Суперадмин роли в «Телефонии» не получает, даже состоя в компании.
-    sa = await _login(client, "admin@clearledger.ru", "admin123")
-    r = await client.get("/api/sso/token", params={"app": "voice", "company_id": "rushydro"},
-                         headers=_h(sa))
-    if r.status_code == 200:
+    # Суперадмин роли в «Телефонии» не получает даже при членстве и явном назначении.
+    superadmin = (await db.execute(select(User).where(
+        User.email == "admin@clearledger.ru"))).scalar_one()
+    membership = await db.get(UserCompany, (superadmin.id, cid))
+    if membership is None:
+        created_membership = True
+        previous_role = None
+        previous_app_roles = None
+        membership = UserCompany(user_id=superadmin.id, company_id=cid, role="admin")
+        db.add(membership)
+    else:
+        created_membership = False
+        previous_role = membership.role
+        previous_app_roles = dict(membership.app_roles) if membership.app_roles else membership.app_roles
+    membership.role = "admin"
+    membership.app_roles = {"voice": "admin"}
+    await db.commit()
+    try:
+        sa = await _login(client, "admin@clearledger.ru", "admin123")
+        r = await client.get("/api/sso/token", params={"app": "voice", "company_id": "rushydro"},
+                             headers=_h(sa))
+        assert r.status_code == 200, r.text
         assert r.json()["roles"] == []
+        assert _claims(r.json()["token"], sso_key)["roles"] == []
+    finally:
+        if created_membership:
+            await db.delete(membership)
+        else:
+            membership.role = previous_role
+            membership.app_roles = previous_app_roles
+        await db.commit()
+
+
+async def test_voice_token_keeps_guard_statuses_and_messages(
+    client: AsyncClient, db: AsyncSession, sso_key, monkeypatch,
+):
+    await _voice(db, "rushydro")
+    await _voice(db, "gig")
+    tag = uuid.uuid4().hex[:6]
+    gig_admin = await _user(client, f"guard-admin-{tag}@test.ru", "gig", "admin")
+    gig_user = await _user(client, f"guard-user-{tag}@test.ru", "gig", "user")
+
+    cases = [
+        ({"app": "unknown", "company_id": "gig"}, gig_admin, 404,
+         "Неизвестное приложение: unknown"),
+        ({"app": "voice", "company_id": "not-a-company"}, gig_admin, 400,
+         "Невалидный company_id"),
+        ({"app": "voice", "company_id": str(uuid.uuid4())}, gig_admin, 400,
+         "Невалидный company_id"),
+        ({"app": "voice", "company_id": "rushydro"}, gig_user, 403,
+         "Нет доступа к компании"),
+    ]
+    for params, token, code, detail in cases:
+        response = await client.get("/api/sso/token", params=params, headers=_h(token))
+        assert response.status_code == code, response.text
+        assert response.json() == {"detail": detail}
+
+    await _voice(db, "gig", False)
+    response = await client.get(
+        "/api/sso/token", params={"app": "voice", "company_id": "gig"},
+        headers=_h(gig_admin),
+    )
+    assert response.status_code == 403, response.text
+    assert response.json() == {"detail": "Приложение не подключено компании"}
+
+    monkeypatch.setattr(sso.settings, "sso_signing_key", "")
+    response = await client.get(
+        "/api/sso/token", params={"app": "voice", "company_id": "gig"},
+        headers=_h(gig_admin),
+    )
+    assert response.status_code == 503, response.text
+    assert response.json() == {"detail": "SSO не настроен (нет ключа подписи)"}
+
+
+async def test_support_voice_token_uses_exact_mapping_and_existing_guards(
+    client: AsyncClient, db: AsyncSession, sso_key, monkeypatch,
+):
+    """UUID Поддержки не заменяется текущей компанией или совпавшим id другого приложения."""
+    gig = await _voice(db, "gig")
+    rushydro = await _voice(db, "rushydro")
+    tag = uuid.uuid4().hex[:6]
+    admin = await _user(client, f"support-voice-admin-{tag}@test.ru", "gig", "admin")
+    reader = await _user(client, f"support-voice-reader-{tag}@test.ru", "gig", "user")
+    support_app = (await db.execute(select(App.id).where(App.code == "support"))).scalar_one()
+    voice_app = (await db.execute(select(App.id).where(App.code == "voice"))).scalar_one()
+    local_gig, local_rushydro, other_app = [uuid.uuid4() for _ in range(3)]
+    links = [
+        AppCompanyLink(app_id=support_app, company_id=gig, external_company_id=str(local_gig)),
+        AppCompanyLink(app_id=support_app, company_id=rushydro, external_company_id=str(local_rushydro)),
+        AppCompanyLink(app_id=voice_app, company_id=gig, external_company_id=str(other_app)),
+    ]
+    db.add_all(links)
+    await db.commit()
+    url = "/api/sso/voice-token-for-support"
+    try:
+        for bearer, roles in [(admin, ["admin"]), (reader, [])]:
+            r = await client.get(url, params={"company_id": str(local_gig)}, headers=_h(bearer))
+            assert r.status_code == 200, r.text
+            payload = r.json()
+            assert payload["company_id"] == str(gig)
+            assert payload["support_company_id"] == str(local_gig)
+            assert payload["roles"] == roles
+            claims = _claims(payload["token"], sso_key)
+            assert claims["cid"] == str(gig) and claims["roles"] == roles
+            assert claims["exp"] - claims["iat"] == payload["expires_in"] == 300
+            assert claims["jti"]
+
+        for missing in (uuid.uuid4(), gig, other_app):
+            r = await client.get(url, params={"company_id": str(missing)}, headers=_h(admin))
+            assert r.status_code == 404, r.text
+        r = await client.get(url, params={"company_id": str(local_rushydro)}, headers=_h(reader))
+        assert r.status_code == 403, r.text
+        r = await client.get(url, params={"company_id": "gig"}, headers=_h(admin))
+        assert r.status_code == 422, r.text
+
+        await _voice(db, "gig", False)
+        r = await client.get(url, params={"company_id": str(local_gig)}, headers=_h(admin))
+        assert r.status_code == 403, r.text
+        assert r.json() == {"detail": "Приложение не подключено компании"}
+        monkeypatch.setattr(sso.settings, "sso_signing_key", "")
+        r = await client.get(url, params={"company_id": str(local_gig)}, headers=_h(admin))
+        assert r.status_code == 503, r.text
+    finally:
+        for link in links:
+            await db.delete(link)
+        await _voice(db, "gig")
+        await db.commit()
+
+
+async def test_authorize_without_company_keeps_fallback_and_audit(
+    client: AsyncClient, db: AsyncSession, sso_key, monkeypatch,
+):
+    tag = uuid.uuid4().hex[:6]
+    email = f"handoff-{tag}@test.ru"
+    bearer = await _user(client, email, "rushydro", "user")
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+    cid = (await db.execute(select(Company.id).where(
+        Company.slug == "rushydro"))).scalar_one()
+    monkeypatch.setattr(sso, "find_app", lambda code: {
+        "code": code,
+        "base_url": "https://coordinator.test",
+        "callback": "/sso/callback",
+        "mode": "sso",
+    } if code == "coordinator" else None)
+
+    response = await client.get(
+        "/api/sso/authorize", params={"app": "coordinator"}, headers=_h(bearer),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["app"] == "coordinator" and body["mode"] == "sso"
+    token = body["url"].split("#token=", 1)[1]
+    claims = _claims(token, sso_key, "coordinator")
+    assert claims["cid"] == str(cid) == str(user.company_id)
+    assert claims["exp"] - claims["iat"] == body["expires_in"]
+
+    event = (await db.execute(select(AuditEvent).where(
+        AuditEvent.user_id == str(user.id),
+        AuditEvent.company_id == cid,
+        AuditEvent.action == "sso.handoff",
+        AuditEvent.details == "coordinator",
+    ))).scalar_one()
+    assert event.user_name == user.name
 
 
 async def test_service_tokens_have_jti_and_scope(sso_key):

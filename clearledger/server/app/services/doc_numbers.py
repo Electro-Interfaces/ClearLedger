@@ -45,7 +45,9 @@ def render(template: str, *, prefix: str, number: int, on_date: date,
     даёт номер вроде «--0007», который потом никто не опознает.
     """
     values: dict[str, object] = {
-        "prefix": prefix or "",
+        # Префикс необязателен: код вида различает независимые счётчики,
+        # иначе два вида с пустым префиксом выдают один и тот же номер.
+        "prefix": prefix or kind_code,
         "n": number,
         "yy": on_date.strftime("%y"),
         "yyyy": on_date.year,

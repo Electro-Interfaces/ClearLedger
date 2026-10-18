@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils'
 import * as voice from '@/services/voiceService'
 import { EmptyBlock } from '@/pages/conf/EmptyBlock'
 import { скачать } from './exportTable'
-import { ЧАСТЬ, процент, сек, число } from './format'
+import { ЧАСТЬ, журналПо, процент, сек, число } from './format'
 import { Heading, NodeError, Stat } from './parts'
 
 const МЕСЯЦЫ = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
@@ -237,10 +237,10 @@ export default function VoiceReportPage() {
             <EmptyBlock иконка={FileText} текст={`За ${r.title} звонков не было`}
               подсказка="Плитки пустые, но отчёт можно скачать и выпустить — заказчик увидит, что звонков не было." />
           )}
-          <Kpis r={r} пояснение={пояснение} />
+          <Kpis r={r} пояснение={пояснение} назад={`/voice/report?${параметры}`} />
           {!нетЗвонков && (
             <>
-              <Outcomes r={r} />
+              <Outcomes r={r} назад={`/voice/report?${параметры}`} />
               <Speed r={r} пояснение={пояснение} />
               <Days r={r} />
               <Hours r={r} />
@@ -301,7 +301,19 @@ function StatusPlate({ r }: { r: voice.MonthlyReport }) {
 
 // ——— Главное ———
 
-function Kpis({ r, пояснение }: { r: voice.MonthlyReport; пояснение: (k: string) => string | undefined }) {
+/** Плитка отчёта → показатель журнала (волна 7). У доли — её числитель; ASA, P90, AHT и «быстрее 60 с» списка не имеют. */
+const KPI_В_ЖУРНАЛ: Record<string, string> = {
+  arrived: 'arrived', missedPct: 'missed', lostPct: 'missedLost', slPct: 'answeredInSl', abandonPct: 'abandonedLong',
+  fcrPct: 'firstCallResolved', ccShare: 'ccAnswered',
+}
+/** Строка «Куда ушли звонки» → показатель: `missed_<причина>` — это `missed:<причина>`. */
+const исходВЖурнал = (k: string): string | undefined => k.startsWith('missed_') ? `missed:${k.slice(7)}`
+  : ({ answered_cc: 'ccAnswered', answered_local: 'localAnswered', forward_answered: 'forwardAnswered' } as Record<string, string>)[k]
+const поОтчёту = (r: voice.MonthlyReport, назад: string) => (metric: string) =>
+  журналПо(metric, { from: r.period.from, to: r.period.to, line: r.lineId, back: назад })
+
+function Kpis({ r, пояснение, назад }: { r: voice.MonthlyReport; пояснение: (k: string) => string | undefined; назад: string }) {
+  const по = поОтчёту(r, назад)
   const порядок = [...r.kpis].sort((a, b) => {
     const ia = ПЕРВЫЕ.indexOf(a.key)
     const ib = ПЕРВЫЕ.indexOf(b.key)
@@ -310,12 +322,13 @@ function Kpis({ r, пояснение }: { r: voice.MonthlyReport; поясне�
   const прошлый = r.previous?.month ? В_МЕСЯЦЕ[Number(r.previous.month.slice(5, 7)) - 1] : null
   return (
     <section aria-label="Главное" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-      {порядок.map(k => <KpiTile key={k.key} k={k} прошлый={прошлый} пояснение={пояснение(k.key)} />)}
+      {порядок.map(k => <KpiTile key={k.key} k={k} прошлый={прошлый} пояснение={пояснение(k.key)}
+        ссылка={KPI_В_ЖУРНАЛ[k.key] && k.value ? по(KPI_В_ЖУРНАЛ[k.key]) : undefined} />)}
     </section>
   )
 }
 
-function KpiTile({ k, прошлый, пояснение }: { k: voice.MonthlyKpi; прошлый: string | null; пояснение?: string }) {
+function KpiTile({ k, прошлый, пояснение, ссылка }: { k: voice.MonthlyKpi; прошлый: string | null; пояснение?: string; ссылка?: string }) {
   const разница = k.value != null && k.previous != null ? k.value - k.previous : null
   const оценка = разница == null || разница === 0 ? null
     : ЛУЧШЕ_МЕНЬШЕ.has(k.key) ? (разница < 0 ? 'лучше' : 'хуже')
@@ -327,7 +340,14 @@ function KpiTile({ k, прошлый, пояснение }: { k: voice.MonthlyKp
     <div title={пояснение} className={cn('space-y-1 rounded-xl border bg-card p-3',
       k.met === false ? 'border-destructive/40' : 'border-border')}>
       <p className="text-xs text-muted-foreground">{k.title}</p>
-      <p className="font-headline text-2xl font-semibold tabular-nums">{значение(k.value, k.unit)}</p>
+      {ссылка
+        ? (
+          <Link to={ссылка} aria-label={`${k.title}: ${значение(k.value, k.unit)} — открыть звонки в журнале`}
+            className="-mx-1 inline-block rounded-md px-1 font-headline text-2xl font-semibold tabular-nums underline decoration-border decoration-1 underline-offset-4 transition-colors hover:bg-accent/50 hover:decoration-primary">
+            {значение(k.value, k.unit)}
+          </Link>
+        )
+        : <p className="font-headline text-2xl font-semibold tabular-nums">{значение(k.value, k.unit)}</p>}
       {прошлый && (
         <p className="text-xs text-muted-foreground">
           в {прошлый}: {значение(k.previous, k.unit)}
@@ -354,7 +374,8 @@ function KpiTile({ k, прошлый, пояснение }: { k: voice.MonthlyKp
 
 // ——— Куда ушли звонки и скорость ответа ———
 
-function Outcomes({ r }: { r: voice.MonthlyReport }) {
+function Outcomes({ r, назад }: { r: voice.MonthlyReport; назад: string }) {
+  const по = поОтчёту(r, назад)
   let пропущенный = 0
   const части = r.outcomes.map(o => ({
     ...o,
@@ -380,7 +401,11 @@ function Outcomes({ r }: { r: voice.MonthlyReport }) {
             {части.map(x => (
               <tr key={x.key} className="border-t border-border/60">
                 <td className="py-1.5"><span className="inline-flex items-center gap-2"><i className={cn('h-2.5 w-2.5 shrink-0 rounded-sm', x.цвет)} />{x.title}</span></td>
-                <td className="whitespace-nowrap py-1.5 pl-3 text-right tabular-nums">{число(x.count)}</td>
+                <td className="whitespace-nowrap py-1.5 pl-3 text-right tabular-nums">
+                  {исходВЖурнал(x.key) && x.count
+                    ? <Link to={по(исходВЖурнал(x.key)!)} className="underline decoration-border underline-offset-4 hover:decoration-primary">{число(x.count)}</Link>
+                    : число(x.count)}
+                </td>
                 <td className="w-36 py-1.5 text-right tabular-nums text-muted-foreground">{процент(x.pct)}</td>
               </tr>
             ))}

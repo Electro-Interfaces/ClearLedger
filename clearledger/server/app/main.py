@@ -580,6 +580,8 @@ app.include_router(store_router.router, prefix=API_PREFIX)
 app.include_router(netservice_router.router, prefix=API_PREFIX)
 app.include_router(meetings_router.router, prefix=API_PREFIX)
 app.include_router(chat_router.router, prefix=API_PREFIX)
+from app.routers import ticket_communications_router
+app.include_router(ticket_communications_router.router, prefix=API_PREFIX)
 app.include_router(notifications_router.router, prefix=API_PREFIX)  # Оповещения пространства
 app.include_router(metrika_router.router, prefix=API_PREFIX)
 # Рынок вокруг сети (продукт «Маркетинг», docs/MARKET.md): чужие точки и наблюдения.

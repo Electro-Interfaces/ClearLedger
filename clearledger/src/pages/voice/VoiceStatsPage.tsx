@@ -9,8 +9,9 @@
  *
  * Выгрузка CSV и Excel — той же выборки, что на экране, первой строкой фильтры.
  */
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Link, useSearchParams } from 'react-router-dom'
 import { BarChart3, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -20,7 +21,7 @@ import { cn } from '@/lib/utils'
 import * as voice from '@/services/voiceService'
 import { EmptyBlock } from '@/pages/conf/EmptyBlock'
 import { скачатьCSV, скачатьExcel, type Лист } from './exportTable'
-import { деньФайла, началоДня, оператор, процент, сек, число } from './format'
+import { ПРИЧИНА_ЗАПАСНОГО, деньФайла, журналПо, началоДня, оператор, процент, сек, число } from './format'
 import { Heading, NodeError, Stat } from './parts'
 import { кудаУшли, поВремени, поГруппам } from './statsMath'
 
@@ -41,9 +42,22 @@ const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Moscow'
 
 export default function VoiceStatsPage() {
   const { companyId } = useCompany()
-  const [период, setПериод] = useState<(typeof ПЕРИОДЫ)[number]['key']>('today')
-  const [толькоКЦ, setТолькоКЦ] = useState(false)
-  const п = ПЕРИОДЫ.find(x => x.key === период) ?? ПЕРИОДЫ[0]
+  // Период и «только КЦ» — в адресе: из журнала по плитке возвращаемся к тем же цифрам.
+  const [params, setParams] = useSearchParams()
+  const п = ПЕРИОДЫ.find(x => x.key === params.get('period')) ?? ПЕРИОДЫ[0]
+  const период = п.key
+  const толькоКЦ = params.get('cc') === '1'
+  const line = params.get('line') || undefined
+  const поставить = (k: string, v: string | null) => {
+    const n = new URLSearchParams(params)
+    if (v) n.set(k, v); else n.delete(k)
+    setParams(n, { replace: true })
+  }
+  const setПериод = (v: string) => поставить('period', v === 'today' ? null : v)
+  const setТолькоКЦ = (v: boolean) => поставить('cc', v ? '1' : null)
+  const назад = `/voice/stats${params.toString() ? `?${params}` : ''}`
+  const servedByЗвонков = толькоКЦ ? 'cc' : undefined
+  const по = (metric: string) => журналПо(metric, { from, to, line, servedBy: servedByЗвонков, back: назад })
   const from = п.from()
   const to = п.to()
   const длинный = Date.parse(to) - Date.parse(from) > 2 * 86_400_000
@@ -57,24 +71,24 @@ export default function VoiceStatsPage() {
     staleTime: Infinity,
   })
   const сводка = useQuery({
-    queryKey: ['voice-stats', companyId, 'summary', from, to, servedBy],
-    queryFn: () => voice.statsSummary(companyId, { from, to, tz: TZ, servedBy }),
+    queryKey: ['voice-stats', companyId, 'summary', from, to, servedBy, line],
+    queryFn: () => voice.statsSummary(companyId, { from, to, tz: TZ, servedBy, line }),
   })
   const ряд = useQuery({
-    queryKey: ['voice-stats', companyId, 'series', from, to, шаг],
-    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: шаг, groupBy: 'servedBy' }),
+    queryKey: ['voice-stats', companyId, 'series', from, to, шаг, line],
+    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: шаг, groupBy: 'servedBy', line }),
   })
   const темы = useQuery({
-    queryKey: ['voice-stats', companyId, 'topic', from, to],
-    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: '1mo', groupBy: 'topic,servedBy' }),
+    queryKey: ['voice-stats', companyId, 'topic', from, to, line],
+    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: '1mo', groupBy: 'topic,servedBy', line }),
   })
   const центры = useQuery({
-    queryKey: ['voice-stats', companyId, 'cc', from, to],
-    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: '1mo', groupBy: 'cc' }),
+    queryKey: ['voice-stats', companyId, 'cc', from, to, line],
+    queryFn: () => voice.statsSeries(companyId, { from, to, tz: TZ, interval: '1mo', groupBy: 'cc', line }),
   })
   const операторы = useQuery({
-    queryKey: ['voice-stats', companyId, 'operators', from, to],
-    queryFn: () => voice.statsOperators(companyId, { from, to }),
+    queryKey: ['voice-stats', companyId, 'operators', from, to, line],
+    queryFn: () => voice.statsOperators(companyId, { from, to, line }),
   })
 
   const пояснение = useMemo(() => {
@@ -160,24 +174,33 @@ export default function VoiceStatsPage() {
       {m && !!всего && (
         <>
           <section aria-label="Показатели" className="flex flex-wrap gap-x-8 gap-y-3 rounded-xl border border-border bg-card p-4">
-            <Stat имя="Поступило" значение={число(m.arrived)} пояснение={пояснение('arrived')} />
-            <Stat имя="Вне часов" значение={число(m.afterHours)} пояснение={пояснение('afterHours')} />
+            <Stat имя="Поступило" значение={число(m.arrived)} пояснение={пояснение('arrived')} ссылка={по('arrived')} />
+            <Stat имя="Пропущено" значение={число(m.missed)} пояснение={пояснение('missedPct') ?? пояснение('missed')}
+              ссылка={по('missed')} тон={(m.missed ?? 0) > 0 ? 'warning' : undefined}
+              подпись={m.missedPct != null ? `${процент(m.missedPct)} поступивших` : undefined}
+              ещё={(m.missed ?? 0) > 0 ? { текст: `не перезвонили: ${число((m.missed ?? 0) - (m.missedReached ?? 0))}`, ссылка: по('missedLost') } : undefined} />
+            <Stat имя="Вне часов" значение={число(m.afterHours)} пояснение={пояснение('afterHours')} ссылка={по('afterHours')} />
             {/* Перевод с другой линии ставит звонок в очередь ещё раз: «в очередь» бывает больше «поступило». */}
-            <Stat имя="В очередь" значение={число(m.offered)}
+            <Stat имя="В очередь" значение={число(m.offered)} ссылка={по('offered')}
               пояснение={(m.transferredIn ?? 0) > 0 ? `${пояснение('offered') ?? ''}. ${пояснение('transferredIn') ?? ''}` : пояснение('offered')}
               подпись={(m.transferredIn ?? 0) > 0 ? `из них ${число(m.transferredIn)} переводом с другой линии` : undefined} />
-            <Stat имя="Отвечено" значение={число(m.answered)} пояснение={пояснение('answered')} />
-            <Stat имя="SL — ответили вовремя" значение={процент(m.slPct)} пояснение={пояснение('slPct')} />
+            <Stat имя="Отвечено" значение={число(m.answered)} пояснение={пояснение('answered')} ссылка={по('answered')} />
+            <Stat имя="SL — ответили вовремя" значение={процент(m.slPct)} пояснение={пояснение('slPct')}
+              ссылка={по('answeredInSl')} ещё={{ текст: 'позже цели SLA', ссылка: по('outsideSl') }} />
             <Stat имя="ASA — среднее ожидание" значение={сек(m.asaSec)}
               пояснение={`${пояснение('asaSec') ?? ''}. P90 — ${сек(m.waitP90Sec)}, максимум — ${сек(m.waitMaxSec)}`} />
             <Stat имя="Брошено" значение={процент(m.abandonPct)} пояснение={пояснение('abandonPct')}
-              тон={(m.abandonPct ?? 0) > 10 ? 'warning' : undefined} />
-            <Stat имя="Запасной сценарий" значение={процент(m.fallbackPct)} пояснение={пояснение('fallbackPct')} />
+              тон={(m.abandonPct ?? 0) > 10 ? 'warning' : undefined} ссылка={по('abandonedLong')}
+              ещё={(m.abandonedShort ?? 0) > 0 ? { текст: `коротко брошенные: ${число(m.abandonedShort)}`, ссылка: по('abandonedShort') } : undefined} />
+            <Stat имя="Запасной сценарий" значение={процент(m.fallbackPct)} пояснение={пояснение('fallbackPct')}
+              ссылка={по('fallback')} />
             <Stat имя="AHT — время обработки" значение={сек(m.ahtSec)} пояснение={пояснение('ahtSec')} />
-            <Stat имя="Переводы" значение={процент(m.transferPct)} пояснение={пояснение('transferPct')} />
-            <Stat имя="FCR — решено с первого раза" значение={процент(m.fcrPct)} пояснение={пояснение('fcrPct')} />
+            <Stat имя="Переводы" значение={процент(m.transferPct)} пояснение={пояснение('transferPct')}
+              ссылка={по('transferred')} />
+            <Stat имя="FCR — решено с первого раза" значение={процент(m.fcrPct)} пояснение={пояснение('fcrPct')}
+              ссылка={по('firstCallResolved')} ещё={{ текст: 'позвонили повторно', ссылка: по('repeatCallers') }} />
             <Stat имя="Итог не записан" значение={число(m.noDisposition)} пояснение={пояснение('noDisposition')}
-              тон={(m.noDisposition ?? 0) > 0 ? 'warning' : undefined} />
+              тон={(m.noDisposition ?? 0) > 0 ? 'warning' : undefined} ссылка={по('noDisposition')} />
           </section>
 
           <section aria-label="Куда ушли звонки" className="space-y-3 rounded-xl border border-border bg-card p-4">
@@ -190,7 +213,12 @@ export default function VoiceStatsPage() {
                 {части.map(x => (
                   <tr key={x.key} className="border-t border-border/60">
                     <td className="py-1.5"><span className="inline-flex items-center gap-2"><i className={cn('h-2.5 w-2.5 rounded-sm', x.цвет)} />{x.имя}</span></td>
-                    <td className="py-1.5 text-right tabular-nums">{число(x.n)}</td>
+                    <td className="py-1.5 text-right tabular-nums">
+                      {/* Список — только у частей, равных показателю узла; «отвечено» и «переведён» здесь — разности. */}
+                      {ЧАСТЬ_В_ЖУРНАЛ[x.key] && x.n
+                        ? <Link to={по(ЧАСТЬ_В_ЖУРНАЛ[x.key])} className="underline decoration-border underline-offset-4 hover:decoration-primary">{число(x.n)}</Link>
+                        : число(x.n)}
+                    </td>
                     <td className="w-20 py-1.5 text-right tabular-nums text-muted-foreground">{процент(Math.round((x.n / всего) * 1000) / 10)}</td>
                   </tr>
                 ))}
@@ -198,8 +226,13 @@ export default function VoiceStatsPage() {
             </table>
             {!!m.fallbackByReason && Object.keys(m.fallbackByReason).length > 0 && (
               <p className="text-xs text-muted-foreground">
-                Запасной сценарий по причинам: {Object.entries(m.fallbackByReason).map(([к, n]) =>
-                  `${ПРИЧИНА_ЗАПАСНОГО[к] ?? к} — ${n}`).join(', ')}
+                Запасной сценарий по причинам: {Object.entries(m.fallbackByReason).map(([к, n], i) => (
+                  <span key={к}>{i > 0 && ', '}
+                    <Link to={по(`fallback:${к}`)} className="underline decoration-border underline-offset-4 hover:decoration-primary">
+                      {ПРИЧИНА_ЗАПАСНОГО[к] ?? к} — {n}
+                    </Link>
+                  </span>
+                ))}
               </p>
             )}
           </section>
@@ -324,7 +357,10 @@ export default function VoiceStatsPage() {
                   <tbody>
                     {операторы.data.map(r => (
                       <tr key={`${r.operator.kind}:${r.operator.id}`} className="border-t border-border/60">
-                        <td className="py-1.5">{оператор(r.operator)}</td>
+                        <td className="py-1.5">
+                          <Link to={`/voice/calls?${new URLSearchParams({ from, to, ...(line ? { line } : {}), operator: `${r.operator.kind}:${r.operator.id}`, back: назад })}`}
+                            className="underline decoration-border underline-offset-4 hover:decoration-primary">{оператор(r.operator)}</Link>
+                        </td>
                         <td className="py-1.5 text-right tabular-nums">{число(r.metrics.answered)}</td>
                         <td className="py-1.5 text-right tabular-nums">{сек(r.metrics.ahtSec)}</td>
                         <td className="py-1.5 text-right tabular-nums">{сек(r.metrics.talkSec)}</td>
@@ -342,9 +378,7 @@ export default function VoiceStatsPage() {
   )
 }
 
-const ПРИЧИНА_ЗАПАСНОГО: Record<string, string> = {
-  max_wait: 'потолок ожидания',
-  kc_offline: 'КЦ не на связи',
-  no_command: 'КЦ не назначил оператора',
-  rule: 'правило',
+/** Части «Куда ушли звонки», которые равны показателю узла и потому открываются списком. */
+const ЧАСТЬ_В_ЖУРНАЛ: Record<string, string> = {
+  callback: 'callbackAccepted', fallback: 'fallback', abandoned: 'abandoned', afterHours: 'afterHours',
 }
