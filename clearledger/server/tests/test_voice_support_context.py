@@ -155,7 +155,8 @@ async def test_node_summary_reads_support_with_signed_tenant_and_fails_partial(c
             assert claims["exp"] - claims["iat"] == 120 and claims["jti"]
             assert body["objectRefs"] == [seeded["loc"]] and "companyId" not in body
 
-            for status_code, payload in [(503, {}), (200, []), (200, {"tickets": []})]:
+            for status_code, payload in [(503, {}), (200, []), (200, {"tickets": []}),
+                                         (200, {"availability": "available", "tickets": [{"bad": "data"}]})]:
                 state.update(status=status_code, body=payload)
                 r = await summary()
                 assert r.status_code == 200, r.text

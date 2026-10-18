@@ -128,6 +128,6 @@ async def support_tickets(db, company_id, *, phone, core_party_ref, object_refs,
         fields = ("ref", "number", "title", "status", "priority", "category", "objectRef", "slaDeadline")
         tickets = [{k: t.get(k) for k in fields} for t in body["tickets"][:limit]
                    if isinstance(t, dict) and all(isinstance(t.get(k), str) for k in ("ref", "number", "title", "status"))]
-        return tickets, "available"
+        return tickets, "available" if len(tickets) == len(body["tickets"][:limit]) else "unavailable"
     except (httpx.HTTPError, ValueError, TypeError):
         return [], "unavailable"
