@@ -381,4 +381,3 @@ export default function VoiceStatsPage() {
 const ЧАСТЬ_В_ЖУРНАЛ: Record<string, string> = {
   callback: 'callbackAccepted', fallback: 'fallback', abandoned: 'abandoned', afterHours: 'afterHours',
 }
-
