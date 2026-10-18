@@ -6,7 +6,9 @@ HTTP к Поддержке идёт с коротким токеном по ка
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from typing import Any
+import uuid
 
 import httpx
 from sqlalchemy import and_, func, or_, select
@@ -102,19 +104,27 @@ async def charging_context(db, company_id, *, phones, ref, limit, detail):
     return out
 
 
-async def support_tickets(db, company_id, *, phone, core_party_ref, object_refs, limit):
+async def _support_target(db, company_id, scope):
     apps = await company_apps(db, company_id)
     if not any(a["code"] == "support" and a["enabled"] for a in apps):
-        return [], "unavailable"
+        return None
     row = (await db.execute(select(App, AppCompanyLink).join(
         AppCompanyLink, AppCompanyLink.app_id == App.id,
     ).where(App.code == "support", AppCompanyLink.company_id == company_id))).first()
     if not row:
-        return [], "unavailable"
+        return None
     app, link = row
-    token = sso.sign_service_token(aud="support", scope="voice.context", company_id=link.external_company_id)
+    token = sso.sign_service_token(aud="support", scope=scope, company_id=link.external_company_id)
     if not token:
+        return None
+    return app, token
+
+
+async def support_tickets(db, company_id, *, phone, core_party_ref, object_refs, limit):
+    target = await _support_target(db, company_id, "voice.context")
+    if not target:
         return [], "unavailable"
+    app, token = target
     try:
         async with httpx.AsyncClient(timeout=0.65, follow_redirects=False) as client:
             res = await client.post(f"{_internal_base_url(app, 'support')}/api/v1/eco/voice/context",
@@ -131,3 +141,50 @@ async def support_tickets(db, company_id, *, phone, core_party_ref, object_refs,
         return tickets, "available" if len(tickets) == len(body["tickets"][:limit]) else "unavailable"
     except (httpx.HTTPError, ValueError, TypeError):
         return [], "unavailable"
+
+
+async def support_knowledge(db, company_id, *, topic, limit):
+    unavailable = {"availability": "unavailable", "items": []}
+    target = await _support_target(db, company_id, "voice.knowledge")
+    if not target:
+        return unavailable
+    app, token = target
+    try:
+        async with httpx.AsyncClient(timeout=0.65, follow_redirects=False) as client:
+            async with client.stream("POST", f"{_internal_base_url(app, 'support')}/api/v1/eco/voice/knowledge",
+                                     headers={"Authorization": f"Bearer {token}"},
+                                     json={"topic": topic, "limit": limit}) as response:
+                response.raise_for_status()
+                chunks, size = [], 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > 384000:
+                        return unavailable
+                    chunks.append(chunk)
+        body = json.loads(b"".join(chunks))
+        if not isinstance(body, dict):
+            return unavailable
+        if body.get("availability") != "available":
+            return {**unavailable, "reason": "topic_unconfigured"} if body.get("reason") == "topic_unconfigured" else unavailable
+        items = body.get("items")
+        if not isinstance(items, list) or len(items) > limit:
+            return unavailable
+        safe = []
+        for item in items:
+            if not isinstance(item, dict):
+                return unavailable
+            ref = item.get("ref")
+            if not isinstance(ref, str) or not ref.startswith("support:article:"):
+                return unavailable
+            article_id = ref.removeprefix("support:article:")
+            if str(uuid.UUID(article_id)) != article_id:
+                return unavailable
+            if (not isinstance(item.get("title"), str) or not 1 <= len(item["title"].strip()) <= 300
+                    or not isinstance(item.get("content"), str) or len(item["content"]) > 16000
+                    or item.get("visibility") not in ("cc", "public")
+                    or type(item.get("version")) is not int or item["version"] < 1):
+                return unavailable
+            safe.append({field: item[field] for field in ("ref", "title", "content", "visibility", "version")})
+        return {"availability": "available", "items": safe}
+    except (httpx.HTTPError, ValueError, TypeError):
+        return unavailable
