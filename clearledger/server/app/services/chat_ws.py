@@ -321,6 +321,9 @@ class ChatConnectionManager:
             if ws is exclude:
                 continue
             try:
+                from app.services.ticket_communications import delivery_allowed
+                if not await delivery_allowed(channel, payload, self._meta.get(ws, {}).get("user_id")):
+                    continue
                 await ws.send_json({**payload, "channel": channel})
             except Exception:  # noqa: BLE001 — мёртвый сокет
                 dead.append(ws)

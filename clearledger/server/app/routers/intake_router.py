@@ -18,7 +18,7 @@ from app.auth import assert_company_member, get_current_user
 from app.config import get_settings
 from app.database import get_db
 from app.deps import get_owned
-from app.models import ChatMessage, SourceFile, User
+from app.models import ChatMessage, ChatRoom, SourceFile, User
 
 router = APIRouter(tags=["Intake / Файлы"])
 
@@ -173,7 +173,7 @@ async def download_file(
     # Файлы вне чата (аватары комнат и людей, выгрузки, распознавание) сюда не попадают —
     # у них нет строки в chat_messages, и проверка их не касается.
     rows = (await db.execute(
-        select(ChatMessage.room_id, ChatMessage.deleted_at)
+        select(ChatMessage.room_id, ChatMessage.deleted_at, ChatMessage.created_at)
         .where(ChatMessage.file_url == f"/api/files/{uid}")
     )).all()
     if rows:
@@ -184,13 +184,23 @@ async def download_file(
         # отдавался человеку, которому саму переписку уже не показывают.
         from app.routers.chat_router import _assert_participant
 
-        live_rooms = {r for r, deleted in rows if deleted is None}
-        allowed = current_user.is_superadmin
+        live_rooms = {r for r, deleted, _ in rows if deleted is None}
+        # Preserve the existing superadmin policy for ordinary chat attachments.
+        # A ticket-only file always requires the fresh private ticket gate.
+        ordinary_copy = (await db.scalar(select(ChatRoom.id).where(
+            ChatRoom.id.in_({r for r, _, _ in rows}),
+            ChatRoom.scope_ticket_id.is_(None)).limit(1))) if current_user.is_superadmin else None
+        allowed = ordinary_copy is not None
         for rid in live_rooms:
             if allowed:
                 break
             try:
-                await _assert_participant(rid, current_user, db)
+                room = await _assert_participant(rid, current_user, db)
+                if room.scope_ticket_id is not None:
+                    from app.routers.chat_router import _history_from
+                    since = await _history_from(rid,current_user,db)
+                    if since and not any(r == rid and deleted is None and at >= since for r,deleted,at in rows):
+                        continue
                 allowed = True
             except HTTPException:
                 pass

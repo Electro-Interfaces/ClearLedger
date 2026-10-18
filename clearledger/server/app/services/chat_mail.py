@@ -107,6 +107,11 @@ def push_room_mail_async(
                            ChatParticipant.user_id != exclude_user_id,
                            User.mail_only.is_(True))
                 )).all()
+                from app.models import ChatRoom
+                from app.services.ticket_communications import is_ticket_room
+                room = await db.get(ChatRoom, room_id)
+                if room is not None and is_ticket_room(room):
+                    return  # private staff discussion has no mail-only participants/bridge
                 emails = [e for e, _ in rows if e]
                 if not emails:
                     return
