@@ -508,6 +508,7 @@ async def _users_payload(
         named = ((membership.app_roles or {}).get(app_code)
                  or (getattr(access_role, "app_roles", None) or {}).get(app_code))
         out.append({
+            "ecoUserId": str(user.id),
             "email": user.email,
             "name": user.name or user.email,
             "role": named or role_map.get(space_role, default_role),

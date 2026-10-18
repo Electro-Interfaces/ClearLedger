@@ -32,7 +32,7 @@ import { MetricHint } from '@/components/workspace/analytics/MetricHint'
 import { ConfirmActionDialog } from '@/components/common/ConfirmActionDialog'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useChatWs, type WsEvent } from '@/hooks/useChatWs'
-import { startMeeting } from '@/services/conferenceService'
+import { startMeeting, startTicketMeeting } from '@/services/conferenceService'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -2451,8 +2451,12 @@ export function ChatPanel({ compact, scopeProduct }: {
     // Конференция пространства, а не публичный meet.jit.si: тот открывал комнату с
     // предсказуемым именем на чужом сервере, и войти мог любой, кому переслали
     // ссылку. Организатор входит модератором по подписанному токену, в чат уходит
-    // гостевая ссылка.
+    // гостевая ссылка. У private ticket video отдельный допуск, URL в чат не пишем.
     mutationFn: async () => {
+      if (roomDetail?.scopeTicketId) {
+        await startTicketMeeting(roomDetail.scopeTicketId)
+        return null
+      }
       const m = await startMeeting()
       return chat.sendMessage(selectedRoom!, { content: `📹 ${user?.name || 'Участник'} приглашает в видеозвонок — присоединяйтесь: ${m.guest_url}` })
     },
@@ -3188,7 +3192,7 @@ export function ChatPanel({ compact, scopeProduct }: {
         </button>
         <MetricHint className="shrink-0" text="Переписку и вложения видят только участники этого чата. Метка рядом с именем говорит, кто перед вами: сотрудник компании, человек партнёра или поддержка платформы. Заход администратора в чужой рабочий чат записывается в журнал действий." />
         {canWrite && (
-          <button onClick={() => callMutation.mutate()} disabled={callMutation.isPending} title="Видеозвонок"
+          <button onClick={() => callMutation.mutate()} disabled={callMutation.isPending || !roomDetail} title="Видеозвонок"
             className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50">
             <Video className="size-4" />
           </button>

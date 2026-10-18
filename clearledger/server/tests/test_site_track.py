@@ -1,10 +1,10 @@
 """Работа «Трека» в карточке проекта: чем она находится.
 
-Ловим то, из-за чего лента оказалась бы пустой при живой работе: предмет у
-проекта два (сам проект и объект сети), и искать надо по обоим — объект
-появляется только со вводом в эксплуатацию, а бумаги нужны с первого дня.
+Работа по проекту и общая работа объекта доступны отдельными режимами.
+Объект появляется только со вводом в эксплуатацию, а бумаги нужны с первого дня.
 """
 import uuid
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from httpx import AsyncClient
@@ -24,7 +24,7 @@ async def _kind(db: AsyncSession, cid: uuid.UUID) -> DocKind:
     return kind
 
 
-async def test_лента_проекта_находит_работу_обоими_предметами(
+async def test_лента_проекта_разделяет_свою_и_общую_работу_объекта(
         auth_client: AsyncClient, db: AsyncSession):
     me = (await auth_client.get("/api/auth/me")).json()
     cid = uuid.UUID(seed_company_id(me))
@@ -57,8 +57,12 @@ async def test_лента_проекта_находит_работу_обоим�
     assert body["subject_ref"] == f"site:{site.id}"
     assert {i["title"] for i in body["items"]} == {"Акт выбора площадки", "Осмотр участка"}
     assert body["object_id"] is None
+    common = await auth_client.get(f"/api/sites/{site.id}/track", params={
+        "company_id": str(cid), "common": True})
+    assert common.status_code == 200, common.text
+    assert common.json()["items"] == []
 
-    # Площадка стала объектом сети — работа по объекту попадает в ту же ленту.
+    # Площадка стала объектом сети: общая работа доступна отдельным режимом.
     # `code` у объекта обязателен: без него вставка падает, а не молча проходит.
     location = ServiceLocation(id=f"ezs-{uuid.uuid4().hex[:16]}", company_id=cid,
                                code=f"P-{uuid.uuid4().hex[:6]}",
@@ -66,6 +70,9 @@ async def test_лента_проекта_находит_работу_обоим�
     db.add(location)
     await db.flush()
     site.location_id = location.id
+    # Прямые работы проекта могут знать и объект; в общей ленте не дублируются.
+    early.object_id = location.id
+    early_errand.object_id = location.id
     later = DocCard(company_id=cid, kind_id=kind.id, kind_code=kind.code,
                     family="internal", direction="none",
                     title="Акт ввода", status="draft", object_id=location.id)
@@ -77,11 +84,15 @@ async def test_лента_проекта_находит_работу_обоим�
     body = (await auth_client.get(f"/api/sites/{site.id}/track",
                                   params={"company_id": str(cid)})).json()
     titles = {i["title"] for i in body["items"]}
-    assert titles == {"Акт выбора площадки", "Осмотр участка",
-                      "Акт ввода", "Выезд на пусконаладку"}
+    assert titles == {"Акт выбора площадки", "Осмотр участка"}
     assert body["object_id"] == location.id
-    # Документы и поручения идут вместе: два списка человек складывал бы в уме.
     assert {i["kind"] for i in body["items"]} == {"doc", "task"}
+    common = await auth_client.get(f"/api/sites/{site.id}/track", params={
+        "company_id": str(cid), "common": True})
+    assert common.status_code == 200, common.text
+    assert {i["title"] for i in common.json()["items"]} == {
+        "Акт ввода", "Выезд на пусконаладку"}
+    assert {i["kind"] for i in common.json()["items"]} == {"doc", "task"}
 
 
 async def test_проект_законный_предмет_документа(auth_client: AsyncClient,
@@ -151,14 +162,15 @@ async def test_лента_работы_отбирается_по_предмет�
     assert {i["kind"] for i in body["work"]} == {"doc", "task"}
 
 
+@pytest.mark.parametrize("number", [None, "П-95"])
 async def test_предмет_расшифровывается_именем_и_ссылкой(
-        auth_client: AsyncClient, db: AsyncSession):
+        auth_client: AsyncClient, db: AsyncSession, number):
     """Сырая ссылка человеку ничего не говорит: он не отличит проект от договора
     и не поймёт, о какой площадке речь."""
     me = (await auth_client.get("/api/auth/me")).json()
     cid = uuid.UUID(seed_company_id(me))
     site = EzsSite(company_id=cid, title="Крыгина ул. 95", kind="new_build",
-                   stage="construction")
+                   stage="construction", project_no=number)
     db.add(site)
     await db.commit()
 
@@ -166,8 +178,14 @@ async def test_предмет_расшифровывается_именем_и_�
     body = (await auth_client.get("/api/docs/refs/resolve", params={
         "company_id": str(cid), "refs": f"site:{site.id},{ghost}"})).json()["refs"]
 
-    assert body[f"site:{site.id}"]["name"] == "Крыгина ул. 95"
-    assert body[f"site:{site.id}"]["url"].endswith(str(site.id))
+    expected = f"{number} · Крыгина ул. 95" if number else "Крыгина ул. 95"
+    assert body[f"site:{site.id}"]["name"] == expected
+    assert parse_qs(urlparse(body[f"site:{site.id}"]["url"]).query)["project"] == [str(site.id)]
+    search = await auth_client.get("/api/work-contexts/search", params={
+        "company_id": str(cid), "prefix": "site", "q": "Крыгина ул. 95"})
+    assert search.status_code == 200, search.text
+    found = next(i for i in search.json()["items"] if i["ref"] == f"site:{site.id}")
+    assert found["title"] == expected
     # Исчезнувшая цель называется прямо: молчание человек прочтёт как «связи
     # нет», хотя связь есть и она сломана.
     assert ghost in body and body[ghost]["name"] is None

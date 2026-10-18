@@ -3,6 +3,8 @@
 import pytest
 from httpx import AsyncClient
 
+from tests.helpers import TEST_USER_PASSWORD
+
 
 # ---------------------------------------------------------------------------
 # Login
@@ -48,7 +50,7 @@ async def test_register_requires_superadmin(client: AsyncClient):
     resp = await client.post(
         "/api/auth/register",
         json={
-            "email": "x@test.com", "password": "secret123",
+            "email": "x@test.com", "password": TEST_USER_PASSWORD,
             "name": "X", "company_id": "gig",
         },
     )
@@ -61,7 +63,7 @@ async def test_register_new_user(auth_client: AsyncClient):
         "/api/auth/register",
         json={
             "email": "newuser@test.com",
-            "password": "secret123",
+            "password": TEST_USER_PASSWORD,
             "name": "Тестовый Пользователь",
             "company_id": "gig",
         },
@@ -78,7 +80,7 @@ async def test_register_duplicate_email(auth_client: AsyncClient):
         "/api/auth/register",
         json={
             "email": "admin@clearledger.ru",
-            "password": "any123",
+            "password": TEST_USER_PASSWORD,
             "name": "Дубль",
             "company_id": "gig",
         },
@@ -123,7 +125,7 @@ async def test_register_normalizes_email(auth_client: AsyncClient):
         "/api/auth/register",
         json={
             "email": "  MixedCase@Test.COM ",
-            "password": "secret123",
+            "password": TEST_USER_PASSWORD,
             "name": "Mixed Case",
             "company_id": "gig",
         },
@@ -136,7 +138,7 @@ async def test_login_email_case_insensitive(client: AsyncClient):
     # Тот же аккаунт (создан выше) логинится при любом регистре.
     resp = await client.post(
         "/api/auth/login",
-        json={"email": "MIXEDCASE@TEST.com", "password": "secret123"},
+        json={"email": "MIXEDCASE@TEST.com", "password": TEST_USER_PASSWORD},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["user"]["email"] == "mixedcase@test.com"
@@ -148,7 +150,7 @@ async def test_register_duplicate_email_case_insensitive(auth_client: AsyncClien
         "/api/auth/register",
         json={
             "email": "MixedCase@test.com",
-            "password": "secret123",
+            "password": TEST_USER_PASSWORD,
             "name": "Dup",
             "company_id": "gig",
         },

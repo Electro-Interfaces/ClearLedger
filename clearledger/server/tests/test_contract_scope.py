@@ -4,14 +4,18 @@
 
 Запуск: cd server && py -3 -m pytest tests/test_contract_scope.py -v
 """
+import uuid
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 LOC1 = "loc-scope-201"
 LOC2 = "loc-scope-202"
 
 
-async def _post(client: AsyncClient, url: str, body: dict) -> dict:
+async def _post(client: AsyncClient, url: str, body: dict) -> dict | list:
     r = await client.post(url, json=body)
     assert r.status_code in (200, 201), f"{url}: {r.text}"
     return r.json()
@@ -182,11 +186,14 @@ async def test_contract_type_and_station_link(auth_client: AsyncClient):
     assert "rent" in {t["code"] for t in types}
     bad = await auth_client.post("/api/references/contracts", json={
         "company_id": "gig", "number": "АР-4X", "date": "2026-05-01",
-        "counterpartyId": cp["id"], "organizationId": org_id, "typeCode": "нет-такого"})
+        "counterpartyId": cp["id"], "organizationId": org_id,
+        "type": "Аренда", "typeCode": "нет-такого"})
     assert bad.status_code == 422, bad.text
+    assert bad.json()["detail"] == "Неизвестный вид договора: нет-такого"
     ct = await _post(auth_client, "/api/references/contracts", {
         "company_id": "gig", "number": "АР-4", "date": "2026-05-01",
-        "counterpartyId": cp["id"], "organizationId": org_id, "typeCode": "rent"})
+        "counterpartyId": cp["id"], "organizationId": org_id,
+        "type": "Аренда", "typeCode": "rent"})
     assert ct["typeCode"] == "rent"
 
     r = await auth_client.post(f"/api/references/contracts/{ct['id']}/locations/loc-scope-401")
@@ -231,8 +238,13 @@ async def test_contract_requisites_and_safe_delete(auth_client: AsyncClient):
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_contract_app_links(auth_client: AsyncClient):
+async def test_contract_app_links(auth_client: AsyncClient, db: AsyncSession):
     """Договор → приложение: привязка, повтор не дублирует, сводка видит её, снятие."""
+    # В приложении каталог создаёт lifespan; ASGITransport его не запускает.
+    from app.services.app_registry import seed_apps
+
+    await seed_apps(db)
+    await db.commit()
     org_id = await _organization(auth_client)
     cp = await _post(auth_client, "/api/references/counterparties", {
         "company_id": "gig", "inn": "7800000601", "name": "Энергосбыт-6 ООО",
@@ -242,8 +254,8 @@ async def test_contract_app_links(auth_client: AsyncClient):
         "counterpartyId": cp["id"], "organizationId": org_id})
     bad = await auth_client.post(f"/api/references/contracts/{ct['id']}/links", json={"app": "нет-такого"})
     assert bad.status_code == 422
-    links = (await auth_client.post(f"/api/references/contracts/{ct['id']}/links", json={"app": "ops"})).json()
-    again = (await auth_client.post(f"/api/references/contracts/{ct['id']}/links", json={"app": "ops"})).json()
+    links = await _post(auth_client, f"/api/references/contracts/{ct['id']}/links", {"app": "ops"})
+    again = await _post(auth_client, f"/api/references/contracts/{ct['id']}/links", {"app": "ops"})
     assert len(links) == len(again) == 1 and links[0]["app"] == "ops" and links[0]["projectRef"] is None
     b = (await auth_client.get("/api/references/contract-bindings", params={"company_id": "gig"})).json()
     assert b["contracts"][ct["id"]]["apps"] == ["ops"] and b["contracts"][ct["id"]]["linked"] == ["ops"]
@@ -280,3 +292,41 @@ async def test_contract_quality(auth_client: AsyncClient):
     assert any(i["id"] == ct["id"] for i in q["no_stations"]["items"])
     assert any(i["id"] == ct["id"] for i in q["no_date"]["items"])
     assert any(i["id"] == ct["id"] for i in q["orphan"]["items"])
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_contract_usage_with_support(auth_client: AsyncClient, db: AsyncSession):
+    """Необязательный контур учитывается и в карточке, и в общей сводке.
+
+    Чистое ядро проверяется тестами выше. Здесь воспроизводим таблицу внешнего
+    приложения: его миграции не входят в схему ядра.
+    """
+    org_id = await _organization(auth_client)
+    cp = await _post(auth_client, "/api/references/counterparties", {
+        "company_id": "gig", "inn": "7800000901", "name": "Сервисный подрядчик ООО",
+    })
+    contract = await _post(auth_client, "/api/references/contracts", {
+        "company_id": "gig", "number": "СЕРВ-9", "date": "2026-07-01", "type": "Услуги",
+        "counterpartyId": cp["id"], "organizationId": org_id})
+    assert await db.scalar(text("SELECT to_regclass('service_contracts')")) is None
+    await db.execute(text("CREATE TABLE service_contracts (contract_id UUID)"))
+    await db.execute(text("INSERT INTO service_contracts (contract_id) VALUES (:cid)"),
+                     {"cid": uuid.UUID(contract["id"])})
+    await db.commit()
+    try:
+        usage = await auth_client.get(f"/api/references/contracts/{contract['id']}/usage")
+        assert usage.status_code == 200, usage.text
+        assert usage.json() == [{"app": "support", "label": "Сервисные договоры «Поддержки»", "count": 1}]
+        bindings = await auth_client.get("/api/references/contract-bindings", params={"company_id": "gig"})
+        assert bindings.status_code == 200, bindings.text
+        assert bindings.json()["contracts"][contract["id"]]["apps"] == ["support"]
+        deleted = await auth_client.delete(f"/api/references/contracts/{contract['id']}")
+        assert deleted.status_code == 409, deleted.text
+    finally:
+        await db.execute(text("DROP TABLE service_contracts"))
+        await db.commit()
+    # После отключения контура оба потребителя снова работают на чистом ядре.
+    assert (await auth_client.get(f"/api/references/contracts/{contract['id']}/usage")).json() == []
+    bindings = await auth_client.get("/api/references/contract-bindings", params={"company_id": "gig"})
+    assert bindings.status_code == 200, bindings.text
+    assert "support" not in bindings.json()["contracts"].get(contract["id"], {}).get("apps", [])

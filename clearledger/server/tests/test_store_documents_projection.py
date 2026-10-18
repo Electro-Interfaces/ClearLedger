@@ -136,7 +136,13 @@ class RebuildSession:
             return Result()
         descriptions = getattr(statement, "column_descriptions", [])
         entity = descriptions[0].get("entity") if descriptions else None
-        return Result(self.rows.get(entity, ()))
+        rows = self.rows.get(entity, ())
+        # select(Model.a, Model.b, ...) возвращает Row, а не ORM-объект,
+        # в отличие от select(Model).scalars().all().
+        if len(descriptions) > 1:
+            rows = [tuple(getattr(row, column["name"]) for column in descriptions)
+                    for row in rows]
+        return Result(rows)
 
     def add(self, row):
         self.added.append(row)
@@ -966,7 +972,9 @@ async def test_rebuild_stale_delete_is_explicit_and_company_scoped(monkeypatch):
         return []
 
     monkeypatch.setattr(store_documents, "ADAPTER_REGISTRY", (("empty", empty),))
-    stale = SimpleNamespace(id=uuid.uuid4())
+    stale = SimpleNamespace(
+        id=uuid.uuid4(), document_id=uuid.uuid4(),
+        document_at=datetime(2026, 8, 9, tzinfo=timezone.utc), source_kind="receipt")
     session = RebuildSession({
         AccountingSourceLink: [], StoreDocFile: [],
         StoreDocumentProjection: [stale], StoreDocumentProjectionLine: [],

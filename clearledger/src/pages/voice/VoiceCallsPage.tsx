@@ -95,7 +95,7 @@ export default function VoiceCallsPage() {
 
   // Участники за период — те, кто отвечал (статистика по операторам); выбранный из ссылки остаётся в списке.
   const операторы = useQuery({
-    queryKey: ['voice-stats', companyId, 'operators', from, to ?? ''],
+    queryKey: ['voice-stats', companyId, 'operators', from, to ?? '', line || undefined],
     queryFn: () => voice.statsOperators(companyId, { from, to: to ?? сейчасДо15(), line: line || undefined }),
     staleTime: 60_000,
   })

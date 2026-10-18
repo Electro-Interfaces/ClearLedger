@@ -10,6 +10,8 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
+from tests.helpers import TEST_USER_PASSWORD
+
 
 def _h(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
@@ -31,10 +33,10 @@ async def _create_user(client: AsyncClient, admin: str, email: str, company: str
     # не про уровень прав внутри своей.
     r = await client.post("/api/users", headers=_h(admin), json={
         "company_id": company, "email": email, "name": email.split("@")[0],
-        "password": "secret123", "role": "admin",
+        "password": TEST_USER_PASSWORD, "role": "admin",
     })
     assert r.status_code in (200, 201), r.text
-    lr = await client.post("/api/auth/login", json={"email": email, "password": "secret123"})
+    lr = await client.post("/api/auth/login", json={"email": email, "password": TEST_USER_PASSWORD})
     assert lr.status_code == 200, lr.text
     return lr.json()["access_token"]
 
@@ -139,7 +141,7 @@ async def test_superadmin_sees_all(client: AsyncClient, auth_client: AsyncClient
 
 
 async def _login(client: AsyncClient, email: str) -> str:
-    r = await client.post("/api/auth/login", json={"email": email, "password": "secret123"})
+    r = await client.post("/api/auth/login", json={"email": email, "password": TEST_USER_PASSWORD})
     assert r.status_code == 200, r.text
     return r.json()["access_token"]
 
@@ -151,7 +153,7 @@ async def test_user_management(client: AsyncClient):
     # Суперадмин заводит АДМИНА компании rushydro.
     r = await client.post("/api/users", headers=_h(admin), json={
         "company_id": "rushydro", "email": "mgr@test.ru", "name": "Mgr",
-        "password": "secret123", "role": "admin",
+        "password": TEST_USER_PASSWORD, "role": "admin",
     })
     assert r.status_code in (200, 201), r.text
     mgr = await _login(client, "mgr@test.ru")
@@ -159,7 +161,7 @@ async def test_user_management(client: AsyncClient):
     # Админ rushydro заводит обычного пользователя.
     r = await client.post("/api/users", headers=_h(mgr), json={
         "company_id": "rushydro", "email": "emp@test.ru", "name": "Emp",
-        "password": "secret123", "role": "user",
+        "password": TEST_USER_PASSWORD, "role": "user",
     })
     assert r.status_code in (200, 201), r.text
     emp_id = r.json()["id"]
@@ -184,7 +186,7 @@ async def test_user_management(client: AsyncClient):
     r = await client.delete(f"/api/users/{emp_id}", headers=_h(mgr), params={"company_id": "rushydro"})
     assert r.status_code == 204
     # После отзыва единственного членства пользователь удалён → логин не проходит.
-    bad = await client.post("/api/auth/login", json={"email": "emp@test.ru", "password": "secret123"})
+    bad = await client.post("/api/auth/login", json={"email": "emp@test.ru", "password": TEST_USER_PASSWORD})
     assert bad.status_code == 401
 
 
@@ -200,7 +202,7 @@ async def test_admin_global_users_and_memberships(client: AsyncClient):
     # Создаём пользователя в rushydro и выдаём членство в gig (мультикомпанийный доступ).
     r = await client.post("/api/users", headers=_h(admin), json={
         "company_id": "rushydro", "email": "multi@test.ru", "name": "Multi",
-        "password": "secret123", "role": "user",
+        "password": TEST_USER_PASSWORD, "role": "user",
     })
     assert r.status_code in (200, 201), r.text
     uid = r.json()["id"]

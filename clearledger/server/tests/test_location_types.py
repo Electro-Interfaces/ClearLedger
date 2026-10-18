@@ -8,6 +8,8 @@
 import pytest
 from httpx import AsyncClient
 
+from tests.helpers import TEST_USER_PASSWORD
+
 
 def _h(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
@@ -24,10 +26,10 @@ async def _admin_token(client: AsyncClient) -> str:
 async def _create_user(client: AsyncClient, admin: str, email: str, company: str, role: str) -> str:
     r = await client.post("/api/users", headers=_h(admin), json={
         "company_id": company, "email": email, "name": email.split("@")[0],
-        "password": "secret123", "role": role,
+        "password": TEST_USER_PASSWORD, "role": role,
     })
     assert r.status_code in (200, 201), r.text
-    lr = await client.post("/api/auth/login", json={"email": email, "password": "secret123"})
+    lr = await client.post("/api/auth/login", json={"email": email, "password": TEST_USER_PASSWORD})
     assert lr.status_code == 200, lr.text
     return lr.json()["access_token"]
 

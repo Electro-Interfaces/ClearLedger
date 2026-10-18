@@ -105,6 +105,18 @@ SYSTEM_ROLES_OFFICE: list[dict] = [
 ]
 
 
+# Производственная команда (`works`): работа в «Треке» и общение, без рабочих мест
+# розницы и бухгалтерии. Администрирование сайта и Link остаётся полному доступу.
+# Ключи — приложения из app_registry: docs входит в разрез works, pulse/chat/conf
+# включены всегда. Семантика та же, что у офисных ролей: app целиком, None — всё.
+SYSTEM_ROLES_WORKS: list[dict] = [
+    {"name": "Полный доступ", "modules": None},
+    {"name": "Руководитель", "modules": ["pulse", "docs", "chat"]},
+    {"name": "Специалист", "modules": ["docs", "chat", "conf"]},
+    {"name": "Наблюдатель", "modules": ["pulse"]},
+]
+
+
 def system_roles_for(profile_id: str | None) -> list[dict]:
     """Набор системных ролей под профиль компании.
 
@@ -116,6 +128,8 @@ def system_roles_for(profile_id: str | None) -> list[dict]:
         return SYSTEM_ROLES
     if profile_id == "office":
         return SYSTEM_ROLES_OFFICE
+    if profile_id == "works":
+        return SYSTEM_ROLES_WORKS
     return SYSTEM_ROLES_ENERGY if profile_id == "energy" else SYSTEM_ROLES_FUEL
 
 

@@ -77,7 +77,7 @@ async def share_series_url(db, ev) -> None:
         CalendarEvent.status != "cancelled").values(conference_url=ev.conference_url))
 
 
-def sign_token(room: str, display_name: str, *, moderator: bool = True, hours: int = 4) -> str | None:
+def sign_token(room: str, display_name: str, *, moderator: bool = True, hours: int = 4, ttl_seconds: int | None = None) -> str | None:
     """Подписать RS256 JWT организатора. None, если ключ подписи не задан."""
     key = _private_key()
     if not key:
@@ -92,7 +92,7 @@ def sign_token(room: str, display_name: str, *, moderator: bool = True, hours: i
         "room": room,
         "iat": now,
         "nbf": now - 10,
-        "exp": now + hours * 3600,
+        "exp": now + (ttl_seconds if ttl_seconds is not None else hours * 3600),
         "context": {"user": {"name": display_name or "Пользователь", "moderator": moderator}},
     }
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.jitsi_kid})

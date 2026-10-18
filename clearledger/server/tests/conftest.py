@@ -41,6 +41,7 @@ from sqlalchemy import text as sa_text
 from app.database import Base, get_db
 from app.main import app
 from app.seed import seed_data
+from tests.helpers import drain_application_tasks
 
 # Тестовый engine (отдельная БД clearledger_test)
 _test_engine = create_async_engine(
@@ -94,6 +95,10 @@ async def setup_database():
 
     yield
 
+    # Аудит и доставка уведомлений владеют своими сессиями. Возврат HTTP-ответа
+    # не означает их завершения: DROP иначе конкурирует с их SELECT/INSERT.
+    await drain_application_tasks()
+
     # Чистим тем же способом, что и создавали: `drop_all` по метаданным не знает
     # о таблицах, заведённых миграциями, и падает на их внешних ключах.
     async with _test_engine.begin() as conn:
@@ -103,12 +108,41 @@ async def setup_database():
     await _test_engine.dispose()
 
 
+@pytest_asyncio.fixture(scope="module", loop_scope="session")
+async def setup_store_database(setup_database):
+    """Минимальный внешний контракт НСИ плюс штатные миграции магазина.
+
+    Общая БД остаётся профилем без магазина: create_all намеренно пропускает
+    магазинные миграции до provisioning edge.item. Тестам матрицы/артикулов
+    нужны только item/group, не весь станционный контур.
+    """
+    from tests.store_provisioning import BASE_DDL
+
+    async with _test_engine.begin() as conn:
+        for statement in (*BASE_DDL, *_db.SKU_MIGRATION_DDL, *_db.MATRIX_MIGRATION_DDL):
+            await conn.execute(sa_text(statement))
+        # Downlink ссылается на настоящую компанию: случайный UUID скрывал
+        # нарушение FK, пока тест раньше падал на отсутствующей таблице.
+        company_id = (await conn.execute(sa_text(
+            "SELECT id FROM companies WHERE slug = 'gig'"))).scalar_one()
+
+    yield company_id
+
+    # Частичный контракт НСИ не должен включать магазинный профиль в чужих
+    # тестах startup: полный provisioning этой схемы принадлежит ledger-edge.
+    await drain_application_tasks()
+    async with _test_engine.begin() as conn:
+        await conn.execute(sa_text(
+            "DROP TABLE edge.matrix_rule, edge.item_code, edge.item, edge.item_group"))
+
+
 @pytest_asyncio.fixture(loop_scope="session")
 async def client(setup_database) -> AsyncGenerator[AsyncClient, None]:
     """HTTP-клиент без авторизации."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+    await drain_application_tasks()
 
 
 @pytest.fixture(autouse=True)
@@ -127,17 +161,21 @@ def _reset_rate_limit():
 
 
 @pytest_asyncio.fixture(loop_scope="session")
-async def auth_client(client: AsyncClient) -> AsyncClient:
+async def auth_client(setup_database) -> AsyncGenerator[AsyncClient, None]:
     """HTTP-клиент с JWT-токеном (admin@clearledger.ru / admin123)."""
-    resp = await client.post(
-        "/api/auth/login",
-        json={"email": "admin@clearledger.ru", "password": "admin123"},
-    )
-    assert resp.status_code == 200, f"Login failed: {resp.text}"
-    token = resp.json()["access_token"]
-    client.headers["Authorization"] = f"Bearer {token}"
-    yield client
-    client.headers.pop("Authorization", None)
+    # Независимый клиент: запросы через `client` остаются анонимными, даже если
+    # тест одновременно использует обе фикстуры.
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post(
+            "/api/auth/login",
+            json={"email": "admin@clearledger.ru", "password": "admin123"},
+        )
+        assert resp.status_code == 200, f"Login failed: {resp.text}"
+        token = resp.json()["access_token"]
+        ac.headers["Authorization"] = f"Bearer {token}"
+        yield ac
+    await drain_application_tasks()
 
 
 @pytest_asyncio.fixture(loop_scope="session")

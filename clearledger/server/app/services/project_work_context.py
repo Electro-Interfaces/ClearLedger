@@ -7,6 +7,10 @@ from app.models import EzsSite, EzsSiteEvent, EzsSiteParticipant, User, UserComp
 from app.services import ezs_sites, project_scenarios
 
 
+def _project_title(number: str | None, title: str | None, city: str | None) -> str:
+    return " · ".join(part for part in (number, title or city or "Проект") if part)
+
+
 class ProjectsContext:
     prefix = "site"
     application = "projects"
@@ -14,7 +18,7 @@ class ProjectsContext:
 
     async def search(self, db, cid, user, q):
         result = await ezs_sites.list_sites(db, cid, search=q, page_size=20)
-        return [{"ref": f"site:{s['id']}", "title": f"{s.get('projectNo') or ''} · {s.get('title') or s.get('city') or 'Проект'}",
+        return [{"ref": f"site:{s['id']}", "title": _project_title(s.get("projectNo"), s.get("title"), s.get("city")),
                  "hint": s.get("address") or s.get("fullAddress") or ""} for s in result["items"]]
 
     async def resolve(self, db, cid, user, key):
@@ -48,7 +52,7 @@ class ProjectsContext:
         if scenario and "message_actions" in scenario:
             actions = [action for action in actions if action["code"] in scenario["message_actions"]]
         return {"ref": f"site:{sid}", "application": self.application,
-            "title": f"{site.project_no or ''} · {site.title or site.city or 'Проект'}",
+            "title": _project_title(site.project_no, site.title, site.city),
             "url": f"/projects?mode=projects&sub=pr_project&project={sid}&ptab=overview", "object_id": site.location_id,
             "suggested_people": suggestions,
             "defaults": {"responsible_id": responsible_id or (str(site.owner_user_id) if site.owner_user_id else None),

@@ -21,7 +21,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import App, AuditEvent, Company, SpaceInboundKey, User, UserCompany
+from app.models import App, AppCompanyLink, AuditEvent, Company, SpaceInboundKey, User, UserCompany
 from app.services import app_registry, sso
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -195,6 +195,61 @@ async def test_voice_token_keeps_guard_statuses_and_messages(
     )
     assert response.status_code == 503, response.text
     assert response.json() == {"detail": "SSO не настроен (нет ключа подписи)"}
+
+
+async def test_support_voice_token_uses_exact_mapping_and_existing_guards(
+    client: AsyncClient, db: AsyncSession, sso_key, monkeypatch,
+):
+    """UUID Поддержки не заменяется текущей компанией или совпавшим id другого приложения."""
+    gig = await _voice(db, "gig")
+    rushydro = await _voice(db, "rushydro")
+    tag = uuid.uuid4().hex[:6]
+    admin = await _user(client, f"support-voice-admin-{tag}@test.ru", "gig", "admin")
+    reader = await _user(client, f"support-voice-reader-{tag}@test.ru", "gig", "user")
+    support_app = (await db.execute(select(App.id).where(App.code == "support"))).scalar_one()
+    voice_app = (await db.execute(select(App.id).where(App.code == "voice"))).scalar_one()
+    local_gig, local_rushydro, other_app = [uuid.uuid4() for _ in range(3)]
+    links = [
+        AppCompanyLink(app_id=support_app, company_id=gig, external_company_id=str(local_gig)),
+        AppCompanyLink(app_id=support_app, company_id=rushydro, external_company_id=str(local_rushydro)),
+        AppCompanyLink(app_id=voice_app, company_id=gig, external_company_id=str(other_app)),
+    ]
+    db.add_all(links)
+    await db.commit()
+    url = "/api/sso/voice-token-for-support"
+    try:
+        for bearer, roles in [(admin, ["admin"]), (reader, [])]:
+            r = await client.get(url, params={"company_id": str(local_gig)}, headers=_h(bearer))
+            assert r.status_code == 200, r.text
+            payload = r.json()
+            assert payload["company_id"] == str(gig)
+            assert payload["support_company_id"] == str(local_gig)
+            assert payload["roles"] == roles
+            claims = _claims(payload["token"], sso_key)
+            assert claims["cid"] == str(gig) and claims["roles"] == roles
+            assert claims["exp"] - claims["iat"] == payload["expires_in"] == 300
+            assert claims["jti"]
+
+        for missing in (uuid.uuid4(), gig, other_app):
+            r = await client.get(url, params={"company_id": str(missing)}, headers=_h(admin))
+            assert r.status_code == 404, r.text
+        r = await client.get(url, params={"company_id": str(local_rushydro)}, headers=_h(reader))
+        assert r.status_code == 403, r.text
+        r = await client.get(url, params={"company_id": "gig"}, headers=_h(admin))
+        assert r.status_code == 422, r.text
+
+        await _voice(db, "gig", False)
+        r = await client.get(url, params={"company_id": str(local_gig)}, headers=_h(admin))
+        assert r.status_code == 403, r.text
+        assert r.json() == {"detail": "Приложение не подключено компании"}
+        monkeypatch.setattr(sso.settings, "sso_signing_key", "")
+        r = await client.get(url, params={"company_id": str(local_gig)}, headers=_h(admin))
+        assert r.status_code == 503, r.text
+    finally:
+        for link in links:
+            await db.delete(link)
+        await _voice(db, "gig")
+        await db.commit()
 
 
 async def test_authorize_without_company_keeps_fallback_and_audit(

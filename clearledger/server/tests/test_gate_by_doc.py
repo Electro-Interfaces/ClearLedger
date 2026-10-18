@@ -44,11 +44,11 @@ async def test_согласованный_документ_закрывает_п
                        target_ref=f"site:{site.id}"))
     await db.flush()
     # Черновик не подтверждает ничего: иначе гейт закрывался бы намерением.
-    assert "contract" not in await ezs_site_work.site_doc_kinds(db, site.id)
+    assert await ezs_site_work.site_doc_kinds(db, site.id) == set()
 
     draft.approval_status = "approved"
     await db.flush()
-    assert "contract" in await ezs_site_work.site_doc_kinds(db, site.id)
+    assert await ezs_site_work.site_doc_kinds(db, site.id) == {"approved:contract"}
 
     # Документ без объявленного пункта гейт не двигает, даже согласованный.
     other = DocKind(company_id=cid, code=f"memo{uuid.uuid4().hex[:6]}",
@@ -63,7 +63,7 @@ async def test_согласованный_документ_закрывает_п
     db.add(DocRelation(company_id=cid, doc_id=note.id, kind="basis",
                        target_ref=f"site:{site.id}"))
     await db.flush()
-    assert await ezs_site_work.site_doc_kinds(db, site.id) == {"contract"}
+    assert await ezs_site_work.site_doc_kinds(db, site.id) == {"approved:contract"}
 
     await db.rollback()
 
@@ -85,17 +85,18 @@ async def test_виды_под_гейты_сеются_профилю_сети(a
 
     from app.models import Company
     from app.routers.docs_router import (
-        STARTER_KINDS, STARTER_KINDS_ENERGY, starter_kinds,
+        STARTER_KINDS, STARTER_KINDS_CONTRACT, STARTER_KINDS_ENERGY, starter_kinds,
     )
     from app.services import ezs_checklist
     from tests.helpers import seed_company_id
 
     # Офису и рознице виды под проекты ЭЗС не нужны: пустой вид в реестре
     # читается как незаполненный, а не как лишний.
-    assert starter_kinds("office") == STARTER_KINDS
-    assert starter_kinds(None) == STARTER_KINDS
+    common = STARTER_KINDS + STARTER_KINDS_CONTRACT
+    assert starter_kinds("office") == common
+    assert starter_kinds(None) == common
     energy = starter_kinds("energy")
-    assert len(energy) == len(STARTER_KINDS) + len(STARTER_KINDS_ENERGY)
+    assert energy == common + STARTER_KINDS_ENERGY
 
     # Каждый профильный вид закрывает существующий пункт: связь с несуществующим
     # означала бы вид, который никогда ничего не двигает.

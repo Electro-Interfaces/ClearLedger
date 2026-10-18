@@ -7758,7 +7758,7 @@ class ChatRoom(Base):
     # scope_product: группа может быть и «по станции», и «в Эксплуатации».
     scope_object_id: Mapped[str | None] = mapped_column(
         String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
-    # Чат ЗАЯВКИ (id из public.tickets, FK через схему не заводим): скрытая группа
+    # Чат ЗАЯВКИ (канонический id Поддержки, FK между приложениями не заводим): скрытая группа
     # «быстро обсудить и записать следующий шаг» — в общий список чатов НЕ попадает,
     # открывается только из карточки заявки (решение МАГа 31.07.2026).
     scope_ticket_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -7789,6 +7789,8 @@ class ChatRoom(Base):
 
     __table_args__ = (
         Index("idx_chat_rooms_company", "company_id"),
+        Index("uq_support_staff_ticket_room", "company_id", "scope_ticket_id",unique=True,
+              postgresql_where=text("scope_purpose = 'support_staff' AND is_active = true")),
         Index("idx_chat_rooms_type", "type"),
         # Частичный: комнат с предметом заметно меньше, чем комнат вообще, а
         # ищут по нему из карточки предмета — «покажи чаты этого проекта».
@@ -14005,3 +14007,15 @@ class StationStatusDay(Base):
         Index("uq_station_status_day", "company_id", "location_id", "day", unique=True),
         Index("ix_station_status_days_company_day", "company_id", "day"),
     )
+
+
+class TicketVideoRoom(Base):
+    """Private ticket room identity; admission is always checked in Support."""
+    __tablename__ = "ticket_video_rooms"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True),primary_key=True,default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True),ForeignKey("companies.id",ondelete="CASCADE"),nullable=False)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True),nullable=False)
+    room: Mapped[str] = mapped_column(String(80),nullable=False,unique=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True),ForeignKey("users.id",ondelete="SET NULL"),nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),server_default=func.now())
+    __table_args__ = (Index("uq_ticket_video_room", "company_id", "ticket_id",unique=True),)
