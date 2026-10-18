@@ -314,6 +314,11 @@ class AppTokenResponse(BaseModel):
     roles: list[str]
 
 
+class SupportVoiceTokenResponse(AppTokenResponse):
+    company_id: uuid.UUID
+    support_company_id: uuid.UUID
+
+
 @router.get("/token", response_model=AppTokenResponse)
 async def app_token(
     app: str = Query(..., description="код приложения, в API которого идёт браузер"),
@@ -340,6 +345,30 @@ async def app_token(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Приложение не подключено компании")
     token, roles, ttl, _cid = await _issue_app_token(db, user, cid, app)
     return AppTokenResponse(token=token, expires_in=ttl, roles=roles)
+
+
+@router.get("/voice-token-for-support", response_model=SupportVoiceTokenResponse)
+async def voice_token_for_support(
+    company_id: uuid.UUID = Query(..., description="идентификатор компании в Поддержке"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SupportVoiceTokenResponse:
+    """Пропуск к записи узла из Поддержки по канонической карте компаний.
+
+    Браузер предъявляет сессию Ядра. JWT Поддержки и служебные ключи сюда
+    не подходят; права и состав продукта проверяются обычным путём выдачи voice.
+    Звук и расшифровка через Ядро или Поддержку не проходят.
+    """
+    from app.services.support_scope import core_company_id_for_support
+
+    cid = await core_company_id_for_support(db, str(company_id))
+    if cid is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "Компания Поддержки не подключена к пространству")
+    issued = await app_token(app="voice", company_id=str(cid), user=user, db=db)
+    return SupportVoiceTokenResponse(
+        **issued.model_dump(), company_id=cid, support_company_id=company_id,
+    )
 
 
 @router.get("/jwks.json")
