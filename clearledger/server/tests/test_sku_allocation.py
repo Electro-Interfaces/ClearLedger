@@ -5,8 +5,6 @@
 номер. Повторять ту ошибку в артикулах нельзя: код кассы переиспользуется и
 живёт до погашения, а артикул выдаётся навсегда.
 """
-import uuid
-
 import pytest
 
 from app.models import EdgeDownlink
@@ -15,7 +13,7 @@ from app.services import sku
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 
-async def test_centralnyy_schyotchik_ne_povtoryaet_nomer(setup_database):
+async def test_centralnyy_schyotchik_ne_povtoryaet_nomer(setup_store_database):
     from app.database import async_session_factory
 
     async with async_session_factory() as db:
@@ -31,10 +29,10 @@ async def test_centralnyy_schyotchik_ne_povtoryaet_nomer(setup_database):
     assert all(sku.ЦЕНТР_ОТ <= н <= sku.ЦЕНТР_ДО for н in номера)
 
 
-async def test_bloki_stanciy_ne_peresekayutsya(setup_database):
+async def test_bloki_stanciy_ne_peresekayutsya(setup_store_database):
     from app.database import async_session_factory
 
-    company = uuid.uuid4()
+    company = setup_store_database
     async with async_session_factory() as db:
         первый = await sku.нарезать_блок(db, company, 208)
         второй = await sku.нарезать_блок(db, company, 209)
@@ -49,11 +47,11 @@ async def test_bloki_stanciy_ne_peresekayutsya(setup_database):
             assert до_a < от_b or до_b < от_a, "блоки пересеклись"
 
 
-async def test_blok_narezaetsya_po_ostatku_stancii(setup_database):
+async def test_blok_narezaetsya_po_ostatku_stancii(setup_store_database):
     """Блок выдаётся с нуля и по кончающемуся запасу, а впрок — никогда."""
     from app.database import async_session_factory
 
-    company = uuid.uuid4()
+    company = setup_store_database
     async with async_session_factory() as db:
         # Станция на связи впервые: своих номеров у неё нет.
         первый = await sku.обеспечить_блок(db, company, 811, None)
