@@ -33,8 +33,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,6 +78,12 @@ class SupportContextIn(BaseModel):
     ref: str | None = Field(None, max_length=80)
     limit: int = Field(300, ge=1, le=1000)
     detail: bool = False
+
+
+class VoiceKnowledgeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    topic: str = Field(..., pattern=r"^[a-z][a-z0-9_-]{0,59}$")
+    limit: int = Field(3, ge=1, le=3)
 
 
 async def _voice_on(db: AsyncSession, company_id) -> None:
@@ -282,6 +288,20 @@ async def customer_summary(
         object_refs=[o["ref"] for o in summary["objects"]], limit=body.limit,
     )
     return {**summary, "tickets": tickets, "ticketAvailability": availability}
+
+
+@router.post("/support/knowledge")
+async def voice_knowledge(
+    body: VoiceKnowledgeIn,
+    response: Response,
+    company: Company = Depends(voice_company),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Три опубликованных статьи своей компании по коду темы, без текста разговора."""
+    from app.services.voice_support_context import support_knowledge
+
+    response.headers["Cache-Control"] = "no-store"
+    return await support_knowledge(db, company.id, topic=body.topic, limit=body.limit)
 
 
 @router.post("/support/customer-context")
