@@ -90,3 +90,15 @@ export async function startEventMeeting(companyId: string, eventId: string): Pro
     throw e
   }
 }
+
+
+/** Видеосвязь заявки: актуальный ticket ACL; только личный короткий вход, без гостевой ссылки. */
+export async function startTicketMeeting(ticketId: string): Promise<void> {
+  const tab = window.open('about:blank', '_blank')
+  if (tab) tab.opener = null
+  try {
+    const result = await post<{ joinUrl: string }>(`/api/chat/tickets/${encodeURIComponent(ticketId)}/video`, {})
+    if (tab) tab.location.replace(result.joinUrl)
+    else window.open(result.joinUrl, '_blank', 'noopener,noreferrer')
+  } catch (error) { tab?.close(); throw error }
+}

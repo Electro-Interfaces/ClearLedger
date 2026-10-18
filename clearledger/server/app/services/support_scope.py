@@ -30,3 +30,18 @@ async def support_company_id(db: AsyncSession, company_id) -> str | None:
         .where(App.code == SUPPORT_APP_CODE, AppCompanyLink.company_id == company_id)
         .limit(1)
     )
+
+
+async def core_company_id_for_support(db: AsyncSession, external_company_id: str):
+    """Компания пространства по точному идентификатору компании Поддержки.
+
+    Обратное чтение той же карты: названия, коды и текущая компания пользователя
+    не заменяют отсутствующее соответствие. Проверка прав остаётся у вызывающей ручки.
+    """
+    return await db.scalar(
+        select(AppCompanyLink.company_id)
+        .join(App, App.id == AppCompanyLink.app_id)
+        .where(App.code == SUPPORT_APP_CODE,
+               AppCompanyLink.external_company_id == external_company_id)
+        .limit(1)
+    )
