@@ -19,6 +19,9 @@ const hubDir = process.env.CONTACT_HUB_DIR
 assert.ok(hubDir, 'Задайте CONTACT_HUB_DIR: checkout ContactHub с node/test/space-wave7.ts')
 const artifacts = await mkdtemp(join(tmpdir(), 'voice-real-node-qa-'))
 const children = []
+const errors = []
+const network = []
+const screens = []
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 let browser
 let cleaning
@@ -125,15 +128,14 @@ try {
   ] }) }))
   const page = await context.newPage()
   page.setDefaultTimeout(20_000)
-  const errors = []
-  const network = []
   page.on('console', message => { if (['warning', 'error'].includes(message.type())) errors.push(`${message.type()}: ${message.text()}`) })
   page.on('pageerror', error => errors.push(error.message))
   page.on('response', response => {
     if (!response.url().startsWith(meta.api)) return
     const request = response.request()
     const url = new URL(response.url())
-    const event = { method: request.method(), path: url.pathname, query: url.search, status: response.status() }
+    // Разовый media ticket тоже даёт доступ: в артефактах не оставляем его значение.
+    const event = { method: request.method(), path: url.pathname.replace(/\/media\/[^/]+$/, '/media/<ticket>'), query: url.search, status: response.status() }
     network.push(event)
     if (response.status() >= 400) errors.push(`HTTP ${response.status()}: ${event.method} ${event.path}`)
   })
@@ -141,41 +143,86 @@ try {
   const result = { origin, backend: { kind: 'PGlite + createSpace + HTTP JWKS', companyId: me.companyId }, checks: {}, artifacts }
   const check = (name, detail) => { result.checks[name] = detail }
   async function screenshot(name) {
+    const installLater = page.getByRole('button', { name: 'Позже', exact: true })
+    if (await installLater.isVisible()) await installLater.click()
     assert.equal(await page.locator('vite-error-overlay').count(), 0, 'Нет Vite overlay')
     assert.ok((await page.locator('body').innerText()).length > 100, 'Экран не пуст')
-    assert.ok(await page.title(), 'Название страницы не пустое')
+    const title = await page.title()
+    const url = new URL(page.url())
+    assert.equal(url.origin, origin, 'Открыт проверяемый локальный интерфейс')
+    assert.ok(url.pathname.startsWith('/voice/'), 'Открыт экран телефонии')
+    assert.match(title, /^Телефония · /, 'Заголовок вкладки соответствует телефонии')
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, 'Нет горизонтального переполнения')
     await page.screenshot({ path: join(artifacts, name), fullPage: true })
+    await writeFile(join(artifacts, name.replace(/\.png$/, '.dom.txt')), await page.locator('body').innerText())
+    screens.push({ screenshot: name, url: page.url(), title, viewport: page.viewportSize(), fullPage: true })
   }
 
-  // Р1: браузерная плитка и журнал действительно используют один расчёт узла.
-  const statsResponse = responseFor('/stats/summary')
-  await page.goto(origin + '/voice/stats')
-  const stats = await (await statsResponse).json()
-  assert.ok(stats.arrived > 0, 'Seed должен попадать в сегодняшний период')
-  const tile = page.getByRole('link', { name: new RegExp(`Поступило: ${stats.arrived}`) })
-  await tile.waitFor()
-  const callsResponse = responseFor('/calls?')
-  await tile.click()
-  const drill = await (await callsResponse).json()
-  assert.equal(drill.metric.key, 'arrived')
-  assert.equal(drill.metric.total, stats.arrived)
-  assert.equal(drill.items.length, drill.metric.calls)
-  assert.equal(drill.items.reduce((total, row) => total + row.count, 0), drill.metric.total)
-  const callUrl = new URL(page.url())
-  assert.equal(callUrl.searchParams.get('metric'), 'arrived')
-  assert.equal(new Date(callUrl.searchParams.get('from')).toISOString(), drill.metric.from)
-  assert.equal(new Date(callUrl.searchParams.get('to')).toISOString(), drill.metric.to)
-  await page.getByLabel('Отбор по показателю').waitFor()
-  const journalRows = page.locator('table tbody tr')
-  await journalRows.first().waitFor()
-  assert.equal(await journalRows.count(), drill.items.length, 'В журнале отрисованы все звонки показателя')
-  for (const [index, call] of drill.items.entries()) {
-    assert.ok((await journalRows.nth(index).innerText()).includes(call.number), `Видна строка ${call.contactId}`)
-    assert.equal((await journalRows.nth(index).locator('td').last().innerText()).trim(), String(call.count))
+  // Р1: положительные выборки обязательных плиток; линия/период переживают карточку и возврат.
+  await page.setViewportSize({ width: 1024, height: 900 })
+  const statsUrl = `${origin}/voice/stats?period=week&line=${encodeURIComponent(meta.lineId)}`
+  const metrics = []
+  for (const [metric, label] of [['arrived', 'Поступило'], ['afterHours', 'Вне часов'], ['noDisposition', 'Итог не записан'], ['missed', 'Пропущено']]) {
+    const statsResponse = responseFor('/stats/summary')
+    await page.goto(statsUrl)
+    const summaryResponse = await statsResponse
+    const statsQuery = new URL(summaryResponse.url()).searchParams
+    assert.equal(statsQuery.get('line'), meta.lineId, 'Сводка действительно отобрана по линии')
+    const stats = await summaryResponse.json()
+    assert.ok(stats[metric] > 0, `Seed должен содержать ${label}`)
+    const tile = page.getByRole('link', { name: new RegExp(`${label}: ${stats[metric]}`) })
+    await tile.waitFor()
+    const callsResponse = responseFor('/calls?')
+    await tile.click()
+    const drillResponse = await callsResponse
+    const requestQuery = new URL(drillResponse.url()).searchParams
+    const drill = await drillResponse.json()
+    assert.equal(drill.metric.key, metric)
+    assert.equal(drill.metric.total, stats[metric])
+    assert.equal(drill.items.length, drill.metric.calls)
+    assert.equal(new Set(drill.items.map(call => call.contactId)).size, drill.items.length, 'Перевод не дублирует карточки')
+    assert.equal(drill.items.reduce((total, row) => total + row.count, 0), drill.metric.total)
+    const listUrl = page.url()
+    const callUrl = new URL(listUrl)
+    for (const query of [callUrl.searchParams, requestQuery]) {
+      assert.equal(query.get('metric'), metric)
+      assert.equal(query.get('line'), meta.lineId)
+      for (const key of ['from', 'to']) {
+        assert.equal(query.get(key), statsQuery.get(key), `Сохранён ${key} сводки`)
+        assert.equal(new Date(query.get(key)).toISOString(), drill.metric[key])
+      }
+    }
+    await page.getByLabel('Отбор по показателю').waitFor()
+    assert.match(await page.getByLabel('Отбор по показателю').innerText(), /обращений|отрезков на линии|задач перезвона/, 'Видна единица счёта')
+    const journalRows = page.locator('table tbody tr')
+    await journalRows.first().waitFor()
+    assert.equal(await journalRows.count(), drill.items.length, 'В журнале отрисованы все звонки показателя')
+    for (const [index, call] of drill.items.entries()) {
+      assert.ok((await journalRows.nth(index).innerText()).includes(call.number), `Видна строка ${call.contactId}`)
+      assert.equal((await journalRows.nth(index).locator('td').last().innerText()).trim(), String(call.count))
+    }
+    await screenshot(`1024-metric-${metric}.png`)
+    const cardResponse = responseFor(`/calls/${drill.items[0].contactId}`)
+    await journalRows.first().click()
+    assert.equal((await cardResponse).status(), 200)
+    await page.getByRole('button', { name: 'К журналу', exact: true }).click()
+    assert.equal(page.url(), listUrl, 'Из карточки возвращаемся к той же выборке')
+    await journalRows.first().waitFor()
+    assert.equal(await journalRows.count(), drill.items.length)
+    await page.getByRole('link', { name: 'Вернуться', exact: true }).click()
+    assert.equal(page.url(), new URL(callUrl.searchParams.get('back'), origin).href, 'Восстановлен адрес исходной сводки вместе с общим фильтром Ядра')
+    const returned = new URL(page.url()).searchParams
+    assert.equal(returned.get('line'), meta.lineId)
+    assert.equal(returned.get('period'), 'week')
+    await page.getByRole('heading', { name: 'Статистика', exact: true }).waitFor()
+    await page.getByRole('button', { name: '7 дней', exact: true, pressed: true }).waitFor()
+    await tile.waitFor()
+    metrics.push({ metric, total: drill.metric.total, uniqueCalls: drill.metric.calls, unit: drill.metric.unit,
+      request: Object.fromEntries(['metric', 'line', 'from', 'to'].map(key => [key, requestQuery.get(key)])),
+      items: drill.items.map(call => ({ contactId: call.contactId, count: call.count })), cardReturn: true, statsReturn: true })
   }
-  await screenshot('1440-metric-drill.png')
-  check('R1', { tile: stats.arrived, total: drill.metric.total, uniqueCalls: drill.metric.calls })
+  check('R1', { metrics })
+  await page.setViewportSize({ width: 1440, height: 1000 })
 
   // Р3: участники/консультация/попытки берутся из истории настоящего узла.
   await page.goto(`${origin}/voice/calls?id=${encodeURIComponent(meta.seed.transfer)}`)
@@ -201,8 +248,48 @@ try {
   assert.equal(await technical.getAttribute('open'), null)
   await technical.locator('summary').click()
   assert.notEqual(await technical.getAttribute('open'), null)
+  const recordedLegs = [
+    { index: mainLegs.findIndex(leg => leg.kind === 'talk' && leg.role === 'consult_transfer'), recordingId: meta.seed.recordings.operator2, label: 'consult-transfer' },
+    { index: mainLegs.findLastIndex(leg => leg.kind === 'talk'), recordingId: meta.seed.recordings.operator3, label: 'after-transfer' },
+  ]
+  assert.ok(recordedLegs.every(leg => leg.index >= 0), 'Есть разговор после консультации и возврата с перевода')
+  const playbacks = []
+  for (const recordedLeg of recordedLegs) for (const side of ['operator', 'caller']) {
+    const part = mainLegs[recordedLeg.index].recordings.find(recording => recording.side === side)
+    assert.ok(part, `У участка есть запись стороны ${side}`)
+    assert.equal(part.recordingId, side === 'operator' ? recordedLeg.recordingId : meta.seed.recordings.caller, 'Выбран WAV именно участника участка')
+    if (side === 'operator') assert.notEqual(part.recordingId, meta.seed.recordings.operator, 'После передачи звучит новый target WAV')
+    await rows.nth(recordedLeg.index).getByRole('button', { name: side === 'operator' ? /^Запись оператора с / : /^Запись звонящего с / }).click()
+    const reason = 'Проверка качества синтетического разговора'
+    await page.getByRole('dialog').getByLabel('Причина', { exact: true }).fill(reason)
+    const ticketResponse = responseFor(`/calls/${meta.seed.transfer}/recordings/${part.recordingId}/ticket`, 'POST')
+    const mediaResponse = responseFor('/media/')
+    await page.getByRole('dialog').getByRole('button', { name: 'Открыть', exact: true }).click()
+    assert.equal((await ticketResponse).status(), 201)
+    const media = await mediaResponse
+    assert.ok([200, 206].includes(media.status()), 'Запись отдана настоящим media API')
+    assert.equal(media.headers()['content-type'], 'audio/wav')
+    await page.waitForFunction(offset => {
+      const audio = document.querySelector('audio')
+      return audio && audio.readyState >= 2 && !audio.paused && audio.currentTime >= offset && audio.currentTime < offset + 10
+    }, part.offsetSec)
+    const startedAt = await page.locator('audio').evaluate(audio => audio.currentTime)
+    await page.waitForFunction(start => {
+      const audio = document.querySelector('audio')
+      return audio && !audio.paused && audio.currentTime >= start + 0.25
+    }, startedAt)
+    const audioState = await page.locator('audio').evaluate(audio => ({ duration: audio.duration, currentTime: audio.currentTime, paused: audio.paused, error: audio.error?.code ?? null }))
+    await screenshot(`1440-${recordedLeg.label}-${side}-playback.png`)
+    await page.locator('audio').evaluate(audio => audio.pause())
+    assert.equal(audioState.error, null)
+    assert.ok(Math.abs(audioState.duration - card.recordings.find(recording => recording.id === part.recordingId).durationSec) < 0.2)
+    const mediaAudit = await api(`/audit?contactId=${encodeURIComponent(meta.seed.transfer)}&limit=100`)
+    assert.ok(mediaAudit.items.some(item => item.action === 'recording.ticket' && item.reason === reason && item.detail.recordingId === part.recordingId))
+    assert.ok(mediaAudit.items.some(item => item.action === 'recording.play' && item.detail.recordingId === part.recordingId))
+    playbacks.push({ leg: recordedLeg.label, side, recordingId: part.recordingId, offset: part.offsetSec, startedAt, ...audioState, audited: true })
+  }
   await screenshot('1440-call-legs.png')
-  check('R3', { legs: card.legs.map(leg => leg.kind), technicalDetailsExpandable: true })
+  check('R3', { legs: card.legs.map(leg => leg.kind), technicalDetailsExpandable: true, playbacks })
 
   // Р2: создать долг из реального звонка, передать сотруднику, отметить попытку и закрыть.
   await page.goto(`${origin}/voice/calls?id=${encodeURIComponent(meta.seed.ordinary)}`)
@@ -272,11 +359,15 @@ try {
     await page.goto(`${origin}/voice/calls?id=${encodeURIComponent(meta.seed.transfer)}`)
     await page.getByRole('heading', { name: 'Кто говорил со звонящим' }).waitFor()
     await screenshot(`${width}-call-legs.png`)
+    if (width === 390) {
+      await page.getByRole('region', { name: 'Участки звонка' }).locator('ol').last().locator(':scope > li').last().scrollIntoViewIfNeeded()
+      await screenshot('390-call-recordings.png')
+    }
     await page.getByRole('button', { name: 'К журналу', exact: true }).waitFor()
   }
   assert.deepEqual(errors, [], 'Браузерные/HTTP ошибки')
   assert.ok(network.length > 20, 'Проверка выполнила реальные запросы к узлу')
-  check('browser', { identity: true, notBlank: true, noOverlay: true, noConsoleErrors: true, widths: [1440, 1024, 390], nodeRequests: network.length })
+  check('browser', { version: browser.version(), identity: true, notBlank: true, noOverlay: true, noConsoleErrors: true, widths: [1440, 1024, 390], nodeRequests: network.length })
   await cleanup()
   assert.equal(node.exitCode, 0, 'Узел штатно закрыл БД')
   await assert.rejects(access(meta.dataDir), 'Временные БД и ключи удалены')
@@ -284,9 +375,14 @@ try {
   await assert.rejects(fetch(origin), 'Vite остановлен')
   check('cleanup', { processesStopped: true, temporaryDatabaseAndKeysRemoved: true })
   await writeFile(join(artifacts, 'network.json'), JSON.stringify(network, null, 2))
+  await writeFile(join(artifacts, 'console.json'), JSON.stringify(errors, null, 2))
+  await writeFile(join(artifacts, 'screens.json'), JSON.stringify(screens, null, 2))
   await writeFile(join(artifacts, 'result.json'), JSON.stringify(result, null, 2))
   process.stdout.write(JSON.stringify(result, null, 2) + '\n')
 } catch (error) {
+  await writeFile(join(artifacts, 'console.json'), JSON.stringify(errors, null, 2))
+  await writeFile(join(artifacts, 'network.json'), JSON.stringify(network, null, 2))
+  await writeFile(join(artifacts, 'screens.json'), JSON.stringify(screens, null, 2))
   process.stderr.write(`${error.stack ?? error}\nАртефакты: ${artifacts}\n`)
   if (browser) {
     const page = browser.contexts()[0]?.pages()[0]
