@@ -7,7 +7,8 @@
 «договоры приложения» = привязанные к нему (`contract_links`) ∪ используемые им.
 
 Источник — приложение (код из реестра `eco_apps`), подпись и выражение «строки,
-ссылающиеся на договор» с колонкой `cid`. Таблицы есть во всех стеках (схема общая).
+ссылающиеся на договор» с колонкой `cid`. Контур «Поддержки» необязателен:
+его таблицу создают миграции соседнего приложения, а не ядра.
 Проводки (`gl_turnovers`) не опрашиваются: индекса по договору нет, а в бухгалтерских
 стеках таблица в миллионы строк — проводка всё равно стоит на первичном документе.
 """
@@ -47,9 +48,18 @@ _SOURCES: list[tuple[str, str, str]] = [
     ("books", "Первичные документы", _col("accounting_docs")),
     ("books", "Входящие документы", _col("intake_items")),
     ("mail", "Правила почты", _col("mail_rules", "set_contract_id")),
-    # Договор обслуживания «Поддержки» (SLA, заявки) ссылается на договор пространства.
-    ("support", "Сервисные договоры «Поддержки»", _col("service_contracts")),
 ]
+
+
+async def _sources(db: AsyncSession) -> list[tuple[str, str, str]]:
+    sources = list(_SOURCES)
+    # То же разрешение имени через search_path, что и у запроса к источнику.
+    # Наличие контура проверяем до SQL: ошибка отсутствующей таблицы уже
+    # прервала бы транзакцию. Ошибки существующей схемы не скрываем.
+    if await db.scalar(text("SELECT to_regclass('service_contracts') IS NOT NULL")):
+        sources.append(("support", "Сервисные договоры «Поддержки»", _col("service_contracts")))
+    return sources
+
 
 # Проект, в котором договор используется по факту: площадка «Проектов».
 _PROJECT_USAGE = """
@@ -64,7 +74,7 @@ _PROJECT_USAGE = """
 async def contract_usage(db: AsyncSession, contract_id: uuid.UUID) -> list[dict]:
     """[{app, label, count}] — только непустые источники."""
     out = []
-    for app, label, sql in _SOURCES:
+    for app, label, sql in await _sources(db):
         n = (await db.execute(text(f"SELECT count(*) FROM ({sql}) u WHERE u.cid = :cid"), {"cid": contract_id})).scalar() or 0
         if n:
             out.append({"app": app, "label": label, "count": int(n)})
@@ -78,7 +88,7 @@ async def usage_by_contract(db: AsyncSession, company_id: uuid.UUID) -> dict[uui
     """
     out: dict[uuid.UUID, dict] = {}
     scope = "u.cid IN (SELECT id FROM contracts WHERE company_id = :co)"
-    for app, _label, sql in _SOURCES:
+    for app, _label, sql in await _sources(db):
         for (cid,) in (await db.execute(text(f"SELECT DISTINCT u.cid FROM ({sql}) u WHERE {scope}"), {"co": company_id})).all():
             out.setdefault(cid, {"apps": set(), "projects": set()})["apps"].add(app)
     for cid, ref in (await db.execute(text(f"SELECT u.cid, u.ref FROM ({_PROJECT_USAGE}) u WHERE {scope}"), {"co": company_id})).all():

@@ -2,22 +2,22 @@
 
 import asyncio
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import database_startup_lock
 
 
-async def test_health_returns_ok(client: AsyncClient):
-    resp = await client.get("/api/health")
+@pytest.mark.parametrize("path", ["/api/health", "/api/live"])
+async def test_health_returns_ok(client: AsyncClient, path: str):
+    resp = await client.get(path)
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "ok"
-    assert data["service"] == "TradeLedger API"
-    assert "version" in data
+    assert resp.json() == {"status": "ok"}
 
 
-async def test_ready_checks_database_schema_and_storage(client: AsyncClient):
+async def test_ready_checks_database_schema_and_storage(client: AsyncClient, tmp_path, monkeypatch):
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
     resp = await client.get("/api/ready")
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "ready"
