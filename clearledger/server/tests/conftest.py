@@ -175,6 +175,7 @@ async def auth_client(setup_database) -> AsyncGenerator[AsyncClient, None]:
         token = resp.json()["access_token"]
         ac.headers["Authorization"] = f"Bearer {token}"
         yield ac
+    await drain_application_tasks()
 
 
 @pytest_asyncio.fixture(loop_scope="session")
