@@ -11,7 +11,10 @@ from sqlalchemy import text
 
 from app.services import matrix
 
-pytestmark = pytest.mark.asyncio(loop_scope="session")
+pytestmark = [
+    pytest.mark.asyncio(loop_scope="session"),
+    pytest.mark.usefixtures("setup_store_database"),
+]
 
 
 async def _подготовить(db, company):
