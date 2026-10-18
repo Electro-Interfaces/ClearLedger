@@ -71,6 +71,15 @@ class SummaryIn(BaseModel):
     limit: int = Field(5, ge=1, le=20)
 
 
+class SupportContextIn(BaseModel):
+    supportCompanyId: uuid.UUID
+    phone: str = Field(..., min_length=3, max_length=40)
+    phones: list[str] = Field(default_factory=list, max_length=20)
+    ref: str | None = Field(None, max_length=80)
+    limit: int = Field(300, ge=1, le=1000)
+    detail: bool = False
+
+
 async def _voice_on(db: AsyncSession, company_id) -> None:
     if not any(a["code"] == "voice" and a["enabled"] for a in await company_apps(db, company_id)):
         raise HTTPException(403, "«Телефония» не подключена компании")
@@ -175,7 +184,8 @@ async def find_candidates(db: AsyncSession, company_id: uuid.UUID, e164: str) ->
     partner_orgs = {m.organization_id for _u, m in people if m.organization_id}
     if partner_orgs:
         org_names = {cp.id: cp.short_name or cp.name for cp in (await db.execute(
-            select(Counterparty).where(Counterparty.id.in_(partner_orgs)))).scalars().all()}
+            select(Counterparty).where(Counterparty.company_id == company_id,
+                                      Counterparty.id.in_(partner_orgs)))).scalars().all()}
     for u, m in people:
         partner = m.party_type == "partner"
         out.append(_candidate("organization" if partner else "staff", "user", f"user:{u.id}",
@@ -197,11 +207,10 @@ async def identify(
             "candidates": await find_candidates(db, company.id, e164)}
 
 
-@router.post("/ezs/customer-summary")
-async def customer_summary(
+async def _customer_summary_data(
     body: SummaryIn,
-    company: Company = Depends(voice_company),
-    db: AsyncSession = Depends(get_db),
+    company: Company,
+    db: AsyncSession,
 ) -> dict[str, Any]:
     """Последние зарядные сессии клиента (новые первыми), их станции и счёт за 30 дней.
 
@@ -256,6 +265,59 @@ async def customer_summary(
             "address": loc.address, "status": loc.operational_status,
         } for loc in (locs[i] for i in loc_ids if i in locs)],
         "stats": {"sessions30d": int(total or 0), "failed30d": int(failed or 0)},
+    }
+
+
+@router.post("/ezs/customer-summary")
+async def customer_summary(
+    body: SummaryIn,
+    company: Company = Depends(voice_company),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    from app.services.voice_support_context import support_tickets
+
+    summary = await _customer_summary_data(body, company, db)
+    tickets, availability = await support_tickets(
+        db, company.id, phone=body.phone, core_party_ref=body.ref,
+        object_refs=[o["ref"] for o in summary["objects"]], limit=body.limit,
+    )
+    return {**summary, "tickets": tickets, "ticketAvailability": availability}
+
+
+@router.post("/support/customer-context")
+async def support_customer_context(
+    body: SupportContextIn,
+    company: Company = Depends(voice_company),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Данные клиента для Поддержки; карта и ключ фиксируют одну компанию.
+
+    Здесь нет обратного вызова в Поддержку: её заявки читаются там же, где живут.
+    """
+    from app.services.support_scope import support_company_id
+    from app.services.voice_support_context import charging_context
+
+    mapped = await support_company_id(db, company.id)
+    if mapped != str(body.supportCompanyId):
+        raise HTTPException(403, "Компания Поддержки не соответствует ключу пространства")
+    if not any(a["code"] == "support" and a["enabled"] for a in await company_apps(db, company.id)):
+        raise HTTPException(403, "«Поддержка» не подключена компании")
+    e164 = to_e164(body.phone)
+    candidates = await find_candidates(db, company.id, e164) if e164 else []
+    caller = next((c for c in candidates if c["ref"] == body.ref), None)
+    caller = caller or (candidates[0] if candidates else None)
+    party_ref = caller["ref"] if caller else None
+    summary = await _customer_summary_data(
+        SummaryIn(phone=body.phone, ref=party_ref, limit=min(body.limit, 20)), company, db,
+    )
+    charging = await charging_context(
+        db, company.id, phones=[body.phone, *body.phones], ref=party_ref,
+        limit=body.limit, detail=body.detail,
+    )
+    return {
+        "supportCompanyId": str(body.supportCompanyId), "coreCompanyId": str(company.id),
+        "corePartyRef": party_ref, "caller": caller, **summary, **charging,
+        "availability": "available",
     }
 
 
