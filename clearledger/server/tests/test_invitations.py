@@ -7,6 +7,7 @@ import pytest
 from httpx import AsyncClient
 
 from app.services import email_service
+from tests.helpers import TEST_USER_PASSWORD
 
 
 def _h(t: str) -> dict:
@@ -52,7 +53,7 @@ async def test_invitation_flow(client: AsyncClient, monkeypatch):
 
     # Accept нового пользователя → автологин-токен, роль admin В rushydro.
     a = await client.post(f"/api/invitations/accept/{token}",
-                          json={"name": "New Hire", "password": "secret123"})
+                          json={"name": "New Hire", "password": TEST_USER_PASSWORD})
     assert a.status_code == 200, a.text
     new_token = a.json()["access_token"]
     me = (await client.get("/api/auth/me", headers=_h(new_token))).json()
@@ -61,7 +62,7 @@ async def test_invitation_flow(client: AsyncClient, monkeypatch):
 
     # Токен одноразовый — повторный accept → 410 «приглашение уже принято».
     a2 = await client.post(f"/api/invitations/accept/{token}",
-                           json={"name": "x", "password": "secret123"})
+                           json={"name": "x", "password": TEST_USER_PASSWORD})
     assert a2.status_code == 410
 
     # Приглашение уже-члена → 409.
@@ -85,10 +86,10 @@ async def test_invitation_permissions_and_revoke(client: AsyncClient, monkeypatc
     # Обычный сотрудник gig не может приглашать.
     await client.post("/api/users", headers=_h(admin), json={
         "company_id": "gig", "email": "plain2@test.ru", "name": "Plain",
-        "password": "secret123", "role": "user",
+        "password": TEST_USER_PASSWORD, "role": "user",
     })
     plain = (await client.post("/api/auth/login", json={
-        "email": "plain2@test.ru", "password": "secret123",
+        "email": "plain2@test.ru", "password": TEST_USER_PASSWORD,
     })).json()["access_token"]
     bad = await client.post("/api/invitations", headers=_h(plain), json={
         "company_id": "gig", "email": "x2@test.ru", "role": "user",
@@ -140,7 +141,7 @@ async def test_принадлежность_партнёра_доезжает_и
     assert any(i["email"] == "partner-rep@test.ru" and i["party_type"] == "partner" for i in lst)
 
     a = await client.post(f"/api/invitations/accept/{sent['token']}",
-                          json={"name": "Partner Rep", "password": "secret123"})
+                          json={"name": "Partner Rep", "password": TEST_USER_PASSWORD})
     assert a.status_code == 200, a.text
 
     members = (await client.get("/api/users", headers=_h(admin),
