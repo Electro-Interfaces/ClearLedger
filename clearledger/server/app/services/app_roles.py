@@ -33,6 +33,10 @@ async def app_roles(db: AsyncSession, user: User, company_id: uuid.UUID | str | 
     """Роли человека в приложении `app_code` в компании. Пусто — роли нет."""
     from app.services.space_projection import DEFAULT_ROLE_MAP
 
+    # Суперадмин управляет контейнером, но не получает доступ к данным звонков клиента,
+    # даже если у него осталось членство или явное назначение роли в этой компании.
+    if app_code == "voice" and user.is_superadmin:
+        return []
     if not company_id:
         return []
     try:
