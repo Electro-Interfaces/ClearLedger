@@ -72,6 +72,35 @@ async def test_повторная_регистрация_не_проходит(a
     assert r2.status_code == 409, r2.text
 
 
+async def test_пустой_префикс_использует_код_вида(auth_client: AsyncClient):
+    cid = await _company(auth_client)
+    year = datetime.now(docs_router._BUSINESS_TIMEZONE).year
+    numbers = []
+    for _ in range(2):
+        code = f"no_prefix_{uuid.uuid4().hex[:8]}"
+        created_kind = await auth_client.post("/api/docs/kinds", json={
+            "company_id": cid, "code": code, "name": "Вид без префикса",
+        })
+        assert created_kind.status_code == 201, created_kind.text
+        kind = created_kind.json()
+        assert kind["number_prefix"] == ""
+        # Вид уже сохранён с пустым префиксом: исправление должно работать и
+        # для существующего справочника, без его перезаписи или миграции.
+        for sequence in (1, 2):
+            created = await auth_client.post("/api/docs", json={
+                "company_id": cid, "kind_id": kind["id"], "title": "Без префикса",
+            })
+            assert created.status_code == 201, created.text
+            registered = await auth_client.post(
+                f"/api/docs/{created.json()['id']}/register", json={"company_id": cid})
+            assert registered.status_code == 200, registered.text
+            number = registered.json()["reg_number"]
+            assert number == f"{code}--{year}-{sequence:04d}"
+            assert not number.startswith("--")
+            numbers.append(number)
+    assert len(set(numbers)) == 4
+
+
 async def test_занятый_номер_вручную_не_принимается(auth_client: AsyncClient):
     cid = await _company(auth_client)
     kinds = await _kinds(auth_client, cid)
