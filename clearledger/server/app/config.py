@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # Видеоконференции Jitsi (meet.dataworker.ru, RS256/ASAP). TradeLedger подписывает
     # JWT организатора СВОИМ приватным ключом (iss=ledger); prosody проверяет публичным
     # ключом с keyserver по kid. Приватный ключ (PEM) — в base64, НЕ в git.
+    # Включают только после внешней проверки JWT-required/no-anonymous media admission.
+    # Короткий JWT сам по себе не закрывает анонимный guest domain Jitsi.
+    jitsi_ticket_private_enabled: bool = False
     jitsi_signing_key: str = ""            # приватный RSA-ключ (PEM) в base64
     jitsi_kid: str = "ledger/1"
     jitsi_issuer: str = "ledger"
