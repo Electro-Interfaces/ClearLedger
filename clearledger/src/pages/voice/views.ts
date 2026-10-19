@@ -67,6 +67,8 @@ export const VOICE_VIEWS: VoiceView[] = [
   { key: 'enrichment', path: 'enrichment', label: 'Распознавание и подсказки', group: 'setup', wave: '2.5', ready: true,
     hint: 'живое обогащение: порог уверенности, что видит оператор' },
 
+  { key: 'connections', path: 'connections', label: 'Настройки подключений', group: 'links', wave: null, ready: true,
+    hint: 'МегаФон, обмен с пространством, контакт-центр и голосовая линия' },
   { key: 'cc', path: 'cc', label: 'Контакт-центры', group: 'links', wave: '2.4', ready: true,
     hint: 'подключение КЦ, сверка ключа, допуск операторов' },
   { key: 'webhooks', path: 'webhooks', label: 'Системы и вебхуки', group: 'links', wave: '2.5', ready: true,
@@ -95,7 +97,7 @@ export const VOICE_GROUP_ICONS: Record<VoiceGroup, LucideIcon> = {
 export const VOICE_VIEW_ICONS: Record<string, LucideIcon> = {
   now: Radio, megafon: PhoneCall, calls: ScrollText, contact: PhoneMissed, callbacks: PhoneCall, stats: BarChart3, report: FileBarChart,
   reconcile: GitCompare, reception: ListChecks, passport: IdCard, targets: Users, sounds: Volume2,
-  enrichment: Sparkles, cc: Headset, webhooks: Webhook, versions: History, audit: ShieldCheck,
+  enrichment: Sparkles, connections: Cable, cc: Headset, webhooks: Webhook, versions: History, audit: ShieldCheck,
   retention: Archive, health: Stethoscope, extensions: Hash, outbound: PhoneOutgoing,
 }
 

@@ -50,6 +50,7 @@ const VoiceReceptionPage = lazy(() => import('@/pages/voice/VoiceReceptionPage')
 const VoicePassportPage = lazy(() => import('@/pages/voice/VoicePassportPage'))
 const VoiceTargetsPage = lazy(() => import('@/pages/voice/VoiceTargetsPage'))
 const VoiceCcPage = lazy(() => import('@/pages/voice/VoiceCcPage'))
+const VoiceConnectionsPage = lazy(() => import('@/pages/voice/VoiceConnectionsPage'))
 const VoiceVersionsPage = lazy(() => import('@/pages/voice/VoiceVersionsPage'))
 const VoiceStubPage = lazy(() => import('@/pages/voice/VoiceStubPage'))
 const ChannelsPage = lazy(() => import('@/pages/ChannelsPage').then((m) => ({ default: m.ChannelsPage })))
@@ -398,6 +399,7 @@ const router = createBrowserRouter([
               { path: 'passport', element: <LazyPage><VoicePassportPage /></LazyPage> },
               { path: 'targets', element: <LazyPage><VoiceTargetsPage /></LazyPage> },
               { path: 'cc', element: <LazyPage><VoiceCcPage /></LazyPage> },
+              { path: 'connections', element: <LazyPage><VoiceConnectionsPage /></LazyPage> },
               { path: 'versions', element: <LazyPage><VoiceVersionsPage /></LazyPage> },
               // Экраны волн 2.5–2.6 (каждый своим куском сборки) и заставки разделов АТС — VoiceStubPage.
               ...['contact', 'report', 'reconcile', 'sounds', 'enrichment', 'webhooks', 'audit', 'retention', 'health', 'extensions', 'outbound']

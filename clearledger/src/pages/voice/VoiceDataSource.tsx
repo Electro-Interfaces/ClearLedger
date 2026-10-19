@@ -24,7 +24,7 @@ export function useVoiceDataSource(pathname: string) {
   const connection = useQuery({
     queryKey: ['voice-data-source', companyId],
     queryFn: () => getMegafonVoice(companyId, { ...megafonPeriodBounds('today', anchor), page: 1, page_size: 1 }),
-    enabled: !!companyId && !directMegafon,
+    enabled: !!companyId && !directMegafon && path !== '/voice/connections',
     staleTime: 5 * 60_000,
     retry: false,
   })
@@ -45,6 +45,7 @@ export function useVoiceDataSource(pathname: string) {
 }
 
 export function VoiceDataSourceBar({ state, pathname }: { state: ReturnType<typeof useVoiceDataSource>; pathname: string }) {
+  if (pathname.replace(/\/$/, '') === '/voice/connections') return null
   if (state.directMegafon) return null
   if (!state.managed && !state.configured) return null
   const section = pathname.split('/')[2] ?? ''

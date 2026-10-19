@@ -31,6 +31,7 @@ export function VoiceLayout() {
   const { companyId } = useCompany()
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const connections = pathname.replace(/\/$/, '') === '/voice/connections'
   // Историю МегаФона читает Ядро: компанию, продукт и роль проверяет Core API.
   const source = useVoiceDataSource(pathname)
   const megafon = source.megafon
@@ -41,7 +42,7 @@ export function VoiceLayout() {
   const кто = useQuery({
     queryKey: ['voice-me', companyId],
     queryFn: () => voice.me(companyId),
-    enabled: !!companyId && !megafon && !source.loading && !source.error,
+    enabled: !!companyId && !connections && !megafon && !source.loading && !source.error,
     // Повторяем только обрыв/временный 5xx. 403 role/company — окончательный ответ,
     // а 401 уже один раз обновляет токен в voiceService: других скрытых повторов нет.
     retry: (failureCount, error) => failureCount < 1 && voice.узелНедоступен(error),
@@ -49,7 +50,8 @@ export function VoiceLayout() {
   })
 
   // Ключ по компании: другой узел — экраны начинают с чистого листа, без чужой правки и выбранного звонка.
-  const содержимое = source.loading ? <AccessLoading />
+  const содержимое = connections ? <Outlet key={companyId} />
+    : source.loading ? <AccessLoading />
     : source.error ? null
     : megafon ? (source.managed
       ? <Suspense fallback={<AccessLoading />}>{pathname.endsWith('/report')

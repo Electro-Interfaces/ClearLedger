@@ -210,6 +210,27 @@ export interface Me {
 
 export const me = (cid: string) => дай<Me>(cid, '/me')
 
+/** Параметры установки узла. Изменение runtime-конфигурации выполняет установщик. */
+export interface NodeConnections {
+  readonly: true
+  node: { url: string | null }
+  core: { url: string | null; keyConfigured: boolean }
+  space: { jwksUrl: string | null; issuer: string; mtls: boolean; companyIds: string[] }
+  asr: { configured: boolean; ready: boolean }
+  llm: { configured: boolean; ready: boolean }
+  trunkConfigured: boolean
+}
+export async function nodeConnections(cid: string) {
+  const data = await дай<NodeConnections>(cid, '/connections')
+  if (!data.space.companyIds.includes(cid)) throw new Error('Настройки узла относятся к другой компании. Обновите страницу.')
+  return data
+}
+export async function checkCoreConnection(cid: string) {
+  const data = (await запрос<{ status: 'ok' | 'error'; code: string; companyId: string }>(cid, '/connections/check', { method: 'POST' })).data
+  if (data.companyId !== cid) throw new Error('Ответ относится к другой компании. Обновите страницу.')
+  return data
+}
+
 // ——— Сейчас ———
 
 export type LiveState = 'ivr' | 'waiting' | 'offered' | 'dialing' | 'connected' | 'held' | 'parked'
