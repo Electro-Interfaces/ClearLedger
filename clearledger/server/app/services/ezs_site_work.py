@@ -116,19 +116,29 @@ EDITABLE_FIELDS = {
     # графы чек-листа согласования (v2.26)
     "input_price_kwth", "smr_cost", "long_term_contract", "has_video", "has_mobile",
     "owner_contact", "source_company", "source_person",
+    # условия аренды и площадки (предложения отдела развития 09.10.2026)
+    "contract_kind", "rent_variable", "rent_revenue_pct", "rent_indexation_pct",
+    "contract_term_months", "contract_registration", "contract_registration_by",
+    "rent_comment", "free_access", "access_hours", "internet_kind", "parking_kind",
+    "parking_floor", "conditions_comment",
 }
 _BOOL = {"subsidy_planned", "access_24x7", "has_lighting", "has_internet",
-         "long_term_contract", "has_video", "has_mobile"}
+         "long_term_contract", "has_video", "has_mobile",
+         "rent_variable", "contract_registration", "free_access"}
 _NUMERIC = {"lat", "lon", "area_m2", "free_power_num", "distance_to_tp_m", "tp_cost",
             "tp_term_months", "connection_cost", "rent_cost_month", "rent_rate",
-            "planned_power_kwt", "input_price_kwth", "smr_cost"}
-_INT = {"planned_ezs_count", "parking_spots"}
+            "planned_power_kwt", "input_price_kwth", "smr_cost",
+            "rent_revenue_pct", "rent_indexation_pct"}
+_INT = {"planned_ezs_count", "parking_spots", "contract_term_months"}
 _UUID_FIELDS = {"owner_user_id", "location_id"}
 
 
 def _field_filled(site: EzsSite, field: str) -> bool:
     if field == "address_any":
         return bool(site.address or site.full_address or site.install_place)
+    if field == "contract_term_months":
+        # Срок числом сменил графу «Долгосрочный договор»; заполненная прежняя пункт 3.7 не открывает.
+        return site.contract_term_months is not None or site.long_term_contract is not None
     return getattr(site, field, None) not in (None, "")
 
 
@@ -166,7 +176,9 @@ def gate_state(site: EzsSite, stage: str | None = None,
             done = bool(marks.get(it["key"], {}).get("done"))
         elif it.get("doc"):
             requirement = it.get("document_state", "file")
-            done = (it["doc"] if requirement == "file" else f"{requirement}:{it['doc']}") in docs
+            # Галочка, поставленная до того, как пункт стал закрываться документом, остаётся в силе.
+            done = ((it["doc"] if requirement == "file" else f"{requirement}:{it['doc']}") in docs
+                    or bool(mark.get("done")))
         elif it.get("equipment"):
             # Закрывается не галочкой, а фактом: все нужные позиции поставлены.
             done = bool(equipment_supplied)
@@ -191,6 +203,7 @@ def gate_state(site: EzsSite, stage: str | None = None,
                     # Снимать обязательность имеет смысл только с того, что её имеет
                     # и не выполнено; три пункта не снимаются вовсе (WAIVE_FORBIDDEN).
                     "waivable": bool(it.get("required")) and it["key"] not in WAIVE_FORBIDDEN,
+                    "notNeeded": bool(it.get("not_needed")),
                     "role": it.get("role"),
                     # Какие графы закрывают пункт: карточка подсвечивает их в паспорте.
                     # Из 55 граф иначе не понять, какие нужны прямо сейчас.
@@ -993,6 +1006,16 @@ def site_out_full(site: EzsSite, owner_name: str | None = None,
         "hasVideo": site.has_video, "hasMobile": site.has_mobile,
         "ownerContact": site.owner_contact, "sourceCompany": site.source_company,
         "sourcePerson": site.source_person,
+        "contractKind": site.contract_kind, "rentVariable": site.rent_variable,
+        "rentRevenuePct": float(site.rent_revenue_pct) if site.rent_revenue_pct is not None else None,
+        "rentIndexationPct": float(site.rent_indexation_pct) if site.rent_indexation_pct is not None else None,
+        "contractTermMonths": site.contract_term_months,
+        "contractRegistration": site.contract_registration,
+        "contractRegistrationBy": site.contract_registration_by,
+        "rentComment": site.rent_comment, "freeAccess": site.free_access,
+        "accessHours": site.access_hours, "internetKind": site.internet_kind,
+        "parkingKind": site.parking_kind, "parkingFloor": site.parking_floor,
+        "conditionsComment": site.conditions_comment,
         "locationId": str(site.location_id) if site.location_id else None,
         "routeCode": site.route_code,
         "manualFields": site.manual_fields or [],

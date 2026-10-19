@@ -734,7 +734,12 @@ async def test_operational_edge_document_needs_no_vat_but_rejects_unknown_lines(
 
 
 @pytest.mark.asyncio
-async def test_fresh_packet_revision_raises_projection_revision(monkeypatch):
+@pytest.mark.parametrize("version_time", [
+    "2026-09-24T12:45:00+00:00",
+    "2026-09-17T20:51:00+00:00",
+    "2026-09-16T20:51:00+00:00",
+])
+async def test_fresh_packet_revision_raises_projection_revision(monkeypatch, version_time):
     """Правка станции (поздняя версия пакета) поднимает ревизию записи реестра.
 
     09.10.2026: ревизия считалась от первой доставки, и новая версия давала
@@ -746,7 +751,7 @@ async def test_fresh_packet_revision_raises_projection_revision(monkeypatch):
     packet_uuid = str(uuid.uuid4())
     document_id = str(uuid.uuid4())
     first = datetime(2026, 9, 17, 20, 51, tzinfo=timezone.utc)
-    later = datetime(2026, 9, 24, 12, 45, tzinfo=timezone.utc)
+    later = datetime.fromisoformat(version_time)
 
     def payload(qty):
         return {"Документы": [{
@@ -757,6 +762,7 @@ async def test_fresh_packet_revision_raises_projection_revision(monkeypatch):
 
     packet = SimpleNamespace(packet_uuid=packet_uuid, station_id=8, received_at=first,
                              kind="shift", payload=payload(1))
+    original_payload = packet.payload
     revision = SimpleNamespace(packet_uuid=packet_uuid, received_at=later, payload=payload(3))
     before = await store_documents._edge_adapter(
         Session({EdgePacket: [packet], StoreReceipt: []}), company_id)
@@ -765,8 +771,10 @@ async def test_fresh_packet_revision_raises_projection_revision(monkeypatch):
         company_id)
     assert len(before) == len(after) == 1
     assert before[0].revision == store_documents._revision(first)
-    assert after[0].revision == store_documents._revision(later)
+    assert after[0].revision == store_documents._revision(max(first, later))
     assert after[0].content_hash != before[0].content_hash
+    assert packet.received_at == first
+    assert packet.payload is original_payload
 
 
 @pytest.mark.asyncio

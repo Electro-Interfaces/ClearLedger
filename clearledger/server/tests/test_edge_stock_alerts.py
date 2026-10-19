@@ -57,3 +57,35 @@ def test_obshchiy_shk_dvuh_kartochek_ne_gasit_raznicu():
     doc = {"Касса": [_касса("s", 1000, шк="123", СлужебныйЗапас=True), _касса("b", 5, код=501, шк="123")],
            "Учет": [_книга("s", 3, шк="123"), _книга("b", 10, шк="123")]}
     assert [(r["item"], r["delta"]) for r in analyze_stock(doc, hall="208")["qty_mismatch"]] == [("b", -5.0)]
+
+
+def test_stock_report_passes_station_hall_without_new_catalog_dependency():
+    """Штатный отчёт сужает кассовую сверку до зала без новых таблиц/колонок."""
+    import asyncio
+    import uuid
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from app.services.edge_service import stock_report
+
+    company_id = uuid.uuid4()
+    doc = {"Тип": "stock_snapshot", "Касса": [_касса("a", 0)],
+           "Учет": [_книга("a", 30, место="20800002")]}
+    row = SimpleNamespace(payload={"Документы": [doc]},
+                          received_at=datetime(2026, 9, 17, tzinfo=timezone.utc))
+
+    class Session:
+        calls = 0
+        async def execute(self, query):
+            self.calls += 1
+            assert self.calls == 1  # Никакого дополнительного запроса edge.item.sku_class.
+            params = query.compile().params
+            assert company_id in params.values() and 208 in params.values()
+            assert "stock" in params.values()
+            return SimpleNamespace(scalar_one_or_none=lambda: row)
+
+    db = Session()
+    out = asyncio.run(stock_report(db, company_id, 208))
+    assert db.calls == 1
+    assert out["available"] is True and out["station_id"] == 208
+    assert out["totals"]["cannot_sell"] == 0
+    assert out["received_at"] == row.received_at

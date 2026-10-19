@@ -25,10 +25,11 @@ import calendar
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    ChargeSession,
     Contract,
     ContractLocation,
     OpsContractTerm,
@@ -36,6 +37,17 @@ from app.models import (
     OpsPeriodCharge,
     StationEnergyPeriod,
 )
+
+# Объём из реестра закупки старше стольких месяцев оценкой не служит. Реестр
+# приходит с лагом в два-три месяца; объём полугодовой и большей давности
+# описывает другую станцию — до замены счётчика, до простоя. У Крутинки
+# февральские 20 490 кВт·ч при продажах ~460 в месяц давали 150 тыс. ₽ ожидания
+# каждый месяц (вопрос Бурмистровой Е. Н., 14.10.2026).
+VOLUME_MAX_AGE_MONTHS = 4
+# Столько месяцев подряд без продаж — станция стоит, и прежний объём к ней не
+# относится: молчащая с января «Наш двор» ожидала 56 тыс. ₽ энергии в месяц по
+# объёму декабря 2024. Такую строку честнее отдать в «нет базы».
+SILENT_MONTHS = 2
 
 # Сколько закрытых периодов берём в среднее. Три — компромисс: одного мало
 # (сезонность), год размывает свежее изменение ставки.
@@ -124,6 +136,11 @@ class ExpandCtx:
         self.items: dict[str, OpsCostItem] = {}
         # (term_id, location_id) → [(period, gross)] закрытых, по убыванию периода
         self.history: dict[tuple[uuid.UUID, str | None], list[tuple[str, float]]] = {}
+        # location_id → месяцы с продажами; `sold_until` — последний месяц, до
+        # которого выгрузка сессий вообще дошла. Нет сессий у компании — правило
+        # молчания не применяется: отсутствие данных не означает простой.
+        self.sold: dict[str, set[str]] = {}
+        self.sold_until: str | None = None
 
     def scope(self, term: OpsContractTerm) -> list[str | None]:
         """Объекты, на которые разворачивается условие.
@@ -160,13 +177,24 @@ class ExpandCtx:
         Месяц возвращаем не для красоты: в подсказке к сумме человек должен
         видеть, что оценка сделана по апрелю, а не по прошлой неделе.
         """
+        oldest = shift_month(period, -VOLUME_MAX_AGE_MONTHS)
         for row in self.energy.get(location_id, []):
             if row.period >= period:
                 continue
+            if row.period < oldest:
+                break                       # дальше только старее — список по убыванию
             qty = _metered_volume(row)
             if qty is not None:
                 return qty, row.period
         return None, None
+
+    def silent(self, location_id: str, period: str) -> bool:
+        """Не продавала ни в одном из SILENT_MONTHS месяцев перед периодом."""
+        before = [shift_month(period, -k) for k in range(1, SILENT_MONTHS + 1)]
+        if self.sold_until is None or self.sold_until < before[0]:
+            return False                    # сессии за эти месяцы ещё не загружены
+        got = self.sold.get(location_id, set())
+        return not any(p in got for p in before)
 
     def prior(self, term_id: uuid.UUID, location_id: str | None,
               period: str, limit: int) -> list[float]:
@@ -202,6 +230,16 @@ async def build_ctx(db: AsyncSession, company_id: uuid.UUID) -> ExpandCtx:
     )).scalars().all()
     for row in rows:
         ctx.energy.setdefault(row.location_id, []).append(row)
+
+    month = func.to_char(ChargeSession.started_at, 'YYYY-MM-01')
+    for location_id, period in (await db.execute(
+        select(ChargeSession.location_id, month)
+        .where(ChargeSession.company_id == company_id)
+        .group_by(ChargeSession.location_id, month)
+        .having(func.sum(ChargeSession.energy_kwh) > 0))).all():
+        ctx.sold.setdefault(location_id, set()).add(period)
+        if ctx.sold_until is None or period > ctx.sold_until:
+            ctx.sold_until = period
 
     ctx.items = {c.code: c for c in (await db.execute(select(OpsCostItem))).scalars().all()}
 
@@ -298,7 +336,7 @@ def estimate(ctx: ExpandCtx, term: OpsContractTerm, period: str,
         # ничего не ждём от поставщика — а мы ждём.
         if tariff is not None:
             prev_qty, prev_period = ctx.last_volume(location_id, period)
-            if prev_qty is not None:
+            if prev_qty is not None and not ctx.silent(location_id, period):
                 gross, net = _net_gross(round(prev_qty * tariff, 2), None, vat)
                 return {"gross": gross, "net": net, "qty": prev_qty,
                         "basis": "metered_prev", "qtyFrom": prev_period}
@@ -355,6 +393,14 @@ async def expand(db: AsyncSession, company_id: uuid.UUID, period: str,
         ))).scalars().all()
     }
 
+    # Уникальность строки — (период, условие), без объекта: у договора сменилась
+    # станция (слияние карточек, перенумерация), и строка висит на старом номере.
+    # Её надо перевести на новый, а не создавать вторую — та не встанет в базу и
+    # уронит весь разворот (105 строк РусГидро, 14.10.2026).
+    по_условию: dict[uuid.UUID, list[OpsPeriodCharge]] = {}
+    for r in existing.values():
+        по_условию.setdefault(r.term_id, []).append(r)
+
     created = updated = skipped = 0
     blocked: list[dict[str, Any]] = []
 
@@ -377,8 +423,17 @@ async def expand(db: AsyncSession, company_id: uuid.UUID, period: str,
                             "reason": "у договора не заполнен охват по объектам"})
             continue
 
+        сироты = [r for r in по_условию.get(term.id, []) if r.location_id not in locations]
         for location_id in locations:
             row = existing.get((term.id, location_id))
+            if row is None and сироты:
+                row = сироты.pop()
+                if row.status != "expected" or row.doc_id is not None:
+                    blocked.append({"termId": str(term.id), "contractId": str(term.contract_id),
+                                    "costItem": term.cost_item,
+                                    "reason": f"строка ведётся по прежнему объекту {row.location_id}"})
+                    continue
+                row.location_id = location_id
             # Строку, которую уже ведёт человек, разворот не трогает: документ
             # привязан, сумма поставлена руками или расхождение оспаривается.
             if row is not None and (row.status != "expected" or row.doc_id is not None):
@@ -393,7 +448,10 @@ async def expand(db: AsyncSession, company_id: uuid.UUID, period: str,
                 db.add(OpsPeriodCharge(
                     company_id=company_id, period=period, cost_item=term.cost_item,
                     term_id=term.id, contract_id=term.contract_id,
-                    counterparty_id=ctx.counterparty.get(term.contract_id),
+                    # Колонка строковая: UUID asyncpg в неё не пропускает, и новая строка
+                    # роняла весь разворот (14.10.2026).
+                    counterparty_id=(str(ctx.counterparty[term.contract_id])
+                                     if ctx.counterparty.get(term.contract_id) else None),
                     location_id=location_id, seq=0,
                     expected_gross=est["gross"], expected_net=est["net"],
                     expected_qty=est["qty"], vat_pct=term.vat_pct,

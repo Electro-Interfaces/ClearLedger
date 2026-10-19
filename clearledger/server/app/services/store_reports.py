@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services import store_costs, store_moves_reports
+from app.services import store_costs
 
 
 _BUSINESS_TZ = ZoneInfo("Europe/Moscow")
@@ -267,6 +267,77 @@ async def vat_book(db: AsyncSession, cid, date_from, date_to,
     return {"rows": строки, "total": len(строки),
             "vat_deductible": round(к_вычету, 2),
             "vat_unconfirmed": round(без_документа, 2)}
+
+
+async def turnover(db: AsyncSession, cid, date_from, date_to,
+                   stations: list[int] | None = None) -> dict:
+    """Оборотно-сальдовая по товарам: остаток на начало, приход, расход, конец.
+
+    Остаток на начало берётся из снимка, ближайшего к началу периода: это
+    единственная точка, где остаток зафиксирован целиком. Приход — из приёмок,
+    расход — из продаж по чекам и списаний. Строка сходится не всегда, и это
+    видно: разница показана колонкой, а не спрятана в «конец».
+    """
+    d1, d2 = _период(date_from, date_to)
+    p = {"cid": cid, "d1": d1, "d2": d2}
+    ф_ст = " AND station_id = ANY(:st)" if stations else ""
+    if stations:
+        p["st"] = stations
+
+    начало = {(r["station_id"], r["item_uuid"]): float(r["quantity"] or 0)
+              for r in (await db.execute(text(f"""
+        SELECT station_id, item_uuid, sum(quantity) AS quantity
+        FROM ({_остатки_карточек(ф_ст, " AND snapshot_at <= :d1")}) t
+        GROUP BY station_id, item_uuid
+    """), p)).mappings().all()}
+
+    конец = {(r["station_id"], r["item_uuid"]): (float(r["quantity"] or 0), r["name"])
+             for r in (await db.execute(text(f"""
+        SELECT station_id, item_uuid, sum(quantity) AS quantity, max(name) AS name
+        FROM ({_остатки_карточек(ф_ст, " AND snapshot_at <= :d2")}) t
+        GROUP BY station_id, item_uuid
+    """), p)).mappings().all()}
+
+    приход: dict[tuple, float] = {}
+    for r in (await db.execute(text(f"""
+        SELECT station_id, lines FROM store_receipts
+        WHERE company_id = :cid{ф_ст} AND status = 'accepted'
+          AND doc_date BETWEEN :d1 AND :d2
+    """), p)).mappings().all():
+        for l in r["lines"] or []:
+            ключ = (r["station_id"], str(l.get("nomenclature_ref") or ""))
+            приход[ключ] = приход.get(ключ, 0) + float(l.get("qty_fact") or 0)
+
+    расход: dict[tuple, float] = {}
+    for r in (await db.execute(text(f"""
+        SELECT station_id, lines FROM store_cheques
+        WHERE company_id = :cid{ф_ст} AND at BETWEEN :d1 AND :d2
+    """), p)).mappings().all():
+        for l in r["lines"] or []:
+            ключ = (r["station_id"], str(l.get("item_uuid") or ""))
+            расход[ключ] = расход.get(ключ, 0) + float(l.get("qty") or 0)
+
+    ключи = set(начало) | set(конец) | set(приход) | set(расход)
+    строки = []
+    for k in ключи:
+        станция, товар = k
+        н = начало.get(k, 0.0)
+        к, имя = конец.get(k, (0.0, None))
+        вх = приход.get(k, 0.0)
+        рх = расход.get(k, 0.0)
+        расчётный = н + вх - рх
+        строки.append({
+            "station_id": станция, "item_uuid": товар, "name": имя or товар[:8],
+            "opening": round(н, 3), "in": round(вх, 3), "out": round(рх, 3),
+            "closing": round(к, 3),
+            # Разница между «сколько должно остаться» и «сколько лежит»: она и
+            # есть предмет инвентаризации, прятать её внутри итога нельзя.
+            "unexplained": round(к - расчётный, 3),
+        })
+    строки.sort(key=lambda x: (
+        x["station_id"] is None, x["station_id"] or 0, -abs(x["unexplained"])))
+    return {"rows": строки, "total": len(строки),
+            "unexplained_total": round(sum(abs(s["unexplained"]) for s in строки), 3)}
 
 
 async def abc(db: AsyncSession, cid, date_from, date_to,
@@ -1214,25 +1285,11 @@ REPORTS = {
     },
     "turnover": {
         "title": "Оборотно-сальдовая по товарам",
-        "about": "Остаток на начало, приход, расход и остаток на конец периода — по журналу "
-                 "движений станций, как на станции: приход — все поступления периода, расход — "
-                 "все выбытия. В книге Excel второй лист «Движения»: что, когда и каким "
-                 "документом.",
-        "columns": ["АЗС", "Товар", "Группа", "Остаток на начало", "Приход за период",
-                    "Расход за период", "Остаток на конец"],
-        "fields": ["station_id", "name", "group", "opening", "in", "out", "closing"],
-    },
-    "stock-on-date": {
-        "title": "Остатки на дату",
-        "about": "Что числилось на конец дня «по» (23:59:59) — по журналу движений станций: "
-                 "по месту, товару и штрихкоду. В книге Excel отдельные листы «Торговый зал» "
-                 "и «Склад» со своими итогами; печать — ведомость по местам (PDF — «Сохранить "
-                 "как PDF» в окне печати). Цена — действующая на конец дня.",
-        "columns": ["АЗС", "Место", "Товар", "Группа", "Код кассы", "Штрихкод", "Ед. изм.",
-                    "Остаток", "Цена", "Сумма"],
-        "fields": ["station_id", "place", "name", "group", "ns_code", "barcode", "unit",
-                   "quantity", "price", "amount"],
-        "group": "sklad",
+        "about": "Остаток на начало, приход, расход и остаток на конец периода. Необъяснённая "
+                 "разница показана колонкой — это и есть предмет инвентаризации.",
+        "columns": ["АЗС", "Товар", "Остаток на начало", "Приход", "Расход",
+                    "Остаток на конец", "Необъяснено"],
+        "fields": ["station_id", "name", "opening", "in", "out", "closing", "unexplained"],
     },
     "abc": {
         "title": "ABC-анализ по выручке",
@@ -1438,8 +1495,7 @@ BUILDERS = {
     "documents": documents,
     "purchase-diff": purchase_diff,
     "vat-book": vat_book,
-    "turnover": store_moves_reports.turnover,
-    "stock-on-date": store_moves_reports.stock_on_date,
+    "turnover": turnover,
     "abc": abc,
     "sales": sales,
     "stock": stock,
@@ -1461,8 +1517,7 @@ BUILDERS = {
 
 
 def xlsx_bytes(header: list[str], rows: list[list], meta: list[tuple[str, str]],
-               title: str, about: str, kinds: list[str] | None = None,
-               extra: list[tuple[str, list[str], list[list]]] | None = None) -> bytes:
+               title: str, about: str, kinds: list[str] | None = None) -> bytes:
     """Собрать книгу отчёта: лист описания и лист данных.
 
     CSV годится, чтобы утащить таблицу, но работать в нём нельзя: ни шапки, ни
@@ -1477,9 +1532,6 @@ def xlsx_bytes(header: list[str], rows: list[list], meta: list[tuple[str, str]],
     `kinds` — вид каждой строки для отчётов-бланков (товарный отчёт): «итог»,
     «раздел», «остаток», «сноска». Без него книга на 23 строки читается сплошной
     массой, и глазами в ней не найти ни «Итого по приходу», ни границу разделов.
-
-    `extra` — дополнительные листы (имя, шапка, строки): места хранения у
-    остатков на дату, движения у оборотки. Оформлены как основной лист.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -1502,21 +1554,7 @@ def xlsx_bytes(header: list[str], rows: list[list], meta: list[tuple[str, str]],
         for ячейка in строка:
             ячейка.alignment = Alignment(wrap_text=True, vertical="top")
 
-    лист = _лист_данных(книга, _имя_листа(title), header, rows, kinds)
-    for имя, шапка_доп, строки_доп in extra or []:
-        _лист_данных(книга, _имя_листа(имя), шапка_доп, строки_доп, None)
-
-    буфер = io.BytesIO()
-    книга.save(буфер)
-    return буфер.getvalue()
-
-
-def _лист_данных(книга, имя: str, header: list[str], rows: list[list],
-                 kinds: list[str] | None):
-    from openpyxl.styles import Alignment, Font, PatternFill
-    from openpyxl.utils import get_column_letter
-
-    лист = книга.create_sheet(имя)
+    лист = книга.create_sheet(_имя_листа(title))
     лист.append(header)
     шапка = Font(bold=True, color="FFFFFF")
     заливка = PatternFill("solid", fgColor="4F6BED")
@@ -1573,7 +1611,10 @@ def _лист_данных(книга, имя: str, header: list[str], rows: lis
     # отсортировав его, человек получит бессмыслицу вместо товарного отчёта.
     if rows and not kinds:
         лист.auto_filter.ref = f"A1:{get_column_letter(len(header))}{len(rows) + 1}"
-    return лист
+
+    буфер = io.BytesIO()
+    книга.save(буфер)
+    return буфер.getvalue()
 
 
 _ДЕНЬГИ = ("сумм", "цена", "выручк", "оборот", "маржа", "себестоим", "вычет",

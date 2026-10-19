@@ -553,12 +553,7 @@ async def stock_report(db: AsyncSession, company_id, station_id: int) -> dict:
     if doc is None:
         return {"station_id": station_id, "available": False,
                 "detail": "в последнем пакете нет снимка"}
-    # Скоуп компании — как у остальных чтений НСИ: общие карточки и свои.
-    сырьё = frozenset((await db.execute(text(
-        "SELECT external_uuid::text FROM edge.item"
-        " WHERE sku_class = 'Сырьё' AND NOT deleted AND external_uuid IS NOT NULL"
-        "   AND (company_id IS NULL OR company_id = :cid)"), {"cid": company_id})).scalars().all())
-    out = analyze_stock(doc, hall=str(station_id), raw=сырьё)
+    out = analyze_stock(doc, hall=str(station_id))
     out["ns_pool"] = _pool(doc)
     out["station_id"] = station_id
     out["available"] = True

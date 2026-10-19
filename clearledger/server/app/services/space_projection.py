@@ -84,10 +84,8 @@ async def project(
             if not chunk and items:
                 break
             body = {"companyId": link.external_company_id, PAYLOAD_KEYS[entity]: chunk}
-            # Полный состав реестра — только с последней пачкой объектов и только
-            # явным списком: приёмник архивирует отсутствующих лишь по нему. Без
-            # этого каждая пачка считалась всем реестром и архивировала соседние
-            # (rushydro, 28.09.2026: 602 объекта в архив, 1722 заявки отменены).
+            # Полный состав передаётся только с последней непустой пачкой объектов.
+            # Промежуточные пачки не должны архивировать соседние объекты.
             if entity == "objects" and start + BATCH_SIZE >= len(items) and items:
                 body["allIds"] = [str(it.get("id")) for it in items if it.get("id")]
             try:

@@ -26,7 +26,6 @@ import json as _json
 import logging
 import re as _re
 import uuid as _uuid
-from datetime import date
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -739,21 +738,18 @@ async def ingest_stations(
                 чужой = by_serial.get(str(typed.get("serial_number") or "").strip())
                 if чужой is not None and чужой is not loc:
                     typed.pop("serial_number", None)
-                # Витрина переводит станции на номер по приказу («359» → «381-0019»).
-                # Прежний номер не теряем: он в сессиях прошлых дней и в бухгалтерских
-                # таблицах, по нему станцию ищут наравне с новым. Трёхзначный номер
-                # витрины и есть бухгалтерский — если «Сводная» его не проставила,
-                # сохраняем его сами, иначе после смены он жил бы только в истории.
-                прежний_номер = str(loc.station_number or "").strip()
-                новый_номер = str(typed.get("station_number") or "").strip()
-                if прежний_номер and новый_номер and прежний_номер != новый_номер:
-                    md = dict(loc.extra_metadata or {})
-                    md["numberHistory"] = [*(md.get("numberHistory") or []), {
-                        "было": прежний_номер, "стало": новый_номер,
-                        "когда": date.today().isoformat(), "основание": "витрина АСУиМ"}]
-                    if not md.get("buNumber") and _re.fullmatch(r"\d{1,3}", прежний_номер):
-                        md["buNumber"] = прежний_номер
-                    loc.extra_metadata = md
+                # Переход статуса — в журнал станции, как в компактной выгрузке CPO:
+                # книга витрины идёт этой веткой и раньше перезаписывала статус молча.
+                новый = typed.get("operational_status")
+                if новый and loc.operational_status != новый:
+                    db.add(AuditEvent(
+                        company_id=company_id, user_id="vitrina",
+                        user_name="Загрузка витрины", action="location_op_status",
+                        details=_json.dumps(
+                            {"location_id": loc.id, "from": loc.operational_status, "to": новый,
+                             "reason": _s(row.get("status_dev")) or "выгрузка витрины"},
+                            ensure_ascii=False, separators=(",", ":")),
+                    ))
                 # ОБОГАЩАЕМ существующий объект: заполняем типизированные колонки +
                 # мержим паспорт; id / code / source_bindings НЕ трогаем.
                 for k, v in typed.items():
@@ -864,10 +860,6 @@ async def build_station_index(db: AsyncSession, company_id) -> dict[str, str]:
             old = str((h or {}).get("было") or "").strip()
             if old:
                 put(alias_r, old, loc)
-        # Бухгалтерский номер — второй постоянный номер станции (см. session_scope).
-        bu = str(md.get("buNumber") or "").strip()
-        if bu:
-            put(alias_r, bu, loc)
     idx = {k: v[1] for k, v in idx_r.items()}
     # Действующие номера приоритетнее прежних: алиас не должен перехватить номер,
     # который сегодня принадлежит другой станции.
@@ -955,11 +947,7 @@ async def backfill_session_locations(db: AsyncSession, company_id, auto_create: 
     )).scalars() if x]
     linked_rows = matched = moved = 0
     for code in codes:
-        # Отрезаем только суффикс разъёма («580-1»). Номер по приказу «591-0019»
-        # резать нельзя: «591» — чужой бухгалтерский номер (станция «Русская»),
-        # совпадение префикса с ним случайно.
-        base, _, tail = code.rpartition("-")
-        lid = idx.get(code) or (idx.get(base) if base and _re.fullmatch(r"\d{1,2}", tail) else None)
+        lid = idx.get(code) or (idx.get(code.rsplit("-", 1)[0]) if "-" in code else None)
         if not lid:
             continue
         matched += 1
