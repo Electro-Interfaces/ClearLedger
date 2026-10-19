@@ -258,12 +258,15 @@ function Operators({ data }: { data: MegafonVoiceData }) {
 
 function Groups({ data }: { data: MegafonVoiceData }) {
   if (!data.groups.length) return <EmptyBlock иконка={PhoneCall} текст="Групп по выбранным условиям нет" />
-  return <div className="min-w-0 rounded-lg border"><Table aria-label="Группы МегаФона">
+  const known = data.groups.filter(group => group.name).reduce((total, group) => total + group.total, 0)
+  return <div className="flex min-w-0 flex-col gap-3">
+    <p role="note" className="text-sm text-muted-foreground">МегаФон указал группу для {count(known)} из {count(data.summary.total)} звонков в выборке. Остальные отражены в строке «Группа не указана». Эти данные не описывают полную нагрузку смен.</p>
+    <div className="min-w-0 rounded-lg border"><Table aria-label="Группы МегаФона">
     <TableHeader><TableRow>{['Группа', 'Всего', 'Отвечено', 'Пропущено'].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader>
     <TableBody>{data.groups.map(group => <TableRow key={group.name}>
       <TableCell>{group.name || 'Группа не указана'}</TableCell><TableCell>{count(group.total)}</TableCell><TableCell>{count(group.answered)}</TableCell><TableCell>{count(group.missed)}</TableCell>
     </TableRow>)}</TableBody>
-  </Table></div>
+  </Table></div></div>
 }
 
 function CallDialog({ companyId, id, close }: { companyId: string; id: string; close: () => void }) {
