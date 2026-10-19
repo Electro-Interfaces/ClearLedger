@@ -187,7 +187,7 @@ function SourceAndLine({ data, checkedAt }: { data: MegafonVoiceData; checkedAt:
   const { connection, line } = data
   const stale = !connection.last_sync_at || !Number.isFinite(Date.parse(connection.last_sync_at))
     || checkedAt - Date.parse(connection.last_sync_at) > connection.poll_interval_seconds * 2 * 1000
-  const status = !connection.configured ? 'Не настроено' : ({ connected: 'Подключено', ok: 'Подключено', error: 'Ошибка', syncing: 'Синхронизация', disconnected: 'Отключено' }[connection.status] ?? connection.status)
+  const status = !connection.configured ? 'Не настроено' : ({ active: 'Подключено', paused: 'Приостановлено', not_configured: 'Не настроено', connected: 'Подключено', ok: 'Подключено', error: 'Ошибка', syncing: 'Синхронизация', disconnected: 'Отключено' }[connection.status] ?? 'Состояние уточняется')
   return <div className="grid min-w-0 gap-3 lg:grid-cols-2">
     <Card className="min-w-0 gap-3 py-4">
       <CardHeader className="px-4"><CardTitle>Источник и свежесть</CardTitle><CardDescription>МегаФон ВАТС · история завершённых звонков</CardDescription></CardHeader>
@@ -282,9 +282,8 @@ function CallDialog({ companyId, id, close }: { companyId: string; id: string; c
           <Fact label="Оператор">{call.operator_name}</Fact><Fact label="Логин оператора">{call.operator_login}</Fact>
           <Fact label="Группа">{call.group_name}</Fact><Fact label="Линия в истории">{[call.line_name, call.line_number].filter(Boolean).join(' · ')}</Fact>
           <Fact label="Ожидание">{seconds(call.wait_sec)}</Fact><Fact label="Разговор">{seconds(call.duration_sec)}</Fact>
-          <Fact label="Запись">{call.has_recording ? 'Есть' : 'Нет'}</Fact><Fact label="Источник">{call.source}</Fact>
-          <Fact label="ID звонка в МегаФоне">{call.call_id}</Fact><Fact label="ID цепочки">{call.thread_id}</Fact>
-          <Fact label="ID оператора">{call.operator_user_id}</Fact><Fact label="ID записи истории">{call.id}</Fact>
+          <Fact label="Запись">{call.has_recording ? 'Есть' : 'Нет'}</Fact><Fact label="Источник">МегаФон ВАТС</Fact>
+          <Fact label="Номер звонка в МегаФоне">{call.call_id}</Fact>
         </dl>
         <p className="text-xs text-muted-foreground">Наличие записи показано по истории МегаФона. Прослушивание здесь не подключено. Исходный публичный номер для этого звонка не подтверждён.</p>
       </> : null}
