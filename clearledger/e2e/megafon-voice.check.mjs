@@ -22,14 +22,15 @@ import { FixtureCompanyProvider } from '@/contexts/CompanyContext';
 import { VoiceLayout } from '@/pages/voice/VoiceLayout';
 import MegafonVoicePage from '@/pages/voice/MegafonVoicePage';
 import * as helpers from '@/services/megafonVoiceService';
+import * as monthlyHelpers from '@/pages/voice/megafonMonthly';
 import '@/index.css';
 const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 document.title = 'Телефония · МегаФон ВАТС · синтетическая проверка';
-window.megafonHelpers = helpers; window.megafonQueryClient = client;
+window.megafonMonthlyHelpers = monthlyHelpers; window.megafonHelpers = helpers; window.megafonQueryClient = client;
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={client}><FixtureCompanyProvider>
 <p role="note">СИНТЕТИЧЕСКАЯ ПРОВЕРКА: вымышленные звонки</p>
 <div style={{height: 'calc(100dvh - 3rem)', display: 'flex', flexDirection: 'column'}}>
-<BrowserRouter><Routes><Route path="/voice" element={<VoiceLayout />}><Route index element={<p>Раздел узла</p>} /><Route path="calls" element={<p>Журнал узла в проверке</p>} /><Route path="stats" element={<p>Статистика узла в проверке</p>} /><Route path="megafon" element={<MegafonVoicePage />} /></Route></Routes></BrowserRouter>
+<BrowserRouter><Routes><Route path="/voice" element={<VoiceLayout />}><Route index element={<p>Раздел узла</p>} /><Route path="calls" element={<p>Журнал узла в проверке</p>} /><Route path="stats" element={<p>Статистика узла в проверке</p>} /><Route path="report" element={<p>Отчёт узла в проверке</p>} /><Route path="megafon" element={<MegafonVoicePage />} /></Route></Routes></BrowserRouter>
 </div>
 </FixtureCompanyProvider></QueryClientProvider>);
 `
@@ -71,7 +72,7 @@ function fixture(query, companyId) {
     summary: { total: filtered.length, inbound: filtered.filter(c => c.direction === 'inbound').length, outbound: filtered.filter(c => c.direction === 'outbound').length,
       answered: filtered.filter(c => !c.missed).length, missed: filtered.filter(c => c.missed).length, avg_wait_sec: filtered.length ? 10 : null,
       avg_talk_sec: filtered.length ? 40 : null, recordings: filtered.filter(c => c.has_recording).length, operator_count: filtered.length ? 2 : 0 },
-    operators: filtered.length ? [{ key: 'qa-user', name: 'Оператор проверки', login: 'qa-agent', extension: '101', user_id: 'qa-user', total: filtered.length, inbound_answered: 5, outbound: 4, missed: 3, avg_talk_sec: 40, avg_wait_sec: 10 }] : [],
+    operators: filtered.length ? [{ key: 'qa-user', name: mode === 'formula' ? '=1+1' : 'Оператор проверки', login: 'qa-agent', extension: '101', user_id: 'qa-user', total: filtered.length, inbound_answered: 5, outbound: 4, missed: 3, avg_talk_sec: 40, avg_wait_sec: 10 }] : [],
     groups: filtered.length ? [{ name: 'Тестовая группа', total: filtered.length, answered: 4, missed: 2 }, { name: '', total: 2, answered: 1, missed: 1 }] : [],
     filters: { operators: [{ key: 'qa-user', name: 'Оператор проверки' }, { key: '', name: 'Без оператора' }], groups: [{ key: 'qa-group', name: 'Тестовая группа' }, { key: '', name: 'Группа не указана' }], lines: [{ key: 'qa-line', name: 'Тестовая линия', number: '+70000000999' }] },
     calls: { items: filtered.slice((page - 1) * 25, page * 25), total: filtered.length, page, page_size: 25 },
@@ -236,6 +237,37 @@ try {
   await page.goto(`${origin}/voice/calls`)
   await page.getByRole('alert').filter({ hasText: 'Не удалось определить источник' }).waitFor()
   assert.equal(await page.getByRole('table').count(), 0)
+  mode = 'normal'
+  const beforeMonthlyNode = nodeRequests
+  await page.goto(`${origin}/voice/report`)
+  await page.getByRole('heading', { name: 'Отчёт за месяц', exact: true }).waitFor()
+  await page.getByRole('table', { name: 'Операторы за месяц' }).waitFor()
+  assert.equal(await page.getByLabel('Источник данных', { exact: true }).inputValue(), 'megafon')
+  const m = await page.evaluate(() => ({ leap: window.megafonMonthlyHelpers.monthlyBounds('2024-02'), bad: window.megafonMonthlyHelpers.monthlyBounds('2026-13'), future: window.megafonMonthlyHelpers.monthlyBounds('2099-01'), previous: window.megafonMonthlyHelpers.shiftMonth('2026-01', -1) }))
+  assert.equal(Date.parse(m.leap.to) - Date.parse(m.leap.from), 29 * 86400000); assert.equal(m.bad, null); assert.equal(m.future, null); assert.equal(m.previous, '2025-12')
+  const monthResponse = page.waitForResponse(r => new URL(r.url()).pathname === '/api/voice/megafon' && new URL(r.url()).searchParams.get('from') === '2026-08-31T21:00:00.000Z')
+  await page.getByLabel('Месяц', { exact: true }).fill('2026-09'); await monthResponse
+  await page.getByRole('button', { name: 'Excel', exact: true }).waitFor()
+  await page.getByLabel('Линия отчёта').selectOption('+70000000999')
+  await page.getByRole('button', { name: 'Excel', exact: true }).waitFor({ state: 'visible' })
+  await page.reload(); await page.getByRole('table', { name: 'Операторы за месяц' }).waitFor()
+  assert.equal(await page.getByLabel('Месяц', { exact: true }).inputValue(), '2026-09')
+  assert.equal(await page.getByLabel('Линия отчёта').inputValue(), '+70000000999')
+  const csvEvent = page.waitForEvent('download'); await page.getByRole('button', { name: 'CSV', exact: true }).click(); const csv = await csvEvent
+  await csv.saveAs(join(artifacts, 'monthly.csv')); const csvText = await readFile(join(artifacts, 'monthly.csv'), 'utf8')
+  assert.ok(csvText.includes('Сводка') && csvText.includes('2026-09') && csvText.includes('Операторы')); assert.ok(!csvText.includes(calls[0].client_phone)); assert.ok(!csvText.includes('recording_url'))
+  const xlsxEvent = page.waitForEvent('download'); await page.getByRole('button', { name: 'Excel', exact: true }).click(); const xlsx = await xlsxEvent
+  await xlsx.saveAs(join(artifacts, 'monthly.xlsx')); assert.equal((await readFile(join(artifacts, 'monthly.xlsx'))).subarray(0, 2).toString(), 'PK')
+  const popupEvent = context.waitForEvent('page'); await page.getByRole('button', { name: 'Печать / PDF', exact: true }).click(); const popup = await popupEvent
+  await popup.getByRole('heading', { name: /отчёт за/ }).waitFor(); assert.equal(await popup.locator('script,img,iframe').count(), 0); assert.ok(!(await popup.locator('body').innerText()).includes(calls[0].client_phone)); await popup.close()
+  await page.getByRole('link', { name: 'Открыть звонки этого отчёта' }).click(); await page.getByRole('table', { name: 'Журнал звонков МегаФона' }).waitFor(); assert.equal(new URL(page.url()).pathname, '/voice/calls')
+  await page.goto(`${origin}/voice/report?month=2099-01`); await page.getByRole('alert').filter({ hasText: 'Выберите корректный месяц' }).waitFor(); assert.ok(await page.getByRole('button', { name: 'Excel', exact: true }).isDisabled())
+  mode = 'empty'; await page.goto(`${origin}/voice/report?month=2026-09`); await page.getByText('В загруженной истории за выбранный месяц и линию звонков нет. Проверьте период и полноту загрузки.').waitFor()
+  mode = 'error'; await page.getByRole('button', { name: 'Обновить', exact: true }).click(); await page.getByRole('alert').filter({ hasText: 'Не удалось рассчитать отчёт' }).waitFor(); assert.ok(await page.getByRole('button', { name: 'Excel', exact: true }).isDisabled())
+  mode = 'formula'; await page.getByRole('button', { name: 'Повторить', exact: true }).click(); await page.getByRole('table', { name: 'Операторы за месяц' }).getByText('=1+1', { exact: true }).waitFor()
+  const safeEvent = page.waitForEvent('download'); await page.getByRole('button', { name: 'CSV', exact: true }).click(); await (await safeEvent).saveAs(join(artifacts, 'monthly-formula.csv')); assert.ok((await readFile(join(artifacts, 'monthly-formula.csv'), 'utf8')).includes("'=1+1;101;"))
+  await page.setViewportSize({ width: 390, height: 844 }); await screenshot('monthly-mobile.png')
+  assert.equal(nodeRequests, beforeMonthlyNode, 'Месячный отчёт МегаФона не обращается к Node')
   mode = 'normal'
   await page.goto(`${origin}/voice`)
   await page.getByText('Узел заказчика не отвечает', { exact: true }).waitFor()

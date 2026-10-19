@@ -12,7 +12,7 @@ export function useVoiceDataSource(pathname: string) {
   const [params, setParams] = useSearchParams()
   const [anchor] = useState(() => new Date())
   const path = pathname.replace(/\/$/, '')
-  const managed = path === '/voice/calls' || path === '/voice/stats'
+  const managed = path === '/voice/calls' || path === '/voice/stats' || path === '/voice/report'
   const directMegafon = path === '/voice/megafon'
   // Старые ссылки с показателями/идентификаторами узла сохраняют свой источник.
   const nodeLink = ['id', 'metric', 'servedBy', 'topic', 'back', 'cc'].some(key => params.has(key))
@@ -51,7 +51,7 @@ export function VoiceDataSourceBar({ state, pathname }: { state: ReturnType<type
   let description = 'Этот раздел показывает данные узла ContactHub. История действующей МегаФон ВАТС доступна в журнале и статистике.'
   if (section === '') description = 'Здесь текущие звонки и присутствие операторов узла ContactHub. Живые разговоры и статусы операторов МегаФона сюда не поступают.'
   if (['contact', 'callbacks'].includes(section)) description = 'Здесь задачи обратного звонка узла ContactHub. Пропущенные звонки МегаФона сами по себе не создают эти задачи.'
-  if (section === 'report') description = 'Этот месячный отчёт рассчитывается по звонкам узла ContactHub. Данные МегаФона смотрите в статистике; в этот отчёт они не включены.'
+  if (section === 'report') description = 'Этот месячный отчёт рассчитывается по звонкам узла ContactHub. Для месячного отчёта МегаФона выберите его в источнике данных.'
   if (section === 'reconcile') description = 'Здесь детализация сравнивается с журналом узла ContactHub. История МегаФона в эту сверку не включена.'
   if (['reception', 'passport', 'targets', 'sounds', 'enrichment', 'cc', 'webhooks', 'versions'].includes(section)) description = 'Настройки этого раздела относятся к узлу ContactHub. Настройки действующей ВАТС МегаФона они не изменяют.'
   if (['audit', 'retention'].includes(section)) description = 'Здесь аудит и записи узла ContactHub. Записи и чтение истории МегаФона в эти списки не включены.'

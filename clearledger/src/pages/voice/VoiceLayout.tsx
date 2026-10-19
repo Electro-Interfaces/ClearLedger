@@ -25,6 +25,7 @@ import { VOICE_GROUPS, VOICE_VIEWS, voicePath, voiceViewFor } from './views'
 import { useVoiceDataSource, VoiceDataSourceBar } from './VoiceDataSource'
 
 const MegafonVoicePage = lazy(() => import('./MegafonVoicePage'))
+const MegafonMonthlyReportPage = lazy(() => import('./MegafonMonthlyReportPage'))
 
 export function VoiceLayout() {
   const { companyId } = useCompany()
@@ -51,7 +52,9 @@ export function VoiceLayout() {
   const содержимое = source.loading ? <AccessLoading />
     : source.error ? null
     : megafon ? (source.managed
-      ? <Suspense fallback={<AccessLoading />}><MegafonVoicePage key={`${companyId}:${pathname}`} section={pathname.endsWith('/stats') ? 'stats' : 'calls'} /></Suspense>
+      ? <Suspense fallback={<AccessLoading />}>{pathname.endsWith('/report')
+        ? <MegafonMonthlyReportPage key={companyId} />
+        : <MegafonVoicePage key={`${companyId}:${pathname}`} section={pathname.endsWith('/stats') ? 'stats' : 'calls'} />}</Suspense>
       : <Outlet key={companyId} />)
     : !companyId || кто.isLoading ? <AccessLoading />
     : кто.isError ? <Refusal ошибка={кто.error} />
