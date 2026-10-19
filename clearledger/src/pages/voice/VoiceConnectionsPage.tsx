@@ -58,7 +58,7 @@ export default function VoiceConnectionsPage() {
   const current = active ?? cc.data?.items.find(c => c.state !== 'revoked')
   const ccUrl = links.ccSettingsUrl(current?.ccIssuer)
   const checkHistory = useMutation({ mutationFn: () => {
-    if (!megafon?.id) throw new Error('Для проверки выберите подключение МегаФона в Поддержке')
+    if (!megafon) throw new Error('Для проверки выберите подключение МегаФона в Поддержке')
     return links.checkProvider(companyId, megafon.id)
   } })
   const checkCore = useMutation({ mutationFn: () => voice.checkCoreConnection(companyId) })
@@ -100,7 +100,7 @@ export default function VoiceConnectionsPage() {
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <Shell title="МегаФон → история звонков" description="Выгрузка истории по API ВАТС. Действующий маршрут звонков сохраняется." status={historyStatus}
         actions={<><Button variant="outline" size="sm" onClick={() => void settings('megafon')} disabled={opening !== null}>Настроить МегаФон</Button>
-          <Button size="sm" variant="outline" disabled={!megafon?.id || !historyConfigured || checkHistory.isPending} onClick={() => checkHistory.mutate()}>Проверить API истории</Button>
+          <Button size="sm" variant="outline" disabled={!megafon || !historyConfigured || checkHistory.isPending} onClick={() => checkHistory.mutate()}>Проверить API истории</Button>
           <Button asChild variant="ghost" size="sm"><Link to="/voice/megafon">Открыть историю</Link></Button></>}>
         {providers.isPending ? <Skeleton className="h-16" /> : providers.error ? <QueryError error={providers.error} /> : <dl className="flex flex-col gap-2">
           <Detail name="Адрес API">{megafon?.endpoint ?? 'Не задан'}</Detail>

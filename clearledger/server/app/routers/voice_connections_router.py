@@ -98,7 +98,7 @@ class SupportConnections(BaseModel):
 
 class CheckIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    connector_id: uuid.UUID
+    connector_id: uuid.UUID | None = Field(...)
 
 
 async def scope(header, user, db):
@@ -108,14 +108,14 @@ async def scope(header, user, db):
     return await _voice_admin(ref, user, db)
 
 
-async def support_request(db, cid, *, connector_id=None):
+async def support_request(db, cid, *, connector_id=None, check=False):
     target = await _support_target(db, cid, "voice.connections")
     if not target:
         raise HTTPException(503, "Поддержка не подключена к компании или служебный обмен не настроен")
     app, token = target
-    method = "POST" if connector_id is not None else "GET"
-    suffix = "/check" if connector_id is not None else ""
-    payload = {"connector_id": str(connector_id)} if connector_id is not None else None
+    method = "POST" if check else "GET"
+    suffix = "/check" if check else ""
+    payload = {"connector_id": str(connector_id) if connector_id else None} if check else None
     try:
         async with httpx.AsyncClient(timeout=12.0 if payload else 4.0, follow_redirects=False) as client:
             async with client.stream(method, f"{_internal_base_url(app, 'support')}/api/v1/eco/voice/connections{suffix}",
@@ -152,7 +152,7 @@ async def connections(company_header: str | None = Header(None, alias="X-Company
 async def check(payload: CheckIn, company_header: str | None = Header(None, alias="X-Company-Id"),
                 user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     cid = await scope(company_header, user, db)
-    body = await support_request(db, cid, connector_id=payload.connector_id)
+    body = await support_request(db, cid, connector_id=payload.connector_id, check=True)
     if not isinstance(body, dict) or type(body.get("ok")) is not bool:
         raise HTTPException(503, "Поддержка не подтвердила результат проверки")
     # Ответ провайдера и его текст не пересылаются: в них могут быть ключи и номера.

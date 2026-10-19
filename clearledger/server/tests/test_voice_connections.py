@@ -80,6 +80,8 @@ async def test_connections_relay_scope_redaction_checks_and_failure(client, db, 
             assert "MUST-NOT-LEAK" not in r.text
             assert seen[-1][2] == {"connector_id": connector}
             assert seen[-1][0] == "/api/v1/eco/voice/connections/check"
+            r = await client.post("/api/voice/connections/check", headers=headers, json={"connector_id": None})
+            assert r.status_code == 200 and seen[-1][2] == {"connector_id": None}
             before = len(seen)
             assert (await client.post("/api/voice/connections/check", headers=headers, json={"connector_id": connector, "company_id": external})).status_code == 422
             assert len(seen) == before
