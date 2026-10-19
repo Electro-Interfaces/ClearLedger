@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -102,6 +103,18 @@ async def overview(db: AsyncSession, support_cid: str, core_cid: uuid.UUID, *,
         round(avg(c.duration_sec) FILTER(WHERE c.duration_sec>0))::int avg_talk_sec,
         round(avg(c.wait_sec) FILTER(WHERE c.direction='inbound' AND NOT c.missed))::int avg_wait_sec
         FROM {table} WHERE {where} GROUP BY c.operator ORDER BY total DESC, name"""), params)).mappings().all()
+    operator_rows = [dict(x) for x in operators]
+    directory = (await db.execute(text(f"""SELECT display_name,extension,user_id
+        FROM {_SCHEMA}.cc_agent_identities WHERE company_id=CAST(:cid AS uuid)
+        AND provider='megafon' AND is_active=true"""), {"cid": support_cid})).mappings().all()
+    def name_key(value):
+        return re.sub(r"^(дежурный|дежурная|дежурство)\s+", "", value or "", flags=re.I).strip().casefold()
+    current_directory = {name_key(x["display_name"]): x for x in directory if x["display_name"]}
+    for row in operator_rows:
+        identity = current_directory.get(name_key(row["key"]))
+        # Добавочный — текущий справочник; не угадываем личность по старому логину.
+        if identity and row["user_id"] and str(identity["user_id"]) == row["user_id"]:
+            row["extension"] = identity["extension"]
     groups = (await db.execute(text(f"""SELECT COALESCE(c.group_name,'') name,count(*)::int total,
         count(*) FILTER(WHERE c.direction='inbound' AND NOT c.missed)::int answered,
         count(*) FILTER(WHERE c.direction='inbound' AND c.missed)::int missed
@@ -136,7 +149,7 @@ async def overview(db: AsyncSession, support_cid: str, core_cid: uuid.UUID, *,
                      "public_number": context.get("public_number"),
                      "forwarding_number": context.get("forwarding_number"),
                      "origin_verified_per_call": False},
-            "summary": summary, "operators": [dict(x) for x in operators], "groups": [dict(x) for x in groups],
+            "summary": summary, "operators": operator_rows, "groups": [dict(x) for x in groups],
             "filters": {"operators": [{"key": k, "name": v} for k, v in ops.items()],
                         "groups": [{"key": k, "name": v} for k, v in grps.items()],
                         "lines": [{"key": k, "name": v, "number": k} for k, v in lines.items()]},

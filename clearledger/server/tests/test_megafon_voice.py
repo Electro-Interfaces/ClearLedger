@@ -31,6 +31,13 @@ async def provider_db(db, monkeypatch):
     await db.execute(text(f"""CREATE TABLE {SCHEMA}.connectors (
         id uuid,company_id uuid,label text,endpoint text,status text,enabled boolean,
         last_sync_at timestamptz,last_error text,config jsonb,provider text,type text)"""))
+    await db.execute(text(f"""CREATE TABLE {SCHEMA}.cc_agent_identities (
+        company_id uuid, provider text, display_name text, extension text, user_id uuid, is_active boolean)"""))
+    operator_id = uuid.uuid4()
+    for identity_cid, extension in [(support_cid, "101"), (other_support, "999")]:
+        await db.execute(text(f"""INSERT INTO {SCHEMA}.cc_agent_identities VALUES
+            (:cid,'megafon','Agent A',:ext,:uid,true)"""),
+            {"cid": identity_cid, "ext": extension, "uid": operator_id})
     await db.execute(text(f"""INSERT INTO {SCHEMA}.connectors VALUES (
         :id,:cid,'Test VATs','https://example.invalid','active',true,now(),NULL,
         CAST(:config AS jsonb),'megafon','channel')"""), {"id": uuid.uuid4(), "cid": support_cid,
@@ -49,6 +56,8 @@ async def provider_db(db, monkeypatch):
             'https://example.invalid/private-recording?secret=hidden',NULL,:source,NULL)"""),
             {"id": id_, "cid": company, "uid": str(id_), "direction": direction, "missed": missed,
              "name": name, "group": group, "at": datetime.fromisoformat(at.replace("Z", "+00:00")), "source": source})
+    await db.execute(text(f"UPDATE {SCHEMA}.call_records SET operator_user_id=:id WHERE operator='Agent A'"),
+                     {"id": operator_id})
     await db.commit()
     yield {"cid": cid, "support_cid": support_cid, "other": other, "ids": ids, "links": links}
     for link in links:
@@ -68,6 +77,7 @@ async def test_overview_filters_pagination_details_and_audit(client, db, provide
     assert body["summary"]["total"] == 3
     assert body["summary"]["answered"] == body["summary"]["missed"] == body["summary"]["outbound"] == 1
     assert body["connection"]["mode"] == "history"
+    assert next(x for x in body["operators"] if x["name"] == "Agent A")["extension"] == "101"
     assert body["line"]["public_number"] == "+78005550000"
     assert body["line"]["origin_verified_per_call"] is False
     assert len(body["calls"]["items"]) == 1 and body["calls"]["total"] == 3
