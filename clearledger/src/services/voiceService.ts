@@ -1139,7 +1139,7 @@ export async function deleteRecordings(cid: string, contactId: string, reason: s
 
 // ——— Получатели событий (волна 4) ———
 
-export type EventType = 'call.completed' | 'call.recording_ready' | 'call.transcript_ready' | 'callback.closed'
+export type EventType = 'call.completed' | 'call.recording_ready' | 'call.transcript_ready' | 'callback.opened' | 'callback.merged' | 'callback.closed'
   | 'config.applied' | 'alert.raised' | 'alert.cleared' | 'audit.recorded'
 
 export interface Webhook {
@@ -1177,6 +1177,11 @@ export async function addWebhook(cid: string, url: string, types: EventType[]) {
 
 export async function deleteWebhook(cid: string, id: string) {
   await запрос<void>(cid, `/webhooks/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+/** Меняется только состав будущих событий; адрес, ключ и прежняя очередь сохраняются. */
+export async function setWebhookTypes(cid: string, id: string, types: EventType[]) {
+  return (await запрос<Webhook>(cid, `/webhooks/${encodeURIComponent(id)}/types`, { method: 'PUT', body: { types } })).data
 }
 
 export const webhookDeliveries = (cid: string, id: string, limit = 100) =>

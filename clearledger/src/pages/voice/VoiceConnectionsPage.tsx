@@ -50,6 +50,7 @@ export default function VoiceConnectionsPage() {
   const node = useQuery({ queryKey: ['voice-node-connections', companyId], queryFn: () => voice.nodeConnections(companyId), enabled: !!companyId, retry: false })
   const cc = useQuery({ queryKey: ['voice-cc', companyId], queryFn: () => voice.ccConnections(companyId), enabled: !!companyId, retry: false })
   const health = useQuery({ queryKey: ['voice-health', companyId], queryFn: () => voice.health(companyId), enabled: !!companyId, retry: false })
+  const webhooks = useQuery({ queryKey: ['voice-webhooks', companyId], queryFn: () => voice.webhooks(companyId), enabled: !!companyId, retry: false })
   const megafon = providers.data?.connections.find(c => c.provider === 'megafon' && c.enabled)
     ?? providers.data?.connections.find(c => c.provider === 'megafon')
   const support = providers.data?.connections.find(c => c.provider === 'asterisk' && c.enabled)
@@ -62,7 +63,7 @@ export default function VoiceConnectionsPage() {
     return links.checkProvider(companyId, megafon.id)
   } })
   const checkCore = useMutation({ mutationFn: () => voice.checkCoreConnection(companyId) })
-  const busy = providers.isFetching || node.isFetching || cc.isFetching || health.isFetching
+  const busy = providers.isFetching || node.isFetching || cc.isFetching || health.isFetching || webhooks.isFetching
   async function settings(provider: 'megafon' | 'asterisk') {
     setOpening(provider)
     try { await links.providerSettings(companyId, provider) }
@@ -71,7 +72,7 @@ export default function VoiceConnectionsPage() {
   }
   async function refresh() {
     checkHistory.reset(); checkCore.reset()
-    await Promise.all([providers.refetch(), node.refetch(), cc.refetch(), health.refetch()])
+    await Promise.all([providers.refetch(), node.refetch(), cc.refetch(), health.refetch(), webhooks.refetch()])
   }
   const forbidden = providers.error instanceof ApiError && [401, 403].includes(providers.error.status)
   if (!companyId) return <p className="p-4" role="alert">Выберите компанию</p>
@@ -88,6 +89,13 @@ export default function VoiceConnectionsPage() {
     : megafon.last_sync_at ? 'История загружается' : configured(historyConfigured)
   const core = node.data?.core
   const space = node.data?.space
+  const receiverUrl = support?.webhook_path ? new URL(`/support${support.webhook_path}`, window.location.origin).href : null
+  const subscription = webhooks.data?.items.find(w => w.url === receiverUrl)
+  const supportEvents: voice.EventType[] = ['call.completed', 'callback.opened', 'callback.merged', 'callback.closed']
+  const subscriptionComplete = supportEvents.every(type => subscription?.types.includes(type))
+  const supportStatus = providers.error || webhooks.error ? 'Нет подтверждения' : providers.isPending || webhooks.isPending ? 'Проверяем…' : !support ? pending(providers.isPending)
+    : !support.readiness.events?.enabled ? 'Приём событий не настроен' : !subscription ? 'Подписка узла не найдена'
+    : subscriptionComplete ? 'Получатель и подписка настроены' : 'Состав событий неполный'
   const voiceStatus = node.error || health.error ? 'Нет подтверждения' : !node.data ? pending(node.isPending) : !node.data.trunkConfigured ? 'Голосовая линия не подключена'
     : health.data?.parts?.trunk?.state === 'up' ? 'Транк на связи' : 'Транк требует проверки'
 
@@ -137,16 +145,18 @@ export default function VoiceConnectionsPage() {
         </dl>}
         <p className="text-xs text-muted-foreground">Приглашение создаётся на узле, принимается в настройках приложения КЦ, затем сверяется отпечаток ключа. Для админки КЦ нужен её собственный вход и второй фактор.</p>
       </Shell>
-      <Shell title="Узел → Поддержка" description="Доставка итогов звонков и событий обратного звонка подписанным вебхуком." status={providers.error ? 'Нет подтверждения' : support ? configured(support.readiness.events?.configured) : pending(providers.isPending)}
+      <Shell title="Узел → Поддержка" description="Доставка итогов звонков и событий обратного звонка подписанным вебхуком." status={supportStatus}
         actions={<><Button size="sm" variant="outline" disabled={opening !== null} onClick={() => void settings('asterisk')}>Настроить приём в Поддержке</Button>
           <Button asChild size="sm" variant="outline"><Link to="/voice/webhooks">Получатели и доставки узла</Link></Button></>}>
         {providers.error ? <QueryError error={providers.error} /> : <dl className="flex flex-col gap-2">
           <Detail name="Приём событий">{support?.enabled ? 'Включён' : 'Выключен'}</Detail>
           <Detail name="Ключ подписи">{support?.sources.webhook_secret ? SOURCE[support.sources.webhook_secret] : 'Не задан'}</Detail>
-          <Detail name="Адрес получателя">{support?.webhook_path ? new URL(`/support${support.webhook_path}`, window.location.origin).href : 'Откройте настройки приёма'}</Detail>
-          <Detail name="Последний обмен">{date(support?.last_sync_at)}</Detail>
+          <Detail name="Адрес получателя">{receiverUrl ?? 'Откройте настройки приёма'}</Detail>
+          <Detail name="Состав событий">{subscription ? `${supportEvents.filter(type => subscription.types.includes(type)).length} из ${supportEvents.length} необходимых: ${subscriptionComplete ? 'итоги и обратные звонки' : 'проверьте состав'}` : 'Подписка на узле не найдена'}</Detail>
+          <Detail name="Последняя доставка">{date(subscription?.lastDeliveredAt)}</Detail>
         </dl>}
-        <p className="text-xs text-muted-foreground">На узле и у получателя должен быть один секрет подписи. Готовность получателя не подтверждает наличие подписки на узле: проверьте её и журнал доставок.</p>
+        {webhooks.error ? <QueryError error={webhooks.error} /> : null}
+        <p className="text-xs text-muted-foreground">На узле и у получателя должен быть один секрет подписи. Изменить состав можно в разделе получателей. Фактическую доставку подтверждает журнал событий.</p>
       </Shell>
       <Shell title="МегаФон → голосовая линия узла" description="Соединение, через которое реальные звонки могут попасть в новое приложение КЦ." status={voiceStatus}
         actions={<Button asChild size="sm" variant="outline"><Link to="/voice/health">Состояние узла и транка</Link></Button>}>
