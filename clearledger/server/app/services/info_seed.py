@@ -26,6 +26,7 @@ from app.services.info_seed_fuel import CATEGORIES as FUEL_CATEGORIES
 from app.services.info_seed_fuel import PROFILE as FUEL_PROFILE
 from app.services.info_seed_shop import ARTICLES as SHOP_ARTICLES
 from app.services.info_seed_shop import CATEGORIES as SHOP_CATEGORIES
+from app.services.info_seed_station import RETIRED_ARTICLE_TITLES
 from app.services.info_seed_station import ARTICLES as STATION_ARTICLES
 from app.services.info_seed_station import CATEGORIES as STATION_CATEGORIES
 from app.services.info_seed_track import ARTICLES as TRACK_ARTICLES
@@ -978,4 +979,10 @@ async def seed_info(db: AsyncSession) -> dict[str, int]:
         res = await _seed_pack(db, profile, cats, arts)
         for k in total:
             total[k] += res[k]
+    # Старые краткие инструкции заменены подробными статьями станции.
+    await db.execute(text("""
+        UPDATE info_articles SET status='draft'
+        WHERE company_id IS NULL AND profile_id=:profile AND updated_by IS NULL
+          AND title = ANY(:titles)
+    """), {"profile": FUEL_PROFILE, "titles": list(RETIRED_ARTICLE_TITLES)})
     return total
