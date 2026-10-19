@@ -737,6 +737,7 @@ async def get_site(
     # `site_detail`. Кнопку, которой всё равно ответят 403, показывать незачем.
     site = await _owned(db, cid, site_id)
     out["mayWaive"] = await _may_waive_gate(db, cid, site, user)
+    out["mayNotNeeded"] = await _may_not_needed(db, cid, site, user)
     return out
 
 
@@ -942,6 +943,18 @@ async def _may_waive_gate(db: AsyncSession, cid, site: EzsSite, user: User) -> b
     if lead is not None:
         return True
     return await _is_company_admin(db, cid, user)
+
+
+async def _may_not_needed(db: AsyncSession, cid, site: EzsSite, user: User) -> bool:
+    """«Не требуется» по схемам 3.2–3.6 решает ОКС: нужна ли схема, знает строитель.
+
+    Администратор компании — на случай проекта без назначенного состава.
+    """
+    oks = (await db.execute(select(EzsSiteParticipant).where(
+        EzsSiteParticipant.site_id == site.id,
+        EzsSiteParticipant.user_id == user.id,
+        EzsSiteParticipant.role_code == "ОКС"))).first()
+    return oks is not None or await _is_company_admin(db, cid, user)
 
 
 # ── Документы проекта ──────────────────────────────────────────────────────
@@ -1227,7 +1240,11 @@ async def waive_gate(
     """
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
-    if not await _may_waive_gate(db, cid, site, user):
+    found = ezs_site_work._item_by_key(site.kind, str(payload.get("key") or ""))
+    if found and found[1].get("not_needed"):
+        if not await _may_not_needed(db, cid, site, user):
+            raise HTTPException(403, "Отметить «не требуется» может участник проекта в роли ОКС")
+    elif not await _may_waive_gate(db, cid, site, user):
         raise HTTPException(
             403, "Снять обязательность может ответственный за проект или отдел развития")
     res = await ezs_site_work.set_gate_waiver(

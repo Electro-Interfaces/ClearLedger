@@ -1112,16 +1112,6 @@ SKU_MIGRATION_DDL = (
         END IF;
     END $$
     """,
-    # Группа и класс, выбранные администратором при заведении: по ним центр
-    # признаёт карточку сам (item_draft_auto), товароведа в центре нет.
-    """
-    DO $$ BEGIN
-        IF to_regclass('edge.item_draft') IS NOT NULL THEN
-            ALTER TABLE edge.item_draft ADD COLUMN IF NOT EXISTS group_path TEXT;
-            ALTER TABLE edge.item_draft ADD COLUMN IF NOT EXISTS sku_class TEXT;
-        END IF;
-    END $$
-    """,
 )
 
 
@@ -3591,12 +3581,6 @@ async def create_all() -> None:
         if edge_ready:
             for stmt in LOCAL_BARCODE_MIGRATION_DDL:
                 await conn.execute(_sa.text(stmt))
-
-        # v2.51: журнал движений учёта станций по дням — для остатков на дату,
-        # истории товара и оборотки сети (07.10.2026).
-        from app.services.edge_moves import DDL as STOCK_MOVES_DDL
-        for stmt in STOCK_MOVES_DDL:
-            await conn.execute(_sa.text(stmt))
 
         # v2.43: BusinessShift identity, collision-safe backfill и current group.
         for stmt in BUSINESS_SHIFT_MIGRATION_DDL:

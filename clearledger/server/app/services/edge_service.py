@@ -395,49 +395,26 @@ def _stock_doc(payload: dict) -> dict | None:
     return None
 
 
-def analyze_stock(doc: dict, hall: str | None = None,
-                  raw: frozenset[str] | set[str] = frozenset()) -> dict:
-    """Сравнить кассу и учёт одного снимка.
-
-    `hall` — код места «торговый зал» (у станции он равен её номеру). Касса
-    знает только зал: склад ей не уходит, и остаток, лежащий на складе, с кассой
-    сравнивать нельзя — иначе весь сезонный товар на складе выглядит «есть в
-    учёте, касса не пробьёт». Без `hall` (и для старых пакетов без «Место»)
-    поведение прежнее: все строки считаются залом.
-
-    `raw` — карточки класса «Сырьё». Сырью, которое не добавка, строка кассы не
-    положена: его расход ведёт агент по технологической карте.
-    """
+def analyze_stock(doc: dict) -> dict:
+    """Сравнить кассу и учёт одного снимка."""
     cash_rows = doc.get("Касса") or []
     book_rows = doc.get("Учет") or []
 
     # Учёт ведётся по (номенклатура, ШК, цена) — для кассы важен ШК.
     book_by_barcode: dict[str, float] = defaultdict(float)
-    book_by_pair: dict[tuple[str, str], float] = defaultdict(float)
     book_by_item: dict[str, float] = defaultdict(float)
     book_name: dict[str, str] = {}
-    # Минус — по карточке на месте хранения, а не по строке: у карточки бывает
-    # плюс на строке без штрихкода и минус на строке со штрихкодом, в сумме ноль.
-    по_месту: dict[tuple[str, str], dict] = {}
+    negatives = []
     for r in book_rows:
         bc = str(r.get("ШтрихКод") or "")
         qty = float(r.get("Остаток") or 0)
         uid = str(r.get("Номенклатура") or "")
-        место = str(r.get("Место") or "")
-        # строка без карточки — сама себе позиция, по штрихкоду
-        ключ = (uid or "шк:" + bc, место)
-        поз = по_месту.setdefault(ключ, {"item": uid, "name": r.get("Наименование"),
-                                         "barcode": "" if uid else bc, "qty": 0.0})
-        поз["qty"] += qty
-        if uid:
-            book_name[uid] = str(r.get("Наименование") or "")
-        if hall is not None and место and место != hall:
-            continue
         book_by_barcode[bc] += qty
-        book_by_pair[(uid, bc)] += qty
         book_by_item[uid] += qty
-    negatives = [dict(поз, qty=round(поз["qty"], 3))
-                 for поз in по_месту.values() if поз["qty"] < -0.0005]
+        book_name[uid] = str(r.get("Наименование") or "")
+        if qty < 0:
+            negatives.append({"item": uid, "name": r.get("Наименование"),
+                              "barcode": bc, "qty": round(qty, 3)})
 
     # Касса: сначала собираем итоги по карточке, потом ищем непродаваемое.
     #
@@ -448,11 +425,9 @@ def analyze_stock(doc: dict, hall: str | None = None,
     # и на одном и том же снимке они выдавали 1 и 9 проблемных позиций.
     # Правда — по карточке: продаётся товар, а не строка таблицы.
     cash_by_barcode: dict[str, float] = defaultdict(float)
-    cash_by_pair: dict[tuple[str, str], float] = defaultdict(float)
     cash_by_item: dict[str, float] = defaultdict(float)
     for r in cash_rows:
         cash_by_barcode[str(r.get("ШтрихКод") or "")] += float(r.get("Остаток") or 0)
-        cash_by_pair[(str(r.get("Номенклатура") or ""), str(r.get("ШтрихКод") or ""))] += float(r.get("Остаток") or 0)
         cash_by_item[str(r.get("Номенклатура") or "")] += float(r.get("Остаток") or 0)
 
     cannot_sell, no_price, stale_vat = [], [], []
@@ -464,10 +439,8 @@ def analyze_stock(doc: dict, hall: str | None = None,
     # без пометки соус приезжал бы сюда «расхождением» на сто тысяч граммов и
     # заслонял настоящие. Старые пакеты пометки не несут — там поведение
     # прежнее.
-    # Пометка действует на пару (карточка, ШК): служебная строка одной карточки
-    # не должна прятать расхождение другой карточки с тем же штрихкодом.
-    служебные = {(str(r.get("Номенклатура") or ""), str(r.get("ШтрихКод") or ""))
-                 for r in cash_rows if r.get("СлужебныйЗапас")}
+    служебные_шк = {str(r.get("ШтрихКод") or "") for r in cash_rows if r.get("СлужебныйЗапас")}
+    служебные_шк.discard("")
     for r in cash_rows:
         bc = str(r.get("ШтрихКод") or "")
         uid = str(r.get("Номенклатура") or "")
@@ -488,31 +461,24 @@ def analyze_stock(doc: dict, hall: str | None = None,
             stale_vat.append({"ns_code": r.get("КодНС"), "name": r.get("Наименование"),
                               "vat": r.get("СтавкаНДСПроцент")})
 
-    # В зале остаток есть, а у карточки нет ни одной строки кассы. Сырьё сюда не
-    # идёт: без строки кассы оно и должно быть.
+    # Учёт есть, а в кассе такого ШК нет вовсе — товар не доехал до кассы.
     missing_in_cash = []
     for uid, qty in book_by_item.items():
-        if qty > 0 and uid and uid not in cash_by_item and uid not in raw:
+        if qty > 0 and uid and uid not in cash_by_item:
             missing_in_cash.append({"item": uid, "name": book_name.get(uid, ""),
                                     "qty": round(qty, 3)})
 
-    # Расхождение количеств по общим ШК — по паре (карточка, ШК): один штрихкод
-    # бывает у двух карточек, и сумма по штрихкоду гасит их разницы друг о друга
-    # (учёт 10 и 10, касса 5 и 15 — «сходится»).
+    # Расхождение количеств по общим ШК.
     qty_diff = []
-    пары_шк: dict[str, set[str]] = defaultdict(set)
-    for uid, bc in list(cash_by_pair) + list(book_by_pair):
-        пары_шк[bc].add(uid)
     for bc, cash_qty in cash_by_barcode.items():
         if not bc or bc not in book_by_barcode:
             continue
-        for uid in sorted(пары_шк[bc]):
-            if (uid, bc) in служебные:
-                continue
-            c, b = cash_by_pair.get((uid, bc), 0.0), book_by_pair.get((uid, bc), 0.0)
-            if abs(c - b) > 0.001:
-                qty_diff.append({"barcode": bc, "item": uid, "cash": round(c, 3),
-                                 "book": round(b, 3), "delta": round(c - b, 3)})
+        if bc in служебные_шк:
+            continue
+        delta = cash_qty - book_by_barcode[bc]
+        if abs(delta) > 0.001:
+            qty_diff.append({"barcode": bc, "cash": round(cash_qty, 3),
+                             "book": round(book_by_barcode[bc], 3), "delta": round(delta, 3)})
     qty_diff.sort(key=lambda x: -abs(x["delta"]))
 
     return {
@@ -553,12 +519,7 @@ async def stock_report(db: AsyncSession, company_id, station_id: int) -> dict:
     if doc is None:
         return {"station_id": station_id, "available": False,
                 "detail": "в последнем пакете нет снимка"}
-    # Скоуп компании — как у остальных чтений НСИ: общие карточки и свои.
-    сырьё = frozenset((await db.execute(text(
-        "SELECT external_uuid::text FROM edge.item"
-        " WHERE sku_class = 'Сырьё' AND NOT deleted AND external_uuid IS NOT NULL"
-        "   AND (company_id IS NULL OR company_id = :cid)"), {"cid": company_id})).scalars().all())
-    out = analyze_stock(doc, hall=str(station_id), raw=сырьё)
+    out = analyze_stock(doc)
     out["ns_pool"] = _pool(doc)
     out["station_id"] = station_id
     out["available"] = True
@@ -710,8 +671,8 @@ def build_alerts(stock: dict) -> list[dict]:
     if t["missing_in_cash"]:
         alerts.append({
             "level": "critical", "topic": "выгрузка",
-            "text": (f"{t['missing_in_cash']} позиций есть в учёте зала, но у карточки "
-                     "нет строки кассы"),
+            "text": (f"{t['missing_in_cash']} позиций есть в учёте, но отсутствуют в "
+                     "кассе — вероятно, не нажата «Загрузить ККМ»"),
             # Ключи те же, что кладёт analyze_stock: список считается по
             # карточке, а не по строке кассы. Здесь читались barcode и
             # book_qty — письмо падало ровно тогда, когда было о чём сообщить.
@@ -721,7 +682,7 @@ def build_alerts(stock: dict) -> list[dict]:
     if t["negative_book"]:
         alerts.append({
             "level": "warning", "topic": "учёт",
-            "text": f"минусы в учёте: {t['negative_book']} позиций",
+            "text": f"минусы в физике склада: {t['negative_book']} позиций",
             "items": [f"{r['name']}: {r['qty']}" for r in stock["negative_book"][:5]],
         })
     if t["stale_vat"]:

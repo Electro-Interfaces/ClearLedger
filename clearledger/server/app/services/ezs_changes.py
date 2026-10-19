@@ -71,6 +71,20 @@ FIELD_META: dict[str, tuple[str, str]] = {
     "permitted_use": ("Разрешённое использование", "conditions"),
     "encumbrances": ("Обременения", "conditions"),
     "long_term_contract": ("Долгосрочный договор", "conditions"),
+    "contract_kind": ("Тип договора", "conditions"),
+    "rent_variable": ("Переменная аренда", "finance"),
+    "rent_revenue_pct": ("Аренда, % от выручки", "finance"),
+    "rent_indexation_pct": ("Индексация аренды, %", "finance"),
+    "contract_term_months": ("Срок договора, мес.", "conditions"),
+    "contract_registration": ("Регистрация договора", "conditions"),
+    "contract_registration_by": ("Регистрирует договор", "conditions"),
+    "rent_comment": ("Комментарий к аренде", "conditions"),
+    "free_access": ("Свободный доступ", "conditions"),
+    "access_hours": ("Время доступа", "conditions"),
+    "parking_kind": ("Тип парковки", "conditions"),
+    "parking_floor": ("Этаж парковки", "conditions"),
+    "conditions_comment": ("Комментарий к условиям площадки", "conditions"),
+    "internet_kind": ("Интернет: LAN / WiFi", "technical"),
     "access_24x7": ("Круглосуточный доступ", "conditions"),
     "parking_spots": ("Парковочные места", "conditions"),
     "free_power_kwt": ("Свободная мощность", "technical"),
@@ -165,6 +179,7 @@ STAGE_LABELS = {
 _BOOL_FIELDS = {
     "subsidy_planned", "access_24x7", "has_lighting", "has_internet",
     "long_term_contract", "has_video", "has_mobile", "tc.needs_reconstruction",
+    "rent_variable", "contract_registration", "free_access",
     "tc.extra_power_possible", "tc.transformer_swap_possible",
 }
 _MONEY_FIELDS = {
