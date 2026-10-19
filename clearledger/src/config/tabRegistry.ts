@@ -31,6 +31,7 @@ const VOICE_TABS = [
   ['/voice/reception', 'Правила приёма'],
   ['/voice/passport', 'Паспорт для КЦ'], ['/voice/targets', 'Сотрудники и переводы'],
   ['/voice/sounds', 'Звуки линии'], ['/voice/enrichment', 'Распознавание и подсказки'],
+  ['/voice/connections', 'Настройки подключений'],
   ['/voice/cc', 'Контакт-центры'], ['/voice/webhooks', 'Системы и вебхуки'],
   ['/voice/versions', 'Версии «Телефонии»'], ['/voice/audit', 'Аудит доступа к звонкам'],
   ['/voice/retention', 'Записи и хранение'], ['/voice/health', 'Состояние узла'],

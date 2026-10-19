@@ -101,6 +101,13 @@ async def voice_company(
     return company
 
 
+@router.get("/voice/connection")
+async def check_node_connection(response: Response, company: Company = Depends(voice_company)):
+    """Узел проверяет свой именной ключ и компанию без передачи данных звонящего."""
+    response.headers["Cache-Control"] = "private, no-store"
+    return {"status": "ok", "company_id": str(company.id)}
+
+
 def _num(v) -> float | None:
     return None if v is None else float(v)
 

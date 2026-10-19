@@ -14,6 +14,8 @@ import { AlertTriangle, Check, Copy, KeyRound, Plus, Trash2, Webhook } from 'luc
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
@@ -26,6 +28,8 @@ const СОБЫТИЕ: Record<voice.EventType, string> = {
   'call.completed': 'звонок закончился',
   'call.recording_ready': 'запись готова',
   'call.transcript_ready': 'расшифровка готова',
+  'callback.opened': 'задача «перезвонить» создана',
+  'callback.merged': 'повторный звонок добавлен к задаче «перезвонить»',
   'callback.closed': 'задача «перезвонить» закрыта',
   'alert.raised': 'тревога поднята',
   'alert.cleared': 'тревога снята',
@@ -192,6 +196,7 @@ function HookRow({ w }: { w: voice.Webhook }) {
   const qc = useQueryClient()
   const [открыт, setОткрыт] = useState(false)
   const [удалить, setУдалить] = useState(false)
+  const [editTypes, setEditTypes] = useState(false)
   const доставки = useQuery({
     queryKey: ['voice-webhook-deliveries', companyId, w.id],
     queryFn: () => voice.webhookDeliveries(companyId, w.id, 100),
@@ -223,8 +228,10 @@ function HookRow({ w }: { w: voice.Webhook }) {
           </p>
         </div>
         <Button variant="outline" size="sm" aria-expanded={открыт} onClick={() => setОткрыт(!открыт)}>{открыт ? 'Скрыть доставки' : 'Доставки'}</Button>
+        <Button variant="outline" size="sm" onClick={() => setEditTypes(true)}>Состав событий</Button>
         {!удалить && <Button variant="outline" size="sm" aria-label="Удалить получателя" onClick={() => setУдалить(true)}><Trash2 /></Button>}
       </div>
+      {editTypes && <WebhookTypesDialog webhook={w} onClose={() => setEditTypes(false)} />}
       {удалить && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-2">
           <span>Удалить получателя? Недоставленные ему события удалятся вместе с ним.</span>
@@ -273,6 +280,44 @@ function HookRow({ w }: { w: voice.Webhook }) {
       )}
     </li>
   )
+}
+
+function WebhookTypesDialog({ webhook, onClose }: { webhook: voice.Webhook; onClose: () => void }) {
+  const { companyId } = useCompany()
+  const qc = useQueryClient()
+  const [types, setTypes] = useState<voice.EventType[]>(() => [...webhook.types])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const changed = [...types].sort().join() !== [...webhook.types].sort().join()
+  async function save() {
+    if (!types.length || !changed || saving) return
+    setSaving(true); setError(null)
+    try {
+      const updated = await voice.setWebhookTypes(companyId, webhook.id, types)
+      qc.setQueryData<{ items: voice.Webhook[] }>(['voice-webhooks', companyId], old => old ? { items: old.items.map(w => w.id === updated.id ? updated : w) } : old)
+      await qc.invalidateQueries({ queryKey: ['voice-webhooks', companyId] })
+      toast.success('Состав будущих событий сохранён')
+      onClose()
+    } catch (e) { setError(e instanceof Error ? e.message : 'Не удалось сохранить состав событий') }
+    finally { setSaving(false) }
+  }
+  return <Dialog open onOpenChange={open => { if (!open && !saving) onClose() }}>
+    <DialogContent className="max-h-[90svh] overflow-y-auto">
+      <DialogHeader><DialogTitle>Состав событий</DialogTitle>
+        <DialogDescription className="break-all">{webhook.url}</DialogDescription></DialogHeader>
+      <fieldset className="flex flex-col gap-3" disabled={saving}>
+        <legend className="mb-3 text-sm font-medium">Какие события передавать получателю</legend>
+        {(Object.entries(СОБЫТИЕ) as [voice.EventType, string][]).map(([type, name]) => <label key={type} className="flex items-start gap-3 text-sm">
+          <Checkbox checked={types.includes(type)} onCheckedChange={checked => setTypes(current => checked === true ? [...current, type] : current.filter(t => t !== type))} />
+          <span>{name}</span></label>)}
+      </fieldset>
+      <p className="text-xs text-muted-foreground">Изменение действует на будущие события. Адрес и ключ подписи сохраняются; прежние события не отправляются повторно.</p>
+      {!types.length ? <p role="alert" className="text-sm text-destructive">Выберите хотя бы одно событие</p> : null}
+      {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+      <DialogFooter><Button variant="outline" onClick={onClose} disabled={saving}>Отмена</Button>
+        <Button onClick={() => void save()} disabled={saving || !types.length || !changed}>{saving ? 'Сохраняем…' : 'Сохранить состав событий'}</Button></DialogFooter>
+    </DialogContent>
+  </Dialog>
 }
 
 // ——— Ключи систем (Ядро, Я-10) ———
