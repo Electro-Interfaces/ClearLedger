@@ -12,6 +12,7 @@
  * Перед разделами оболочка спрашивает у узла `/me`: пускает ли он этого человека.
  * Отказ узла объясняется здесь, один раз, а не в каждом разделе отдельно.
  */
+import { lazy, Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { PhoneOff } from 'lucide-react'
@@ -21,13 +22,17 @@ import { useCompany } from '@/contexts/CompanyContext'
 import * as voice from '@/services/voiceService'
 import { EmptyBlock } from '@/pages/conf/EmptyBlock'
 import { VOICE_GROUPS, VOICE_VIEWS, voicePath, voiceViewFor } from './views'
+import { useVoiceDataSource, VoiceDataSourceBar } from './VoiceDataSource'
+
+const MegafonVoicePage = lazy(() => import('./MegafonVoicePage'))
 
 export function VoiceLayout() {
   const { companyId } = useCompany()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   // Историю МегаФона читает Ядро: компанию, продукт и роль проверяет Core API.
-  const megafon = pathname.replace(/\/$/, '') === '/voice/megafon'
+  const source = useVoiceDataSource(pathname)
+  const megafon = source.megafon
   // ≤1024 рельсы пространства на экране нет (MainLayout прячет её в шторку), поэтому раздел
   // выбирается списком сверху — как у «Конференций» на телефоне.
   const компакт = useMaxWidth(1024)
@@ -35,7 +40,7 @@ export function VoiceLayout() {
   const кто = useQuery({
     queryKey: ['voice-me', companyId],
     queryFn: () => voice.me(companyId),
-    enabled: !!companyId && !megafon,
+    enabled: !!companyId && !megafon && !source.loading && !source.error,
     // Повторяем только обрыв/временный 5xx. 403 role/company — окончательный ответ,
     // а 401 уже один раз обновляет токен в voiceService: других скрытых повторов нет.
     retry: (failureCount, error) => failureCount < 1 && voice.узелНедоступен(error),
@@ -43,7 +48,11 @@ export function VoiceLayout() {
   })
 
   // Ключ по компании: другой узел — экраны начинают с чистого листа, без чужой правки и выбранного звонка.
-  const содержимое = megafon ? <Outlet key={companyId} />
+  const содержимое = source.loading ? <AccessLoading />
+    : source.error ? null
+    : megafon ? (source.managed
+      ? <Suspense fallback={<AccessLoading />}><MegafonVoicePage key={`${companyId}:${pathname}`} section={pathname.endsWith('/stats') ? 'stats' : 'calls'} /></Suspense>
+      : <Outlet key={companyId} />)
     : !companyId || кто.isLoading ? <AccessLoading />
     : кто.isError ? <Refusal ошибка={кто.error} />
       : <Outlet key={companyId} />
@@ -53,6 +62,7 @@ export function VoiceLayout() {
   const экран = (
     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto"
       style={узкий ? { paddingBottom: 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))' } : undefined}>
+      <VoiceDataSourceBar state={source} pathname={pathname} />
       {содержимое}
     </div>
   )

@@ -29,7 +29,7 @@ window.megafonHelpers = helpers; window.megafonQueryClient = client;
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={client}><FixtureCompanyProvider>
 <p role="note">СИНТЕТИЧЕСКАЯ ПРОВЕРКА: вымышленные звонки</p>
 <div style={{height: 'calc(100dvh - 3rem)', display: 'flex', flexDirection: 'column'}}>
-<BrowserRouter><Routes><Route path="/voice" element={<VoiceLayout />}><Route index element={<p>Раздел узла</p>} /><Route path="megafon" element={<MegafonVoicePage />} /></Route></Routes></BrowserRouter>
+<BrowserRouter><Routes><Route path="/voice" element={<VoiceLayout />}><Route index element={<p>Раздел узла</p>} /><Route path="calls" element={<p>Журнал узла в проверке</p>} /><Route path="stats" element={<p>Статистика узла в проверке</p>} /><Route path="megafon" element={<MegafonVoicePage />} /></Route></Routes></BrowserRouter>
 </div>
 </FixtureCompanyProvider></QueryClientProvider>);
 `
@@ -205,6 +205,38 @@ try {
   await dialog.getByRole('button', { name: 'К журналу' }).click()
   const megafonNodeRequests = nodeRequests
   assert.equal(megafonNodeRequests, 0)
+  // Привычные разделы используют подключённую ВАТС, даже если Node недоступен.
+  await page.goto(`${origin}/voice/calls`)
+  await page.getByRole('heading', { name: 'Журнал звонков', exact: true }).waitFor()
+  await page.getByRole('table', { name: 'Журнал звонков МегаФона' }).waitFor()
+  assert.equal(await page.getByLabel('Источник данных', { exact: true }).inputValue(), 'megafon')
+  assert.equal(new URL(page.url()).searchParams.get('source'), 'megafon')
+  assert.equal(nodeRequests, 0)
+  await page.goto(`${origin}/voice/stats`)
+  await page.getByRole('heading', { name: 'Статистика', exact: true }).waitFor()
+  await page.getByRole('table', { name: 'Операторы МегаФона' }).waitFor()
+  await page.reload()
+  await page.getByRole('table', { name: 'Операторы МегаФона' }).waitFor()
+  assert.equal(nodeRequests, 0)
+  await page.getByLabel('Источник данных', { exact: true }).selectOption('node')
+  await page.getByText('Узел заказчика не отвечает', { exact: true }).waitFor()
+  assert.equal(new URL(page.url()).searchParams.get('source'), 'node')
+  await page.getByLabel('Источник данных', { exact: true }).selectOption('megafon')
+  await page.getByRole('table', { name: 'Операторы МегаФона' }).waitFor()
+  await page.goto(`${origin}/voice/calls?metric=arrived&id=node-call&line=line-main`)
+  await page.getByText('Узел заказчика не отвечает', { exact: true }).waitFor()
+  assert.equal(new URL(page.url()).searchParams.get('id'), 'node-call')
+  assert.equal(await page.getByLabel('Источник данных', { exact: true }).inputValue(), 'node')
+  // Отсутствие коннектора сохраняет прежний Node guard; ошибка источника не выдаётся за ноль.
+  mode = 'unconfigured'
+  await page.goto(`${origin}/voice/calls`)
+  await page.getByText('Узел заказчика не отвечает', { exact: true }).waitFor()
+  assert.equal(await page.getByLabel('Источник данных', { exact: true }).inputValue(), 'node')
+  mode = 'error'
+  await page.goto(`${origin}/voice/calls`)
+  await page.getByRole('alert').filter({ hasText: 'Не удалось определить источник' }).waitFor()
+  assert.equal(await page.getByRole('table').count(), 0)
+  mode = 'normal'
   await page.goto(`${origin}/voice`)
   await page.getByText('Узел заказчика не отвечает', { exact: true }).waitFor()
   assert.ok(nodeRequests > 0, 'На соседнем маршруте проверка узла сохранена')

@@ -29,18 +29,18 @@ const count = (value: number | null) => value == null ? '—' : NUMBER.format(va
 const seconds = (value: number | null) => value == null ? '—' : `${NUMBER.format(value)} с`
 const direction = (value: MegafonCall['direction']) => value === 'inbound' ? 'Входящий' : value === 'outbound' ? 'Исходящий' : '—'
 
-export default function MegafonVoicePage() {
+export default function MegafonVoicePage({ section }: { section?: 'calls' | 'stats' }) {
   const { companyId } = useCompany()
-  return <MegafonCompanyPage key={companyId} companyId={companyId} />
+  return <MegafonCompanyPage key={companyId} companyId={companyId} section={section} />
 }
 
-function MegafonCompanyPage({ companyId }: { companyId: string }) {
+function MegafonCompanyPage({ companyId, section }: { companyId: string; section?: 'calls' | 'stats' }) {
   const [url, setUrl] = useSearchParams()
   const [anchor] = useState(() => new Date())
   const params = megafonParamsFromUrl(url, anchor)
   const companyChanged = url.has('voice_company') && url.get('voice_company') !== companyId
   const selected = companyChanged ? null : url.get('call')
-  const view = VIEWS.some(item => item.k === url.get('view')) ? url.get('view')! : 'calls'
+  const view = VIEWS.some(item => item.k === url.get('view')) ? url.get('view')! : section === 'stats' ? 'operators' : 'calls'
   const requestedPeriod = url.get('period')
   const expectedPeriod = megafonPeriodBounds(requestedPeriod === '7d' || requestedPeriod === '30d' ? requestedPeriod : 'today', anchor)
   const period = params.from === expectedPeriod.from && params.to === expectedPeriod.to ? requestedPeriod ?? 'today' : 'custom'
@@ -52,16 +52,17 @@ function MegafonCompanyPage({ companyId }: { companyId: string }) {
   // Фиксируем фактический интервал: карточка, reload и «Назад» сохраняют выборку.
   useEffect(() => {
     if (!companyId) return
-    if (url.get('from') === params.from && url.get('to') === params.to && url.get('voice_company') === companyId) return
+    if (url.get('from') === params.from && url.get('to') === params.to && url.get('voice_company') === companyId && (!section || url.get('source') === 'megafon')) return
     const next = new URLSearchParams(url)
     next.set('voice_company', companyId)
+    if (section) next.set('source', 'megafon')
     if (companyChanged) {
       for (const key of ['operator', 'group', 'line', 'missed', 'direction', 'search', 'page', 'call']) next.delete(key)
     }
     next.set('from', params.from)
     next.set('to', params.to)
     setUrl(next, { replace: true })
-  }, [url, setUrl, params.from, params.to, companyId, companyChanged])
+  }, [url, setUrl, params.from, params.to, companyId, companyChanged, section])
   const urlSearch = url.get('search') ?? ''
   useEffect(() => { setSearchDraft(urlSearch) }, [urlSearch])
 
@@ -98,11 +99,11 @@ function MegafonCompanyPage({ companyId }: { companyId: string }) {
   const hasFilters = ['operator', 'group', 'line', 'missed', 'direction', 'search'].some(key => url.has(key))
   const filter = (key: string, value: string) => change({ [key]: value === ALL ? null : value })
 
-  return <main className="flex min-w-0 flex-col gap-4 p-3 md:p-5" aria-label="МегаФон ВАТС">
+  return <main className="flex min-w-0 flex-col gap-4 p-3 md:p-5" aria-label={section === 'calls' ? 'Журнал звонков' : section === 'stats' ? 'Статистика' : 'МегаФон ВАТС'}>
     <header className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex min-w-0 flex-col gap-1">
-        <h1 className="font-headline text-lg font-semibold">МегаФон ВАТС</h1>
-        <p className="text-sm text-muted-foreground">История звонков и работа операторов</p>
+        <h1 className="font-headline text-lg font-semibold">{section === 'calls' ? 'Журнал звонков' : section === 'stats' ? 'Статистика' : 'МегаФон ВАТС'}</h1>
+        <p className="text-sm text-muted-foreground">{section ? 'МегаФон ВАТС · история звонков и работа операторов' : 'История звонков и работа операторов'}</p>
       </div>
       <Button variant="outline" size="sm" disabled={query.isFetching || invalidUrlSearch || !companyId} onClick={() => void query.refetch()}>
         <RefreshCw data-icon="inline-start" />{query.isFetching ? 'Обновляем…' : 'Обновить'}
