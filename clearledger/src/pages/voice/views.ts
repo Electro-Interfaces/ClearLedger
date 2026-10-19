@@ -41,6 +41,8 @@ export const VOICE_GROUPS: { key: VoiceGroup; label: string }[] = [
 export const VOICE_VIEWS: VoiceView[] = [
   { key: 'now', path: '', label: 'Сейчас', group: 'work', wave: '2.1', ready: true,
     hint: 'принимается ли линия и кто ждёт' },
+  { key: 'megafon', path: 'megafon', label: 'МегаФон ВАТС', group: 'work', wave: null, ready: true,
+    hint: 'история МегаФона: линия, операторы, группы и журнал звонков' },
   { key: 'calls', path: 'calls', label: 'Журнал звонков', group: 'work', wave: '2.1', ready: true,
     hint: 'все звонки линии: найти звонок по последним цифрам номера' },
   { key: 'contact', path: 'contact', label: 'Нужен контакт', group: 'work', wave: '2.7', ready: true,
@@ -91,7 +93,7 @@ export const VOICE_GROUP_ICONS: Record<VoiceGroup, LucideIcon> = {
 }
 
 export const VOICE_VIEW_ICONS: Record<string, LucideIcon> = {
-  now: Radio, calls: ScrollText, contact: PhoneMissed, callbacks: PhoneCall, stats: BarChart3, report: FileBarChart,
+  now: Radio, megafon: PhoneCall, calls: ScrollText, contact: PhoneMissed, callbacks: PhoneCall, stats: BarChart3, report: FileBarChart,
   reconcile: GitCompare, reception: ListChecks, passport: IdCard, targets: Users, sounds: Volume2,
   enrichment: Sparkles, cc: Headset, webhooks: Webhook, versions: History, audit: ShieldCheck,
   retention: Archive, health: Stethoscope, extensions: Hash, outbound: PhoneOutgoing,

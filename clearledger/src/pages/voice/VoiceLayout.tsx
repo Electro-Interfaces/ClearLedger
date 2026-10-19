@@ -26,6 +26,8 @@ export function VoiceLayout() {
   const { companyId } = useCompany()
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  // Историю МегаФона читает Ядро: компанию, продукт и роль проверяет Core API.
+  const megafon = pathname.replace(/\/$/, '') === '/voice/megafon'
   // ≤1024 рельсы пространства на экране нет (MainLayout прячет её в шторку), поэтому раздел
   // выбирается списком сверху — как у «Конференций» на телефоне.
   const компакт = useMaxWidth(1024)
@@ -33,7 +35,7 @@ export function VoiceLayout() {
   const кто = useQuery({
     queryKey: ['voice-me', companyId],
     queryFn: () => voice.me(companyId),
-    enabled: !!companyId,
+    enabled: !!companyId && !megafon,
     // Повторяем только обрыв/временный 5xx. 403 role/company — окончательный ответ,
     // а 401 уже один раз обновляет токен в voiceService: других скрытых повторов нет.
     retry: (failureCount, error) => failureCount < 1 && voice.узелНедоступен(error),
@@ -41,7 +43,8 @@ export function VoiceLayout() {
   })
 
   // Ключ по компании: другой узел — экраны начинают с чистого листа, без чужой правки и выбранного звонка.
-  const содержимое = !companyId || кто.isLoading ? <AccessLoading />
+  const содержимое = megafon ? <Outlet key={companyId} />
+    : !companyId || кто.isLoading ? <AccessLoading />
     : кто.isError ? <Refusal ошибка={кто.error} />
       : <Outlet key={companyId} />
 
