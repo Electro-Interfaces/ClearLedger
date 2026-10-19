@@ -509,6 +509,8 @@ app.include_router(edge_router.router, prefix=API_PREFIX)  # приём паке
 app.include_router(eco_events_router.router, prefix=API_PREFIX)  # обратный канал приложений
 app.include_router(space_events_router.router, prefix=API_PREFIX)  # подписки на исходящие события и очередь
 from app.routers import voice_router
+from app.routers import megafon_voice_router
+app.include_router(megafon_voice_router.router, prefix=API_PREFIX)  # История внешней ВАТС, отдельно от узла
 app.include_router(voice_router.router, prefix=API_PREFIX)  # «Телефония»: кто звонит — узлу по ключу voice.identify
 app.include_router(voice_router.keys_router, prefix=API_PREFIX)  # «Телефония»: ключи систем для API узла
 app.include_router(ocr_router.router, prefix=API_PREFIX)
