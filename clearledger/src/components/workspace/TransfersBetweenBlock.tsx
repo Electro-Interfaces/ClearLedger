@@ -34,13 +34,13 @@ const СОСТОЯНИЕ: Record<string, string> = {
   'расхождение': 'text-red-400/90',
 }
 
-export function TransfersBetweenBlock({ dateFrom, dateTo }: {
-  dateFrom?: string; dateTo?: string
+export function TransfersBetweenBlock({ dateFrom, dateTo, stations }: {
+  dateFrom?: string; dateTo?: string; stations?: string[]
 }) {
   const { company } = useCompany()
   const { data, isLoading } = useQuery({
-    queryKey: ['store-transfers-between', company.id, dateFrom, dateTo],
-    queryFn: () => getStoreTransfersBetween({ dateFrom, dateTo }),
+    queryKey: ['store-transfers-between', company.id, dateFrom, dateTo, stations?.join(',') ?? ''],
+    queryFn: () => getStoreTransfersBetween({ dateFrom, dateTo, stations }),
   })
 
   const передачи = data?.transfers ?? []
@@ -76,11 +76,16 @@ export function TransfersBetweenBlock({ dateFrom, dateTo }: {
         </div>
       )}
 
+      {(data?.cancellation_conflicts ?? []).map((conflict) => (
+        <p role="alert" key={conflict.task_id} className="px-3 py-2 text-sm text-destructive">
+          {conflict.number}: АЗС {conflict.from_station} → АЗС {conflict.to_station}. {conflict.reason}
+        </p>
+      ))}
       {isLoading ? (
         <div className="px-3 py-4 text-xs text-muted-foreground">Сводим отправки и приёмы…</div>
       ) : передачи.length === 0 ? (
         <div className="px-3 py-4 text-xs text-muted-foreground">
-          Передач между станциями не было. Пока в сети одна АЗС, это норма: передавать некому.
+          За выбранный период действующих передач между станциями нет.
         </div>
       ) : (
         <div className="overflow-x-auto">

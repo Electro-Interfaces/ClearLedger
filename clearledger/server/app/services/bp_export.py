@@ -582,6 +582,13 @@ class BpPackageEmitter:
             return shift_open <= moment <= shift_close
 
         related = [entry for entry in entries if in_shift(entry) and entry.id != target.id]
+        transfer_context = []
+        if any(((entry.meta or {}).get("Документ") or {}).get("Направление") in {"out", "in"}
+               and not str(((entry.meta or {}).get("Документ") or {}).get("ИдентификаторДокумента") or "").startswith("central:")
+               for entry in related if entry.doc_type_id == "transfer"):
+            from app.services.edge_transfer_register import latest_documents
+            transfer_context = await latest_documents(self.session, self.company_id)
+
 
         purchases: list[dict] = []
         productions: list[dict] = []
@@ -639,6 +646,13 @@ class BpPackageEmitter:
             if kind in {"recipe", "retail_sale_sidegoods"}:
                 continue
             doc = deepcopy((entry.meta or {}).get("Документ") or {})
+            if kind == "transfer" and doc.get("Направление") in {"out", "in"} and not str(doc.get("ИдентификаторДокумента") or "").startswith("central:"):
+                from app.services.edge_transfer_register import canonical_document
+                canonical, reason = canonical_document(doc, transfer_context)
+                if canonical is None:
+                    skipped.append({"Тип": "transfer", "Номер": str(doc.get("Номер") or entry.source_id), "Причина": reason})
+                    continue
+                doc = canonical
             source_uuid = str(doc.get("ИсточникUUID") or entry.source_id or "")
             dedup = (kind, source_uuid)
             if dedup in seen or doc.get("ПометкаУдаления"):
@@ -847,6 +861,15 @@ class BpPackageEmitter:
             elif kind == "gain":
                 gains.append(doc)
             elif kind == "writeoff":
+                place = str(doc.get("МестоХранения") or "")
+                if place:
+                    warehouse = code2guid.get(place)
+                    if not warehouse:
+                        skipped.append({"Тип": "writeoff", "Номер": str(doc.get("Номер") or source_uuid),
+                                        "Причина": "Не определён склад места списания " + place})
+                        continue
+                    doc["Склад"] = warehouse
+                    nsi_wh.add(warehouse)
                 writeoffs.append(doc)
             elif kind == "transfer":
                 # Направление приходит в двух видах: агент шлёт коды (out/in/

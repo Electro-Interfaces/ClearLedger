@@ -7,7 +7,8 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ShowMore, useVisible } from '@/components/common/ShowMore'
-import { StationDocsBlock } from './StationDocsBlock'
+import { StockDocumentsPanel } from './StockDocumentsPanel'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { getStoreWriteoffs, type StoreWriteoffDoc } from '@/services/storeService'
 import { SnapshotBadge } from '@/components/common/SnapshotBadge'
 import { ModalCard } from '@/components/ui/modal-card'
@@ -18,7 +19,7 @@ import { NomenclatureCardModal } from './NomenclatureCardModal'
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
 
-export function StoreWriteoffPanel({ companyId, dateFrom, dateTo, stations }: {
+function LegacyStoreWriteoffPanel({ companyId, dateFrom, dateTo, stations }: {
   companyId: string; dateFrom?: string; dateTo?: string; stations?: string[]
 }) {
   const [warehouse, setWarehouse] = useState<string | undefined>(undefined)
@@ -204,7 +205,17 @@ export function StoreWriteoffPanel({ companyId, dateFrom, dateTo, stations }: {
 
       {/* Второй источник того же предмета: реестр выше — история 1С, здесь —
           то, что заводят на самой АЗС. Пока 1С ведёт станцию, они идут рядом. */}
-      <StationDocsBlock kind="writeoff" dateFrom={dateFrom} dateTo={dateTo} title="Списания станции" />
     </div>
   )
+}
+
+export function StoreWriteoffPanel(props: { companyId: string; dateFrom?: string; dateTo?: string; stations?: string[] }) {
+  return <Tabs defaultValue="current" className="p-4">
+    <TabsList aria-label="Источник документов">
+      <TabsTrigger value="current">Документы станций</TabsTrigger>
+      <TabsTrigger value="archive">Архив ЦБ</TabsTrigger>
+    </TabsList>
+    <TabsContent value="current"><StockDocumentsPanel {...props} kind="writeoff" /></TabsContent>
+    <TabsContent value="archive"><LegacyStoreWriteoffPanel {...props} /></TabsContent>
+  </Tabs>
 }

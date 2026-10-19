@@ -63,9 +63,12 @@ def test_recipient_acceptance_returns_to_sender():
     assert task["payload"] == {
         "id": "doc-1",
         "accepted_station": 210,
-        "accepted_at": "2026-08-04T15:20:00+03:00",
+        "accepted_at": "2026-08-04T12:20:00+00:00",
         "accepted_qty": 4.0,
+        "sender_revision_at": "",
         "difference": -1.0,
+        "revision_at": "2026-08-04T12:20:00+00:00",
+        "lines": [{"item_uuid": "item-1", "barcode": "4600000000001", "qty_sent": 5.0, "qty_fact": 4.0}],
     }
 
 
@@ -86,3 +89,34 @@ def test_central_distribution_ack_does_not_route_to_station_zero():
         }],
     }
     assert transfer_tasks(payload, 208) == []
+
+
+def test_deleted_outgoing_creates_cancellation_not_new_receipt():
+    payload = _outgoing()
+    payload["ВремяВыгрузки"] = "2026-08-04T16:00:00+03:00"
+    payload["Документы"][0]["ПометкаУдаления"] = True
+    task, = transfer_tasks(payload, 208)
+    assert task["kind"] == "incoming_transfer_cancelled"
+    assert task["station_id"] == 210
+    assert task["payload"]["id"] == "incoming:208:doc-1"
+    assert task["payload"]["revision_at"] == "2026-08-04T13:00:00+00:00"
+    assert task["idempotency_key"] == transfer_tasks(payload, 208)[0]["idempotency_key"]
+
+
+def test_repost_and_cancel_have_distinct_keys_and_cancellation_time():
+    payload = _outgoing()
+    payload["Документы"][0]["РедакцияДата"] = "2026-08-04T12:00:00+03:00"
+    original, = transfer_tasks(payload, 208)
+    payload["ВремяВыгрузки"] = "2026-08-04T16:00:00+03:00"
+    payload["Документы"][0]["ПометкаУдаления"] = True
+    cancelled, = transfer_tasks(payload, 208)
+    assert original["idempotency_key"] != cancelled["idempotency_key"]
+    assert cancelled["payload"]["revision_at"] == "2026-08-04T13:00:00+00:00"
+
+
+@pytest.mark.parametrize("quantity", [-1, float("nan"), float("inf")])
+def test_transfer_rejects_invalid_quantity(quantity):
+    payload = _outgoing()
+    payload["Документы"][0]["Товары"][0]["КоличествоОтправлено"] = quantity
+    with pytest.raises(TransferRoutingError, match="количество"):
+        transfer_tasks(payload, 208)

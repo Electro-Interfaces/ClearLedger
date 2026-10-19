@@ -2848,121 +2848,86 @@ async def store_transfers_between(
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
     station_id: int | None = Query(None, description="АЗС с любой стороны передачи"),
+    stations: str | None = Query(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Передачи товара между АЗС: кто отправил, кто принял и что не сошлось.
+    from app.services.edge_transfer_register import between_stations
+    cid = await scope_company_id(user, db)
+    access = await resolve_document_access(user, db, cid)
+    requested = {int(s) for s in (stations or "").split(",") if s.strip().isdigit()}
+    if station_id is not None:
+        requested.add(station_id)
+    station_scope = _legacy_station_scope(access, requested or None)
+    try:
+        return await between_stations(db, cid, date_from, date_to, station_scope)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
-    Перемещение внутри станции (склад ↔ торговый зал) — внутреннее дело
-    товароведа. Передача между станциями — смена материально ответственного:
-    один сдал, другой принял, и до подтверждения товар в пути, то есть
-    физически нигде. Механика двусторонняя с самого начала (агент отправителя
-    ставит получателю заготовку приёмки, тот отвечает подтверждением), но в
-    центре её не было видно — а именно центр и разбирает, если не сошлось.
 
-    Пары сводятся по идентификатору документа отправителя: подтверждение
-    получателя несёт его в виде «incoming:<АЗС отправителя>:<документ>».
-    """
-    cid: uuid.UUID = await scope_company_id(user, db)
-    p: dict = {"cid": cid}
-    период_out, период_in = "", ""
-    if date_from:
-        p["d1"] = date.fromisoformat(date_from)
-        период_out += " AND coalesce((d->>'Дата')::timestamptz, p.received_at) >= :d1"
-    if date_to:
-        p["d2"] = date.fromisoformat(date_to)
-        период_out += " AND coalesce((d->>'Дата')::timestamptz, p.received_at) < (CAST(:d2 AS date) + 1)"
+@router.get("/stock-documents")
+async def store_stock_documents(
+    kind: str = Query(..., pattern="^(transfer|writeoff)$"),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    stations: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.edge_transfer_register import latest_documents, is_deleted, parse_moment
+    from zoneinfo import ZoneInfo
+    import math
 
-    rows = [dict(r) for r in (await db.execute(text(f"""
-        WITH отправки AS (
-            SELECT p.station_id AS from_station,
-                   d->>'ИдентификаторДокумента' AS doc_id,
-                   d->>'Номер' AS number,
-                   coalesce((d->>'Дата')::timestamptz, p.received_at) AS doc_date,
-                   coalesce((d->>'КодАЗСПолучателя')::int, 0) AS to_station,
-                   coalesce(d->>'МестоОтправитель', '') AS from_place,
-                   coalesce(d->>'Комментарий', '') AS comment,
-                   coalesce(jsonb_array_length(d->'Товары'), 0) AS positions,
-                   (SELECT coalesce(sum((t->>'КоличествоОтправлено')::numeric), 0)
-                      FROM jsonb_array_elements(coalesce(d->'Товары', '[]'::jsonb)) t) AS qty_sent,
-                   p.packet_uuid, p.received_at
-            FROM edge_packets p,
-                 LATERAL jsonb_array_elements(coalesce(p.payload->'Документы', '[]'::jsonb)) d
-            WHERE p.company_id = :cid AND d->>'Тип' = 'transfer'
-              AND d->>'Направление' = 'out'{период_out}
-        ), приёмы AS (
-            SELECT p.station_id AS accepted_station,
-                   d->>'ИдентификаторДокумента' AS incoming_id,
-                   coalesce((d->>'Дата')::timestamptz, p.received_at) AS accepted_at,
-                   (SELECT coalesce(sum((t->>'Количество')::numeric), 0)
-                      FROM jsonb_array_elements(coalesce(d->'Товары', '[]'::jsonb)) t) AS qty_accepted,
-                   p.packet_uuid AS accept_packet
-            FROM edge_packets p,
-                 LATERAL jsonb_array_elements(coalesce(p.payload->'Документы', '[]'::jsonb)) d
-            WHERE p.company_id = :cid AND d->>'Тип' = 'transfer'
-              AND d->>'Направление' = 'in'
-        )
-        SELECT о.*, пр.accepted_station, пр.accepted_at, пр.qty_accepted, пр.accept_packet,
-               dl.delivered_at AS task_delivered_at, dl.acked_at AS task_acked_at,
-               dl.cancelled_at AS task_cancelled_at
-        FROM отправки о
-        LEFT JOIN приёмы пр
-               ON пр.incoming_id = 'incoming:' || о.from_station || ':' || о.doc_id
-        LEFT JOIN edge_downlink dl
-               ON dl.company_id = :cid AND dl.station_id = о.to_station
-              AND dl.kind = 'incoming_transfer'
-              AND dl.note = 'transfer:' || о.from_station || ':' || (
-                    SELECT coalesce(d2->>'ИсточникUUID', '')
-                    FROM edge_packets p2,
-                         LATERAL jsonb_array_elements(coalesce(p2.payload->'Документы','[]'::jsonb)) d2
-                    WHERE p2.packet_uuid = о.packet_uuid
-                      AND d2->>'ИдентификаторДокумента' = о.doc_id
-                    LIMIT 1)
-        ORDER BY о.doc_date DESC
-        -- Потолок высокий и осознанный: передач между АЗС в сети немного, а
-        -- обрезать реестр молча нельзя — «в пути» не должно теряться за краем.
-        LIMIT 5000
-    """), p)).mappings().all()]
-
-    now = datetime.now(timezone.utc)
-    итог = {"в пути": 0, "принято": 0, "расхождение": 0}
-    передачи = []
-    for r in rows:
-        if station_id is not None and station_id not in (r["from_station"], r["to_station"]):
+    cid = await scope_company_id(user, db)
+    access = await resolve_document_access(user, db, cid)
+    requested = {int(s) for s in (stations or "").split(",") if s.strip().isdigit()}
+    station_scope = _legacy_station_scope(access, requested or None)
+    documents = await latest_documents(db, cid, kind)
+    rows = []
+    for row in documents:
+        doc = row["doc"]
+        if is_deleted(doc) or doc.get("СлужебныйДокумент") in (True, 1, "true", "True", "1"):
             continue
-        отправлено = float(r["qty_sent"] or 0)
-        принято = float(r["qty_accepted"]) if r["qty_accepted"] is not None else None
-        разница = None if принято is None else round(принято - отправлено, 3)
-        состояние = ("расхождение" if разница not in (None, 0)
-                     else "принято" if принято is not None else "в пути")
-        итог[состояние] += 1
-        в_пути_часов = (None if принято is not None
-                        else round((now - r["doc_date"]).total_seconds() / 3600))
-        передачи.append({
-            "from_station": r["from_station"], "to_station": r["to_station"],
-            "number": r["number"], "doc_date": r["doc_date"], "doc_id": r["doc_id"],
-            "from_place": r["from_place"], "comment": r["comment"],
-            "positions": r["positions"],
-            "qty_sent": round(отправлено, 3), "qty_accepted": принято,
-            "difference": разница, "state": состояние,
-            "accepted_at": r["accepted_at"], "hours_in_transit": в_пути_часов,
-            # Судьба заготовки приёмки у получателя: доставлена ли она агенту.
-            # «В пути» при недоставленном задании — это не потерянный товар, а
-            # молчащая станция, и лечится это разными способами.
-            "task_delivered": bool(r["task_delivered_at"]),
-            "task_acked": bool(r["task_acked_at"]),
-            "packet_uuid": r["packet_uuid"],
+        if station_scope is not None and row["station"] not in station_scope:
+            continue
+        moment = parse_moment(doc.get("Дата")) or row["received_at"]
+        day = moment.astimezone(ZoneInfo("Europe/Moscow")).date()
+        if (date_from and day < date_from) or (date_to and day > date_to):
+            continue
+        sanitized = sanitize_edge_document(doc, trusted_station_packet=True)
+        if sanitized["pure_fuel"]:
+            continue
+        lines = sanitized["lines"]
+        unvalued = 0
+        amount = 0.0
+        if kind == "writeoff":
+            for line in lines:
+                value = line.get("Сумма")
+                try:
+                    value = float(value)
+                except (ValueError, TypeError):
+                    value = None
+                if line.get("КачествоСебестоимости") not in {"known", "exact"} or value is None or not math.isfinite(value):
+                    unvalued += 1
+                else:
+                    amount += value
+        rows.append({
+            "station_id": row["station"], "source_uuid": row["source_uuid"],
+            "packet_uuid": row["packet_uuid"], "doc_index": row["doc_index"],
+            "number": doc.get("Номер"), "doc_date": moment,
+            "author": doc.get("Автор") or "", "note": doc.get("Причина") or doc.get("Комментарий") or "",
+            "place_from": doc.get("МестоХранения") or doc.get("МестоОтправитель") or doc.get("Склад") or "",
+            "place_to": doc.get("МестоПолучатель") or "",
+            "direction": doc.get("Направление") or "", "positions": len(lines),
+            "amount": round(amount, 2) if kind == "writeoff" else None,
+            "unvalued_positions": unvalued, "received_at": row["received_at"],
+            "classification_error": sanitized["reason"],
         })
-
-    return {
-        "transfers": передачи,
-        "total": len(передачи),
-        "by_state": итог,
-        # Дольше суток в пути — повод спросить: столько занимает доставка между
-        # соседними АЗС, а не приём товара с машины.
-        "stuck": [t for t in передачи
-                  if t["state"] == "в пути" and (t["hours_in_transit"] or 0) >= 24],
-    }
+    rows.sort(key=lambda row: (row["doc_date"], row["source_uuid"]), reverse=True)
+    return {"docs": rows, "total": len(rows), "positions": sum(row["positions"] for row in rows),
+            "amount": round(sum(row["amount"] or 0 for row in rows), 2) if kind == "writeoff" else None,
+            "unvalued_positions": sum(row["unvalued_positions"] for row in rows),
+            "read_at": datetime.now(timezone.utc)}
 
 
 @router.get("/station-doc")
@@ -3036,8 +3001,8 @@ async def store_station_doc(
         "label": STATION_DOC_KINDS.get(d.get("Тип"), d.get("Тип")),
         "number": d.get("Номер"),
         "doc_date": d.get("Дата"),
-        "place_from": d.get("Склад") or d.get("СкладОтправитель"),
-        "place_to": d.get("СкладПолучатель"),
+        "place_from": d.get("МестоХранения") or d.get("МестоОтправитель") or d.get("Склад") or d.get("СкладОтправитель"),
+        "place_to": d.get("МестоПолучатель") or d.get("СкладПолучатель"),
         "counterparty": d.get("Контрагент"),
         "contract": d.get("ДоговорКонтрагента"),
         "incoming_number": d.get("НомерВходящегоДокумента"),

@@ -1464,13 +1464,15 @@ export interface StoreTransferBetween {
 }
 
 export const getStoreTransfersBetween = (opts: {
-  dateFrom?: string; dateTo?: string; stationId?: number | null
+  dateFrom?: string; dateTo?: string; stationId?: number | null; stations?: string[]
 }) => get<{
   transfers: StoreTransferBetween[]
   total: number
   by_state: Record<string, number>
   stuck: StoreTransferBetween[]
+  cancellation_conflicts: { from_station: number; to_station: number; number: string; reason: string; task_id: string }[]
 }>('/api/store/transfers-between', {
+  stations: opts.stations?.join(',') || undefined,
   date_from: opts.dateFrom || undefined,
   date_to: opts.dateTo || undefined,
   station_id: opts.stationId ?? undefined,
@@ -3451,3 +3453,19 @@ export const applyStorePricePlan = (body: {
 }) =>
   post<{ applied: number; scheduled: number; stations: number; failed?: number
          effective_at?: string; note: string }>('/api/store/price-plan/apply', body)
+
+export interface StockDocument {
+  station_id: number; source_uuid: string; packet_uuid: string; doc_index: number
+  number: string | null; doc_date: string; author: string; note: string
+  place_from: string; place_to: string; direction: string; positions: number
+  amount: number | null; unvalued_positions: number; received_at: string; classification_error: string | null
+}
+export const getStockDocuments = (opts: {
+  kind: 'transfer' | 'writeoff'; dateFrom?: string; dateTo?: string; stations?: string[]
+}) => get<{
+  docs: StockDocument[]; total: number; positions: number; amount: number | null
+  unvalued_positions: number; read_at: string
+}>('/api/store/stock-documents', {
+  kind: opts.kind, date_from: opts.dateFrom, date_to: opts.dateTo,
+  stations: opts.stations?.join(',') || undefined,
+})

@@ -7,8 +7,8 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ShowMore, useVisible } from '@/components/common/ShowMore'
-import { StationDocsBlock } from './StationDocsBlock'
-import { TransfersBetweenBlock } from './TransfersBetweenBlock'
+import { StockDocumentsPanel } from './StockDocumentsPanel'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { getStoreTransfers, type StoreTransferDoc } from '@/services/storeService'
 import { SnapshotBadge } from '@/components/common/SnapshotBadge'
 import { ModalCard } from '@/components/ui/modal-card'
@@ -18,7 +18,7 @@ import { rowDrill } from './rowDrill'
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 const money = (n: number) => (n === 0 ? '—' : fmtMoney(n))
 
-export function StoreTransferPanel({ companyId, dateFrom, dateTo, stations }: {
+function LegacyStoreTransferPanel({ companyId, dateFrom, dateTo, stations }: {
   companyId: string; dateFrom?: string; dateTo?: string; stations?: string[]
 }) {
   const [direction, setDirection] = useState<string | null>(null)
@@ -191,9 +191,18 @@ export function StoreTransferPanel({ companyId, dateFrom, dateTo, stations }: {
           то, что заводят на самой АЗС. Пока 1С ведёт станцию, они идут рядом. */}
       {/* Передача между АЗС — другой предмет, чем перемещение внутри станции:
           там меняется полка, здесь — материально ответственный. */}
-      <TransfersBetweenBlock dateFrom={dateFrom} dateTo={dateTo} />
 
-      <StationDocsBlock kind="transfer" dateFrom={dateFrom} dateTo={dateTo} title="Перемещения станции" />
     </div>
   )
+}
+
+export function StoreTransferPanel(props: { companyId: string; dateFrom?: string; dateTo?: string; stations?: string[] }) {
+  return <Tabs defaultValue="current" className="p-4">
+    <TabsList aria-label="Источник документов">
+      <TabsTrigger value="current">Документы станций</TabsTrigger>
+      <TabsTrigger value="archive">Архив ЦБ</TabsTrigger>
+    </TabsList>
+    <TabsContent value="current"><StockDocumentsPanel {...props} kind="transfer" /></TabsContent>
+    <TabsContent value="archive"><LegacyStoreTransferPanel {...props} /></TabsContent>
+  </Tabs>
 }

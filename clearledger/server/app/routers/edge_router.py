@@ -1001,10 +1001,16 @@ async def downlink(
     # пересборку реестра всей компании — 10.10.2026 НСИ не доезжала до 208,
     # 14.10 пачка карточек Верево положила центр.
 
+    agent = (await db.execute(select(EdgeAgent).where(
+        EdgeAgent.company_id == company_id, EdgeAgent.station_id == station_id,
+    ))).scalar_one_or_none()
+    capabilities = (agent.payload or {}).get("capabilities", []) if agent else []
+    supported = edge_transfers.CANCELLATION_CAPABILITY in capabilities
+    compatibility = (True if supported else EdgeDownlink.kind.notin_(edge_transfers.CANCELLATION_TASK_KINDS))
     rows = (await db.execute(
         select(EdgeDownlink)
         .where(EdgeDownlink.company_id == company_id,
-               EdgeDownlink.station_id == station_id,
+               EdgeDownlink.station_id == station_id, compatibility,
                EdgeDownlink.acked_at.is_(None),
                # Отменённое центром станции не отдаём — иначе отмена
                # существовала бы только на экране.
@@ -1026,19 +1032,42 @@ async def downlink(
 @router.post("/downlink/{task_id}/ack")
 async def downlink_ack(
     task_id: uuid.UUID,
+    request: Request,
     company: Company = Depends(get_company_by_api_key),
     станция_ключа_: int | None = Depends(станция_ключа),
     db: AsyncSession = Depends(get_db),
 ):
-    """Станция применила задание. До этого момента оно будет приходить снова."""
-    условия = [EdgeDownlink.id == task_id, EdgeDownlink.company_id == company.id]
-    if станция_ключа_ is not None:
-        # Гасить можно только своё: иначе задание чужой АЗС закрывается
-        # неприменённым и центр считает его доставленным.
-        условия.append(EdgeDownlink.station_id == станция_ключа_)
-    row = (await db.execute(select(EdgeDownlink).where(*условия))).scalar_one_or_none()
+    """Сохранить результат применения; конфликт отмены не означает снятие товара."""
+    header = request.headers.get("X-Station-Id", "")
+    if not header.isdigit():
+        raise HTTPException(400, "Не определён код АЗС")
+    station_id = сверить_станцию(станция_ключа_, int(header))
+    row = (await db.execute(select(EdgeDownlink).where(
+        EdgeDownlink.id == task_id, EdgeDownlink.company_id == company.id,
+        EdgeDownlink.station_id == station_id,
+    ))).scalar_one_or_none()
     if row is None:
         raise HTTPException(404, "Задание не найдено")
+    raw = await request.body()
+    body = {}
+    if raw:
+        try:
+            body = json.loads(raw)
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise HTTPException(400, "Неверный результат задания") from exc
+        if not isinstance(body, dict):
+            raise HTTPException(400, "Неверный результат задания")
+    result = body.get("result")
+    allowed = {"cancelled", "conflict", "stale"} if row.kind == "incoming_transfer_cancelled" else {"applied", "stale", "missing", "conflict"}
+    if row.kind in edge_transfers.CANCELLATION_TASK_KINDS or result is not None:
+        if (not isinstance(result, dict) or result.get("document_id") != (row.payload or {}).get("id")
+                or result.get("status") not in allowed):
+            raise HTTPException(422, "Не подтверждён результат применения передачи")
+        stored = {"document_id": result["document_id"], "status": result["status"],
+                  "reason": str(result.get("reason") or "")[:1000]}
+        if row.acked_at is None:
+            row.payload = {**(row.payload or {}), "_delivery_result": stored,
+                           "_result_at": datetime.now(timezone.utc).isoformat()}
     if row.acked_at is None:
         row.acked_at = datetime.now(timezone.utc)
         await db.commit()

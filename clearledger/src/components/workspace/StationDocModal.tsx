@@ -212,7 +212,7 @@ export function StationDocModal({ packetUuid, index, onClose }: {
                       <td className="px-3 py-1.5">{l.name}</td>
                       <td className="px-3 py-1.5 tabular-nums text-muted-foreground">{l.barcode ?? '—'}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">
-                        {nf(l.qty, 3)}
+                        {nf(l.qty, 3)} {l.unit}
                         {l.qty_expected != null && l.qty_expected !== l.qty && (
                           <span className="ml-1 text-[10px] text-amber-300/90">заявлено {nf(l.qty_expected, 3)}</span>
                         )}
