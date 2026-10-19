@@ -189,7 +189,7 @@ async def route_transfer_tasks(
             payload=task["payload"],
             note=task["note"],
             idempotency_key=task["idempotency_key"],
-        ).on_conflict_do_nothing(index_elements=["company_id", "idempotency_key"])
+        ).on_conflict_do_nothing()
         result = await db.execute(statement)
         created += result.rowcount or 0
     return created

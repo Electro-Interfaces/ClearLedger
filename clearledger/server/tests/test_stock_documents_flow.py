@@ -21,6 +21,11 @@ def request(station, body=None):
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_transfer_cancel_replay_capability_and_result(db, monkeypatch):
+    # Миграция существующих баз создаёт partial index; create_all новой базы — constraint.
+    from sqlalchemy import text
+    await db.execute(text("ALTER TABLE edge_downlink DROP CONSTRAINT IF EXISTS uq_edge_downlink_company_idempotency"))
+    await db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_edge_downlink_company_idempotency ON edge_downlink(company_id,idempotency_key) WHERE idempotency_key IS NOT NULL"))
+    await db.commit()
     company = Company(name="Проверка перемещений", slug="stock-flow-" + uuid.uuid4().hex, profile_id="fuel")
     db.add(company)
     await db.flush()
