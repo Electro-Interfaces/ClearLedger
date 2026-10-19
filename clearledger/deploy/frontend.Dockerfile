@@ -1,15 +1,20 @@
+# syntax=docker/dockerfile:1.7
 FROM node:22-alpine AS build
 
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=${VITE_API_URL}
 
 # Бренд экосистемы-контейнера (white-label): «Экосистема <бренд>», «<бренд> Ledger».
+# Пространство может жить в подкаталоге: демо-стенд отдаётся кромкой сайта
+# по пути /demo-run/space/app/, снаружи он не открывается вовсе.
+ARG VITE_BASE_PATH=/
+ENV VITE_BASE_PATH=${VITE_BASE_PATH}
 ARG VITE_ECOSYSTEM_BRAND=ElsyPlus
 ENV VITE_ECOSYSTEM_BRAND=${VITE_ECOSYSTEM_BRAND}
 
 WORKDIR /src
 COPY package.json package-lock.json* ./
-RUN npm ci --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 
 COPY . .
 
@@ -31,7 +36,7 @@ RUN test -n "$VITE_API_URL" -o -n "$ALLOW_DEMO" || { \
 RUN case "$VITE_API_URL" in */api|*/api/) \
       echo "ОШИБКА СБОРКИ: VITE_API_URL='$VITE_API_URL' оканчивается на /api." >&2; \
       echo "Нужен ORIGIN: --build-arg VITE_API_URL=https://<домен> (без /api)." >&2; exit 1;; esac
-RUN npm run build
+RUN --mount=type=cache,target=/src/node_modules/.vite npm run build
 
 # ─── runtime ─────────────────────────────────────────────────────────
 FROM nginx:alpine
@@ -68,15 +73,28 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
+    # Манифест PWA: без правильного типа Android отказывается ставить приложение
+    # на домашний экран («manifest fetched with unexpected MIME type»).
     location ~* \.webmanifest$ {
         default_type application/manifest+json;
         add_header Cache-Control "no-cache";
+    }
+
+    # Слои карты (границы регионов): без своего типа nginx отдаёт их как
+    # octet-stream — мимо gzip и с no-cache от правила SPA ниже.
+    location ~* \.geojson$ {
+        default_type application/geo+json;
+        add_header Cache-Control "public, max-age=2592000";
     }
 
     location / {
         add_header Cache-Control "no-cache";
         try_files $uri $uri/ /index.html;
     }
+
+    gzip on;
+    gzip_types application/json application/geo+json application/javascript text/css text/plain image/svg+xml;
+    gzip_min_length 1024;
 }
 EOF
 
