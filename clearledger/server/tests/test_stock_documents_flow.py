@@ -63,6 +63,12 @@ async def test_transfer_cancel_replay_capability_and_result(db, monkeypatch):
     register = await between_stations(db, company.id)
     assert register["total"] == 0 and len(register["cancellation_conflicts"]) == 1
     assert (await between_stations(db, company.id, station_scope=()))["cancellation_conflicts"] == []
+    newer = {**outgoing, "РедакцияДата": "2026-10-19T10:01:00+03:00"}
+    db.add(EdgePacket(company_id=company.id,station_id=208,packet_uuid="reissued",kind="transfer",
+        payload={"Документы":[newer],"ВремяВыгрузки":newer["РедакцияДата"]}))
+    await db.commit()
+    register=await between_stations(db,company.id)
+    assert register["total"]==1 and len(register["cancellation_conflicts"])==1
 
 
 @pytest.mark.asyncio(loop_scope="session")

@@ -110,17 +110,17 @@ async def between_stations(db, company_id, date_from=None, date_to=None, station
         if (first and day < first) or (last and day > last):
             continue
         related = [task for task in tasks if task.note == f"transfer:{sender}:{outgoing['source_uuid']}"]
-        if is_deleted(doc):
-            cancellations = [task for task in related if task.kind == "incoming_transfer_cancelled"]
-            latest_task = max(cancellations, key=lambda task: task.created_at, default=None)
-            result = ((latest_task.payload or {}).get("_delivery_result") or {}) if latest_task else {}
-            if result.get("status") == "conflict":
-                conflicts.append({"from_station": sender, "to_station": target,
-                                  "number": doc.get("Номер"), "doc_id": doc.get("ИдентификаторДокумента"),
-                                  "reason": result.get("reason") or "Получатель уже принял товар",
-                                  "task_id": str(latest_task.id)})
-            continue
         incoming = received_document(outgoing, documents)
+        cancellations = [task for task in related if task.kind == "incoming_transfer_cancelled"]
+        latest_cancellation = max(cancellations, key=lambda task: task.created_at, default=None)
+        result = ((latest_cancellation.payload or {}).get("_delivery_result") or {}) if latest_cancellation else {}
+        if result.get("status") == "conflict" and (is_deleted(doc) or incoming is None):
+            conflicts.append({"from_station": sender, "to_station": target,
+                              "number": doc.get("Номер"), "doc_id": doc.get("ИдентификаторДокумента"),
+                              "reason": result.get("reason") or "Получатель уже принял товар",
+                              "task_id": str(latest_cancellation.id)})
+        if is_deleted(doc):
+            continue
         sent_lines = line_quantities(doc.get("Товары") or [], "КоличествоОтправлено")
         accepted_lines = line_quantities(incoming["doc"].get("Товары") or [], "Количество") if incoming else None
         sent = sum(sent_lines.values())
