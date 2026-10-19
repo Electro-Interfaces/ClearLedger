@@ -148,7 +148,7 @@ export default function VoiceContactPage() {
           active={отбор === 'cc'} onClick={() => переключить('cc')} />
         <Tile icon={UserRound} label="У сотрудников" value={сколько(x => x.assignee?.kind === 'staff')} hint="звонят сами, отмечают попытки"
           active={отбор === 'staff'} onClick={() => переключить('staff')} />
-        <Tile icon={UserX} label="Не назначено" value={сколько(x => !x.assignee)} hint="КЦ не подключён"
+        <Tile icon={UserX} label="Не назначено" value={сколько(x => !x.assignee)} hint="Исполнитель ещё не назначен"
           tone={все.some(x => !x.assignee) ? 'text-warning' : undefined}
           active={отбор === 'none'} onClick={() => переключить('none')} />
         <Tile icon={Repeat} label="Звонили повторно" value={сколько(x => (x.missedCalls ?? 1) > 1)} hint="пропусков больше одного"
