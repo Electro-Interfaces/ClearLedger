@@ -958,7 +958,7 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
     # Без этого пересборка откатывала бы применённую правку станции: приёмник
     # кладёт новую версию в EdgePacketRevision (сырьё L1 append-only и не
     # переписывается), а реестр читал бы первую доставку.
-    свежие: dict[str, dict] = {}
+    свежие: dict[str, tuple[dict, datetime | None]] = {}
     if _АВТО_РЕВИЗИИ:
         from app.models import EdgePacketRevision
         ревизии = (await db.execute(select(EdgePacketRevision).where(
@@ -966,7 +966,8 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
         ).order_by(EdgePacketRevision.received_at))).scalars().all()
         for rev in ревизии:  # последняя по времени перезаписывает предыдущие
             if rev.payload:
-                свежие[str(rev.packet_uuid)] = rev.payload
+                # Содержание и время версии передаются вместе, без изменения L1.
+                свежие[str(rev.packet_uuid)] = (rev.payload, rev.received_at)
     # Приёмка приезжает пакетом и тут же разворачивается в реестр приёмок: это
     # один документ, а не два. Связь известна по source_uuid — без неё каждая
     # накладная стояла в реестре дважды, причём копия из пакета с нулевой
@@ -997,9 +998,11 @@ async def _edge_adapter(db: AsyncSession, company_id: uuid.UUID) -> list[Project
         # это ORM-объект, правка улетела бы в БД, а сырьё L1 неприкосновенно.
         _свежий = свежие.get(str(packet.packet_uuid))
         if _свежий:
+            _данные, _момент = _свежий
             packet = SimpleNamespace(
                 station_id=packet.station_id, packet_uuid=packet.packet_uuid,
-                received_at=packet.received_at, kind=packet.kind, payload=_свежий)
+                received_at=max(filter(None, (packet.received_at, _момент)), default=None),
+                kind=packet.kind, payload=_данные)
         for index, document in enumerate((packet.payload or {}).get("Документы") or []):
             if not isinstance(document, dict):
                 continue

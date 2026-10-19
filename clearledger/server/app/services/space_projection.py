@@ -83,10 +83,14 @@ async def project(
             chunk = items[start:start + BATCH_SIZE]
             if not chunk and items:
                 break
+            body = {"companyId": link.external_company_id, PAYLOAD_KEYS[entity]: chunk}
+            # Полный состав передаётся только с последней непустой пачкой объектов.
+            # Промежуточные пачки не должны архивировать соседние объекты.
+            if entity == "objects" and start + BATCH_SIZE >= len(items) and items:
+                body["allIds"] = [str(it.get("id")) for it in items if it.get("id")]
             try:
                 resp = await client.post(
-                    url,
-                    json={"companyId": link.external_company_id, PAYLOAD_KEYS[entity]: chunk},
+                    url, json=body,
                     headers={"Authorization": f"Bearer {token}"},
                 )
             except httpx.HTTPError as e:
