@@ -20,6 +20,17 @@ from app.services import info_center
 router = APIRouter(prefix="/info", tags=["Инфо (знание пространства)"])
 
 
+@router.get("/cc")
+async def cc_instructions(db: AsyncSession = Depends(get_db)):
+    """Только опубликованные инструкции платформы для отдельного пульта КЦ.
+
+    Не принимает company_id, article_id или произвольные фильтры. Документы
+    компании и прочие данные пространства этим входом не доступны.
+    """
+    from app.services.info_cc import instructions
+    return await instructions(db)
+
+
 @router.get("/meta")
 async def meta(user: User = Depends(get_current_user)):
     """Пласты знания — для фильтров и форм."""
