@@ -19,6 +19,7 @@ import { appCodeForPath, productForPath, productLabel } from '@/config/spaceProd
 import { useCompany } from '@/contexts/CompanyContext'
 import { Markdown } from './Markdown'
 import { useRail } from '@/components/report-kit'
+import { voiceViewFor } from '@/pages/voice/views'
 
 export function InfoContextPanel({ companyId, onClose, embedded = false }: {
   companyId: string; onClose: () => void; embedded?: boolean
@@ -59,7 +60,10 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
     const вид = params.get('view')
     return вид ? `${раздел}:${вид}` : раздел
   }
-  const sectionKey = appCode === 'docs' && !sub
+  // «Телефония» кодирует раздел в пути, а не в ?sub=. Меню и помощь
+  // используют один справочник, включая /voice/megafon и будущие экраны АТС.
+  const sectionKey = appCode === 'voice' ? voiceViewFor(pathname).key
+    : appCode === 'docs' && !sub
     ? трековыйКлюч()
     : sub && tab ? `${sub}:${tab}` : sub
 

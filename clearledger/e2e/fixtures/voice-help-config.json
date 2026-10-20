@@ -1,0 +1,199 @@
+{
+  "passport": {
+    "version": 3,
+    "effectiveAt": "2026-10-01T00:00:00Z",
+    "minAcceptedVersion": 2,
+    "presentation": {
+      "greeting": "Зарядная сеть «Меридиан», здравствуйте",
+      "brandName": "Меридиан",
+      "operatorNameMode": "first_name"
+    },
+    "disposition": {
+      "codes": [
+        "charging_failed",
+        "refund",
+        "card",
+        "info",
+        "equipment",
+        "no_disposition"
+      ],
+      "requiredFields": {
+        "charging_failed": [
+          "station",
+          "session"
+        ],
+        "refund": [
+          "session"
+        ]
+      },
+      "wrapupSec": 120
+    },
+    "privacy": {
+      "phoneMask": "last4",
+      "cardFields": [
+        "identity.kind",
+        "identity.displayName",
+        "identity.repeat",
+        "station",
+        "session",
+        "openTickets",
+        "balance"
+      ],
+      "postContactAccessHours": 2,
+      "recordingDownload": false
+    },
+    "access": {
+      "admission": "manual",
+      "hours": [
+        {
+          "days": "mon-sun",
+          "from": "00:00",
+          "to": "24:00",
+          "tz": "Europe/Moscow"
+        }
+      ],
+      "cidr": [
+        "10.0.0.0/8"
+      ],
+      "requireMfa": true
+    },
+    "actions": {
+      "transferTargets": [
+        {
+          "code": "duty_engineer",
+          "kind": "client_staff",
+          "label": "Дежурный инженер сети"
+        },
+        {
+          "code": "billing",
+          "kind": "client_staff",
+          "label": "Расчёты и возвраты"
+        }
+      ],
+      "ccOperatorTransfer": true,
+      "takeover": true,
+      "createTicket": true
+    },
+    "fallback": {
+      "afterSec": 20,
+      "retryAfterSec": 20,
+      "maxTotalSec": 90,
+      "target": "voicemail_ezs"
+    },
+    "offer": {
+      "maxTtlSec": 25,
+      "allowPick": true
+    },
+    "kcRetention": {
+      "dispositionFields": [
+        "topic",
+        "refundRequested"
+      ],
+      "ticketNumber": true,
+      "preferredOperator": true,
+      "days": 365
+    },
+    "liveEnrichment": {
+      "enabled": true,
+      "showTranscript": false,
+      "llmEnabled": true,
+      "threshold": 0.8,
+      "cloudFallback": false
+    }
+  },
+  "reception": {
+    "lineId": "L-demo",
+    "hours": [
+      {
+        "days": "mon-fri",
+        "from": "09:00",
+        "to": "18:00",
+        "tz": "Europe/Moscow"
+      }
+    ],
+    "vip": [
+      "+70000000102"
+    ],
+    "repeatWithinMin": 30,
+    "priority": {
+      "normal": 50,
+      "repeat": 70,
+      "vip": 90
+    },
+    "afterHoursTarget": "voicemail_ezs",
+    "operators": [
+      "PJSIP/op1"
+    ],
+    "greeting": "sound:hello-world",
+    "mohClass": "default",
+    "targets": {
+      "voicemail_ezs": {
+        "action": "message",
+        "sounds": [
+          "sound:vm-nobodyavail",
+          "sound:goodbye"
+        ]
+      },
+      "duty_engineer": {
+        "action": "forward",
+        "endpoint": "PJSIP/op2"
+      }
+    },
+    "topics": [
+      {
+        "code": "charging_failed",
+        "name": "Станция не заряжает",
+        "category": "Станция",
+        "description": "Зарядка не началась, оборвалась или станция не отвечает"
+      },
+      {
+        "code": "refund",
+        "name": "Вопрос по деньгам",
+        "category": "Оплата",
+        "description": "Списали без зарядки, списали дважды, вернуть деньги"
+      },
+      {
+        "code": "app",
+        "name": "Мобильное приложение",
+        "category": "Приложение",
+        "description": "Не входит, не видит станцию, не проходит оплата в приложении"
+      },
+      {
+        "code": "tariff",
+        "name": "Стоимость зарядки",
+        "category": "Тариф",
+        "description": "Сколько стоит, почему такая сумма, тариф организации"
+      },
+      {
+        "code": "site",
+        "name": "Состояние площадки",
+        "category": "Площадка",
+        "description": "Занято место, нет освещения, повреждён кабель или разъём"
+      },
+      {
+        "code": "corporate",
+        "name": "Корпоративный клиент",
+        "category": "Юрлицо",
+        "description": "Договор, карты сотрудников, счета и закрывающие документы"
+      },
+      {
+        "code": "info",
+        "name": "Другое обращение",
+        "category": "Общее",
+        "description": "Справка, предложение, вопрос не по зарядке"
+      }
+    ],
+    "slaTargetSec": 20
+  },
+  "policy": {
+    "recordingsDays": 90,
+    "transcriptsDays": 30,
+    "numberMonths": 12,
+    "recordingDownload": false,
+    "fcrWindowMin": 30,
+    "shortAbandonSec": 5,
+    "callbackDueSec": 900,
+    "alertSlPct": 80,
+    "alertSlMinOffered": 5
+  }
+}

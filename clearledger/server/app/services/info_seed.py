@@ -40,6 +40,7 @@ from app.services.info_seed_support import CATEGORIES as SUPPORT_CATEGORIES
 from app.services.info_seed_office import ARTICLES as OFFICE_ARTICLES
 from app.services.info_seed_office import CATEGORIES as OFFICE_CATEGORIES
 from app.services.info_seed_office import PROFILE as OFFICE_PROFILE
+from app.services.info_seed_voice import ARTICLES as VOICE_ARTICLES, CATEGORIES as VOICE_CATEGORIES
 
 PROFILE = "energy"
 
@@ -55,6 +56,7 @@ APP_CATEGORIES = [
     {"title": "Пространство", "sort": 1},
     {"title": "Инфо", "sort": 6},
     {"title": "Поддержка", "sort": 8},
+    {"title": "Телефония", "sort": 9},
     {"title": "Трек", "sort": 11},
     {"title": "Проекты", "sort": 20},
     {"title": "Эксплуатация", "sort": 25},
@@ -973,8 +975,8 @@ async def seed_info(db: AsyncSession) -> dict[str, int]:
         # «Управление», поэтому его знание лежит в общем слое, а не в отраслевом.
         # «Инфо» и «Трек» — приложения Ядра: их знание общее для всех профилей.
         (None, COMMON_CATEGORIES + TRACK_CATEGORIES + HELP_CATEGORIES
-         + SUPPORT_CATEGORIES + PULSE_CATEGORIES,
-         COMMON_ARTICLES + TRACK_ARTICLES + HELP_ARTICLES + SUPPORT_ARTICLES + PULSE_ARTICLES),
+         + SUPPORT_CATEGORIES + PULSE_CATEGORIES + VOICE_CATEGORIES,
+         COMMON_ARTICLES + TRACK_ARTICLES + HELP_ARTICLES + SUPPORT_ARTICLES + PULSE_ARTICLES + VOICE_ARTICLES),
         (PROFILE, CATEGORIES, ARTICLES),
         # Топливный профиль ведёт «Топливо», «Магазин» и рабочее место АЗС. Пакеты
         # раздельные (их правят разные люди и в разное время), профиль один.
