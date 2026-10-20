@@ -620,6 +620,82 @@ async def test_prepare_key_scope_idempotency_and_response_allowlist(env, db):
     assert r.status_code == 413
 
 
+@pytest.mark.parametrize("state", ["preparing", "ready", "partial", "unavailable"])
+@pytest.mark.parametrize("lost_binding", [False, True])
+async def test_prepare_replay_accepts_current_state_without_new_binding_or_ttl(env, db, state, lost_binding):
+    client, _origin, _peer, tenants = env
+    t = tenants[0]
+    payload = envelope(callRef=t["callRef"], phone="+79990000001", startedAt=now(), direction="inbound")
+    headers = {"X-Cloud-API-Key": t["keys"][0][0]}
+    initial = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+    assert initial.status_code == 202, initial.text
+    if lost_binding:
+        # Support уже сохранил context; Core не успел записать binding до обрыва.
+        row = await db.get(ContextBinding, t["contextRef"])
+        await db.delete(row)
+        await db.commit()
+    t["prepare"].update(state=state, contextVersion=2, phone="synthetic-private", blocks={"private": True})
+    r = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+    assert r.status_code == 202, r.text
+    result = r.json()
+    assert result["state"] == state and result["contextVersion"] == 2
+    for name in ("contextRef", "callRef", "preparedAt", "expiresAt"):
+        assert result[name] == initial.json()[name]
+    assert set(result) == set(initial.json()) and "synthetic-private" not in r.text
+    assert await db.scalar(select(func.count()).select_from(ContextBinding).where(
+        ContextBinding.core_cid == t["coreCid"])) == 1
+    row = await db.get(ContextBinding, t["contextRef"], populate_existing=True)
+    assert row.expires_at == datetime.fromisoformat(initial.json()["expiresAt"])
+
+
+@pytest.mark.parametrize("mutation", [
+    {"state": "expired"}, {"state": "future"}, {"state": None}, {"state": 1},
+    {"state": True}, {"state": []}, {"state": {}}, {"state": ""},
+    {"schemaVersion": True}, {"schemaVersion": 2}, {"version": "future"},
+    {"contextVersion": True}, {"contextVersion": 0}, {"contextVersion": 1.5},
+    {"contextRef": "foreign"}, {"preparedAt": "invalid"},
+    {"preparedAt": "2026-10-20T00:00:00"}, {"expiresAt": "2000-01-01T00:00:00+00:00"},
+    {"retryAfterMs": True}, {"retryAfterMs": 60001},
+])
+async def test_prepare_replay_rejects_malformed_or_expired_receipt(env, db, mutation):
+    t = await prepared(env)
+    t["prepare"].update(state="partial", contextVersion=2)
+    t["prepare"].update(mutation)
+    before = await db.get(ContextBinding, t["contextRef"])
+    expiry = before.expires_at
+    client = env[0]
+    r = await client.post(PREFIX + "/prepare", json=envelope(
+        callRef=t["callRef"], phone="+79990000001", startedAt=now(), direction="inbound"),
+        headers={"X-Cloud-API-Key": t["keys"][0][0]})
+    assert r.status_code == 503 and r.json()["error"]["code"] == "upstream_invalid", r.text
+    assert "phone" not in r.text and "synthetic-private" not in r.text
+    row = await db.get(ContextBinding, t["contextRef"], populate_existing=True)
+    assert row.expires_at == expiry
+
+
+@pytest.mark.parametrize("mutation,status", [("ref", 409), ("expiry", 409), ("call", 503), ("ttl", 503)])
+async def test_prepare_replay_rejects_conflicting_binding_or_extended_ttl(env, db, mutation, status):
+    t = await prepared(env)
+    initial = copy.deepcopy(t["prepare"])
+    t["prepare"].update(state="ready", contextVersion=2)
+    if mutation == "ref":
+        t["prepare"]["contextRef"] = "scx_" + secrets.token_urlsafe(32)
+    elif mutation == "expiry":
+        t["prepare"]["expiresAt"] = (datetime.fromisoformat(initial["expiresAt"]) + timedelta(minutes=1)).isoformat()
+    elif mutation == "call":
+        t["prepare"]["callRef"] = {**t["callRef"], "nodeContactId": "foreign"}
+    else:
+        t["prepare"]["expiresAt"] = (datetime.fromisoformat(initial["preparedAt"]) + timedelta(hours=25)).isoformat()
+    r = await env[0].post(PREFIX + "/prepare", json=envelope(
+        callRef=t["callRef"], phone="+79990000001", startedAt=now(), direction="inbound"),
+        headers={"X-Cloud-API-Key": t["keys"][0][0]})
+    assert r.status_code == status, r.text
+    assert await db.scalar(select(func.count()).select_from(ContextBinding).where(
+        ContextBinding.core_cid == t["coreCid"])) == 1
+    row = await db.get(ContextBinding, t["contextRef"], populate_existing=True)
+    assert row.expires_at == datetime.fromisoformat(initial["expiresAt"])
+
+
 @pytest.mark.parametrize("bad,status", [(None, 500), ([], 200), ({}, 200), ({"version": "future"}, 200)])
 async def test_upstream_failure_is_explicit_and_no_retry_recursion(env, bad, status):
     t = await admitted(env)

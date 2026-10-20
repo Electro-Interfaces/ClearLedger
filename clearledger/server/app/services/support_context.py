@@ -199,9 +199,11 @@ async def prepare(db, raw_key, body):
     try:
         from pydantic import TypeAdapter
         ref = TypeAdapter(ContextRef).validate_python(data["contextRef"])
-        if (data["version"] != VERSION or data["schemaVersion"] != 1
+        if (data["version"] != VERSION or type(data["schemaVersion"]) is not int or data["schemaVersion"] != 1
                 or data["callRef"] != call or type(data["contextVersion"]) is not int
-                or data["contextVersion"] < 1 or data["state"] != "preparing"):
+                or data["contextVersion"] < 1 or type(data["state"]) is not str
+                # Повтор prepare возвращает текущее persisted state (C02 clarifier).
+                or data["state"] not in ("preparing", "ready", "partial", "unavailable")):
             raise ValueError("prepare shape")
         prepared = datetime.fromisoformat(data["preparedAt"].replace("Z", "+00:00"))
         expires = datetime.fromisoformat(data["expiresAt"].replace("Z", "+00:00"))
