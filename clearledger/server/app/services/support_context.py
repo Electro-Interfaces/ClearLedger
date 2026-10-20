@@ -345,6 +345,13 @@ async def core_actor(db, sub, core_cid):
     return user, member, digest(snapshot)
 
 
+def phase_mask_change(previous_phase, phase, previous_mask, mask):
+    """Только фазовая проекция live grant; identity/versions проверяются отдельно."""
+    masks = {"offering": "consult", "consult": "consult", "connected": "operator", "wrapup": "operator"}
+    return (previous_phase != phase and previous_mask == masks.get(previous_phase)
+            and mask == masks.get(phase))
+
+
 async def admit(db, body, jkt, *, renew_claims=None):
     core_cid, trust, cid, base, node = await node_configuration(db, body.nodeId)
     await db.commit()
@@ -368,7 +375,7 @@ async def admit(db, body, jkt, *, renew_claims=None):
         "assignmentVersion": n["assignmentVersion"], "cnf": {"jkt": jkt},
     }.items()):
         fail(403, "renew_binding_mismatch")
-    actor = await actor_resolve(base, core_cid, cid, call, context_ref, n)
+    actor = await actor_resolve(base, core_cid, cid, call, context_ref, n, renew_claims)
     user, member, permission_digest = await core_actor(db, actor["coreActorSub"], core_cid)
     actions &= set(actor["capabilities"])
     if actor["fieldMask"] not in ("operator", "consult"):
@@ -395,7 +402,10 @@ async def admit(db, body, jkt, *, renew_claims=None):
                 or old.token_version != user.token_version or old.permissions_digest != permission_digest
                 or str(user.id) != renew_claims["sub"]
                 or actor["bindingVersion"] != renew_claims["bindingVersion"]
-                or actor["permissionsVersion"] != renew_claims["permissionsVersion"]):
+                or actor["permissionsVersion"] != renew_claims["permissionsVersion"]
+                or any(actor[k] != old.authority[k] for k in ("bindingRef", "supportUserRef"))
+                or (actor["fieldMask"] != old.authority["fieldMask"] and not phase_mask_change(
+                    renew_claims["phase"], n["phase"], old.authority["fieldMask"], actor["fieldMask"]))):
             fail(403, "renew_revoked")
         old.revoked_at = datetime.now(timezone.utc)
     # Object restrictions are checked in Support against Core's current membership
@@ -550,7 +560,15 @@ async def current(db, token, *, allow_phase_change=False):
     if any(actor[k] != c[v] for k, v in (("coreActorSub", "sub"), ("bindingVersion", "bindingVersion"),
                                         ("permissionsVersion", "permissionsVersion"))):
         fail(403, "support_permissions_changed")
-    if any(actor[k] != authority[k] for k in ("supportUserRef", "bindingRef", "fieldMask")):
+    if any(actor[k] != authority[k] for k in ("supportUserRef", "bindingRef")):
+        fail(403, "support_binding_changed")
+    # Только renew допускает закономерную смену live-проекции при новой фазе.
+    # Старый access не получает ни новую маску, ни actions: ниже остаётся
+    # пересечение с его claims, а выдача требует нового consume + actor-resolve.
+    if actor["fieldMask"] != authority["fieldMask"] and not (
+        allow_phase_change and c["scp"] == "support_context" and phase_mask_change(
+            c["phase"], n["phase"], authority["fieldMask"], actor["fieldMask"])
+    ):
         fail(403, "support_binding_changed")
     if tickets and not set(tickets) <= set(actor["ticketRefs"]):
         fail(403, "postcall_ticket_denied")

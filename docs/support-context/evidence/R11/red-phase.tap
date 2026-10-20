@@ -1,0 +1,252 @@
+F.FF                                                                     [100%]
+=================================== FAILURES ===================================
+_ test_renew_phase_issues_fresh_rights_without_upgrading_old_token[offering-connected] _
+
+env = (<httpx.AsyncClient object at 0x7f5f49831a90>, 'http://127.0.0.1:44515', <tests.test_support_context_v1.Peer object at...thetic-call-7727c1c6ff374606baf3171910a8cd97'}, 'contextRef': 'scx_UjanQAkVUCMUqLtFIQY6xSKmJ4iESJbu6IQS51LrNto', ...}])
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7f5f4ac0ce10>
+source = 'offering', target = 'connected'
+
+    @pytest.mark.parametrize("source,target", [("offering", "connected"), ("connected", "wrapup"),
+                                              ("consult", "connected"), ("connected", "consult")])
+    async def test_renew_phase_issues_fresh_rights_without_upgrading_old_token(env, db, source, target):
+        t = env[3][0]
+        live_phase(t, source)
+        t = await admitted(env)
+        old_claims = t["claims"]
+        r = await introspect(env, t)
+        assert r.status_code == 200, r.text
+        if source in ("offering", "consult"):
+            assert r.json()["actions"] == ["context.details", "context.read"]
+        live_phase(t, target)
+        t["code"] = secrets.token_urlsafe(32)  # новый Node admission, не повтор /admit
+        r = await introspect(env, t)
+        assert r.status_code == 409 and r.json()["error"]["code"] == "phase_changed", r.text
+        offset = len(env[2].requests)
+        r = await renew_grant(env, t)
+>       assert r.status_code == 200, r.text
+E       AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"support_binding_changed","retryable":false},"requestRef":"c5e2b505c9cf45a6b5b606059c1c3fc3"}
+E       assert 403 == 200
+E        +  where 403 = <Response [403 Forbidden]>.status_code
+
+tests/test_support_context_v1.py:307: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-10-21 01:16:13,750 [INFO] clearledger.seed: Создана компания: ООО ГИГ (ГазИнвестГрупп) (gig)
+2026-10-21 01:16:13,750 [INFO] clearledger.seed: Создана компания: РусГидро (rushydro)
+2026-10-21 01:16:13,765 [WARNING] passlib.handlers.bcrypt: (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/home/mag/orca/workspaces/ledger-app/support-context-core-20261020/.venv/lib/python3.13/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+              ^^^^^^^^^^^^^^^^^
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2026-10-21 01:16:14,110 [INFO] clearledger.seed: Создан сид-суперадмин: admin@clearledger.ru
+2026-10-21 01:16:14,124 [INFO] clearledger.seed: Создан шаблон проводок: ОРП/ОтчетККМОПродажах
+2026-10-21 01:16:14,124 [INFO] clearledger.seed: Создан шаблон проводок: ПТУ/Покупка
+2026-10-21 01:16:14,124 [INFO] clearledger.seed: Создан шаблон проводок: ПТУ/—
+2026-10-21 01:16:14,124 [INFO] clearledger.seed: Создан шаблон проводок: ОПЗС/ОтчетПроизводстваЗаСмену
+2026-10-21 01:16:14,125 [INFO] clearledger.seed: Создан шаблон проводок: КорректировкаПоступления/СогласованноеИзменение
+2026-10-21 01:16:14,148 [INFO] clearledger.seed: ГИГ: канал оплаты retail
+2026-10-21 01:16:14,148 [INFO] clearledger.seed: ГИГ: канал оплаты retail_cash
+2026-10-21 01:16:14,148 [INFO] clearledger.seed: ГИГ: канал оплаты retail_card
+2026-10-21 01:16:14,148 [INFO] clearledger.seed: ГИГ: канал оплаты cards
+2026-10-21 01:16:14,149 [INFO] clearledger.seed: ГИГ: канал оплаты online
+2026-10-21 01:16:14,149 [INFO] clearledger.seed: ГИГ: канал оплаты voucher
+2026-10-21 01:16:14,149 [INFO] clearledger.seed: ГИГ: канал оплаты coupon
+2026-10-21 01:16:14,149 [INFO] clearledger.seed: ГИГ: канал оплаты ledger
+2026-10-21 01:16:14,149 [INFO] clearledger.seed: ГИГ: канал оплаты writeoff_fuel
+2026-10-21 01:16:14,199 [INFO] clearledger.seed: ГИГ: источник «MSTO Онлайн-заказы»
+2026-10-21 01:16:14,244 [INFO] clearledger.seed: ГИГ: источник «STS Транзакции» создан (draft)
+2026-10-21 01:16:14,283 [INFO] clearledger.seed: Номенклатура дел заведена: ООО ГИГ (ГазИнвестГрупп) (3 дела)
+2026-10-21 01:16:14,289 [INFO] clearledger.seed: Виды документов заведены: ООО ГИГ (ГазИнвестГрупп) (4 вида)
+2026-10-21 01:16:14,305 [INFO] clearledger.seed: Номенклатура дел заведена: РусГидро (3 дела)
+2026-10-21 01:16:14,307 [INFO] clearledger.seed: Виды документов заведены: РусГидро (4 вида)
+2026-10-21 01:16:14,342 [INFO] clearledger.seed: Seed завершён
+------------------------------ Captured log setup ------------------------------
+INFO     clearledger.seed:seed.py:110 Создана компания: ООО ГИГ (ГазИнвестГрупп) (gig)
+INFO     clearledger.seed:seed.py:110 Создана компания: РусГидро (rushydro)
+WARNING  passlib.handlers.bcrypt:bcrypt.py:622 (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/home/mag/orca/workspaces/ledger-app/support-context-core-20261020/.venv/lib/python3.13/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+              ^^^^^^^^^^^^^^^^^
+AttributeError: module 'bcrypt' has no attribute '__about__'
+INFO     clearledger.seed:seed.py:561 Создан сид-суперадмин: admin@clearledger.ru
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ОРП/ОтчетККМОПродажах
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ПТУ/Покупка
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ПТУ/—
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ОПЗС/ОтчетПроизводстваЗаСмену
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: КорректировкаПоступления/СогласованноеИзменение
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail_cash
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail_card
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты cards
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты online
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты voucher
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты coupon
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты ledger
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты writeoff_fuel
+INFO     clearledger.seed:seed.py:341 ГИГ: источник «MSTO Онлайн-заказы»
+INFO     clearledger.seed:seed.py:408 ГИГ: источник «STS Транзакции» создан (draft)
+INFO     clearledger.seed:seed.py:249 Номенклатура дел заведена: ООО ГИГ (ГазИнвестГрупп) (3 дела)
+INFO     clearledger.seed:seed.py:259 Виды документов заведены: ООО ГИГ (ГазИнвестГрупп) (4 вида)
+INFO     clearledger.seed:seed.py:249 Номенклатура дел заведена: РусГидро (3 дела)
+INFO     clearledger.seed:seed.py:259 Виды документов заведены: РусГидро (4 вида)
+INFO     clearledger.seed:seed.py:146 Seed завершён
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 01:16:14,935 [INFO] httpx: HTTP Request: POST http://127.0.0.1:46679/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:16:14,946 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 01:16:15,057 [INFO] httpx: HTTP Request: POST http://127.0.0.1:46679/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+2026-10-21 01:16:15,127 [INFO] httpx: HTTP Request: POST http://127.0.0.1:46679/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 01:16:15,262 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+2026-10-21 01:16:15,377 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+2026-10-21 01:16:15,727 [INFO] httpx: HTTP Request: POST http://127.0.0.1:46679/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 01:16:15,788 [INFO] httpx: HTTP Request: POST http://127.0.0.1:46679/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 01:16:15,808 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/introspect "HTTP/1.1 200 OK"
+2026-10-21 01:16:15,937 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+2026-10-21 01:16:16,216 [INFO] httpx: HTTP Request: POST http://127.0.0.1:46679/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 01:16:16,219 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/introspect "HTTP/1.1 409 Conflict"
+2026-10-21 01:16:16,494 [INFO] httpx: HTTP Request: POST http://127.0.0.1:46679/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 01:16:16,553 [INFO] httpx: HTTP Request: POST http://127.0.0.1:46679/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 01:16:16,555 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/renew "HTTP/1.1 403 Forbidden"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:46679/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:46679/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:46679/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:46679/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:46679/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/introspect "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:46679/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/introspect "HTTP/1.1 409 Conflict"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:46679/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:46679/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44515/api/eco/support-context/v1/renew "HTTP/1.1 403 Forbidden"
+_ test_renew_phase_issues_fresh_rights_without_upgrading_old_token[consult-connected] _
+
+env = (<httpx.AsyncClient object at 0x7f5f484b5f10>, 'http://127.0.0.1:40579', <tests.test_support_context_v1.Peer object at...thetic-call-2fc4708e286b492b8d8f229568d84316'}, 'contextRef': 'scx_J9VBGMova9ARellEVsShf0akXLpjBgCH1ntPfx4E_To', ...}])
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7f5f49885010>
+source = 'consult', target = 'connected'
+
+    @pytest.mark.parametrize("source,target", [("offering", "connected"), ("connected", "wrapup"),
+                                              ("consult", "connected"), ("connected", "consult")])
+    async def test_renew_phase_issues_fresh_rights_without_upgrading_old_token(env, db, source, target):
+        t = env[3][0]
+        live_phase(t, source)
+        t = await admitted(env)
+        old_claims = t["claims"]
+        r = await introspect(env, t)
+        assert r.status_code == 200, r.text
+        if source in ("offering", "consult"):
+            assert r.json()["actions"] == ["context.details", "context.read"]
+        live_phase(t, target)
+        t["code"] = secrets.token_urlsafe(32)  # новый Node admission, не повтор /admit
+        r = await introspect(env, t)
+        assert r.status_code == 409 and r.json()["error"]["code"] == "phase_changed", r.text
+        offset = len(env[2].requests)
+        r = await renew_grant(env, t)
+>       assert r.status_code == 200, r.text
+E       AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"support_binding_changed","retryable":false},"requestRef":"ba04fc07f6054fc9a0f9989b339367e3"}
+E       assert 403 == 200
+E        +  where 403 = <Response [403 Forbidden]>.status_code
+
+tests/test_support_context_v1.py:307: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 01:16:21,824 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40029/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:16:21,831 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 01:16:21,938 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40029/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+2026-10-21 01:16:22,010 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40029/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 01:16:22,073 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+2026-10-21 01:16:22,216 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+2026-10-21 01:16:22,512 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40029/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 01:16:22,583 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40029/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 01:16:22,599 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/introspect "HTTP/1.1 200 OK"
+2026-10-21 01:16:22,715 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+2026-10-21 01:16:22,990 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40029/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 01:16:22,993 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/introspect "HTTP/1.1 409 Conflict"
+2026-10-21 01:16:23,240 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40029/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 01:16:23,310 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40029/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 01:16:23,313 [INFO] httpx: HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/renew "HTTP/1.1 403 Forbidden"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40029/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40029/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40029/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40029/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40029/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/introspect "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40029/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/introspect "HTTP/1.1 409 Conflict"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40029/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40029/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:40579/api/eco/support-context/v1/renew "HTTP/1.1 403 Forbidden"
+_ test_renew_phase_issues_fresh_rights_without_upgrading_old_token[connected-consult] _
+
+env = (<httpx.AsyncClient object at 0x7f5f495aae10>, 'http://127.0.0.1:36611', <tests.test_support_context_v1.Peer object at...thetic-call-6ff21e94ca04481d91c5fb4fe7a30dea'}, 'contextRef': 'scx_bJsdi_tZ0_uU95tAv9FYrlJjVOMvCWxfs7wR9WA-8O4', ...}])
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7f5f48499f10>
+source = 'connected', target = 'consult'
+
+    @pytest.mark.parametrize("source,target", [("offering", "connected"), ("connected", "wrapup"),
+                                              ("consult", "connected"), ("connected", "consult")])
+    async def test_renew_phase_issues_fresh_rights_without_upgrading_old_token(env, db, source, target):
+        t = env[3][0]
+        live_phase(t, source)
+        t = await admitted(env)
+        old_claims = t["claims"]
+        r = await introspect(env, t)
+        assert r.status_code == 200, r.text
+        if source in ("offering", "consult"):
+            assert r.json()["actions"] == ["context.details", "context.read"]
+        live_phase(t, target)
+        t["code"] = secrets.token_urlsafe(32)  # новый Node admission, не повтор /admit
+        r = await introspect(env, t)
+        assert r.status_code == 409 and r.json()["error"]["code"] == "phase_changed", r.text
+        offset = len(env[2].requests)
+        r = await renew_grant(env, t)
+>       assert r.status_code == 200, r.text
+E       AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"support_binding_changed","retryable":false},"requestRef":"9b01ff6925a7487a92be2ca1ca0129e2"}
+E       assert 403 == 200
+E        +  where 403 = <Response [403 Forbidden]>.status_code
+
+tests/test_support_context_v1.py:307: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 01:16:24,391 [INFO] httpx: HTTP Request: POST http://127.0.0.1:42623/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:16:24,399 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 01:16:24,495 [INFO] httpx: HTTP Request: POST http://127.0.0.1:42623/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+2026-10-21 01:16:24,558 [INFO] httpx: HTTP Request: POST http://127.0.0.1:42623/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 01:16:24,624 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+2026-10-21 01:16:24,774 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+2026-10-21 01:16:25,068 [INFO] httpx: HTTP Request: POST http://127.0.0.1:42623/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 01:16:25,128 [INFO] httpx: HTTP Request: POST http://127.0.0.1:42623/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 01:16:25,143 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/introspect "HTTP/1.1 200 OK"
+2026-10-21 01:16:25,256 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+2026-10-21 01:16:25,547 [INFO] httpx: HTTP Request: POST http://127.0.0.1:42623/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 01:16:25,550 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/introspect "HTTP/1.1 409 Conflict"
+2026-10-21 01:16:25,805 [INFO] httpx: HTTP Request: POST http://127.0.0.1:42623/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 01:16:25,870 [INFO] httpx: HTTP Request: POST http://127.0.0.1:42623/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 01:16:25,873 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/renew "HTTP/1.1 403 Forbidden"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:42623/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:42623/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:42623/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:42623/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:42623/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/introspect "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:42623/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/introspect "HTTP/1.1 409 Conflict"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:42623/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:42623/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36611/api/eco/support-context/v1/renew "HTTP/1.1 403 Forbidden"
+=========================== short test summary info ============================
+FAILED tests/test_support_context_v1.py::test_renew_phase_issues_fresh_rights_without_upgrading_old_token[offering-connected]
+FAILED tests/test_support_context_v1.py::test_renew_phase_issues_fresh_rights_without_upgrading_old_token[consult-connected]
+FAILED tests/test_support_context_v1.py::test_renew_phase_issues_fresh_rights_without_upgrading_old_token[connected-consult]
+3 failed, 1 passed, 75 deselected, 2 warnings in 30.10s

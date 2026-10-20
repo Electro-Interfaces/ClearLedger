@@ -86,6 +86,8 @@ class Peer:
         self.delay = 0
         self.errors = []
         self.on_status = None
+        self.on_consume = None
+        self.used_codes = set()
 
     @asynccontextmanager
     async def running(self):
@@ -119,8 +121,17 @@ class Peer:
                         result = tenant["actor"]
                     elif self.path.endswith("/consume"):
                         assert c["svc"] == "support-context.admission"
-                        assert body["admissionCode"] == tenant["code"]
+                        code = body["admissionCode"]
+                        if code != tenant["code"] or code in owner.used_codes:
+                            self.send_response(409)
+                            self.send_header("Content-Length", "2")
+                            self.end_headers()
+                            self.wfile.write(b'{}')
+                            return
                         assert body["jkt"] == tenant["jkt"]
+                        owner.used_codes.add(code)
+                        if owner.on_consume:
+                            owner.on_consume()
                         result = tenant["node"]
                     elif self.path.endswith("/status"):
                         assert c["svc"] == "support-context.admission"
@@ -259,6 +270,163 @@ async def introspect(env, t, *, token=None, service=None):
                              headers={"Authorization": "Bearer " + service})
 
 
+def live_phase(t, phase, *, mask=None):
+    t["node"].update(phase=phase, phaseDeadline=(
+        datetime.now(timezone.utc) + timedelta(seconds=50)).isoformat()
+        if phase in ("offering", "wrapup") else None)
+    t["actor"]["fieldMask"] = mask or ("consult" if phase in ("offering", "consult") else "operator")
+
+
+async def renew_grant(env, t, *, code=None, key=None, proof=None):
+    client, origin, _peer, _tenants = env
+    return await client.post(PREFIX + "/renew", json=envelope(
+        nodeId=t["callRef"]["nodeId"], grantId=t["claims"]["grantId"],
+        admissionCode=code or t["code"]), headers={
+            "Authorization": "DPoP " + t["grant"],
+            "DPoP": proof or dpop(key or t["key"], origin + PREFIX + "/renew", token=t["grant"]),
+        })
+
+
+@pytest.mark.parametrize("source,target", [("offering", "connected"), ("connected", "wrapup"),
+                                          ("consult", "connected"), ("connected", "consult")])
+async def test_renew_phase_issues_fresh_rights_without_upgrading_old_token(env, db, source, target):
+    t = env[3][0]
+    live_phase(t, source)
+    t = await admitted(env)
+    old_claims = t["claims"]
+    r = await introspect(env, t)
+    assert r.status_code == 200, r.text
+    if source in ("offering", "consult"):
+        assert r.json()["actions"] == ["context.details", "context.read"]
+    live_phase(t, target)
+    t["code"] = secrets.token_urlsafe(32)  # новый Node admission, не повтор /admit
+    r = await introspect(env, t)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "phase_changed", r.text
+    offset = len(env[2].requests)
+    r = await renew_grant(env, t)
+    assert r.status_code == 200, r.text
+    assert [p.rsplit("/", 1)[1] for p, _c, _b in env[2].requests[offset:]] == [
+        "status", "actor-resolve", "consume", "actor-resolve"]
+    token = r.json()["token"]
+    c = jwt.decode(token, env[2].public_key, algorithms=["RS256"], audience="support-context")
+    assert c["phase"] == target and c["grantId"] != old_claims["grantId"]
+    for name in ("sub", "act", "cnf", "callRef", "contextRef", "assignmentVersion",
+                 "bindingVersion", "permissionsVersion"):
+        assert c[name] == old_claims[name]
+    expected = sorted(ALL_ACTIONS) if target in ("connected", "wrapup") else ["context.details", "context.read"]
+    assert c["actions"] == expected
+    if target == "wrapup":
+        assert c["exp"] <= int(datetime.fromisoformat(t["node"]["phaseDeadline"]).timestamp())
+    old = await db.get(ContextGrant, old_claims["grantId"], populate_existing=True)
+    assert old.revoked_at
+    r = await introspect(env, t)
+    assert r.status_code == 403, r.text
+    r = await introspect(env, t, token=token)
+    assert r.status_code == 200 and r.json()["actions"] == expected, r.text
+    assert r.json()["fieldMask"] == t["actor"]["fieldMask"]
+    # Отзыв после успешного renewal виден следующей операции без positive cache.
+    t["actor"]["active"] = False
+    assert (await introspect(env, t, token=token)).status_code == 403
+
+
+@pytest.mark.parametrize("change", ["revoke", "node_revoke", "inactive", "assignment", "act",
+    "connection", "jkt", "binding", "binding_ref", "support_user", "permissions", "actor",
+    "membership", "actor_active", "core_session", "mask_same_phase", "vendor", "assigned_ticket"])
+async def test_renew_phase_keeps_identity_versions_revoke_and_mask_checks(env, db, change):
+    t = env[3][0]
+    live_phase(t, "offering")
+    t = await admitted(env)
+    live_phase(t, "connected")
+    t["code"] = secrets.token_urlsafe(32)
+    if change == "revoke":
+        row = await db.get(ContextGrant, t["claims"]["grantId"])
+        row.revoked_at = datetime.now(timezone.utc)
+    elif change == "node_revoke":
+        t["node"]["revoked"] = True
+    elif change == "inactive":
+        t["node"]["active"] = False
+    elif change == "assignment":
+        t["node"]["assignmentVersion"] += 1
+    elif change == "act":
+        t["node"]["act"] = {"iss": "https://foreign.invalid", "sub": "foreign"}
+    elif change == "connection":
+        t["node"]["connectionId"] = "foreign"
+    elif change == "jkt":
+        t["node"]["jkt"] = "x" * 43
+    elif change == "binding":
+        t["actor"]["bindingVersion"] += 1
+    elif change == "binding_ref":
+        t["actor"]["bindingRef"] = "foreign"
+    elif change == "support_user":
+        t["actor"]["supportUserRef"] = str(uuid.uuid4())
+    elif change == "permissions":
+        t["actor"]["permissionsVersion"] += 1
+    elif change == "actor":
+        t["actor"]["coreActorSub"] = str(uuid.uuid4())
+    elif change == "membership":
+        t["actor"]["membership"] = False
+    elif change == "actor_active":
+        t["actor"]["active"] = False
+    elif change == "core_session":
+        t["user"].token_version += 1
+    elif change == "mask_same_phase":
+        live_phase(t, "offering", mask="operator")  # валидный deadline, прежняя фаза
+    else:
+        t["actor"]["fieldMask"] = change
+    await db.commit()
+    before = await db.scalar(select(func.count()).select_from(ContextGrant))
+    offset = len(env[2].requests)
+    r = await renew_grant(env, t)
+    assert r.status_code == 403, r.text
+    assert not any(p.endswith("/consume") for p, _c, _b in env[2].requests[offset:])
+    assert await db.scalar(select(func.count()).select_from(ContextGrant)) == before
+
+
+@pytest.mark.parametrize("change", ["bindingRef", "supportUserRef", "bindingVersion", "permissionsVersion"])
+async def test_renew_rechecks_stable_binding_after_fresh_consume(env, db, change):
+    t = env[3][0]
+    live_phase(t, "offering")
+    t = await admitted(env)
+    live_phase(t, "connected")
+    t["code"] = secrets.token_urlsafe(32)
+    def mutate():
+        value = t["actor"][change]
+        t["actor"][change] = value + 1 if isinstance(value, int) else "foreign"
+    env[2].on_consume = mutate
+    before = await db.scalar(select(func.count()).select_from(ContextGrant))
+    r = await renew_grant(env, t)
+    assert r.status_code == 403, r.text
+    assert await db.scalar(select(func.count()).select_from(ContextGrant)) == before
+    old = await db.get(ContextGrant, t["claims"]["grantId"], populate_existing=True)
+    assert old.revoked_at is None
+
+
+async def test_renew_transition_denies_stolen_proof_and_replayed_code(env, db):
+    t = env[3][0]
+    live_phase(t, "offering")
+    t = await admitted(env)
+    used = t["code"]
+    live_phase(t, "connected")
+    t["code"] = secrets.token_urlsafe(32)
+    r = await renew_grant(env, t, key=ec.generate_private_key(ec.SECP256R1()))
+    assert r.status_code == 401, r.text
+    for invalid_code in (used, secrets.token_urlsafe(32)):
+        r = await renew_grant(env, t, code=invalid_code)
+        assert r.status_code == 409, r.text
+    proof = dpop(t["key"], env[1] + PREFIX + "/renew", token=t["grant"])
+    r = await renew_grant(env, t, proof=proof)
+    assert r.status_code == 200, r.text
+    replacement = r.json()["token"]
+    r = await renew_grant(env, t, proof=proof)
+    assert r.status_code == 401 and r.json()["error"]["code"] == "replay", r.text
+    t["grant"], t["claims"] = replacement, jwt.decode(
+        replacement, env[2].public_key, algorithms=["RS256"], audience="support-context")
+    before = await db.scalar(select(func.count()).select_from(ContextGrant))
+    r = await renew_grant(env, t)  # уже consumed code, но новый валидный proof
+    assert r.status_code == 409, r.text
+    assert await db.scalar(select(func.count()).select_from(ContextGrant)) == before
+
+
 async def test_real_http_two_companies_scoped_grants_and_opaque_prepare(env, db):
     client, _origin, peer, tenants = env
     for i in range(2):
@@ -354,6 +522,7 @@ async def test_real_signed_wrong_tokens_never_fallback(env, mutation):
 
 async def test_dpop_real_proofs_replay_durable_renew_and_host_binding(env, db):
     t = await admitted(env)
+    t["code"] = secrets.token_urlsafe(32)
     client, origin, _peer, _tenants = env
     path = origin + PREFIX + "/renew"
     body = envelope(grantId=t["claims"]["grantId"], nodeId=t["callRef"]["nodeId"], admissionCode=t["code"])
