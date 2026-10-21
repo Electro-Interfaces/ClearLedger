@@ -450,6 +450,8 @@ def check_postcall_node(data, trust, c, authority, *, allow_pending=False):
     if n["phase"] != "ended":
         if not allow_pending or authority.get("postcallDeadline") or n["phase"] != "wrapup":
             fail(403, "postcall_revoked")
+        if trust.postcallMaxSec == 0:
+            fail(403, "postcall_expired")
         # Только первоначальный переход. Живой wrapup обязан по-прежнему
         # подтверждать assignment/active/MFA и ещё не истёкший Node deadline.
         check_node(data, trust, c["callRef"], c["contextRef"], c["cnf"]["jkt"], c)

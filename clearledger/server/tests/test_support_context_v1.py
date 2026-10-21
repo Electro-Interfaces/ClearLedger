@@ -889,7 +889,7 @@ async def test_postcall_initial_wrapup_pending_then_ended_with_new_proof(env, db
     "binding", "binding_ref", "support_user", "permissions", "actor", "membership",
     "actor_active", "unassigned", "wrong_ticket", "mask", "no_capabilities",
     "core_session", "core_membership", "core_module", "core_scope", "context_expired",
-    "existing_deadline", "expired_hard_deadline",
+    "existing_deadline", "expired_hard_deadline", "policy_disabled",
 ])
 async def test_postcall_pending_never_masks_permanent_denial(env, db, reason):
     t = await postcall_wrapup(env)
@@ -954,6 +954,8 @@ async def test_postcall_pending_never_masks_permanent_denial(env, db, reason):
     elif reason == "context_expired":
         bound = await db.get(ContextBinding, t["contextRef"])
         bound.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    elif reason == "policy_disabled":
+        t["voice"].config = {"supportContext": {**t["config"], "postcallMaxSec": 0}}
     elif reason in ("existing_deadline", "expired_hard_deadline"):
         hard = datetime.now(timezone.utc) + timedelta(seconds=60 if reason == "existing_deadline" else -1)
         row.authority = {**row.authority, "postcallDeadline": hard.isoformat()}
