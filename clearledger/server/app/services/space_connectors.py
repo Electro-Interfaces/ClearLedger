@@ -116,7 +116,8 @@ async def _app_connectors(
     app_row: App, link: AppCompanyLink, app_code: str, app_name: str,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Спросить приложение о его коннекторах. Ошибку возвращаем, а не роняем витрину."""
-    token = sso.sign_service_token(aud=app_code, scope="projection")
+    token = sso.sign_service_token(aud=app_code, scope="projection",
+                                   app_company_id=link.external_company_id)
     if not token:
         return [], "единый вход не настроен (нет ключа подписи)"
 
@@ -593,7 +594,8 @@ async def fetch_external_work(
         return {"ok": False, "reason": f"приложение «{app_code}» компании не подключено"}
     app_row, link = row
 
-    token = sso.sign_service_token(aud=app_code, scope="projection")
+    token = sso.sign_service_token(aud=app_code, scope="projection",
+                                   app_company_id=link.external_company_id)
     if not token:
         return {"ok": False, "reason": "единый вход не настроен (нет ключа подписи)"}
 

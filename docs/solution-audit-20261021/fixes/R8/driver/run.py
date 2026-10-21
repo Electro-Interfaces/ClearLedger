@@ -46,7 +46,11 @@ A = SimpleNamespace(support_id="a0000000-0000-4000-8000-000000000001", slug="fix
                     core_id=uuid.UUID("aa000000-0000-4000-8000-0000000000a1"),
                     process="a5000000-0000-4000-8000-000000000001", subject="obj-a",
                     link="a4000000-0000-4000-8000-000000000001",
-                    email="dispatcher-a@fix-r8.invalid")
+                    email="dispatcher-a@fix-r8.invalid",
+                    # Человек тот же в каждом прогоне: со случайным `sub` второй прогон
+                    # получал бы 409 «связана с другим пользователем» — это свойство
+                    # драйвера, а не граница, которую проверяют.
+                    person=uuid.UUID("a6000000-0000-4000-8000-0000000000a6"))
 B = SimpleNamespace(support_id="b0000000-0000-4000-8000-000000000002", slug="fix-r8-b",
                     core_id=uuid.UUID("bb000000-0000-4000-8000-0000000000b2"),
                     process="b5000000-0000-4000-8000-000000000002", subject="obj-b")
@@ -69,7 +73,11 @@ os.environ["SSO_SIGNING_KEY"] = base64.b64encode(КЛЮЧ.read_bytes()).decode()
 os.environ.setdefault("SECRET_KEY", "fix-r8-driver")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://clearledger:clearledger@127.0.0.1:37432/clearledger_test")
 
-sys.path.insert(0, str(КОРЕНЬ.parents[5] / "clearledger" / "server"))
+# Откуда берётся код Ядра. По умолчанию — дерево этого драйвера; красный прогон
+# указывает сюда дерево на предправочном SHA, чтобы между прогонами отличался
+# ТОЛЬКО продуктовый код, а не ещё и драйвер.
+sys.path.insert(0, os.environ.get(
+    "FIX_CORE", str(КОРЕНЬ.parents[5] / "clearledger" / "server")))
 import httpx  # noqa: E402
 import jwt as jwtlib  # noqa: E402
 
@@ -107,9 +115,10 @@ class StubDB:
         self.link = SimpleNamespace(external_company_id=support_id, external_code=None)
 
     async def execute(self, statement):
+        строка = self.link if "eco_app_company_links" in str(statement) else self.app
         return SimpleNamespace(first=lambda: (self.app, self.link),
-                               scalar_one_or_none=lambda: self.app,
-                               scalars=lambda: SimpleNamespace(all=lambda: [self.app]))
+                               scalar_one_or_none=lambda: строка,
+                               scalars=lambda: SimpleNamespace(all=lambda: [строка]))
 
     async def scalar(self, statement):
         return self.app
@@ -246,7 +255,7 @@ async def main() -> int:
           "200, шаг resolved", ответ, ответ["статус"] == 200)
 
     # P-02 — обычный handoff человека не затронут.
-    человек = SimpleNamespace(id=uuid.uuid4(), email=A.email, name="Диспетчер заказчика А",
+    человек = SimpleNamespace(id=A.person, email=A.email, name="Диспетчер заказчика А",
                               is_superadmin=False)
     handoff = sso.sign_sso_token(user=человек, company_id=A.core_id,
                                  companies=[{"id": str(A.core_id), "slug": A.slug,

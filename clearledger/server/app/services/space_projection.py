@@ -204,7 +204,8 @@ async def object_tickets(
         # Соответствие не задано — приложение просто ещё не знает об этой компании.
         return {"app": app_code, "linked": False, "total": 0, "open": 0, "tickets": []}
 
-    token = sso.sign_service_token(aud=app_code, scope="projection")
+    token = sso.sign_service_token(aud=app_code, scope="projection",
+                                   app_company_id=link.external_company_id)
     if not token:
         raise ProjectionError("Единый вход не настроен (нет ключа подписи)")
 
@@ -450,7 +451,11 @@ async def _target(
             "Нет соответствия компаний: задайте, какой компании приложения отвечает эта "
             "компания пространства (Центр управления → Приложения)")
 
-    token = sso.sign_service_token(aud=app_code, scope="projection")
+    # Карта компаний прочитана строкой выше — ею и задаётся область действия токена.
+    # Раньше она попадала только в тело вызова, а удостоверение не называло никого:
+    # один токен работал в контуре любого заказчика приложения (B-11, 21.10.2026).
+    token = sso.sign_service_token(aud=app_code, scope="projection",
+                                   app_company_id=link.external_company_id)
     if not token:
         raise ProjectionError("Единый вход не настроен (нет ключа подписи) — проекция невозможна")
     return app_row, link, token

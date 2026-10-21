@@ -1,0 +1,28 @@
+# Зелёный прогон ПОСЛЕ правки — те же проверки арендатора служебного токена
+# ветка: fix/audit-r8-service-token-tenant-20261021
+# дата: 2026-10-21T22:28:10+03:00
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.7.0 -- /usr/local/bin/python
+rootdir: /app/server
+configfile: pytest.ini
+plugins: anyio-4.15.1, asyncio-1.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=session, asyncio_default_test_loop_scope=session
+collecting ... collected 14 items
+
+tests/test_service_token_tenant.py::test_sign_service_token_names_tenant PASSED [  7%]
+tests/test_service_token_tenant.py::test_sign_service_token_refuses_without_tenant PASSED [ 14%]
+tests/test_service_token_tenant.py::test_slug_tenant_goes_to_company_claim PASSED [ 21%]
+tests/test_service_token_tenant.py::test_voice_service_token_names_company PASSED [ 28%]
+tests/test_service_token_tenant.py::test_projection_target_names_tenant PASSED [ 35%]
+tests/test_service_token_tenant.py::test_object_tickets_names_tenant PASSED [ 42%]
+tests/test_service_token_tenant.py::test_app_connectors_names_tenant PASSED [ 50%]
+tests/test_service_token_tenant.py::test_external_work_names_tenant PASSED [ 57%]
+tests/test_service_token_tenant.py::test_desk_card_names_tenant PASSED   [ 64%]
+tests/test_service_token_tenant.py::test_event_delivery_names_tenant PASSED [ 71%]
+tests/test_service_token_tenant.py::test_managed_connectors_names_tenant PASSED [ 78%]
+tests/test_service_token_tenant.py::test_ticket_communication_names_tenant PASSED [ 85%]
+tests/test_service_token_tenant.py::test_voice_context_names_tenant PASSED [ 92%]
+tests/test_service_token_tenant.py::test_every_issuance_site_names_the_tenant PASSED [100%]
+
+============================== 14 passed in 6.97s ==============================

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import secrets
 import time
 import uuid
@@ -169,30 +170,67 @@ def sign_vendor_token(*, user, company_id: str, self_code: str, vendor_code: str
     }, key, algorithm="RS256", headers={"kid": settings.sso_kid})
 
 
-def sign_service_token(*, aud: str, scope: str, ttl_seconds: int = 120,
-                       company_id: str | None = None, actor_id: str | None = None) -> str | None:
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+
+
+def sign_service_token(*, aud: str, scope: str, app_company_id: str,
+                       ttl_seconds: int = 120, actor_id: str | None = None) -> str | None:
     """Служебный (машинный) токен Ядра для приложения `aud`.
 
     Отличается от handoff-токена клеймом `svc`: он не про человека, а про право
     выполнить операцию между системами (например проекцию общих сущностей). Живёт
     минуты — ровно на время вызова. None, если ключ подписи не настроен.
+
+    ⚠ `app_company_id` — компания В ТЕРМИНАХ ПОЛУЧАТЕЛЯ (`external_company_id` карты
+    `eco_app_company_links`, а для узла «Телефонии» — его собственная настройка
+    `cid`). Это **область действия токена**, и она обязательна.
+
+    Безымянный служебный токен работал в контуре ЛЮБОГО заказчика приложения:
+    область задавал параметр `companyId` запроса, а удостоверение не называло
+    никого, — достаточно было подменить параметр (B-11, аудит решения 21.10.2026).
+    Поэтому аргумента по умолчанию у него нет: забыть компанию можно только здесь, и
+    новый путь выдачи обязан её назвать. Проверять то же в каждом маршруте
+    бессмысленно — подпись одна, и проверка живёт рядом с ней.
+
+    Называет компанию двумя клеймами с одним значением, потому что получателей двое:
+
+    * `cid` — как было. По нему арендатора читают `connector-management`, `voice-*`
+      и `ticket-communications` Поддержки и API узла «Телефонии»;
+    * `company_id` (UUID) либо `company` (код) — прямая форма контракта версии 2
+      служебного канала (`TSupport:docs/process-facade-service-channel.md`). `cid`
+      эта версия арендатором не считает: там он лишь выбирает компанию по умолчанию
+      внутри списка `companies`.
+
+    Список `companies` Ядро здесь не собирает намеренно: в точке выдачи известна
+    ровно одна компания — та, чью пару прочитала карта, — и область действия токена
+    обязана быть минимальной. Список назвал бы компании, которых этот вызов не
+    касается.
     """
     key = _private_key()
     if not key:
         return None
+    арендатор = str(app_company_id or "").strip()
+    if not арендатор:
+        raise ValueError(
+            "Служебному токену нужна компания получателя: токен без арендатора "
+            "действует в контуре любого заказчика приложения")
     now = int(time.time())
     payload = {
         "iss": settings.sso_issuer,
         "aud": aud,
         "sub": f"service:{scope}",
         "svc": scope,
+        "cid": арендатор,
+        # Нумерация компаний у приложений разная (`external_company_id` — строка):
+        # UUID идёт идентификатором, всё прочее — кодом. Положить код в `company_id`
+        # значило бы молча потерять арендатора: приёмник читает его только как UUID.
+        ("company_id" if _UUID_RE.match(арендатор) else "company"): арендатор,
         "jti": new_jti(),
         "iat": now,
         "nbf": now - 10,
         "exp": now + ttl_seconds,
     }
-    if company_id is not None:
-        payload["cid"] = company_id
     if actor_id is not None:
         payload["actor"] = actor_id
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})
@@ -218,7 +256,9 @@ def sign_voice_service_token(*, scope: str, company_id: str,
         raise ValueError(f"Неизвестная область «Телефонии»: {scope}")
     if not company_id:
         raise ValueError("Служебному токену «Телефонии» нужна компания")
-    return sign_service_token(aud="voice", scope=scope, company_id=str(company_id),
+    # Для узла «компания получателя» — компания пространства: узел провизионирован
+    # Ядром и свою `cid` знает нашим идентификатором, не чужим.
+    return sign_service_token(aud="voice", scope=scope, app_company_id=str(company_id),
                               actor_id=actor_id)
 
 

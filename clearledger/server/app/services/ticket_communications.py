@@ -28,7 +28,7 @@ async def access(db, cid, user, ticket_id, *, event=None, candidates=False):
         raise HTTPException(404, "Поддержка не подключена компании")
     app = await db.scalar(select(App).where(App.code == "support"))
     token = sso.sign_service_token(aud="support", scope="ticket.communication",
-        company_id=str(mapped), actor_id=str(user.id))
+        app_company_id=str(mapped), actor_id=str(user.id))
     if app is None or not token:
         raise HTTPException(503, "Взаимодействие временно недоступно")
     tid = str(uuid.UUID(str(ticket_id)))

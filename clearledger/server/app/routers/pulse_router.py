@@ -3441,12 +3441,13 @@ async def pulse_my_line_action(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Линия закрыта для этой роли")
 
     try:
-        app_row, _link, _tok = await space_projection._target(db, cid, "support")
+        app_row, link, _tok = await space_projection._target(db, cid, "support")
     except space_projection.ProjectionError as e:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(e))
     # Свой скоуп: право проецировать справочники не должно означать право
     # открывать человеку смену и назначать на него обращения.
-    token = sso.sign_service_token(aud="support", scope="desk")
+    token = sso.sign_service_token(aud="support", scope="desk",
+                                   app_company_id=link.external_company_id)
     if not token:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                             "Единый вход не настроен — действовать за сотрудника нельзя")

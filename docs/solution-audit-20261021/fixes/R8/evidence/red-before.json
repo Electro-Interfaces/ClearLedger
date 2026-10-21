@@ -16,9 +16,9 @@
           "aud": "support",
           "sub": "service:projection",
           "svc": "projection",
-          "iat": 1792610526,
-          "nbf": 1792610516,
-          "exp": 1792610646
+          "iat": 1792610972,
+          "nbf": 1792610962,
+          "exp": 1792611092
         }
       },
       "итог": "КРАСНО"
