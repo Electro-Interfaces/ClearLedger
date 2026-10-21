@@ -14,7 +14,7 @@ import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Company, InfoArticle, InfoBinding, InfoCategory, User
@@ -209,19 +209,34 @@ async def context(db: AsyncSession, company_id, *, app_code: str,
         часть = часть.strip()
         if not часть:
             continue
-        for k in (часть, часть.split(":")[0]):
+        # Например, calls:node:card -> calls:node -> calls. Соседний
+        # источник calls:megafon в эту подборку не попадает.
+        segments = часть.split(":")
+        for k in (":".join(segments[:n]) for n in range(len(segments), 0, -1)):
             if k and k not in keys:
                 keys.append(k)
-    rows = (await db.execute(
-        select(InfoArticle, InfoBinding.section_key, InfoBinding.weight)
+    relevance = case({key: -key.count(":") for key in keys}, value=InfoBinding.section_key,
+                     else_=1) if keys else InfoBinding.section_key.is_(None)
+    matches = (
+        select(InfoBinding.article_id, InfoBinding.section_key, InfoBinding.weight,
+               relevance.label("relevance"),
+               func.row_number().over(partition_by=InfoBinding.article_id,
+                                      order_by=(relevance, InfoBinding.weight.desc())).label("choice"))
         .join(InfoBinding, InfoBinding.article_id == InfoArticle.id)
+        .select_from(InfoArticle)
         .where(_visible(InfoArticle, company_id, profile),
                InfoArticle.status == "published",
                InfoBinding.app_code == app_code,
                or_(InfoBinding.section_key.is_(None),
                    InfoBinding.section_key.in_(keys or [""])))
-        .order_by(InfoBinding.section_key.is_(None),   # точное совпадение раздела — выше
-                  InfoBinding.weight.desc(), InfoArticle.sort_order)
+        .subquery())
+    # Выбираем лучшую привязку каждой статьи в БД. Тело и поля читаем
+    # только для итоговой подборки, лимит не расходуется на дубли.
+    rows = (await db.execute(
+        select(InfoArticle, matches.c.section_key, matches.c.weight)
+        .join(matches, matches.c.article_id == InfoArticle.id)
+        .where(matches.c.choice == 1)
+        .order_by(matches.c.relevance, matches.c.weight.desc(), InfoArticle.sort_order, InfoArticle.id)
         .limit(limit))).all()
     items = []
     seen: set[str] = set()

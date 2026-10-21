@@ -1,3 +1,4 @@
+import { VOICE_MEGAFON_TABS } from './views'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
@@ -18,7 +19,7 @@ import {
   type MegafonCall, type MegafonPeriod, type MegafonVoiceData,
 } from '@/services/megafonVoiceService'
 
-const VIEWS = [{ k: 'calls', label: 'Журнал звонков' }, { k: 'operators', label: 'Операторы' }, { k: 'groups', label: 'Группы' }]
+const VIEWS = VOICE_MEGAFON_TABS
 const PERIODS = [{ value: 'today', label: 'Сегодня' }, { value: '7d', label: '7 дней' }, { value: '30d', label: '30 дней' }]
 // Пустое значение — реальный отбор «не указан»; отсутствие параметра — все значения.
 const ALL = '__megafon_all__'
@@ -52,6 +53,9 @@ function MegafonCompanyPage({ companyId, section }: { companyId: string; section
   // Фиксируем фактический интервал: карточка, reload и «Назад» сохраняют выборку.
   useEffect(() => {
     if (!companyId) return
+    // При переключении источника старый экран ещё может завершать эффект.
+    // Явный выбор узла нельзя переписать нормализацией URL истории.
+    if (section && url.get('source') === 'node') return
     if (url.get('from') === params.from && url.get('to') === params.to && url.get('voice_company') === companyId && (!section || url.get('source') === 'megafon')) return
     const next = new URLSearchParams(url)
     next.set('voice_company', companyId)

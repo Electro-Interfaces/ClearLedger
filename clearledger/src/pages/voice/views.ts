@@ -108,3 +108,26 @@ export function voiceViewFor(pathname: string): VoiceView {
   return [...VOICE_VIEWS].filter(v => v.path)
     .find(v => pathname === voicePath(v) || pathname.startsWith(`${voicePath(v)}/`)) ?? VOICE_VIEWS[0]
 }
+
+export const VOICE_RECEPTION_TABS = [
+  { key: 'hours', name: 'Часы и линия', поля: ['/lineName', '/slaTargetSec', '/hours', '/greeting', '/mohClass', '/operators'] },
+  { key: 'vip', name: 'VIP и повторы', поля: ['/vip', '/repeatWithinMin', '/priority'] },
+  { key: 'queue', name: 'Очередь и ожидание', поля: ['/queueAnnounceFirstSec', '/queueAnnounceSec', '/queueAnnounceSound', '/agentLostSound'] },
+  { key: 'callback', name: 'Обратный звонок', поля: ['/callbackOfferSec', '/callbackLeadSec', '/callbackOfferSound', '/callbackConfirmSound', '/callbackRetryMin', '/callbackMaxAttempts', '/callbackRingSec', '/callbackDial', '/callbackCallerId', '/missedCallback'] },
+  { key: 'fallback', name: 'Вне часов и запасной сценарий', поля: ['/afterHoursTarget', '/targets'] },
+  { key: 'topics', name: 'Темы', поля: ['/topics'] },
+  { key: 'controls', name: 'Пульт оператора', поля: ['/operatorControls'] },
+] as const
+
+export const VOICE_PASSPORT_TABS = [
+  { key: 'presentation', name: 'Представление', поля: ['/presentation'] },
+  { key: 'disposition', name: 'Итоги', поля: ['/disposition'] },
+  { key: 'privacy', name: 'Приватность', поля: ['/privacy'] },
+  { key: 'access', name: 'Допуск операторов', поля: ['/access'] },
+  { key: 'actions', name: 'Действия', поля: ['/actions'] },
+  { key: 'fallback', name: 'Ожидание и предложение', поля: ['/fallback', '/offer', '/minAcceptedVersion'] },
+  { key: 'retention', name: 'Что КЦ хранит', поля: ['/kcRetention'] },
+  { key: 'enrichment', name: 'Подсказки', поля: ['/liveEnrichment'] },
+] as const
+
+export const VOICE_MEGAFON_TABS = [{ k: 'calls', label: 'Журнал звонков' }, { k: 'operators', label: 'Операторы' }, { k: 'groups', label: 'Группы' }] as const

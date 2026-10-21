@@ -1,3 +1,4 @@
+import { VOICE_RECEPTION_TABS } from './views'
 /**
  * «Правила приёма» — всё, что раньше правили руками в *.reception.json, по вкладкам
  * на языке звонящего (docs/voice-app.html ContactHub, §5).
@@ -35,15 +36,7 @@ import {
   type ПравилаПриёма, type Цель,
 } from './reception'
 
-const ВКЛАДКИ = [
-  { key: 'hours', name: 'Часы и линия', поля: ['/lineName', '/slaTargetSec', '/hours', '/greeting', '/mohClass', '/operators'] },
-  { key: 'vip', name: 'VIP и повторы', поля: ['/vip', '/repeatWithinMin', '/priority'] },
-  { key: 'queue', name: 'Очередь и ожидание', поля: ['/queueAnnounceFirstSec', '/queueAnnounceSec', '/queueAnnounceSound', '/agentLostSound'] },
-  { key: 'callback', name: 'Обратный звонок', поля: ['/callbackOfferSec', '/callbackLeadSec', '/callbackOfferSound', '/callbackConfirmSound', '/callbackRetryMin', '/callbackMaxAttempts', '/callbackRingSec', '/callbackDial', '/callbackCallerId', '/missedCallback'] },
-  { key: 'fallback', name: 'Вне часов и запасной сценарий', поля: ['/afterHoursTarget', '/targets'] },
-  { key: 'topics', name: 'Темы', поля: ['/topics'] },
-  { key: 'controls', name: 'Пульт оператора', поля: ['/operatorControls'] },
-] as const
+const ВКЛАДКИ = VOICE_RECEPTION_TABS
 
 type Вкладка = (typeof ВКЛАДКИ)[number]['key']
 
