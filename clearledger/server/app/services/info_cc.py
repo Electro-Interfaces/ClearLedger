@@ -28,5 +28,6 @@ async def instructions(db: AsyncSession) -> dict:
                           "summary": row.summary or "", "bodyMd": row.body_md,
                           "category": definition["category"],
                           "sections": definition["cc_sections"],
+                          "contexts": definition["cc_contexts"],
                           "audience": definition["cc_audience"]})
     return {"source": "info", "items": items}

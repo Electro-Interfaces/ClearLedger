@@ -10,12 +10,25 @@ from app.services.info_seed import seed_info
 from app.services.info_seed_cc import ARTICLES
 
 
+def test_cc_help_covers_current_screen_states_and_new_support_mode():
+    contexts = {c for a in ARTICLES for c in a['cc_contexts']}
+    assert contexts == {
+        'desk:start', 'desk:ready', 'desk:away', 'desk:queue', 'desk:offer', 'desk:connected',
+        'desk:wrapup', 'desk:hold', 'desk:park', 'desk:callback', 'desk:transfer', 'desk:sound', 'desk:outbound',
+        'head', 'journal', 'actions', 'stats:contacts', 'stats:operators', 'stats:occupancy', 'stats:callbacks',
+        'admin:customers', 'admin:operators', 'admin:breaks', 'admin:connections', 'admin:chain',
+    }
+    support = next(a for a in ARTICLES if a['cc_key'] == 'support')
+    assert 'не означает её включение' in support['body']
+
+
 def test_cc_instructions_have_unique_keys_and_readable_steps():
     assert len(ARTICLES) == len({a["title"] for a in ARTICLES}) == len({a["cc_key"] for a in ARTICLES})
     for a in ARTICLES:
         assert len(a["body"]) > 500 and a["summary"]
         assert not re.search('[—–]', a["body"] + a["title"] + a["summary"])
         assert a["bindings"] == [("voice", "cc", 50)]
+        assert a["cc_contexts"]
 
 
 @pytest.mark.asyncio(loop_scope="session")
@@ -37,7 +50,7 @@ async def test_cc_public_pack_is_same_published_platform_content_and_excludes_co
     pack = await instructions(db)
     assert pack["items"][0]["bodyMd"] == row.body_md
     assert len(pack["items"]) == len(ARTICLES)
-    assert set(pack["items"][0]) == {"key", "title", "summary", "bodyMd", "category", "sections", "audience"}
+    assert set(pack["items"][0]) == {"key", "title", "summary", "bodyMd", "category", "sections", "audience", "contexts"}
     row.status = "draft"; await db.flush()
     assert len((await instructions(db))["items"]) == len(ARTICLES) - 1
     await db.commit()
