@@ -245,6 +245,49 @@ async def test_voice_context_names_tenant(captured):
     assert tenant_of(captured[-1]["claims"]) == REMOTE
 
 
+async def test_empty_company_link_is_refused_on_write(monkeypatch):
+    """Пустое соответствие в карту не записывается.
+
+    Область действия служебного токена читается из `external_company_id`, и пустая
+    запись оставила бы карту «заполненной» без компании — выписать токен приложению
+    стало бы нечем. Чинится там, где данные входят, а не десятью проверками у подписи.
+    """
+    from app.routers import space_registry_router as реестр
+
+    async def участник(ref, user, db):
+        return COMPANY
+
+    monkeypatch.setattr(реестр, "assert_company_member", участник)
+    админ = SimpleNamespace(id=ACTOR, is_superadmin=True)
+    for пусто in ("", "   "):
+        with pytest.raises(реестр.HTTPException) as отказ:
+            await реестр.put_link(app_code="support", company_id=str(COMPANY),
+                                  external_company_id=пусто, external_code=None,
+                                  user=админ, db=StubDB())
+        assert отказ.value.status_code == 422
+
+    записано: dict = {}
+
+    class ПишущаяDB(StubDB):
+        async def execute(self, statement):
+            if "eco_app_company_links" in str(statement):
+                return SimpleNamespace(scalar_one_or_none=lambda: None)
+            return await super().execute(statement)
+
+        def add(self, row):
+            записано["external_company_id"] = row.external_company_id
+
+        async def commit(self):
+            pass
+
+    # Положительный контроль: законное соответствие по-прежнему записывается,
+    # с обрезкой пробелов — ведущий пробел в ключе уже обходил сверки однажды.
+    ответ = await реестр.put_link(app_code="support", company_id=str(COMPANY),
+                                  external_company_id=f" {REMOTE} ", external_code="rushydro",
+                                  user=админ, db=ПишущаяDB())
+    assert ответ["externalCompanyId"] == записано["external_company_id"] == REMOTE
+
+
 def test_every_issuance_site_names_the_tenant():
     """Ни одного пути выдачи без компании — проверяется по исходникам.
 

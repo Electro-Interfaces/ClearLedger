@@ -15,3 +15,28 @@
 карантин, пропущен: tests/test_accounting_egress.py
 карантин, пропущен: tests/test_accounting_group_v3.py
 ── tests/test_accounting_outbox.py
+...................                                                      [100%]
+19 passed in 1.22s
+── tests/test_accounting_reconciliation.py
+.........                                                                [100%]
+9 passed in 0.08s
+── tests/test_acquaint_requests.py
+.....                                                                    [100%]
+5 passed in 11.49s
+── tests/test_app_registry_defaults.py
+...........                                                              [100%]
+11 passed in 0.07s
+── tests/test_approval_requests.py
+.......                                                                  [100%]
+7 passed in 0.07s
+── tests/test_asuim_payment_time.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_asuim_vitrina.py
+...............                                                          [100%]
+15 passed in 0.22s
+── tests/test_audit_security.py
+.                                                                        [100%]
+1 passed in 11.03s
+── tests/test_auth.py
+RC=137
