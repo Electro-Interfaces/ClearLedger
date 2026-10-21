@@ -87,6 +87,7 @@ class Peer:
         self.errors = []
         self.on_status = None
         self.on_consume = None
+        self.on_actor_resolve = None
         self.used_codes = set()
 
     @asynccontextmanager
@@ -118,6 +119,8 @@ class Peer:
                         assert c["svc"] == "support-context.actor-resolve"
                         assert body["contextRef"] == tenant["contextRef"]
                         assert body["act"] == tenant["node"]["act"]
+                        if owner.on_actor_resolve:
+                            owner.on_actor_resolve()
                         result = tenant["actor"]
                     elif self.path.endswith("/consume"):
                         assert c["svc"] == "support-context.admission"
@@ -817,6 +820,128 @@ async def postcall_wrapup(env):
     return t
 
 
+def boundary_evidence(name, data):
+    import os
+    from pathlib import Path
+    if prefix := os.environ.get("R26_EVIDENCE_PREFIX"):
+        Path(prefix + "-" + name + ".json").write_text(json.dumps(data, indent=2) + "\n")
+
+
+async def test_postcall_pending_crosses_live_deadline_during_actor_http(env, db):
+    t = await postcall_wrapup(env)
+    client, origin, peer, _tenants = env
+    from app.database import async_session_factory
+    loop = asyncio.get_running_loop()
+    trace = {}
+
+    def on_status():
+        # Node status законно подтверждает wrapup до deadline. Только реальное
+        # время HTTP actor-resolve пересекает его; SQL/часы не подменяются.
+        deadline = datetime.now(timezone.utc) + timedelta(seconds=1)
+        t["node"]["phaseDeadline"] = deadline.isoformat()
+        trace["nodeDeadline"] = deadline.isoformat()
+
+    async def barrier():
+        trace["actorHttpStartedAt"] = now()
+        assert datetime.fromisoformat(trace["actorHttpStartedAt"]) < datetime.fromisoformat(trace["nodeDeadline"])
+        async with async_session_factory() as other:
+            root = await other.scalar(select(ContextGrant).where(
+                ContextGrant.grant_id == t["claims"]["grantId"]).with_for_update(nowait=True))
+            assert root.revoked_at is None
+            trace["rootLockNowaitAcquired"] = True
+            await other.commit()
+        await asyncio.sleep(max(0, datetime.fromisoformat(trace["nodeDeadline"]).timestamp() - time.time() + .02))
+        trace["actorHttpFinishedAt"] = now()
+
+    peer.on_status = on_status
+    peer.on_actor_resolve = lambda: asyncio.run_coroutine_threadsafe(barrier(), loop).result(timeout=2.5)
+    row = await db.get(ContextGrant, t["claims"]["grantId"], populate_existing=True)
+    original = (copy.deepcopy(row.claims), copy.deepcopy(row.authority), row.expires_at, row.revoked_at)
+    before = await db.scalar(select(func.count()).select_from(ContextGrant))
+    proof = dpop(t["key"], origin + PREFIX + "/postcall")
+    body = envelope(grantId=t["claims"]["grantId"], ticketRef="synthetic-own-ticket")
+    r = await client.post(PREFIX + "/postcall", json=body, headers={"DPoP": proof})
+    row = await db.get(ContextGrant, row.grant_id, populate_existing=True)
+    trace.update(status=r.status_code, error=r.json().get("error"),
+                 sourceUnchanged=(row.claims, row.authority, row.expires_at, row.revoked_at) == original,
+                 grantCountUnchanged=await db.scalar(select(func.count()).select_from(ContextGrant)) == before)
+    boundary_evidence("actor-deadline-crossing", trace)
+    assert datetime.fromisoformat(trace["actorHttpFinishedAt"]) > datetime.fromisoformat(trace["nodeDeadline"])
+    assert trace["sourceUnchanged"] and trace["grantCountUnchanged"]
+    assert r.status_code == 409, r.text
+    assert r.json()["error"] == {"code": "postcall_pending", "retryable": True}
+    assert set(r.json()) == {"version", "schemaVersion", "error", "requestRef"}
+    r = await client.post(PREFIX + "/postcall", json=body, headers={"DPoP": proof})
+    assert r.status_code == 401 and r.json()["error"]["code"] == "replay", r.text
+
+
+async def test_postcall_pending_context_ttl_crossing_during_actor_http_is_denied(env, db):
+    t = await postcall_wrapup(env)
+    client, origin, peer, _tenants = env
+    # Context TTL остаётся самостоятельной границей, даже когда expired live
+    # projection допустима лишь для ожидания ended.
+    context_exp = datetime.now(timezone.utc) + timedelta(seconds=1.5)
+    bound = await db.get(ContextBinding, t["contextRef"])
+    bound.expires_at = context_exp
+    await db.commit()
+    t["node"].update(active=False, phaseDeadline=(
+        datetime.now(timezone.utc) - timedelta(milliseconds=8)).isoformat())
+    trace = {"contextExpiresAt": context_exp.isoformat()}
+
+    def barrier():
+        trace["actorHttpStartedAt"] = now()
+        assert datetime.now(timezone.utc) < context_exp
+        time.sleep(max(0, context_exp.timestamp() - time.time() + .02))
+        trace["actorHttpFinishedAt"] = now()
+
+    peer.on_actor_resolve = barrier
+    row = await db.get(ContextGrant, t["claims"]["grantId"], populate_existing=True)
+    original = (copy.deepcopy(row.claims), copy.deepcopy(row.authority), row.expires_at, row.revoked_at)
+    before = await db.scalar(select(func.count()).select_from(ContextGrant))
+    r = await postcall_request(env, t)
+    row = await db.get(ContextGrant, row.grant_id, populate_existing=True)
+    trace.update(status=r.status_code, error=r.json().get("error"),
+                 sourceUnchanged=(row.claims, row.authority, row.expires_at, row.revoked_at) == original,
+                 grantCountUnchanged=await db.scalar(select(func.count()).select_from(ContextGrant)) == before)
+    boundary_evidence("context-ttl-crossing", trace)
+    assert trace["sourceUnchanged"] and trace["grantCountUnchanged"]
+    assert r.status_code == 403 and r.json()["error"] == {"code": "context_expired", "retryable": False}, r.text
+
+
+@pytest.mark.parametrize("active", [True, False])
+async def test_postcall_pending_expired_live_projection_then_ended(env, db, active):
+    t = await postcall_wrapup(env)
+    deadline = datetime.now(timezone.utc) - timedelta(milliseconds=8)
+    t["node"].update(phase="wrapup", active=active, phaseDeadline=deadline.isoformat())
+    row = await db.get(ContextGrant, t["claims"]["grantId"], populate_existing=True)
+    original = (copy.deepcopy(row.claims), copy.deepcopy(row.authority), row.expires_at, row.revoked_at)
+    before = await db.scalar(select(func.count()).select_from(ContextGrant))
+    r = await postcall_request(env, t)
+    row = await db.get(ContextGrant, row.grant_id, populate_existing=True)
+    trace = dict(nodePhase="wrapup", active=active, revoked=False, liveDeadline=deadline.isoformat(),
+                 responseAt=now(), status=r.status_code, error=r.json().get("error"),
+                 sourceUnchanged=(row.claims, row.authority, row.expires_at, row.revoked_at) == original,
+                 grantCountUnchanged=await db.scalar(select(func.count()).select_from(ContextGrant)) == before)
+    boundary_evidence("expired-live-" + str(active).lower(), trace)
+    assert trace["sourceUnchanged"] and trace["grantCountUnchanged"]
+    assert r.status_code == 409, r.text
+    assert r.json()["error"] == {"code": "postcall_pending", "retryable": True}
+    # Это не допускает действия через прежний live token даже до его JWT exp.
+    assert (await introspect(env, t)).status_code == 403
+    ended = datetime.now(timezone.utc)
+    t["node"].update(phase="ended", active=False, allowedActions=[], endedAt=ended.isoformat())
+    r = await postcall_request(env, t)  # свежий proof, обязательное ended
+    assert r.status_code == 200, r.text
+    c = jwt.decode(r.json()["token"], env[2].public_key, algorithms=["RS256"], audience="support-context")
+    assert c["scp"] == "ticket_postcall" and c["ticketRefs"] == ["synthetic-own-ticket"]
+    assert c["actions"] == ["ticket.append", "ticket.read"] and c["exp"] - c["iat"] <= 120
+    granted = await db.get(ContextGrant, c["grantId"], populate_existing=True)
+    assert datetime.fromisoformat(granted.authority["postcallDeadline"]) == ended + timedelta(seconds=3600)
+    trace.update(endedStatus=r.status_code, endedAt=ended.isoformat(), actions=c["actions"],
+                 ticketRefs=c["ticketRefs"], hardDeadline=granted.authority["postcallDeadline"])
+    boundary_evidence("expired-live-" + str(active).lower(), trace)
+
+
 async def test_postcall_initial_wrapup_pending_then_ended_with_new_proof(env, db):
     t = env[3][0]
     # Настоящий exp округляется вниз; ждём его истечения, оставляя дробную
@@ -884,8 +1009,8 @@ async def test_postcall_initial_wrapup_pending_then_ended_with_new_proof(env, db
 
 
 @pytest.mark.parametrize("reason", [
-    "node_revoke", "source_revoke", "inactive", "assignment", "act", "connection", "jkt",
-    "admission", "call", "context", "mfa", "connected", "wrapup_expired", "no_wrapup_deadline",
+    "node_revoke", "source_revoke", "assignment", "act", "connection", "jkt",
+    "admission", "call", "context", "mfa", "connected",
     "binding", "binding_ref", "support_user", "permissions", "actor", "membership",
     "actor_active", "unassigned", "wrong_ticket", "mask", "no_capabilities",
     "core_session", "core_membership", "core_module", "core_scope", "context_expired",
@@ -893,14 +1018,16 @@ async def test_postcall_initial_wrapup_pending_then_ended_with_new_proof(env, db
 ])
 async def test_postcall_pending_never_masks_permanent_denial(env, db, reason):
     t = await postcall_wrapup(env)
+    # Даже при задержавшейся expired/inactive live-проекции все настоящие
+    # отказы остаются окончательными по уточнённому sidecar R26.
+    t["node"].update(active=False, phaseDeadline=(
+        datetime.now(timezone.utc) - timedelta(milliseconds=8)).isoformat())
     row = await db.get(ContextGrant, t["claims"]["grantId"], populate_existing=True)
     original_authority = copy.deepcopy(row.authority)
     if reason == "node_revoke":
         t["node"]["revoked"] = True
     elif reason == "source_revoke":
         row.revoked_at = datetime.now(timezone.utc)
-    elif reason == "inactive":
-        t["node"]["active"] = False
     elif reason == "assignment":
         t["node"]["assignmentVersion"] += 1
     elif reason == "act":
@@ -919,10 +1046,6 @@ async def test_postcall_pending_never_masks_permanent_denial(env, db, reason):
         t["node"]["amr"] = ["pwd"]
     elif reason == "connected":
         t["node"]["phase"] = "connected"
-    elif reason == "wrapup_expired":
-        t["node"]["phaseDeadline"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
-    elif reason == "no_wrapup_deadline":
-        t["node"]["phaseDeadline"] = None
     elif reason == "binding":
         t["actor"]["bindingVersion"] += 1
     elif reason == "binding_ref":
@@ -970,6 +1093,24 @@ async def test_postcall_pending_never_masks_permanent_denial(env, db, reason):
     assert await db.scalar(select(func.count()).select_from(ContextGrant)) == before
     row = await db.get(ContextGrant, row.grant_id, populate_existing=True)
     assert row.authority == original_authority
+
+
+@pytest.mark.parametrize("bad_deadline", ["missing", None, "not-a-date", "2026-10-21T01:00:00", 0, "1792542170", {}])
+async def test_postcall_pending_rejects_malformed_wrapup_projection(env, db, bad_deadline):
+    t = await postcall_wrapup(env)
+    t["node"]["active"] = False
+    if bad_deadline == "missing":
+        del t["node"]["phaseDeadline"]
+    else:
+        t["node"]["phaseDeadline"] = bad_deadline
+    before = await db.scalar(select(func.count()).select_from(ContextGrant))
+    offset = len(env[2].requests)
+    r = await postcall_request(env, t)
+    assert r.status_code == 503 and r.json()["error"]["code"] == "node_invalid", r.text
+    assert not any(path.endswith("/actor-resolve") for path, _c, _b in env[2].requests[offset:])
+    assert await db.scalar(select(func.count()).select_from(ContextGrant)) == before
+    root = await db.get(ContextGrant, t["claims"]["grantId"], populate_existing=True)
+    assert not root.revoked_at and "postcallDeadline" not in root.authority
 
 
 @pytest.mark.parametrize("change", ["revoke", "core_membership", "core_session", "core_scope", "deadline"])

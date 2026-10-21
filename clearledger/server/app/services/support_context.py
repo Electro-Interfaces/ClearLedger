@@ -452,10 +452,17 @@ def check_postcall_node(data, trust, c, authority, *, allow_pending=False):
             fail(403, "postcall_revoked")
         if trust.postcallMaxSec == 0:
             fail(403, "postcall_expired")
-        # Только первоначальный переход. Живой wrapup обязан по-прежнему
-        # подтверждать assignment/active/MFA и ещё не истёкший Node deadline.
-        check_node(data, trust, c["callRef"], c["contextRef"], c["cnf"]["jkt"], c)
-        return n, evidence.phaseDeadline
+        if trust.requireMfa and "otp" not in n["amr"]:
+            fail(403, "mfa_required")
+        # Валидная live-проекция обязательна, но её expiry/active=false не
+        # доказывают revoke во время перехода Node к ended. Прав здесь нет.
+        try:
+            live_deadline = datetime.fromisoformat(data["phaseDeadline"].replace("Z", "+00:00"))
+        except (KeyError, AttributeError, TypeError, ValueError):
+            fail(503, "node_invalid")
+        if live_deadline.tzinfo is None:
+            fail(503, "node_invalid")
+        return n, None  # hard postcall deadline до ended ещё не известен
     ended = evidence.endedAt
     now = datetime.now(timezone.utc)
     if ended is None or ended.tzinfo is None or ended > now:
@@ -524,8 +531,8 @@ async def postcall(db, grant_id, ticket_ref):
             fail(403, "postcall_revoked")
         deadline = min(deadline, datetime.fromisoformat(root.authority["postcallDeadline"]))
     if pending:
-        if min(deadline, context_exp) <= datetime.now(timezone.utc):
-            fail(403, "wrapup_expired")
+        if context_exp <= datetime.now(timezone.utc):
+            fail(403, "context_expired")
         # HTTP409 не выдаёт право и не изменяет источник/deadline. DPoP уже
         # durable consumed роутером; следующий запрос требует нового proof.
         await db.commit()
