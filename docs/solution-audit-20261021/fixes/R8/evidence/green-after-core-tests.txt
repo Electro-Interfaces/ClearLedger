@@ -1,6 +1,7 @@
 # Зелёный прогон ПОСЛЕ правки — те же проверки арендатора служебного токена
-# ветка: fix/audit-r8-service-token-tenant-20261021
-# дата: 2026-10-21T22:28:10+03:00
+# ветка fix/audit-r8-service-token-tenant-20261021, SHA 4744dfcd
+# тот же файл tests/test_service_token_tenant.py, что красный в red-before-core-tests.txt
+# дата: 2026-10-21T22:42:02+03:00
 
 ============================= test session starts ==============================
 platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.7.0 -- /usr/local/bin/python
@@ -8,21 +9,42 @@ rootdir: /app/server
 configfile: pytest.ini
 plugins: anyio-4.15.1, asyncio-1.4.0
 asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=session, asyncio_default_test_loop_scope=session
-collecting ... collected 14 items
+collecting ... collected 35 items
 
-tests/test_service_token_tenant.py::test_sign_service_token_names_tenant PASSED [  7%]
-tests/test_service_token_tenant.py::test_sign_service_token_refuses_without_tenant PASSED [ 14%]
-tests/test_service_token_tenant.py::test_slug_tenant_goes_to_company_claim PASSED [ 21%]
-tests/test_service_token_tenant.py::test_voice_service_token_names_company PASSED [ 28%]
-tests/test_service_token_tenant.py::test_projection_target_names_tenant PASSED [ 35%]
-tests/test_service_token_tenant.py::test_object_tickets_names_tenant PASSED [ 42%]
-tests/test_service_token_tenant.py::test_app_connectors_names_tenant PASSED [ 50%]
-tests/test_service_token_tenant.py::test_external_work_names_tenant PASSED [ 57%]
-tests/test_service_token_tenant.py::test_desk_card_names_tenant PASSED   [ 64%]
-tests/test_service_token_tenant.py::test_event_delivery_names_tenant PASSED [ 71%]
-tests/test_service_token_tenant.py::test_managed_connectors_names_tenant PASSED [ 78%]
-tests/test_service_token_tenant.py::test_ticket_communication_names_tenant PASSED [ 85%]
-tests/test_service_token_tenant.py::test_voice_context_names_tenant PASSED [ 92%]
-tests/test_service_token_tenant.py::test_every_issuance_site_names_the_tenant PASSED [100%]
+tests/test_service_token_tenant.py::test_sign_service_token_names_tenant PASSED [  2%]
+tests/test_service_token_tenant.py::test_sign_service_token_refuses_without_tenant PASSED [  5%]
+tests/test_service_token_tenant.py::test_slug_tenant_goes_to_company_claim PASSED [  8%]
+tests/test_service_token_tenant.py::test_voice_service_token_names_company PASSED [ 11%]
+tests/test_service_token_tenant.py::test_projection_target_names_tenant PASSED [ 14%]
+tests/test_service_token_tenant.py::test_object_tickets_names_tenant PASSED [ 17%]
+tests/test_service_token_tenant.py::test_app_connectors_names_tenant PASSED [ 20%]
+tests/test_service_token_tenant.py::test_external_work_names_tenant PASSED [ 22%]
+tests/test_service_token_tenant.py::test_desk_card_names_tenant PASSED   [ 25%]
+tests/test_service_token_tenant.py::test_event_delivery_names_tenant PASSED [ 28%]
+tests/test_service_token_tenant.py::test_managed_connectors_names_tenant PASSED [ 31%]
+tests/test_service_token_tenant.py::test_ticket_communication_names_tenant PASSED [ 34%]
+tests/test_service_token_tenant.py::test_voice_context_names_tenant PASSED [ 37%]
+tests/test_service_token_tenant.py::test_empty_company_link_is_refused_on_write PASSED [ 40%]
+tests/test_service_token_tenant.py::test_every_issuance_site_names_the_tenant PASSED [ 42%]
+tests/test_managed_connectors.py::test_admin_forwards_to_owner_with_mapped_company_and_scoped_token PASSED [ 45%]
+tests/test_managed_connectors.py::test_member_cannot_read_settings_or_manage_connections[/catalog-GET] PASSED [ 48%]
+tests/test_managed_connectors.py::test_member_cannot_read_settings_or_manage_connections[/managed/support/55555555-5555-4555-8555-555555555555-GET] PASSED [ 51%]
+tests/test_managed_connectors.py::test_member_cannot_read_settings_or_manage_connections[/managed/support-POST] PASSED [ 54%]
+tests/test_managed_connectors.py::test_member_cannot_read_settings_or_manage_connections[/managed/support/55555555-5555-4555-8555-555555555555-PATCH] PASSED [ 57%]
+tests/test_managed_connectors.py::test_member_cannot_read_settings_or_manage_connections[/managed/support/55555555-5555-4555-8555-555555555555/actions/test-POST] PASSED [ 60%]
+tests/test_managed_connectors.py::test_foreign_company_never_reaches_owner PASSED [ 62%]
+tests/test_managed_connectors.py::test_catalog_explains_unavailable_owner PASSED [ 65%]
+tests/test_managed_connectors.py::test_update_and_action_have_fixed_routes_and_unknown_action_is_rejected PASSED [ 68%]
+tests/test_managed_connectors.py::test_service_token_remains_compatible_with_existing_scopes PASSED [ 71%]
+tests/test_managed_connectors.py::test_directory_binding_uses_owner_company_and_checks_admin PASSED [ 74%]
+tests/test_voice_tokens.py::test_voice_token_carries_role_jti_and_bounded_ttl PASSED [ 77%]
+tests/test_voice_tokens.py::test_platform_superadmin_voice_without_membership_keeps_company_guards PASSED [ 80%]
+tests/test_voice_tokens.py::test_voice_token_keeps_guard_statuses_and_messages PASSED [ 82%]
+tests/test_voice_tokens.py::test_support_voice_token_uses_exact_mapping_and_existing_guards PASSED [ 85%]
+tests/test_voice_tokens.py::test_authorize_without_company_keeps_fallback_and_audit PASSED [ 88%]
+tests/test_voice_tokens.py::test_service_tokens_have_jti_and_scope PASSED [ 91%]
+tests/test_voice_tokens.py::test_system_keys_and_exchange PASSED         [ 94%]
+tests/test_voice_tokens.py::test_exchange_needs_voice_enabled PASSED     [ 97%]
+tests/test_voice_tokens.py::test_keys_are_fixed_before_reply PASSED      [100%]
 
-============================== 14 passed in 6.97s ==============================
+============================= 35 passed in 36.48s ==============================
