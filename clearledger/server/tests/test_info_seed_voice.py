@@ -9,6 +9,7 @@ from app.models import Company, InfoArticle, InfoBinding, InfoCategory
 from app.services import info_center
 from app.services.info_seed import seed_info
 from app.services.info_seed_voice import ARTICLES, CATEGORIES
+from app.services.info_seed_cc import ARTICLES as CC_ARTICLES
 
 FRONT = Path(__file__).resolve().parents[2]
 
@@ -19,7 +20,7 @@ def test_voice_help_covers_real_routes_and_images():
     if not menu.exists():
         pytest.skip("Фронт недоступен в backend-only образе")
     keys = set(re.findall(r"\{ key: '([^']+)', path:", menu.read_text()))
-    bindings = {section for a in ARTICLES for app, section, _ in a["bindings"] if app == "voice" and section}
+    bindings = {section.split(":")[0] for a in ARTICLES for app, section, _ in a["bindings"] if app == "voice" and section}
     assert bindings == keys
     assert len({a["title"] for a in ARTICLES}) == len(ARTICLES)
     assert {a["category"] for a in ARTICLES} == {c["title"] for c in CATEGORIES}
@@ -77,7 +78,7 @@ async def test_voice_help_is_available_by_context_and_is_company_scoped(db):
     await seed_info(db)
     for company in [energy, office]:
         tree = await info_center.tree(db, company.id, app_code="voice")
-        assert tree["total"] == len(ARTICLES) + (1 if company == energy else 0)
+        assert tree["total"] == len(ARTICLES) + len(CC_ARTICLES) + (1 if company == energy else 0)
         for section in ["now", "calls", "reception", "connections", "health", "extensions", "outbound"]:
             result = await info_center.context(db, company.id, app_code="voice", section_key=section)
             specific = [a for a in result["items"] if a.get("exact")]
@@ -87,3 +88,45 @@ async def test_voice_help_is_available_by_context_and_is_company_scoped(db):
             if company == office:
                 assert all(a["id"] != str(own.id) for a in result["items"])
     assert await info_center.article(db, office.id, own.id) is None
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_voice_help_ranks_current_source_and_tab_before_parent(db):
+    company = Company(name="Учебная линия", slug="voice-help-context", profile_id="energy")
+    db.add(company)
+    await db.flush()
+    await seed_info(db)
+    for section, first, absent in [
+        ("calls:node:card", "Карточка звонка: участки, запись и итог", "МегаФон ВАТС: история, операторы и группы"),
+        ("calls:megafon:calls", "МегаФон ВАТС: история, операторы и группы", "Журнал звонков узла: поиск и отбор"),
+        ("stats:megafon:operators", "МегаФон: показатели операторов", "Статистика: от показателя к звонкам"),
+        ("stats:megafon:groups", "МегаФон: группы и полнота сведений", "МегаФон: показатели операторов"),
+        ("report:megafon", "МегаФон: отчёт за месяц", "Отчёт за месяц: источник, версия и выгрузка"),
+        ("report:node", "Отчёт за месяц: источник, версия и выгрузка", "МегаФон: отчёт за месяц"),
+        ("passport:access", "Паспорт КЦ: допуск операторов", "Паспорт КЦ: приватность карточки"),
+        ("webhooks:keys", "Ключи систем: выдать доступ к данным узла", "МегаФон: отчёт за месяц"),
+    ]:
+        result = await info_center.context(db, company.id, app_code="voice", section_key=section)
+        titles = [a["title"] for a in result["items"]]
+        assert titles[0] == first, (section, titles)
+        assert absent not in titles
+        assert len(titles) == len(set(titles))
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_context_limit_counts_unique_articles_not_bindings(db):
+    company = Company(name="Учебная компания", slug="voice-help-dedup", profile_id="energy")
+    db.add(company)
+    await db.flush()
+    for i in range(10):
+        article = InfoArticle(company_id=company.id, title=f"Памятка {i}", kind="lnd",
+                              body_md="Учебный документ", status="published")
+        db.add(article)
+        await db.flush()
+        for section in ["calls:node:card", "calls:node", "calls", None]:
+            db.add(InfoBinding(article_id=article.id, app_code="voice", section_key=section, weight=1000 - i))
+    await db.flush()
+    result = await info_center.context(db, company.id, app_code="voice", section_key="calls:node:card", limit=8)
+    assert len(result["items"]) == 8
+    assert len({a["id"] for a in result["items"]}) == 8
+    assert [a["title"] for a in result["items"]] == [f"Памятка {i}" for i in range(8)]

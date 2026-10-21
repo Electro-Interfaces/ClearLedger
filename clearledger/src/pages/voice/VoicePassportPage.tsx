@@ -1,3 +1,4 @@
+import { VOICE_PASSPORT_TABS } from './views'
 /**
  * «Паспорт для КЦ» — что контакт-центр знает о линии и что ему разрешено.
  *
@@ -33,16 +34,7 @@ import {
 import type { ПравилаПриёма } from './reception'
 import { useDraft, type Черновик } from './useDraft'
 
-const ВКЛАДКИ = [
-  { key: 'presentation', name: 'Представление', поля: ['/presentation'] },
-  { key: 'disposition', name: 'Итоги', поля: ['/disposition'] },
-  { key: 'privacy', name: 'Приватность', поля: ['/privacy'] },
-  { key: 'access', name: 'Допуск операторов', поля: ['/access'] },
-  { key: 'actions', name: 'Действия', поля: ['/actions'] },
-  { key: 'fallback', name: 'Ожидание и предложение', поля: ['/fallback', '/offer', '/minAcceptedVersion'] },
-  { key: 'retention', name: 'Что КЦ хранит', поля: ['/kcRetention'] },
-  { key: 'enrichment', name: 'Подсказки', поля: ['/liveEnrichment'] },
-] as const
+const ВКЛАДКИ = VOICE_PASSPORT_TABS
 
 export interface Части {
   п: Паспорт

@@ -23,6 +23,7 @@ export default function MegafonMonthlyReportPage() {
     enabled: !!companyId && !!bounds && !changedCompany, retry: false,
   })
   useEffect(() => {
+    if (url.get('source') === 'node') return
     if (!companyId || (url.get('voice_company') === companyId && url.get('source') === 'megafon')) return
     const next = new URLSearchParams(url); next.set('voice_company', companyId); next.set('source', 'megafon')
     if (changedCompany) next.delete('line')

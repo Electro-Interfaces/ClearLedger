@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { useCompany } from '@/contexts/CompanyContext'
 import { ApiError } from '@/services/apiClient'
 import { getMegafonVoice, megafonPeriodBounds } from '@/services/megafonVoiceService'
+import { voiceSourceParams } from './sourceParams'
 
 export function useVoiceDataSource(pathname: string) {
   const { companyId } = useCompany()
@@ -38,7 +39,9 @@ export function useVoiceDataSource(pathname: string) {
   const megafon = directMegafon || (managed && !fixedNode && (explicit === 'megafon' || configured))
   function select(source: string) {
     // Параметры разных журналов несовместимы; переключаем всю выборку явно.
-    setParams({ source }, { replace: false })
+    // Общий контур f принадлежит оболочке. Его удаление запускает её
+    // восстановление URL и может вернуть прежний источник из старого снимка.
+    setParams(previous => voiceSourceParams(previous, source), { replace: false })
   }
   return { managed, directMegafon, megafon, loading, error, configured, source: megafon ? 'megafon' : 'node',
     select, retry: () => void connection.refetch() }

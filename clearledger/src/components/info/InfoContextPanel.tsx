@@ -19,31 +19,37 @@ import { appCodeForPath, productForPath, productLabel } from '@/config/spaceProd
 import { useCompany } from '@/contexts/CompanyContext'
 import { Markdown } from './Markdown'
 import { useRail } from '@/components/report-kit'
-import { voiceViewFor } from '@/pages/voice/views'
+import { voiceHelpContext } from '@/pages/voice/helpContext'
+import { useVoiceDataSource } from '@/pages/voice/VoiceDataSource'
 
-export function InfoContextPanel({ companyId, onClose, embedded = false }: {
-  companyId: string; onClose: () => void; embedded?: boolean
-}) {
+interface PanelProps { companyId: string; onClose: () => void; embedded?: boolean }
+interface HelpContext {
+  appCode: string; sectionKey: string | null; title?: string
+  loading?: boolean; error?: unknown; retry?: () => void
+}
+
+export function InfoContextPanel(props: PanelProps) {
+  const { pathname } = useLocation()
+  return appCodeForPath(pathname) === 'voice'
+    ? <VoiceContextPanel {...props} /> : <RouteContextPanel {...props} />
+}
+
+function VoiceContextPanel(props: PanelProps) {
   const { pathname } = useLocation()
   const [params] = useSearchParams()
-  const navigate = useNavigate()
-  const { company } = useCompany()
-  const [openId, setOpenId] = useState<string | null>(null)
-  // Помощь самого экрана (как читать таблицу, что умеют инструменты) — здесь же,
-  // а не отдельной кнопкой рядом с «Инфо»: вопрос «как тут работать» один
-  // (решение МАГа 15.10.2026).
-  const screen = useRail()
-  const screenHelp = screen.available && screen.help ? (
-    <details open className="mb-3 rounded-md border border-primary/30 bg-primary/5 p-2.5">
-      <summary className="cursor-pointer text-xs font-semibold">Этот экран · {screen.title}</summary>
-      <div className="pt-2">{screen.help}</div>
-    </details>
-  ) : null
+  const source = useVoiceDataSource(pathname)
+  const context = { ...voiceHelpContext(pathname, params, source.source),
+    loading: source.loading, error: source.error, retry: source.retry }
+  return <ContextPanel key={JSON.stringify([props.companyId, context.appCode, context.sectionKey])}
+    {...props} context={context} />
+}
 
+function RouteContextPanel(props: PanelProps) {
+  const { pathname } = useLocation()
+  const [params] = useSearchParams()
   // Контекст = приложение по маршруту + раздел рабочей области из `?sub=`.
   // Приложение — не только продукт разреза: «Управление» и «Данные» тоже реестровые,
   // и подсказка в них обязана знать, где человек, а не считать всё Учётом.
-  const product = productForPath(pathname)
   const appCode = appCodeForPath(pathname)
   // Ключ места двухуровневый: раздел плюс вкладка карточки («pr_project:work»).
   // Без вкладки панель на «Паспорте» и на «Документах» показывала одно и то же —
@@ -60,16 +66,34 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
     const вид = params.get('view')
     return вид ? `${раздел}:${вид}` : раздел
   }
-  // «Телефония» кодирует раздел в пути, а не в ?sub=. Меню и помощь
-  // используют один справочник, включая /voice/megafon и будущие экраны АТС.
-  const sectionKey = appCode === 'voice' ? voiceViewFor(pathname).key
-    : appCode === 'docs' && !sub
+  const sectionKey = appCode === 'docs' && !sub
     ? трековыйКлюч()
     : sub && tab ? `${sub}:${tab}` : sub
+
+  return <ContextPanel key={JSON.stringify([props.companyId, appCode, sectionKey])}
+    {...props} context={{ appCode, sectionKey }} />
+}
+
+/** При смене раздела, вкладки, источника или компании выбранная статья сбрасывается. */
+function ContextPanel({ companyId, onClose, embedded = false, context }: PanelProps & { context: HelpContext }) {
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  const { company } = useCompany()
+  const product = productForPath(pathname)
+  const { appCode, sectionKey } = context
+  const [openId, setOpenId] = useState<string | null>(null)
+  const screen = useRail()
+  const screenHelp = screen.available && screen.help ? (
+    <details open className="mb-3 rounded-md border border-primary/30 bg-primary/5 p-2.5">
+      <summary className="cursor-pointer text-xs font-semibold">Этот экран · {screen.title}</summary>
+      <div className="pt-2">{screen.help}</div>
+    </details>
+  ) : null
 
   const ctx = useQuery({
     queryKey: ['info-ctx', companyId, appCode, sectionKey],
     queryFn: () => getInfoContext(companyId, appCode, sectionKey),
+    enabled: !context.loading && !context.error,
   })
   const article = useQuery({
     queryKey: ['info-article', companyId, openId],
@@ -78,7 +102,7 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
   })
 
   return (
-    <aside className={embedded
+    <aside aria-label="Контекстная помощь" className={embedded
       ? 'flex h-full w-full flex-col bg-background'
       : 'flex h-full w-full max-w-[420px] flex-col border-l border-border bg-background'}>
       {/* В доке шапку и крестик рисует сам док — вторая полоса выглядела бы ошибкой. */}
@@ -101,7 +125,16 @@ export function InfoContextPanel({ companyId, onClose, embedded = false }: {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
-        {openId ? (
+        {context.title && <p className="mb-3 text-xs font-medium" aria-label="Контекст помощи">{context.title}</p>}
+        {context.loading ? <p role="status" className="text-xs text-muted-foreground">Подбираем помощь для источника данных…</p>
+          : context.error || ctx.isError ? (
+            <div className="space-y-2 text-xs">
+              <p role="alert">{context.error ? 'Не удалось определить источник данных для помощи.' : 'Не удалось загрузить помощь.'}</p>
+              <Button size="sm" variant="outline" onClick={() => context.error ? context.retry?.() : void ctx.refetch()}>Повторить</Button>
+            </div>
+          ) : openId ? (
+          article.isError ? <div className="space-y-2 text-xs"><p role="alert">Не удалось открыть статью.</p>
+            <Button size="sm" variant="outline" onClick={() => void article.refetch()}>Повторить</Button></div> :
           article.isLoading || !article.data
             ? <div className="flex justify-center py-8"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
             : (

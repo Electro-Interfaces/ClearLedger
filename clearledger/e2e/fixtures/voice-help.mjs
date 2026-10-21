@@ -135,6 +135,8 @@ export function nodeReply(path, query, method) {
 export function coreReply(path, query) {
   if (path === '/api/sso/token') return { token: 'help-fixture-only', expires_in: 300 }
   if (path === '/api/voice/megafon') return megafon(query)
+  if (path.startsWith('/api/voice/megafon/calls/')) return { company_id: companyId, provider: 'megafon',
+    call: megafon(query).calls.items.find(call => call.id === path.split('/').at(-1)) }
   if (path === '/api/voice/connections') return { company_id: companyId, connections: ['megafon', 'asterisk'].map(provider => ({
     id: `demo-${provider}`, provider, enabled: true, status: 'ok', configured: true, endpoint: `https://${provider}.example.invalid`,
     sources: { endpoint: 'connector', api_key: 'connector', crm_token: 'connector', webhook_secret: 'connector' },
