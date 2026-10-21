@@ -207,14 +207,16 @@ def sign_service_token(*, aud: str, scope: str, app_company_id: str,
     обязана быть минимальной. Список назвал бы компании, которых этот вызов не
     касается.
     """
-    key = _private_key()
-    if not key:
-        return None
+    # Область действия проверяется до ключа подписи: безымянный вызов — ошибка
+    # вызывающего кода, и она не должна молчать там, где единый вход просто выключен.
     арендатор = str(app_company_id or "").strip()
     if not арендатор:
         raise ValueError(
             "Служебному токену нужна компания получателя: токен без арендатора "
             "действует в контуре любого заказчика приложения")
+    key = _private_key()
+    if not key:
+        return None
     now = int(time.time())
     payload = {
         "iss": settings.sso_issuer,
@@ -222,15 +224,15 @@ def sign_service_token(*, aud: str, scope: str, app_company_id: str,
         "sub": f"service:{scope}",
         "svc": scope,
         "cid": арендатор,
-        # Нумерация компаний у приложений разная (`external_company_id` — строка):
-        # UUID идёт идентификатором, всё прочее — кодом. Положить код в `company_id`
-        # значило бы молча потерять арендатора: приёмник читает его только как UUID.
-        ("company_id" if _UUID_RE.match(арендатор) else "company"): арендатор,
         "jti": new_jti(),
         "iat": now,
         "nbf": now - 10,
         "exp": now + ttl_seconds,
     }
+    # Нумерация компаний у приложений разная (`external_company_id` — строка):
+    # UUID идёт идентификатором, всё прочее — кодом. Положить код в `company_id`
+    # значило бы молча потерять арендатора: приёмник читает его только как UUID.
+    payload["company_id" if _UUID_RE.match(арендатор) else "company"] = арендатор
     if actor_id is not None:
         payload["actor"] = actor_id
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})

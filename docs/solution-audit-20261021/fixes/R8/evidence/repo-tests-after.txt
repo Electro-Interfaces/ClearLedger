@@ -48,3 +48,15 @@
 ...                                                                      [100%]
 3 passed in 0.06s
 ── tests/test_calendar.py
+.....                                                                    [100%]
+5 passed in 10.47s
+── tests/test_calendar_meeting.py
+..                                                                       [100%]
+2 passed in 10.13s
+── tests/test_calendar_papers.py
+..                                                                       [100%]
+2 passed in 11.60s
+── tests/test_calendar_workflow.py
+..............                                                           [100%]
+14 passed in 11.08s
+── tests/test_catalog_check_deleted.py
