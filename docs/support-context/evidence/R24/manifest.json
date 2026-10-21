@@ -1,0 +1,124 @@
+{
+  "task": "R24",
+  "runtime": "c29bc8ba4ab9a90bfb6e8149237c34b67c3ce442",
+  "initial_runtime": "0c0ef45982a3e27d8f9c23398dcea82fde83e7d7",
+  "baseline": "84fa48788dec63ce10f5d6c8a2a465b3b41f38e9",
+  "baseline_runtime": "133909486d997cc3b194944c703cc4d3631940e8",
+  "scope": "Core TCP HTTP/PostgreSQL/RS256/ES256 DPoP; limited Node/Support HTTP protocol peers",
+  "actual_v20": "Separate owner; natural Node timer/browser/business effects not claimed by this report",
+  "suites": {
+    "red-pending": {
+      "runtime": "133909486d997cc3b194944c703cc4d3631940e8",
+      "result": "1 failed, 149 deselected",
+      "failure": "403 postcall_revoked instead of 409 pending"
+    },
+    "green-postcall": {
+      "runtime": "0c0ef45982a3e27d8f9c23398dcea82fde83e7d7",
+      "result": "53 passed, 97 deselected"
+    },
+    "green-renew-source": {
+      "runtime": "0c0ef45982a3e27d8f9c23398dcea82fde83e7d7",
+      "result": "52 passed, 99 deselected"
+    },
+    "red-disabled-policy": {
+      "runtime": "0c0ef45982a3e27d8f9c23398dcea82fde83e7d7",
+      "result": "1 failed, 150 deselected",
+      "failure": "postcallMaxSec=0 produced pending instead of permanent denial"
+    },
+    "green-policy-final": {
+      "runtime": "c29bc8ba4ab9a90bfb6e8149237c34b67c3ce442",
+      "result": "3 passed, 148 deselected"
+    }
+  },
+  "all_own_resources_removed": true,
+  "resources": {
+    "green-policy-final-resources.json": {
+      "container": "core-support-context-r24-5544e5d2c058",
+      "database": "core_support_context_r24",
+      "loopback": true,
+      "pytest_args": [
+        "tests/test_support_context_v1.py",
+        "-k",
+        "policy_disabled or initial_wrapup_pending or existing_grant_phase_rollback"
+      ],
+      "cleanup": true,
+      "port": 33304,
+      "pytest_exit": 0
+    },
+    "green-postcall-resources.json": {
+      "container": "core-support-context-r24-31143d830df8",
+      "database": "core_support_context_r24",
+      "loopback": true,
+      "pytest_args": [
+        "tests/test_support_context_v1.py",
+        "-k",
+        "postcall"
+      ],
+      "cleanup": true,
+      "port": 33298,
+      "pytest_exit": 0
+    },
+    "green-renew-source-resources.json": {
+      "container": "core-support-context-r24-832ad7117ae9",
+      "database": "core_support_context_r24",
+      "loopback": true,
+      "pytest_args": [
+        "tests/test_support_context_v1.py",
+        "tests/test_support_context_source_v1.py",
+        "-k",
+        "renew or source or consult or restricted_core or current_core or revoke"
+      ],
+      "cleanup": true,
+      "port": 33300,
+      "pytest_exit": 0
+    },
+    "red-disabled-policy-resources.json": {
+      "container": "core-support-context-r24-a31ef4278bd9",
+      "database": "core_support_context_r24",
+      "loopback": true,
+      "pytest_args": [
+        "tests/test_support_context_v1.py",
+        "-k",
+        "policy_disabled"
+      ],
+      "cleanup": true,
+      "port": 33303,
+      "pytest_exit": 1
+    },
+    "red-pending-resources.json": {
+      "container": "core-support-context-r24-37005d485315",
+      "database": "core_support_context_r24",
+      "loopback": true,
+      "pytest_args": [
+        "tests/test_support_context_v1.py",
+        "-k",
+        "initial_wrapup_pending"
+      ],
+      "cleanup": true,
+      "port": 33297,
+      "pytest_exit": 1
+    }
+  },
+  "artifact_sha256": {
+    "docs/support-context/evidence/R24/green-policy-final-resources.json": "032506fbead6782378c55b0981c6d7104dd410763a19e3ede11066438a591c39",
+    "docs/support-context/evidence/R24/green-policy-final.tap": "cdb4bce79a8c68c89edca064cbb0d15492684be054cf9685e674b8f8a5cd1f6d",
+    "docs/support-context/evidence/R24/green-postcall-resources.json": "fc49c2d22426236ec6840e0ad3d28a69e363ecf8bde2c49961ef04a0d046b39f",
+    "docs/support-context/evidence/R24/green-postcall.tap": "4ece65849ea9f31b825ae8561c118217243a506b6177fbba9aa95cbcf454a8e4",
+    "docs/support-context/evidence/R24/green-renew-source-resources.json": "0babda6e9419cf74bef506176221c1f1957a700e4c4dbd2d6e8c0ffa450ba33f",
+    "docs/support-context/evidence/R24/green-renew-source.tap": "a30bd1d022917b944051d5672379ac12ed45d9ff2fe79830880735a912a34b3e",
+    "docs/support-context/evidence/R24/red-disabled-policy-resources.json": "2a2e8db818158b2262027366757f1545f07a64645a03309333002c90664fee9a",
+    "docs/support-context/evidence/R24/red-disabled-policy.tap": "f91976cb0d7689aae8b138ea510adced50ba864b5a2a03c3d6456ca0168f3ee6",
+    "docs/support-context/evidence/R24/red-pending-resources.json": "469f6a34b05b957e722d2d630bb774ab41da349d3a69ae5ea5586fd4a65dd854",
+    "docs/support-context/evidence/R24/red-pending.tap": "7cc7ed18e93d82eaa3466f8b1ab16f5d552634aa4160e5ed3c367398053a5813",
+    "docs/support-context/evidence/R24/run-tests.py": "07fd39166a54e00069833ee79efc5f3ff08dd0072c593622667b0202bda64091"
+  },
+  "normative_sha256": {
+    "contract-v1.md": "df916e2194429268b06be2ab2b1c03eb32e0d81503df8ce3043d5eb9c73eba12",
+    "postcall-transition-v1.md": "78c560e1c7ed96319576c33a9c4def4ee00f48347152846ab75296c04b1dee13"
+  },
+  "pr": 18,
+  "pr_body_updated": true,
+  "base": "feat/voice-megafon-20261019",
+  "merge": false,
+  "deploy": false
+}

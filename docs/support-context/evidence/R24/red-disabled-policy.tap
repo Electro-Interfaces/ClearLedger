@@ -1,0 +1,91 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_____ test_postcall_pending_never_masks_permanent_denial[policy_disabled] ______
+tests/test_support_context_v1.py:967: in test_postcall_pending_never_masks_permanent_denial
+    assert r.status_code == 403, r.text
+E   AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"postcall_pending","retryable":true},"requestRef":"854bd217116a4b08ac8c74c911286a31"}
+E   assert 409 == 403
+E    +  where 409 = <Response [409 Conflict]>.status_code
+---------------------------- Captured stderr setup -----------------------------
+2026-10-21 03:43:56,788 [INFO] clearledger.seed: Создана компания: ООО ГИГ (ГазИнвестГрупп) (gig)
+2026-10-21 03:43:56,788 [INFO] clearledger.seed: Создана компания: РусГидро (rushydro)
+2026-10-21 03:43:56,800 [WARNING] passlib.handlers.bcrypt: (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/home/mag/orca/workspaces/ledger-app/support-context-core-20261020/.venv/lib/python3.13/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+              ^^^^^^^^^^^^^^^^^
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2026-10-21 03:43:57,155 [INFO] clearledger.seed: Создан сид-суперадмин: admin@clearledger.ru
+2026-10-21 03:43:57,162 [INFO] clearledger.seed: Создан шаблон проводок: ОРП/ОтчетККМОПродажах
+2026-10-21 03:43:57,162 [INFO] clearledger.seed: Создан шаблон проводок: ПТУ/Покупка
+2026-10-21 03:43:57,162 [INFO] clearledger.seed: Создан шаблон проводок: ПТУ/—
+2026-10-21 03:43:57,162 [INFO] clearledger.seed: Создан шаблон проводок: ОПЗС/ОтчетПроизводстваЗаСмену
+2026-10-21 03:43:57,162 [INFO] clearledger.seed: Создан шаблон проводок: КорректировкаПоступления/СогласованноеИзменение
+2026-10-21 03:43:57,173 [INFO] clearledger.seed: ГИГ: канал оплаты retail
+2026-10-21 03:43:57,173 [INFO] clearledger.seed: ГИГ: канал оплаты retail_cash
+2026-10-21 03:43:57,174 [INFO] clearledger.seed: ГИГ: канал оплаты retail_card
+2026-10-21 03:43:57,174 [INFO] clearledger.seed: ГИГ: канал оплаты cards
+2026-10-21 03:43:57,174 [INFO] clearledger.seed: ГИГ: канал оплаты online
+2026-10-21 03:43:57,174 [INFO] clearledger.seed: ГИГ: канал оплаты voucher
+2026-10-21 03:43:57,174 [INFO] clearledger.seed: ГИГ: канал оплаты coupon
+2026-10-21 03:43:57,174 [INFO] clearledger.seed: ГИГ: канал оплаты ledger
+2026-10-21 03:43:57,174 [INFO] clearledger.seed: ГИГ: канал оплаты writeoff_fuel
+2026-10-21 03:43:57,195 [INFO] clearledger.seed: ГИГ: источник «MSTO Онлайн-заказы»
+2026-10-21 03:43:57,222 [INFO] clearledger.seed: ГИГ: источник «STS Транзакции» создан (draft)
+2026-10-21 03:43:57,245 [INFO] clearledger.seed: Номенклатура дел заведена: ООО ГИГ (ГазИнвестГрупп) (3 дела)
+2026-10-21 03:43:57,247 [INFO] clearledger.seed: Виды документов заведены: ООО ГИГ (ГазИнвестГрупп) (4 вида)
+2026-10-21 03:43:57,254 [INFO] clearledger.seed: Номенклатура дел заведена: РусГидро (3 дела)
+2026-10-21 03:43:57,255 [INFO] clearledger.seed: Виды документов заведены: РусГидро (4 вида)
+2026-10-21 03:43:57,271 [INFO] clearledger.seed: Seed завершён
+------------------------------ Captured log setup ------------------------------
+INFO     clearledger.seed:seed.py:110 Создана компания: ООО ГИГ (ГазИнвестГрупп) (gig)
+INFO     clearledger.seed:seed.py:110 Создана компания: РусГидро (rushydro)
+WARNING  passlib.handlers.bcrypt:bcrypt.py:622 (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/home/mag/orca/workspaces/ledger-app/support-context-core-20261020/.venv/lib/python3.13/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+              ^^^^^^^^^^^^^^^^^
+AttributeError: module 'bcrypt' has no attribute '__about__'
+INFO     clearledger.seed:seed.py:561 Создан сид-суперадмин: admin@clearledger.ru
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ОРП/ОтчетККМОПродажах
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ПТУ/Покупка
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ПТУ/—
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ОПЗС/ОтчетПроизводстваЗаСмену
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: КорректировкаПоступления/СогласованноеИзменение
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail_cash
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail_card
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты cards
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты online
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты voucher
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты coupon
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты ledger
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты writeoff_fuel
+INFO     clearledger.seed:seed.py:341 ГИГ: источник «MSTO Онлайн-заказы»
+INFO     clearledger.seed:seed.py:408 ГИГ: источник «STS Транзакции» создан (draft)
+INFO     clearledger.seed:seed.py:249 Номенклатура дел заведена: ООО ГИГ (ГазИнвестГрупп) (3 дела)
+INFO     clearledger.seed:seed.py:259 Виды документов заведены: ООО ГИГ (ГазИнвестГрупп) (4 вида)
+INFO     clearledger.seed:seed.py:249 Номенклатура дел заведена: РусГидро (3 дела)
+INFO     clearledger.seed:seed.py:259 Виды документов заведены: РусГидро (4 вида)
+INFO     clearledger.seed:seed.py:146 Seed завершён
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 03:43:57,708 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36071/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 03:43:57,715 [INFO] httpx: HTTP Request: POST http://127.0.0.1:58127/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 03:43:57,812 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36071/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+2026-10-21 03:43:57,883 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36071/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 03:43:58,009 [INFO] httpx: HTTP Request: POST http://127.0.0.1:58127/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+2026-10-21 03:43:58,189 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36071/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 03:43:58,251 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36071/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 03:43:58,269 [INFO] httpx: HTTP Request: POST http://127.0.0.1:58127/api/eco/support-context/v1/postcall "HTTP/1.1 409 Conflict"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36071/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:58127/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36071/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36071/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:58127/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36071/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36071/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:58127/api/eco/support-context/v1/postcall "HTTP/1.1 409 Conflict"
+=========================== short test summary info ============================
+FAILED tests/test_support_context_v1.py::test_postcall_pending_never_masks_permanent_denial[policy_disabled]
+1 failed, 150 deselected, 2 warnings in 8.54s
