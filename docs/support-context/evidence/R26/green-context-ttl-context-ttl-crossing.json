@@ -1,0 +1,12 @@
+{
+  "contextExpiresAt": "2026-10-21T00:54:27.591336+00:00",
+  "actorHttpStartedAt": "2026-10-21T00:54:26.326616+00:00",
+  "actorHttpFinishedAt": "2026-10-21T00:54:27.611445+00:00",
+  "status": 403,
+  "error": {
+    "code": "context_expired",
+    "retryable": false
+  },
+  "sourceUnchanged": true,
+  "grantCountUnchanged": true
+}

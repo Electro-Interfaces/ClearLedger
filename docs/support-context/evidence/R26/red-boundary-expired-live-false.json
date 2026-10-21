@@ -1,0 +1,14 @@
+{
+  "nodePhase": "wrapup",
+  "active": false,
+  "revoked": false,
+  "liveDeadline": "2026-10-21T00:52:39.930444+00:00",
+  "responseAt": "2026-10-21T00:52:40.169872+00:00",
+  "status": 403,
+  "error": {
+    "code": "assignment_revoked",
+    "retryable": false
+  },
+  "sourceUnchanged": true,
+  "grantCountUnchanged": true
+}

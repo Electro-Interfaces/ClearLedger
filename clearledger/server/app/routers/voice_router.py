@@ -78,6 +78,9 @@ class SupportContextIn(BaseModel):
     ref: str | None = Field(None, max_length=80)
     limit: int = Field(300, ge=1, le=1000)
     detail: bool = False
+    # Opt-in для сборщика v1: кандидат не становится выбранным человеком.
+    strictSelection: bool = False
+    cursor: str | None = Field(None, max_length=4096)
 
 
 class VoiceKnowledgeIn(BaseModel):
@@ -224,6 +227,7 @@ async def _customer_summary_data(
     body: SummaryIn,
     company: Company,
     db: AsyncSession,
+    *, as_of: datetime | None = None,
 ) -> dict[str, Any]:
     """Последние зарядные сессии клиента (новые первыми), их станции и счёт за 30 дней.
 
@@ -247,12 +251,14 @@ async def _customer_summary_data(
     if not conds:
         return empty
     where = and_(ChargeSession.company_id == company.id, or_(*conds))
+    if as_of is not None:
+        where = and_(where, ChargeSession.started_at <= as_of.replace(tzinfo=None))
 
     rows = (await db.execute(
         select(ChargeSession).where(where, ChargeSession.started_at.is_not(None))
         .order_by(ChargeSession.started_at.desc()).limit(body.limit)
     )).scalars().all()
-    since = datetime.now(MSK).replace(tzinfo=None) - timedelta(days=30)
+    since = (as_of or datetime.now(MSK)).replace(tzinfo=None) - timedelta(days=30)
     total, failed = (await db.execute(
         select(func.count(), func.count().filter(ChargeSession.energy_kwh <= 0))
         .where(where, ChargeSession.started_at >= since)
@@ -322,7 +328,7 @@ async def support_customer_context(
     Здесь нет обратного вызова в Поддержку: её заявки читаются там же, где живут.
     """
     from app.services.support_scope import support_company_id
-    from app.services.voice_support_context import charging_context
+    from app.services.voice_support_context import charging_context, decode_source_cursor
 
     mapped = await support_company_id(db, company.id)
     if mapped != str(body.supportCompanyId):
@@ -332,19 +338,39 @@ async def support_customer_context(
     e164 = to_e164(body.phone)
     candidates = await find_candidates(db, company.id, e164) if e164 else []
     caller = next((c for c in candidates if c["ref"] == body.ref), None)
-    caller = caller or (candidates[0] if candidates else None)
+    if body.strictSelection:
+        if body.ref and caller is None:
+            raise HTTPException(404, "Выбранный человек не относится к этому поиску")
+    else:
+        caller = caller or (candidates[0] if candidates else None)
     party_ref = caller["ref"] if caller else None
+    as_of = datetime.now(MSK) if body.strictSelection else None
+    page = None
+    if body.cursor:
+        if not body.strictSelection or not body.detail:
+            raise HTTPException(400, "Курсор требует strictSelection/detail")
+        page = decode_source_cursor(body.cursor, company.id, [body.phone, *body.phones], party_ref)
+        as_of = datetime.fromisoformat(page["asOf"])
     summary = await _customer_summary_data(
-        SummaryIn(phone=body.phone, ref=party_ref, limit=min(body.limit, 20)), company, db,
+        SummaryIn(phone="unknown" if body.strictSelection and party_ref else body.phone,
+                  ref=party_ref, limit=min(body.limit, 20)), company, db, as_of=as_of,
     )
     charging = await charging_context(
         db, company.id, phones=[body.phone, *body.phones], ref=party_ref,
-        limit=body.limit, detail=body.detail,
+        limit=body.limit, detail=body.detail, strict_ref=body.strictSelection and bool(party_ref),
+        strict_selection=body.strictSelection, as_of=as_of, page=page,
     )
+    if body.strictSelection and not party_ref:
+        charging["ezs"] = None
+    strict_fields = ({"candidates": candidates,
+                      "identityState": "operator_selected" if caller else
+                          "ambiguous" if len(candidates) > 1 else "candidate" if candidates else "unknown",
+                      "historyIdentity": "core_person" if caller else "phone"}
+                     if body.strictSelection else {})
     return {
         "supportCompanyId": str(body.supportCompanyId), "coreCompanyId": str(company.id),
         "corePartyRef": party_ref, "caller": caller, **summary, **charging,
-        "availability": "available",
+        "availability": "available", **strict_fields,
     }
 
 
@@ -497,3 +523,10 @@ async def exchange_voice_key(
     # ответа, а экран «Ключи систем» показывает время обмена сразу.
     await db.commit()
     return {"token": token, "token_type": "bearer", "expires_in": 120, "scope": scope}
+
+
+# Отдельный namespace и auth, зарегистрирован до штатного create_all. Старые
+# /identify, /customer-summary и /support/customer-context остаются совместимы.
+from app.routers.support_context_router import router as support_context_router
+
+router.include_router(support_context_router)

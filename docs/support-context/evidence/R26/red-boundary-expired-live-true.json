@@ -1,0 +1,14 @@
+{
+  "nodePhase": "wrapup",
+  "active": true,
+  "revoked": false,
+  "liveDeadline": "2026-10-21T00:52:38.454522+00:00",
+  "responseAt": "2026-10-21T00:52:38.612502+00:00",
+  "status": 403,
+  "error": {
+    "code": "wrapup_expired",
+    "retryable": false
+  },
+  "sourceUnchanged": true,
+  "grantCountUnchanged": true
+}

@@ -1,0 +1,238 @@
+.FFF.FFF                                                                 [100%]
+=================================== FAILURES ===================================
+_ test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[False-ready] _
+
+env = (<httpx.AsyncClient object at 0x7fdc4f8bcc30>, 'http://127.0.0.1:48491', <tests.test_support_context_v1.Peer object at...thetic-call-7c14f0bfc5684162be8974c3bc07b56b'}, 'contextRef': 'scx_sglQRY6kHOqUBGcd9OrvKZv__JfyXi2DPXNQaoNwkCU', ...}])
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7fdc4ec5ab10>
+state = 'ready', lost_binding = False
+
+    @pytest.mark.parametrize("state", ["preparing", "ready", "partial", "unavailable"])
+    @pytest.mark.parametrize("lost_binding", [False, True])
+    async def test_prepare_replay_accepts_current_state_without_new_binding_or_ttl(env, db, state, lost_binding):
+        client, _origin, _peer, tenants = env
+        t = tenants[0]
+        payload = envelope(callRef=t["callRef"], phone="+79990000001", startedAt=now(), direction="inbound")
+        headers = {"X-Cloud-API-Key": t["keys"][0][0]}
+        initial = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+        assert initial.status_code == 202, initial.text
+        if lost_binding:
+            # Support уже сохранил context; Core не успел записать binding до обрыва.
+            row = await db.get(ContextBinding, t["contextRef"])
+            await db.delete(row)
+            await db.commit()
+        t["prepare"].update(state=state, contextVersion=2, phone="synthetic-private", blocks={"private": True})
+        r = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+>       assert r.status_code == 202, r.text
+E       AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"upstream_invalid","retryable":true},"requestRef":"4be1802f68964eeb9ef4a9cd4d16bd11"}
+E       assert 503 == 202
+E        +  where 503 = <Response [503 Service Unavailable]>.status_code
+
+tests/test_support_context_v1.py:639: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 01:21:44,776 [INFO] httpx: HTTP Request: POST http://127.0.0.1:35859/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:44,784 [INFO] httpx: HTTP Request: POST http://127.0.0.1:48491/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 01:21:44,866 [INFO] httpx: HTTP Request: POST http://127.0.0.1:35859/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:44,869 [INFO] httpx: HTTP Request: POST http://127.0.0.1:48491/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:35859/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:48491/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:35859/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:48491/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+_ test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[False-partial] _
+
+env = (<httpx.AsyncClient object at 0x7fdc4eca5150>, 'http://127.0.0.1:37533', <tests.test_support_context_v1.Peer object at...thetic-call-00d279c2aff24e31a86105953b409b8a'}, 'contextRef': 'scx_V1bvNMtD225wKf4P5kttE77TEMZAQI_wlcGRu0hD9a0', ...}])
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7fdc4e9de150>
+state = 'partial', lost_binding = False
+
+    @pytest.mark.parametrize("state", ["preparing", "ready", "partial", "unavailable"])
+    @pytest.mark.parametrize("lost_binding", [False, True])
+    async def test_prepare_replay_accepts_current_state_without_new_binding_or_ttl(env, db, state, lost_binding):
+        client, _origin, _peer, tenants = env
+        t = tenants[0]
+        payload = envelope(callRef=t["callRef"], phone="+79990000001", startedAt=now(), direction="inbound")
+        headers = {"X-Cloud-API-Key": t["keys"][0][0]}
+        initial = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+        assert initial.status_code == 202, initial.text
+        if lost_binding:
+            # Support уже сохранил context; Core не успел записать binding до обрыва.
+            row = await db.get(ContextBinding, t["contextRef"])
+            await db.delete(row)
+            await db.commit()
+        t["prepare"].update(state=state, contextVersion=2, phone="synthetic-private", blocks={"private": True})
+        r = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+>       assert r.status_code == 202, r.text
+E       AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"upstream_invalid","retryable":true},"requestRef":"f023dd5e2c03434db8e9f32ddfb03bc6"}
+E       assert 503 == 202
+E        +  where 503 = <Response [503 Service Unavailable]>.status_code
+
+tests/test_support_context_v1.py:639: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 01:21:45,875 [INFO] httpx: HTTP Request: POST http://127.0.0.1:35959/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:45,883 [INFO] httpx: HTTP Request: POST http://127.0.0.1:37533/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 01:21:45,965 [INFO] httpx: HTTP Request: POST http://127.0.0.1:35959/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:45,969 [INFO] httpx: HTTP Request: POST http://127.0.0.1:37533/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:35959/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:37533/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:35959/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:37533/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+_ test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[False-unavailable] _
+
+env = (<httpx.AsyncClient object at 0x7fdc4e9df050>, 'http://127.0.0.1:45153', <tests.test_support_context_v1.Peer object at...thetic-call-1a3d61b5c4a846b8931d96d0483e5f72'}, 'contextRef': 'scx_fF71D_LKsKaR32bjYknLYliIDRoKPmxviqAaRcDNO-Y', ...}])
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7fdc4e9cd7c0>
+state = 'unavailable', lost_binding = False
+
+    @pytest.mark.parametrize("state", ["preparing", "ready", "partial", "unavailable"])
+    @pytest.mark.parametrize("lost_binding", [False, True])
+    async def test_prepare_replay_accepts_current_state_without_new_binding_or_ttl(env, db, state, lost_binding):
+        client, _origin, _peer, tenants = env
+        t = tenants[0]
+        payload = envelope(callRef=t["callRef"], phone="+79990000001", startedAt=now(), direction="inbound")
+        headers = {"X-Cloud-API-Key": t["keys"][0][0]}
+        initial = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+        assert initial.status_code == 202, initial.text
+        if lost_binding:
+            # Support уже сохранил context; Core не успел записать binding до обрыва.
+            row = await db.get(ContextBinding, t["contextRef"])
+            await db.delete(row)
+            await db.commit()
+        t["prepare"].update(state=state, contextVersion=2, phone="synthetic-private", blocks={"private": True})
+        r = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+>       assert r.status_code == 202, r.text
+E       AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"upstream_invalid","retryable":true},"requestRef":"a17c6fe1e24640e69db1f1bd97d865bc"}
+E       assert 503 == 202
+E        +  where 503 = <Response [503 Service Unavailable]>.status_code
+
+tests/test_support_context_v1.py:639: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 01:21:47,089 [INFO] httpx: HTTP Request: POST http://127.0.0.1:46111/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:47,096 [INFO] httpx: HTTP Request: POST http://127.0.0.1:45153/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 01:21:47,172 [INFO] httpx: HTTP Request: POST http://127.0.0.1:46111/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:47,175 [INFO] httpx: HTTP Request: POST http://127.0.0.1:45153/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:46111/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:45153/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:46111/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:45153/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+_ test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[True-ready] _
+
+env = (<httpx.AsyncClient object at 0x7fdc4d87fad0>, 'http://127.0.0.1:55837', <tests.test_support_context_v1.Peer object at...thetic-call-80f937cbec4e4ab6a6cc9543a3f68ade'}, 'contextRef': 'scx_x0vSOzx20_BioWpEp0xfjnBKjoJs19wUwnR707WRXQs', ...}])
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7fdc4d8aba10>
+state = 'ready', lost_binding = True
+
+    @pytest.mark.parametrize("state", ["preparing", "ready", "partial", "unavailable"])
+    @pytest.mark.parametrize("lost_binding", [False, True])
+    async def test_prepare_replay_accepts_current_state_without_new_binding_or_ttl(env, db, state, lost_binding):
+        client, _origin, _peer, tenants = env
+        t = tenants[0]
+        payload = envelope(callRef=t["callRef"], phone="+79990000001", startedAt=now(), direction="inbound")
+        headers = {"X-Cloud-API-Key": t["keys"][0][0]}
+        initial = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+        assert initial.status_code == 202, initial.text
+        if lost_binding:
+            # Support уже сохранил context; Core не успел записать binding до обрыва.
+            row = await db.get(ContextBinding, t["contextRef"])
+            await db.delete(row)
+            await db.commit()
+        t["prepare"].update(state=state, contextVersion=2, phone="synthetic-private", blocks={"private": True})
+        r = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+>       assert r.status_code == 202, r.text
+E       AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"upstream_invalid","retryable":true},"requestRef":"9844b2646bda42658c536d88ec1f258c"}
+E       assert 503 == 202
+E        +  where 503 = <Response [503 Service Unavailable]>.status_code
+
+tests/test_support_context_v1.py:639: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 01:21:49,251 [INFO] httpx: HTTP Request: POST http://127.0.0.1:39985/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:49,259 [INFO] httpx: HTTP Request: POST http://127.0.0.1:55837/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 01:21:49,343 [INFO] httpx: HTTP Request: POST http://127.0.0.1:39985/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:49,346 [INFO] httpx: HTTP Request: POST http://127.0.0.1:55837/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:39985/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:55837/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:39985/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:55837/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+_ test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[True-partial] _
+
+env = (<httpx.AsyncClient object at 0x7fdc4d87fd10>, 'http://127.0.0.1:50179', <tests.test_support_context_v1.Peer object at...thetic-call-6ee530000135411dbbf3b9f654354d68'}, 'contextRef': 'scx_7ltwaEdqhukcXtneRxr0NE2jGtTvxW2STkOJip3PMfM', ...}])
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7fdc4e967b10>
+state = 'partial', lost_binding = True
+
+    @pytest.mark.parametrize("state", ["preparing", "ready", "partial", "unavailable"])
+    @pytest.mark.parametrize("lost_binding", [False, True])
+    async def test_prepare_replay_accepts_current_state_without_new_binding_or_ttl(env, db, state, lost_binding):
+        client, _origin, _peer, tenants = env
+        t = tenants[0]
+        payload = envelope(callRef=t["callRef"], phone="+79990000001", startedAt=now(), direction="inbound")
+        headers = {"X-Cloud-API-Key": t["keys"][0][0]}
+        initial = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+        assert initial.status_code == 202, initial.text
+        if lost_binding:
+            # Support уже сохранил context; Core не успел записать binding до обрыва.
+            row = await db.get(ContextBinding, t["contextRef"])
+            await db.delete(row)
+            await db.commit()
+        t["prepare"].update(state=state, contextVersion=2, phone="synthetic-private", blocks={"private": True})
+        r = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+>       assert r.status_code == 202, r.text
+E       AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"upstream_invalid","retryable":true},"requestRef":"b6a6d2438811454ba216a2f6489f728f"}
+E       assert 503 == 202
+E        +  where 503 = <Response [503 Service Unavailable]>.status_code
+
+tests/test_support_context_v1.py:639: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 01:21:50,326 [INFO] httpx: HTTP Request: POST http://127.0.0.1:41853/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:50,335 [INFO] httpx: HTTP Request: POST http://127.0.0.1:50179/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 01:21:50,417 [INFO] httpx: HTTP Request: POST http://127.0.0.1:41853/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:50,420 [INFO] httpx: HTTP Request: POST http://127.0.0.1:50179/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:41853/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:50179/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:41853/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:50179/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+_ test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[True-unavailable] _
+
+env = (<httpx.AsyncClient object at 0x7fdc4d87f710>, 'http://127.0.0.1:56993', <tests.test_support_context_v1.Peer object at...thetic-call-7d63f36727224a2d9e409411a8ffd566'}, 'contextRef': 'scx_cybg3_K-ZsBMfIiH5SMZzdxCDQtsMMNHAXot87eamcE', ...}])
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7fdc4ea46c50>
+state = 'unavailable', lost_binding = True
+
+    @pytest.mark.parametrize("state", ["preparing", "ready", "partial", "unavailable"])
+    @pytest.mark.parametrize("lost_binding", [False, True])
+    async def test_prepare_replay_accepts_current_state_without_new_binding_or_ttl(env, db, state, lost_binding):
+        client, _origin, _peer, tenants = env
+        t = tenants[0]
+        payload = envelope(callRef=t["callRef"], phone="+79990000001", startedAt=now(), direction="inbound")
+        headers = {"X-Cloud-API-Key": t["keys"][0][0]}
+        initial = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+        assert initial.status_code == 202, initial.text
+        if lost_binding:
+            # Support уже сохранил context; Core не успел записать binding до обрыва.
+            row = await db.get(ContextBinding, t["contextRef"])
+            await db.delete(row)
+            await db.commit()
+        t["prepare"].update(state=state, contextVersion=2, phone="synthetic-private", blocks={"private": True})
+        r = await client.post(PREFIX + "/prepare", json=payload, headers=headers)
+>       assert r.status_code == 202, r.text
+E       AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"upstream_invalid","retryable":true},"requestRef":"59872d471a814b7da54b7c47e3fb77be"}
+E       assert 503 == 202
+E        +  where 503 = <Response [503 Service Unavailable]>.status_code
+
+tests/test_support_context_v1.py:639: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 01:21:51,340 [INFO] httpx: HTTP Request: POST http://127.0.0.1:33759/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:51,348 [INFO] httpx: HTTP Request: POST http://127.0.0.1:56993/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 01:21:51,425 [INFO] httpx: HTTP Request: POST http://127.0.0.1:33759/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 01:21:51,428 [INFO] httpx: HTTP Request: POST http://127.0.0.1:56993/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:33759/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:56993/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:33759/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:56993/api/eco/support-context/v1/prepare "HTTP/1.1 503 Service Unavailable"
+=========================== short test summary info ============================
+FAILED tests/test_support_context_v1.py::test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[False-ready]
+FAILED tests/test_support_context_v1.py::test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[False-partial]
+FAILED tests/test_support_context_v1.py::test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[False-unavailable]
+FAILED tests/test_support_context_v1.py::test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[True-ready]
+FAILED tests/test_support_context_v1.py::test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[True-partial]
+FAILED tests/test_support_context_v1.py::test_prepare_replay_accepts_current_state_without_new_binding_or_ttl[True-unavailable]
+6 failed, 2 passed, 103 deselected, 2 warnings in 28.35s

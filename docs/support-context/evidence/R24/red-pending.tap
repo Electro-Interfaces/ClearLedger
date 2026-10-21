@@ -1,0 +1,93 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+________ test_postcall_initial_wrapup_pending_then_ended_with_new_proof ________
+tests/test_support_context_v1.py:842: in test_postcall_initial_wrapup_pending_then_ended_with_new_proof
+    assert r.status_code == 409, r.text
+E   AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"postcall_revoked","retryable":false},"requestRef":"4a2b1517e19f4bc18a2ec9c16ad8d686"}
+E   assert 403 == 409
+E    +  where 403 = <Response [403 Forbidden]>.status_code
+---------------------------- Captured stderr setup -----------------------------
+2026-10-21 03:40:09,305 [INFO] clearledger.seed: Создана компания: ООО ГИГ (ГазИнвестГрупп) (gig)
+2026-10-21 03:40:09,305 [INFO] clearledger.seed: Создана компания: РусГидро (rushydro)
+2026-10-21 03:40:09,316 [WARNING] passlib.handlers.bcrypt: (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/home/mag/orca/workspaces/ledger-app/support-context-core-20261020/.venv/lib/python3.13/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+              ^^^^^^^^^^^^^^^^^
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2026-10-21 03:40:09,665 [INFO] clearledger.seed: Создан сид-суперадмин: admin@clearledger.ru
+2026-10-21 03:40:09,674 [INFO] clearledger.seed: Создан шаблон проводок: ОРП/ОтчетККМОПродажах
+2026-10-21 03:40:09,675 [INFO] clearledger.seed: Создан шаблон проводок: ПТУ/Покупка
+2026-10-21 03:40:09,675 [INFO] clearledger.seed: Создан шаблон проводок: ПТУ/—
+2026-10-21 03:40:09,675 [INFO] clearledger.seed: Создан шаблон проводок: ОПЗС/ОтчетПроизводстваЗаСмену
+2026-10-21 03:40:09,675 [INFO] clearledger.seed: Создан шаблон проводок: КорректировкаПоступления/СогласованноеИзменение
+2026-10-21 03:40:09,685 [INFO] clearledger.seed: ГИГ: канал оплаты retail
+2026-10-21 03:40:09,685 [INFO] clearledger.seed: ГИГ: канал оплаты retail_cash
+2026-10-21 03:40:09,686 [INFO] clearledger.seed: ГИГ: канал оплаты retail_card
+2026-10-21 03:40:09,686 [INFO] clearledger.seed: ГИГ: канал оплаты cards
+2026-10-21 03:40:09,686 [INFO] clearledger.seed: ГИГ: канал оплаты online
+2026-10-21 03:40:09,686 [INFO] clearledger.seed: ГИГ: канал оплаты voucher
+2026-10-21 03:40:09,686 [INFO] clearledger.seed: ГИГ: канал оплаты coupon
+2026-10-21 03:40:09,686 [INFO] clearledger.seed: ГИГ: канал оплаты ledger
+2026-10-21 03:40:09,686 [INFO] clearledger.seed: ГИГ: канал оплаты writeoff_fuel
+2026-10-21 03:40:09,714 [INFO] clearledger.seed: ГИГ: источник «MSTO Онлайн-заказы»
+2026-10-21 03:40:09,743 [INFO] clearledger.seed: ГИГ: источник «STS Транзакции» создан (draft)
+2026-10-21 03:40:09,765 [INFO] clearledger.seed: Номенклатура дел заведена: ООО ГИГ (ГазИнвестГрупп) (3 дела)
+2026-10-21 03:40:09,768 [INFO] clearledger.seed: Виды документов заведены: ООО ГИГ (ГазИнвестГрупп) (4 вида)
+2026-10-21 03:40:09,774 [INFO] clearledger.seed: Номенклатура дел заведена: РусГидро (3 дела)
+2026-10-21 03:40:09,776 [INFO] clearledger.seed: Виды документов заведены: РусГидро (4 вида)
+2026-10-21 03:40:09,796 [INFO] clearledger.seed: Seed завершён
+------------------------------ Captured log setup ------------------------------
+INFO     clearledger.seed:seed.py:110 Создана компания: ООО ГИГ (ГазИнвестГрупп) (gig)
+INFO     clearledger.seed:seed.py:110 Создана компания: РусГидро (rushydro)
+WARNING  passlib.handlers.bcrypt:bcrypt.py:622 (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/home/mag/orca/workspaces/ledger-app/support-context-core-20261020/.venv/lib/python3.13/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+              ^^^^^^^^^^^^^^^^^
+AttributeError: module 'bcrypt' has no attribute '__about__'
+INFO     clearledger.seed:seed.py:561 Создан сид-суперадмин: admin@clearledger.ru
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ОРП/ОтчетККМОПродажах
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ПТУ/Покупка
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ПТУ/—
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ОПЗС/ОтчетПроизводстваЗаСмену
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: КорректировкаПоступления/СогласованноеИзменение
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail_cash
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail_card
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты cards
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты online
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты voucher
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты coupon
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты ledger
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты writeoff_fuel
+INFO     clearledger.seed:seed.py:341 ГИГ: источник «MSTO Онлайн-заказы»
+INFO     clearledger.seed:seed.py:408 ГИГ: источник «STS Транзакции» создан (draft)
+INFO     clearledger.seed:seed.py:249 Номенклатура дел заведена: ООО ГИГ (ГазИнвестГрупп) (3 дела)
+INFO     clearledger.seed:seed.py:259 Виды документов заведены: ООО ГИГ (ГазИнвестГрупп) (4 вида)
+INFO     clearledger.seed:seed.py:249 Номенклатура дел заведена: РусГидро (3 дела)
+INFO     clearledger.seed:seed.py:259 Виды документов заведены: РусГидро (4 вида)
+INFO     clearledger.seed:seed.py:146 Seed завершён
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 03:40:10,343 [INFO] httpx: HTTP Request: POST http://127.0.0.1:37615/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 03:40:10,352 [INFO] httpx: HTTP Request: POST http://127.0.0.1:33273/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 03:40:10,485 [INFO] httpx: HTTP Request: POST http://127.0.0.1:37615/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+2026-10-21 03:40:10,554 [INFO] httpx: HTTP Request: POST http://127.0.0.1:37615/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 03:40:10,675 [INFO] httpx: HTTP Request: POST http://127.0.0.1:33273/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+2026-10-21 03:40:13,157 [INFO] httpx: HTTP Request: POST http://127.0.0.1:33273/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+2026-10-21 03:40:13,262 [INFO] httpx: HTTP Request: POST http://127.0.0.1:33273/api/eco/support-context/v1/introspect "HTTP/1.1 401 Unauthorized"
+2026-10-21 03:40:13,476 [INFO] httpx: HTTP Request: POST http://127.0.0.1:37615/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 03:40:13,479 [INFO] httpx: HTTP Request: POST http://127.0.0.1:33273/api/eco/support-context/v1/postcall "HTTP/1.1 403 Forbidden"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:37615/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:33273/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:37615/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:37615/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:33273/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:33273/api/eco/support-context/v1/service-token "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:33273/api/eco/support-context/v1/introspect "HTTP/1.1 401 Unauthorized"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:37615/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:33273/api/eco/support-context/v1/postcall "HTTP/1.1 403 Forbidden"
+=========================== short test summary info ============================
+FAILED tests/test_support_context_v1.py::test_postcall_initial_wrapup_pending_then_ended_with_new_proof
+1 failed, 149 deselected, 2 warnings in 11.42s

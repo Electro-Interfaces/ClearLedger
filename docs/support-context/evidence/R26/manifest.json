@@ -1,0 +1,111 @@
+{
+  "task": "R26",
+  "runtime": "59beaac9811abd1897d016310d8295c320313063",
+  "baseline_clean": "455faec088251180f88499b80ed746fc79d89879",
+  "baseline_runtime": "c29bc8ba4ab9a90bfb6e8149237c34b67c3ce442",
+  "runtime_service_sha256": "3eb27ef8cd5e001d47fe09a685915dece23493b4a3d5bec8d0736eed70506278",
+  "suite_results": {
+    "red-boundary": "3 failed, 151 deselected",
+    "green-postcall": "61 passed, 97 deselected",
+    "green-context-ttl": "1 passed, 158 deselected",
+    "green-live-regression": "50 passed, 109 deselected"
+  },
+  "resources": {
+    "green-context-ttl-resources.json": {
+      "container": "core-support-context-r26-400061c7d3bb",
+      "database": "core_support_context_r26",
+      "loopback": true,
+      "pytest_args": [
+        "tests/test_support_context_v1.py",
+        "-k",
+        "context_ttl_crossing"
+      ],
+      "cleanup": true,
+      "port": 33311,
+      "pytest_exit": 0,
+      "base_commit": "455faec088251180f88499b80ed746fc79d89879",
+      "runtime_service_sha256": "3eb27ef8cd5e001d47fe09a685915dece23493b4a3d5bec8d0736eed70506278"
+    },
+    "green-live-regression-resources.json": {
+      "container": "core-support-context-r26-48f044663c7b",
+      "database": "core_support_context_r26",
+      "loopback": true,
+      "pytest_args": [
+        "tests/test_support_context_v1.py",
+        "-k",
+        "renew or current_core or restricted_core or live_assignment or phase_limits"
+      ],
+      "cleanup": true,
+      "base_commit": "59beaac9811abd1897d016310d8295c320313063",
+      "runtime_service_sha256": "3eb27ef8cd5e001d47fe09a685915dece23493b4a3d5bec8d0736eed70506278",
+      "port": 33314,
+      "pytest_exit": 0
+    },
+    "green-postcall-resources.json": {
+      "container": "core-support-context-r26-1ae91782d8c1",
+      "database": "core_support_context_r26",
+      "loopback": true,
+      "pytest_args": [
+        "tests/test_support_context_v1.py",
+        "-k",
+        "postcall"
+      ],
+      "cleanup": true,
+      "port": 33310,
+      "pytest_exit": 0,
+      "base_commit": "455faec088251180f88499b80ed746fc79d89879",
+      "runtime_service_sha256": "3eb27ef8cd5e001d47fe09a685915dece23493b4a3d5bec8d0736eed70506278"
+    },
+    "red-boundary-resources.json": {
+      "container": "core-support-context-r26-ff7e03bd9d6a",
+      "database": "core_support_context_r26",
+      "loopback": true,
+      "pytest_args": [
+        "tests/test_support_context_v1.py",
+        "-k",
+        "crosses_live_deadline or expired_live_projection"
+      ],
+      "cleanup": true,
+      "port": 33309,
+      "pytest_exit": 1,
+      "base_commit": "455faec088251180f88499b80ed746fc79d89879",
+      "runtime_service_sha256": "369acee38a379a7b282e9a8da8ec719174f693b012517239628056d4637977cc"
+    }
+  },
+  "all_own_resources_removed": true,
+  "scope": "Real Core TCP HTTP/PostgreSQL/RS256/ES256 DPoP with limited Node/Support HTTP protocol peers",
+  "actual_v20": "Separate natural Node timer/Support business transaction/browser verification; not claimed here",
+  "handoff": {
+    "root": "msg_34c4bf1c028b",
+    "v20": "msg_7e4822423135",
+    "r25_via_owning_run": "msg_1f356c4ece8b",
+    "r25_direct": "Rejected because Dispatch completed; no new Dispatch or agents created"
+  },
+  "pr": 18,
+  "base": "feat/voice-megafon-20261019",
+  "merge": false,
+  "deploy": false,
+  "normative_sha256": {
+    "contract-v1.md": "df916e2194429268b06be2ab2b1c03eb32e0d81503df8ce3043d5eb9c73eba12",
+    "postcall-transition-v1.md": "3db9e9229418a124df476ab28f574a16ed37e692b83fd7083748301fc45e3e3c"
+  },
+  "artifact_sha256": {
+    "docs/support-context/evidence/R26/green-context-ttl-context-ttl-crossing.json": "15a70366e959090c05ce9d9e990ec65376a08ee517aee4d9e2c6e48db5a9c9b0",
+    "docs/support-context/evidence/R26/green-context-ttl-resources.json": "96a959812a3d6b83744abe92e082bc0b7d7ce259789b0fdaade768ff9441bd01",
+    "docs/support-context/evidence/R26/green-context-ttl.tap": "9b57293c7dade46a918574fca1af0fd58d82cd7331bc487cfcba7e2166f6e717",
+    "docs/support-context/evidence/R26/green-live-regression-resources.json": "e9ffe89a9718f926d3b4a124fe57ed3503d740230a398c4049899eca7f09248f",
+    "docs/support-context/evidence/R26/green-live-regression.tap": "a50bded68bff8369be7d4dc3fc3af5eb2324dc64fef0dbf7b026307a9fd5f140",
+    "docs/support-context/evidence/R26/green-postcall-actor-deadline-crossing.json": "5bb00da5b0291ad981eb4042346077d88fb5c79cc74f34e6a06d729e70e09ade",
+    "docs/support-context/evidence/R26/green-postcall-expired-live-false.json": "daee9ef98e4aa4dfca5c3c3daad072b96b173790568b023f75028d17ff08446b",
+    "docs/support-context/evidence/R26/green-postcall-expired-live-true.json": "d18ffa695b81f128df755d8bb17bf9455b7e7c3e31fa7317008d3bf0f3767007",
+    "docs/support-context/evidence/R26/green-postcall-resources.json": "23c680989d07a469323441de6289d0fc72b03343087eebbf66e24b89f88c94e0",
+    "docs/support-context/evidence/R26/green-postcall.tap": "7c3191e26b2e4cbabd2a5088988b307ab67f8c5e69edcd44d81759b645b8581e",
+    "docs/support-context/evidence/R26/red-boundary-actor-deadline-crossing.json": "e8aa715268c385ecfc48a9706db5d3236f833fd5b1dfb31aea68dac48efda92e",
+    "docs/support-context/evidence/R26/red-boundary-expired-live-false.json": "103d8fbf4bd1cf73d522b21c94bbd0c33963b7fc85cdfd0c32fa7b8ce197de16",
+    "docs/support-context/evidence/R26/red-boundary-expired-live-true.json": "0f7ccd2455708ab94118abafeb492912dccdc6c633219477be846ba4a480ed32",
+    "docs/support-context/evidence/R26/red-boundary-resources.json": "aed6b31e04086ba630eb05b5d5d59bc72c724f2b6a1dae3528d75b0a78c48309",
+    "docs/support-context/evidence/R26/red-boundary.tap": "cc9c0b36fc9cc1e505272ec174309d6aba68c5105d5c16b24e2b7de02c9a22eb",
+    "docs/support-context/evidence/R26/run-tests.py": "8a5fa411eaba4b7b1c769c4f275736d35c4df3300659672f27e4d44a69144fca"
+  },
+  "pr_body_updated": true
+}

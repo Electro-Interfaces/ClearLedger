@@ -1,0 +1,14 @@
+{
+  "container": "core-support-context-r24-832ad7117ae9",
+  "database": "core_support_context_r24",
+  "loopback": true,
+  "pytest_args": [
+    "tests/test_support_context_v1.py",
+    "tests/test_support_context_source_v1.py",
+    "-k",
+    "renew or source or consult or restricted_core or current_core or revoke"
+  ],
+  "cleanup": true,
+  "port": 33300,
+  "pytest_exit": 0
+}
