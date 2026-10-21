@@ -1,0 +1,996 @@
+# Полный локальный набор Ядра ПОСЛЕ правки (clearledger/server: bash tests/run_ci.sh)
+# дерево: отдельное, SHA fe94f3f5 ветки fix/audit-r8-service-token-tenant-20261021
+# окружение: образ fix-r8-py:1 (Python 3.13, как server/Dockerfile), своя база clearledger_test_after на fix-r8-pg
+# дата: 2026-10-21T22:47:29+03:00
+
+── tests/test_access_keys.py
+.....                                                                    [100%]
+5 passed in 0.06s
+── tests/test_accounting_adjustment.py
+...........                                                              [100%]
+11 passed in 0.07s
+── tests/test_accounting_business_date.py
+....                                                                     [100%]
+4 passed in 0.06s
+карантин, пропущен: tests/test_accounting_egress.py
+карантин, пропущен: tests/test_accounting_group_v3.py
+── tests/test_accounting_outbox.py
+...................                                                      [100%]
+19 passed in 1.06s
+── tests/test_accounting_reconciliation.py
+.........                                                                [100%]
+9 passed in 0.07s
+── tests/test_acquaint_requests.py
+.....                                                                    [100%]
+5 passed in 12.36s
+── tests/test_app_registry_defaults.py
+...........                                                              [100%]
+11 passed in 0.07s
+── tests/test_approval_requests.py
+.......                                                                  [100%]
+7 passed in 0.07s
+── tests/test_asuim_payment_time.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_asuim_vitrina.py
+...............                                                          [100%]
+15 passed in 0.22s
+── tests/test_audit_security.py
+.                                                                        [100%]
+1 passed in 10.84s
+── tests/test_auth.py
+.............                                                            [100%]
+13 passed in 14.44s
+── tests/test_bp_package_transport.py
+.....                                                                    [100%]
+5 passed in 0.50s
+── tests/test_business_access.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_calendar.py
+.....E                                                                   [100%]
+==================================== ERRORS ====================================
+_________________ ERROR at teardown of test_отмена_не_удаляет __________________
+
+self = <sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_cursor object at 0x7fe05ceace80>
+operation = 'DROP SCHEMA public CASCADE', parameters = ()
+
+    async def _prepare_and_execute(self, operation, parameters):
+        adapt_connection = self._adapt_connection
+    
+        async with adapt_connection._execute_mutex:
+            if not adapt_connection._started:
+                await adapt_connection._start_transaction()
+    
+            if parameters is None:
+                parameters = ()
+    
+            try:
+                prepared_stmt, attributes = await adapt_connection._prepare(
+                    operation, self._invalidate_schema_cache_asof
+                )
+    
+                if attributes:
+                    self.description = [
+                        (
+                            attr.name,
+                            attr.type.oid,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                        for attr in attributes
+                    ]
+                else:
+                    self.description = None
+    
+                if self.server_side:
+                    self._cursor = await prepared_stmt.cursor(*parameters)
+                    self.rowcount = -1
+                else:
+>                   self._rows = deque(await prepared_stmt.fetch(*parameters))
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+/usr/local/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py:534: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/local/lib/python3.13/site-packages/asyncpg/prepared_stmt.py:176: in fetch
+    data = await self.__bind_execute(args, 0, timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.13/site-packages/asyncpg/prepared_stmt.py:267: in __bind_execute
+    data, status, _ = await self.__do_execute(
+/usr/local/lib/python3.13/site-packages/asyncpg/prepared_stmt.py:256: in __do_execute
+    return await executor(protocol)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+>   ???
+E   asyncpg.exceptions.OutOfMemoryError: out of shared memory
+E   HINT:  You might need to increase max_locks_per_transaction.
+
+asyncpg/protocol/protocol.pyx:206: OutOfMemoryError
+
+The above exception was the direct cause of the following exception:
+
+self = <sqlalchemy.engine.base.Connection object at 0x7fe05d030ad0>
+dialect = <sqlalchemy.dialects.postgresql.asyncpg.PGDialect_asyncpg object at 0x7fe05eb0a490>
+context = <sqlalchemy.dialects.postgresql.asyncpg.PGExecutionContext_asyncpg object at 0x7fe05e8a5150>
+statement = <sqlalchemy.dialects.postgresql.asyncpg.PGCompiler_asyncpg object at 0x7fe05d004cd0>
+parameters = [()]
+
+    def _exec_single_context(
+        self,
+        dialect: Dialect,
+        context: ExecutionContext,
+        statement: Union[str, Compiled],
+        parameters: Optional[_AnyMultiExecuteParams],
+    ) -> CursorResult[Any]:
+        """continue the _execute_context() method for a single DBAPI
+        cursor.execute() or cursor.executemany() call.
+    
+        """
+        if dialect.bind_typing is BindTyping.SETINPUTSIZES:
+            generic_setinputsizes = context._prepare_set_input_sizes()
+    
+            if generic_setinputsizes:
+                try:
+                    dialect.do_set_input_sizes(
+                        context.cursor, generic_setinputsizes, context
+                    )
+                except BaseException as e:
+                    self._handle_dbapi_exception(
+                        e, str(statement), parameters, None, context
+                    )
+    
+        cursor, str_statement, parameters = (
+            context.cursor,
+            context.statement,
+            context.parameters,
+        )
+    
+        effective_parameters: Optional[_AnyExecuteParams]
+    
+        if not context.executemany:
+            effective_parameters = parameters[0]
+        else:
+            effective_parameters = parameters
+    
+        if self._has_events or self.engine._has_events:
+            for fn in self.dispatch.before_cursor_execute:
+                str_statement, effective_parameters = fn(
+                    self,
+                    cursor,
+                    str_statement,
+                    effective_parameters,
+                    context,
+                    context.executemany,
+                )
+    
+        if self._echo:
+            self._log_info(str_statement)
+    
+            stats = context._get_cache_stats()
+    
+            if not self.engine.hide_parameters:
+                self._log_info(
+                    "[%s] %r",
+                    stats,
+                    sql_util._repr_params(
+                        effective_parameters,
+                        batches=10,
+                        ismulti=context.executemany,
+                    ),
+                )
+            else:
+                self._log_info(
+                    "[%s] [SQL parameters hidden due to hide_parameters=True]",
+                    stats,
+                )
+    
+        evt_handled: bool = False
+        try:
+            if context.execute_style is ExecuteStyle.EXECUTEMANY:
+                effective_parameters = cast(
+                    "_CoreMultiExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_executemany:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_executemany(
+                        cursor,
+                        str_statement,
+                        effective_parameters,
+                        context,
+                    )
+            elif not effective_parameters and context.no_parameters:
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute_no_params:
+                        if fn(cursor, str_statement, context):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+                    self.dialect.do_execute_no_params(
+                        cursor, str_statement, context
+                    )
+            else:
+                effective_parameters = cast(
+                    "_CoreSingleExecuteParams", effective_parameters
+                )
+                if self.dialect._has_events:
+                    for fn in self.dialect.dispatch.do_execute:
+                        if fn(
+                            cursor,
+                            str_statement,
+                            effective_parameters,
+                            context,
+                        ):
+                            evt_handled = True
+                            break
+                if not evt_handled:
+>                   self.dialect.do_execute(
+                        cursor, str_statement, effective_parameters, context
+                    )
+
+/usr/local/lib/python3.13/site-packages/sqlalchemy/engine/base.py:1967: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/local/lib/python3.13/site-packages/sqlalchemy/engine/default.py:941: in do_execute
+    cursor.execute(statement, parameters)
+/usr/local/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py:568: in execute
+    self._adapt_connection.await_(
+/usr/local/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py:132: in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py:196: in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+/usr/local/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py:546: in _prepare_and_execute
+    self._handle_exception(error)
+/usr/local/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py:497: in _handle_exception
+    self._adapt_connection._handle_exception(error)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <AdaptedConnection <asyncpg.connection.Connection object at 0x7fe05d943200>>
+error = OutOfMemoryError('out of shared memory')
+
+    def _handle_exception(self, error):
+        if self._connection.is_closed():
+            self._transaction = None
+            self._started = False
+    
+        if not isinstance(error, AsyncAdapt_asyncpg_dbapi.Error):
+            exception_mapping = self.dbapi._asyncpg_error_translate
+    
+            for super_ in type(error).__mro__:
+                if super_ in exception_mapping:
+                    translated_error = exception_mapping[super_](
+                        "%s: %s" % (type(error), error)
+                    )
+                    translated_error.pgcode = translated_error.sqlstate = (
+                        getattr(error, "sqlstate", None)
+                    )
+>                   raise translated_error from error
+E                   sqlalchemy.dialects.postgresql.asyncpg.AsyncAdapt_asyncpg_dbapi.Error: <class 'asyncpg.exceptions.OutOfMemoryError'>: out of shared memory
+E                   HINT:  You might need to increase max_locks_per_transaction.
+
+/usr/local/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py:780: Error
+
+The above exception was the direct cause of the following exception:
+
+    def finalizer() -> None:
+        """Yield again, to finalize."""
+    
+        async def async_finalizer() -> None:
+            try:
+                await gen_obj.__anext__()
+            except StopAsyncIteration:
+                pass
+            else:
+                msg = "Async generator fixture didn't stop."
+                msg += "Yield only once."
+                raise ValueError(msg)
+    
+>       runner.run(async_finalizer(), context=context)
+
+/usr/local/lib/python3.13/site-packages/pytest_asyncio/plugin.py:424: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/local/lib/python3.13/asyncio/runners.py:119: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.13/asyncio/base_events.py:726: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+/usr/local/lib/python3.13/site-packages/pytest_asyncio/plugin.py:416: in async_finalizer
+    await gen_obj.__anext__()
+tests/conftest.py:106: in setup_database
+    await conn.execute(sa_text("DROP SCHEMA public CASCADE"))
+/usr/local/lib/python3.13/site-packages/sqlalchemy/ext/asyncio/engine.py:657: in execute
+    result = await greenlet_spawn(
+/usr/local/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py:201: in greenlet_spawn
+    result = context.throw(*sys.exc_info())
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.13/site-packages/sqlalchemy/engine/base.py:1418: in execute
+    return meth(
+/usr/local/lib/python3.13/site-packages/sqlalchemy/sql/elements.py:515: in _execute_on_connection
+    return connection._execute_clauseelement(
+/usr/local/lib/python3.13/site-packages/sqlalchemy/engine/base.py:1640: in _execute_clauseelement
+    ret = self._execute_context(
+/usr/local/lib/python3.13/site-packages/sqlalchemy/engine/base.py:1846: in _execute_context
+    return self._exec_single_context(
+/usr/local/lib/python3.13/site-packages/sqlalchemy/engine/base.py:1986: in _exec_single_context
+    self._handle_dbapi_exception(
+/usr/local/lib/python3.13/site-packages/sqlalchemy/engine/base.py:2355: in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+/usr/local/lib/python3.13/site-packages/sqlalchemy/engine/base.py:1967: in _exec_single_context
+    self.dialect.do_execute(
+/usr/local/lib/python3.13/site-packages/sqlalchemy/engine/default.py:941: in do_execute
+    cursor.execute(statement, parameters)
+/usr/local/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py:568: in execute
+    self._adapt_connection.await_(
+/usr/local/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py:132: in await_only
+    return current.parent.switch(awaitable)  # type: ignore[no-any-return,attr-defined] # noqa: E501
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.13/site-packages/sqlalchemy/util/_concurrency_py3k.py:196: in greenlet_spawn
+    value = await result
+            ^^^^^^^^^^^^
+/usr/local/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py:546: in _prepare_and_execute
+    self._handle_exception(error)
+/usr/local/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py:497: in _handle_exception
+    self._adapt_connection._handle_exception(error)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <AdaptedConnection <asyncpg.connection.Connection object at 0x7fe05d943200>>
+error = OutOfMemoryError('out of shared memory')
+
+    def _handle_exception(self, error):
+        if self._connection.is_closed():
+            self._transaction = None
+            self._started = False
+    
+        if not isinstance(error, AsyncAdapt_asyncpg_dbapi.Error):
+            exception_mapping = self.dbapi._asyncpg_error_translate
+    
+            for super_ in type(error).__mro__:
+                if super_ in exception_mapping:
+                    translated_error = exception_mapping[super_](
+                        "%s: %s" % (type(error), error)
+                    )
+                    translated_error.pgcode = translated_error.sqlstate = (
+                        getattr(error, "sqlstate", None)
+                    )
+>                   raise translated_error from error
+E                   sqlalchemy.exc.DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) <class 'asyncpg.exceptions.OutOfMemoryError'>: out of shared memory
+E                   HINT:  You might need to increase max_locks_per_transaction.
+E                   [SQL: DROP SCHEMA public CASCADE]
+E                   (Background on this error at: https://sqlalche.me/e/20/dbapi)
+
+/usr/local/lib/python3.13/site-packages/sqlalchemy/dialects/postgresql/asyncpg.py:780: DBAPIError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 19:51:18,108 [WARNING] clearledger.email: [mail:dev] приглашение на встречу для guest-4a1a0b59@test.local: Приглашение: Планёрка по 208 — 22.10.2026 в 22:51
+2026-10-21 19:51:18,135 [WARNING] clearledger.email: [mail:dev] приглашение на встречу для guest-4a1a0b59@test.local: Отменено: Планёрка по 208 — 22.10.2026 в 22:51
+------------------------------ Captured log call -------------------------------
+WARNING  clearledger.email:email_service.py:260 [mail:dev] приглашение на встречу для guest-4a1a0b59@test.local: Приглашение: Планёрка по 208 — 22.10.2026 в 22:51
+WARNING  clearledger.email:email_service.py:260 [mail:dev] приглашение на встречу для guest-4a1a0b59@test.local: Отменено: Планёрка по 208 — 22.10.2026 в 22:51
+=========================== short test summary info ============================
+ERROR tests/test_calendar.py::test_отмена_не_удаляет - sqlalchemy.exc.DBAPIEr...
+5 passed, 1 error in 11.65s
+── tests/test_calendar_meeting.py
+..                                                                       [100%]
+2 passed in 11.45s
+── tests/test_calendar_papers.py
+..                                                                       [100%]
+2 passed in 10.91s
+── tests/test_calendar_workflow.py
+..............                                                           [100%]
+14 passed in 11.63s
+── tests/test_catalog_check_deleted.py
+..                                                                       [100%]
+2 passed in 0.05s
+── tests/test_catering_economy.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_cena_rozhdaetsya_stanciey.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_charge_sales_regressions.py
+......                                                                   [100%]
+6 passed in 0.99s
+── tests/test_chat_room_subject.py
+...                                                                      [100%]
+3 passed in 11.60s
+── tests/test_chat_scope_directory.py
+..                                                                       [100%]
+2 passed in 12.61s
+── tests/test_chat_ws.py
+......                                                                   [100%]
+6 passed in 9.96s
+── tests/test_cheque_catalog_vat.py
+............                                                             [100%]
+12 passed in 0.08s
+── tests/test_client_errors.py
+.....                                                                    [100%]
+5 passed in 0.07s
+── tests/test_companies.py
+.......                                                                  [100%]
+7 passed in 12.53s
+── tests/test_conf_app.py
+................                                                         [100%]
+16 passed in 13.90s
+── tests/test_conf_privacy.py
+...                                                                      [100%]
+3 passed in 10.83s
+── tests/test_conf_protocol.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_contract_direction.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_contract_liability.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_contract_scope.py
+.........                                                                [100%]
+9 passed in 15.19s
+── tests/test_cutover_state_machine.py
+.......                                                                  [100%]
+7 passed in 0.95s
+── tests/test_data_nakladnoy_dlya_stancii.py
+....                                                                     [100%]
+4 passed in 0.06s
+── tests/test_database_lifecycle.py
+.                                                                        [100%]
+1 passed in 10.94s
+── tests/test_digest.py
+........                                                                 [100%]
+8 passed in 0.07s
+── tests/test_digest_task_link.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_doc_note_in_force.py
+..                                                                       [100%]
+2 passed in 12.57s
+── tests/test_doc_text.py
+.........                                                                [100%]
+9 passed in 0.66s
+── tests/test_doc_workflow_unit.py
+.....................                                                    [100%]
+21 passed in 1.01s
+── tests/test_docs_archive_flow.py
+......                                                                   [100%]
+=============================== warnings summary ===============================
+tests/test_docs_archive_flow.py::test_акт_уничтожения_требует_четырёх_раздельных_решений
+  <sys>:0: SAWarning: DELETE statement on table 'doc_exports' expected to delete 1 row(s); 0 were matched.  Please set confirm_deleted_rows=False within the mapper configuration to prevent this warning.
+
+tests/test_docs_archive_flow.py::test_акт_уничтожения_требует_четырёх_раздельных_решений
+  <sys>:0: SAWarning: DELETE statement on table 'doc_versions' expected to delete 1 row(s); 0 were matched.  Please set confirm_deleted_rows=False within the mapper configuration to prevent this warning.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+6 passed, 2 warnings in 17.38s
+── tests/test_docs_archive_queue.py
+.                                                                        [100%]
+1 passed in 10.61s
+── tests/test_docs_archive_security.py
+...........                                                              [100%]
+11 passed in 0.95s
+── tests/test_docs_editing_unit.py
+......                                                                   [100%]
+6 passed in 0.92s
+── tests/test_docs_next.py
+........................                                                 [100%]
+24 passed in 21.11s
+── tests/test_docs_register.py
+.......................                                                  [100%]
+23 passed in 22.71s
+── tests/test_docs_reports.py
+.....                                                                    [100%]
+5 passed in 13.35s
+── tests/test_document_requests.py
+........                                                                 [100%]
+8 passed in 0.92s
+── tests/test_dubli_smen.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_eco_work_desk.py
+..                                                                       [100%]
+2 passed in 11.37s
+── tests/test_edge_chain.py
+...                                                                      [100%]
+3 passed in 0.09s
+── tests/test_edge_kkt.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_edge_ns_codes_own.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_edge_packet_hash.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_edge_stock.py
+..                                                                       [100%]
+2 passed in 0.06s
+── tests/test_edge_stock_alerts.py
+.......                                                                  [100%]
+7 passed in 0.96s
+── tests/test_edge_stock_nocode.py
+....                                                                     [100%]
+4 passed in 0.07s
+карантин, пропущен: tests/test_edge_to_bp_flow.py
+── tests/test_edge_transfers.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_edo_upd_article.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_edo_upd_seller.py
+..                                                                       [100%]
+2 passed in 0.06s
+── tests/test_entries.py
+.............                                                            [100%]
+13 passed in 14.39s
+── tests/test_equipment_docs.py
+..............                                                           [100%]
+14 passed in 0.11s
+── tests/test_equipment_reports.py
+.......                                                                  [100%]
+7 passed in 0.09s
+── tests/test_export_policy.py
+.....                                                                    [100%]
+5 passed in 0.07s
+── tests/test_external_approval.py
+........                                                                 [100%]
+8 passed in 0.07s
+── tests/test_ezs_accounting.py
+........                                                                 [100%]
+8 passed in 0.09s
+── tests/test_ezs_checklist.py
+..........                                                               [100%]
+10 passed in 0.10s
+── tests/test_ezs_exit_reasons.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_ezs_gate_waiver.py
+........                                                                 [100%]
+8 passed in 0.97s
+── tests/test_ezs_tp_steps.py
+........                                                                 [100%]
+8 passed in 0.11s
+── tests/test_fuel_balance.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_fuel_costing_allocation.py
+..                                                                       [100%]
+2 passed in 0.06s
+── tests/test_fuel_pricing_events.py
+........                                                                 [100%]
+8 passed in 0.11s
+── tests/test_gate_by_doc.py
+...                                                                      [100%]
+3 passed in 11.80s
+── tests/test_goods_report_list.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_guard.py
+.....                                                                    [100%]
+5 passed in 0.08s
+── tests/test_health.py
+....                                                                     [100%]
+4 passed in 10.36s
+── tests/test_ics.py
+..........                                                               [100%]
+10 passed in 0.08s
+── tests/test_ics_invite.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_info_cc.py
+..                                                                       [100%]
+2 passed in 13.14s
+── tests/test_info_center.py
+.....                                                                    [100%]
+5 passed in 0.08s
+── tests/test_info_seed_equipment.py
+.....                                                                    [100%]
+5 passed in 0.09s
+── tests/test_info_seed_station.py
+.....                                                                    [100%]
+5 passed in 0.08s
+── tests/test_info_seed_work_contexts.py
+..                                                                       [100%]
+2 passed in 13.45s
+── tests/test_invitations.py
+.....                                                                    [100%]
+5 passed in 13.47s
+── tests/test_item_draft_atomic.py
+....                                                                     [100%]
+4 passed in 0.26s
+── tests/test_item_draft_auto.py
+..........                                                               [100%]
+10 passed in 0.10s
+── tests/test_item_draft_defaults.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_launcher_favorites.py
+......                                                                   [100%]
+6 passed in 12.20s
+── tests/test_location_bindings.py
+.....                                                                    [100%]
+5 passed in 0.07s
+── tests/test_location_metadata_merge.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_location_types.py
+.....                                                                    [100%]
+5 passed in 13.60s
+── tests/test_mail_robot_sender.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_mail_security.py
+...............                                                          [100%]
+15 passed in 1.03s
+── tests/test_mail_sender_parse.py
+.....                                                                    [100%]
+5 passed in 0.06s
+── tests/test_mail_to_task.py
+...                                                                      [100%]
+3 passed in 11.27s
+── tests/test_managed_connectors.py
+...........                                                              [100%]
+11 passed in 1.45s
+── tests/test_market_operators.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_market_registry.py
+...........                                                              [100%]
+11 passed in 0.11s
+── tests/test_market_scope.py
+.....                                                                    [100%]
+5 passed in 1.06s
+── tests/test_matrix_rules.py
+.......                                                                  [100%]
+7 passed in 10.52s
+── tests/test_meeting_series.py
+..........                                                               [100%]
+10 passed in 0.08s
+── tests/test_megafon_voice.py
+..                                                                       [100%]
+2 passed in 15.16s
+── tests/test_notes_attachments.py
+..                                                                       [100%]
+2 passed in 11.62s
+── tests/test_notify_rules.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_object_freeze.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_object_scope.py
+.....                                                                    [100%]
+5 passed in 0.08s
+── tests/test_onec_entry_adapter.py
+.....                                                                    [100%]
+5 passed in 0.07s
+── tests/test_ops_closing.py
+.......................                                                  [100%]
+23 passed in 0.12s
+── tests/test_ops_monitor_scope.py
+.....                                                                    [100%]
+5 passed in 10.77s
+── tests/test_ops_monitor_unit.py
+....                                                                     [100%]
+4 passed in 0.09s
+── tests/test_oversight.py
+...........                                                              [100%]
+11 passed in 11.80s
+── tests/test_partner_bridge_topics.py
+........                                                                 [100%]
+8 passed in 10.87s
+── tests/test_partner_sync.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_partner_visit_pass.py
+............                                                             [100%]
+12 passed in 11.03s
+── tests/test_personal_isolation.py
+...............                                                          [100%]
+15 passed in 14.23s
+── tests/test_personal_reminders.py
+...                                                                      [100%]
+3 passed in 11.01s
+── tests/test_personal_visibility.py
+..                                                                       [100%]
+2 passed in 11.63s
+── tests/test_pii_masker.py
+.......                                                                  [100%]
+7 passed in 0.09s
+── tests/test_placement.py
+.........                                                                [100%]
+9 passed in 0.07s
+── tests/test_process_boundary.py
+...                                                                      [100%]
+3 passed in 0.13s
+── tests/test_process_templates.py
+.....                                                                    [100%]
+5 passed in 16.89s
+── tests/test_project_analytics.py
+.....                                                                    [100%]
+5 passed in 0.47s
+── tests/test_project_audit.py
+..                                                                       [100%]
+2 passed in 12.36s
+── tests/test_project_changes.py
+.....                                                                    [100%]
+5 passed in 0.49s
+── tests/test_project_feedback_unit.py
+.................                                                        [100%]
+17 passed in 0.98s
+── tests/test_project_integration.py
+............................................                             [100%]
+44 passed in 1.16s
+── tests/test_project_reconcile.py
+........                                                                 [100%]
+8 passed in 0.07s
+── tests/test_project_report.py
+........                                                                 [100%]
+8 passed in 0.18s
+── tests/test_project_scenario_versions.py
+.....                                                                    [100%]
+5 passed in 16.40s
+── tests/test_projects_process.py
+......                                                                   [100%]
+6 passed in 10.52s
+── tests/test_pulse_home.py
+........                                                                 [100%]
+8 passed in 13.57s
+── tests/test_pulse_rules.py
+.................................................                        [100%]
+49 passed in 0.21s
+── tests/test_rate_limit.py
+......                                                                   [100%]
+6 passed in 0.20s
+── tests/test_raw_intake.py
+...............                                                          [100%]
+15 passed in 0.10s
+── tests/test_receipt_authority.py
+......                                                                   [100%]
+6 passed in 0.06s
+── tests/test_recipe_versions.py
+......                                                                   [100%]
+6 passed in 10.81s
+── tests/test_reestr_contract_pick.py
+...                                                                      [100%]
+3 passed in 0.44s
+── tests/test_references_sync.py
+.......                                                                  [100%]
+7 passed in 9.97s
+── tests/test_rejected_sessions.py
+.......                                                                  [100%]
+7 passed in 0.08s
+── tests/test_scope_reaches_screens.py
+...........                                                              [100%]
+11 passed in 0.99s
+── tests/test_security_audit.py
+..............                                                           [100%]
+14 passed in 0.19s
+── tests/test_service_accounts.py
+...                                                                      [100%]
+3 passed in 11.30s
+── tests/test_service_token_tenant.py
+...............                                                          [100%]
+15 passed in 7.40s
+── tests/test_shared_commercial_owner.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_site_track.py
+.......                                                                  [100%]
+7 passed in 14.08s
+── tests/test_sites_close_and_node.py
+...                                                                      [100%]
+3 passed in 12.31s
+── tests/test_sites_intake.py
+......                                                                   [100%]
+6 passed in 11.84s
+── tests/test_sku.py
+..........                                                               [100%]
+10 passed in 0.08s
+── tests/test_sku_allocation.py
+...                                                                      [100%]
+3 passed in 10.70s
+── tests/test_sliyanie_ttk_po_stanciyam.py
+....                                                                     [100%]
+4 passed in 0.06s
+── tests/test_snyatie_ceny_ne_nol.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_space_connection_registry.py
+....                                                                     [100%]
+4 passed in 0.47s
+── tests/test_space_data_model.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_space_events.py
+.......                                                                  [100%]
+7 passed in 0.08s
+── tests/test_space_events_router.py
+..............                                                           [100%]
+14 passed in 0.09s
+── tests/test_space_links.py
+..                                                                       [100%]
+2 passed in 0.07s
+── tests/test_space_projection_batching.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_space_projection_users.py
+.                                                                        [100%]
+1 passed in 11.12s
+── tests/test_space_time.py
+.........................................                                [100%]
+41 passed in 0.16s
+── tests/test_spare_docs.py
+........................                                                 [100%]
+24 passed in 0.11s
+── tests/test_stanciya_sklada.py
+....                                                                     [100%]
+4 passed in 0.06s
+── tests/test_starter_templates.py
+.....                                                                    [100%]
+5 passed in 13.01s
+── tests/test_station_canon.py
+....                                                                     [100%]
+4 passed in 0.08s
+── tests/test_station_console_query.py
+..                                                                       [100%]
+2 passed in 0.07s
+── tests/test_station_console_redirect.py
+.....                                                                    [100%]
+5 passed in 0.06s
+── tests/test_station_console_rewrite.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_station_exchange_state.py
+......                                                                   [100%]
+6 passed in 0.08s
+── tests/test_station_numbers.py
+...                                                                      [100%]
+3 passed in 0.41s
+── tests/test_station_passport.py
+.......                                                                  [100%]
+7 passed in 0.09s
+── tests/test_station_roster.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_stats.py
+...                                                                      [100%]
+3 passed in 11.66s
+── tests/test_stock_batches_cost.py
+...                                                                      [100%]
+3 passed in 0.47s
+── tests/test_store_baskets.py
+......                                                                   [100%]
+6 passed in 0.10s
+── tests/test_store_catalog_health.py
+..                                                                       [100%]
+2 passed in 0.07s
+── tests/test_store_document_snapshot_refs.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_store_documents_projection.py
+........................................................................ [ 88%]
+.........                                                                [100%]
+81 passed in 1.42s
+── tests/test_store_drilldown.py
+.                                                                        [100%]
+1 passed in 0.08s
+── tests/test_store_dynamics_price_log.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_store_price_mrc.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_store_price_plans.py
+........                                                                 [100%]
+8 passed in 0.45s
+── tests/test_store_price_response.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_store_receipt_accounting_readiness.py
+................                                                         [100%]
+16 passed in 1.15s
+── tests/test_store_receipt_contract.py
+...............                                                          [100%]
+15 passed in 0.99s
+── tests/test_store_receipt_ingest.py
+ss                                                                       [100%]
+2 skipped in 0.08s
+── tests/test_store_release_cost.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_store_shift_dedup.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_store_shift_flow.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_store_shifts_scope.py
+.....                                                                    [100%]
+5 passed in 0.99s
+── tests/test_store_stock_cost_doubt.py
+........                                                                 [100%]
+8 passed in 0.08s
+── tests/test_support_context_source_v1.py
+.                                                                        [100%]
+1 passed in 12.31s
+── tests/test_support_context_v1.py
+........................................................................ [ 45%]
+........................................................................ [ 90%]
+...............                                                          [100%]
+=============================== warnings summary ===============================
+tests/test_support_context_v1.py::test_renew_phase_issues_fresh_rights_without_upgrading_old_token[offering-connected]
+  /usr/local/lib/python3.13/site-packages/websockets/legacy/__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+tests/test_support_context_v1.py::test_renew_phase_issues_fresh_rights_without_upgrading_old_token[offering-connected]
+  /usr/local/lib/python3.13/site-packages/uvicorn/protocols/websockets/websockets_impl.py:17: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+159 passed, 2 warnings in 267.12s (0:04:27)
+── tests/test_svedenie_1s.py
+......                                                                   [100%]
+6 passed in 0.08s
+── tests/test_task_from_message.py
+..                                                                       [100%]
+2 passed in 12.41s
+── tests/test_task_notify_channels.py
+....                                                                     [100%]
+4 passed in 12.14s
+── tests/test_tasks_route.py
+.................                                                        [100%]
+17 passed in 21.27s
+── tests/test_tenant_isolation.py
+....                                                                     [100%]
+4 passed in 16.79s
+── tests/test_ticket_communications.py
+............                                                             [100%]
+12 passed in 0.27s
+── tests/test_vendor_portal.py
+......................                                                   [100%]
+22 passed in 0.54s
+── tests/test_voice_connections.py
+..                                                                       [100%]
+2 passed in 14.27s
+── tests/test_voice_core.py
+......                                                                   [100%]
+6 passed in 12.92s
+── tests/test_voice_knowledge.py
+.                                                                        [100%]
+1 passed in 12.44s
+── tests/test_voice_support_context.py
+...                                                                      [100%]
+3 passed in 13.87s
+── tests/test_voice_tokens.py
+.........                                                                [100%]
+9 passed in 28.17s
+── tests/test_work_contexts_integration.py
+....................                                                     [100%]
+20 passed in 21.67s
+── tests/test_work_list.py
+.......                                                                  [100%]
+7 passed in 14.39s
+── tests/test_work_state.py
+.......                                                                  [100%]
+7 passed in 0.10s
+── tests/test_works_roles.py
+....                                                                     [100%]
+4 passed in 10.59s
+
+проверок не было (окружение отключило файл целиком): tests/test_store_receipt_ingest.py
+в CI эти файлы гоняются — зелёный прогон здесь не заменяет зелёный CI
+красные файлы: tests/test_calendar.py
+RC=1

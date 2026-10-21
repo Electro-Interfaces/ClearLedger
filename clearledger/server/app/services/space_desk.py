@@ -319,7 +319,8 @@ async def _support(db: AsyncSession, cid: uuid.UUID) -> dict[str, Any]:
     if row is None:
         return {"metrics": []}
     app_row, link = row
-    token = sso.sign_service_token(aud="support", scope="projection")
+    token = sso.sign_service_token(aud="support", scope="projection",
+                                   app_company_id=link.external_company_id)
     if not token:
         return {"metrics": []}
     url = f"{_internal_base_url(app_row, 'support')}/api/v1/eco/summary"

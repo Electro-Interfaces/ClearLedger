@@ -649,6 +649,14 @@ async def put_link(
     app_row = (await db.execute(select(App).where(App.code == app_code))).scalar_one_or_none()
     if app_row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Приложение не найдено: {app_code}")
+    # Пустое соответствие хуже отсутствующего: карта есть, а компании в ней нет —
+    # и служебный токен приложению выписать нечем (область действия токена читается
+    # отсюда, B-11 аудита решения 21.10.2026). Нет идентификатора — нет и записи.
+    external_company_id = (external_company_id or "").strip()
+    if not external_company_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Укажите идентификатор компании в приложении: по нему "
+                            "задаётся область действия служебных вызовов")
     cid = await assert_company_member(company_id, user, db)
 
     link = (await db.execute(select(AppCompanyLink).where(

@@ -31,7 +31,7 @@ async def owner_context(db, company_id, app_code):
 
 async def owner_request(db, company_id, actor_id, app_code, method, path, body=None):
     app, remote_company = await owner_context(db, company_id, app_code)
-    token = sso.sign_service_token(aud=app_code, scope="connections", company_id=remote_company, actor_id=str(actor_id))
+    token = sso.sign_service_token(aud=app_code, scope="connections", app_company_id=remote_company, actor_id=str(actor_id))
     if not token:
         raise HTTPException(503, "Служебная связь с Поддержкой не настроена: нет ключа единого входа")
     try:

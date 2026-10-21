@@ -131,10 +131,17 @@ async def test_update_and_action_have_fixed_routes_and_unknown_action_is_rejecte
 
 
 def test_service_token_remains_compatible_with_existing_scopes(signing):
-    token = sso.sign_service_token(aud='support', scope='projection')
+    """Скоуп проекции остался собой, но безымянным токен больше не бывает.
+
+    Проверка ждала `'cid' not in claims` — то есть закрепляла ровно ту выдачу без
+    арендатора, которой один служебный токен работал в контуре любого заказчика
+    (B-11, аудит решения 21.10.2026). Теперь область действия обязательна, а на
+    безымянном скоупе `actor` по-прежнему не появляется сам.
+    """
+    token = sso.sign_service_token(aud='support', scope='projection', app_company_id=REMOTE)
     claims = jwt.decode(token, signing, algorithms=['RS256'], audience='support', issuer=sso.settings.sso_issuer)
     assert claims['svc'] == 'projection'
-    assert 'cid' not in claims and 'actor' not in claims
+    assert claims['cid'] == claims['company_id'] == REMOTE and 'actor' not in claims
 
 
 @pytest.mark.asyncio

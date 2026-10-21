@@ -1,0 +1,287 @@
+# Красный прогон ДО правки — проверки арендатора служебного токена
+# дерево: отдельное, продуктовый код = база b154019d (origin/MagLook/support-context-release-20261021, содержит аудируемый 4b0fc72b)
+# тест: тот же tests/test_service_token_tenant.py, что зеленеет после правки
+# дата: 2026-10-21T22:27:42+03:00
+
+============================= test session starts ==============================
+platform linux -- Python 3.13.16, pytest-9.1.1, pluggy-1.7.0 -- /usr/local/bin/python
+rootdir: /app/server
+configfile: pytest.ini
+plugins: anyio-4.15.1, asyncio-1.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=session, asyncio_default_test_loop_scope=session
+collecting ... collected 14 items
+
+tests/test_service_token_tenant.py::test_sign_service_token_names_tenant FAILED [  7%]
+tests/test_service_token_tenant.py::test_sign_service_token_refuses_without_tenant FAILED [ 14%]
+tests/test_service_token_tenant.py::test_slug_tenant_goes_to_company_claim FAILED [ 21%]
+tests/test_service_token_tenant.py::test_voice_service_token_names_company FAILED [ 28%]
+tests/test_service_token_tenant.py::test_projection_target_names_tenant FAILED [ 35%]
+tests/test_service_token_tenant.py::test_object_tickets_names_tenant FAILED [ 42%]
+tests/test_service_token_tenant.py::test_app_connectors_names_tenant FAILED [ 50%]
+tests/test_service_token_tenant.py::test_external_work_names_tenant FAILED [ 57%]
+tests/test_service_token_tenant.py::test_desk_card_names_tenant FAILED   [ 64%]
+tests/test_service_token_tenant.py::test_event_delivery_names_tenant FAILED [ 71%]
+tests/test_service_token_tenant.py::test_managed_connectors_names_tenant FAILED [ 78%]
+tests/test_service_token_tenant.py::test_ticket_communication_names_tenant FAILED [ 85%]
+tests/test_service_token_tenant.py::test_voice_context_names_tenant FAILED [ 92%]
+tests/test_service_token_tenant.py::test_every_issuance_site_names_the_tenant FAILED [100%]
+
+=================================== FAILURES ===================================
+_____________________ test_sign_service_token_names_tenant _____________________
+
+signing = b'-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvVZUj9kHDm8DmT7Ncx5r\nwkWkLRZIwTEqTSQXJpn5uU...fRNcCn4ohVdcGt\nEhgzzBlJhGDIa0F0kyxurdwRrPMLDgrhUyRd74VQWBpye668WI0aYsaIcgLMZYnz\nQwIDAQAB\n-----END PUBLIC KEY-----\n'
+
+    def test_sign_service_token_names_tenant(signing):
+        """Токен называет компанию получателя клеймом прямой формы, и `kid` в заголовке."""
+>       token = sso.sign_service_token(aud="support", scope="projection",
+                                       app_company_id=REMOTE)
+E       TypeError: sign_service_token() got an unexpected keyword argument 'app_company_id'. Did you mean 'company_id'?
+
+tests/test_service_token_tenant.py:137: TypeError
+________________ test_sign_service_token_refuses_without_tenant ________________
+
+signing = b'-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvVKEW+4m4tibMXlPzHMK\nEZFByDEOpP4JIBEkBJnzn8...WluqlNiXrHDLDw\nn0mGGimPbdjckl4SfZ6LZbzv+oHQZB7wUDSgCJ7c6FiKpyRFpfck3wxOD/FvDq9T\ngQIDAQAB\n-----END PUBLIC KEY-----\n'
+
+    def test_sign_service_token_refuses_without_tenant(signing):
+        """Безымянного служебного токена выдать нельзя — и это проверка на стыке.
+    
+        Повторять её в каждом маршруте бессмысленно: забыть компанию можно только здесь,
+        и новый путь выдачи обязан назвать её, иначе не соберётся вызов.
+        """
+>       with pytest.raises(TypeError):
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+E       Failed: DID NOT RAISE TypeError
+
+tests/test_service_token_tenant.py:157: Failed
+____________________ test_slug_tenant_goes_to_company_claim ____________________
+
+signing = b'-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlJzafz54de5jqKfWhjbP\nV9STjwnhZKBV2aUpdvczHh...A+YTIL5Bq0rnuh\n8jSwP9x8EVZTAL5WI5xUjclRQFcDmiMY8mC7Mbo7w5Mf6KEqieicaL9Lp1mc/0DM\ntwIDAQAB\n-----END PUBLIC KEY-----\n'
+
+    def test_slug_tenant_goes_to_company_claim(signing):
+        """Не всякое приложение нумерует компании UUID: код уходит слагом.
+    
+        `eco_app_company_links.external_company_id` — строка («у разных приложений разный
+        тип»). Поддержка читает `company_id` только как UUID, а неUUID — как слаг в
+        `company`; положить код в `company_id` значило бы молча потерять арендатора.
+        """
+        claims = jwt.decode(
+>           sso.sign_service_token(aud="support", scope="projection", app_company_id="rushydro"),
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            signing, algorithms=["RS256"], audience="support", issuer=sso.settings.sso_issuer)
+E       TypeError: sign_service_token() got an unexpected keyword argument 'app_company_id'. Did you mean 'company_id'?
+
+tests/test_service_token_tenant.py:172: TypeError
+____________________ test_voice_service_token_names_company ____________________
+
+signing = b'-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArSl4AZhpy9x9YIeR3ewx\nItE253c+GWdxdxwWZLKELa...PraCsr9US2sTYQ\nwp+5/P+EK9w0kbvEr1kplmv4V/yVWjpx0l/L5yxG99oiNnYFua2SkVposVcQiW4Y\nPwIDAQAB\n-----END PUBLIC KEY-----\n'
+
+    def test_voice_service_token_names_company(signing):
+        """Узел «Телефонии» пускает только свою компанию — она и названа."""
+        claims = jwt.decode(
+            sso.sign_voice_service_token(scope="voice.stats", company_id=str(COMPANY)),
+            signing, algorithms=["RS256"], audience="voice", issuer=sso.settings.sso_issuer)
+>       assert claims["cid"] == str(COMPANY) and tenant_of(claims) == str(COMPANY)
+E       AssertionError: assert ('11111111-111...-111111111111' == '11111111-111...-111111111111'
+E         
+E           11111111-1111-4111-8111-111111111111 and None == '11111111-1111-4111-8111-111111111111')
+E        +  where None = tenant_of({'iss': 'elsyplus', 'aud': 'voice', 'sub': 'service:voice.stats', 'svc': 'voice.stats', ...})
+E        +  and   '11111111-1111-4111-8111-111111111111' = str(UUID('11111111-1111-4111-8111-111111111111'))
+
+tests/test_service_token_tenant.py:183: AssertionError
+_____________________ test_projection_target_names_tenant ______________________
+
+captured = []
+signing = b'-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2VwLzOxLW6PnVVmQ8C5W\nf5YdMsSeIDuihSnNl1J7Xv...KS0N14YIcX95z+\nThFgN4BwcNs7lmNuymKNwHf39dL/K8aXhdIDR9PFIKR0YNZiDAFct04OET4JPfwk\nSwIDAQAB\n-----END PUBLIC KEY-----\n'
+
+    async def test_projection_target_names_tenant(captured, signing):
+        """Проекция справочников: `_target` держит и карту компаний, и подпись."""
+        _app, link, token = await space_projection._target(StubDB(), COMPANY, "support")
+        claims = jwt.decode(token, signing, algorithms=["RS256"], audience="support",
+                            issuer=sso.settings.sso_issuer)
+>       assert tenant_of(claims) == link.external_company_id == REMOTE
+E       AssertionError: assert None == '33333333-3333-4333-8333-333333333333'
+E        +  where None = tenant_of({'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:projection', 'svc': 'projection', ...})
+E        +  and   '33333333-3333-4333-8333-333333333333' = namespace(external_company_id='33333333-3333-4333-8333-333333333333', external_code='rushydro', company_id=UUID('11111111-1111-4111-8111-111111111111')).external_company_id
+
+tests/test_service_token_tenant.py:193: AssertionError
+_______________________ test_object_tickets_names_tenant _______________________
+
+captured = [{'url': 'http://support.test:3003/api/v1/eco/objects/obj-1/tickets?companyId=33333333-3333-4333-8333-333333333333&lim...s': {'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:projection', 'svc': 'projection', ...}, 'kid': 'elsyplus/1'}]
+
+    async def test_object_tickets_names_tenant(captured):
+        await space_projection.object_tickets(StubDB(), COMPANY, "obj-1")
+>       assert tenant_of(captured[-1]["claims"]) == REMOTE
+E       AssertionError: assert None == '33333333-3333-4333-8333-333333333333'
+E        +  where None = tenant_of({'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:projection', 'svc': 'projection', ...})
+
+tests/test_service_token_tenant.py:198: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 19:27:53,964 [INFO] httpx: HTTP Request: GET http://support.test:3003/api/v1/eco/objects/obj-1/tickets?companyId=33333333-3333-4333-8333-333333333333&limit=20 "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: GET http://support.test:3003/api/v1/eco/objects/obj-1/tickets?companyId=33333333-3333-4333-8333-333333333333&limit=20 "HTTP/1.1 200 OK"
+_______________________ test_app_connectors_names_tenant _______________________
+
+captured = [{'url': 'http://support.test:3003/api/v1/eco/connectors?companyId=33333333-3333-4333-8333-333333333333', 'claims': {'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:projection', 'svc': 'projection', ...}, 'kid': 'elsyplus/1'}]
+
+    async def test_app_connectors_names_tenant(captured):
+        await space_connectors._app_connectors(APP, LINK, "support", "Поддержка")
+>       assert tenant_of(captured[-1]["claims"]) == REMOTE
+E       AssertionError: assert None == '33333333-3333-4333-8333-333333333333'
+E        +  where None = tenant_of({'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:projection', 'svc': 'projection', ...})
+
+tests/test_service_token_tenant.py:203: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 19:27:54,082 [INFO] httpx: HTTP Request: GET http://support.test:3003/api/v1/eco/connectors?companyId=33333333-3333-4333-8333-333333333333 "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: GET http://support.test:3003/api/v1/eco/connectors?companyId=33333333-3333-4333-8333-333333333333 "HTTP/1.1 200 OK"
+_______________________ test_external_work_names_tenant ________________________
+
+captured = [{'url': 'http://support.test:3003/api/v1/eco/connectors/55555555-5555-4555-8555-555555555555/work/W-1?companyId=33333...s': {'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:projection', 'svc': 'projection', ...}, 'kid': 'elsyplus/1'}]
+
+    async def test_external_work_names_tenant(captured):
+        await space_connectors.fetch_external_work(
+            StubDB(), COMPANY, connector_key=f"support:{TICKET}", external_ref="W-1")
+>       assert tenant_of(captured[-1]["claims"]) == REMOTE
+E       AssertionError: assert None == '33333333-3333-4333-8333-333333333333'
+E        +  where None = tenant_of({'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:projection', 'svc': 'projection', ...})
+
+tests/test_service_token_tenant.py:209: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 19:27:54,228 [INFO] httpx: HTTP Request: GET http://support.test:3003/api/v1/eco/connectors/55555555-5555-4555-8555-555555555555/work/W-1?companyId=33333333-3333-4333-8333-333333333333 "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: GET http://support.test:3003/api/v1/eco/connectors/55555555-5555-4555-8555-555555555555/work/W-1?companyId=33333333-3333-4333-8333-333333333333 "HTTP/1.1 200 OK"
+_________________________ test_desk_card_names_tenant __________________________
+
+captured = [{'url': 'http://support.test:3003/api/v1/eco/summary?companyId=33333333-3333-4333-8333-333333333333', 'claims': {'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:projection', 'svc': 'projection', ...}, 'kid': 'elsyplus/1'}]
+
+    async def test_desk_card_names_tenant(captured):
+        await space_desk._support(StubDB(), COMPANY)
+>       assert tenant_of(captured[-1]["claims"]) == REMOTE
+E       AssertionError: assert None == '33333333-3333-4333-8333-333333333333'
+E        +  where None = tenant_of({'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:projection', 'svc': 'projection', ...})
+
+tests/test_service_token_tenant.py:214: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 19:27:54,321 [INFO] httpx: HTTP Request: GET http://support.test:3003/api/v1/eco/summary?companyId=33333333-3333-4333-8333-333333333333 "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: GET http://support.test:3003/api/v1/eco/summary?companyId=33333333-3333-4333-8333-333333333333 "HTTP/1.1 200 OK"
+_______________________ test_event_delivery_names_tenant _______________________
+
+captured = [{'url': 'http://support.test:3003/api/v1/eco/events', 'claims': {'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:events', 'svc': 'events', ...}, 'kid': 'elsyplus/1'}]
+
+    async def test_event_delivery_names_tenant(captured):
+        """Фоновая доставка событий — тот же служебный канал, свой скоуп."""
+        sub = SimpleNamespace(target_kind="app", app_code="support", path="/api/v1/eco/events",
+                              url=None, secret_enc=None)
+        row = SimpleNamespace(event_id=uuid.uuid4(), type="doc.posted", subject="doc:1",
+                              occurred_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+                              data={}, company_id=COMPANY)
+        assert await space_events._send(StubDB(), sub, row) == 200
+        assert captured[-1]["claims"]["svc"] == "events"
+>       assert tenant_of(captured[-1]["claims"]) == REMOTE
+E       AssertionError: assert None == '33333333-3333-4333-8333-333333333333'
+E        +  where None = tenant_of({'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:events', 'svc': 'events', ...})
+
+tests/test_service_token_tenant.py:226: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 19:27:54,490 [INFO] httpx: HTTP Request: POST http://support.test:3003/api/v1/eco/events "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://support.test:3003/api/v1/eco/events "HTTP/1.1 200 OK"
+_____________________ test_managed_connectors_names_tenant _____________________
+
+captured = [{'url': 'http://support.test:3003/api/v1/eco/connector-management/catalog?companyId=33333333-3333-4333-8333-333333333...: {'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:connections', 'svc': 'connections', ...}, 'kid': 'elsyplus/1'}]
+
+    async def test_managed_connectors_names_tenant(captured):
+        await managed_connectors.owner_request(StubDB(), COMPANY, ACTOR, "support", "GET", "/catalog")
+>       assert tenant_of(captured[-1]["claims"]) == REMOTE
+E       AssertionError: assert None == '33333333-3333-4333-8333-333333333333'
+E        +  where None = tenant_of({'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:connections', 'svc': 'connections', ...})
+
+tests/test_service_token_tenant.py:231: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 19:27:54,592 [INFO] httpx: HTTP Request: GET http://support.test:3003/api/v1/eco/connector-management/catalog?companyId=33333333-3333-4333-8333-333333333333 "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: GET http://support.test:3003/api/v1/eco/connector-management/catalog?companyId=33333333-3333-4333-8333-333333333333 "HTTP/1.1 200 OK"
+____________________ test_ticket_communication_names_tenant ____________________
+
+captured = [{'url': 'http://support.test:3003/api/v1/eco/tickets/55555555-5555-4555-8555-555555555555/communication-access', 'cla...s', 'aud': 'support', 'sub': 'service:ticket.communication', 'svc': 'ticket.communication', ...}, 'kid': 'elsyplus/1'}]
+
+    async def test_ticket_communication_names_tenant(captured):
+        user = SimpleNamespace(id=ACTOR, email="operator@test.ru", mail_only=False,
+                               is_superadmin=False)
+        await ticket_communications.access(StubDB(), COMPANY, user, TICKET)
+>       assert tenant_of(captured[-1]["claims"]) == REMOTE
+E       AssertionError: assert None == '33333333-3333-4333-8333-333333333333'
+E        +  where None = tenant_of({'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:ticket.communication', 'svc': 'ticket.communication', ...})
+
+tests/test_service_token_tenant.py:238: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 19:27:54,694 [INFO] httpx: HTTP Request: POST http://support.test:3003/api/v1/eco/tickets/55555555-5555-4555-8555-555555555555/communication-access "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://support.test:3003/api/v1/eco/tickets/55555555-5555-4555-8555-555555555555/communication-access "HTTP/1.1 200 OK"
+_______________________ test_voice_context_names_tenant ________________________
+
+captured = [{'url': 'http://support.test:3003/api/v1/eco/voice/context', 'claims': {'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:voice.context', 'svc': 'voice.context', ...}, 'kid': 'elsyplus/1'}]
+
+    async def test_voice_context_names_tenant(captured):
+        await voice_support_context.support_tickets(
+            StubDB(), COMPANY, phone="+70000000000", core_party_ref=None,
+            object_refs=[], limit=5)
+>       assert tenant_of(captured[-1]["claims"]) == REMOTE
+E       AssertionError: assert None == '33333333-3333-4333-8333-333333333333'
+E        +  where None = tenant_of({'iss': 'elsyplus', 'aud': 'support', 'sub': 'service:voice.context', 'svc': 'voice.context', ...})
+
+tests/test_service_token_tenant.py:245: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 19:27:54,834 [INFO] httpx: HTTP Request: POST http://support.test:3003/api/v1/eco/voice/context "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://support.test:3003/api/v1/eco/voice/context "HTTP/1.1 200 OK"
+__________________ test_every_issuance_site_names_the_tenant ___________________
+
+    def test_every_issuance_site_names_the_tenant():
+        """Ни одного пути выдачи без компании — проверяется по исходникам.
+    
+        Путей девять, и половина из них ходит в Поддержку из фона (доставка событий,
+        контекст звонка) — туда тест запросом не попадает. Обязательный аргумент стыка
+        делает безымянную выдачу невозможной, а эта проверка ловит обратное движение:
+        вернуть аргументу значение по умолчанию.
+        """
+        import ast
+        import pathlib
+        import warnings
+    
+        корень = pathlib.Path(__file__).resolve().parents[1] / "app"
+        сайты, безымянные = 0, []
+        for путь in корень.rglob("*.py"):
+            with warnings.catch_warnings():
+                # Разбор чужих файлов — не повод показывать их предупреждения здесь.
+                warnings.simplefilter("ignore", SyntaxWarning)
+                дерево = ast.parse(путь.read_text(encoding="utf-8"))
+            for узел in ast.walk(дерево):
+                if (isinstance(узел, ast.Call) and isinstance(узел.func, ast.Attribute)
+                        and узел.func.attr == "sign_service_token"):
+                    сайты += 1
+                    if not any(k.arg == "app_company_id" for k in узел.keywords):
+                        безымянные.append(f"{путь.name}:{узел.lineno}")
+        assert сайты >= 9, f"путей выдачи найдено {сайты} — проверка смотрит не туда"
+>       assert not безымянные, f"служебный токен без арендатора: {безымянные}"
+E       AssertionError: служебный токен без арендатора: ['pulse_router.py:3449', 'space_projection.py:207', 'space_projection.py:453', 'space_events.py:233', 'voice_support_context.py:190', 'space_desk.py:322', 'ticket_communications.py:30', 'space_connectors.py:119', 'space_connectors.py:596', 'managed_connectors.py:34']
+E       assert not ['pulse_router.py:3449', 'space_projection.py:207', 'space_projection.py:453', 'space_events.py:233', 'voice_support_context.py:190', 'space_desk.py:322', ...]
+
+tests/test_service_token_tenant.py:274: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_service_token_tenant.py::test_sign_service_token_names_tenant
+FAILED tests/test_service_token_tenant.py::test_sign_service_token_refuses_without_tenant
+FAILED tests/test_service_token_tenant.py::test_slug_tenant_goes_to_company_claim
+FAILED tests/test_service_token_tenant.py::test_voice_service_token_names_company
+FAILED tests/test_service_token_tenant.py::test_projection_target_names_tenant
+FAILED tests/test_service_token_tenant.py::test_object_tickets_names_tenant
+FAILED tests/test_service_token_tenant.py::test_app_connectors_names_tenant
+FAILED tests/test_service_token_tenant.py::test_external_work_names_tenant - ...
+FAILED tests/test_service_token_tenant.py::test_desk_card_names_tenant - Asse...
+FAILED tests/test_service_token_tenant.py::test_event_delivery_names_tenant
+FAILED tests/test_service_token_tenant.py::test_managed_connectors_names_tenant
+FAILED tests/test_service_token_tenant.py::test_ticket_communication_names_tenant
+FAILED tests/test_service_token_tenant.py::test_voice_context_names_tenant - ...
+FAILED tests/test_service_token_tenant.py::test_every_issuance_site_names_the_tenant
+============================== 14 failed in 7.79s ==============================

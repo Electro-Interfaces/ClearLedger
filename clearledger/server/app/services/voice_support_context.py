@@ -187,7 +187,7 @@ async def _support_target(db, company_id, scope):
     if not row:
         return None
     app, link = row
-    token = sso.sign_service_token(aud="support", scope=scope, company_id=link.external_company_id)
+    token = sso.sign_service_token(aud="support", scope=scope, app_company_id=link.external_company_id)
     if not token:
         return None
     return app, token

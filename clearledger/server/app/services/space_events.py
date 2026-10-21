@@ -230,7 +230,8 @@ async def _send(db: AsyncSession, sub: EventSubscription,
         # как это делает проекция. Наш UUID ему ничего не говорит.
         body_obj["data"] = dict(body_obj.get("data") or {})
         body_obj["data"]["companyId"] = link.external_company_id
-        token = sso.sign_service_token(aud=sub.app_code or "", scope="events")
+        token = sso.sign_service_token(aud=sub.app_code or "", scope="events",
+                                       app_company_id=link.external_company_id)
         if not token:
             raise RuntimeError("единый вход не настроен: нечем подписать вызов")
         headers["Authorization"] = f"Bearer {token}"
