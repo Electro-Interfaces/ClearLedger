@@ -1,0 +1,15 @@
+{
+  "container": "core-support-context-r26-400061c7d3bb",
+  "database": "core_support_context_r26",
+  "loopback": true,
+  "pytest_args": [
+    "tests/test_support_context_v1.py",
+    "-k",
+    "context_ttl_crossing"
+  ],
+  "cleanup": true,
+  "port": 33311,
+  "pytest_exit": 0,
+  "base_commit": "455faec088251180f88499b80ed746fc79d89879",
+  "runtime_service_sha256": "3eb27ef8cd5e001d47fe09a685915dece23493b4a3d5bec8d0736eed70506278"
+}

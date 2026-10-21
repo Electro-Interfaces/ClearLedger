@@ -1,0 +1,137 @@
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+________ test_postcall_pending_crosses_live_deadline_during_actor_http _________
+tests/test_support_context_v1.py:871: in test_postcall_pending_crosses_live_deadline_during_actor_http
+    assert r.status_code == 409, r.text
+E   AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"wrapup_expired","retryable":false},"requestRef":"50f42bb951a8424d87e4bd291c68b268"}
+E   assert 403 == 409
+E    +  where 403 = <Response [403 Forbidden]>.status_code
+---------------------------- Captured stderr setup -----------------------------
+2026-10-21 03:52:34,432 [INFO] clearledger.seed: Создана компания: ООО ГИГ (ГазИнвестГрупп) (gig)
+2026-10-21 03:52:34,432 [INFO] clearledger.seed: Создана компания: РусГидро (rushydro)
+2026-10-21 03:52:34,442 [WARNING] passlib.handlers.bcrypt: (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/home/mag/orca/workspaces/ledger-app/support-context-core-20261020/.venv/lib/python3.13/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+              ^^^^^^^^^^^^^^^^^
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2026-10-21 03:52:34,786 [INFO] clearledger.seed: Создан сид-суперадмин: admin@clearledger.ru
+2026-10-21 03:52:34,798 [INFO] clearledger.seed: Создан шаблон проводок: ОРП/ОтчетККМОПродажах
+2026-10-21 03:52:34,798 [INFO] clearledger.seed: Создан шаблон проводок: ПТУ/Покупка
+2026-10-21 03:52:34,798 [INFO] clearledger.seed: Создан шаблон проводок: ПТУ/—
+2026-10-21 03:52:34,798 [INFO] clearledger.seed: Создан шаблон проводок: ОПЗС/ОтчетПроизводстваЗаСмену
+2026-10-21 03:52:34,798 [INFO] clearledger.seed: Создан шаблон проводок: КорректировкаПоступления/СогласованноеИзменение
+2026-10-21 03:52:34,808 [INFO] clearledger.seed: ГИГ: канал оплаты retail
+2026-10-21 03:52:34,809 [INFO] clearledger.seed: ГИГ: канал оплаты retail_cash
+2026-10-21 03:52:34,809 [INFO] clearledger.seed: ГИГ: канал оплаты retail_card
+2026-10-21 03:52:34,809 [INFO] clearledger.seed: ГИГ: канал оплаты cards
+2026-10-21 03:52:34,809 [INFO] clearledger.seed: ГИГ: канал оплаты online
+2026-10-21 03:52:34,809 [INFO] clearledger.seed: ГИГ: канал оплаты voucher
+2026-10-21 03:52:34,809 [INFO] clearledger.seed: ГИГ: канал оплаты coupon
+2026-10-21 03:52:34,809 [INFO] clearledger.seed: ГИГ: канал оплаты ledger
+2026-10-21 03:52:34,809 [INFO] clearledger.seed: ГИГ: канал оплаты writeoff_fuel
+2026-10-21 03:52:34,833 [INFO] clearledger.seed: ГИГ: источник «MSTO Онлайн-заказы»
+2026-10-21 03:52:34,861 [INFO] clearledger.seed: ГИГ: источник «STS Транзакции» создан (draft)
+2026-10-21 03:52:34,894 [INFO] clearledger.seed: Номенклатура дел заведена: ООО ГИГ (ГазИнвестГрупп) (3 дела)
+2026-10-21 03:52:34,897 [INFO] clearledger.seed: Виды документов заведены: ООО ГИГ (ГазИнвестГрупп) (4 вида)
+2026-10-21 03:52:34,904 [INFO] clearledger.seed: Номенклатура дел заведена: РусГидро (3 дела)
+2026-10-21 03:52:34,906 [INFO] clearledger.seed: Виды документов заведены: РусГидро (4 вида)
+2026-10-21 03:52:34,930 [INFO] clearledger.seed: Seed завершён
+------------------------------ Captured log setup ------------------------------
+INFO     clearledger.seed:seed.py:110 Создана компания: ООО ГИГ (ГазИнвестГрупп) (gig)
+INFO     clearledger.seed:seed.py:110 Создана компания: РусГидро (rushydro)
+WARNING  passlib.handlers.bcrypt:bcrypt.py:622 (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/home/mag/orca/workspaces/ledger-app/support-context-core-20261020/.venv/lib/python3.13/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+              ^^^^^^^^^^^^^^^^^
+AttributeError: module 'bcrypt' has no attribute '__about__'
+INFO     clearledger.seed:seed.py:561 Создан сид-суперадмин: admin@clearledger.ru
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ОРП/ОтчетККМОПродажах
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ПТУ/Покупка
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ПТУ/—
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ОПЗС/ОтчетПроизводстваЗаСмену
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: КорректировкаПоступления/СогласованноеИзменение
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail_cash
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail_card
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты cards
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты online
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты voucher
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты coupon
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты ledger
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты writeoff_fuel
+INFO     clearledger.seed:seed.py:341 ГИГ: источник «MSTO Онлайн-заказы»
+INFO     clearledger.seed:seed.py:408 ГИГ: источник «STS Транзакции» создан (draft)
+INFO     clearledger.seed:seed.py:249 Номенклатура дел заведена: ООО ГИГ (ГазИнвестГрупп) (3 дела)
+INFO     clearledger.seed:seed.py:259 Виды документов заведены: ООО ГИГ (ГазИнвестГрупп) (4 вида)
+INFO     clearledger.seed:seed.py:249 Номенклатура дел заведена: РусГидро (3 дела)
+INFO     clearledger.seed:seed.py:259 Виды документов заведены: РусГидро (4 вида)
+INFO     clearledger.seed:seed.py:146 Seed завершён
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 03:52:35,562 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44905/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 03:52:35,570 [INFO] httpx: HTTP Request: POST http://127.0.0.1:60131/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 03:52:35,687 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44905/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+2026-10-21 03:52:35,756 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44905/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 03:52:35,875 [INFO] httpx: HTTP Request: POST http://127.0.0.1:60131/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+2026-10-21 03:52:36,043 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44905/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 03:52:37,065 [INFO] httpx: HTTP Request: POST http://127.0.0.1:44905/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 03:52:37,090 [INFO] httpx: HTTP Request: POST http://127.0.0.1:60131/api/eco/support-context/v1/postcall "HTTP/1.1 403 Forbidden"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44905/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:60131/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44905/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44905/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:60131/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44905/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:44905/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:60131/api/eco/support-context/v1/postcall "HTTP/1.1 403 Forbidden"
+________ test_postcall_pending_expired_live_projection_then_ended[True] ________
+tests/test_support_context_v1.py:894: in test_postcall_pending_expired_live_projection_then_ended
+    assert r.status_code == 409, r.text
+E   AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"wrapup_expired","retryable":false},"requestRef":"4d023a91d1604076a412da1f5c03f155"}
+E   assert 403 == 409
+E    +  where 403 = <Response [403 Forbidden]>.status_code
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 03:52:38,198 [INFO] httpx: HTTP Request: POST http://127.0.0.1:37675/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 03:52:38,205 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36391/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 03:52:38,292 [INFO] httpx: HTTP Request: POST http://127.0.0.1:37675/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+2026-10-21 03:52:38,355 [INFO] httpx: HTTP Request: POST http://127.0.0.1:37675/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 03:52:38,420 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36391/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+2026-10-21 03:52:38,565 [INFO] httpx: HTTP Request: POST http://127.0.0.1:37675/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 03:52:38,568 [INFO] httpx: HTTP Request: POST http://127.0.0.1:36391/api/eco/support-context/v1/postcall "HTTP/1.1 403 Forbidden"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:37675/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36391/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:37675/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:37675/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36391/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:37675/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:36391/api/eco/support-context/v1/postcall "HTTP/1.1 403 Forbidden"
+_______ test_postcall_pending_expired_live_projection_then_ended[False] ________
+tests/test_support_context_v1.py:894: in test_postcall_pending_expired_live_projection_then_ended
+    assert r.status_code == 409, r.text
+E   AssertionError: {"version":"support-context/1","schemaVersion":1,"error":{"code":"assignment_revoked","retryable":false},"requestRef":"06adb0a98dc043f381f8fa23bb07e5b5"}
+E   assert 403 == 409
+E    +  where 403 = <Response [403 Forbidden]>.status_code
+----------------------------- Captured stderr call -----------------------------
+2026-10-21 03:52:39,672 [INFO] httpx: HTTP Request: POST http://127.0.0.1:35371/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+2026-10-21 03:52:39,679 [INFO] httpx: HTTP Request: POST http://127.0.0.1:53743/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+2026-10-21 03:52:39,768 [INFO] httpx: HTTP Request: POST http://127.0.0.1:35371/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+2026-10-21 03:52:39,832 [INFO] httpx: HTTP Request: POST http://127.0.0.1:35371/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+2026-10-21 03:52:39,896 [INFO] httpx: HTTP Request: POST http://127.0.0.1:53743/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+2026-10-21 03:52:40,121 [INFO] httpx: HTTP Request: POST http://127.0.0.1:35371/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+2026-10-21 03:52:40,124 [INFO] httpx: HTTP Request: POST http://127.0.0.1:53743/api/eco/support-context/v1/postcall "HTTP/1.1 403 Forbidden"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:35371/api/v1/eco/support-context/v1/prepare "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:53743/api/eco/support-context/v1/prepare "HTTP/1.1 202 Accepted"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:35371/cc/v0/support-context/v1/admission/consume "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:35371/api/v1/eco/support-context/v1/actor-resolve "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:53743/api/eco/support-context/v1/admit "HTTP/1.1 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:35371/cc/v0/support-context/v1/admission/status "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:53743/api/eco/support-context/v1/postcall "HTTP/1.1 403 Forbidden"
+=========================== short test summary info ============================
+FAILED tests/test_support_context_v1.py::test_postcall_pending_crosses_live_deadline_during_actor_http
+FAILED tests/test_support_context_v1.py::test_postcall_pending_expired_live_projection_then_ended[True]
+FAILED tests/test_support_context_v1.py::test_postcall_pending_expired_live_projection_then_ended[False]
+3 failed, 151 deselected, 2 warnings in 13.07s

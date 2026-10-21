@@ -1,0 +1,13 @@
+{
+  "nodeDeadline": "2026-10-21T00:53:41.631635+00:00",
+  "actorHttpStartedAt": "2026-10-21T00:53:40.693625+00:00",
+  "rootLockNowaitAcquired": true,
+  "actorHttpFinishedAt": "2026-10-21T00:53:41.652435+00:00",
+  "status": 409,
+  "error": {
+    "code": "postcall_pending",
+    "retryable": true
+  },
+  "sourceUnchanged": true,
+  "grantCountUnchanged": true
+}
