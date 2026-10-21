@@ -23,8 +23,8 @@ Action = Literal["context.read", "context.details", "context.select", "context.c
                  "ticket.create", "ticket.read", "ticket.append"]
 
 
-def fail(status: int, code: str):
-    raise HTTPException(status, {"code": code, "retryable": status in (503, 504)},
+def fail(status: int, code: str, *, retryable: bool | None = None):
+    raise HTTPException(status, {"code": code, "retryable": status in (503, 504) if retryable is None else retryable},
                         headers={"WWW-Authenticate": "DPoP"} if status == 401 else None)
 
 

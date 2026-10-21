@@ -808,6 +808,223 @@ async def postcall_request(env, t, ticket="synthetic-own-ticket", key=None):
                              headers={"DPoP": dpop(key or t["key"], origin + PREFIX + "/postcall")})
 
 
+async def postcall_wrapup(env):
+    t = env[3][0]
+    live_phase(t, "wrapup")
+    t = await admitted(env)
+    t["actor"].update(fieldMask="assigned_ticket", ticketRefs=["synthetic-own-ticket"],
+                      capabilities=["ticket.read", "ticket.append"])
+    return t
+
+
+async def test_postcall_initial_wrapup_pending_then_ended_with_new_proof(env, db):
+    t = env[3][0]
+    # Настоящий exp округляется вниз; ждём его истечения, оставляя дробную
+    # часть допустимого wrapup. Ни JWT/SQL phase, ни часы Core не подменяются.
+    live_phase(t, "wrapup")
+    phase_deadline = datetime.fromtimestamp(int(time.time()) + 3.95, timezone.utc)
+    t["node"]["phaseDeadline"] = phase_deadline.isoformat()
+    t = await admitted(env)
+    t["actor"].update(fieldMask="assigned_ticket", ticketRefs=["synthetic-own-ticket"],
+                      capabilities=["ticket.read", "ticket.append"])
+    assert t["claims"]["exp"] == int(phase_deadline.timestamp())
+    source = await db.get(ContextGrant, t["claims"]["grantId"], populate_existing=True)
+    original = (copy.deepcopy(source.claims), copy.deepcopy(source.authority), source.expires_at)
+    before = await db.scalar(select(func.count()).select_from(ContextGrant))
+    await asyncio.sleep(max(0, t["claims"]["exp"] - time.time() + .01))
+    assert datetime.now(timezone.utc) < phase_deadline
+    assert (await introspect(env, t)).status_code == 401
+    client, origin, peer, _tenants = env
+    proof = dpop(t["key"], origin + PREFIX + "/postcall")
+    body = envelope(grantId=t["claims"]["grantId"], ticketRef="synthetic-own-ticket")
+    offset = len(peer.requests)
+    r = await client.post(PREFIX + "/postcall", json=body, headers={"DPoP": proof})
+    assert r.status_code == 409, r.text
+    assert r.json()["error"] == {"code": "postcall_pending", "retryable": True}
+    assert set(r.json()) == {"version", "schemaVersion", "error", "requestRef"}
+    assert r.headers["Cache-Control"] == "private, no-store"
+    assert [p.rsplit("/", 1)[1] for p, _c, _b in peer.requests[offset:]] == ["status", "actor-resolve"]
+    assert peer.requests[-1][2]["phase"] == "postcall"
+    assert peer.requests[-1][2]["ticketRefs"] == ["synthetic-own-ticket"]
+    assert peer.requests[-1][2]["expectedBindingVersion"] == t["claims"]["bindingVersion"]
+    assert peer.requests[-1][2]["expectedPermissionsVersion"] == t["claims"]["permissionsVersion"]
+    source = await db.get(ContextGrant, source.grant_id, populate_existing=True)
+    assert (source.claims, source.authority, source.expires_at) == original
+    assert source.revoked_at is None and "postcallDeadline" not in source.authority
+    assert await db.scalar(select(func.count()).select_from(ContextGrant)) == before
+    # Ошибка тоже расходует DPoP: durable replay, а не повтор права.
+    r = await client.post(PREFIX + "/postcall", json=body, headers={"DPoP": proof})
+    assert r.status_code == 401 and r.json()["error"]["code"] == "replay", r.text
+    assert (await introspect(env, t)).status_code == 401
+    # Peer подтверждает ended только после реального истечения своего deadline.
+    await asyncio.sleep(max(0, phase_deadline.timestamp() - time.time() + .01))
+    ended = datetime.now(timezone.utc)
+    t["node"].update(phase="ended", active=False, allowedActions=[], endedAt=ended.isoformat())
+    r = await postcall_request(env, t)
+    assert r.status_code == 200, r.text
+    token = r.json()["token"]
+    c = jwt.decode(token, peer.public_key, algorithms=["RS256"], audience="support-context")
+    assert c["scp"] == "ticket_postcall" and c["phase"] == "postcall"
+    assert c["ticketRefs"] == ["synthetic-own-ticket"]
+    assert c["actions"] == ["ticket.append", "ticket.read"]
+    assert c["exp"] - c["iat"] <= 120
+    granted = await db.get(ContextGrant, c["grantId"], populate_existing=True)
+    hard = granted.authority["postcallDeadline"]
+    assert datetime.fromisoformat(hard) == ended + timedelta(seconds=3600)
+    assert await db.scalar(select(func.count()).select_from(ContextGrant)) == before + 1
+    r = await introspect(env, t, token=token)
+    assert r.status_code == 200 and r.json()["actions"] == ["ticket.append", "ticket.read"], r.text
+    assert r.json()["fieldMask"] == "assigned_ticket"
+    # Сдвиг endedAt от peer не продлевает уже закреплённый hard deadline.
+    t["node"]["endedAt"] = now()
+    r = await postcall_request(env, t)
+    assert r.status_code == 200, r.text
+    again = await db.get(ContextGrant, r.json()["grantId"], populate_existing=True)
+    assert again.authority["postcallDeadline"] == hard
+
+
+@pytest.mark.parametrize("reason", [
+    "node_revoke", "source_revoke", "inactive", "assignment", "act", "connection", "jkt",
+    "admission", "call", "context", "mfa", "connected", "wrapup_expired", "no_wrapup_deadline",
+    "binding", "binding_ref", "support_user", "permissions", "actor", "membership",
+    "actor_active", "unassigned", "wrong_ticket", "mask", "no_capabilities",
+    "core_session", "core_membership", "core_module", "core_scope", "context_expired",
+    "existing_deadline", "expired_hard_deadline",
+])
+async def test_postcall_pending_never_masks_permanent_denial(env, db, reason):
+    t = await postcall_wrapup(env)
+    row = await db.get(ContextGrant, t["claims"]["grantId"], populate_existing=True)
+    original_authority = copy.deepcopy(row.authority)
+    if reason == "node_revoke":
+        t["node"]["revoked"] = True
+    elif reason == "source_revoke":
+        row.revoked_at = datetime.now(timezone.utc)
+    elif reason == "inactive":
+        t["node"]["active"] = False
+    elif reason == "assignment":
+        t["node"]["assignmentVersion"] += 1
+    elif reason == "act":
+        t["node"]["act"] = {**t["node"]["act"], "sub": "synthetic-other-operator"}
+    elif reason == "connection":
+        t["node"]["connectionId"] = "synthetic-other-connection"
+    elif reason == "jkt":
+        t["node"]["jkt"] = "synthetic-other-key"
+    elif reason == "admission":
+        t["node"]["admissionRef"] = "synthetic-other-admission"
+    elif reason == "call":
+        t["node"]["callRef"] = {**t["callRef"], "nodeContactId": "synthetic-other-call"}
+    elif reason == "context":
+        t["node"]["contextRef"] = "scx_" + secrets.token_urlsafe(32)
+    elif reason == "mfa":
+        t["node"]["amr"] = ["pwd"]
+    elif reason == "connected":
+        t["node"]["phase"] = "connected"
+    elif reason == "wrapup_expired":
+        t["node"]["phaseDeadline"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    elif reason == "no_wrapup_deadline":
+        t["node"]["phaseDeadline"] = None
+    elif reason == "binding":
+        t["actor"]["bindingVersion"] += 1
+    elif reason == "binding_ref":
+        t["actor"]["bindingRef"] = "synthetic-other-binding"
+    elif reason == "support_user":
+        t["actor"]["supportUserRef"] = str(uuid.uuid4())
+    elif reason == "permissions":
+        t["actor"]["permissionsVersion"] += 1
+    elif reason == "actor":
+        t["actor"]["coreActorSub"] = str(uuid.uuid4())
+    elif reason == "membership":
+        t["actor"]["membership"] = False
+    elif reason == "actor_active":
+        t["actor"]["active"] = False
+    elif reason == "unassigned":
+        t["actor"]["ticketRefs"] = []
+    elif reason == "mask":
+        t["actor"]["fieldMask"] = "operator"
+    elif reason == "no_capabilities":
+        t["actor"]["capabilities"] = []
+    elif reason == "core_session":
+        t["user"].token_version += 1
+    elif reason == "core_membership":
+        await db.delete(t["member"])
+    elif reason == "core_module":
+        t["member"].role, t["member"].modules = "user", ["voice"]
+    elif reason == "core_scope":
+        t["member"].object_scope = ["synthetic-other-object"]
+    elif reason == "context_expired":
+        bound = await db.get(ContextBinding, t["contextRef"])
+        bound.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    elif reason in ("existing_deadline", "expired_hard_deadline"):
+        hard = datetime.now(timezone.utc) + timedelta(seconds=60 if reason == "existing_deadline" else -1)
+        row.authority = {**row.authority, "postcallDeadline": hard.isoformat()}
+        original_authority = copy.deepcopy(row.authority)
+    await db.commit()
+    before = await db.scalar(select(func.count()).select_from(ContextGrant))
+    r = await postcall_request(env, t, ticket="synthetic-foreign-ticket" if reason == "wrong_ticket"
+                               else "synthetic-own-ticket")
+    assert r.status_code == 403, r.text
+    assert r.json()["error"]["code"] != "postcall_pending"
+    assert r.json()["error"]["retryable"] is False
+    assert await db.scalar(select(func.count()).select_from(ContextGrant)) == before
+    row = await db.get(ContextGrant, row.grant_id, populate_existing=True)
+    assert row.authority == original_authority
+
+
+@pytest.mark.parametrize("change", ["revoke", "core_membership", "core_session", "core_scope", "deadline"])
+async def test_postcall_pending_rechecks_core_after_peer_http_without_lock(env, db, change):
+    t = await postcall_wrapup(env)
+    grant_id = t["claims"]["grantId"]
+    from app.database import async_session_factory
+    loop = asyncio.get_running_loop()
+
+    async def mutate():
+        async with async_session_factory() as other:
+            if change in ("revoke", "deadline"):
+                row = await other.scalar(select(ContextGrant).where(
+                    ContextGrant.grant_id == grant_id).with_for_update(nowait=True))
+                if change == "revoke":
+                    row.revoked_at = datetime.now(timezone.utc)
+                else:
+                    row.authority = {**row.authority, "postcallDeadline": (
+                        datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()}
+            elif change == "core_membership":
+                row = await other.get(UserCompany, (t["user"].id, t["company"].id))
+                await other.delete(row)
+            elif change == "core_session":
+                row = await other.get(User, t["user"].id)
+                row.token_version += 1
+            else:
+                row = await other.get(UserCompany, (t["user"].id, t["company"].id))
+                row.object_scope = ["synthetic-new-scope"]
+            await other.commit()
+
+    def on_status():
+        asyncio.run_coroutine_threadsafe(mutate(), loop).result(timeout=2)
+
+    env[2].on_status = on_status
+    before = await db.scalar(select(func.count()).select_from(ContextGrant))
+    r = await postcall_request(env, t)
+    assert r.status_code == 403 and r.json()["error"]["code"] != "postcall_pending", r.text
+    assert await db.scalar(select(func.count()).select_from(ContextGrant)) == before
+
+
+async def test_postcall_existing_grant_phase_rollback_is_strict(env, db):
+    t = await postcall_ready(env, db)
+    r = await postcall_request(env, t)
+    assert r.status_code == 200, r.text
+    postcall_grant = r.json()
+    live_phase(t, "wrapup")
+    before = await db.scalar(select(func.count()).select_from(ContextGrant))
+    for grant_id in (t["claims"]["grantId"], postcall_grant["grantId"]):
+        r = await env[0].post(PREFIX + "/postcall", json=envelope(
+            grantId=grant_id, ticketRef="synthetic-own-ticket"), headers={
+                "DPoP": dpop(t["key"], env[1] + PREFIX + "/postcall")})
+        assert r.status_code == 403 and r.json()["error"]["code"] == "postcall_revoked", r.text
+    r = await introspect(env, t, token=postcall_grant["token"])
+    assert r.status_code == 403 and r.json()["error"]["code"] == "postcall_revoked", r.text
+    assert await db.scalar(select(func.count()).select_from(ContextGrant)) == before
+
+
 async def test_postcall_expired_live_access_gets_only_assigned_ticket_and_fixed_deadline(env, db):
     t = await postcall_ready(env, db, expired_source=True)
     r = await introspect(env, t)

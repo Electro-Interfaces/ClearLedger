@@ -437,16 +437,23 @@ async def persist_grant(db, claims, authority, token_version, permission_digest,
                     phase=claims["phase"], actions=claims["actions"])
 
 
-def check_postcall_node(data, trust, c, authority):
+def check_postcall_node(data, trust, c, authority, *, allow_pending=False):
     try:
         evidence = NodeEvidence.model_validate(data)
     except ValidationError:
         fail(503, "node_invalid")
     n = evidence.model_dump(mode="json")
-    if (n["revoked"] or n["phase"] != "ended" or any(n[k] != c[k] for k in (
+    if (n["revoked"] or any(n[k] != c[k] for k in (
         "callRef", "contextRef", "connectionId", "act", "assignmentVersion"))
             or n["jkt"] != c["cnf"]["jkt"] or n["admissionRef"] != authority["admissionRef"]):
         fail(403, "postcall_revoked")
+    if n["phase"] != "ended":
+        if not allow_pending or authority.get("postcallDeadline") or n["phase"] != "wrapup":
+            fail(403, "postcall_revoked")
+        # Только первоначальный переход. Живой wrapup обязан по-прежнему
+        # подтверждать assignment/active/MFA и ещё не истёкший Node deadline.
+        check_node(data, trust, c["callRef"], c["contextRef"], c["cnf"]["jkt"], c)
+        return n, evidence.phaseDeadline
     ended = evidence.endedAt
     now = datetime.now(timezone.utc)
     if ended is None or ended.tzinfo is None or ended > now:
@@ -488,7 +495,9 @@ async def postcall(db, grant_id, ticket_ref):
                                          nodeId=node.nodeId),
                            envelope(admissionRef=authority["admissionRef"], contextRef=c["contextRef"],
                                     callRef=c["callRef"], connectionId=c["connectionId"], act=c["act"]))
-    n, deadline = check_postcall_node(data, trust, c, authority)
+    n, deadline = check_postcall_node(data, trust, c, authority,
+                                     allow_pending=source.claims["scp"] == "support_context")
+    pending = n["phase"] == "wrapup"
     n["phase"] = "postcall"
     actor = await actor_resolve(base, c["coreCid"], cid, c["callRef"], c["contextRef"], n, c,
                                 ticket_refs=[ticket_ref])
@@ -499,6 +508,9 @@ async def postcall(db, grant_id, ticket_ref):
             or actor["ticketRefs"] != [ticket_ref]
             or actor["fieldMask"] not in ("assigned_ticket", "vendor")):
         fail(403, "postcall_ticket_denied")
+    actions = sorted({"ticket.read", "ticket.append"} & set(actor["capabilities"]))
+    if not actions:
+        fail(403, "no_capabilities")
     # После HTTP ещё раз проверяем локальный source grant и Core ACL.
     root = await db.scalar(select(ContextGrant).where(ContextGrant.grant_id == root_id)
                            .with_for_update().execution_options(populate_existing=True))
@@ -506,14 +518,23 @@ async def postcall(db, grant_id, ticket_ref):
     if root is None or root.revoked_at or user.token_version != source_version or pd != source_permissions:
         fail(403, "grant_revoked")
     if root.authority.get("postcallDeadline"):
+        if pending:
+            fail(403, "postcall_revoked")
         deadline = min(deadline, datetime.fromisoformat(root.authority["postcallDeadline"]))
+    if pending:
+        if min(deadline, context_exp) <= datetime.now(timezone.utc):
+            fail(403, "wrapup_expired")
+        # HTTP409 не выдаёт право и не изменяет источник/deadline. DPoP уже
+        # durable consumed роутером; следующий запрос требует нового proof.
+        await db.commit()
+        fail(409, "postcall_pending", retryable=True)
     authority.update(sourceGrantId=root_id, postcallDeadline=min(deadline, context_exp).isoformat(),
                      fieldMask=actor["fieldMask"])
     # Запоминаем hard deadline и на источнике: новый /postcall исходного grantId
     # не может продлить период изменением endedAt или политики.
     root.authority = {**root.authority, "postcallDeadline": authority["postcallDeadline"]}
     c.update(grantId=uuid.uuid4().hex, jti=uuid.uuid4().hex, scp="ticket_postcall", phase="postcall",
-             actions=sorted({"ticket.read", "ticket.append"} & set(actor["capabilities"])), ticketRefs=[ticket_ref])
+             actions=actions, ticketRefs=[ticket_ref])
     return await persist_grant(db, c, authority, source_version, pd, min(deadline, context_exp))
 
 
