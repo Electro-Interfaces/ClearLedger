@@ -1,0 +1,17 @@
+# Полный локальный набор Ядра ПОСЛЕ правки (clearledger/server: bash tests/run_ci.sh)
+# ветка fix/audit-r8-service-token-tenant-20261021, SHA 3aa18e6d
+# окружение: образ fix-r8-py:1 (Python 3.13, как server/Dockerfile), своя база clearledger_test_after на fix-r8-pg
+# дата: 2026-10-21T22:38:41+03:00
+
+── tests/test_access_keys.py
+.....                                                                    [100%]
+5 passed in 0.06s
+── tests/test_accounting_adjustment.py
+...........                                                              [100%]
+11 passed in 0.07s
+── tests/test_accounting_business_date.py
+....                                                                     [100%]
+4 passed in 0.06s
+карантин, пропущен: tests/test_accounting_egress.py
+карантин, пропущен: tests/test_accounting_group_v3.py
+── tests/test_accounting_outbox.py

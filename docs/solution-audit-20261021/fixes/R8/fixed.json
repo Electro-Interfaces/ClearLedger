@@ -1,0 +1,64 @@
+{
+  "кластер": "R8",
+  "репозиторий": "Electro-Interfaces/ClearLedger",
+  "ветка": "fix/audit-r8-service-token-tenant-20261021",
+  "база": {
+    "ref": "origin/MagLook/support-context-release-20261021",
+    "sha": "b154019d",
+    "обоснование": "последний выпуск Ядра (21.10.2026, пространство 1.2.732, бэкенд v1482); содержит аудируемый SHA 4b0fc72b как предок, services/sso.py между ними не отличается. Рабочий каталог стоит на fix/pulse-edinoe-mesto — ветка отстаёт на 382 коммита и sign_service_token в ней нет"
+  },
+  "пара": {
+    "вторая_половина": "Electro-Interfaces/TSupport#6, ветка fix/audit-r2-core-channel-20261021",
+    "порядок_выкатки": "сначала Ядро (эта правка), затем TSupport#6",
+    "контракт": "TSupport:docs/process-facade-service-channel.md, версия 2"
+  },
+  "находки": [
+    {
+      "id": "B-11",
+      "роль": "парная половина в Ядре — выдача служебного токена с арендатором",
+      "status": "исправлено",
+      "что_изменено": "sign_service_token получила обязательный аргумент app_company_id (компания в терминах получателя, без значения по умолчанию; пустая строка — ValueError) и кладёт её двумя клеймами с одним значением: cid остаётся прежним для уже работающих приёмников, и добавляется прямая форма контракта версии 2 — company_id для UUID, company для кода. Форма прямая, не списком companies: в точке выдачи Ядру известна ровно одна компания, и область действия токена обязана быть минимальной. Десять путей выдачи стали называть компанию из карты eco_app_company_links, которая в каждом из них уже была прочитана и попадала только в тело вызова. Защита стоит на стыке подписи, а не в маршрутах: забыть компанию можно только там, и новый путь выдачи обязан её назвать. Срок жизни (120 с), sub, svc и скоупы не менялись; kid в заголовке был и остался",
+      "файлы": [
+        "clearledger/server/app/services/sso.py",
+        "clearledger/server/app/services/space_projection.py",
+        "clearledger/server/app/services/space_connectors.py",
+        "clearledger/server/app/services/space_desk.py",
+        "clearledger/server/app/services/space_events.py",
+        "clearledger/server/app/services/managed_connectors.py",
+        "clearledger/server/app/services/ticket_communications.py",
+        "clearledger/server/app/services/voice_support_context.py",
+        "clearledger/server/app/routers/pulse_router.py",
+        "clearledger/server/tests/test_service_token_tenant.py",
+        "clearledger/server/tests/test_managed_connectors.py"
+      ],
+      "доказательство": {
+        "красный_до": [
+          "evidence/red-before-core-tests.txt — 14 красных на предправочном коде, тем же файлом проверок, что зеленеет после",
+          "evidence/red-before.json — парный контур: 7 красных, 2 положительных контроля зелёные; клеймы выданного токена iss/aud/sub/svc/iat/nbf/exp, арендатора нет; Поддержка ветки R2 отвечает 403 SERVICE_TENANT_MISSING на все вызовы"
+        ],
+        "зелёный_после": [
+          "evidence/green-after-core-tests.txt — те же 14 проверок зелёные",
+          "evidence/green-after.json — парный контур 9 из 9: 200 без companyId (арендатор из токена), 403 SERVICE_TENANT_MISMATCH на подмену companyId, 404 на чужой экземпляр, 200 токеном второго заказчика в своём контуре"
+        ],
+        "положительные_контроли": [
+          "P-01 доставка исхода внешней работы по ребру без слоёв полномочий — 200, шаг resolved (до правки 403)",
+          "P-02 обычный handoff человека через того же издателя — 200, зелено и до, и после",
+          "P-03 свойства токена не расширены: exp-iat = 120 с, svc = projection",
+          "десять путей выдачи проверены по фактически уходящему заголовку Authorization, у каждого свой прежний скоуп",
+          "узел «Телефонии» получает cid компании пространства как раньше (tests/test_voice_tokens.py)"
+        ],
+        "набор_репозитория": [
+          "evidence/repo-tests-before.txt / repo-tests-after.txt — clearledger/server: bash tests/run_ci.sh",
+          "evidence/repo-typecheck-before.txt / repo-typecheck-after.txt — clearledger: npx tsc --noEmit -p tsconfig.app.json, RC=0 в обоих",
+          "evidence/repo-summary.md — итоги и разбор прежних падений"
+        ]
+      },
+      "остаточный_риск": "Эко-мост Поддержки scripts/routes/v1/eco.js (скоупы projection, events, desk) по-прежнему берёт компанию из запроса — тот же корень, что у B-11, но файл в репозитории Поддержки и в границу ни R2, ни R8 не входил. Правка Ядра даёт этому мосту всё необходимое: арендатор теперь назван на всех скоупах, не только на процессном фасаде. Отдельно: соответствие компаний ведёт человек в Центре управления, и неверная запись в eco_app_company_links назовёт не ту компанию — Поддержка проверяет соответствие у себя (SERVICE_TENANT_UNKNOWN), второго справочника в Ядре не заводилось"
+    }
+  ],
+  "миграции": "не потребовались: источник компании уже в схеме (eco_app_company_links), новых колонок и номеров нет",
+  "контур": {
+    "контейнеры": ["fix-r8-pg", "fix-r8-pgv", "fix-r8-py:1", "fix-r8-net"],
+    "порты": ["37010 — экземпляр Поддержки ветки R2 (только чтение)", "37020 — издатель JWKS Ядра", "37432 — база проверок Ядра", "37433 — база Поддержки"]
+  }
+}
