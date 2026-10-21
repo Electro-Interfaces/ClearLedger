@@ -1,0 +1,24 @@
+# Перепрогон файлов, упавших на teardown в общих наборах — отказ контура, не кода
+#
+# В обоих общих прогонах ровно один файл показал «.....E»: тесты прошли, ошибка на
+# teardown, где conftest делает DROP SCHEMA public CASCADE. Ошибка одна и та же —
+# asyncpg OutOfMemoryError «out of shared memory, HINT: You might need to increase
+# max_locks_per_transaction». Файлы разные (до правки test_location_types, после —
+# test_calendar), и это прямо показывает природу: в моём контуре три тестовые базы
+# жили в одном контейнере postgres:16 с max_locks_per_transaction=64, и одновременные
+# DROP SCHEMA на схемах в сотни таблиц исчерпывали таблицу блокировок. Кому именно
+# не хватит слотов — вопрос совпадения прогонов во времени.
+#
+# Лимит поднят до 512, прогоны идут по одному. Дата: 2026-10-21T23:54:02+03:00
+
+===== ДО правки: tests/test_location_types.py (дерево e1cc3e6b) =====
+.....                                                                    [100%]
+5 passed in 13.93s
+
+===== ПОСЛЕ правки: tests/test_calendar.py (дерево fe94f3f5) =====
+.....                                                                    [100%]
+5 passed in 11.41s
+
+===== ПОСЛЕ правки: tests/test_location_types.py (контроль того же файла) =====
+.....                                                                    [100%]
+5 passed in 14.02s

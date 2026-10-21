@@ -204,10 +204,22 @@ svc=projection  cid=<компания Поддержки>  company_id=<она ж
 Набор репозитория (`.github/workflows/checks.yml`) — типы фронта и тесты бэкенда;
 линтера Python в проекте нет.
 
-| Проверка | До | После |
+| Проверка | До (`e1cc3e6b`) | После (`fe94f3f5`) |
 |---|---|---|
-| `clearledger/server: bash tests/run_ci.sh` | `evidence/repo-tests-before.txt` | `evidence/repo-tests-after.txt` |
-| `clearledger: npx tsc --noEmit -p tsconfig.app.json` | `evidence/repo-typecheck-before.txt` | `evidence/repo-typecheck-after.txt` |
+| `clearledger/server: bash tests/run_ci.sh` | 209 файлов, **1668 тестов пройдено**, падений по коду 0 | 210 файлов, **1683 пройдено** (+15 — ровно новый файл проверок), падений по коду 0 |
+| `clearledger: npx tsc --noEmit -p tsconfig.app.json` | RC=0 | RC=0 |
+
+Новых падений нет. В каждом прогоне один файл показал ошибку **на teardown** — разные
+файлы (`test_location_types.py` до, `test_calendar.py` после), ошибка одна:
+`DROP SCHEMA public CASCADE` упал с `OutOfMemoryError: out of shared memory, HINT: …
+max_locks_per_transaction`. Это отказ моего контура, где три тестовые базы жили в одном
+контейнере с лимитом блокировок 64; тесты в обоих файлах прошли, упала уборка после
+них. Лимит поднят, оба файла перепрогнаны по одному — зелёные
+(`evidence/repo-tests-teardown-rerun.txt`).
+
+Прежние падения, которые были до правки и остались: карантин из трёх файлов
+(`tests/quarantine.txt`, причины записаны там) и `test_store_receipt_ingest.py`,
+который отключает себя сам при отсутствии окружения. Молча ничего не чинилось.
 
 Прогоны шли в образе `fix-r8-py:1` (Python 3.13 — такой же, как `server/Dockerfile`),
 каждый со своей базой на контейнере `fix-r8-pg`; прогон «до» — в отдельном дереве на
