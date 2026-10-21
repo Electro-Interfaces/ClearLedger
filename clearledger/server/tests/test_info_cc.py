@@ -20,6 +20,9 @@ def test_cc_help_covers_current_screen_states_and_new_support_mode():
     }
     support = next(a for a in ARTICLES if a['cc_key'] == 'support')
     assert 'не означает её включение' in support['body']
+    actions = [a for a in ARTICLES if 'actions' in a['cc_contexts']]
+    assert [a['cc_key'] for a in actions] == ['actions']
+    assert 'id оператора' in actions[0]['body'] and 'Над кем' in actions[0]['body']
 
 
 def test_cc_instructions_have_unique_keys_and_readable_steps():
