@@ -134,6 +134,32 @@ async def токен_проекции(заказчик) -> str:
     return token
 
 
+async def токен_подключений(заказчик) -> str | None:
+    """Токен управления подключениями: `managed_connectors.owner_request`.
+
+    Третий путь выдачи и другой приёмник: он читает арендатора по `cid` и требует
+    совпадения с `companyId` запроса, то есть проверяет совместимость правки.
+    """
+    поймано: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        поймано["raw"] = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        return httpx.Response(200, json={"providers": []})
+
+    from app.services import managed_connectors
+
+    настоящий = managed_connectors.httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+    managed_connectors.httpx.AsyncClient = lambda **kw: настоящий(transport=transport, **kw)
+    try:
+        await managed_connectors.owner_request(
+            StubDB(заказчик.support_id), заказчик.core_id, заказчик.person,
+            "support", "GET", "/catalog")
+    finally:
+        managed_connectors.httpx.AsyncClient = настоящий
+    return поймано.get("raw")
+
+
 async def токен_стола(заказчик) -> str | None:
     """Токен карточки заявок рабочего стола: `space_desk._support` — ещё один путь.
 
@@ -270,6 +296,20 @@ async def main() -> int:
           {"статус": вход.status_code, "компания": тело.get("sso_company_id"),
            "ошибка": тело.get("error")},
           вход.status_code == 200 and тело.get("sso_company_id") == A.support_id)
+
+    # P-04 — действующий маршрут Ядра на другом скоупе работает через живую Поддержку.
+    # Этот приёмник читает арендатора по `cid` и требует его совпадения с запросом:
+    # добавленные клеймы не должны были его тронуть.
+    подключения = await токен_подключений(A)
+    ответ = вызов(f"/api/v1/eco/connector-management/catalog?companyId={A.support_id}",
+                  подключения)
+    пункт("P-04", "подключения (скоуп connections, арендатор по cid) — действующий маршрут",
+          "200, каталог отдан", ответ, ответ["статус"] == 200)
+
+    # P-05 — эко-мост на скоупе проекции: карточка заявок стола тем же токеном.
+    ответ = вызов(f"/api/v1/eco/summary?companyId={A.support_id}", проекция_а)
+    пункт("P-05", "сводка заявок (эко-мост, скоуп projection) — действующий маршрут",
+          "200", ответ, ответ["статус"] == 200)
 
     # P-03 — выданный токен не раздаёт лишнего: срок жизни и область прежние.
     пункт("P-03", "свойства токена не расширены: срок жизни и скоуп",
