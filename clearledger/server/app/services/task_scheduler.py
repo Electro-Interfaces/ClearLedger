@@ -24,7 +24,9 @@ lifespan, advisory-lock от двойного запуска в кластере
 from __future__ import annotations
 
 import asyncio
+import calendar
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -78,41 +80,56 @@ _WITH_BUCKET = frozenset({"reminders", "escalations", "acquaints",
                           "approvals", "meetings", "partner_topics", "digests"})
 
 
-def _tz(rule: dict) -> ZoneInfo:
+def validate_rule(rule: dict) -> tuple[ZoneInfo, str, int, int]:
+    """Невалидное правило не превращается в другое расписание по умолчанию."""
+    if not isinstance(rule, dict):
+        raise ValueError("Правило расписания должно быть объектом")
     try:
-        return ZoneInfo(str(rule.get("tz") or "Europe/Moscow"))
-    except Exception:  # noqa: BLE001 — незнакомый пояс не должен ронять расписание
-        return ZoneInfo("Europe/Moscow")
+        tz = ZoneInfo(rule.get("tz") or "Europe/Moscow")
+    except (ValueError, TypeError, KeyError) as exc:
+        raise ValueError("Неизвестный часовой пояс расписания") from exc
+    at = rule.get("at", "09:00")
+    if not isinstance(at, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", at):
+        raise ValueError("Время расписания задаётся в формате ЧЧ:ММ (00:00–23:59)")
+    mode = rule.get("mode", "daily")
+    if mode not in ("daily", "weekly", "monthly"):
+        raise ValueError("Период расписания: daily, weekly или monthly")
+    for key, low, high in (("day", 1, 31), ("weekday", 0, 6)):
+        if key in rule:
+            value = rule[key]
+            if type(value) is not int or not low <= value <= high:
+                raise ValueError(f"{key}: требуется целое число от {low} до {high}")
+    hour, minute = map(int, at.split(":"))
+    return tz, mode, hour, minute
+
+
+def _tz(rule: dict) -> ZoneInfo:
+    """Совместимый helper; неверный пояс теперь имеет явную ошибку."""
+    return validate_rule(rule)[0]
 
 
 def next_run(rule: dict, after: datetime) -> datetime:
-    """Когда расписание сработает в следующий раз (в UTC).
+    """Следующее срабатывание в UTC, строго после after.
 
-    Считаем в местном времени пояса правила: «первого числа в 9 утра» человек
-    понимает по своему календарю, а сервер живёт в UTC.
+    В коротком месяце берём последний день; исходный day правила сохраняется,
+    поэтому после февральского 28-го правило «31» вернётся к 31-му марта.
     """
-    tz = _tz(rule)
+    tz, mode, at_h, at_m = validate_rule(rule)
     local = after.astimezone(tz)
-    hh, _, mm = str(rule.get("at") or "09:00").partition(":")
-    at_h, at_m = int(hh or 9), int(mm or 0)
-    mode = str(rule.get("mode") or "daily").lower()
-
     nxt = local.replace(hour=at_h, minute=at_m, second=0, microsecond=0)
     if mode == "weekly":
-        want = int(rule.get("weekday") or 0)  # 0 — понедельник
-        shift = (want - nxt.weekday()) % 7
-        nxt += timedelta(days=shift)
+        want = rule.get("weekday", 0)
+        nxt += timedelta(days=(want - nxt.weekday()) % 7)
         if nxt <= local:
             nxt += timedelta(days=7)
     elif mode == "monthly":
-        day = max(1, min(28, int(rule.get("day") or 1)))  # 28 — чтобы был в любом месяце
-        nxt = nxt.replace(day=day)
+        day = rule.get("day", 1)
+        nxt = nxt.replace(day=min(day, calendar.monthrange(nxt.year, nxt.month)[1]))
         if nxt <= local:
-            nxt = (nxt.replace(day=1) + timedelta(days=32)).replace(day=day, hour=at_h,
-                                                                    minute=at_m)
-    else:  # daily
-        if nxt <= local:
-            nxt += timedelta(days=1)
+            month = (nxt.replace(day=1) + timedelta(days=32)).replace(day=1)
+            nxt = month.replace(day=min(day, calendar.monthrange(month.year, month.month)[1]))
+    elif nxt <= local:
+        nxt += timedelta(days=1)
     return nxt.astimezone(timezone.utc)
 
 
@@ -182,10 +199,17 @@ async def run_recurrences(db, now: datetime) -> int:
                    TaskRecurrence.next_run_at <= now)))).all()
     made = 0
     for rec, tpl in rows:
+        try:
+            next_at = next_run(rec.rule, now)
+        except ValueError as exc:
+            # Старое повреждённое правило не должно породить задачу даже при
+            # уже сохранённом next_run_at. Остальные расписания продолжаются.
+            log.warning("расписание %s пропущено: %s", rec.id, exc)
+            continue
         # Первый прогон расписания задачу не порождает: включили «каждый
         # понедельник» — ждём понедельника, а не создаём сразу.
         if rec.next_run_at is None:
-            rec.next_run_at = next_run(rec.rule or {}, now)
+            rec.next_run_at = next_at
             continue
         got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
                               {"ns": LOCK_NAMESPACE, "key": rec.id.int % (2 ** 31)})
@@ -193,7 +217,7 @@ async def run_recurrences(db, now: datetime) -> int:
             continue
         task = await spawn_from_template(db, rec, tpl)
         rec.last_run_at = now
-        rec.next_run_at = next_run(rec.rule or {}, now)
+        rec.next_run_at = next_at
         if task is not None:
             made += 1
             person = await db.get(User, task.assignee_id) if task.assignee_id else None

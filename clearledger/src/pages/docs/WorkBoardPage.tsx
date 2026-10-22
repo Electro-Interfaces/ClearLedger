@@ -62,7 +62,7 @@ const AXES: { code: BoardAxis; name: string; hint: string }[] = [
   {
     code: 'due',
     name: 'По сроку',
-    hint: 'Перенос меняет СРОК — обязательство перед компанией.',
+    hint: 'Перенос меняет срок для всей компании: «Сегодня» и «Завтра» ставят 18:00 по местному времени. После 18:00 перенос в «Сегодня» попадёт в «Просрочено».',
   },
 ]
 
@@ -238,7 +238,10 @@ export function WorkBoardPage() {
       if (axis === 'due') {
         const on = new Date()
         if (v.col.code === 'tomorrow') on.setDate(on.getDate() + 1)
-        toast.success(`Срок — ${format(on, 'd MMMM', { locale: ru })}`)
+        toast.success(`Срок — ${format(on, 'd MMMM', { locale: ru })}, 18:00`, {
+          description: new Date(endOfDay(on)).getTime() < Date.now()
+            ? 'Срок уже прошёл: поручение в «Просрочено».' : undefined,
+        })
       }
     },
     // Причина отказа — главное, что человек должен увидеть: иначе карточка
@@ -329,6 +332,12 @@ export function WorkBoardPage() {
                     {cards.length}
                   </span>
                 </div>
+                {axis === 'due' && (col.code === 'today' || col.code === 'tomorrow') && (
+                  <p className="px-3 pb-2 text-xs text-muted-foreground">
+                    Срок — {col.code === 'today' ? 'сегодня' : 'завтра'} в 18:00
+                    {col.code === 'today' && '. После 18:00 — в «Просрочено»'}
+                  </p>
+                )}
                 <div className="flex-1 space-y-2 overflow-y-auto px-2 pb-2">
                   {cards.map((item) => (
                     <Card key={`${item.kind}-${item.id}`} item={item}

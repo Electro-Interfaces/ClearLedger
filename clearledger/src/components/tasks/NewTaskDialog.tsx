@@ -30,8 +30,9 @@ import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { PRIORITY_LABEL, fileSize } from './taskWords'
 import { SearchPicker } from './SearchPicker'
 import { useAuth } from '@/contexts/AuthContext'
+import { selectedTaskType } from '@/lib/taskCardInput'
 
-export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSignal, draft }: {
+export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSignal, draft, onDraftDone }: {
   companyId: string
   onCreated: (taskId: string) => void
   defaultObjectId?: string
@@ -48,6 +49,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
    * выбранный исполнитель терялись на переходе.
    */
   draft?: { title?: string; assigneeId?: string; description?: string }
+  onDraftDone?: () => void
 }) {
   const qc = useQueryClient()
   const { user } = useAuth()
@@ -69,11 +71,11 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
   const [dragOver, setDragOver] = useState(false)
   // Заготовку подставляем один раз, при появлении: дальше человек правит форму,
   // и перезапись затирала бы его работу.
-  const заготовкаПодставлена = useRef(false)
+  const заготовкаПодставлена = useRef<typeof draft>(undefined)
   useEffect(() => {
-    if (!draft || заготовкаПодставлена.current) return
+    if (!draft || заготовкаПодставлена.current === draft) return
     if (!draft.title && !draft.assigneeId) return
-    заготовкаПодставлена.current = true
+    заготовкаПодставлена.current = draft
     if (draft.title) setTitle(draft.title)
     if (draft.description) setDescription(draft.description)
     if (draft.assigneeId) setAssigneeId(draft.assigneeId)
@@ -150,14 +152,12 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
     queryFn: () => tasksService.listTaskLabels(companyId),
     enabled: open, staleTime: 5 * 60 * 1000,
   })
-  // Тип по умолчанию — первый общий, а не «без типа». Работа без типа не имеет
-  // маршрута: на доске она стоит намертво и двигается только в «Готово». Быстрая
-  // постановка не должна рождать такую по умолчанию — «без типа» остаётся
-  // осознанным выбором в списке, а не тем, что получаешь, не глядя.
+  // Первый общий тип применяется, пока человек не сделал явный выбор.
+  // `none` сохраняется и в черновике, чтобы не подменить его умолчанием.
   const типПоУмолчанию = (typesQ.data?.types ?? [])
     .find((t) => t.is_active && !t.project_id)?.id ?? ''
-  const выбранныйТип = typeId || типПоУмолчанию
-  const type = (typesQ.data?.types ?? []).find((t) => t.id === typeId)
+  const выбранныйТип = selectedTaskType(typeId, типПоУмолчанию)
+  const type = (typesQ.data?.types ?? []).find((t) => t.id === выбранныйТип)
 
   const reset = () => {
     setTitle(''); setDescription(''); setProjectId(''); setTypeId(''); setAssigneeId('')
@@ -207,14 +207,17 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
     onSuccess: (task) => {
       toast.success(`Задача ${tasksService.taskKey(task)} поставлена`)
       qc.invalidateQueries({ queryKey: ['tasks'] })
-      setOpen(false); reset()
+      setOpen(false); reset(); onDraftDone?.()
       onCreated(task.id)
     },
     onError: (e) => toast.error(`Не удалось поставить задачу: ${(e as Error).message}`),
   })
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset() }}>
+    <Dialog open={open} onOpenChange={(v) => {
+      setOpen(v)
+      if (!v) { reset(); onDraftDone?.() }
+    }}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="h-9">
           <Plus className="mr-1.5 h-3.5 w-3.5" />Поставить подробно
@@ -254,7 +257,10 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
               <div className="space-y-1.5">
                 <Label>Проект</Label>
                 <Select value={projectId || 'none'}
-                  onValueChange={(v) => { setProjectId(v === 'none' ? '' : v); setTypeId('') }}>
+                  onValueChange={(v) => {
+                    setProjectId(v === 'none' ? '' : v)
+                    setTypeId((chosen) => chosen === 'none' ? chosen : '')
+                  }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Без проекта</SelectItem>
@@ -268,7 +274,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
             <div className="space-y-1.5">
               <Label>Тип</Label>
               <Select value={выбранныйТип || 'none'}
-                onValueChange={(v) => setTypeId(v === 'none' ? '' : v)}>
+                onValueChange={setTypeId}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Поручение (без типа)</SelectItem>

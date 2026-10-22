@@ -121,22 +121,45 @@ export async function downloadAttachment(
 }
 
 export async function openAuthAttachment(
-  path: string, options: { cache?: boolean } = {},
+  path: string, options: { cache?: boolean; fileName?: string } = {},
 ): Promise<void> {
   const target = window.open('', '_blank')
   if (!target) throw new Error('Браузер заблокировал новую вкладку')
   target.opener = null
   try {
     const useCache = options.cache !== false
-    const cached = useCache ? найти(path) : null
-    const objUrl = cached ?? URL.createObjectURL(await downloadBlob(path))
+    // У кеша хранится URL без MIME. Для именованного файла заново узнаём
+    // формат, чтобы и повторное открытие ZIP сохраняло исходное имя.
+    const cached = useCache && !options.fileName ? найти(path) : null
+    const blob = cached ? null : await downloadBlob(path)
+    const objUrl = cached ?? URL.createObjectURL(blob!)
     if (!cached && useCache) положить(path, objUrl)
-    target.location.href = objUrl
+    // У blob-адреса нет имени исходного файла. Архив, открытый как вкладка,
+    // браузер скачивает под UUID. Для именованных вложений без preview
+    // скачивание задаёт имя явно; прежние вызовы без имени сохраняют поведение.
+    if (options.fileName && blob && !canPreviewAttachment(blob.type)) {
+      target.close()
+      const anchor = document.createElement('a')
+      anchor.href = objUrl
+      anchor.download = options.fileName
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } else {
+      target.location.href = objUrl
+    }
     if (!useCache) window.setTimeout(() => URL.revokeObjectURL(objUrl), 60_000)
   } catch (error) {
     target.close()
     throw error
   }
+}
+
+/** Форматы, для которых кнопка названия сохраняет встроенный просмотр. */
+export function canPreviewAttachment(mimeType: string): boolean {
+  const type = mimeType.split(';', 1)[0].trim().toLowerCase()
+  return /^(image\/(avif|bmp|gif|jpeg|png|webp)|application\/pdf|text\/plain)$/.test(type)
+    || type.startsWith('audio/') || type.startsWith('video/')
 }
 
 export function humanSize(bytes: number): string {

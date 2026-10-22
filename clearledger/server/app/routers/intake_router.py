@@ -156,6 +156,9 @@ async def download_file(
     from app.routers.store_documents_router import authorize_store_file_download
     await authorize_store_file_download(db, current_user, uid)
 
+    from app.services.task_access import authorize_task_file_download
+    await authorize_task_file_download(db, current_user, uid, source.company_id)
+
     # Файл документа «Дела»: закрытую карточку видят только автор, ответственный
     # и подписант, поэтому одной принадлежности компании здесь недостаточно.
     from app.routers.docs_router import authorize_docs_file_download

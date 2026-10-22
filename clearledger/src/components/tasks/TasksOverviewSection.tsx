@@ -34,8 +34,9 @@ const STATUS_LABEL: Record<string, string> = {
 const dtT = (s: string | null) => (s ? new Date(s).toLocaleString('ru-RU',
   { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—')
 
-export function TasksOverviewSection({ companyId, period, onDrill }: {
+export function TasksOverviewSection({ companyId, period, onDrill, canTriage = false }: {
   companyId: string
+  canTriage?: boolean
   /** Период раздела «Отчёты». Своего регулятора экран не держит: их было три на
    *  три соседних отчёта, и человек не знал, какой из них он сейчас настроил. */
   period: { from: string; to: string }
@@ -67,7 +68,8 @@ export function TasksOverviewSection({ companyId, period, onDrill }: {
           onClick={() => onDrill({ scope: 'mine' })} />
         <MetricTile label="Без исполнителя" value={s?.totals.unassigned ?? '—'}
           tone={s && s.totals.unassigned > 0 ? 'warning' : undefined}
-          hint="поставлена, но ни у кого не в руках" onClick={() => onDrill({ scope: 'open' })} />
+          hint={canTriage ? 'поставлена, но ни у кого не в руках' : 'разбор доступен руководителю'}
+          onClick={canTriage ? () => onDrill({ scope: 'triage' }) : undefined} />
         <MetricTile label="Поставлено" value={s?.totals.created ?? '—'} hint="новых за период" />
         <MetricTile label="Закрыто" value={s?.totals.done ?? '—'} hint={
           s?.totals.avg_days != null ? `в среднем за ${s.totals.avg_days} дн` : 'за период'}
@@ -77,13 +79,13 @@ export function TasksOverviewSection({ companyId, period, onDrill }: {
       <div className="grid gap-4 lg:grid-cols-3">
         <CutCard title="Кто чем занят" empty="Задачи пока никому не поручены"
           rows={s?.by_assignee} loading={q.isLoading}
-          onRow={(r) => r.id && onDrill({ scope: 'all', assignee: r.id })} />
+          onRow={(r, scope) => r.id && onDrill({ scope, assignee: r.id })} />
         <CutCard title="По типам" empty="Типы ещё не заведены"
           rows={s?.by_type} loading={q.isLoading}
-          onRow={(r) => r.id && onDrill({ scope: 'all', type: r.id })} />
+          onRow={(r, scope) => r.id && onDrill({ scope, type: r.id })} />
         <CutCard title="По объектам" empty="Задачи не привязаны к объектам"
           rows={s?.by_object} loading={q.isLoading}
-          onRow={(r) => r.id && onDrill({ scope: 'all', object: r.id })} />
+          onRow={(r, scope) => r.id && onDrill({ scope, object: r.id })} />
       </div>
 
       <Card className="p-0">
@@ -132,7 +134,7 @@ export function TasksOverviewSection({ companyId, period, onDrill }: {
 /** Разрез: строка — сколько в работе, из них просрочено, и сколько закрыто. */
 function CutCard({ title, rows, empty, loading, onRow }: {
   title: string; rows?: TasksCut[]; empty: string; loading: boolean
-  onRow: (r: TasksCut) => void
+  onRow: (r: TasksCut, scope: 'open' | 'overdue' | 'closed') => void
 }) {
   return (
     <Card className="p-0">
@@ -147,16 +149,28 @@ function CutCard({ title, rows, empty, loading, onRow }: {
       ) : (
         <div className="max-h-[280px] overflow-y-auto">
           {rows.map((r) => (
-            <button key={r.name} onClick={() => onRow(r)}
-              className="flex w-full items-center gap-2 border-b px-4 py-1.5 text-left text-xs last:border-0 hover:bg-muted/40">
-              <span className="min-w-0 flex-1 truncate">{r.name}</span>
-              <span className="w-7 shrink-0 text-right tabular-nums">{r.open}</span>
-              <span className={cn('w-7 shrink-0 text-right tabular-nums',
-                r.overdue > 0 ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
-                {r.overdue}
-              </span>
-              <span className="w-7 shrink-0 text-right tabular-nums text-muted-foreground">{r.done}</span>
-            </button>
+            <div key={r.id ?? r.name}
+              className="flex w-full items-center gap-2 border-b px-4 py-1.5 text-left text-xs last:border-0">
+              {r.id ? (
+                <button type="button" onClick={() => onRow(r, 'open')}
+                  className="min-w-0 flex-1 truncate text-left underline-offset-2 hover:underline focus-visible:outline-ring"
+                  title={`${r.name} · в работе`}>
+                  {r.name}
+                </button>
+              ) : <span className="min-w-0 flex-1 truncate">{r.name}</span>}
+              {([
+                ['open', r.open, 'В работе'],
+                ['overdue', r.overdue, 'Просрочено'],
+                ['closed', r.done, 'Закрыто за период'],
+              ] as const).map(([scope, count, label]) => (
+                r.id ? <button key={scope} type="button" onClick={() => onRow(r, scope)}
+                  aria-label={`${r.name} · ${label}: ${count}`}
+                  className={cn('min-h-8 w-9 shrink-0 rounded text-right tabular-nums hover:bg-muted focus-visible:outline-ring',
+                    scope === 'overdue' && count > 0 ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted-foreground')}>
+                  {count}
+                </button> : <span key={scope} className="w-9 shrink-0 text-right tabular-nums text-muted-foreground">{count}</span>
+              ))}
+            </div>
           ))}
         </div>
       )}
