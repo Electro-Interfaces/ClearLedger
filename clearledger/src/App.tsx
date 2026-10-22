@@ -4,12 +4,13 @@ import {
 } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
-import { AuthProvider } from '@/contexts/AuthContext'
+import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext'
 import { isFuelProfile } from '@/config/profiles'
 import { useAppEnabled } from '@/hooks/useCompanyRegistry'
 import { SPACE_PAGES, SPACE_PRODUCTS, isCarvedProfile } from '@/config/spaceProducts'
 import { TabsProvider } from '@/contexts/TabsContext'
+import { NavigationHistoryProvider } from '@/contexts/NavigationHistoryContext'
 import { FilterProvider } from '@/contexts/FilterContext'
 import { StationCardProvider } from '@/contexts/StationCardContext'
 import { SupportProvider } from '@/contexts/SupportContext'
@@ -220,6 +221,7 @@ function Providers() {
 
 function CompanyScopedProviders() {
   const { companyId } = useCompany()
+  const { user } = useAuth()
   const location = useLocation()
   const { pathname } = location
   const [scopeCompany, setScopeCompany] = useState(companyId)
@@ -238,6 +240,8 @@ function CompanyScopedProviders() {
   const isStoreDemo = pathname.endsWith('/demo/shop') || (isDemoPath() && pathname === '/shop')
   return (
     <TabsProvider key={companyId}>
+      <NavigationHistoryProvider key={`${companyId}:${user?.id ?? ''}`}
+        scope={companyId && user?.id ? `${companyId}:${user.id}` : ''}>
       <FilterProvider syncUrl={!isStoreDemo}>
         {/* Карточка станции одна на пространство: любой экран открывает её поверх
             себя, не уходя в «Объекты» и не теряя отбор (РусГидро 18.09.2026). */}
@@ -268,6 +272,7 @@ function CompanyScopedProviders() {
           </TooltipProvider>
         </SupportProvider>
       </FilterProvider>
+      </NavigationHistoryProvider>
     </TabsProvider>
   )
 }
