@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import PersonalMark
+from app.services import space_time
 
 
 class DeferRefused(ValueError):
@@ -66,7 +67,7 @@ async def marks_for(db: AsyncSession, company_id: uuid.UUID, user_id: uuid.UUID,
     return {r.target_ref: r for r in rows}
 
 
-def _day(value: datetime | str | None) -> date | None:
+def _day(value: datetime | str | None, tz: str | None) -> date | None:
     """Срок предмета как календарный день. Строку принимаем потому, что очередь
     отдаёт срок в ISO, а не объектом."""
     if value is None:
@@ -78,20 +79,20 @@ def _day(value: datetime | str | None) -> date | None:
             return None
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
-    return value.date()
+    return space_time.local_date(value, tz)
 
 
 def clamp_defer(until: date, due: datetime | str | None,
-                today: date | None = None) -> date:
+                today: date | None = None, tz: str | None = "UTC") -> date:
     """До какого дня отложение допустимо.
 
     Чистая функция, поэтому проверяется без базы. Просроченное не прячется
     вовсе; отложенное дальше срока возвращается в день срока.
     """
-    today = today or datetime.now(timezone.utc).date()
+    today = today or space_time.local_date(datetime.now(timezone.utc), tz)
     if until <= today:
         raise DeferRefused("Отложить можно только на будущий день")
-    day = _day(due)
+    day = _day(due, tz)
     if day is None:
         return until
     if day <= today:
@@ -106,6 +107,7 @@ async def put(db: AsyncSession, company_id: uuid.UUID, user_id: uuid.UUID,
               taken_for: date | None = None, deferred_until: date | None = None,
               starred: bool | None = None, position: int | None = None,
               due_at: datetime | str | None = None, today: date | None = None,
+              tz: str | None = "UTC",
               drop_day: bool = False, undefer: bool = False,
               clear: bool = False) -> PersonalMark | None:
     """Поставить или изменить отметку. Переданное меняется, остальное стоит.
@@ -152,7 +154,7 @@ async def put(db: AsyncSession, company_id: uuid.UUID, user_id: uuid.UUID,
     if deferred_until is not None:
         # `today` — местный день ЧЕЛОВЕКА: он прячет предмет у себя, и «завтра»
         # у него наступает по его часам, а не по серверным.
-        row.deferred_until = clamp_defer(deferred_until, due_at, today)
+        row.deferred_until = clamp_defer(deferred_until, due_at, today, tz)
         row.taken_for = None
         # `default=0` у колонки применяется при ВСТАВКЕ, а не при создании
         # объекта: у только что заведённой отметки счётчик ещё None, и

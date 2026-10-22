@@ -34,6 +34,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import assert_company_product, get_company_by_api_key, get_current_user
 from app.database import get_db
 from app.services.service_accounts import not_service
+from app.services.task_access import (
+    is_admin as _is_admin, visible_to as _visible_to, can_view_task as _can_view_task,
+    assert_view_task as _assert_view_task, authorize_task_file_download,
+)
 from app.models import (
     Company, PartnerSpace, PartnerTopic,
     ServiceLocation, SourceFile, Task, TaskAttachment, TaskChecklistItem,
@@ -417,7 +421,7 @@ async def _names(db: AsyncSession, tasks: list[Task]) -> dict[uuid.UUID, dict[st
     } for t in tasks}
 
 
-async def _extras(db: AsyncSession, tasks: list[Task], *,
+async def _extras(db: AsyncSession, tasks: list[Task], cid: uuid.UUID, user: User, *,
                   with_items: bool = False) -> dict[uuid.UUID, dict[str, Any]]:
     """Метки, прогресс чек-листа и число подзадач — пачкой на весь список.
 
@@ -469,7 +473,8 @@ async def _extras(db: AsyncSession, tasks: list[Task], *,
         select(TaskLink.task_id, func.count(),
                func.count().filter(Task.status == "open"))
         .join(Task, Task.id == TaskLink.related_task_id)
-        .where(TaskLink.task_id.in_(ids), TaskLink.kind == "subtask")
+        .where(TaskLink.task_id.in_(ids), TaskLink.kind == "subtask",
+               Task.company_id == cid, _visible_to(user, await _is_admin(db, cid, user)))
         .group_by(TaskLink.task_id))).all():
         kids[tid] = {"total": total, "open": open_cnt}
 
@@ -515,43 +520,6 @@ _VISIBILITY_WORD = {
 }
 
 
-def _visible_to(user: User, is_admin: bool):
-    """Условие видимости для выборок: три уровня закрытости, не два.
-
-    Собрано одним местом намеренно: стоит забыть его в поиске или в обзоре — и
-    закрытая задача утечёт хотя бы заголовком, а это ровно то, ради чего её
-    закрывали.
-
-    `company`  — видят все в пространстве;
-    `private`  — причастные и администратор: кадровое и денежное поручение
-                 администратор обязан видеть, за него он и отвечает;
-    `personal` — ТОЛЬКО автор, включая администратора. Это личная запись
-                 человека, и «личное» в названии раздела должно быть правдой.
-
-    Условие перечисляет уровни, а не отрицает один из них. Прежнее
-    `visibility != "private"` было истинно для любого нового значения — то есть
-    добавление третьего уровня молча раскрыло бы все личные записи компании.
-    """
-    if is_admin:
-        # Администратор видит всё, кроме чужого личного.
-        return or_(Task.visibility != "personal", Task.author_id == user.id)
-    return or_(
-        Task.visibility == "company",
-        and_(
-            Task.visibility == "private",
-            or_(
-                Task.author_id == user.id,
-                Task.assignee_id == user.id,
-                Task.id.in_(select(TaskWatcher.task_id).where(
-                    TaskWatcher.user_id == user.id)),
-                Task.id.in_(select(TaskParticipant.task_id).where(
-                    TaskParticipant.user_id == user.id)),
-            ),
-        ),
-        and_(Task.visibility == "personal", Task.author_id == user.id),
-    )
-
-
 # Как часто снимается редакция записи. Чаще — «Ход работы» превращается в
 # поток «правка, правка, правка», и нужную редакцию в нём не найти; реже —
 # теряется абзац, стёртый пять минут назад.
@@ -592,13 +560,6 @@ def _my_dated_personal(user: User):
                 Task.due_at.is_not(None))
 
 
-async def _is_admin(db: AsyncSession, cid: uuid.UUID, user: User) -> bool:
-    if user.is_superadmin:
-        return True
-    m = await db.get(UserCompany, (user.id, cid))
-    return m is not None and m.role == "admin"
-
-
 # Ключ работы, как её называют вслух и шлют ссылкой: `TF-42`.
 _TASK_KEY_RE = re.compile(r"^([A-Za-z0-9_]{1,10})-(\d{1,9})$")
 
@@ -632,53 +593,22 @@ async def _task_or_404(db: AsyncSession, cid: uuid.UUID, task_id: str) -> Task:
     return t
 
 
-async def _assert_actor(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -> None:
-    """Право менять задачу: исполнитель, автор или администратор пространства.
-
-    Работу двигает тот, у кого она в руках, — согласование каждого шага у
-    постановщика убило бы смысл маршрута.
-
-    **Личная запись — исключение без исключений.** Её меняет только автор: ни
-    администратор, ни суперадминистратор. Это та же граница, что в
-    `_can_view_task`, и стоять она обязана здесь, а не в каждой из семнадцати
-    ручек, которые эту проверку зовут: забыть её в одной — то же самое, что не
-    делать вовсе. Слово «личное» в названии раздела должно быть правдой и на
-    ручках изменения, а не только на выборках.
-    """
-    if t.visibility == "personal":
-        if t.author_id == user.id:
-            return
-        # 404, а не 403: подтверждать существование чужой личной записи тому,
-        # кто её видеть не должен, — уже утечка.
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
-    if user.is_superadmin or user.id in (t.assignee_id, t.author_id):
-        return
-    m = await db.get(UserCompany, (user.id, cid))
-    if m is not None and m.role == "admin":
-        return
-    # Четвёртый, кто вправе вмешаться: руководитель, в чьём охвате стоит эта
-    # работа. Без него раздел «Компания» остаётся окном — видно, что висит, и
-    # ничего не сделать. Граница полномочия одна — охват: за пределами своей
-    # ветки руководитель такой же сотрудник, как все.
-    from app.services import oversight
-    if (await oversight.охват(db, cid, user)).входит(t.assignee_id):
-        return
-    raise HTTPException(status.HTTP_403_FORBIDDEN, "Задача не ваша")
-
-
-async def _can_view_task(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -> bool:
-    """Зеркало `_visible_to` для одиночной карточки. Расходиться им нельзя:
-    список и карточка обязаны отвечать одинаково, иначе закрытая запись
-    открывается по прямой ссылке."""
+async def _can_edit_task(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -> bool:
+    """То же полномочие для API и интерфейса, включая охват руководителя."""
+    if not await _can_view_task(db, cid, user, t):
+        return False
     if t.visibility == "personal":
         return t.author_id == user.id
-    if t.visibility != "private":
+    if user.id in (t.assignee_id, t.author_id) or await _is_admin(db, cid, user):
         return True
-    if await _is_admin(db, cid, user):
-        return True
-    return user.id in (t.author_id, t.assignee_id) or bool(
-        await db.get(TaskWatcher, (t.id, user.id))
-        or await db.get(TaskParticipant, (t.id, user.id)))
+    from app.services import oversight
+    return (await oversight.охват(db, cid, user)).входит(t.assignee_id)
+
+
+async def _assert_actor(db: AsyncSession, cid: uuid.UUID, user: User, t: Task) -> None:
+    await _assert_view_task(db, cid, user, t)
+    if not await _can_edit_task(db, cid, user, t):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Задача не ваша")
 
 
 # Обратная сторона связи называется иначе: если А — родитель Б, то у Б это
@@ -688,15 +618,16 @@ _LINK_MIRROR = {"subtask": "parent", "blocks": "blocked_by",
                 "relates": "relates", "duplicates": "duplicated_by"}
 
 
-async def _links_out(db: AsyncSession, t: Task) -> list[dict[str, Any]]:
+async def _links_out(db: AsyncSession, t: Task, cid: uuid.UUID, user: User) -> list[dict[str, Any]]:
     """Связи задачи в обе стороны — одним списком, как их видит человек."""
+    visible = _visible_to(user, await _is_admin(db, cid, user))
     out: list[dict[str, Any]] = []
     forward = (await db.execute(
         select(TaskLink, Task).join(Task, Task.id == TaskLink.related_task_id)
-        .where(TaskLink.task_id == t.id))).all()
+        .where(TaskLink.task_id == t.id, Task.company_id == cid, visible))).all()
     backward = (await db.execute(
         select(TaskLink, Task).join(Task, Task.id == TaskLink.task_id)
-        .where(TaskLink.related_task_id == t.id))).all()
+        .where(TaskLink.related_task_id == t.id, Task.company_id == cid, visible))).all()
     for link, other in forward:
         out.append({"id": str(link.id), "kind": link.kind, "task_id": str(other.id),
                     "number": other.number, "title": other.title, "status": other.status})
@@ -780,6 +711,8 @@ async def list_tasks(
     query: str | None = Query(None, max_length=500),
     due_from: datetime | None = Query(None),
     due_to: datetime | None = Query(None),
+    closed_from: date_type | None = None,
+    closed_to: date_type | None = None,
     sort: str = Query("created", pattern="^-?(created|updated|due|priority|number)$"),
     limit: int = Query(100, ge=1, le=_LIST_LIMIT),
     offset: int = Query(0, ge=0),
@@ -905,6 +838,10 @@ async def list_tasks(
         sel = sel.where(Task.due_at >= due_from)
     if due_to:
         sel = sel.where(Task.due_at <= due_to)
+    if closed_from is not None or closed_to is not None:
+        _, _, start_at, end_at = _errand_bounds(closed_from, closed_to)
+        sel = sel.where(Task.status.in_(("done", "cancelled")),
+                        Task.closed_at >= start_at, Task.closed_at < end_at)
     if q and (text := q.strip()):
         # Номер ищем как номер: «123» и «№123» должны открывать задачу, а не
         # искать «123» в тексте — цифру в заголовке пишут редко, а номер называют
@@ -938,7 +875,7 @@ async def list_tasks(
     names = await _names(db, tasks)
     # Пункты чек-листа нужны только записной книжке: там они и есть содержание
     # записи, а в общем реестре их не показывают.
-    extras = await _extras(db, tasks, with_items=(visibility == "personal"))
+    extras = await _extras(db, tasks, cid, current_user, with_items=(visibility == "personal"))
     # Личная отметка приезжает вместе со строкой, одним запросом на страницу.
     # Без неё действия раскладки в строке работали вслепую — солнце не залито у
     # взятого в день, «убрать из подборки» не появляется никогда, — и их
@@ -1017,7 +954,8 @@ async def list_projects(
     counts = dict((pid, (n, o)) for pid, n, o in (await db.execute(
         select(Task.project_id, func.count(Task.id),
                func.count(Task.id).filter(Task.status == "open"))
-        .where(Task.company_id == cid, Task.project_id.is_not(None))
+        .where(Task.company_id == cid, Task.project_id.is_not(None),
+               _visible_to(current_user, await _is_admin(db, cid, current_user)))
         .group_by(Task.project_id))).all())
     return {"projects": [_project_out(p, *counts.get(p.id, (0, 0))) for p in rows]}
 
@@ -1150,7 +1088,8 @@ async def list_versions(
     counts = dict((vid, (n, o)) for vid, n, o in (await db.execute(
         select(Task.fix_version_id, func.count(Task.id),
                func.count(Task.id).filter(Task.status == "open"))
-        .where(Task.company_id == cid, Task.fix_version_id.is_not(None))
+        .where(Task.company_id == cid, Task.fix_version_id.is_not(None),
+               _visible_to(current_user, await _is_admin(db, cid, current_user)))
         .group_by(Task.fix_version_id))).all())
     return {"versions": [_version_out(v, *counts.get(v.id, (0, 0))) for v in rows]}
 
@@ -1313,7 +1252,8 @@ async def list_sprints(
         select(Task.sprint_id,
                func.count(Task.id).filter(Task.status != "open"),
                func.count(Task.id).filter(Task.status == "open"))
-        .where(Task.company_id == cid, Task.sprint_id.is_not(None))
+        .where(Task.company_id == cid, Task.sprint_id.is_not(None),
+               _visible_to(current_user, await _is_admin(db, cid, current_user)))
         .group_by(Task.sprint_id))).all())
     return {"sprints": [_sprint_out(sp, *counts.get(sp.id, (0, 0))) for sp in rows]}
 
@@ -1726,7 +1666,7 @@ async def create_task(
                           _errand_text(t, current_user, None), t)
         await db.commit()
     names = await _names(db, [t])
-    extras = await _extras(db, [t])
+    extras = await _extras(db, [t], cid, current_user)
     return _task_out(t, route, names[t.id], extras[t.id])
 
 
@@ -1807,7 +1747,8 @@ async def tasks_summary(
     events = (await db.execute(
         select(TaskEvent, Task.number, Task.title)
         .join(Task, Task.id == TaskEvent.task_id)
-        .where(Task.company_id == cid, в_периоде(TaskEvent.created_at))
+        .where(Task.company_id == cid, в_периоде(TaskEvent.created_at),
+               _visible_to(current_user, await _is_admin(db, cid, current_user)), _not_personal())
         .order_by(TaskEvent.created_at.desc()).limit(60))).all()
     actors = {r.id: r.name for r in (await db.execute(select(User).where(
         User.id.in_({e.user_id for e, _, _ in events if e.user_id})))).scalars()} if events else {}
@@ -1822,7 +1763,8 @@ async def tasks_summary(
         "totals": {
             "open": len(open_t),
             "overdue": len(overdue),
-            "mine": sum(1 for t in open_t if current_user.id in (t.assignee_id, t.author_id)),
+            "mine": sum(1 for t in open_t if t.assignee_id == current_user.id
+                        and t.waiting_for != "external"),
             "unassigned": sum(1 for t in open_t if t.assignee_id is None),
             "created": len(created_period),
             "done": len(closed_t),
@@ -2172,11 +2114,14 @@ async def create_recurrence(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Шаблон не найден")
     if tpl.assignee_id is not None and tpl.assignee_id != current_user.id:
         await _assert_admin(db, cid, current_user)
+    try:
+        next_at = task_scheduler.next_run(payload.rule or {}, datetime.now(timezone.utc))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     rec = TaskRecurrence(
         company_id=cid, template_id=tpl.id, rule=payload.rule or {},
         enabled=payload.enabled, created_by=current_user.id,
-        next_run_at=task_scheduler.next_run(payload.rule or {},
-                                            datetime.now(timezone.utc)))
+        next_run_at=next_at)
     db.add(rec)
     await db.commit()
     await db.refresh(rec)
@@ -2280,11 +2225,13 @@ async def download_attachment(
     task = await db.get(Task, att.task_id)
     if task is None or task.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Вложение не найдено")
+    await _assert_view_task(db, cid, current_user, task)
+    await authorize_task_file_download(db, current_user, att.file_id, cid)
     sf = await db.get(SourceFile, att.file_id)
-    if sf is None or not Path(sf.storage_path).exists():
+    if sf is None or sf.company_id != cid or not Path(sf.storage_path).exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл потерян в хранилище")
     return FileResponse(sf.storage_path, media_type=sf.mime_type or "application/octet-stream",
-                        filename=sf.file_name)
+                        filename=sf.file_name, headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/assignment-counts")
@@ -2333,7 +2280,7 @@ async def task_details(
     if not await _can_view_task(db, cid, current_user, t):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
     names = await _names(db, [t])
-    extras = await _extras(db, [t])
+    extras = await _extras(db, [t], cid, current_user)
     events = (await db.execute(
         select(TaskEvent).where(TaskEvent.task_id == t.id)
         .order_by(TaskEvent.created_at))).scalars().all()
@@ -2365,11 +2312,13 @@ async def task_details(
         .where(TaskParticipant.task_id == t.id)
         .order_by(TaskParticipant.created_at))).all()
 
+    can_edit = await _can_edit_task(db, cid, current_user, t)
     can_manage_files = (current_user.id in (t.author_id, t.assignee_id)
                         or await _is_admin(db, cid, current_user))
     return {
         **_task_out(t, names[t.id]["route"], names[t.id], extras[t.id]),
         "description": t.description,
+        "can_edit": can_edit,
         "events": [{
             "id": str(e.id), "kind": e.kind,
             # Имя из письма важнее имени учётки: подпись под репликой должна
@@ -2400,11 +2349,12 @@ async def task_details(
             "can_delete": can_manage_files or a.uploaded_by == current_user.id,
             "created_at": a.created_at.isoformat() if a.created_at else None,
         } for a, sf in attachments],
-        "links": await _links_out(db, t),
+        "links": await _links_out(db, t, cid, current_user),
         "work_items": [{
             "id": str(w.id), "minutes": w.minutes, "duration": human_duration(w.minutes),
             "work_date": w.work_date.isoformat(), "description": w.description,
             "kind": w.kind, "user": people.get(w.user_id),
+            "can_delete": can_edit or current_user.id in (w.user_id, w.created_by),
         } for w, in work],
     }
 
@@ -2710,7 +2660,7 @@ async def task_action(
     await db.commit()
     await db.refresh(t)
     names = await _names(db, [t])
-    extras = await _extras(db, [t])
+    extras = await _extras(db, [t], cid, current_user)
     out = _task_out(t, route, names[t.id], extras[t.id])
     # Закрыть родителя с живыми подзадачами можно, но человек должен об этом
     # узнать: запрет здесь мешал бы работать (подзадачу могли завести «на потом»),
@@ -2990,6 +2940,7 @@ async def add_link(
     t = await _task_or_404(db, cid, task_id)
     await _assert_actor(db, cid, current_user, t)
     other = await _task_or_404(db, cid, payload.related_task_id)
+    await _assert_view_task(db, cid, current_user, other)
     if other.id == t.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Задачу нельзя связать с собой")
     # Круг из подзадач сделал бы дерево бесконечным при обходе; для остальных
@@ -3053,6 +3004,7 @@ async def add_watcher(
     кто видит задачу: следить за чужой работой — не привилегия."""
     cid = await _assert_work(payload.company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
+    await _assert_view_task(db, cid, current_user, t)
     uid = _uuid_or_400(payload.user_id, "user_id") if payload.user_id else current_user.id
     if uid != current_user.id:
         await _assert_actor(db, cid, current_user, t)
@@ -3075,6 +3027,7 @@ async def delete_watcher(
 ):
     cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
+    await _assert_view_task(db, cid, current_user, t)
     uid = _uuid_or_400(user_id, "user_id")
     if uid != current_user.id:
         await _assert_actor(db, cid, current_user, t)
@@ -3138,6 +3091,7 @@ async def delete_attachment(
     ссылаться другая запись, а чистка хранилища — отдельная работа."""
     cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
+    await _assert_view_task(db, cid, current_user, t)
     att = await db.get(TaskAttachment, _uuid_or_400(attachment_id, "attachment_id"))
     if att is None or att.task_id != t.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Вложение не найдено")
@@ -3291,12 +3245,13 @@ async def apply_command(
                 unknown.append(f"спринт {nxt}")
                 i += 2
             continue
-        if w in ("стадия", "state", "stage") and nxt:
+        if w in ("стадия", "state", "stage"):
             code = stages.get(nxt.lower())
-            if code:
-                action["stage_code"] = code
-                i += 2
-                continue
+            if code is None:
+                raise HTTPException(400, f"Неизвестная стадия: {nxt or 'не указана'}")
+            action["stage_code"] = code
+            i += 2
+            continue
         if w in ("срок", "due") and nxt:
             # Срок бывает из двух слов: «через 3 дня».
             for take in (3, 2, 1):
@@ -3510,7 +3465,7 @@ async def delete_code_ref(
 
 # «2ч 30м», «1,5 ч», «90м», «45» — люди пишут длительность как придётся, и
 # заставлять их вводить минуты числом значит получить учёт, которым не пользуются.
-_DUR = re.compile(r"(\d+(?:[.,]\d+)?)\s*(ч|час[а-я]*|h|м|мин[а-я]*|m)?", re.IGNORECASE)
+_DUR = re.compile(r"(\d+(?:[.,]\d+)?)\s*(час(?:а|ов)?|ч|h|мин(?:ута|уты|ут)?|м|m)?", re.IGNORECASE)
 
 
 def parse_duration(text: str) -> int | None:
@@ -3522,7 +3477,12 @@ def parse_duration(text: str) -> int | None:
         return None
     total = 0.0
     found = False
-    for value, unit in _DUR.findall(raw):
+    end = 0
+    for match in _DUR.finditer(raw):
+        if raw[end:match.start()].strip():
+            return None
+        end = match.end()
+        value, unit = match.groups()
         num = float(value.replace(",", "."))
         u = (unit or "").lower()
         if u.startswith(("ч", "h")):
@@ -3534,6 +3494,8 @@ def parse_duration(text: str) -> int | None:
             # два часа, а не две минуты.
             total += num * 60
         found = True
+    if raw[end:].strip() or total > 60 * 24 * 30:
+        return None
     minutes = int(round(total))
     return minutes if found and 0 < minutes <= 60 * 24 * 30 else None
 
@@ -3573,6 +3535,7 @@ async def add_work_item(
     """
     cid = await _assert_work(payload.company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
+    await _assert_view_task(db, cid, current_user, t)
     minutes = parse_duration(payload.duration)
     if minutes is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
@@ -3615,6 +3578,7 @@ async def delete_work_item(
     """Убрать свою запись о работе; чужую — участник задачи или администратор."""
     cid = await _assert_work(company_id, current_user, db)
     t = await _task_or_404(db, cid, task_id)
+    await _assert_view_task(db, cid, current_user, t)
     item = await db.get(TaskWorkItem, _uuid_or_400(item_id, "item_id"))
     if item is None or item.task_id != t.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Запись не найдена")
@@ -4112,6 +4076,7 @@ async def errand_discipline(
     closed = list((await db.execute(select(Task).where(
         Task.company_id == cid,
         Task.status.in_(("done", "cancelled")),
+        _visible_to(current_user, await _is_admin(db, cid, current_user)), _not_personal(),
         Task.closed_at.is_not(None),
         Task.closed_at >= start_at,
         Task.closed_at < end_at,
@@ -4155,7 +4120,9 @@ async def errand_discipline(
 
     now = datetime.now(timezone.utc)
     open_tasks = list((await db.execute(select(Task).where(
-        Task.company_id == cid, Task.status == "open"))).scalars())
+        Task.company_id == cid, Task.status == "open",
+        _visible_to(current_user, await _is_admin(db, cid, current_user)),
+        _not_personal()))).scalars())
     overdue = [t for t in open_tasks if t.due_at is not None and t.due_at < now]
 
     return {

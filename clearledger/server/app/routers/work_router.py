@@ -2996,6 +2996,7 @@ async def place(
             deferred_until=payload.defer_until, starred=payload.starred,
             position=payload.position, clear=payload.clear,
             drop_day=payload.drop_day, undefer=payload.undefer,
+            tz=current_user.tz,
             today=space_time.local_date(datetime.now(timezone.utc),
                                         current_user.tz),
             due_at=(await _due_of(db, cid, payload.target_ref)
