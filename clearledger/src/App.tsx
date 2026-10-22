@@ -1,6 +1,6 @@
-import { lazy, Suspense, useEffect, useRef } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import {
-  createBrowserRouter, RouterProvider, Outlet, Link, Navigate, useLocation, useNavigate, useParams,
+  createBrowserRouter, RouterProvider, Outlet, Link, Navigate, useLocation, useParams,
 } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
@@ -222,19 +222,19 @@ function CompanyScopedProviders() {
   const { companyId } = useCompany()
   const location = useLocation()
   const { pathname } = location
-  const navigate = useNavigate()
-  const previousCompany = useRef(companyId)
-  // Эта граница переживает TabsProvider key={companyId}. Проводник ниже неё
-  // перемонтируется и уже не сможет отличить смену компании от прямой ссылки.
-  useEffect(() => {
-    const previous = previousCompany.current
-    previousCompany.current = companyId
-    if (!previous || !companyId || previous === companyId || !/(?:^|\/)files\/?$/.test(pathname)) return
+  const [scopeCompany, setScopeCompany] = useState(companyId)
+  // До монтирования новой компании убираем адресный отбор предыдущей.
+  // Иначе проводник успевает сохранить его в новую историю, а FilterProvider
+  // конкурирует с запоздалой очисткой URL за параметр f.
+  if (scopeCompany !== companyId) {
     const search = new URLSearchParams(location.search)
-    if (!search.has('folder') && !search.has('q')) return
-    search.delete('folder'); search.delete('q')
-    navigate({ pathname, search: search.toString(), hash: location.hash }, { replace: true })
-  }, [companyId, location.hash, location.search, navigate, pathname])
+    if (scopeCompany && companyId && /(?:^|\/)files\/?$/.test(pathname)
+        && ['folder', 'q', 'f'].some((key) => search.has(key))) {
+      search.delete('folder'); search.delete('q'); search.delete('f')
+      return <Navigate to={{ pathname, search: search.toString(), hash: location.hash }} replace />
+    }
+    setScopeCompany(companyId)
+  }
   const isStoreDemo = pathname.endsWith('/demo/shop') || (isDemoPath() && pathname === '/shop')
   return (
     <TabsProvider key={companyId}>
