@@ -15,7 +15,8 @@ import { Loader2, AlertTriangle, ArrowUp, ArrowDown, ChevronsUpDown, ChevronRigh
 import { KpiCard } from './analytics/AnalyticsPeriodPicker'
 import { BarList } from '@/components/ui/bar-list'
 import { HINTS, MetricHint } from './analytics/MetricHint'
-import { TzToggle, type Tz } from './analytics/TzToggle'
+import type { Tz } from './analytics/TzToggle'
+import { HourlyOccupancy } from './analytics/HourlyOccupancy'
 import { seriesColor } from './analytics/palette'
 import { MultiPeriodPicker } from './analytics/PeriodRangePicker'
 import { ChargeTrendChart, ChargeBarChart } from './analytics/ChargeTrendChart'
@@ -33,7 +34,7 @@ import { HorizonControl } from './HorizonControl'
 import { PieChart, Pie, Cell, Tooltip as RTooltip } from 'recharts'
 import { getReconciliationBy, type ReconByRow } from '@/services/chargePaymentsService'
 import {
-  getChargeSessions, getChargeTimeseries, getChargeCompareMulti, getChargeSlice, getChargeHeatmap,
+  getChargeSessions, getChargeTimeseries, getChargeCompareMulti, getChargeSlice,
   getChargeNewClients, getChargeNewClientsList, getChargeVisits, getChargeUnpaid, getChargeUnpaidStation,
   getChargeBrandReliability,
   fmtMoney, fmtMoneyShort, fmtMetric, fmtMetricCompact, CHARGE_METRIC_LABELS,
@@ -563,97 +564,11 @@ function ShareDonut({ title, rows }: { title: string; rows: ChargeSessionLine[] 
   )
 }
 
-const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']  // isodow 1..7
-
-/** Heatmap загрузки: час × день недели (цвет = интенсивность). */
-function ChargeHeatmap({ companyId, dateFrom, dateTo, tz }: { companyId: string; dateFrom: string; dateTo: string; tz?: Tz }) {
-  const n = useNarrow()
-  const { data, isLoading } = useQuery({
-    queryKey: ['charge-heatmap', companyId, dateFrom, dateTo, n.key, tz ?? 'msk'],
-    queryFn: () => getChargeHeatmap({ companyId, dateFrom, dateTo, metric: 'sessions', stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal, tz }),
-  })
-  if (isLoading) return <Loading />
-  if (!data || data.cells.length === 0) return <Empty />
-  const grid: Record<string, number> = {}
-  let max = 0
-  data.cells.forEach((c) => { grid[`${c.hour}-${c.weekday}`] = c.value; if (c.value > max) max = c.value })
-  const color = (v: number) => (v ? `hsl(var(--chart-1) / ${0.1 + 0.9 * (v / max)})` : 'hsl(var(--muted) / 0.3)')
-
-  const items: ReactNode[] = [<div key="corner" />]
-  WEEKDAYS.forEach((w, i) => items.push(<div key={`wd${i}`} className="text-[10px] text-center text-muted-foreground pb-1">{w}</div>))
-  for (let h = 0; h < 24; h++) {
-    items.push(<div key={`hr${h}`} className="text-[10px] text-right pr-1 text-muted-foreground tabular-nums leading-4">{String(h).padStart(2, '0')}</div>)
-    for (let wd = 1; wd <= 7; wd++) {
-      const v = grid[`${h}-${wd}`] ?? 0
-      items.push(<div key={`${h}-${wd}`} title={`${WEEKDAYS[wd - 1]} ${String(h).padStart(2, '0')}:00 — ${nf0.format(v)} сессий`}
-        className="h-4 rounded-sm" style={{ background: color(v) }} />)
-    }
-  }
-  return (
-    <Card>
-      <CardContent className="pt-4">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Загрузка: час × день недели (число сессий)</div>
-        <div className="overflow-x-auto" data-chart>
-          <div className="inline-grid gap-0.5" style={{ gridTemplateColumns: '28px repeat(7, minmax(30px, 1fr))' }}>
-            {items}
-          </div>
-        </div>
-        <div className="mt-2 text-[10px] text-muted-foreground">Темнее — выше загрузка. Пики → ToU-тарифы; «мёртвые» окна → ТО/скидки.</div>
-      </CardContent>
-    </Card>
-  )
-}
-
-/** Время и загрузка — heatmap час×день + профиль по часам суток. */
+/** Период и сеть приходят из общего контура; смена контура сбрасывает портовые отборы. */
 function TimeLoad({ companyId, dateFrom, dateTo }: { companyId: string; dateFrom: string; dateTo: string }) {
-  // Вид-срез: период — только из контура рабочей области.
-  const period = { from: dateFrom, to: dateTo }
-  // Часовой пояс анализа: по умолчанию МСК; «Местное» сдвигает час/день на пояс
-  // региона станции (сеть от Калининграда до Камчатки — до +9 ч от МСК).
-  const [tz, setTz] = useState<Tz>('msk')
-  const { data, isLoading } = useCS(companyId, period.from, period.to, 'hour', tz)
-  const tzNote = tz === 'local'
-    ? 'Час — по местному времени станции (сдвиг на часовой пояс региона).'
-    : 'Час — по московскому времени (как хранятся сессии).'
-  return (
-    <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="text-[11px] text-muted-foreground">{tzNote}</div>
-        <TzToggle value={tz} onChange={setTz} />
-      </div>
-      {isLoading || !data || data.lines.length === 0 ? (isLoading ? <Loading /> : <Empty />) : (() => {
-      const max = Math.max(...data.lines.map((l) => l.sessions), 1)
-      return (
-      <div className="space-y-4">
-      <SessionKpis t={data.totals} />
-      {data.lines.length >= 3 && (
-        <div className="space-y-1.5">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Распределение сессий по часам суток</div>
-          <DistributionKpis lines={data.lines} metric="sessions" dimGen="час" topLabel="Пиковый час" bottomLabel="Тихий час" />
-        </div>
-      )}
-      <ChargeHeatmap companyId={companyId} dateFrom={period.from} dateTo={period.to} tz={tz} />
-      <Card>
-        <CardContent className="pt-4">
-          <div className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Профиль по часам суток (число сессий)</div>
-          <div className="space-y-1">
-            {data.lines.map((l) => (
-              <div key={l.label} className="flex items-center gap-2 text-xs">
-                <span className="w-10 tabular-nums text-muted-foreground">{l.label}</span>
-                <div className="flex-1 h-4 bg-muted/40 rounded overflow-hidden">
-                  <div className="h-full bg-primary/70 rounded" style={{ width: `${l.sessions / max * 100}%` }} />
-                </div>
-                <span className="w-24 text-right font-mono tabular-nums">{nf0.format(l.sessions)} · {nf0.format(l.energy_kwh)}кВтч</span>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-      </div>
-      )
-      })()}
-    </div>
-  )
+  const narrow = useNarrow()
+  const [tz, setTz] = useState<Tz>("msk")
+  return <HourlyOccupancy key={`${companyId}|${narrow.key}|${dateFrom}|${dateTo}`} companyId={companyId} dateFrom={dateFrom} dateTo={dateTo} narrow={narrow} tz={tz} onTzChange={setTz} />
 }
 
 const DYN_DEFAULTS = { metric: 'amount' as ChargeMetric, seriesSel: '__net__', bucket: 'month' as ChargeBucket, yoy: false }
