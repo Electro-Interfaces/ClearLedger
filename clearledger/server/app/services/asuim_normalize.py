@@ -1211,8 +1211,7 @@ def map_sessions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "result": _s(r.get("статус") or r.get("результат"), 40),
             "charge_type": _s(r.get("тип_зарядки"), 40),
             "user_type": _s(r.get("тип_пользователя"), 20),
-            "user_id": (_phone(r.get("телефон") or r.get("телефон_пользователя"))
-                        or _s(r.get("id_пользователя"), 160)),
+            "user_id": _phone(r.get("телефон") or r.get("телефон_пользователя")),
             "rfid": _s(r.get("rfid_карта") or r.get("номер_карты"), 120),
             "energy_kwh": _num(r.get("энергия_квтч")) or 0,
             # Деньги сессии витрина зовёт «стоимость_руб» (в платежах та же величина —

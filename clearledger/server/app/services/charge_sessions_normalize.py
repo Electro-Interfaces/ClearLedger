@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_factory
 from app.models import (
-    ChannelSyncLog, ChargeRejected, ChargeSession, Contract, CorporateClient, Counterparty,
+    ChannelSyncLog, ChargeRejected, ChargeSession, Contract, CorporateClient, Counterparty, EzsCustomer,
     Organization,
 )
 from app.services.analytics_cache import bump_version
@@ -218,6 +218,18 @@ async def ingest_charge_sessions(
     )
     station_idx = await build_station_index(db, company_id)
     source_idx = await build_source_station_index(db, company_id)
+    missing_customer_ids = {row.get("source_customer_id") for row in rows
+                            if not row.get("user_id") and row.get("source_customer_id")}
+    customer_phones = {}
+    if missing_customer_ids:
+        # Неполная витрина может прислать ID клиента без телефона. Внешний ID
+        # сохраняется отдельно и не превращается во второй «телефон» того же клиента.
+        from app.services.asuim_normalize import _phone
+        customer_phones = {ext_id: _phone(phone) for ext_id, phone in (await db.execute(
+            select(EzsCustomer.customer_ext_id, EzsCustomer.phone).where(
+                EzsCustomer.company_id == company_id)
+        )).all() if ext_id in missing_customer_ids}
+
 
     deleted = 0
     if mode == "replace":
@@ -276,6 +288,8 @@ async def ingest_charge_sessions(
     await _bump(0)
     for idx, row in enumerate(rows):
         try:
+            if not row.get("user_id") and row.get("source_customer_id"):
+                row = {**row, "user_id": customer_phones.get(row["source_customer_id"])}
             sid = row.get("session_ext_id")
             if not sid:
                 errors += 1

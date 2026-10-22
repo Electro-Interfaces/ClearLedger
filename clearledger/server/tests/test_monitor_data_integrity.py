@@ -34,7 +34,8 @@ def test_source_phone_aliases_and_stable_station_identity():
     assert row['source_station_id'] == '3503'
     assert row['station_code'] == '590'  # исторический номер сохраняется
     assert map_sessions([source_row(телефон=None, телефон_пользователя='+79000000002')])[0]['user_id'] == '+79000000002'
-    assert map_sessions([source_row(телефон=None)])[0]['user_id'] == '42'
+    assert map_sessions([source_row(телефон=None)])[0]['user_id'] is None
+    assert map_sessions([source_row(телефон=None)])[0]['source_customer_id'] == '42'
     short = source_row(дата_окончания=datetime(2026, 9, 17, 17, 59, 59))
     assert map_sessions([short])[0]['duration_min'] == 0
     assert resolve_session_location(row, {'590': 'wrong'}, {'3503': 'correct'}) == 'correct'
@@ -297,3 +298,26 @@ async def test_number_alone_does_not_relocate_existing_real_object(db):
     await backfill_session_locations(db, cid)
     await db.refresh(historical)
     assert historical.location_id == previous.id
+
+
+@pytest.mark.asyncio(loop_scope='session')
+async def test_missing_phone_uses_company_registry_and_never_external_id_as_phone(db):
+    from app.models import EzsCustomer
+    cid, (loc, _, foreign) = await fleet(db)
+    db.add_all([
+        EzsCustomer(company_id=cid, customer_ext_id='42', phone='+79000000001'),
+        EzsCustomer(company_id=foreign.company_id, customer_ext_id='42', phone='+79000000099'),
+    ])
+    await db.flush()
+    rows = map_sessions([
+        source_row(id_сессии='registry', телефон=None),
+        source_row(id_сессии='explicit'),
+        source_row(id_сессии='unknown', телефон=None, id_пользователя='999'),
+    ])
+    result = await ingest_charge_sessions(db, cid, rows)
+    assert result['created'] == 3 and result['errors'] == 0
+    stored = {s.session_ext_id: s for s in (await db.execute(select(ChargeSession).where(
+        ChargeSession.company_id == cid))).scalars()}
+    assert stored['registry'].user_id == stored['explicit'].user_id == '+79000000001'
+    assert stored['unknown'].user_id is None
+    assert stored['unknown'].source_customer_id == '999'
