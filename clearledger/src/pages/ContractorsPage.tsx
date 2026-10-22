@@ -55,6 +55,7 @@ import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
 import { getSiteMembers } from '@/services/sitesService'
 import { ContractAppsField, saveContractLinks, useAppLabel, type ContractLinkDraft } from '@/components/reference/ContractAppsField'
 import { useSearchParams } from 'react-router-dom'
+import { useHistoryViewState } from '@/hooks/useHistoryViewState'
 import { ContractDocumentsBlock } from '@/components/reference/ContractDocumentsBlock'
 import { ContractQualityPanel } from '@/components/reference/ContractQualityPanel'
 import { useStationContracts, stationHitLabel } from '@/components/reference/useStationContracts'
@@ -1423,14 +1424,14 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
   // Ярлык типа: fuel хранит в type код 1С-вида (СПокупателем/…) — показываем перевод.
   const typeLabel = (t: string) => (isEnergy ? t : kindLabel(t))
   const { data: allContracts = [], isLoading } = useContracts()
-  const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState<string>('all')
+  const [search, setSearch] = useHistoryViewState('contracts-search', '')
+  const [typeFilter, setTypeFilter] = useHistoryViewState<string>('contracts-type', 'all')
   const [limit, setLimit] = useState(100)
-  const [sortKey, setSortKey] = useState<'date' | 'amount'>('date')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [sortKey, setSortKey] = useHistoryViewState<'date' | 'amount'>('contracts-sort', 'date')
+  const [sortDir, setSortDir] = useHistoryViewState<'asc' | 'desc'>('contracts-direction', 'desc')
   // По контрагентам — как договоры и заводятся: контрагент → его договоры.
-  const [grouped, setGrouped] = useState(true)
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [grouped, setGrouped] = useHistoryViewState('contracts-grouped', true)
+  const [collapsed, setCollapsed] = useHistoryViewState<Set<string>>('contracts-collapsed', new Set())
   const toggleSort = (col: 'date' | 'amount') => {
     if (sortKey === col) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(col); setSortDir('desc') }
@@ -1803,11 +1804,11 @@ export function ContractorsPage() {
   const setView = setSub
   // <1024 (порог грида lg): мастер-деталь — карточка шторкой поверх списка.
   const isNarrow = useMaxWidth(1024)
-  const [search, setSearch] = useState('')
-  const [roleFilter, setRoleFilter] = useState<string>('all')
-  const [flag, setFlag] = useState<CpFlag | null>(null)
-  const [sortBy, setSortBy] = useState<CpSort>('name')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [search, setSearch] = useHistoryViewState('counterparties-search', '')
+  const [roleFilter, setRoleFilter] = useHistoryViewState<string>('counterparties-role', 'all')
+  const [flag, setFlag] = useHistoryViewState<CpFlag | null>('counterparties-flag', null)
+  const [sortBy, setSortBy] = useHistoryViewState<CpSort>('counterparties-sort', 'name')
+  const [selectedId, setSelectedId] = useHistoryViewState<string | null>('counterparties-selected', null)
 
   // Цифры по контрагентам: обороты, долг, дата последней операции. Считает сервер
   // по документам и сальдо источника — тем же, чем живут карточка и «Взаиморасчёты».
