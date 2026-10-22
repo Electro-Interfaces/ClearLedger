@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.services.network_vendors import network_vendors
+from app.services.network_reliability import network_reliability
 from app.services.ops_worklist import ops_worklist
 
 
@@ -66,6 +67,25 @@ class MonitorNumericContractTest(unittest.IsolatedAsyncioTestCase):
         raw_sum = sum(Decimal(str(r["energyKwhRaw"])) for r in stations)
         self.assertEqual(raw_sum, Decimal("30.08"))
         self.assertEqual(Decimal(str(vendor["energyKwhRaw"])), raw_sum)
+
+    async def test_reliability_energy_can_be_aggregated_before_rounding(self):
+        boundary = datetime(2026, 10, 21, 12)
+        station = SimpleNamespace(id="a", code="a", name="Станция", region_id=None,
+                                  extra_metadata={}, city=None, brand="Марка", model=None,
+                                  owner="РусГидро", operational_status="working", connectors_count=2)
+        db = AsyncMock()
+        db.execute.side_effect = [
+            SimpleNamespace(scalar=lambda: boundary),
+            SimpleNamespace(all=lambda: [("a", 1, 0, 0, 1, 0, Decimal("10.04"),
+                                          100, boundary, 1, 1, 0)]),
+            SimpleNamespace(all=lambda: []),
+            SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [station]))]
+        with patch("app.services.network_reliability.visit_summary", AsyncMock(return_value={
+            "a": {"visits": 1, "ok": 1, "lost": 0}
+        })):
+            result = await network_reliability(db, "company", min_sessions=1)
+        self.assertEqual(result["stations"][0]["energyKwh"], 10)
+        self.assertEqual(result["stations"][0]["energyKwhRaw"], 10.04)
 
 
 if __name__ == "__main__":
