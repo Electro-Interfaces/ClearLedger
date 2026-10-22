@@ -45,6 +45,24 @@ async def assert_view_task(db: AsyncSession, cid: uuid.UUID, user: User, task: T
         raise HTTPException(404, "Задача не найдена")
 
 
+async def assert_task_room(db: AsyncSession, room, user: User) -> None:
+    """Старое участие в обсуждении не заменяет актуальное чтение поручения.
+
+    Продукт комнаты и прочие права чата здесь не требуются: обсуждение открывают
+    из карточки поручения с теми же docs/legacy plan, что и саму карточку.
+    Членство комнаты проверяет caller отдельно.
+    """
+    if not room.is_active or room.company_id is None:
+        raise HTTPException(404, "Чат не найден")
+    task = await db.get(Task, room.scope_task_id)
+    if task is None or not await can_view_task(db, room.company_id, user, task):
+        raise HTTPException(404, "Чат не найден")
+    try:
+        await assert_company_product(str(room.company_id), user, db, "docs")
+    except HTTPException:
+        await assert_company_product(str(room.company_id), user, db, "plan")
+
+
 async def authorize_task_file_download(db: AsyncSession, user: User, file_id: uuid.UUID,
                                        cid: uuid.UUID) -> None:
     """Task-only файл с несколькими привязками читается через любую доступную.

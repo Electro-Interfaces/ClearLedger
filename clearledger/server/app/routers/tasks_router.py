@@ -3383,6 +3383,7 @@ async def list_code_refs(
     """Что сделано в коде по задаче."""
     cid = await _assert_work(company_id, current_user, db)
     task = await _task_or_404(db, cid, task_id)
+    await _assert_view_task(db, cid, current_user, task)
     rows = (await db.execute(select(TaskCodeRef).where(
         TaskCodeRef.task_id == task.id).order_by(TaskCodeRef.created_at))).scalars().all()
     names = {u.id: u.name for u in (await db.execute(select(User).where(
