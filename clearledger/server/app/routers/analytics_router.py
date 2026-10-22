@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from datetime import date, datetime
@@ -229,6 +230,52 @@ async def get_sales_channels(
     f = await _filter_from_query(company_id, date_from, date_to, station_id, db, current_user, "management")
     svc = AnalyticsService(db)
     return await svc.sales_channels(f)
+
+
+@router.get("/charge-sessions/hourly-occupancy")
+async def get_charge_hourly_occupancy(
+    company_id: str,
+    date_from: str,
+    date_to: str,
+    stations: str | None = None,
+    regions: str | None = None,
+    tz: str = Query("msk", pattern="^(msk|local)$"),
+    group_by: str = Query("auto", pattern="^(auto|station|connector)$"),
+    connector_types: str | None = None,
+    connector_ids: str | None = None,
+    dim: str | None = Query(None, pattern="^(station|region|connector|user_type|client|charge_type|result|tariff)$"),
+    dim_val: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Занятые минуты и начатые сессии по часам; физический порт = location_id:номер."""
+    from decimal import Decimal, InvalidOperation
+    from app.services.charge_hourly_occupancy import hourly_occupancy
+
+    f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "sales")
+    if f.date_to < f.date_from or f.date_to == date.max:
+        raise HTTPException(400, detail="Некорректный период")
+    if (dim is None) != (dim_val is None):
+        raise HTTPException(400, detail="dim и dim_val задаются вместе")
+    if dim == "tariff":
+        try:
+            if not Decimal(dim_val.replace(",", ".")).is_finite():
+                raise InvalidOperation
+        except (InvalidOperation, ValueError):
+            raise HTTPException(400, detail="Некорректный тариф")
+    ids = None
+    if connector_ids is not None:
+        try:
+            ids = json.loads(connector_ids)
+        except (ValueError, TypeError):
+            raise HTTPException(400, detail="connector_ids: ожидается JSON-массив строк")
+        if not isinstance(ids, list) or any(not isinstance(item, str) or not item.strip() for item in ids):
+            raise HTTPException(400, detail="connector_ids: ожидается JSON-массив строк")
+    f.station_codes = _csv(stations)
+    f.regions = _csv(regions)
+    f.dim_by, f.dim_val = dim, dim_val
+    return await hourly_occupancy(db, f, tz=tz, group_by=group_by,
+                                  connector_types=_csv(connector_types), connector_ids=ids)
 
 
 @router.get("/charge-sessions")
