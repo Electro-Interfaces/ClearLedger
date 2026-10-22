@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { openAuthAttachment } from '@/lib/authFiles'
 import type { SpaceDocument } from '@/services/referenceService'
@@ -11,6 +11,12 @@ import type { LoadedShift, LoadedReceipt } from '@/services/fuel/fuelMappingServ
 import type { FsNode, ViewMode, SortConfig, RawPanelFilters, TreeState, AdvancedFilters, GroupMode } from './raw-panel-types'
 import { DEFAULT_ADVANCED_FILTERS } from './raw-panel-types'
 import { LS_KEY_VIEW_MODE, LS_KEY_TREE_STATE, LS_KEY_SORT_CONFIG } from './raw-panel-constants'
+
+import { useCompany } from '@/contexts/CompanyContext'
+import { SPACE_PRODUCTS, pathAllowed } from '@/config/spaceProducts'
+import { routeAllowed } from '@/config/accessModules'
+import { productModuleAllowed } from '@/config/productAccess'
+import { documentExplorerActions, primaryExplorerAction, pushExplorerHistory, readExplorerLocation, restoreExplorerHistory, type ExplorerAction, type ExplorerHistory } from '@/lib/documentExplorerActions'
 
 /** useState synced to localStorage */
 function usePersisted<T>(key: string, fallback: T): [T, (v: T | ((prev: T) => T)) => void] {
@@ -27,7 +33,55 @@ function usePersisted<T>(key: string, fallback: T): [T, (v: T | ((prev: T) => T)
   return [value, setPersisted]
 }
 
-export function useRawPanelState() {
+export function useRawPanelState({ explorer = false } = {}) {
+  const location = useLocation()
+  const [, setParams] = useSearchParams()
+  const { company, companyId, companyModules, canApp, canModule } = useCompany()
+  const prefix = SPACE_PRODUCTS.find((product) => location.pathname.startsWith(`${product.route}/`))?.route ?? ''
+  const canOpenRoute = (href: string) => {
+    const pathname = href.split('?')[0]
+    if (pathname === '/docs') return canApp('docs')
+    if (pathname === '/projects' && !canModule('projects', 'pr_project')) return false
+    return pathAllowed(pathname, company.profileId, canApp, (p) => routeAllowed(p, companyModules),
+      (app, code) => productModuleAllowed(app, code, canModule, company.profileId))
+  }
+  const previousCompany = useRef(companyId)
+  const [historyCompany, setHistoryCompany] = useState(companyId)
+  const historyKey = `files-navigation:${companyId}:${location.pathname}`
+  const [storedHistory, setHistory] = useState<ExplorerHistory>(() => {
+    const current = readExplorerLocation(location.search)
+    if (explorer) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(historyKey) ?? 'null') as ExplorerHistory | null
+        return restoreExplorerHistory(saved, current)
+      } catch { /* A fresh navigation still works when browser storage is unavailable. */ }
+    }
+    return { entries: [current], index: 0 }
+  })
+  const history = explorer ? restoreExplorerHistory(storedHistory, readExplorerLocation(location.search)) : storedHistory
+  useEffect(() => {
+    if (!explorer || previousCompany.current !== companyId) return
+    try { sessionStorage.setItem(historyKey, JSON.stringify(history)) } catch { /* optional cache */ }
+  }, [explorer, history, historyKey, companyId])
+  const writeLocation = (folder: string[], query: string, replace = false) => {
+    setParams((previous) => {
+      const next = new URLSearchParams(previous)
+      if (folder.length) next.set('folder', folder.join('/')); else next.delete('folder')
+      if (query) next.set('q', query); else next.delete('q')
+      return next
+    }, { replace })
+  }
+
+  useEffect(() => {
+    if (!explorer || previousCompany.current === companyId) return
+    previousCompany.current = companyId
+    setParams((previous) => {
+      const next = new URLSearchParams(previous)
+      next.delete('folder'); next.delete('q')
+      return next
+    }, { replace: true })
+  }, [companyId, explorer, setParams])
+
   const navigate = useNavigate()
   // --- Persisted state ---
   const [viewMode, setViewMode] = usePersisted<ViewMode>(LS_KEY_VIEW_MODE, 'tree')
@@ -41,12 +95,15 @@ export function useRawPanelState() {
   })
 
   // --- Session state ---
-  const [filters, setFilters] = useState<RawPanelFilters>({
+  const [localFilters, setFilters] = useState<RawPanelFilters>({
     searchQuery: '',
     status: 'all',
     docType: 'all',
   })
-  const [currentPath, setCurrentPath] = useState<string[]>([])
+  const [localPath, setCurrentPath] = useState<string[]>([])
+  const explorerLocation = useMemo(() => readExplorerLocation(location.search), [location.search])
+  const currentPath = explorer ? explorerLocation.folder : localPath
+  const filters = useMemo(() => explorer ? { ...localFilters, searchQuery: explorerLocation.query } : localFilters, [explorer, localFilters, explorerLocation.query])
   const [openTabs, setOpenTabs] = useState<FsNode[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<FsNode | null>(null)
@@ -62,6 +119,16 @@ export function useRawPanelState() {
   const [filterDialogOpen, setFilterDialogOpen] = useState(false)
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({ ...DEFAULT_ADVANCED_FILTERS })
   const [groupMode, setGroupMode] = useState<GroupMode>('default')
+
+  if (historyCompany !== companyId) {
+    setHistoryCompany(companyId)
+    setSelectedNode(null)
+    setOpenTabs([])
+    setActiveTabId(null)
+    setCurrentPath([])
+    setFilters({ searchQuery: '', status: 'all', docType: 'all' })
+    setHistory({ entries: [{ folder: [], query: '' }], index: 0 })
+  }
 
   const applyPreset = useCallback((preset: Partial<AdvancedFilters>) => {
     setAdvancedFilters(() => ({ ...DEFAULT_ADVANCED_FILTERS, ...preset }))
@@ -112,19 +179,52 @@ export function useRawPanelState() {
   }, [setTreeState])
 
   // --- Navigation ---
-  const navigateTo = useCallback((path: string[]) => {
-    setCurrentPath(path)
-    setFilters((prev) => ({ ...prev, searchQuery: '' }))
-  }, [])
+  const navigateTo = (path: string[]) => {
+    if (explorer) {
+      setHistory(pushExplorerHistory(history, { folder: path, query: '' }))
+      writeLocation(path, '')
+    } else {
+      setCurrentPath(path)
+      setFilters((prev) => ({ ...prev, searchQuery: '' }))
+    }
+    setSelectedNode(null)
+  }
 
-  const goUp = useCallback(() => {
+  const moveHistory = (delta: number) => {
+    const index = history.index + delta
+    const next = history.entries[index]
+    if (!next) return
+    setHistory({ ...history, index })
+    writeLocation(next.folder, next.query, true)
+    setSelectedNode(null)
+  }
+  const goBack = () => moveHistory(-1)
+  const goForward = () => moveHistory(1)
+
+  const goUp = () => {
     if (currentPath.length > 0) {
       navigateTo(currentPath.slice(0, -1))
     }
-  }, [currentPath, navigateTo])
+  }
+
+  const getNodeActions = (node: FsNode): ExplorerAction[] => {
+    const d = node.doc
+    if (!d) return []
+    if (d.docType === 'channel_run') return d.channelId && canOpenRoute(`/connectors/${encodeURIComponent(d.channelId)}`)
+      ? [{ id: 'channel', label: 'Канал', href: `/connectors/${encodeURIComponent(d.channelId)}` }] : []
+    if (d.docType === 'space_file' || d.docType === 'contract_card') {
+      return documentExplorerActions(d.data as SpaceDocument, canOpenRoute, prefix)
+    }
+    return []
+  }
+  const runAction = (action: ExplorerAction) => {
+    if (action.attachment) {
+      openAuthAttachment(action.href).catch((e: unknown) => toast.error(e instanceof Error ? e.message : 'Не удалось открыть файл'))
+    } else navigate(action.href)
+  }
 
   // --- File operations ---
-  const openFile = useCallback((node: FsNode) => {
+  const openFile = (node: FsNode) => {
     // Add to tabs
     setOpenTabs((prev) => {
       if (prev.some((t) => t.path === node.path)) return prev
@@ -150,14 +250,10 @@ export function useRawPanelState() {
         setViewingApiReceipt(d.data as LoadedReceipt)
         return
       }
-      // Документы пространства: файл открывается во вкладке, договор — в «Договорах».
-      if (d.docType === 'space_file' || d.docType === 'contract_card') {
-        const sd = d.data as SpaceDocument
-        if (sd.fileId) {
-          openAuthAttachment(`/api/files/${sd.fileId}`).catch((e: unknown) => toast.error(e instanceof Error ? e.message : 'Не удалось открыть файл'))
-        } else if (sd.contractId) {
-          navigate(`${window.location.pathname.replace(/\/files$/, '')}/contractors?sub=contracts&contract=${sd.contractId}`)
-        } else toast.info('Файл к документу не приложен')
+      if (d.docType === 'space_file' || d.docType === 'contract_card' || d.docType === 'channel_run') {
+        const action = primaryExplorerAction(getNodeActions(node))
+        if (action) runAction(action)
+        else toast.info('Нет доступной карточки или файла для этого документа')
         return
       }
       return // channel_run и прочие — только выделение и панель деталей
@@ -175,7 +271,7 @@ export function useRawPanelState() {
       return
     }
     // Прочие типы — пока только выделение и панель деталей (спец-модалки нет).
-  }, [workspace, navigate])
+  }
 
   // --- Tab operations ---
   const closeTab = useCallback((path: string) => {
@@ -202,13 +298,19 @@ export function useRawPanelState() {
   }, [setSortConfig])
 
   // --- Filter operations ---
-  const updateFilter = useCallback(<K extends keyof RawPanelFilters>(key: K, value: RawPanelFilters[K]) => {
-    setFilters((prev) => ({ ...prev, [key]: value }))
-  }, [])
+  const updateFilter = <K extends keyof RawPanelFilters>(key: K, value: RawPanelFilters[K]) => {
+    if (explorer && key === 'searchQuery') {
+      const query = String(value)
+      setHistory({ ...history, entries: history.entries.map((entry, i) => i === history.index ? { ...entry, query } : entry) })
+      writeLocation(currentPath, query, true)
+      setSelectedNode(null)
+    } else setFilters((prev) => ({ ...prev, [key]: value }))
+  }
 
-  const clearFilters = useCallback(() => {
+  const clearFilters = () => {
     setFilters({ searchQuery: '', status: 'all', docType: 'all' })
-  }, [])
+    if (explorer) writeLocation(currentPath, '', true)
+  }
 
   const hasActiveFilters = filters.status !== 'all' || filters.docType !== 'all'
 
@@ -218,7 +320,9 @@ export function useRawPanelState() {
     // Tree
     treeState, isExpanded, toggleExpanded, saveScrollPosition,
     // Navigation
-    currentPath, navigateTo, goUp,
+    currentPath, navigateTo, goUp, goBack, goForward,
+    canBack: history.index > 0, canForward: history.index < history.entries.length - 1,
+    getNodeActions, runAction, canOpenRoute, prefix,
     // Selection
     selectedNode, setSelectedNode, focusedPath, setFocusedPath,
     // Tabs
