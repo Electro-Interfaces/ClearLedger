@@ -41,6 +41,8 @@ import { TasksBoardPage } from './TasksBoardPage'
 import { ViewsSection } from './TasksRegulation'
 import { QueryBar, type QuerySuggestions } from '@/components/tasks/QueryBar'
 import { TasksDueBoard } from './TasksDueBoard'
+import { consumeTaskDraft, taskDraft, taskReportScope } from '@/lib/taskQueue'
+import { formatPeriod } from '@/lib/formatDate'
 
 const nf = new Intl.NumberFormat('ru-RU')
 const PAGE = 100
@@ -69,12 +71,15 @@ export function TasksWorkPage({ embeddedView }: {
         : embeddedView === 'registry'
       ? { label: 'Поручения компании', hint: 'Вся работа с отбором, поиском и выгрузкой' }
       : (TASKS_VIEWS[route] ?? []).find((item) => item.key === view)
-  const scope = VIEW_SCOPE[view] ?? 'open'
   // Фильтры и группировка — свойство пункта, а не переключатель на экране:
   // «Сегодня» с фильтром по автору перестало бы отвечать на свой вопрос.
   const full = view === 'registry' || view === 'objects'
 
   const [params, setParams] = useSearchParams()
+  const reportScope = full ? taskReportScope(params) : undefined
+  const scope = reportScope ?? VIEW_SCOPE[view] ?? 'open'
+  const closedFrom = scope === 'closed' ? params.get('closed_from') || undefined : undefined
+  const closedTo = scope === 'closed' ? params.get('closed_to') || undefined : undefined
   const set = (kv: Record<string, string | null>) => setParams((p) => {
     const n = new URLSearchParams(p)
     for (const [k, v] of Object.entries(kv)) { if (v) n.set(k, v); else n.delete(k) }
@@ -87,20 +92,11 @@ export function TasksWorkPage({ embeddedView }: {
   // Заготовка из быстрой панели: строка и исполнитель, набранные до перехода.
   // Читаем один раз и сразу убираем из адреса — обновление страницы не должно
   // открывать форму заново.
-  const [заготовка] = useState(() => ({
-    title: params.get('draft') ?? undefined,
-    assigneeId: params.get('assignee') ?? undefined,
-  }))
+  const [заготовка] = useState(() => taskDraft(params))
   useEffect(() => {
-    if (!params.get('draft') && !params.get('assignee')) return
-    setParams((p) => {
-      const n = new URLSearchParams(p)
-      n.delete('draft'); n.delete('assignee')
-      return n
-    }, { replace: true })
-    // Один раз при заходе: дальше адрес чистый, и эффект не повторяется.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (!params.has('draft')) return
+    setParams(consumeTaskDraft, { replace: true })
+  }, [params, setParams])
 
   const objectId = params.get('object') ?? ''
   const projectId = params.get('project') ?? ''
@@ -176,6 +172,7 @@ export function TasksWorkPage({ embeddedView }: {
     priority: priority || undefined, labelId: labelId || undefined,
     q: q || undefined, sort, limit: PAGE, offset: page * PAGE,
     query: queryText || undefined,
+    closedFrom, closedTo,
   }
   const listQ = useQuery({
     queryKey: ['tasks', company.id, scope, filters],
@@ -191,7 +188,7 @@ export function TasksWorkPage({ embeddedView }: {
   const tasks = listQ.data?.tasks ?? []
   const total = listQ.data?.total ?? 0
   const hasFilter = !!(objectId || projectId || versionId || typeId || assigneeId
-                       || authorId || priority || labelId || q || queryText)
+                       || authorId || priority || labelId || q || queryText || reportScope || closedFrom || closedTo)
 
   /* Подсказки строки запроса берём из справочников, которые экран и так
      загрузил: второй источник имён разошёлся бы с первым. */
@@ -208,6 +205,11 @@ export function TasksWorkPage({ embeddedView }: {
   }
 
   const refresh = () => { void listQ.refetch(); setPicked(new Set()) }
+  const resetFilters = () => set({
+    q: null, assignee: null, author: null, type: null, project: null,
+    object: null, priority: null, label: null, version: null, query: null,
+    scope: null, closed_from: null, closed_to: null,
+  })
 
   /* Работа с клавиатуры — то, чем берёт YouTrack: `/` в поиск, стрелки по списку,
      Enter открывает, Esc снимает отметки. Клавиши молчат, пока курсор в поле
@@ -282,6 +284,9 @@ export function TasksWorkPage({ embeddedView }: {
             <>
               <SaveViewButton companyId={company.id} query={{
                 view: 'registry',
+                ...(reportScope && { scope: reportScope }),
+                ...(closedFrom && { closed_from: closedFrom }),
+                ...(closedTo && { closed_to: closedTo }),
                 ...(assigneeId && { assignee: assigneeId }),
                 ...(authorId && { author: authorId }),
                 ...(projectId && { project: projectId }),
@@ -343,7 +348,7 @@ export function TasksWorkPage({ embeddedView }: {
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input defaultValue={q} ref={searchRef}
+            <Input key={q} defaultValue={q} ref={searchRef}
               placeholder="Поиск: №, заголовок, реплики — «/» ставит курсор сюда"
               className="h-8 w-[240px] pl-7 text-xs"
               onKeyDown={(e) => {
@@ -392,14 +397,24 @@ export function TasksWorkPage({ embeddedView }: {
             items={(labelsQ.data?.labels ?? []).map((l) => ({ id: l.id, name: l.name }))} />
           {hasFilter && (
             <Button variant="ghost" size="sm" className="h-8 text-muted-foreground"
-              onClick={() => set({
-                q: null, assignee: null, author: null, type: null,
-                object: null, priority: null, label: null, version: null,
-                query: null,
-              })}>
+              onClick={resetFilters}>
               <X className="mr-1 h-3.5 w-3.5" />Сбросить
             </Button>
           )}
+        </div>
+      )}
+
+      {full && reportScope && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>
+            {{ open: 'В работе · на сейчас', overdue: 'Просрочено · на сейчас',
+              mine: 'На мне · на сейчас', triage: 'Без исполнителя · на сейчас', closed: 'Закрытые поручения', all: 'Все состояния' }[reportScope]}
+            {(closedFrom || closedTo) && ` · закрыты ${formatPeriod(closedFrom ?? '', closedTo ?? '')}`}
+          </span>
+          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs"
+            onClick={() => set({ scope: null, closed_from: null, closed_to: null })}>
+            <X className="size-3" />Снять отбор отчёта
+          </Button>
         </div>
       )}
 
@@ -420,10 +435,7 @@ export function TasksWorkPage({ embeddedView }: {
         <EmptyState view={view} hasFilter={hasFilter}
           companyTotal={anyQ.data?.total ?? 1}
           onGo={(path) => navigate(path)}
-          onReset={() => set({
-            q: null, assignee: null, author: null, type: null,
-            object: null, priority: null, label: null,
-          })} />
+          onReset={resetFilters} />
       ) : (
         asBoard && canBoard ? (
           <TasksDueBoard tasks={tasks} companyId={company.id}
