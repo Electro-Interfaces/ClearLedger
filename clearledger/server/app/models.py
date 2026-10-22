@@ -1121,6 +1121,10 @@ class Counterparty(Base):
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # v2.5: универсальный снимок ВСЕХ реквизитов источника (L1 RAW) + промо-колонки.
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Изменённые человеком реквизиты: повторный импорт их не перезаписывает.
+    manual_overrides: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     full_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     okpo: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Полная карточка контрагента (ручной ввод для компаний без 1С + промо из raw)
@@ -1308,6 +1312,16 @@ class CounterpartyContact(Base):
 # ---------------------------------------------------------------------------
 class Contract(Base):
     __tablename__ = "contracts"
+    __table_args__ = (
+        Index("uq_contract_creation", "company_id", "creation_key", unique=True,
+              postgresql_where=text("creation_key IS NOT NULL")),
+    )
+
+    # Намерение создать паспорт, отдельно от его юридических реквизитов.
+    creation_key: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    creation_actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    creation_request_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -1338,6 +1352,10 @@ class Contract(Base):
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # v2.5: универсальный снимок ВСЕХ реквизитов 1С (L1 RAW) + промо-колонки.
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Изменённые человеком реквизиты: повторный импорт их не перезаписывает.
+    manual_overrides: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     # ВидДоговора 1С: СПокупателем | СПоставщиком | СКомитентом | ... (см. SCHEMA_REFS_GIG §2)
     kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
@@ -12559,6 +12577,9 @@ class DocCard(Base):
         Index("uq_doc_cards_mail_source", "company_id", "source_ref", unique=True,
               postgresql_where=text(
                   "source = 'mail' AND source_ref IS NOT NULL")),
+        Index("uq_doc_cards_contract_source", "company_id", "source_ref", unique=True,
+              postgresql_where=text(
+                  "source = 'manual' AND source_ref LIKE 'contract-document:%'")),
         Index("idx_doc_cards_registry", "company_id", "family", "reg_date"),
         Index("idx_doc_cards_counterparty", "company_id", "counterparty_id"),
         Index("idx_doc_cards_retention", "company_id", "retention_state",

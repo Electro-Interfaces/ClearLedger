@@ -17,7 +17,8 @@ import { Input } from '@/components/ui/input'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useSpaceApps } from '@/hooks/useSpaceApps'
 import { SPACE_PRODUCTS, productLabel } from '@/config/spaceProducts'
-import { addContractLink, deleteContractLink, searchContractProjects, type ContractLinkRef } from '@/services/referenceService'
+import { addContractLink, deleteContractLink, getContractLinks, searchContractProjects, type ContractLinkRef } from '@/services/referenceService'
+import { reconcileContractLinks } from '@/lib/contractFormSave'
 
 const selectClass = 'h-9 w-full min-w-0 rounded-md border bg-muted/60 px-2 text-sm'
 /** Инструменты пространства договорами не владеют — их в выборе нет. */
@@ -83,10 +84,8 @@ export function ContractAppsField({ value, onChange }: { value: ContractLinkDraf
 }
 
 /** Сохранить черновик привязок: добавить новые, снять убранные. */
-export async function saveContractLinks(contractId: string, before: ContractLinkDraft[], after: ContractLinkDraft[]) {
-  const key = (l: ContractLinkDraft) => `${l.app}|${l.projectRef ?? ''}`
-  const keep = new Set(after.map(key))
-  for (const l of before) if (l.id && !keep.has(key(l))) await deleteContractLink(contractId, l.id)
-  const had = new Set(before.map(key))
-  for (const l of after) if (!had.has(key(l))) await addContractLink(contractId, l.app, l.projectRef)
+export async function saveContractLinks(contractId: string, after: ContractLinkDraft[]) {
+  await reconcileContractLinks(after, () => getContractLinks(contractId),
+    (id) => deleteContractLink(contractId, id),
+    (link) => addContractLink(contractId, link.app, link.projectRef))
 }

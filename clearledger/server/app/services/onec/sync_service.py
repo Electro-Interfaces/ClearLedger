@@ -25,6 +25,11 @@ from app.models import (
 from app.services.onec.com_client import OneCComClient
 from app.services.onec.crypto import decrypt_password
 from app.services.onec.exceptions import OneCError
+from app.services.reference_overrides import apply_import_values
+from app.services.reference_identity import (
+    ContractIndex, CounterpartyIndex, IdentityConflict, contract_identity,
+    counterparty_identity, id_key, json_ids, lock_manual_creation, unique_candidate,
+)
 from app.services.onec.odata_client import (
     ENTITY_CONTRACTS,
     ENTITY_COUNTERPARTIES,
@@ -105,7 +110,7 @@ def _clean_ref(val: Any) -> str | None:
     """Ref_Key → None для пустой ссылки (all-zero GUID) или пустого значения."""
     if not val:
         return None
-    s = val.strip() if isinstance(val, str) else val
+    s = id_key(val)
     if not s or s == _EMPTY_GUID:
         return None
     return s
@@ -170,6 +175,30 @@ def _clean_1c_date(val: Any) -> str:
     """Дата OData → 'YYYY-MM-DD'; «пустая дата 1С» (0001/0100-01-01) → ''."""
     s = (str(val) if val else "")[:10]
     return "" if s and s < "1900-01-01" else s
+
+
+def _assert_reference_source(row, ref_key, connection):
+    if row.external_ref and id_key(row.external_ref) != id_key(ref_key):
+        raise IdentityConflict(f"Карточка {row.id} уже связана с другим внешним ключом "
+                               f"{row.external_ref}; требуется явное сопоставление источников")
+    source = (row.raw or {}).get("referenceSource") or {}
+    if source.get("kind") and source["kind"] != "onec":
+        raise IdentityConflict(f"Карточка {row.id} уже связана с другим источником; "
+                               "требуется явное сопоставление источников")
+    connection_id = getattr(connection, "id", None)
+    if source.get("connectionId") and connection_id and source["connectionId"] != id_key(connection_id):
+        raise IdentityConflict(f"Карточка {row.id} уже связана с другим источником 1С; "
+                               "требуется явное сопоставление источников")
+
+
+def _reference_raw(item, connection, identity, previous=None):
+    # Пришедшие реквизиты сохраняются без промо/ручных правок. Исходный ключ
+    # другого импортера не теряется при первом подтверждённом связывании с 1С.
+    result = json_ids(dict(item))
+    result["referenceIdentity"] = (previous or {}).get("referenceIdentity") or identity
+    if connection_id := getattr(connection, "id", None):
+        result["referenceSource"] = {"kind": "onec", "connectionId": id_key(connection_id)}
+    return result
 
 
 class OneCSyncService:
@@ -894,7 +923,12 @@ class OneCSyncService:
                 model.external_ref.is_not(None),
             )
         )).scalars().all()
-        return {r.external_ref: getattr(r, by) for r in rows if r.external_ref}
+        grouped = {}
+        for row in rows:
+            if row.external_ref:
+                grouped.setdefault(id_key(row.external_ref), []).append(row)
+        return {ref: getattr(unique_candidate(candidates, f"{model.__tablename__} external_ref {ref}"), by)
+                for ref, candidates in grouped.items()}
 
     async def _build_inn_index(self, model: type, company_id: Any) -> dict[str, str]:
         """{external_ref → ИНН} для подстановки в counterparty_inn AccountingDoc.
@@ -1114,6 +1148,14 @@ class OneCSyncService:
         log: OneCSyncLog,
     ) -> dict[str, int]:
         stats = {"processed": 0, "created": 0, "updated": 0, "skipped": 0, "errors": 0}
+        await lock_manual_creation(self.session, connection.company_id, "counterparty")
+        rows = (await self.session.execute(select(Counterparty).where(
+            Counterparty.company_id == connection.company_id))).scalars().all()
+        cp_index = CounterpartyIndex(rows)
+        by_ref = {}
+        for cp in rows:
+            if cp.external_ref:
+                by_ref.setdefault(id_key(cp.external_ref), []).append(cp)
         # Полная выборка: промо-поля + ВСЕ реквизиты (describe) → raw полный снимок.
         select_list = await self._full_select(client, ENTITY_COUNTERPARTIES, COUNTERPARTY_FETCH)
         async for item in client.iter_entity(ENTITY_COUNTERPARTIES, select=select_list, orderby="Ref_Key", page_size=500):
@@ -1126,12 +1168,8 @@ class OneCSyncService:
                 stats["errors"] += 1
                 continue
             try:
-                existing = (await self.session.execute(
-                    select(Counterparty).where(
-                        Counterparty.company_id == connection.company_id,
-                        Counterparty.external_ref == ref_key,
-                    )
-                )).scalar_one_or_none()
+                ref_key = id_key(ref_key)
+                existing = unique_candidate(by_ref.get(ref_key, []), f"контрагента external_ref {ref_key}")
                 name = (item.get("Description") or "").strip() or "(без названия)"
                 inn = (item.get("ИНН") or "").strip()
                 kpp = (item.get("КПП") or "").strip() or None
@@ -1141,32 +1179,52 @@ class OneCSyncService:
                 if head_ref == ref_key:  # сам себе головной — не иерархия
                     head_ref = None
                 cp_type = _resolve_cp_type(item)
+                if existing is None and counterparty_identity(inn, kpp):
+                    if len(inn) == 10 and not kpp and cp_index.by_inn.get(inn):
+                        raise IdentityConflict(f"Нужно сверить КПП для ИНН {inn}: "
+                                               "в пространстве уже есть карточки этого юрлица")
+                    existing = cp_index.resolve(name, inn, kpp)
+                if existing is not None:
+                    _assert_reference_source(existing, ref_key, connection)
+                source_identity = {"name": name, "inn": inn, "kpp": kpp}
                 if existing is None:
-                    self.session.add(Counterparty(
+                    existing = Counterparty(
                         id=uuid.uuid4(),
                         company_id=connection.company_id,
                         external_ref=ref_key,
                         name=name, inn=inn, kpp=kpp,
                         full_name=full_name, okpo=okpo, head_ref=head_ref,
-                        type=cp_type, kind="external", raw=item,
+                        type=cp_type, kind="external",
+                        raw=_reference_raw(item, connection, source_identity),
                         # карточка с полными реквизитами и ссылкой БП уже канон
                         # бухгалтерии — её завёл бухгалтер, а не станция. Тот же
                         # критерий, что применила миграция к прежним записям.
                         # Существующие карточки не трогаем: решение товароведа
                         # (blocked/archived) синхронизация воскрешать не должна.
                         lifecycle_status="verified" if inn and name else "draft",
-                    ))
+                    )
+                    self.session.add(existing)
                     stats["created"] += 1
                 else:
-                    existing.name = name or existing.name
-                    existing.inn = inn or existing.inn
-                    existing.kpp = kpp or existing.kpp
-                    existing.full_name = full_name or existing.full_name
-                    existing.okpo = okpo or existing.okpo
-                    existing.head_ref = head_ref or existing.head_ref
-                    existing.type = cp_type or existing.type
-                    existing.raw = item
+                    apply_import_values(existing, {
+                        "name": name or existing.name,
+                        "inn": inn or existing.inn,
+                        "kpp": kpp or existing.kpp,
+                        "full_name": full_name or existing.full_name,
+                        "okpo": okpo or existing.okpo,
+                        "head_ref": head_ref or existing.head_ref,
+                        "type": cp_type or existing.type,
+                    })
+                    existing.external_ref = ref_key
+                    existing.raw = _reference_raw(item, connection, source_identity, existing.raw)
                     stats["updated"] += 1
+                await self.session.flush()
+                cp_index.add(existing)
+                by_ref[ref_key] = [existing]
+            except IdentityConflict:
+                stats["errors"] += 1
+                self._merge_log_stats(log, stats)
+                raise
             except Exception as exc:  # noqa: BLE001
                 stats["errors"] += 1
                 logger.warning("Counterparty upsert failed (Ref_Key=%s): %s", ref_key, exc)
@@ -1190,11 +1248,19 @@ class OneCSyncService:
         # запроса на каждый договор. Перед построением сбрасываем сессию:
         # контрагентов мог завести этот же прогон, и без flush они в индекс не
         # попадут — все их договоры «пропустятся» до следующего раза.
+        await lock_manual_creation(self.session, connection.company_id, "contract")
         await self.session.flush()
         local_cp = await self._build_local_index(
             Counterparty, connection.company_id, by="id")
         local_org = await self._build_local_index(
             Organization, connection.company_id, by="id")
+        rows = (await self.session.execute(select(Contract).where(
+            Contract.company_id == connection.company_id))).scalars().all()
+        contract_index = ContractIndex(rows)
+        by_ref = {}
+        for contract in rows:
+            if contract.external_ref:
+                by_ref.setdefault(id_key(contract.external_ref), []).append(contract)
         # Полная выборка: промо-поля + ВСЕ реквизиты (describe) → raw полный снимок.
         select_list = await self._full_select(client, ENTITY_CONTRACTS, CONTRACT_FETCH)
         extended = select_list + [f for f in CONTRACT_FETCH_EXT if f not in select_list]
@@ -1209,26 +1275,19 @@ class OneCSyncService:
                 stats["errors"] += 1
                 continue
             try:
-                existing = (await self.session.execute(
-                    select(Contract).where(
-                        Contract.company_id == connection.company_id,
-                        Contract.external_ref == ref_key,
-                    )
-                )).scalar_one_or_none()
+                ref_key = id_key(ref_key)
+                existing = unique_candidate(by_ref.get(ref_key, []), f"договора external_ref {ref_key}")
                 owner_ref = _clean_ref(item.get("Owner_Key") or item.get("Владелец_Key")) or ""
                 org_ref = _clean_ref(item.get("Организация_Key")) or ""
                 # Ссылки на контрагента и юрлицо — наши идентификаторы, а не GUID
                 # из 1С: обе оси давно ведутся внешними ключами. Раньше сюда
                 # писался GUID, и загрузка падала на первом же договоре —
                 # нарушением внешнего ключа, то есть весь справочник не доезжал.
-                owner = local_cp.get(owner_ref)
-                org = local_org.get(org_ref)
+                owner = local_cp.get(id_key(owner_ref))
+                org = local_org.get(id_key(org_ref))
                 if owner is None or org is None:
-                    # Контрагент или юрлицо ещё не синхронизированы: договор
-                    # подождёт следующего прогона. Молча пропускать нельзя —
-                    # иначе «загрузилось 0 из 300» выглядит успехом.
-                    stats["skipped"] += 1
-                    continue
+                    raise IdentityConflict("Не найдена сторона договора в справочнике компании: "
+                                           f"контрагент {owner_ref}, организация {org_ref}")
                 number = (item.get("Номер") or item.get("Description") or "").strip()
                 date = _clean_1c_date(item.get("Дата"))
                 kind = _norm_contract_kind(item.get("ВидДоговора"))
@@ -1242,8 +1301,20 @@ class OneCSyncService:
                 incl_vat = incl_vat if isinstance(incl_vat, bool) else None
                 comment = (item.get("Комментарий") or "").strip() or None
                 req = _contract_requisites(item)
+                if existing is None and contract_identity(number, date, kind):
+                    party = await self.session.get(Counterparty, owner)
+                    existing = contract_index.resolve(party, kind, number, date, organization_id=org)
+                    if existing is None:
+                        other_kind = contract_index.resolve(party, None, number, date, organization_id=org)
+                        if other_kind is not None:
+                            raise IdentityConflict(f"Договор {other_kind.id} имеет те же стороны, "
+                                                   "номер и дату, но другой вид; требуется сверка")
+                if existing is not None:
+                    _assert_reference_source(existing, ref_key, connection)
+                source_identity = {"counterparty_id": id_key(owner), "organization_id": id_key(org),
+                                   "number": number, "date": date, "type": kind or ""}
                 if existing is None:
-                    self.session.add(Contract(
+                    existing = Contract(
                         id=uuid.uuid4(),
                         company_id=connection.company_id,
                         external_ref=ref_key,
@@ -1260,29 +1331,40 @@ class OneCSyncService:
                         comment=comment,
                         **req,
                         scope_type="unassigned",
-                        raw=item,
-                    ))
+                        raw=_reference_raw(item, connection, source_identity),
+                    )
+                    self.session.add(existing)
                     stats["created"] += 1
                 else:
-                    existing.number = number or existing.number
-                    existing.date = date or existing.date
-                    existing.counterparty_id = owner or existing.counterparty_id
-                    existing.organization_id = org or existing.organization_id
-                    existing.type = kind or existing.type
-                    existing.kind = kind or existing.kind
-                    existing.valid_until = valid_until
-                    existing.is_closed = is_closed
+                    imported = {
+                        "number": number or existing.number,
+                        "date": date or existing.date,
+                        "counterparty_id": owner or existing.counterparty_id,
+                        "organization_id": org or existing.organization_id,
+                        "type": kind or existing.type,
+                        "kind": kind or existing.kind,
+                        "valid_until": valid_until,
+                        "is_closed": is_closed,
+                        **req,
+                    }
                     if amount_limit is not None:
-                        existing.amount_limit = amount_limit
+                        imported["amount_limit"] = amount_limit
                     if incl_vat is not None:
-                        existing.amount_incl_vat = incl_vat
+                        imported["amount_incl_vat"] = incl_vat
                     if comment and not existing.comment:   # свой комментарий пространства не затираем
-                        existing.comment = comment
-                    for col, val in req.items():   # реквизиты 1С — источник 1С, если база их знает
-                        setattr(existing, col, val)
-                    existing.raw = item
+                        imported["comment"] = comment
+                    apply_import_values(existing, imported)
+                    existing.external_ref = ref_key
+                    existing.raw = _reference_raw(item, connection, source_identity, existing.raw)
                     # scope_type НЕ трогаем — наш слой охвата, не из 1С
                     stats["updated"] += 1
+                await self.session.flush()
+                contract_index.add(existing)
+                by_ref[ref_key] = [existing]
+            except IdentityConflict:
+                stats["errors"] += 1
+                self._merge_log_stats(log, stats)
+                raise
             except Exception as exc:  # noqa: BLE001
                 stats["errors"] += 1
                 logger.warning("Contract upsert failed (Ref_Key=%s): %s", ref_key, exc)

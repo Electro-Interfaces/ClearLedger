@@ -16,10 +16,13 @@
 """
 from __future__ import annotations
 
+from app.services.reference_identity import IdentityConflict, id_key, unique_candidate
+
 import json
 import uuid
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -251,13 +254,17 @@ async def list_contracts(
     """
     cps = (await db.execute(
         select(Counterparty).where(Counterparty.company_id == company_id))).scalars().all()
-    by_key = {k: c for c in cps for k in (c.external_ref, str(c.id)) if k}
+    by_key = {}
+    for cp in cps:
+        for key in {id_key(cp.id), id_key(cp.external_ref)} - {""}:
+            by_key.setdefault(key, []).append(cp)
 
     covered = dict((await db.execute(
         select(ContractLocation.contract_id, func.count())
         .where(ContractLocation.company_id == company_id)
         .group_by(ContractLocation.contract_id))).all())
 
+    covered = {id_key(k): v for k, v in covered.items()}
     stmt = select(Contract).where(Contract.company_id == company_id)
     if query:
         like = f"%{query.strip().lower()}%"
@@ -268,7 +275,10 @@ async def list_contracts(
         dir_ = contract_direction(c.kind)
         if direction and dir_ != direction:
             continue
-        cp = by_key.get(c.counterparty_id)
+        try:
+            cp = unique_candidate(by_key.get(id_key(c.counterparty_id), []), "контрагента договора")
+        except IdentityConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
         out.append({
             "id": str(c.id),
             "number": c.number,
@@ -282,7 +292,7 @@ async def list_contracts(
             "counterpartyInn": cp.inn if cp else None,
             # company — весь периметр, locations — набор объектов, unassigned — охват не задан.
             "scopeType": c.scope_type,
-            "objectsCount": covered.get(c.id, 0),
+            "objectsCount": covered.get(id_key(c.id), 0),
             "validUntil": c.valid_until,
             "isClosed": c.is_closed,
         })

@@ -836,6 +836,7 @@ class NomenclatureResponse(BaseModel):
 
 class ContractCreate(BaseModel):
     company_id: str
+    creationKey: uuid.UUID | None = None
     number: str
     date: str
     counterpartyId: str

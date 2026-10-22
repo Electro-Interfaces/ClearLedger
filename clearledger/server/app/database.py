@@ -4019,6 +4019,13 @@ async def create_all() -> None:
             # тысячами (у НПК 17 398 из 18 045), а взаиморасчёты по оборотам нельзя
             # было открыть карточкой контрагента.
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS title VARCHAR(300)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS manual_overrides JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS manual_overrides JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS creation_key UUID",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS creation_actor_id UUID REFERENCES users(id) ON DELETE SET NULL",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS creation_request_hash CHAR(64)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_contract_creation ON contracts(company_id, creation_key) "
+            "WHERE creation_key IS NOT NULL",
             # Договор был единственным местом ядра, где контрагент и юрлицо хранились
             # СТРОКОЙ без внешнего ключа: целостность не проверялась, а каждый запрос
             # писал `::text`. Значения — валидные UUID (проверено на трёх компаниях),
@@ -4375,6 +4382,9 @@ async def create_all() -> None:
             "source = 'mail' AND source_ref IS NOT NULL) UPDATE doc_cards AS card SET "
             "source_ref = left(card.source_ref, 145) || '#legacy-duplicate-' || "
             "card.id::text FROM ranked WHERE ranked.id = card.id AND ranked.position > 1",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_cards_contract_source "
+            "ON doc_cards(company_id, source_ref) "
+            "WHERE source = 'manual' AND source_ref LIKE 'contract-document:%'",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_cards_mail_source "
             "ON doc_cards (company_id, source_ref) WHERE source = 'mail' "
             "AND source_ref IS NOT NULL",

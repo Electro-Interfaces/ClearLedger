@@ -6,8 +6,7 @@
 собственника участка нельзя сопоставить с арендодателем, которому платим.
 
 Здесь одна механика на все такие поля: взять различные значения текста, свести с
-карточкой контрагента по нормализованному имени (`_normname` — та же функция, что при
-разборе реестров, поэтому «ООО «Ромашка»» и «Ромашка ООО» это одна карточка), чего нет
+карточкой контрагента по полному имени с сохранением формы юрлица, чего нет
 — завести. Текст не трогаем: он остаётся исходником.
 
 Без `apply=True` ничего не пишет — считает, сколько совпадёт и сколько карточек
@@ -22,6 +21,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +29,9 @@ from app.models import (
     CorporateClient, Counterparty, EzsSite, EzsSiteEquipment, EzsTechConnection,
 )
 from app.services.reestr_normalize import _clean_cp_name, _cp_type, _normname
+from app.services.reference_identity import lock_manual_creation
+from app.services.reference_overrides import apply_import_values
+from app.services.reference_identity import CounterpartyIndex, IdentityConflict
 
 # (ключ, что за роль, модель, текстовое поле, поле ссылки, метка в aliases карточки)
 _LINKS: list[tuple[str, str, Any, Any, Any, str]] = [
@@ -71,17 +74,11 @@ async def link_counterparties(db: AsyncSession, company_id: uuid.UUID,
     площадки из банка кандидатов чаще всего останется кандидатом, и заводить его
     карточкой значит превратить реестр контрагентов в список «с кем поговорили».
     """
+    if apply:
+        await lock_manual_creation(db, company_id, "counterparty")
     cps = (await db.execute(select(Counterparty).where(
         Counterparty.company_id == company_id))).scalars().all()
-    by_norm: dict[str, Counterparty] = {}
-    for cp in cps:
-        nn = _normname(cp.name)
-        if nn:
-            by_norm.setdefault(nn, cp)
-        for alias in (cp.aliases or []):
-            an = _normname(alias)
-            if an and an not in by_norm:
-                by_norm[an] = cp
+    cp_index = CounterpartyIndex(cps)
 
     links: list[dict[str, Any]] = []
     total_linked = total_created = 0
@@ -101,8 +98,10 @@ async def link_counterparties(db: AsyncSession, company_id: uuid.UUID,
             if not _usable(raw):
                 skipped += cnt
                 continue
-            nn = _normname(raw)
-            cp = by_norm.get(nn)
+            try:
+                cp = cp_index.resolve(_clean_cp_name(raw))
+            except IdentityConflict as exc:
+                raise HTTPException(409, str(exc)) from exc
             if cp is None:
                 created += 1
                 if len(samples) < 5:
@@ -111,14 +110,15 @@ async def link_counterparties(db: AsyncSession, company_id: uuid.UUID,
                     cp = Counterparty(
                         company_id=company_id, inn="", name=_clean_cp_name(raw)[:500],
                         type=_cp_type(raw), aliases=[alias], kind="external",
+                        raw={"referenceIdentity": {"name": _clean_cp_name(raw), "inn": ""}},
                     )
                     db.add(cp)
                     await db.flush()
-                    by_norm[nn] = cp
+                    cp_index.add(cp)
             else:
                 matched += 1
                 if write and alias not in (cp.aliases or []):
-                    cp.aliases = sorted(set((cp.aliases or []) + [alias]))
+                    apply_import_values(cp, {"aliases": sorted(set((cp.aliases or []) + [alias]))})
             linked += cnt
             if write and cp is not None:
                 await db.execute(update(model).where(

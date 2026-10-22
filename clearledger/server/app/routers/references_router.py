@@ -3,6 +3,8 @@ CRUD для НСИ (справочники): контрагенты, орган�
 Все ответы в camelCase для прямой совместимости с фронтендом.
 """
 
+import hashlib
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -90,6 +92,10 @@ from app.schemas import (
     WarehouseUpdate,
 )
 
+from app.services.reference_overrides import mark_reference_changes, snapshot_reference_fields
+from app.services.reference_identity import (
+    counterparty_identity, contract_identity, id_key, lock_manual_creation,
+)
 from app.services.contract_usage import contract_usage, usage_by_contract
 router = APIRouter(prefix="/references", tags=["НСИ (Справочники)"])
 
@@ -185,18 +191,16 @@ def _counterparty_match(keys) -> Any:
     контрагента внешней ссылки нет вовсе. Раньше набор целиком отдавался в
     `external_ref IN (...)`, и как только в нём оказывался настоящий UUID —
     запрос падал на типе колонки, то есть 500 на карточке точки и на списке
-    договоров. Разделяем: UUID ищем по идентификатору, остальное по внешней
-    ссылке.
+    договоров. Любой ключ проверяем как внешнюю ссылку, а корректный UUID
+    также ищем по нашему идентификатору.
     """
     ids, refs = [], []
     for key in keys:
-        if isinstance(key, uuid.UUID):
-            ids.append(key)
-            continue
+        refs.append(id_key(key))
         try:
             ids.append(uuid.UUID(str(key)))
         except (ValueError, AttributeError, TypeError):
-            refs.append(str(key))
+            pass
     conditions = []
     if refs:
         conditions.append(Counterparty.external_ref.in_(refs))
@@ -268,6 +272,19 @@ async def create_counterparty(
     if str(body.lifecycleStatus) == "verified":
         await _assert_can_verify_counterparty(
             db, current_user, cid, inn=body.inn, kpp=body.kpp, name=body.name)
+    identity = counterparty_identity(body.inn, body.kpp)
+    if identity:
+        await lock_manual_creation(db, cid, "counterparty")
+        candidates = (await db.execute(select(Counterparty).where(
+            Counterparty.company_id == cid,
+            func.btrim(Counterparty.inn) == identity[0],
+        ))).scalars().all()
+        # Без КПП нельзя молча выбрать филиал или завести второе лицо того же ИНН.
+        duplicates = [c for c in candidates if not identity[1] or not str(c.kpp or "").strip()
+                      or counterparty_identity(c.inn, c.kpp) == identity]
+        if duplicates:
+            raise HTTPException(409, "Контрагент с такими ИНН/КПП уже существует: "
+                                + ", ".join(sorted(str(c.id) for c in duplicates)))
     cp = Counterparty(
         company_id=cid,
         inn=body.inn,
@@ -293,6 +310,7 @@ async def update_counterparty(
 ):
     uid = _parse_uuid(item_id)
     cp = await get_owned(Counterparty, uid, current_user, db)  # 404 для чужой/несуществующей
+    before = snapshot_reference_fields(cp)
 
     if body.lifecycleStatus is not None and str(body.lifecycleStatus) == "verified" \
             and cp.lifecycle_status != "verified":
@@ -305,11 +323,11 @@ async def update_counterparty(
 
     if body.inn is not None:
         cp.inn = body.inn
-    if body.kpp is not None:
+    if "kpp" in body.model_fields_set:
         cp.kpp = body.kpp
     if body.name is not None:
         cp.name = body.name
-    if body.shortName is not None:
+    if "shortName" in body.model_fields_set:
         cp.short_name = body.shortName
     if body.type is not None:
         cp.type = body.type
@@ -319,9 +337,10 @@ async def update_counterparty(
         cp.lifecycle_status = body.lifecycleStatus
     for camel, snake in _CP_EXTRA_FIELDS.items():
         val = getattr(body, camel)
-        if val is not None:
+        if camel in body.model_fields_set:
             setattr(cp, snake, val)
 
+    mark_reference_changes(cp, before)
     await db.flush()
     await db.refresh(cp)   # дозагрузить onupdate-поля (updated_at) в async-контексте
     return _counterparty_resp(cp)
@@ -726,8 +745,8 @@ def _contract_resp(c: Contract) -> ContractResponse:
         companyId=str(c.company_id),
         number=c.number,
         date=c.date,
-        counterpartyId=c.counterparty_id,
-        organizationId=c.organization_id,
+        counterpartyId=id_key(c.counterparty_id),
+        organizationId=id_key(c.organization_id),
         type=c.type,
         amountLimit=c.amount_limit,
         kind=c.kind,
@@ -741,7 +760,8 @@ def _contract_resp(c: Contract) -> ContractResponse:
         isClosed=c.is_closed,
         scopeType=c.scope_type,
         typeCode=c.type_code,
-        **{api: getattr(c, col) for api, col in _CONTRACT_REQ_FIELDS.items()},
+        **{api: (id_key(getattr(c, col)) or None) if api == "responsibleId"
+           else getattr(c, col) for api, col in _CONTRACT_REQ_FIELDS.items()},
         externalRef=c.external_ref,
         raw=c.raw,
         createdAt=_ts(c.created_at),
@@ -764,10 +784,11 @@ async def list_contracts(
     counts = dict((await db.execute(
         select(ContractLocation.contract_id, func.count())
         .where(ContractLocation.company_id == cid).group_by(ContractLocation.contract_id))).all())
+    counts = {id_key(k): v for k, v in counts.items()}
     out = []
     for c in rows:
         r = _contract_resp(c)
-        r.locationsCount = int(counts.get(c.id, 0))
+        r.locationsCount = int(counts.get(id_key(c.id), 0))
         out.append(r)
     return out
 
@@ -795,6 +816,18 @@ async def list_contract_types(
     return [{"code": r["code"], "label": r["label"], "gkBasis": r["gk_basis"], "direction": r["direction"]} for r in rows]
 
 
+async def _validate_contract_parties(db, company_id, counterparty_id, organization_id):
+    cp_id = _parse_uuid(str(counterparty_id), "контрагента")
+    org_id = _parse_uuid(str(organization_id), "организации")
+    cp = await db.get(Counterparty, cp_id)
+    if cp is None or id_key(cp.company_id) != id_key(company_id):
+        raise HTTPException(400, "Контрагент не найден в справочнике пространства")
+    org = await db.get(Organization, org_id)
+    if org is None or id_key(org.company_id) != id_key(company_id):
+        raise HTTPException(400, "Организация не найдена в справочнике пространства")
+    return cp_id, org_id
+
+
 @router.post(
     "/contracts",
     response_model=ContractResponse,
@@ -806,15 +839,41 @@ async def create_contract(
     current_user: User = Depends(get_current_user),
 ):
     cid = await assert_company_member(body.company_id, current_user, db)
-    cp = await db.get(Counterparty, body.counterpartyId)
-    if cp is None or cp.company_id != cid:
-        raise HTTPException(400, "Контрагент не найден в справочнике пространства")
+    cp_id, org_id = await _validate_contract_parties(
+        db, cid, body.counterpartyId, body.organizationId)
+    identity = contract_identity(body.number, body.date, body.type)
+    request_hash = hashlib.sha256(json.dumps(
+        body.model_dump(mode="json", exclude={"company_id", "creationKey"}),
+        sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest() if body.creationKey else None
+    if identity or body.creationKey:
+        await lock_manual_creation(db, cid, "contract")
+    if body.creationKey:
+        previous = (await db.execute(select(Contract).where(
+            Contract.company_id == cid, Contract.creation_key == body.creationKey,
+        ))).scalar_one_or_none()
+        if previous is not None:
+            if previous.creation_actor_id != current_user.id or previous.creation_request_hash != request_hash:
+                raise HTTPException(409, "Ключ создания договора уже использован с другими реквизитами")
+            return _contract_resp(previous)
+    if identity:
+        candidates = (await db.execute(select(Contract).where(
+            Contract.company_id == cid, Contract.counterparty_id == cp_id,
+            Contract.organization_id == org_id,
+        ))).scalars().all()
+        duplicates = [c for c in candidates if contract_identity(c.number, c.date, c.type) == identity]
+        if duplicates:
+            raise HTTPException(409, "Договор с такими сторонами и реквизитами уже существует: "
+                                + ", ".join(sorted(str(c.id) for c in duplicates)))
     c = Contract(
         company_id=cid,
+        creation_key=body.creationKey,
+        creation_actor_id=current_user.id if body.creationKey else None,
+        creation_request_hash=request_hash,
         number=body.number,
         date=body.date,
-        counterparty_id=body.counterpartyId,
-        organization_id=body.organizationId,
+        counterparty_id=cp_id,
+        organization_id=org_id,
         type=body.type,
         type_code=await _check_type_code(db, body.typeCode),
         amount_limit=body.amountLimit,
@@ -844,7 +903,13 @@ async def update_contract(
 ):
     uid = _parse_uuid(item_id)
     c = await get_owned(Contract, uid, current_user, db)  # 404 для чужого/несуществующего
+    before = snapshot_reference_fields(c)
 
+    cp_id, org_id = await _validate_contract_parties(
+        db, c.company_id,
+        body.counterpartyId if body.counterpartyId is not None else c.counterparty_id,
+        body.organizationId if body.organizationId is not None else c.organization_id,
+    )
     sent = body.model_fields_set
     for api, col in (("validUntil", "valid_until"), ("amountLimit", "amount_limit"), ("vatRate", "vat_rate"),
                      ("amountInclVat", "amount_incl_vat"), ("settlementKind", "settlement_kind"),
@@ -858,12 +923,9 @@ async def update_contract(
     if body.date is not None:
         c.date = body.date
     if body.counterpartyId is not None:
-        cp = await db.get(Counterparty, body.counterpartyId)
-        if cp is None or cp.company_id != c.company_id:
-            raise HTTPException(400, "Контрагент не найден в справочнике пространства")
-        c.counterparty_id = body.counterpartyId
+        c.counterparty_id = cp_id
     if body.organizationId is not None:
-        c.organization_id = body.organizationId
+        c.organization_id = org_id
     if body.type is not None:
         c.type = body.type
     if body.typeCode is not None:
@@ -891,6 +953,7 @@ async def update_contract(
     if body.scopeType is not None:
         c.scope_type = body.scopeType
 
+    mark_reference_changes(c, before)
     await db.flush()
     await db.refresh(c)   # дозагрузить onupdate-поля (updated_at) в async-контексте
     return _contract_resp(c)
@@ -1089,7 +1152,7 @@ def _location_brief(loc: ServiceLocation) -> LocationBrief:
 def _cp_keys(cp: Counterparty) -> list[str]:
     """Идентификаторы контрагента в Contract.counterparty_id: GUID 1С (external_ref)
     и наш UUID (для договоров, созданных вручную)."""
-    return [k for k in (cp.external_ref, str(cp.id)) if k]
+    return sorted({id_key(k) for k in (cp.external_ref, cp.id) if k})
 
 
 @router.put("/contracts/{item_id}/scope", response_model=ContractResponse)
@@ -1350,7 +1413,7 @@ async def get_location_contracts(
     )).scalars().all()
 
     # Резолв имён контрагентов по counterparty_id (GUID external_ref или наш UUID).
-    keys = {c.counterparty_id for c in contracts if c.counterparty_id}
+    keys = {id_key(c.counterparty_id) for c in contracts if c.counterparty_id}
     cp_map: dict[str, Counterparty] = {}
     if keys:
         cp_cond = _counterparty_match(keys)
@@ -1361,23 +1424,23 @@ async def get_location_contracts(
         )).scalars().all()
         for cp in cps:
             if cp.external_ref:
-                cp_map[cp.external_ref] = cp
-            cp_map[str(cp.id)] = cp
+                cp_map[id_key(cp.external_ref)] = cp
+            cp_map[id_key(cp.id)] = cp
 
     briefs: list[LocationContractBrief] = []
     seen: dict[str, CounterpartyBrief] = {}
     for c in contracts:
-        cp = cp_map.get(str(c.counterparty_id)) if c.counterparty_id else None
+        cp = cp_map.get(id_key(c.counterparty_id)) if c.counterparty_id else None
         briefs.append(LocationContractBrief(
             id=str(c.id), number=c.number, date=c.date, kind=c.kind,
             scopeType=c.scope_type, companyWide=(c.scope_type == "company"),
-            counterpartyId=c.counterparty_id,
+            counterpartyId=id_key(c.counterparty_id),
             counterpartyName=cp.name if cp else None,
             counterpartyInn=cp.inn if cp else None,
             validUntil=c.valid_until,
         ))
-        if c.counterparty_id and c.counterparty_id not in seen:
-            seen[c.counterparty_id] = CounterpartyBrief(
+        if c.counterparty_id and id_key(c.counterparty_id) not in seen:
+            seen[id_key(c.counterparty_id)] = CounterpartyBrief(
                 id=str(cp.id) if cp else None,
                 # У ручного контрагента внешней ссылки нет — тогда ключом идёт
                 # наш идентификатор, и он обязан доехать строкой: схема ответа
@@ -1402,7 +1465,7 @@ def _settlement_resp(s: StationContractSettlement) -> SettlementResponse:
         locationId=s.location_id,
         role=s.role,
         contractId=str(s.contract_id) if s.contract_id else None,
-        counterpartyId=s.counterparty_id,
+        counterpartyId=id_key(s.counterparty_id) or None,
         paidThrough=s.paid_through,
         paymentStatus=s.payment_status,
         basis=s.basis,
@@ -1531,7 +1594,7 @@ async def settlements_detail(
     )).scalars().all() if loc_ids else []
     loc_map = {l.id: l for l in locs}
 
-    cp_ids = {r.counterparty_id for r in rows if r.counterparty_id}
+    cp_ids = {id_key(r.counterparty_id) for r in rows if r.counterparty_id}
     cp_map: dict[str, str] = {}
     if cp_ids:
         cond = _counterparty_match(cp_ids)
@@ -1539,8 +1602,8 @@ async def settlements_detail(
             select(Counterparty).where(Counterparty.company_id == cid, cond)
         )).scalars().all():
             if cp.external_ref:
-                cp_map[cp.external_ref] = cp.name
-            cp_map[str(cp.id)] = cp.name
+                cp_map[id_key(cp.external_ref)] = cp.name
+            cp_map[id_key(cp.id)] = cp.name
 
     contr_ids = {r.contract_id for r in rows if r.contract_id}
     contr_map: dict = {}
@@ -1560,8 +1623,8 @@ async def settlements_detail(
             stationName=loc.name if loc else None,
             buNumber=md.get("buNumber"),
             role=r.role,
-            counterpartyId=r.counterparty_id,
-            counterpartyName=(cp_map.get(str(r.counterparty_id))
+            counterpartyId=id_key(r.counterparty_id) or None,
+            counterpartyName=(cp_map.get(id_key(r.counterparty_id))
                               if r.counterparty_id else None),
             contractNumber=contr_map.get(r.contract_id) if r.contract_id else None,
             contractId=str(r.contract_id) if r.contract_id else None,
