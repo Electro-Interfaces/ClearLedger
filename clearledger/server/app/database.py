@@ -1951,6 +1951,22 @@ ACCOUNTING_REVISION_MIGRATION_DDL = (
 )
 
 
+TASK_ASSIGNMENT_MIGRATION_DDL = (
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assignment_revision UUID",
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS assignment_by_id UUID",
+    "ALTER TABLE tasks ALTER COLUMN assignment_revision SET DEFAULT gen_random_uuid()",
+    "WITH migrated AS (UPDATE tasks SET assignment_revision = gen_random_uuid(), "
+    "assignment_by_id = author_id WHERE assignment_revision IS NULL "
+    "RETURNING id, company_id, assignee_id, assignment_revision) "
+    "INSERT INTO task_assignment_reads (company_id, user_id, task_id, assignment_revision) "
+    "SELECT company_id, assignee_id, id, assignment_revision "
+    "FROM migrated WHERE assignee_id IS NOT NULL "
+    "ON CONFLICT (company_id, user_id, task_id) DO UPDATE SET "
+    "assignment_revision = EXCLUDED.assignment_revision",
+    "ALTER TABLE tasks ALTER COLUMN assignment_revision SET NOT NULL",
+)
+
+
 async def create_all() -> None:
     """Создаёт все таблицы (если не существуют) + инкрементальные миграции."""
     from app.services.phone_e164 import PHONE_FUNCTION_DDL
@@ -1963,6 +1979,10 @@ async def create_all() -> None:
 
     # Инкрементальные миграции для существующих таблиц
     async with engine.begin() as conn:
+        # Просмотр конкретной передачи; старые назначения получают baseline,
+        # чтобы обновление не объявляло их новыми входящими.
+        for statement in TASK_ASSIGNMENT_MIGRATION_DDL:
+            await conn.execute(text(statement))
         # v0.6: cloud_api_key для Companies (внешний доступ TSupport)
         await conn.execute(
             __import__("sqlalchemy").text(

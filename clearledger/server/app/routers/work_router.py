@@ -50,7 +50,7 @@ from app.models import (
 from sqlalchemy import true as _sa_true
 
 from app.config import settings
-from app.services import (oversight, placement, space_time, work_query,
+from app.services import (calendar_series, oversight, placement, space_time, work_query,
                           work_state)
 
 log = logging.getLogger(__name__)
@@ -1666,7 +1666,7 @@ async def calendar_create(
             # встреча может пройти без него.
             role="optional" if uid in необязательные and uid != организатор else "required",
             response="accepted" if uid == организатор else "pending"))
-    await db.flush()
+    await calendar_series.materialize_series(db, cid, ev.id, datetime.now(timezone.utc))
     parts = await _attendees(db, [ev.id])
     await db.commit()
     # Позванные узнают о встрече сразу, а не когда откроют календарь: прежде
@@ -1689,7 +1689,9 @@ async def calendar_action(
     from app.services import reminders
 
     cid = await _assert_work(payload.company_id, current_user, db)
-    ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
+    # Блокировка ДО изменения правила и участников общая с регламентом.
+    ev = await calendar_series.lock_event(
+        db, cid, _uuid_or_400(event_id, "event_id"))
     if ev is None or ev.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
     parts = (await _attendees(db, [ev.id])).get(ev.id, [])
@@ -1868,7 +1870,7 @@ async def calendar_action(
                     PersonalReminder.target_ref == f"event:{ev.id}",
                     PersonalReminder.fired_at.is_(None)))).scalars():
                 напоминание.remind_at = напоминание.remind_at + сдвиг
-    await db.flush()
+    await calendar_series.materialize_series(db, cid, ev.id, datetime.now(timezone.utc))
     parts = (await _attendees(db, [ev.id])).get(ev.id, [])
     await db.commit()
     from app.services import meeting_notice
