@@ -199,7 +199,9 @@ function savePresets(companyId: string, list: NamedPreset[]): void {
 export function FilterProvider({ children, syncUrl = true }: { children: ReactNode; syncUrl?: boolean }) {
   const { companyId } = useCompany()
   const [searchParams, setSearchParams] = useSearchParams()
-  const companyChanged = lastFilterCompanyId !== null && lastFilterCompanyId !== companyId
+  // Пустая компания при восстановлении входа не является предыдущим контуром.
+  // Иначе холодный вход затирал фильтр из ссылки локальным состоянием компании.
+  const companyChanged = !!companyId && !!lastFilterCompanyId && lastFilterCompanyId !== companyId
   const ignoreInitialUrlRef = useRef(companyChanged)
   const initialUrlState = companyChanged || !syncUrl ? null
     : decodeFilterParam(searchParams.get(URL_FILTER_PARAM))
@@ -228,7 +230,7 @@ export function FilterProvider({ children, syncUrl = true }: { children: ReactNo
   }, [state])
 
   useEffect(() => {
-    lastFilterCompanyId = companyId
+    if (companyId) lastFilterCompanyId = companyId
   }, [companyId])
 
   // Смена компании перемонтирует провайдер (TabsProvider key={companyId} в App),
@@ -270,6 +272,9 @@ export function FilterProvider({ children, syncUrl = true }: { children: ReactNo
   // URL-персист текущей выборки: merge-safe, replace — без спама history.
   useEffect(() => {
     if (!syncUrl) return
+    // Между отрисовкой и пассивным эффектом уже мог прийти новый переход.
+    // Старая запись фильтра не должна заменять более свежую ссылку/Back.
+    if (new URLSearchParams(window.location.search).get(URL_FILTER_PARAM) !== rawUrlFilter) return
     const pending = pendingUrlStateRef.current
     if (pending && !sameFilterState(state, pending)) return
     if (pending) pendingUrlStateRef.current = null

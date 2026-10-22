@@ -276,7 +276,7 @@ function MobileWorkspace() {
   }, { replace: true })
 
   return (
-    <div className="h-full min-h-0 flex flex-col">
+    <div className="h-full min-h-0 flex flex-col [@media(max-height:500px)_and_(hover:none)_and_(pointer:coarse)]:overflow-y-auto">
       {/* Фильтр рабочей области (период/станции/…) — свайп без видимого скроллбара */}
       <div className="overflow-x-auto scrollbar-hide shrink-0"><WorkspaceToolbar /></div>
 
@@ -327,8 +327,10 @@ function MobileWorkspace() {
         )}
       </div>
 
-      {/* Контент режима — тот же диспетчер, что на десктопе */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      {/* На коротком сенсорном экране контур и селекторы уходят вверх при
+          прокрутке. Сам отчёт сохраняет высоту рабочего стола: выбранный
+          регион не должен зажимать таблицу до нескольких пикселей. */}
+      <div className="flex-1 min-h-0 overflow-hidden [@media(max-height:500px)_and_(hover:none)_and_(pointer:coarse)]:h-full [@media(max-height:500px)_and_(hover:none)_and_(pointer:coarse)]:flex-none">
         <ModePanel />
       </div>
     </div>

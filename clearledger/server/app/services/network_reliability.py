@@ -166,6 +166,7 @@ async def network_reliability(
             "clients": int(клиентов or 0),
             "clientsAffected": int(задетых or 0),
             "energyKwh": decimal_round(энергия, 1),
+            "energyKwhRaw": float(энергия or 0),
             "revenue": round(float(деньги or 0), 2),
             # Сколько энергии приходится на попытку: у станции, которая «работает»,
             # но отдаёт 0,1 кВт·ч на подъезд, беда не в проценте, а в железе.

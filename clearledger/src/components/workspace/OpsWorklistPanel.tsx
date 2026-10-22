@@ -28,7 +28,7 @@
  * отвечают «что смотреть», набор — «как разобрать увиденное».
  */
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { OpsSnapshotNotice } from './OpsSnapshotNotice'
 import {
   AlertTriangle, ChevronDown, ClipboardCheck, ClipboardX, Gauge, Loader2, Plug, X,
@@ -56,6 +56,7 @@ import { useMonitorScope } from './useMonitorScope'
 import { daysAgoISO } from '@/components/workspace/analytics/periodPresets'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
+import { worklistReasonMatches, worklistUpkeepCount } from '@/lib/monitorMetrics'
 import {
   getOpsTickets, getOpsWorklist, getStationHistory, getStationVisits, type OpsWorklist, type WorklistRow,
 } from '@/services/opsService'
@@ -168,7 +169,7 @@ function строкаТаблицы(r: WorklistRow, workKnown: boolean): Cell[] 
     r.lastSessionAt ? датаМск(r.lastSessionAt, true) : '',
     r.silentDays ?? '', r.failedVisitsPct ?? '', r.clientsLost,
     r.visitsPerDay ?? '', r.lossPerMonth || '',
-    workKnown ? r.openTickets : '', вРаботе(r, workKnown),
+    workKnown ? r.openTickets ?? '' : '', вРаботе(r, workKnown),
   ]
 }
 
@@ -224,7 +225,7 @@ export function OpsWorklistPanel() {
   const строки = useMemo(() => {
     let все = q.data?.rows ?? []
     if (неВзятые && q.data?.workKnown) все = все.filter((r) => !r.openTickets)
-    if (причина !== 'all') все = все.filter((r) => r.reasons.some((p) => p.kind === причина))
+    if (причина !== 'all' && (причина !== 'breached' || q.data?.workKnown)) все = все.filter((r) => worklistReasonMatches(r.reasons, причина))
     if (локальныйРегион !== 'all') все = все.filter((r) => r.region === локальныйРегион)
     if (!поиск.trim()) return все
     return все.filter((r) => matchesSearch(поиск, [r.name, r.number, r.code, r.city, r.region,
@@ -232,6 +233,9 @@ export function OpsWorklistPanel() {
   }, [q.data, поиск, причина, локальныйРегион, неВзятые])
 
   const workKnown = !!q.data?.workKnown
+  const толькоНеВзятые = неВзятые && workKnown
+  const причинаОтбора = причина === 'breached' && !workKnown ? 'all' : причина
+  const работаНеизвестна = наДень ? 'история заявок на день не восстановлена' : 'связь с Поддержкой недоступна'
   const ячейки = useMemo(() => строки.map((r) => строкаТаблицы(r, workKnown)), [строки, workKnown])
   const итог = useMemo<Cell[]>(() => {
     const t: Cell[] = ШАПКА.map(() => '')
@@ -239,15 +243,15 @@ export function OpsWorklistPanel() {
     t[С.станция] = `${qty(строки.length)} станций`
     t[С.ушло] = строки.reduce((s, r) => s + r.clientsLost, 0)
     t[С.цена] = строки.reduce((s, r) => s + (r.lossPerMonth || 0), 0)
-    if (workKnown) t[С.заявок] = строки.reduce((s, r) => s + r.openTickets, 0)
+    if (workKnown) t[С.заявок] = строки.reduce((s, r) => s + (r.openTickets ?? 0), 0)
     return t
   }, [строки, workKnown])
 
   const данныеПо = q.data ? new Date(q.data.asOf).toLocaleString('ru-RU',
     { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }) : ''
   const отбор = [
-    неВзятые && 'никем не взято',
-    причина !== 'all' && (СЛОВО_ПРИЧИНЫ[причина] ?? причина),
+    толькоНеВзятые && 'никем не взято',
+    причинаОтбора !== 'all' && (причинаОтбора === 'upkeep' ? 'поверка, ТО и осмотр' : СЛОВО_ПРИЧИНЫ[причинаОтбора] ?? причинаОтбора),
     локальныйРегион !== 'all' && локальныйРегион,
     поиск.trim() && `поиск «${поиск.trim()}»`,
   ].filter(Boolean) as string[]
@@ -328,7 +332,7 @@ export function OpsWorklistPanel() {
       return (
         <a href={`/support/customer/tickets/${r.lastTicketId}`} className="text-xs text-primary hover:underline">
           {r.lastTicketNumber ?? `${r.openTickets} заявк.`}
-          {r.breachedTickets > 0 && <span className="ml-1 text-red-600 dark:text-red-400">срок сорван</span>}
+          {(r.breachedTickets ?? 0) > 0 && <span className="ml-1 text-red-600 dark:text-red-400">срок сорван</span>}
         </a>
       )
     }
@@ -416,14 +420,14 @@ export function OpsWorklistPanel() {
             <Плитка icon={ClipboardX} label="Никем не взято" value={t.notTaken == null ? '—' : nf.format(t.notTaken)}
               hint={d.workKnown
                 ? `нет открытой заявки${t.lossNotTaken ? ` · ${money(t.lossNotTaken)}/мес` : ''}`
-                : наДень ? 'история заявок на день не восстановлена' : 'связь с Поддержкой недоступна'}
+                : работаНеизвестна}
               tone={t.notTaken ? 'text-red-600 dark:text-red-400' : undefined}
-              active={неВзятые && причина === 'all'}
+              active={толькоНеВзятые && причинаОтбора === 'all'} disabled={!workKnown}
               onClick={() => { setНеВзятые(true); setПричина('all') }} />
-            <Плитка icon={AlertTriangle} label="Срок заявки сорван" value={nf.format(t.breached)}
-              hint="работа заведена, но стоит"
+            <Плитка icon={AlertTriangle} label="Срок заявки сорван" value={workKnown && t.breached != null ? nf.format(t.breached) : '—'}
+              hint={workKnown ? 'работа заведена, но стоит' : работаНеизвестна}
               tone={t.breached ? 'text-purple-600 dark:text-purple-400' : undefined}
-              active={причина === 'breached'}
+              active={причинаОтбора === 'breached'} disabled={!workKnown}
               onClick={() => {
                 // Просроченные заявки существуют только у взятых в работу —
                 // держать «никем не взято» вместе с ними значит показать пусто.
@@ -442,16 +446,17 @@ export function OpsWorklistPanel() {
                 плиткой, только когда она есть: «0» при незаполненных сроках
                 читался как «всё в порядке». Сроки не зависят от того, взята ли
                 станция в работу, поэтому отбор «никем не взято» снимается. */}
-            {t.meter + t.service + t.check > 0 && (
-              <Плитка icon={Gauge} label="Поверка и ТО"
-                value={nf.format(t.meter + t.service)}
+            {worklistUpkeepCount(d.rows) > 0 && (
+              <Плитка icon={Gauge} label="Поверка, ТО и осмотр"
+                value={nf.format(worklistUpkeepCount(d.rows))}
                 hint={`поверка ${nf.format(t.meter)} · ТО ${nf.format(t.service)}`
-                  + (t.check ? ` · осмотр ${nf.format(t.check)}` : '')}
+                  + (t.check ? ` · осмотр ${nf.format(t.check)}` : '')
+                  + (t.upkeepUnknown ? ' · часть сроков не заполнена' : '')}
                 tone={t.meter ? 'text-sky-600 dark:text-sky-400' : undefined}
-                active={причина === 'meter'}
+                active={причина === 'upkeep'}
                 onClick={() => {
                   setНеВзятые(false)
-                  setПричина(причина === 'meter' ? 'all' : 'meter')
+                  setПричина(причина === 'upkeep' ? 'all' : 'upkeep')
                 }} />
             )}
           </div>
@@ -465,23 +470,24 @@ export function OpsWorklistPanel() {
           {фильтрыОткрыты && (
             <div className="flex flex-wrap items-end gap-3">
               <Поле label="В работе" id="ops-today-work" w="w-44">
-                <Select value={неВзятые ? 'free' : 'all'} onValueChange={(v) => setНеВзятые(v === 'free')}>
+                <Select value={толькоНеВзятые ? 'free' : 'all'} onValueChange={(v) => setНеВзятые(v === 'free')}>
                   <SelectTrigger id="ops-today-work" className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="free">Никем не взято</SelectItem>
+                    <SelectItem value="free" disabled={!workKnown}>Никем не взято</SelectItem>
                     <SelectItem value="all">Все станции</SelectItem>
                   </SelectContent>
                 </Select>
               </Поле>
               <Поле label="Причина" id="ops-today-reason" w="w-52">
-                <Select value={причина} onValueChange={setПричина}>
+                <Select value={причинаОтбора} onValueChange={setПричина}>
                   <SelectTrigger id="ops-today-reason" className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Любая причина</SelectItem>
                     <SelectItem value="silent">Нет зарядок</SelectItem>
                     <SelectItem value="dry">Попытки без энергии</SelectItem>
                     <SelectItem value="failing">Отказывает</SelectItem>
-                    <SelectItem value="breached">Срок заявки сорван</SelectItem>
+                    <SelectItem value="breached" disabled={!workKnown}>Срок заявки сорван</SelectItem>
+                    <SelectItem value="upkeep">Поверка, ТО и осмотр</SelectItem>
                     <SelectItem value="meter">Поверка счётчика</SelectItem>
                     <SelectItem value="service">Просрочено ТО</SelectItem>
                     <SelectItem value="check">Нарушение по осмотру</SelectItem>
@@ -546,7 +552,7 @@ export function OpsWorklistPanel() {
                 </Button>
                 </>
               )}
-              <ExportButton title="Работа на сегодня" subtitle={`данные по ${данныеПо}`}
+              <ExportButton title={наДень ? `Работа на ${наДень.split('-').reverse().join('.')}` : 'Работа на сегодня'} subtitle={`данные по ${данныеПо}`}
                 getEl={() => экран.current} />
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={сброс}
                 disabled={!отбор.length && !Object.keys(набор.filters).length}>
@@ -646,7 +652,7 @@ export function OpsWorklistPanel() {
           </div>
         )}
       />
-      <WorklistDrill вид={карточка ? расшифровка : null} row={строкаКарточки} onClose={() => setРасшифровка(null)} />
+      <WorklistDrill вид={карточка ? расшифровка : null} row={строкаКарточки} asOf={наДень || undefined} onClose={() => setРасшифровка(null)} />
 
       <BulkTicketDialog open={!!пачка} onClose={() => { setПачка(null); setОтмечены(new Set()) }}
         stations={пачка ?? []} />
@@ -658,45 +664,46 @@ const мск = (iso: string | null) => iso ? new Date(iso).toLocaleString('ru-RU
   { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }) : ''
 
 /** Окно-расшифровка строки: данные станции из тех же API, что карточка станции. */
-function WorklistDrill({ вид, row, onClose }: { вид: Расшифровка | null; row: WorklistRow | null; onClose: () => void }) {
+function WorklistDrill({ вид, row, asOf, onClose }: { вид: Расшифровка | null; row: WorklistRow | null; asOf?: string; onClose: () => void }) {
   const scope = useMonitorScope()
   const { companyId } = useCompany()
   const id = row?.locationId ?? ''
   const надо = (...в: Расшифровка[]) => !!companyId && !!id && !!вид && в.includes(вид)
-  const визиты = useQuery({
-    queryKey: ['drill-visits', companyId, id, scope],
-    queryFn: () => getStationVisits(companyId, id, { days: 90 }),
+  const визиты = useInfiniteQuery({
+    queryKey: ['drill-visits', companyId, id, asOf ?? '', scope],
+    queryFn: ({ pageParam }) => getStationVisits(companyId, id, { days: 90, asOf, offset: pageParam, limit: 200 }),
+    initialPageParam: 0,
+    getNextPageParam: (last) => last.hasMore ? (last.offset ?? 0) + last.returned : undefined,
     enabled: надо('visits'), staleTime: 60_000,
   })
   const история = useQuery({
-    queryKey: ['drill-history', companyId, id, scope],
-    queryFn: () => getStationHistory(companyId, id, 90),
+    queryKey: ['drill-history', companyId, id, asOf ?? '', scope],
+    queryFn: () => getStationHistory(companyId, id, 90, asOf),
     enabled: надо('breaks', 'days'), staleTime: 60_000,
   })
-  // Заявки — срез региона станции, отбор по станции здесь: отдельного запроса
-  // «заявки одной станции» у сервера нет.
+  // Срез самой станции: общий региональный лимит не должен обрезать её историю.
   const заявки = useQuery({
-    queryKey: ['drill-tickets', companyId, row?.region ?? '', scope],
-    queryFn: () => getOpsTickets(companyId, { ...scope, days: 365, region: row?.region ?? undefined, limit: 5000 }),
+    queryKey: ['drill-tickets', companyId, id, asOf ?? ''],
+    queryFn: () => getOpsTickets(companyId, { locationIds: id, days: 365, asOf, limit: 5000 }),
     enabled: надо('tickets'), staleTime: 60_000,
   })
   const имя = РАСШИФРОВКИ.find((р) => р.вид === вид)?.имя ?? ''
-  const подпись = row ? `${row.name}${row.number ? ` · № ${row.number}` : ''}` : ''
+  const подпись = row ? `${row.name}${row.number ? ` · № ${row.number}` : ''}${asOf ? ` · по ${asOf.split('-').reverse().join('.')}` : ''}` : ''
   let head: string[] = []
   let rows: Cell[][] = []
   let q: { isLoading: boolean; isError: boolean } = визиты
   let note: string | undefined
   if (вид === 'visits') {
-    const d = визиты.data
+    const d = визиты.data?.pages[0]
     const картина = new Map(d?.patterns.map((p) => [p.key, p.label]) ?? [])
     head = ['Начало', 'Минут у станции', 'Попыток', 'Зарядился', 'кВт·ч', 'Выручка, ₽', 'Клиент', 'Карта', 'Как прошло']
-    rows = (d?.visits ?? []).map((v) => [мск(v.startedAt), v.minutesAtStation ?? '', v.attempts, v.charged ? 'да' : 'нет',
+    rows = (визиты.data?.pages.flatMap((p) => p.visits) ?? []).map((v) => [мск(v.startedAt), v.minutesAtStation ?? '', v.attempts, v.charged ? 'да' : 'нет',
       v.energyKwh, v.revenue, v.clientName ?? v.client ?? '', v.card ?? '', картина.get(v.pattern) ?? v.pattern])
-    note = d?.note
+    note = d ? `Показано ${rows.length} из ${d.totalMatching ?? d.totals.visits} приездов. ${d.note}` : undefined
   } else if (вид === 'breaks') {
     q = история
     head = ['С', 'По', 'Дней']
-    rows = (история.data?.breaks ?? []).map((b) => [мск(b.from), b.ongoing ? 'идёт сейчас' : мск(b.to), b.days])
+    rows = (история.data?.breaks ?? []).map((b) => [мск(b.from), b.ongoing ? 'до конца среза' : мск(b.to), b.days])
     note = история.data?.note
   } else if (вид === 'days') {
     q = история
@@ -711,7 +718,13 @@ function WorklistDrill({ вид, row, onClose }: { вид: Расшифровк�
   }
   return (
     <RelatedReport open={!!вид && !!row} title={имя} subtitle={подпись} head={head} rows={rows}
-      loading={q.isLoading} error={q.isError} note={note} onClose={onClose} />
+      loading={q.isLoading} error={q.isError && !(вид === 'visits' && визиты.data)} note={note} onClose={onClose}
+      footer={вид === 'visits' && визиты.hasNextPage && <div className="flex flex-col gap-2">
+        {визиты.isFetchNextPageError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить следующую страницу. Уже загруженные приезды сохранены.</p>}
+        <Button variant="outline" disabled={визиты.isFetchingNextPage} onClick={() => void визиты.fetchNextPage()}>
+          {визиты.isFetchingNextPage ? 'Загружаем…' : 'Показать ещё приезды'}
+        </Button>
+      </div>} />
   )
 }
 
@@ -785,9 +798,9 @@ function WorklistCompare({ companyId, region, base, now }: { companyId: string; 
   const ряды: { label: string; cur: number | null; prev: number | null; деньги?: boolean }[] = было ? [
     { label: 'Станций в списке', cur: now.totals.rows, prev: было.totals.rows },
     { label: 'Никем не взято', cur: now.totals.notTaken, prev: было.totals.notTaken },
-    { label: 'Срок заявки сорван', cur: now.totals.breached, prev: было.totals.breached },
+    { label: 'Срок заявки сорван', cur: now.workKnown ? now.totals.breached : null, prev: было.workKnown ? было.totals.breached : null },
     { label: 'Неисправен разъём', cur: now.totals.connector ?? 0, prev: было.totals.connector ?? 0 },
-    { label: 'Поверка и ТО', cur: now.totals.meter + now.totals.service, prev: было.totals.meter + было.totals.service },
+    { label: 'Поверка, ТО и осмотр', cur: now.totals.upkeepUnknown ? null : worklistUpkeepCount(now.rows), prev: было.totals.upkeepUnknown ? null : worklistUpkeepCount(было.rows) },
     { label: 'Цена бездействия, ₽/мес', cur: now.totals.lossPerMonth, prev: было.totals.lossPerMonth, деньги: true },
   ] : []
   const список = (title: string, rows: WorklistRow[]) => (
@@ -854,9 +867,12 @@ function WorklistCompare({ companyId, region, base, now }: { companyId: string; 
           </ul>
           {было.workKnown === false && (
             <p className="text-xs text-muted-foreground">
-              На прошлый день история заявок не восстанавливается, поэтому «никем не взято» там неизвестно.
+              На прошлый день история заявок не восстанавливается, поэтому число невзятых станций и просроченных заявок там неизвестно.
             </p>
           )}
+          {(now.totals.upkeepUnknown > 0 || было.totals.upkeepUnknown > 0) && <p className="text-xs text-muted-foreground">
+            Часть сроков поверки и ТО не заполнена. Полную динамику профилактики сравнить нельзя.
+          </p>}
           {список('Появились в работе', разница.новые)}
           {список('Ушли из работы', разница.ушли)}
         </>

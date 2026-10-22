@@ -61,7 +61,7 @@ export function IntakeHealthBar({ compact }: {
           <AlertTriangle className="size-3.5 shrink-0" />
           Выгрузка не приходила {Math.round(d.hours ?? 0)} ч — последняя загрузка{' '}
           {дата(d.lastLoadAt)}, данные по {дата(d.dataThrough)}.
-          {' '}Всё, что на экранах, посчитано по этому дню.
+          {' '}Более свежих данных пока нет. Дата выбранного среза указана в отчёте.
         </div>
       )}
 

@@ -27,7 +27,7 @@ import { TaskAssignmentBadges } from '@/components/tasks/TaskAssignmentBadges'
 
 /** Пилюля-кнопка: синий акцент, активное состояние — как у остальных кнопок шапки. */
 const btnCls = (active: boolean) =>
-  `relative h-11 min-w-11 px-3 gap-2 rounded-xl transition-all duration-200 font-medium border ${
+  `relative h-10 min-w-10 px-2 gap-2 rounded-xl transition-all duration-200 font-medium border sm:h-11 sm:min-w-11 sm:px-3 ${
     active
       ? 'bg-primary text-white border-primary'
       : 'bg-primary/10 dark:bg-primary/20 hover:bg-primary text-primary dark:text-primary/80 hover:text-white border-primary/30 dark:border-primary/50 hover:border-primary'
@@ -85,7 +85,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
     // Блок виден и на телефоне: чат, задачи и конференция — то, ради чего человек
     // берёт трубку в руки. Прежде он прятался на md:, и в мобильной шапке от него
     // оставалась одна кнопка чата.
-    <div className="flex items-center gap-1.5 pl-1 md:gap-2">
+    <div className="flex items-center gap-1 pl-0 sm:gap-1.5 sm:pl-1 md:gap-2">
       <div className="hidden h-6 w-px bg-border/50 md:block" />
       {/* Конференция стоит во всех шапках (просьба МАГа 10.09.2026): созвон зовут из
           любого экрана, а не только с рабочего стола. На телефоне её прячем везде,
@@ -166,7 +166,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
         size="icon"
         aria-pressed={interactionSection === 'tickets'}
         onClick={() => toggleInteraction('tickets')}
-        className={`h-11 w-11 rounded-xl ${interactionSection === 'tickets' ? 'bg-primary/10 text-primary hover:bg-primary/15' : 'text-muted-foreground hover:text-foreground'}`}
+        className={`h-10 w-10 shrink-0 rounded-xl sm:h-11 sm:w-11 ${interactionSection === 'tickets' ? 'bg-primary/10 text-primary hover:bg-primary/15' : 'text-muted-foreground hover:text-foreground'}`}
         title="Поддержка платформы: вопросы и ошибки по программе"
       >
         <LifeBuoy className="h-[18px] w-[18px]" />

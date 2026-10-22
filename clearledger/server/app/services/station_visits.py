@@ -29,13 +29,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession, ServiceLocation
+from app.services.ops_monitor_context import monitor_context
 
 ОКНО_ДНЕЙ = 30
 ПРЕДЕЛ_ВИЗИТОВ = 200
@@ -81,8 +82,12 @@ async def station_visits(
     days: int = ОКНО_ДНЕЙ,
     only_failed: bool = False,
     limit: int = ПРЕДЕЛ_ВИЗИТОВ,
+    offset: int = 0,
+    as_of: date | None = None,
 ) -> dict[str, Any]:
     """Приезды на станцию за окно, каждый — с попытками внутри."""
+    if offset < 0:
+        raise ValueError("Смещение страницы не может быть отрицательным")
     loc = (await db.execute(select(ServiceLocation).where(
         ServiceLocation.id == location_id,
         ServiceLocation.company_id == company_id))).scalar_one_or_none()
@@ -92,15 +97,16 @@ async def station_visits(
     граница = (await db.execute(
         select(func.max(ChargeSession.started_at))
         .where(ChargeSession.company_id == company_id))).scalar()
-    сейчас = граница or datetime.now(timezone.utc).replace(tzinfo=None)
+    сейчас, контекст = monitor_context(граница, as_of)
     с_даты = сейчас - timedelta(days=days)
 
     сессии = (await db.execute(
         select(ChargeSession)
         .where(ChargeSession.company_id == company_id,
                ChargeSession.location_id == location_id,
-               ChargeSession.started_at >= с_даты)
-        .order_by(ChargeSession.started_at))).scalars().all()
+               ChargeSession.started_at >= с_даты,
+               ChargeSession.started_at <= сейчас)
+        .order_by(ChargeSession.started_at, ChargeSession.id))).scalars().all()
 
     # Группируем по ключу визита. У старых строк его может не быть (ключи
     # проставляет пересчёт после загрузки) — такую попытку показываем отдельным
@@ -112,7 +118,7 @@ async def station_visits(
 
     собранные: list[dict[str, Any]] = []
     for ключ, попытки in визиты.items():
-        попытки.sort(key=lambda s: (s.visit_seq or 0, s.started_at))
+        попытки.sort(key=lambda s: (s.visit_seq or 0, s.started_at, s.session_ext_id))
         первая, последняя = попытки[0], попытки[-1]
         энергия = sum(float(s.energy_kwh or 0) for s in попытки)
         деньги = sum(float(s.client_amount or s.amount or 0) for s in попытки)
@@ -155,7 +161,10 @@ async def station_visits(
             } for i, s in enumerate(попытки)],
         })
 
-    собранные.sort(key=lambda v: v["startedAt"], reverse=True)
+    # При одинаковом времени ключ сохраняет порядок между запросами страниц,
+    # независимо от порядка строк, возвращённых БД.
+    собранные.sort(key=lambda v: (v["startedAt"], v["visitKey"]), reverse=True)
+    страница = собранные[offset:offset + limit]
     всего_визитов = len(визиты)
     неудачных = sum(1 for v in собранные if not v["charged"]) if only_failed else sum(
         1 for ключ, п in визиты.items() if not any(float(s.energy_kwh or 0) > 0 for s in п))
@@ -196,7 +205,7 @@ async def station_visits(
     затяжных = sum(1 for s in пустые if float(s.duration_min or 0) >= 5)
 
     return {
-        "asOf": сейчас.isoformat(),
+        **контекст,
         "days": days,
         "station": {
             "locationId": str(loc.id),
@@ -222,8 +231,11 @@ async def station_visits(
                      "тока не дала"),
         },
         "connectors": sorted(по_коннекторам.values(), key=lambda g: -g["failedPct"]),
-        "visits": собранные[:limit],
-        "returned": min(len(собранные), limit),
+        "visits": страница,
+        "totalMatching": len(собранные),
+        "offset": offset,
+        "hasMore": offset + len(страница) < len(собранные),
+        "returned": len(страница),
         "note": ("визит — один приезд клиента; несколько попыток подряд входят в "
                  "него и показаны шагами. «Без энергии» — попытка завершилась "
                  "штатно, но ток не пошёл"),

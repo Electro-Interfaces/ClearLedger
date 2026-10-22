@@ -25,9 +25,9 @@ export function Header() {
   return (
     <header className="relative z-20 mobile-safe-top box-content h-[var(--header-height)] shrink-0
                        border-b border-border/50 bg-card/95 backdrop-blur-xl">
-      <div className="flex h-full items-center justify-between gap-2 px-2 sm:gap-3 sm:px-4 md:px-6">
+      <div className="flex h-full items-center justify-between gap-1 px-1 sm:gap-3 sm:px-4 md:px-6">
         {/* Левый блок: бургер (моб.) + лого + бренд + свёртка сайдбара */}
-        <div className="flex min-w-0 items-center gap-3 md:gap-4">
+        <div className="flex min-w-0 shrink-0 items-center gap-3 sm:shrink md:gap-4">
           <NavigationBackButton />
           {/* Бургера на телефоне нет (решение МАГа 06.09.2026): меню открывает
               кнопка «Приложения» в нижней панели — та, до которой достаёт большой
@@ -81,10 +81,10 @@ export function Header() {
             В пространстве работают ОРГАНИЗАЦИИ (терминология МАГа 15.08.2026) — их и
             выбирают здесь. Оба переключателя скрываются, когда выбирать не из чего. */}
         {/* Распорка: прижимает переключатель, связь и профиль к правому краю. */}
-        <div className="flex-1" />
+        <div className="hidden flex-1 sm:block" />
 
         {/* Правый блок: организация + связь с пространством + режим + профиль */}
-        <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-1.5 md:gap-2">
           {/* 🔴 Переключатель организации — В ШАПКЕ, слева от «Конференции».
               Он уезжал отсюда дважды: сначала скрывался при единственной организации,
               потом переехал в полосу под шапкой. Оба раза человек искал его глазами на

@@ -23,13 +23,14 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditEvent, ChargeSession, ServiceLocation
+from app.services.ops_monitor_context import MSK, monitor_context
 
 ОКНО_ДНЕЙ = 90
 
@@ -48,6 +49,7 @@ from app.models import AuditEvent, ChargeSession, ServiceLocation
 async def station_history(
     db: AsyncSession, company_id: uuid.UUID, location_id: str, *,
     days: int = ОКНО_ДНЕЙ,
+    as_of: date | None = None,
 ) -> dict[str, Any]:
     """Работа, перерывы и события станции за окно."""
     loc = (await db.execute(select(ServiceLocation).where(
@@ -59,7 +61,7 @@ async def station_history(
     граница = (await db.execute(
         select(func.max(ChargeSession.started_at))
         .where(ChargeSession.company_id == company_id))).scalar()
-    сейчас = граница or datetime.now(timezone.utc).replace(tzinfo=None)
+    сейчас, контекст = monitor_context(граница, as_of)
     с_даты = сейчас - timedelta(days=days)
 
     сорвана = ChargeSession.result.ilike("%error%")
@@ -74,7 +76,8 @@ async def station_history(
                func.avg(ChargeSession.duration_min))
         .where(ChargeSession.company_id == company_id,
                ChargeSession.location_id == location_id,
-               ChargeSession.started_at >= с_даты))).one()
+               ChargeSession.started_at >= с_даты,
+               ChargeSession.started_at <= сейчас))).one()
     всего, срывов, пустых, клиентов, энергия, деньги, длит = итог
     всего = int(всего or 0)
 
@@ -92,7 +95,8 @@ async def station_history(
                        ChargeSession.client_amount, ChargeSession.amount)), 0))
             .where(ChargeSession.company_id == company_id,
                    ChargeSession.location_id == location_id,
-                   ChargeSession.started_at >= с_даты)
+                   ChargeSession.started_at >= с_даты,
+                   ChargeSession.started_at <= сейчас)
             .group_by(func.date(ChargeSession.started_at))
             .order_by(func.date(ChargeSession.started_at)))).all()
     ]
@@ -106,6 +110,7 @@ async def station_history(
             .where(ChargeSession.company_id == company_id,
                    ChargeSession.location_id == location_id,
                    ChargeSession.started_at >= с_даты,
+                   ChargeSession.started_at <= сейчас,
                    ChargeSession.energy_kwh > 0)
             .order_by(ChargeSession.started_at))).all()
     ]
@@ -138,6 +143,7 @@ async def station_history(
         select(AuditEvent)
         .where(AuditEvent.company_id == company_id,
                AuditEvent.action == "location_op_status",
+               AuditEvent.timestamp <= сейчас.replace(tzinfo=MSK),
                AuditEvent.details.like(f'%"location_id":"{loc.id}"%'))
         .order_by(AuditEvent.timestamp.desc()).limit(100))).scalars().all()
     события: list[dict[str, Any]] = []
@@ -158,11 +164,12 @@ async def station_history(
     последняя = (await db.execute(
         select(func.max(ChargeSession.started_at))
         .where(ChargeSession.company_id == company_id,
-               ChargeSession.location_id == location_id))).scalar()
+               ChargeSession.location_id == location_id,
+               ChargeSession.started_at <= сейчас))).scalar()
 
     порты = loc.connectors_count or 0
     return {
-        "asOf": сейчас.isoformat(),
+        **контекст,
         "days": days,
         "station": {
             "locationId": str(loc.id),

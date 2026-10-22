@@ -13,6 +13,9 @@ export default mergeConfig(base, defineConfig({
     enforce: 'pre',
     transform(code, id) {
       const target = id.split('?')[0]
+      if (target.endsWith('/contexts/FilterContext.tsx')) {
+        return code.replace("from './CompanyContext'", `from ${JSON.stringify(path.resolve(__dirname, 'filter-company.tsx'))}`)
+      }
       if (!/\/(WorkspaceFilterBar|NetworkStatePanel|NetworkReliabilityPanel|NetworkVendorsPanel|OpsTicketsPanel|useMonitorScope|BulkTicketDialog)\.tsx?$/.test(target)) return
       const hooks = JSON.stringify(path.resolve(__dirname, 'hooks.tsx'))
       let source = code.replace(/from ['"]@\/contexts\/(CompanyContext|FilterContext)['"]/g, `from ${hooks}`)

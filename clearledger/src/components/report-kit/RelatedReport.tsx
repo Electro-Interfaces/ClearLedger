@@ -9,7 +9,7 @@ import { showCell, type Cell } from './format'
  * нет (МАГ, 15.10.2026: «открываются ещё в одном окне сверху, чтобы я мог его
  * закрыть и остаться там, где был»).
  */
-export function RelatedReport({ open, title, subtitle, head, rows, loading, error, note, onClose, children }: {
+export function RelatedReport({ open, title, subtitle, head, rows, loading, error, note, footer, onClose, children }: {
   open: boolean
   title: string
   subtitle?: string
@@ -18,6 +18,7 @@ export function RelatedReport({ open, title, subtitle, head, rows, loading, erro
   loading?: boolean
   error?: boolean
   note?: string
+  footer?: ReactNode
   onClose: () => void
   children?: ReactNode
 }) {
@@ -58,6 +59,7 @@ export function RelatedReport({ open, title, subtitle, head, rows, loading, erro
             </table>
           )}
           {note && !loading && <p className="mt-3 text-xs text-muted-foreground">{note}</p>}
+          {footer && !loading && <div className="mt-3">{footer}</div>}
         </div>
       </DialogContent>
     </Dialog>

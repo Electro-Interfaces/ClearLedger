@@ -9,15 +9,31 @@
 
 import { toPng } from 'html-to-image'
 import { saveAs } from 'file-saver'
+import { exportDateStamp } from '@/lib/exportDate'
+import { showCell } from '@/components/report-kit/format'
 import {
   getChargePivot, getChargeSessionRows, getChargeNewClientsList,
   type ChargePivotDim, type ChargeMetric, type ChargeSessionRow, type ChargeNewClientRow,
 } from './analyticsService'
 
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+let pdfFonts: Promise<Record<string, string>> | undefined
+
+function loadPdfFonts(): Promise<Record<string, string>> {
+  pdfFonts ??= fetch(`${import.meta.env.BASE_URL}pdfmake/vfs_fonts.js`).then(async (response) => {
+    if (!response.ok) throw new Error('Не удалось загрузить шрифт PDF')
+    // Локальный файл поставки содержит JSON-словарь TTF. Код файла не исполняется.
+    const source = await response.text()
+    const start = source.indexOf('{'), end = source.indexOf('};', start)
+    const fonts = JSON.parse(source.slice(start, end + 1)) as Record<string, string>
+    if (!fonts['Roboto-Regular.ttf'] || !fonts['Roboto-Medium.ttf']) throw new Error('Не найден шрифт PDF')
+    return fonts
+  }).catch((error) => { pdfFonts = undefined; throw error })
+  return pdfFonts
+}
 
 function fileBase(title: string): string {
-  const date = new Date().toISOString().slice(0, 10)
+  const date = exportDateStamp()
   return `${title.replace(/[\\/:*?"<>|]+/g, ' ').trim()} · ${date}`
 }
 
@@ -198,8 +214,47 @@ export async function exportNewClientsXlsx(
   saveAs(new Blob([buf], { type: XLSX_MIME }), `${fileBase(`Новые клиенты · ${label}`)}.xlsx`)
 }
 
-export async function exportChargePdf(el: HTMLElement, title: string): Promise<void> {
+export async function exportChargePdf(el: HTMLElement, title: string, subtitle?: string): Promise<void> {
   const { jsPDF } = await import('jspdf')
+  const tables = readTables(el)
+  if (tables.length && !findCharts(el).length) {
+    const [{ default: autoTable }, fonts] = await Promise.all([import('jspdf-autotable'), loadPdfFonts()])
+    const doc = new jsPDF({ orientation: tables.some((table) => table.columns.length > 6) ? 'landscape' : 'portrait', unit: 'pt', format: 'a4' })
+    for (const [file, style] of [['Roboto-Regular.ttf', 'normal'], ['Roboto-Medium.ttf', 'bold']]) {
+      doc.addFileToVFS(file, fonts[file]); doc.addFont(file, 'Report', style)
+    }
+    doc.setFont('Report', 'bold'); doc.setFontSize(13)
+    doc.text(title, 24, 35)
+    let y = 48
+    if (subtitle) {
+      doc.setFont('Report', 'normal'); doc.setFontSize(9)
+      const lines = doc.splitTextToSize(subtitle, doc.internal.pageSize.getWidth() - 48)
+      doc.text(lines, 24, y); y += lines.length * 12 + 6
+    }
+    const kpis = readKpis(el)
+    const sections: Tbl[] = [...(kpis.length ? [{ name: 'Показатели', columns: ['Показатель', 'Значение', 'Примечание'], rows: kpis.map((k) => [k.label, k.value, k.hint]) }] : []), ...tables]
+    for (const table of sections) {
+      if (y > doc.internal.pageSize.getHeight() - 80) { doc.addPage(); y = 30 }
+      doc.setFont('Report', 'bold'); doc.setFontSize(10)
+      doc.text(`${table.name} · строк: ${table.rows.length}`, 24, y)
+      autoTable(doc, {
+        startY: y + 8, head: [table.columns],
+        body: table.rows.map((row) => row.map((value, col) => value === '' ? '—' : showCell(value, table.columns[col]))),
+        margin: { top: 24, bottom: 30, left: 24, right: 24 },
+        theme: 'grid', styles: { font: 'Report', fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
+        headStyles: { font: 'Report', fontStyle: 'bold', fillColor: [238, 240, 246], textColor: [25, 32, 45] },
+        columnStyles: Object.fromEntries(table.columns.flatMap((_, col) => table.rows.some((row) => typeof row[col] === 'number') ? [[col, { halign: 'right' as const }]] : [])),
+      })
+      y = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 20
+    }
+    const pages = doc.getNumberOfPages()
+    for (let page = 1; page <= pages; page++) {
+      doc.setPage(page); doc.setFont('Report', 'normal'); doc.setFontSize(8)
+      doc.text(`${page} / ${pages}`, doc.internal.pageSize.getWidth() - 24, doc.internal.pageSize.getHeight() - 14, { align: 'right' })
+    }
+    doc.save(`${fileBase(title)}.pdf`)
+    return
+  }
   const dataUrl = await snapshot(el)
   const img = new Image()
   await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error('img')); img.src = dataUrl })
@@ -301,7 +356,7 @@ export async function exportChargePivots(opts: {
       rows: pv.rows, cols: pv.cols, metric: pv.metric,
     })
     const ws = wb.addWorksheet(safeSheet(pv.title, used))
-    const corner = PIVOT_DIM_LABEL[pv.rows] + (pv.cols ? ` \ ${PIVOT_DIM_LABEL[pv.cols]}` : '')
+    const corner = PIVOT_DIM_LABEL[pv.rows] + (pv.cols ? `  ${PIVOT_DIM_LABEL[pv.cols]}` : '')
     ws.addRow([`${pv.title} — ${PIVOT_METRIC_LABEL[pv.metric ?? 'amount']}`]).font = { bold: true, size: 13 }
     ws.addRow([`Период ${opts.dateFrom} … ${opts.dateTo}`]).font = { italic: true, color: { argb: 'FF888888' } }
     ws.addRow([])
