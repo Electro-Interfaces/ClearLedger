@@ -3,16 +3,660 @@
 5 passed in 0.07s
 ── tests/test_accounting_adjustment.py
 ...........                                                              [100%]
-11 passed in 0.11s
+11 passed in 0.09s
 ── tests/test_accounting_business_date.py
 ....                                                                     [100%]
-4 passed in 0.07s
+4 passed in 0.06s
 карантин, пропущен: tests/test_accounting_egress.py
 карантин, пропущен: tests/test_accounting_group_v3.py
 ── tests/test_accounting_outbox.py
 ...................                                                      [100%]
-19 passed in 1.23s
+19 passed in 1.09s
 ── tests/test_accounting_reconciliation.py
 .........                                                                [100%]
-9 passed in 0.09s
+9 passed in 0.08s
 ── tests/test_acquaint_requests.py
+.....                                                                    [100%]
+5 passed in 13.10s
+── tests/test_app_registry_defaults.py
+...........                                                              [100%]
+11 passed in 0.09s
+── tests/test_approval_requests.py
+.......                                                                  [100%]
+7 passed in 0.08s
+── tests/test_asuim_payment_time.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_asuim_vitrina.py
+...............                                                          [100%]
+15 passed in 0.25s
+── tests/test_audit_security.py
+.                                                                        [100%]
+1 passed in 12.13s
+── tests/test_auth.py
+.............                                                            [100%]
+13 passed in 16.64s
+── tests/test_bp_package_transport.py
+.....                                                                    [100%]
+5 passed in 0.98s
+── tests/test_business_access.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_calendar.py
+.....                                                                    [100%]
+5 passed in 11.50s
+── tests/test_calendar_meeting.py
+..                                                                       [100%]
+2 passed in 13.00s
+── tests/test_calendar_papers.py
+..                                                                       [100%]
+2 passed in 11.62s
+── tests/test_calendar_workflow.py
+..............                                                           [100%]
+14 passed in 12.31s
+── tests/test_catalog_check_deleted.py
+..                                                                       [100%]
+2 passed in 0.06s
+── tests/test_catering_economy.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_cena_rozhdaetsya_stanciey.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_charge_sales_regressions.py
+......                                                                   [100%]
+6 passed in 0.94s
+── tests/test_chat_room_subject.py
+...                                                                      [100%]
+3 passed in 13.64s
+── tests/test_chat_scope_directory.py
+..                                                                       [100%]
+2 passed in 14.77s
+── tests/test_chat_ws.py
+......                                                                   [100%]
+6 passed in 12.64s
+── tests/test_cheque_catalog_vat.py
+............                                                             [100%]
+12 passed in 0.08s
+── tests/test_client_errors.py
+.....                                                                    [100%]
+5 passed in 0.07s
+── tests/test_companies.py
+.......                                                                  [100%]
+7 passed in 14.68s
+── tests/test_conf_app.py
+................                                                         [100%]
+16 passed in 16.20s
+── tests/test_conf_privacy.py
+...                                                                      [100%]
+3 passed in 12.83s
+── tests/test_conf_protocol.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_contract_direction.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_contract_liability.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_contract_scope.py
+.........                                                                [100%]
+9 passed in 17.08s
+── tests/test_cutover_state_machine.py
+.......                                                                  [100%]
+7 passed in 0.96s
+── tests/test_data_nakladnoy_dlya_stancii.py
+....                                                                     [100%]
+4 passed in 0.06s
+── tests/test_database_lifecycle.py
+.                                                                        [100%]
+1 passed in 12.05s
+── tests/test_digest.py
+........                                                                 [100%]
+8 passed in 0.07s
+── tests/test_digest_task_link.py
+.                                                                        [100%]
+1 passed in 0.05s
+── tests/test_doc_note_in_force.py
+..                                                                       [100%]
+2 passed in 12.84s
+── tests/test_doc_text.py
+.........                                                                [100%]
+9 passed in 1.11s
+── tests/test_doc_workflow_unit.py
+.....................                                                    [100%]
+21 passed in 0.92s
+── tests/test_docs_archive_flow.py
+......                                                                   [100%]
+=============================== warnings summary ===============================
+tests/test_docs_archive_flow.py::test_акт_уничтожения_требует_четырёх_раздельных_решений
+  <sys>:0: SAWarning: DELETE statement on table 'doc_exports' expected to delete 1 row(s); 0 were matched.  Please set confirm_deleted_rows=False within the mapper configuration to prevent this warning.
+
+tests/test_docs_archive_flow.py::test_акт_уничтожения_требует_четырёх_раздельных_решений
+  <sys>:0: SAWarning: DELETE statement on table 'doc_versions' expected to delete 1 row(s); 0 were matched.  Please set confirm_deleted_rows=False within the mapper configuration to prevent this warning.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+6 passed, 2 warnings in 18.83s
+── tests/test_docs_archive_queue.py
+.                                                                        [100%]
+1 passed in 13.15s
+── tests/test_docs_archive_security.py
+...........                                                              [100%]
+11 passed in 0.96s
+── tests/test_docs_editing_unit.py
+......                                                                   [100%]
+6 passed in 0.93s
+── tests/test_docs_next.py
+........................                                                 [100%]
+24 passed in 23.95s
+── tests/test_docs_register.py
+.......................                                                  [100%]
+23 passed in 25.02s
+── tests/test_docs_reports.py
+.....                                                                    [100%]
+5 passed in 14.60s
+── tests/test_document_requests.py
+........                                                                 [100%]
+8 passed in 0.88s
+── tests/test_dubli_smen.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_eco_work_desk.py
+..                                                                       [100%]
+2 passed in 12.89s
+── tests/test_edge_chain.py
+...                                                                      [100%]
+3 passed in 0.10s
+── tests/test_edge_kkt.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_edge_ns_codes_own.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_edge_packet_hash.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_edge_stock.py
+..                                                                       [100%]
+2 passed in 0.07s
+── tests/test_edge_stock_alerts.py
+.......                                                                  [100%]
+7 passed in 0.97s
+── tests/test_edge_stock_nocode.py
+....                                                                     [100%]
+4 passed in 0.08s
+карантин, пропущен: tests/test_edge_to_bp_flow.py
+── tests/test_edge_transfers.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_edo_upd_article.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_edo_upd_seller.py
+..                                                                       [100%]
+2 passed in 0.06s
+── tests/test_entries.py
+.............                                                            [100%]
+13 passed in 17.69s
+── tests/test_equipment_docs.py
+..............                                                           [100%]
+14 passed in 0.10s
+── tests/test_equipment_reports.py
+.......                                                                  [100%]
+7 passed in 0.12s
+── tests/test_export_policy.py
+.....                                                                    [100%]
+5 passed in 0.07s
+── tests/test_external_approval.py
+........                                                                 [100%]
+8 passed in 0.07s
+── tests/test_ezs_accounting.py
+........                                                                 [100%]
+8 passed in 0.09s
+── tests/test_ezs_checklist.py
+..........                                                               [100%]
+10 passed in 0.09s
+── tests/test_ezs_exit_reasons.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_ezs_gate_waiver.py
+........                                                                 [100%]
+8 passed in 0.91s
+── tests/test_ezs_tp_steps.py
+........                                                                 [100%]
+8 passed in 0.12s
+── tests/test_fuel_balance.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_fuel_costing_allocation.py
+..                                                                       [100%]
+2 passed in 0.06s
+── tests/test_fuel_pricing_events.py
+........                                                                 [100%]
+8 passed in 0.08s
+── tests/test_gate_by_doc.py
+...                                                                      [100%]
+3 passed in 12.74s
+── tests/test_goods_report_list.py
+...                                                                      [100%]
+3 passed in 0.08s
+── tests/test_guard.py
+.....                                                                    [100%]
+5 passed in 0.08s
+── tests/test_health.py
+....                                                                     [100%]
+4 passed in 12.12s
+── tests/test_ics.py
+..........                                                               [100%]
+10 passed in 0.08s
+── tests/test_ics_invite.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_info_cc.py
+..                                                                       [100%]
+2 passed in 17.66s
+── tests/test_info_center.py
+.....                                                                    [100%]
+5 passed in 0.10s
+── tests/test_info_seed_equipment.py
+.....                                                                    [100%]
+5 passed in 0.12s
+── tests/test_info_seed_station.py
+.....                                                                    [100%]
+5 passed in 0.08s
+── tests/test_info_seed_work_contexts.py
+..                                                                       [100%]
+2 passed in 16.93s
+── tests/test_invitations.py
+.....                                                                    [100%]
+5 passed in 15.95s
+── tests/test_item_draft_atomic.py
+....                                                                     [100%]
+4 passed in 0.25s
+── tests/test_item_draft_auto.py
+..........                                                               [100%]
+10 passed in 0.10s
+── tests/test_item_draft_defaults.py
+....                                                                     [100%]
+4 passed in 0.08s
+── tests/test_launcher_favorites.py
+......                                                                   [100%]
+6 passed in 13.70s
+── tests/test_location_bindings.py
+.....                                                                    [100%]
+5 passed in 0.07s
+── tests/test_location_metadata_merge.py
+...                                                                      [100%]
+3 passed in 0.10s
+── tests/test_location_types.py
+.....                                                                    [100%]
+5 passed in 15.34s
+── tests/test_mail_robot_sender.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_mail_security.py
+...............                                                          [100%]
+15 passed in 0.97s
+── tests/test_mail_sender_parse.py
+.....                                                                    [100%]
+5 passed in 0.06s
+── tests/test_mail_to_task.py
+...                                                                      [100%]
+3 passed in 13.23s
+── tests/test_managed_connectors.py
+...........                                                              [100%]
+11 passed in 1.54s
+── tests/test_market_operators.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_market_registry.py
+...........                                                              [100%]
+11 passed in 0.12s
+── tests/test_market_scope.py
+.....                                                                    [100%]
+5 passed in 0.87s
+── tests/test_matrix_rules.py
+.......                                                                  [100%]
+7 passed in 12.97s
+── tests/test_meeting_series.py
+..........                                                               [100%]
+10 passed in 0.08s
+── tests/test_megafon_voice.py
+..                                                                       [100%]
+2 passed in 16.46s
+── tests/test_notes_attachments.py
+..                                                                       [100%]
+2 passed in 12.50s
+── tests/test_notify_rules.py
+...                                                                      [100%]
+3 passed in 0.15s
+── tests/test_object_freeze.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_object_scope.py
+.....                                                                    [100%]
+5 passed in 0.08s
+── tests/test_onec_entry_adapter.py
+.....                                                                    [100%]
+5 passed in 0.08s
+── tests/test_ops_closing.py
+.......................                                                  [100%]
+23 passed in 0.11s
+── tests/test_ops_monitor_scope.py
+.....                                                                    [100%]
+5 passed in 12.71s
+── tests/test_ops_monitor_unit.py
+....                                                                     [100%]
+4 passed in 0.10s
+── tests/test_oversight.py
+...........                                                              [100%]
+11 passed in 13.66s
+── tests/test_partner_bridge_topics.py
+........                                                                 [100%]
+8 passed in 12.05s
+── tests/test_partner_sync.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_partner_visit_pass.py
+............                                                             [100%]
+12 passed in 13.55s
+── tests/test_personal_isolation.py
+...............                                                          [100%]
+15 passed in 15.05s
+── tests/test_personal_reminders.py
+...                                                                      [100%]
+3 passed in 12.25s
+── tests/test_personal_visibility.py
+..                                                                       [100%]
+2 passed in 12.47s
+── tests/test_pii_masker.py
+.......                                                                  [100%]
+7 passed in 0.08s
+── tests/test_placement.py
+.........                                                                [100%]
+9 passed in 0.08s
+── tests/test_process_boundary.py
+...                                                                      [100%]
+3 passed in 0.13s
+── tests/test_process_templates.py
+.....                                                                    [100%]
+5 passed in 17.60s
+── tests/test_project_analytics.py
+.....                                                                    [100%]
+5 passed in 0.90s
+── tests/test_project_audit.py
+..                                                                       [100%]
+2 passed in 12.57s
+── tests/test_project_changes.py
+.....                                                                    [100%]
+5 passed in 0.97s
+── tests/test_project_feedback_unit.py
+.................                                                        [100%]
+17 passed in 1.01s
+── tests/test_project_integration.py
+............................................                             [100%]
+44 passed in 1.11s
+── tests/test_project_reconcile.py
+........                                                                 [100%]
+8 passed in 0.09s
+── tests/test_project_report.py
+........                                                                 [100%]
+8 passed in 0.17s
+── tests/test_project_scenario_versions.py
+.....                                                                    [100%]
+5 passed in 17.67s
+── tests/test_projects_process.py
+......                                                                   [100%]
+6 passed in 11.67s
+── tests/test_pulse_home.py
+........                                                                 [100%]
+8 passed in 14.85s
+── tests/test_pulse_rules.py
+.................................................                        [100%]
+49 passed in 0.20s
+── tests/test_rate_limit.py
+......                                                                   [100%]
+6 passed in 0.69s
+── tests/test_raw_intake.py
+...............                                                          [100%]
+15 passed in 0.10s
+── tests/test_receipt_authority.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_recipe_versions.py
+......                                                                   [100%]
+6 passed in 13.07s
+── tests/test_reestr_contract_pick.py
+...                                                                      [100%]
+3 passed in 0.93s
+── tests/test_references_sync.py
+.......                                                                  [100%]
+7 passed in 12.13s
+── tests/test_rejected_sessions.py
+.......                                                                  [100%]
+7 passed in 0.11s
+── tests/test_scope_reaches_screens.py
+...........                                                              [100%]
+11 passed in 0.92s
+── tests/test_security_audit.py
+..............                                                           [100%]
+14 passed in 0.22s
+── tests/test_service_accounts.py
+...                                                                      [100%]
+3 passed in 12.74s
+── tests/test_service_token_tenant.py
+...............                                                          [100%]
+15 passed in 7.45s
+── tests/test_shared_commercial_owner.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_site_track.py
+.......                                                                  [100%]
+7 passed in 14.76s
+── tests/test_sites_close_and_node.py
+...                                                                      [100%]
+3 passed in 13.25s
+── tests/test_sites_intake.py
+......                                                                   [100%]
+6 passed in 12.19s
+── tests/test_sku.py
+..........                                                               [100%]
+10 passed in 0.09s
+── tests/test_sku_allocation.py
+...                                                                      [100%]
+3 passed in 11.80s
+── tests/test_sliyanie_ttk_po_stanciyam.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_snyatie_ceny_ne_nol.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_space_connection_registry.py
+....                                                                     [100%]
+4 passed in 0.87s
+── tests/test_space_data_model.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_space_events.py
+.......                                                                  [100%]
+7 passed in 0.08s
+── tests/test_space_events_router.py
+..............                                                           [100%]
+14 passed in 0.09s
+── tests/test_space_links.py
+..                                                                       [100%]
+2 passed in 0.07s
+── tests/test_space_projection_batching.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_space_projection_users.py
+.                                                                        [100%]
+1 passed in 12.77s
+── tests/test_space_time.py
+.........................................                                [100%]
+41 passed in 0.14s
+── tests/test_spare_docs.py
+........................                                                 [100%]
+24 passed in 0.12s
+── tests/test_stanciya_sklada.py
+....                                                                     [100%]
+4 passed in 0.06s
+── tests/test_starter_templates.py
+.....                                                                    [100%]
+5 passed in 13.95s
+── tests/test_station_canon.py
+....                                                                     [100%]
+4 passed in 0.08s
+── tests/test_station_console_query.py
+..                                                                       [100%]
+2 passed in 0.06s
+── tests/test_station_console_redirect.py
+.....                                                                    [100%]
+5 passed in 0.09s
+── tests/test_station_console_rewrite.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_station_exchange_state.py
+......                                                                   [100%]
+6 passed in 0.12s
+── tests/test_station_numbers.py
+...                                                                      [100%]
+3 passed in 1.01s
+── tests/test_station_passport.py
+.......                                                                  [100%]
+7 passed in 0.08s
+── tests/test_station_roster.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_stats.py
+...                                                                      [100%]
+3 passed in 12.75s
+── tests/test_stock_batches_cost.py
+...                                                                      [100%]
+3 passed in 0.86s
+── tests/test_store_baskets.py
+......                                                                   [100%]
+6 passed in 0.11s
+── tests/test_store_catalog_health.py
+..                                                                       [100%]
+2 passed in 0.07s
+── tests/test_store_document_snapshot_refs.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_store_documents_projection.py
+........................................................................ [ 88%]
+.........                                                                [100%]
+81 passed in 1.46s
+── tests/test_store_drilldown.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_store_dynamics_price_log.py
+.                                                                        [100%]
+1 passed in 0.06s
+── tests/test_store_price_mrc.py
+....                                                                     [100%]
+4 passed in 0.08s
+── tests/test_store_price_plans.py
+........                                                                 [100%]
+8 passed in 0.88s
+── tests/test_store_price_response.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_store_receipt_accounting_readiness.py
+................                                                         [100%]
+16 passed in 1.27s
+── tests/test_store_receipt_contract.py
+...............                                                          [100%]
+15 passed in 0.99s
+── tests/test_store_receipt_ingest.py
+ss                                                                       [100%]
+2 skipped in 0.09s
+── tests/test_store_release_cost.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_store_shift_dedup.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_store_shift_flow.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_store_shifts_scope.py
+.....                                                                    [100%]
+5 passed in 0.89s
+── tests/test_store_stock_cost_doubt.py
+........                                                                 [100%]
+8 passed in 0.08s
+── tests/test_support_context_source_v1.py
+.                                                                        [100%]
+1 passed in 13.19s
+── tests/test_support_context_v1.py
+........................................................................ [ 45%]
+........................................................................ [ 90%]
+...............                                                          [100%]
+=============================== warnings summary ===============================
+tests/test_support_context_v1.py::test_renew_phase_issues_fresh_rights_without_upgrading_old_token[offering-connected]
+  /usr/local/lib/python3.13/site-packages/websockets/legacy/__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+tests/test_support_context_v1.py::test_renew_phase_issues_fresh_rights_without_upgrading_old_token[offering-connected]
+  /usr/local/lib/python3.13/site-packages/uvicorn/protocols/websockets/websockets_impl.py:17: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+159 passed, 2 warnings in 276.85s (0:04:36)
+── tests/test_svedenie_1s.py
+......                                                                   [100%]
+6 passed in 0.08s
+── tests/test_task_from_message.py
+..                                                                       [100%]
+2 passed in 12.82s
+── tests/test_task_notify_channels.py
+....                                                                     [100%]
+4 passed in 12.70s
+── tests/test_tasks_route.py
+.................                                                        [100%]
+17 passed in 23.43s
+── tests/test_tenant_isolation.py
+....                                                                     [100%]
+4 passed in 18.46s
+── tests/test_ticket_communications.py
+............                                                             [100%]
+12 passed in 0.26s
+── tests/test_vendor_portal.py
+......................                                                   [100%]
+22 passed in 0.63s
+── tests/test_voice_connections.py
+..                                                                       [100%]
+2 passed in 15.93s
+── tests/test_voice_core.py
+......                                                                   [100%]
+6 passed in 13.56s
+── tests/test_voice_customer_summary_answers.py
+...                                                                      [100%]
+3 passed in 16.93s
+── tests/test_voice_knowledge.py
+.                                                                        [100%]
+1 passed in 13.33s
+── tests/test_voice_support_context.py
+...                                                                      [100%]
+3 passed in 14.68s
+── tests/test_voice_tokens.py
+.........                                                                [100%]
+9 passed in 31.02s
+── tests/test_work_contexts_integration.py
+....................                                                     [100%]
+20 passed in 23.08s
+── tests/test_work_list.py
+.......                                                                  [100%]
+7 passed in 16.21s
+── tests/test_work_state.py
+.......                                                                  [100%]
+7 passed in 0.09s
+── tests/test_works_roles.py
+....                                                                     [100%]
+4 passed in 11.75s
+
+проверок не было (окружение отключило файл целиком): tests/test_store_receipt_ingest.py
+в CI эти файлы гоняются — зелёный прогон здесь не заменяет зелёный CI
+все файлы зелёные
+RC=0
