@@ -15,6 +15,7 @@ run_channel(db, channel) диспетчеризует по типу источн
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -645,14 +646,22 @@ async def run_channel(
     src = await _channel_source(db, channel.id)
     if src is None:
         return {"status": "skipped", "message": "в потоках канала нет источника"}
+    # rollback истекает ORM-атрибуты, даже при expire_on_commit=False. Факты для
+    # журнала фиксируем заранее, чтобы ошибка нормализации не скрылась за lazy load.
+    channel_fact = SimpleNamespace(id=channel.id, name=channel.name, template_id=channel.template_id)
+    source_fact = SimpleNamespace(id=src.id, company_id=src.company_id,
+                                  source_type=src.source_type, name=src.name)
     try:
         result = await _dispatch(db, channel, src, date_from, date_to, log_id,
                                  station_codes, all_period, mode)
     except Exception as exc:  # noqa: BLE001 — факт неудачи нужен именно при ней
-        await _publish_sync_fact(db, channel, src,
+        # Событие ошибки коммитится отдельно от незавершённого импорта. Иначе
+        # ValueError/IdentityConflict оставлял уже добавленные карточки в базе.
+        await db.rollback()
+        await _publish_sync_fact(db, channel_fact, source_fact,
                                  {"status": "error", "message": str(exc)})
         raise
-    await _publish_sync_fact(db, channel, src, result)
+    await _publish_sync_fact(db, channel_fact, source_fact, result)
     return result
 
 

@@ -14,6 +14,7 @@ import type {
   EnergyPeriodsSummary, ReestrModel, DispenseRecon,
 } from '@/types/settlement'
 import { isApiEnabled, get, post, patch, put, del, upload } from './apiClient'
+import { counterpartyPatch } from '@/lib/contractFormSave'
 import {
   counterpartiesKey, organizationsKey, nomenclatureKey, contractsKey,
   warehousesKey, bankAccountsKey, balancesKey,
@@ -120,7 +121,7 @@ export async function updateCounterparty(
   updates: Partial<Omit<Counterparty, 'id' | 'companyId' | 'createdAt'>>,
 ): Promise<Counterparty | undefined> {
   if (isApiEnabled()) {
-    return patch<Counterparty>(`/api/references/counterparties/${id}`, updates)
+    return patch<Counterparty>(`/api/references/counterparties/${id}`, counterpartyPatch(updates))
   }
   const list = await loadList<Counterparty>(counterpartiesKey(companyId))
   const idx = list.findIndex((c) => c.id === id)
@@ -417,9 +418,11 @@ export async function findContractsByCounterparty(companyId: string, counterpart
   return list.filter((c) => c.counterpartyId === counterpartyId)
 }
 
+export type CreateContractInput = Omit<Contract, 'id' | 'companyId' | 'createdAt' | 'updatedAt'> & { creationKey?: string }
+
 export async function createContract(
   companyId: string,
-  input: Omit<Contract, 'id' | 'companyId' | 'createdAt' | 'updatedAt'>,
+  input: CreateContractInput,
 ): Promise<Contract> {
   if (isApiEnabled()) {
     return post<Contract>('/api/references/contracts', { ...input, company_id: companyId })
@@ -467,6 +470,10 @@ export interface ContractUsage { app: string; label: string; count: number }
 export interface SpaceDocument {
   id: string; docType: 'space_file' | 'contract_card'; title: string; catalog: string; date: string
   contractId?: string | null; docId?: string; fileId?: string | null; fileName?: string | null; size?: number | null; status?: string | null
+  contractIds?: string[]
+  siteId?: string
+  projectId?: string | null
+  siteDocId?: string
 }
 
 /** Дерево «Документов» пространства: договоры с их бумагами, документы проектов, «Трек». */

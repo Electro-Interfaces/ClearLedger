@@ -40,7 +40,7 @@ const REASON_ICON = {
 } as const
 
 export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
-  hideDeferred = false, hideTaken = false, kinds }: {
+  hideDeferred = false, hideTaken = false, kinds, onOpenTask }: {
   /** Оставить только поручения или только документы. На телефоне очередь режут
    *  по этому вопросу: «Трек» ведёт и то и другое, но за раз человек разбирает
    *  что-то одно (замечание МАГа 08.09.2026). */
@@ -54,6 +54,7 @@ export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
    *  сроку. Своя копия строки очереди разошлась бы с этой на первой же правке. */
   reasons?: MyWorkItem['reason'][]
   kinds?: MyWorkItem['kind'][]
+  onOpenTask?: (id: string) => void
   /** Чем объяснить пустоту, когда разрез узкий: «виз на вас нет» вместо общего. */
   empty?: string
   /** Спрятанное человеком до будущего дня не показывать. Включается там, где
@@ -163,7 +164,8 @@ export function MyWorkPage({ buckets: only, reasons, empty, heading = true,
               {group.map((item) => (
                 <Line key={`${item.kind}-${item.id}-${item.reason}`} item={item}
                   busy={act.isPending} companyId={company.id} onChanged={refresh}
-                  onOpen={() => navigate(workService.myWorkHref(item))}
+                  onOpen={() => item.kind === 'task' && onOpenTask
+                    ? onOpenTask(item.id) : navigate(workService.myWorkHref(item))}
                   onDone={() => act.mutate(item)} />
               ))}
             </div>

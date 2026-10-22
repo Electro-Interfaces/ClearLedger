@@ -6,19 +6,20 @@
  * карточки «Трека» уникален, а бумаг у договора много). Поэтому тот же документ виден
  * в «Треке», в карточке договора и в «Документах» пространства (папка договора).
  *
- * Доп. соглашение может менять срок и сумму — как в 1С, где оно живёт табличной частью
- * договора: изменение применяется к договору, а в документе остаётся, что именно поменяли.
+ * Предлагаемые изменения условий сохраняются в attrs документа. Регистрация бумаги
+ * не подтверждает подписание и потому не меняет условия договора.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Loader2, Paperclip } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useCompany } from '@/contexts/CompanyContext'
-import { get, post } from '@/services/apiClient'
+import { ApiError, get, post } from '@/services/apiClient'
 import { createDoc, getDoc, listDocs, registerDoc, uploadVersion, type DocKind } from '@/services/docsService'
-import { updateContract } from '@/services/referenceService'
+import { getCounterparties } from '@/services/referenceService'
+import { localReferenceId, resumeCreation, type CreationProgress } from '@/lib/contractFormSave'
 import { openAuthAttachment } from '@/lib/authFiles'
 import type { Contract } from '@/types'
 
@@ -38,6 +39,11 @@ export function ContractDocumentsBlock({ contract: c }: { contract: Contract }) 
   const [f, setF] = useState({ kindId: '', number: '', date: '', title: '', validUntil: '', amount: '' })
   const [file, setFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
+  const progress = useRef<CreationProgress>({ completed: [] })
+  const draft = useRef<{ body: Record<string, unknown>; file: File } | null>(null)
+  const [saveError, setSaveError] = useState('')
+  const counterparties = useQuery({ queryKey: ['references', companyId, 'counterparties'],
+    queryFn: () => getCounterparties(companyId), enabled: adding })
   const kind = kinds.data?.find((k) => k.id === f.kindId)
   const supplement = kind?.code === 'contract_supplement'
 
@@ -51,29 +57,53 @@ export function ContractDocumentsBlock({ contract: c }: { contract: Contract }) 
   }
 
   const save = async () => {
-    if (!kind || !file) return
+    if (!kind || !file || progress.current.running) return
+    const cpId = localReferenceId(c.counterpartyId, counterparties.data ?? [])
+    if (!cpId) { setSaveError('Не удалось определить контрагента договора. Дождитесь загрузки справочника или проверьте его связь с договором.'); return }
     setBusy(true)
+    setSaveError('')
     try {
+      const retry = !!draft.current
       const changes: Record<string, unknown> = {}
       if (supplement && f.validUntil) changes.validUntil = f.validUntil
       if (supplement && f.amount) changes.amountLimit = Number(f.amount)
-      const doc = await createDoc(companyId, {
+      draft.current ??= { file, body: {
         kind_id: kind.id, title: f.title.trim() || `${kind.name} к договору № ${c.number}`,
-        counterparty_id: c.counterpartyId, external_number: f.number.trim() || null, external_date: f.date || null,
+        counterparty_id: cpId, external_number: f.number.trim() || null, external_date: f.date || null,
         attrs: { contract_id: c.id, ...(Object.keys(changes).length ? { contract_changes: changes } : {}) },
-      })
-      await post(`/api/docs/${doc.id}/relations`, { company_id: companyId, kind: 'annex_of', target_ref: ref })
-      await uploadVersion(companyId, doc.id, file, 'body')
-      await registerDoc(companyId, doc.id)
-      if (Object.keys(changes).length) {
-        await updateContract(companyId, c.id, changes as Partial<Contract>)
-        qc.invalidateQueries({ queryKey: ['references', companyId] })
-      }
+        source: 'manual', source_ref: `contract-document:${crypto.randomUUID()}`,
+      } }
+      const pendingDraft = draft.current
+      await resumeCreation(progress.current, () => createDoc(companyId, pendingDraft.body), [
+        { name: 'relation', run: async (id) => {
+          if (retry && (await getDoc(companyId, id)).relations.some((r) => r.kind === 'annex_of' && r.target_ref === ref)) return
+          await post(`/api/docs/${id}/relations`, { company_id: companyId, kind: 'annex_of', target_ref: ref })
+        } },
+        { name: 'upload', run: async (id) => {
+          if (retry) {
+            const details = await getDoc(companyId, id)
+            const hash = await crypto.subtle.digest('SHA-256', await pendingDraft.file.arrayBuffer())
+            const sha256 = Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join('')
+            if (details.versions.some((v) => v.role === 'body' && v.sha256 === sha256)) return
+          }
+          await uploadVersion(companyId, id, pendingDraft.file, 'body')
+        } },
+        { name: 'register', run: async (id) => {
+          if (retry && (await getDoc(companyId, id)).reg_number) return
+          await registerDoc(companyId, id)
+        } },
+      ])
       qc.invalidateQueries({ queryKey: ['contract-docs', c.id] })
       qc.invalidateQueries({ queryKey: ['raw-docs-space', companyId] })
-      toast.success(Object.keys(changes).length ? 'Доп. соглашение добавлено, условия договора обновлены' : 'Документ добавлен к договору')
+      toast.success(Object.keys(changes).length ? 'Доп. соглашение добавлено. Предлагаемые условия сохранены в документе' : 'Документ добавлен к договору')
+      progress.current = { completed: [] }
+      draft.current = null
       setAdding(false); setFile(null); setF({ kindId: '', number: '', date: '', title: '', validUntil: '', amount: '' })
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось добавить документ') }
+    } catch (e) {
+      if (!progress.current.id && e instanceof ApiError && [400, 401, 403, 404, 409, 422].includes(e.status)) draft.current = null
+      const message = e instanceof Error ? e.message : 'Не удалось добавить документ'
+      setSaveError(message); toast.error(message)
+    }
     finally { setBusy(false) }
   }
 
@@ -84,6 +114,7 @@ export function ContractDocumentsBlock({ contract: c }: { contract: Contract }) 
         <Button size="sm" variant="outline" onClick={() => setAdding((v) => !v)}>Добавить документ</Button>
       </div>
       {adding && <div className="space-y-2 rounded-md border p-2">
+        <fieldset disabled={busy || !!draft.current} className="min-w-0 space-y-2">
         <div className="grid gap-2 sm:grid-cols-[1fr_120px_150px]">
           <select aria-label="Вид документа" className={field} value={f.kindId} onChange={(e) => setF((s) => ({ ...s, kindId: e.target.value }))}>
             <option value="">{kinds.isLoading ? 'Загрузка видов…' : 'Вид документа'}</option>
@@ -99,12 +130,17 @@ export function ContractDocumentsBlock({ contract: c }: { contract: Contract }) 
           <label className="text-xs space-y-1"><span className="text-muted-foreground">Новая сумма (если меняется)</span>
             <Input aria-label="Новая сумма" className="h-9" inputMode="decimal" value={f.amount} onChange={(e) => setF((s) => ({ ...s, amount: e.target.value.replace(/[^\d.]/g, '') }))} /></label>
         </div>}
+        {supplement && <p className="text-xs text-muted-foreground">Срок и сумма сохранятся в документе как предлагаемые изменения. После подписания измените условия в карточке договора.</p>}
         <label className="flex items-center gap-2 text-sm cursor-pointer">
           <Paperclip className="size-4" /><span className="truncate">{file ? file.name : 'Выбрать файл (PDF, скан, DOCX, до 25 МБ)'}</span>
           <input aria-label="Файл документа" type="file" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         </label>
+        </fieldset>
+        {saveError && <p role="alert" className="text-sm text-destructive">{saveError}</p>}
+        {progress.current.id && <p className="text-xs text-muted-foreground">Карточка документа сохранена. Продолжите сохранение, чтобы завершить привязку, загрузку файла и регистрацию.</p>}
+        {draft.current && !progress.current.id && <p className="text-xs text-muted-foreground">Ответ о создании не получен. Повторите сохранение: документ будет найден по ключу этой попытки.</p>}
         <Button size="sm" disabled={!kind || !file || busy} onClick={() => void save()}>
-          {busy && <Loader2 className="size-4 mr-1 animate-spin" />}Сохранить документ</Button>
+          {busy && <Loader2 className="size-4 mr-1 animate-spin" />}{draft.current ? 'Продолжить сохранение документа' : 'Сохранить документ'}</Button>
       </div>}
       {docs.isLoading ? <p className="text-xs text-muted-foreground">Загрузка…</p>
         : !docs.data?.docs?.length ? <p className="text-xs text-muted-foreground">Документов нет. Подписанный экземпляр, доп. соглашения и акты прикладываются здесь.</p>

@@ -4,7 +4,9 @@
  * справа — выбранный контрагент с полными реквизитами из 1С, где он работает,
  * и его договоры (с детальной карточкой каждого).
  */
-import { Fragment, useState, useMemo, useEffect } from 'react'
+import { Fragment, useState, useMemo, useEffect, useRef } from 'react'
+import { ApiError } from '@/services/apiClient'
+import { localReferenceId, searchContractCounterparties, resumeCreation, type CreationProgress } from '@/lib/contractFormSave'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { DocumentWindow } from '@/components/books/DocumentWindow'
@@ -821,7 +823,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
               </Badge>
             ))}
           </div>
-          <ContractFormDialog counterpartyId={cp.externalRef || cp.id}>
+          <ContractFormDialog counterpartyId={cp.id}>
             <Button size="sm" variant="outline" className="shrink-0"><Plus className="size-4 mr-1.5" /> Добавить</Button>
           </ContractFormDialog>
         </div>
@@ -844,7 +846,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                     <p className="mt-0.5 text-xs text-muted-foreground/70">
                       Здесь появятся договоры контрагента — из 1С или добавленные вручную.
                     </p>
-                    <ContractFormDialog counterpartyId={cp.externalRef || cp.id}>
+                    <ContractFormDialog counterpartyId={cp.id}>
                       <Button size="sm" variant="outline" className="mt-2"><Plus className="size-4 mr-1.5" /> Добавить договор</Button>
                     </ContractFormDialog>
                   </TableCell>
@@ -879,7 +881,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                   <TableCell>
                     {!c.externalRef && (
                       <div className="flex gap-1 justify-end">
-                        <ContractFormDialog counterpartyId={cp.externalRef || cp.id} edit={c}>
+                        <ContractFormDialog counterpartyId={cp.id} edit={c}>
                           <Button variant="ghost" size="icon" className="h-8 w-8"><Pencil className="size-4" /></Button>
                         </ContractFormDialog>
                         <DeleteContractButton contract={c} />
@@ -1038,15 +1040,15 @@ function isoDate(v?: string | null): string {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : (v ?? '')
 }
 
-function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, children }: {
+function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, children, routeCreate = false }: {
   /** Контрагент задан (карточка контрагента) — или выбирается в форме (раздел «Договоры»). */
-  counterpartyId?: string; counterparties?: Counterparty[]; edit?: Contract; children: React.ReactNode
+  counterpartyId?: string; counterparties?: Counterparty[]; edit?: Contract; children: React.ReactNode; routeCreate?: boolean
 }) {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   const create = useCreateContract()
   const update = useMutation({
-    mutationFn: (updates: Partial<Contract>) => refs.updateContract(companyId, edit!.id, updates),
+    mutationFn: ({ id, updates }: { id: string; updates: Partial<Contract> }) => refs.updateContract(companyId, id, updates),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['references', companyId] }),
   })
   const orgsQuery = useQuery({
@@ -1054,8 +1056,23 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
     queryFn: () => refs.getOrganizations(companyId), enabled: !!companyId,
   })
   const orgs = orgsQuery.data ?? []
-  const [open, setOpen] = useState(false)
-  const [f, setF] = useState({
+  const allCps = useCounterparties()
+  const cpRows = counterparties ?? allCps.data ?? []
+  const progress = useRef<CreationProgress>({ completed: [] })
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [params, setParams] = useSearchParams()
+  const [localOpen, setLocalOpen] = useState(false)
+  const open = routeCreate ? params.get('new') === '1' : localOpen
+  const setOpen = (value: boolean) => {
+    if (!routeCreate) { setLocalOpen(value); return }
+    setParams((previous) => {
+      const next = new URLSearchParams(previous)
+      if (value) next.set('new', '1'); else next.delete('new')
+      return next
+    }, { replace: true })
+  }
+  const initialForm = () => ({
     number: edit?.number ?? '', date: isoDate(edit?.date), kind: edit?.kind ?? 'СПокупателем',
     type: edit?.type ?? '', organizationId: edit?.organizationId ?? '',
     currency: edit?.currency ?? 'RUB', validUntil: isoDate(edit?.validUntil),
@@ -1077,13 +1094,10 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
     signerOur: edit?.signerOur ?? '', signerOurPosition: edit?.signerOurPosition ?? '',
     signerCp: edit?.signerCp ?? '', signerCpPosition: edit?.signerCpPosition ?? '', signerCpBasis: edit?.signerCpBasis ?? '',
   })
-  const counterpartyId = f.counterpartyId
+  const [f, setF] = useState(initialForm)
+  const counterpartyId = localReferenceId(f.counterpartyId, cpRows)
   const people = useQuery({ queryKey: ['site-members', companyId], queryFn: () => getSiteMembers(companyId), enabled: open, staleTime: 300_000 })
-  const cpOptions = useMemo(() => {
-    const q = f.cpQuery.trim().toLocaleLowerCase('ru')
-    return (counterparties ?? []).filter((c) => !q || `${c.name} ${c.inn ?? ''}`.toLocaleLowerCase('ru').includes(q))
-      .sort((a, b) => a.name.localeCompare(b.name, 'ru')).slice(0, 200)
-  }, [counterparties, f.cpQuery])
+  const cpOptions = useMemo(() => searchContractCounterparties(cpRows, f.cpQuery), [cpRows, f.cpQuery])
   // Вид по справочнику (основание по ГК) — рядом со свободным «предметом».
   const typesQuery = useQuery({ queryKey: ['references', 'contract-types'], queryFn: refs.getContractTypes, staleTime: 3_600_000 })
   // Станции договора — прямо в форме. При правке охват сохраняется, только если
@@ -1100,10 +1114,11 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
   useEffect(() => {
     if (open && edit && currentLocs.data && !scopeDirty) setScopeValue({ scopeType: edit.scopeType ?? 'unassigned', locationIds: currentLocs.data.map((l) => l.id) })
   }, [open, edit, currentLocs.data, scopeDirty])
-  const orgId = f.organizationId || (orgs[0]?.externalRef || orgs[0]?.id || '')
+  const orgId = localReferenceId(f.organizationId || orgs[0]?.id || '', orgs)
   const canSave = f.number.trim() !== '' && f.date.trim() !== '' && orgId !== '' && counterpartyId !== ''
-  const pending = create.isPending || update.isPending || setScope.isPending
+  const pending = saving || create.isPending || update.isPending || setScope.isPending
   async function save() {
+    if (progress.current.running || !canSave) return
     const payload = {
       number: f.number.trim(), date: f.date.trim(), counterpartyId,
       organizationId: orgId, kind: f.kind, type: f.type.trim() || kindLabel(f.kind),
@@ -1133,21 +1148,36 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
       return
     }
     try {
-      const saved = edit ? await update.mutateAsync(payload) : await create.mutateAsync(payload)
-      if (!edit || scopeDirty) {
-        const contractId = edit?.id ?? saved?.id
-        if (contractId) await setScope.mutateAsync({ contractId, scopeType: scope.scopeType,
-          locationIds: scope.scopeType === 'locations' ? scope.locationIds : [] })
-      }
-      const linkedId = edit?.id ?? saved?.id
-      if (linkedId && linksDirty) {
-        await saveContractLinks(linkedId, edit ? (linksQuery.data ?? []) : [], links)
-        qc.invalidateQueries({ queryKey: ['contract-links', linkedId] })
-      }
+      setSaving(true); setSaveError('')
+      const linkedId = await resumeCreation(progress.current, async () => {
+        if (edit) {
+          await update.mutateAsync({ id: edit.id, updates: payload })
+          return { id: edit.id }
+        }
+        progress.current.creationKey ??= crypto.randomUUID()
+        return create.mutateAsync({ ...payload, creationKey: progress.current.creationKey })
+      }, [
+        { name: 'scope', run: (contractId) => !edit || scopeDirty
+          ? setScope.mutateAsync({ contractId, scopeType: scope.scopeType,
+            locationIds: scope.scopeType === 'locations' ? scope.locationIds : [] }) : Promise.resolve() },
+        { name: 'links', run: (contractId) => linksDirty ? saveContractLinks(contractId, links) : Promise.resolve() },
+      ])
+      qc.invalidateQueries({ queryKey: ['contract-links', linkedId] })
       qc.invalidateQueries({ queryKey: ['contract-bindings', companyId] })
       toast.success(edit ? 'Договор обновлён' : 'Договор добавлен')
       setOpen(false)
-    } catch (e) { toast.error(`Ошибка: ${(e as Error).message}`) }
+      progress.current = { completed: [] }
+      if (!edit) {
+        setF(initialForm()); setScopeValue({ scopeType: 'locations', locationIds: [] })
+        setScopeDirty(false); setLinks([]); setLinksDirty(false)
+      }
+    } catch (e) {
+      if (!progress.current.id && e instanceof ApiError && [400, 401, 403, 404, 409, 422].includes(e.status)) {
+        progress.current.creationKey = undefined
+      }
+      const message = `Ошибка: ${(e as Error).message}`
+      setSaveError(message); toast.error(message)
+    } finally { setSaving(false) }
   }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -1159,16 +1189,16 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
             {edit && <span className={`text-xs font-normal ${contractStatus(edit).cls}`}>{contractStatus(edit).label}</span>}
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-3">
+        <fieldset disabled={pending || !!progress.current.id || !!progress.current.creationKey} className="space-y-3 min-w-0">
           {!fixedCp && <div className="space-y-1.5"><Label>Контрагент <span className="text-destructive">*</span></Label>
             <Input aria-label="Поиск контрагента" value={f.cpQuery} placeholder="Название или ИНН"
               onChange={(e) => setF((s) => ({ ...s, cpQuery: e.target.value }))} />
-            <select aria-label="Контрагент" className="h-9 w-full rounded-md border bg-muted/60 px-2 text-sm" value={f.counterpartyId}
+            <select aria-label="Контрагент" className="h-9 w-full rounded-md border bg-muted/60 px-2 text-sm" value={counterpartyId}
               onChange={(e) => setF((s) => ({ ...s, counterpartyId: e.target.value }))}>
               <option value="">Выберите контрагента</option>
-              {f.counterpartyId && !cpOptions.some((c) => (c.externalRef || c.id) === f.counterpartyId) &&
-                <option value={f.counterpartyId}>{counterparties?.find((c) => (c.externalRef || c.id) === f.counterpartyId)?.name ?? 'выбранный'}</option>}
-              {cpOptions.map((c) => <option key={c.id} value={c.externalRef || c.id}>{c.name}{c.inn ? ` · ИНН ${c.inn}` : ''}</option>)}
+              {counterpartyId && !cpOptions.some((c) => c.id === counterpartyId) &&
+                <option value={counterpartyId}>{cpRows.find((c) => c.id === counterpartyId)?.name ?? 'выбранный'}</option>}
+              {cpOptions.map((c) => <option key={c.id} value={c.id}>{c.name}{c.inn ? ` · ИНН ${c.inn}` : ''}</option>)}
             </select></div>}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5"><Label>Номер <span className="text-destructive">*</span></Label>
@@ -1195,7 +1225,7 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
           <div className="space-y-1.5"><Label>Организация</Label>
             <Select value={orgId} onValueChange={(v) => setF((s) => ({ ...s, organizationId: v }))}>
               <SelectTrigger className="w-full"><SelectValue placeholder={orgs.length ? 'Выберите' : 'Нет организаций'} /></SelectTrigger>
-              <SelectContent>{orgs.map((o) => <SelectItem key={o.id} value={o.externalRef || o.id}>{o.name}</SelectItem>)}</SelectContent>
+              <SelectContent>{orgs.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}</SelectContent>
             </Select></div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1284,10 +1314,13 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
               : <ContractAppsField value={links} onChange={(v) => { setLinks(v); setLinksDirty(true) }} />}
           </div>
           {orgs.length === 0 && <p className="text-xs text-amber-600 dark:text-amber-400">Сначала заведите организацию (раздел «Данные → Организация»).</p>}
-        </div>
+        </fieldset>
+        {saveError && <p role="alert" className="text-sm text-destructive">{saveError}</p>}
+        {progress.current.id && <p className="text-xs text-muted-foreground">Карточка договора сохранена. Повторите сохранение, чтобы завершить охват и привязки.</p>}
+        {progress.current.creationKey && !progress.current.id && <p className="text-xs text-muted-foreground">Ответ о создании не получен. Повторите сохранение, чтобы найти договор и завершить привязки.</p>}
         <DialogFooter>
           <Button disabled={!canSave || pending} onClick={save}>
-            {pending && <Loader2 className="size-4 animate-spin mr-2" />} Сохранить
+            {pending && <Loader2 className="size-4 animate-spin mr-2" />} {progress.current.id || progress.current.creationKey ? 'Продолжить сохранение' : 'Сохранить'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1505,7 +1538,7 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
           <label className="flex items-center gap-1.5 text-xs whitespace-nowrap cursor-pointer">
             <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="size-3.5 accent-primary" />
             по контрагентам</label>
-          <ContractFormDialog counterparties={counterparties}>
+          <ContractFormDialog counterparties={counterparties} routeCreate>
             <Button size="sm" className="shrink-0"><Plus className="size-4 mr-1" /> Договор</Button>
           </ContractFormDialog>
         </div>

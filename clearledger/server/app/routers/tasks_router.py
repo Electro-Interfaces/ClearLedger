@@ -43,7 +43,7 @@ from app.models import (
     User, UserCompany,
 )
 from app.services import (
-    notify, partner_bridge, placement, process_templates, space_connectors, task_mail,
+    notify, partner_bridge, placement, process_templates, space_connectors, task_mail, task_assignments,
     task_scheduler, work_query, work_state,
 )
 
@@ -325,6 +325,7 @@ def _task_out(t: Task, route: list[dict], names: dict[str, str | None],
     return {
         **(extra or {}),
         "id": str(t.id),
+        "assignment_revision": str(t.assignment_revision),
         "number": t.number,
         # Как задачу называют вслух и пишут в коммите: `TF-42`. Сквозной номер
         # остаётся рядом — на него ссылаются уже написанные интеграции.
@@ -2286,6 +2287,37 @@ async def download_attachment(
                         filename=sf.file_name)
 
 
+@router.get("/assignment-counts")
+async def assignment_counts(
+    company_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await _assert_work(company_id, current_user, db)
+    return await task_assignments.counts(db, cid, current_user.id)
+
+
+class AssignmentViewIn(BaseModel):
+    company_id: str
+    assignment_revision: uuid.UUID
+
+
+@router.post("/{task_id}/assignment-view")
+async def view_assignment(
+    task_id: str, payload: AssignmentViewIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    cid = await _assert_work(payload.company_id, current_user, db)
+    t = await _task_or_404(db, cid, task_id)
+    if not await _can_view_task(db, cid, current_user, t):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
+    acknowledged = await task_assignments.acknowledge(
+        db, cid, current_user.id, t.id, payload.assignment_revision)
+    await db.commit()
+    return {"acknowledged": acknowledged}
+
+
 @router.get("/{task_id}")
 async def task_details(
     task_id: str,
@@ -2485,7 +2517,7 @@ async def task_action(
                 new_assignee = new_person
             db.add(TaskEvent(task_id=t.id, kind="assign", user_id=current_user.id,
                              from_value=was, to_value=now_name, note=payload.note))
-            t.assignee_id = new_id
+            task_assignments.assign(t, new_id, current_user.id)
             logged = True
 
     if payload.status is not None and payload.status != t.status:
@@ -2806,7 +2838,7 @@ async def bulk_action(
                 now_name = (await db.get(User, new_id)).name if new_id else None
                 db.add(TaskEvent(task_id=t.id, kind="assign", user_id=current_user.id,
                                  from_value=was, to_value=now_name, note=payload.note))
-                t.assignee_id = new_id
+                task_assignments.assign(t, new_id, current_user.id)
         if payload.status is not None and payload.status != t.status:
             db.add(TaskEvent(task_id=t.id, kind="status", user_id=current_user.id,
                              from_value=t.status, to_value=payload.status, note=payload.note))
