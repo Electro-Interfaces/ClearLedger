@@ -115,7 +115,8 @@ async def ops_worklist(
     параметром, а не запрашивается отсюда: расчёт остаётся про данные Ядра и
     считается, даже когда приложение недоступно.
     """
-    работа = (open_work or {}) if as_of is None else {}
+    работа_известна = open_work is not None and as_of is None
+    работа = (open_work or {}) if работа_известна else {}
 
     состояние = await network_state(db, company_id, region=region,
                                     only_problems=False, as_of=as_of, location_ids=location_ids)
@@ -149,8 +150,8 @@ async def ops_worklist(
                 "failedVisitsPct": None,
                 "visits": 0,
                 # Ход работы: сколько открытых заявок и есть ли сорванный срок.
-                "openTickets": int(w.get("open") or 0),
-                "breachedTickets": int(w.get("breached") or 0),
+                "openTickets": int(w.get("open") or 0) if работа_известна else None,
+                "breachedTickets": int(w.get("breached") or 0) if работа_известна else None,
                 "lastTicketId": w.get("lastId"),
                 "lastTicketNumber": w.get("lastNumber"),
                 "lastSessionAt": (парк.get(loc_id) or источник).get("lastSessionAt"),
@@ -379,7 +380,7 @@ async def ops_worklist(
             "rows": len(список),
             "silent": sum(1 for s in список if any(r["kind"] == "silent" for r in s["reasons"])),
             "failing": sum(1 for s in список if any(r["kind"] == "failing" for r in s["reasons"])),
-            "breached": sum(1 for s in список if s["breachedTickets"]),
+            "breached": sum(1 for s in список if s["breachedTickets"]) if работа_известна else None,
             "meter": sum(1 for s in список if any(r["kind"] == "meter" for r in s["reasons"])),
             "service": sum(1 for s in список if any(r["kind"] == "service" for r in s["reasons"])),
             "check": sum(1 for s in список if any(r["kind"] == "check" for r in s["reasons"])),
