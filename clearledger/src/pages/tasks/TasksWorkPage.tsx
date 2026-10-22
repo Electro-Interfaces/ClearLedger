@@ -8,7 +8,7 @@
  * Весь отбор живёт в адресе: на «просрочки у Петрова» можно дать ссылку, а
  * обзор проваливается сюда сменой параметров.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -600,7 +600,7 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject
         </thead>
         <tbody>
           {groups.map((g) => (
-            <>
+            <Fragment key={g.name}>
               {g.name && (
                 <tr key={`g-${g.name}`} className="border-t bg-muted/20">
                   <td colSpan={COLUMNS.length + 1}
@@ -738,7 +738,7 @@ function TasksTable({ tasks, sort, onSort, picked, onPick, cursor, groupByObject
                   </td>
                 </tr>
               ))}
-            </>
+            </Fragment>
           ))}
         </tbody>
       </table>
