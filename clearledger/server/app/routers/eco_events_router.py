@@ -55,17 +55,13 @@ async def accept_event(
     return {"status": outcome, "note": note}
 
 
-# Состояния предметов «Трека» словами, а не кодами: витрину читает человек в
-# карточке заявки, и «Ждём виз» ему говорит больше, чем `pending`.
-_DOC_STATE = {
-    "draft": "Черновик", "registered": "Зарегистрирован", "in_force": "Действует",
-    "executed": "Исполнен", "archived": "В архиве", "cancelled": "Отменён",
-}
-_TASK_STATE = {"open": "В работе", "done": "Выполнено", "cancelled": "Отменено"}
-_KIND_NAME = {
-    "approval": "Согласование", "document": "Документ",
-    "errand": "Поручение", "acquaint": "Ознакомление",
-}
+# Состояния предметов «Трека» словами и сборка строки витрины — в
+# `services/process_work.py`: ту же строку собирает сводка клиента для оператора
+# КЦ, и три копии разошлись бы на первой правке (аудит 21.10.2026, C-09).
+from app.services.process_work import (  # noqa: E402 — рядом с местом применения
+    DOC_STATE as _DOC_STATE, KIND_NAME as _KIND_NAME, TASK_STATE as _TASK_STATE,
+    items_by_process,
+)
 
 
 @router.get("/process/{process_id}/work")
@@ -84,81 +80,9 @@ async def process_work(
     Витрина только читает и ничего не решает: право показать её людям —
     у Поддержки, она знает, кто смотрит на заявку.
     """
-    rows = (await db.execute(
-        select(ApprovalRequest)
-        .where(ApprovalRequest.company_id == company.id,
-               ApprovalRequest.process_id == str(process_id)[:64])
-        .order_by(ApprovalRequest.created_at)
-    )).scalars().all()
-    if not rows:
-        return {"process_id": process_id, "items": []}
-
-    from app.config import get_settings
-
-    base = get_settings().app_public_url.rstrip("/")
-    doc_ids = {row.doc_id for row in rows if row.doc_id}
-    task_ids = {row.task_id for row in rows if row.task_id}
-    docs = {d.id: d for d in (await db.execute(select(DocCard).where(
-        DocCard.id.in_(doc_ids)))).scalars().all()} if doc_ids else {}
-    tasks = {t.id: t for t in (await db.execute(select(Task).where(
-        Task.id.in_(task_ids)))).scalars().all()} if task_ids else {}
-
-    # Лист ознакомления считаем одним запросом на все документы просьбы: по
-    # одному на строку витрина стоила бы столько же, сколько сама заявка.
-    sheets: dict[uuid.UUID, dict[str, int]] = {}
-    if any(row.kind == "acquaint" for row in rows):
-        from sqlalchemy import func
-
-        counted = (await db.execute(
-            select(DocAcquaint.doc_id, DocAcquaint.status,
-                   func.count(DocAcquaint.id))
-            .where(DocAcquaint.doc_id.in_(doc_ids))
-            .group_by(DocAcquaint.doc_id, DocAcquaint.status))).all()
-        for doc_id, state, count in counted:
-            entry = sheets.setdefault(doc_id, {"done": 0, "total": 0})
-            entry["total"] += int(count)
-            if state == "done":
-                entry["done"] += int(count)
-
-    items = []
-    for row in rows:
-        item: dict[str, Any] = {
-            "id": str(row.id),
-            "kind": row.kind,
-            "kind_name": _KIND_NAME.get(row.kind, row.kind),
-            "requested_at": row.created_at.isoformat() if row.created_at else None,
-            "outcome": row.outcome,
-            "waits": bool(row.on_approved) and row.outcome is None,
-            "decided_at": row.decided_at.isoformat() if row.decided_at else None,
-        }
-        doc = docs.get(row.doc_id) if row.doc_id else None
-        task = tasks.get(row.task_id) if row.task_id else None
-        if doc is not None:
-            item.update({
-                "subject": "document",
-                "number": doc.reg_number or None,
-                "title": doc.title,
-                "state": _DOC_STATE.get(doc.status, doc.status),
-                "url": f"{base}/docs?view=all&doc={doc.id}",
-            })
-            if row.kind == "acquaint":
-                sheet = sheets.get(doc.id, {"done": 0, "total": row.round})
-                item["state"] = f"Ознакомились {sheet['done']} из {sheet['total']}"
-        elif task is not None:
-            item.update({
-                "subject": "task",
-                "number": f"№{task.number}",
-                "title": task.title,
-                "state": _TASK_STATE.get(task.status, task.status),
-                "url": f"{base}/docs/company?view=errands&task={task.id}",
-            })
-        else:
-            # Предмет исчез (документ удалён, компания пересобрана) — строку
-            # всё равно показываем: сам факт просьбы это история процесса.
-            item.update({"subject": None, "title": "Предмет недоступен",
-                         "state": None, "url": None})
-        items.append(item)
-    return {"process_id": process_id, "items": items}
+    key = str(process_id)[:64]
+    by_process = await items_by_process(db, company.id, [key])
+    return {"process_id": process_id, "items": by_process.get(key, [])}
 
 
 @router.get("/work")

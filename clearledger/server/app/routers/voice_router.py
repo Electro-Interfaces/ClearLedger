@@ -296,11 +296,16 @@ async def customer_summary(
     from app.services.voice_support_context import support_tickets
 
     summary = await _customer_summary_data(body, company, db)
-    tickets, availability = await support_tickets(
+    # Заявки, три ответа Ядра по каждой и состояние источника собираются одним
+    # местом (`support_tickets`): сводка клиента — одна, и собирать её по частям
+    # в каждом маршруте значило бы развести копии (аудит 21.10.2026, C-09).
+    block = await support_tickets(
         db, company.id, phone=body.phone, core_party_ref=body.ref,
         object_refs=[o["ref"] for o in summary["objects"]], limit=body.limit,
     )
-    return {**summary, "tickets": tickets, "ticketAvailability": availability}
+    return {**summary, "tickets": block["tickets"],
+            "ticketAvailability": block["availability"],
+            "ticketSource": block["source"]}
 
 
 @router.post("/support/knowledge")
