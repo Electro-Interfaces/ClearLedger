@@ -11,6 +11,8 @@ import { useQuery } from '@tanstack/react-query'
 import { MapContainer, CircleMarker, Popup, useMap, useMapEvents, AttributionControl } from 'react-leaflet'
 import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
+import { MapStationList } from '@/components/map/MapStationList'
+import { groupPointsByCoordinates } from '@/lib/mapPointGroups'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import {
@@ -348,9 +350,12 @@ function StationMarkers({ points, colorFn, sizeFn, metricMap, dark, onOpen }: {
   const halo = dark ? '#0b1220' : '#ffffff'
   // рисуем крупные первыми (внизу), мелкие последними (поверх) → мелкие не теряются
   const ordered = useMemo(() => [...points].sort((a, b) => sizeFn(b) - sizeFn(a)), [points, sizeFn])
+  const groups = useMemo(() => groupPointsByCoordinates(ordered,
+    (p) => [p.lat, p.lon], (p) => p.id), [ordered])
   return (
     <>
-      {ordered.map((p) => {
+      {groups.map((group) => {
+        const p = group.items[0]
         const mx = metricMap.get(p.id)
         const op = opMeta(p.opStatus)
         const radius = Math.min(26, base * sizeFn(p))
@@ -358,7 +363,14 @@ function StationMarkers({ points, colorFn, sizeFn, metricMap, dark, onOpen }: {
           <CircleMarker key={p.id} center={[p.lat, p.lon]} radius={radius}
             pathOptions={{ color: halo, weight: 1.4, fillColor: colorFn(p), fillOpacity: 0.82 }}>
             <Popup className="cl-map-popup">
-              <div className="w-[240px]">
+              {group.items.length > 1 ? (
+                <div className="w-[240px] p-3 pr-6">
+                  <div className="text-sm font-semibold">Объекты в одной точке: {group.items.length}</div>
+                  <MapStationList items={group.items.map((item) => ({
+                    ...item, status: item.opStatus,
+                  }))} onOpen={onOpen} />
+                </div>
+              ) : <div className="w-[240px]">
                 {/* шапка: имя + адрес + чипы паспорта (место справа сверху — под крестик) */}
                 <div className="px-3 pb-2 pr-6 pt-2.5">
                   <div className="truncate text-[13px] font-semibold leading-tight text-foreground">{p.name}</div>
@@ -401,7 +413,7 @@ function StationMarkers({ points, colorFn, sizeFn, metricMap, dark, onOpen }: {
                     Открыть станцию →
                   </button>
                 )}
-              </div>
+              </div>}
             </Popup>
           </CircleMarker>
         )
