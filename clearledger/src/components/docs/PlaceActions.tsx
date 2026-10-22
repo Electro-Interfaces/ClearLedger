@@ -28,6 +28,8 @@ import * as tasksService from '@/services/tasksService'
 import type { PersonalMark } from '@/services/workService'
 import { shortDay } from '@/lib/personalDay'
 import { cn } from '@/lib/utils'
+import { clampTaskDefer, taskDueDay } from '@/lib/taskCardInput'
+import { useAuth } from '@/contexts/AuthContext'
 
 /** Ближайший день недели вперёд: «в понедельник» — самый частый ответ на
  *  вопрос «когда вернуться», и считать его человеку не должно приходиться. */
@@ -62,6 +64,9 @@ export function PlaceActions({
   compact?: boolean
 }) {
   const qc = useQueryClient()
+  const { user } = useAuth()
+  // Сервер личного отложения использует current_user.tz с тем же умолчанием.
+  const personalZone = user?.tz || 'Europe/Moscow'
   const mobile = useMaxWidth(640)
   const compact = compactProp || mobile
   /** Что именно выбирают днём: запланировать работу или спрятать до даты.
@@ -95,7 +100,9 @@ export function PlaceActions({
 
   const act = useMutation({
     mutationFn: (data: Parameters<typeof workService.place>[2]) =>
-      workService.place(companyId, targetRef, data),
+      workService.place(companyId, targetRef, data.deferUntil
+        ? { ...data, deferUntil: clampTaskDefer(data.deferUntil, dueAt, personalZone) }
+        : data),
     onSuccess: (res) => {
       setPickingDate(null)
       // Ответ сервера — уже посчитанная отметка: кладём её в очередь и в списки
@@ -135,7 +142,7 @@ export function PlaceActions({
    *  `placement.clamp_defer` на сервере: расхождение на день означало отказ
    *  после нажатия — ровно то, чего эта проверка и должна избегать. */
   const нельзяПрятать = !!dueAt
-    && workService.todayKey(new Date(dueAt)) <= workService.todayKey()
+    && taskDueDay(dueAt, personalZone) <= taskDueDay(new Date().toISOString(), personalZone)
 
   const inDay = mark?.taken_for === workService.todayKey()
   /** День, на который человек запланировал работу, — включая сегодняшний.
@@ -310,7 +317,7 @@ export function PlaceActions({
               </DropdownMenuLabel>
               {ветка({
                 icon: CalendarClock,
-                label: dueAt ? `Срок: ${shortDay(dueAt.slice(0, 10))}` : 'Поставить срок',
+                label: dueAt ? `Срок: ${shortDay(taskDueDay(dueAt))}` : 'Поставить срок',
                 children: (
                   <>
                     <DropdownMenuItem onClick={() => срок.mutate(workService.todayKey())}>

@@ -495,6 +495,9 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
   const [at, setAt] = useState('09:00')
   const [weekday, setWeekday] = useState('0')
   const [day, setDay] = useState('1')
+  const invalidDay = mode === 'monthly'
+    && (!/^\d+$/.test(day) || Number(day) < 1 || Number(day) > 31)
+  const invalidTime = !/^([01]\d|2[0-3]):[0-5]\d$/.test(at)
 
   const q = useQuery({
     queryKey: ['task-recurrences', companyId],
@@ -506,7 +509,10 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
   })
   const done = () => qc.invalidateQueries({ queryKey: ['task-recurrences'] })
   const create = useMutation({
-    mutationFn: () => tasksService.createTaskRecurrence({
+    mutationFn: () => {
+      if (invalidDay) throw new Error('Укажите целое число месяца от 1 до 31')
+      if (invalidTime) throw new Error('Укажите время от 00:00 до 23:59')
+      return tasksService.createTaskRecurrence({
       companyId, templateId,
       rule: {
         mode, at,
@@ -516,7 +522,8 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
         // понимает по своему времени.
         tz: 'Europe/Moscow',
       },
-    }),
+      })
+    },
     onSuccess: () => { toast.success('Расписание заведено'); setTemplateId(''); done() },
     onError: (e) => toast.error((e as Error).message),
   })
@@ -590,19 +597,28 @@ export function RecurrencesSection({ companyId }: { companyId: string }) {
           {mode === 'monthly' && (
             <div className="space-y-1.5">
               <Label htmlFor="task-schedule-day" className="text-xs">Число</Label>
-              <Input id="task-schedule-day" type="number" min={1} max={28} value={day} className="h-8 w-[90px] text-xs"
+              <Input id="task-schedule-day" type="number" min={1} max={31} step={1} value={day}
+                aria-invalid={invalidDay} aria-describedby={invalidDay ? 'task-schedule-day-error' : undefined}
+                className="h-8 w-[90px] text-xs"
                 onChange={(e) => setDay(e.target.value)} />
+              {invalidDay && <p id="task-schedule-day-error" role="alert" className="text-xs text-destructive">
+                Целое число от 1 до 31
+              </p>}
             </div>
           )}
           <div className="space-y-1.5">
             <Label htmlFor="task-schedule-time" className="text-xs">Время</Label>
-            <Input id="task-schedule-time" type="time" value={at} onChange={(e) => setAt(e.target.value)}
+            <Input id="task-schedule-time" type="time" value={at} aria-invalid={invalidTime}
+              onChange={(e) => setAt(e.target.value)}
               className="h-8 w-[110px] text-xs" />
           </div>
-          <Button size="sm" className="h-8" disabled={!templateId || create.isPending}
+          <Button size="sm" className="h-8" disabled={!templateId || invalidDay || invalidTime || create.isPending}
             onClick={() => create.mutate()}>
             <CalendarClock className="mr-1.5 h-3.5 w-3.5" />Завести
           </Button>
+          {mode === 'monthly' && <p className="basis-full text-xs text-muted-foreground">
+            Если такого числа в месяце нет, поручение появится в последний день месяца.
+          </p>}
         </div>
       )}
 

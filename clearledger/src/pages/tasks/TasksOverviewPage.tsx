@@ -11,9 +11,10 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { useDocsScope } from '@/hooks/useDocsScope'
 import { TasksOverviewSection } from '@/components/tasks/TasksOverviewSection'
 import { TrackExport } from '@/components/docs/TrackExport'
+import { taskReportParams } from '@/lib/taskQueue'
 
 export function TasksOverviewPage() {
-  const { company } = useCompany()
+  const { company, oversees } = useCompany()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const scope = useDocsScope()
@@ -30,8 +31,8 @@ export function TasksOverviewPage() {
         <div>
           <h1 className="text-base font-semibold">Поручения</h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Как идёт работа компании за период. Любая цифра — вход в реестр с этим
-            же отбором.
+            Как идёт работа компании за период. Нажмите показатель, чтобы открыть
+            реестр с выбранным отбором.
           </p>
         </div>
         <TrackExport
@@ -41,14 +42,9 @@ export function TasksOverviewPage() {
           fileName="Поручения Трека.xlsx"
           hint="Итоги и разрезы по людям, типам и объектам — книгой Excel" />
       </div>
-      <TasksOverviewSection companyId={company.id} period={period}
+      <TasksOverviewSection companyId={company.id} period={period} canTriage={oversees}
         onDrill={(f) => {
-          const n = new URLSearchParams({ view: 'registry' })
-          // Обзор считает по всем задачам периода, поэтому и реестр открываем
-          // без сужения по состоянию — иначе цифра и список разойдутся.
-          if (f.assignee) n.set('assignee', f.assignee)
-          if (f.type) n.set('type', f.type)
-          if (f.object) n.set('object', f.object)
+          const n = taskReportParams(f, period)
           navigate(`/tasks/company?${n.toString()}`)
         }} />
     </div>

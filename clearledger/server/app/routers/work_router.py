@@ -2953,16 +2953,22 @@ async def list_action(
             "stale_days": (now - row.reviewed_at).days if row.reviewed_at else None}
 
 
-async def _due_of(db: AsyncSession, cid: uuid.UUID, target_ref: str):
+async def _due_of(db: AsyncSession, cid: uuid.UUID, target_ref: str, viewer: User):
     """Срок предмета — он ограничивает отложение. Личное сокрытие не вправе
     уносить работу за её собственный срок."""
     kind, _, key = target_ref.partition(":")
     try:
         oid = uuid.UUID(key)
     except ValueError:
+        if kind == "task":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
         return None
     if kind == "task":
         row = await db.get(Task, oid)
+        if row is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
+        from app.services.task_access import assert_view_task
+        await assert_view_task(db, cid, viewer, row)
     elif kind == "doc":
         row = await db.get(DocCard, oid)
     else:
@@ -2980,6 +2986,12 @@ async def place(
     from app.services import placement
 
     cid = await _assert_work(payload.company_id, current_user, db)
+    # Любая новая/изменяемая task-метка требует текущего чтения поручения.
+    # Чистое удаление своей метки не читает предмет и его срок: раскладку можно
+    # убрать и после отзыва доступа, не раскрывая данные прежней работы.
+    due_at = None
+    if not payload.clear and (payload.defer_until or payload.target_ref.startswith("task:")):
+        due_at = await _due_of(db, cid, payload.target_ref, current_user)
     list_id = None
     if payload.list_id:
         from app.models import PersonalList
@@ -2996,10 +3008,10 @@ async def place(
             deferred_until=payload.defer_until, starred=payload.starred,
             position=payload.position, clear=payload.clear,
             drop_day=payload.drop_day, undefer=payload.undefer,
+            tz=current_user.tz,
             today=space_time.local_date(datetime.now(timezone.utc),
                                         current_user.tz),
-            due_at=(await _due_of(db, cid, payload.target_ref)
-                    if payload.defer_until else None))
+            due_at=due_at)
     except placement.DeferRefused as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     if row is not None and payload.drop_list:

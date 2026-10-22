@@ -51,6 +51,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { useSectionOpen } from '@/hooks/useSectionOpen'
 import { SearchPicker } from '@/components/tasks/SearchPicker'
 import { workCounts } from '@/lib/workCounts'
+import { taskDraftHref, taskQueueIsCompact } from '@/lib/taskQueue'
 
 /** Срок словами: «сегодня» / «завтра» / «просрочена на 3 дн» — точная дата тут лишняя. */
 function dueText(due: string | null, overdue: boolean): string | null {
@@ -213,7 +214,6 @@ export function TasksQuickPanel({ compact: compactProp }: {
   // полоса дня, — и на 353 px от них оставались обрезанные надписи «ЖДУ…», «ВЕДУ…»,
   // а низ окна занимал «Мой день» вместо самой работы.
   const isMobile = useIsMobile()
-  const compact = compactProp ?? isMobile
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { companyId } = useCompany()
@@ -226,9 +226,21 @@ export function TasksQuickPanel({ compact: compactProp }: {
   const [kindFilter, setKindFilter] = useState<'all' | 'task' | 'doc'>('all')
   // Ширины полос человек ставит сам: у кого-то рельса с длинными словами, у
   // кого-то день с длинными названиями встреч. Значения переживают перезагрузку.
+  const panelRef = useRef<HTMLDivElement>(null)
   const shellRef = useRef<HTMLDivElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
+  const initiatingControlRef = useRef<HTMLElement | null>(null)
+  const [panelWidth, setPanelWidth] = useState(() => window.innerWidth)
   const rail = useDragWidth('cl-track-rail-w', 224, 160, 420)
   const day = useDragWidth('cl-track-day-w', 320, 220, 560)
+  const compact = compactProp ?? (isMobile || taskQueueIsCompact(panelWidth, rail.width, day.width))
+  useEffect(() => {
+    const panel = panelRef.current
+    if (!panel) return
+    const observer = new ResizeObserver(([entry]) => setPanelWidth(entry.contentRect.width))
+    observer.observe(panel)
+    return () => observer.disconnect()
+  }, [])
   const [draft, setDraft] = useState('')
   // Кому: пусто — себе. Список тот же, что в карточке поручения, и тем же ключом
   // запроса: открыв «Трек» следом, человек не ждёт второй загрузки сотрудников.
@@ -318,15 +330,23 @@ export function TasksQuickPanel({ compact: compactProp }: {
   // Иначе постановка проходится дважды — один раз здесь, второй раз там
   // (Чурилов, 12.09.2026).
   const goWithDraft = (href: string) => {
-    const q = new URLSearchParams()
-    if (draft.trim()) q.set('draft', draft.trim())
-    if (assigneeId) q.set('assignee', assigneeId)
-    const хвост = q.toString()
-    go(хвост ? `${href}${href.includes('?') ? '&' : '?'}${хвост}` : href)
+    go(taskDraftHref(href, draft, assigneeId))
   }
   // Очередь остаётся смонтированной под полной карточкой: её разрез, прокрутка
   // и черновик не теряются. Навигация в приложение — отдельное явное действие.
-  const openTask = (id: string) => setSelectedTask(id)
+  const openTask = (id: string) => {
+    // Связанные поручения меняют содержимое окна, но не место возврата в очереди.
+    if (!selectedTask) {
+      openerRef.current = initiatingControlRef.current
+        ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    }
+    setSelectedTask(id)
+  }
+  const rememberInitiator = (event: React.SyntheticEvent) => {
+    if (!selectedTask && event.target instanceof Element) {
+      initiatingControlRef.current = event.target.closest<HTMLElement>('button, a, [tabindex]')
+    }
+  }
   const current = VIEWS.find((v) => v.key === view) ?? VIEWS[0]
 
   const renderView = (v: typeof VIEWS[number]) => {
@@ -473,7 +493,8 @@ export function TasksQuickPanel({ compact: compactProp }: {
   )
 
   return (
-    <div className="flex h-full flex-col">
+    <div ref={panelRef} tabIndex={-1} className="flex h-full min-w-0 flex-col outline-none"
+      onClickCapture={rememberInitiator} onKeyDownCapture={rememberInitiator}>
       {/* Постановка стоит над всем окном, а не внутри разреза: записать мысль
           человек приходит независимо от того, какой список сейчас открыт. */}
       <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-4 py-2">
@@ -571,7 +592,14 @@ export function TasksQuickPanel({ compact: compactProp }: {
         )}
       </div>
       <Dialog open={!!selectedTask} onOpenChange={(open) => { if (!open) setSelectedTask(null) }}>
-        <DialogContent className="flex max-h-[90dvh] w-[calc(100%_-_1rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+        <DialogContent onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          const opener = openerRef.current
+          if (opener?.isConnected) opener.focus({ preventScroll: true })
+          else panelRef.current?.focus({ preventScroll: true })
+          openerRef.current = null
+          initiatingControlRef.current = null
+        }} className="flex max-h-[90dvh] w-[calc(100%_-_1rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
           <DialogHeader className="shrink-0 border-b px-4 py-3 pr-12">
             <DialogTitle className="text-base">Карточка поручения</DialogTitle>
             <Button variant="outline" size="sm" className="mt-2 w-fit gap-1.5"

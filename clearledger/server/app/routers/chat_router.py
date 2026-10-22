@@ -200,6 +200,9 @@ async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) 
     if room.scope_ticket_id is not None:
         from app.services.ticket_communications import assert_staff_room
         await assert_staff_room(db, room, user)
+    if room.scope_task_id is not None:
+        from app.services.task_access import assert_task_room
+        await assert_task_room(db, room, user)
     p = (await db.execute(select(ChatParticipant.id).where(
         ChatParticipant.room_id == room_id, ChatParticipant.user_id == user.id))).scalar_one_or_none()
     if p is None and not user.is_superadmin:
@@ -209,7 +212,7 @@ async def _assert_participant(room_id: uuid.UUID, user: User, db: AsyncSession) 
     # каждой ручке: через эту функцию идут и чтение ленты, и отправка, и вложения.
     # Комнаты предмета (заявка, задача) контуром не режутся: в список пространства
     # они не попадают вовсе (см. `list_rooms`), открываются только из карточки, и
-    # границу им держит участие плюс проверка причастности при заведении. Иначе
+    # границу им держит участие плюс актуальный ACL предмета выше. Иначе
     # оператор контакт-центра получал 404 на обсуждение СВОЕЙ заявки — комнату
     # заводят без продукта, и контур не совпадал никогда.
     if room.company_id is not None and room.type != "direct"             and room.scope_ticket_id is None and room.scope_task_id is None:
@@ -2384,7 +2387,8 @@ async def search_all_messages(
         .join(ChatParticipant, and_(ChatParticipant.room_id == ChatRoom.id,
                                     ChatParticipant.user_id == current_user.id))
         .where(ChatRoom.company_id == cid, ChatRoom.is_active.is_(True),
-               ChatRoom.scope_ticket_id.is_(None),  # скрытое обсуждение ищут только внутри карточки
+               # Скрытые обсуждения ищут только внутри карточки предмета.
+               ChatRoom.scope_ticket_id.is_(None), ChatRoom.scope_task_id.is_(None),
                ChatMessage.deleted_at.is_(None),
                or_(ChatRoom.type == "direct", ChatRoom.scope_product == scope)
                if scope else text("true"),
@@ -2808,6 +2812,8 @@ async def ensure_task_room(
     task = await db.get(Task, tid)
     if task is None or task.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
+    from app.services.task_access import assert_view_task
+    await assert_view_task(db, cid, current_user, task)
 
     room = (await db.execute(select(ChatRoom).where(
         ChatRoom.scope_task_id == tid, ChatRoom.company_id == cid,
