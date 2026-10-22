@@ -43,6 +43,7 @@ import { QueryBar, type QuerySuggestions } from '@/components/tasks/QueryBar'
 import { TasksDueBoard } from './TasksDueBoard'
 import { consumeTaskDraft, taskDraft, taskReportScope } from '@/lib/taskQueue'
 import { formatPeriod } from '@/lib/formatDate'
+import { useTrackDraft } from '@/hooks/useTrackDraft'
 
 const nf = new Intl.NumberFormat('ru-RU')
 const PAGE = 100
@@ -57,6 +58,7 @@ export function TasksWorkPage({ embeddedView }: {
   embeddedView?: 'mine' | 'registry' | 'assigned' | 'watching'
 } = {}) {
   const { company } = useCompany()
+  const { user } = useAuth()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const route = tasksRouteOf(pathname)
@@ -90,13 +92,26 @@ export function TasksWorkPage({ embeddedView }: {
   }, { replace: true })
 
   // Заготовка из быстрой панели: строка и исполнитель, набранные до перехода.
-  // Читаем один раз и сразу убираем из адреса — обновление страницы не должно
-  // открывать форму заново.
-  const [заготовка] = useState(() => taskDraft(params))
+  // Workspace может перемонтировать пункт после очистки URL. Буфер переживает
+  // этот переход в SPA и очищается после закрытия/создания, а не раньше формы.
+  // Он только в памяти: перезагрузка страницы не повторяет уже принятый URL.
+  const передача = useTrackDraft<{
+    companyId: string; userId: string; draft: NonNullable<ReturnType<typeof taskDraft>>
+  } | null>(
+    `track:task-create:${user?.id}:${company.id}`, null, false)
+  const { value: pendingDraft, save: сохранитьПередачу } = передача
+  const заготовка = pendingDraft?.companyId === company.id && pendingDraft.userId === user?.id
+    ? pendingDraft.draft : undefined
+  const draftRequest = params.has('draft') ? params.toString() : null
+  const acceptedDraft = useRef<string | null>(null)
   useEffect(() => {
-    if (!params.has('draft')) return
+    if (draftRequest === null) { acceptedDraft.current = null; return }
+    if (acceptedDraft.current === draftRequest) return
+    acceptedDraft.current = draftRequest
+    const incoming = taskDraft(new URLSearchParams(draftRequest))
+    if (incoming) сохранитьПередачу({ companyId: company.id, userId: user?.id ?? '', draft: incoming })
     setParams(consumeTaskDraft, { replace: true })
-  }, [params, setParams])
+  }, [draftRequest, setParams, сохранитьПередачу, company.id, user?.id])
 
   const objectId = params.get('object') ?? ''
   const projectId = params.get('project') ?? ''
@@ -187,6 +202,49 @@ export function TasksWorkPage({ embeddedView }: {
   })
   const tasks = listQ.data?.tasks ?? []
   const total = listQ.data?.total ?? 0
+  const exportCurrentTasks = () => {
+    const parsed = listQ.data?.query?.parsed ?? {}
+    const effective = (key: string, fallback: string) => parsed[key] ?? fallback
+    const names = (rows: { id: string; name: string }[] | undefined, id: string) =>
+      rows?.find((row) => row.id === id)?.name ?? id
+    const scopeNames: Record<string, string> = {
+      all: 'Все состояния', open: 'В работе на сейчас', overdue: 'Просрочено на сейчас',
+      closed: 'Закрытые поручения', mine: 'На мне', assigned: 'Я поставил',
+      watching: 'Наблюдаю', today: 'Сегодня', waiting: 'Ожидание внешней стороны',
+      triage: 'Без исполнителя', my_due: 'Мои сроки',
+    }
+    const context: [string, string | number][] = [
+      ['Компания', company.name], ['Раздел', meta?.label ?? 'Задачи'],
+      ['Разрез', scopeNames[effective('scope', scope)] ?? effective('scope', scope)],
+      ['Период закрытия', closedFrom && closedTo
+        ? formatPeriod(closedFrom, closedTo)
+        : closedFrom || closedTo
+          ? `${closedFrom ?? 'По умолчанию отчёта'} — ${closedTo ?? 'По умолчанию отчёта'}`
+          : 'Без ограничения периода'],
+      ['Объём', 'Текущая страница'], ['Страница', page + 1],
+      ['Строк в выгрузке', tasks.length], ['Всего в отборе', total],
+      ['Автор выгрузки', user?.name ?? ''],
+      ['Сформировано', new Date().toLocaleString('ru-RU', { timeZoneName: 'short' })],
+    ]
+    const add = (label: string, value: string, rows?: { id: string; name: string }[]) => {
+      if (value) context.push([label, rows ? names(rows, value) : value])
+    }
+    add('Исполнитель', effective('assignee_id', assigneeId), peopleQ.data?.people)
+    add('Автор поручения', effective('author_id', authorId), peopleQ.data?.people)
+    add('Проект', effective('project_id', projectId), projectsQ.data?.projects)
+    add('Тип', effective('type_id', typeId), typesQ.data?.types)
+    add('Объект', effective('object_id', objectId), objectsQ.data)
+    add('Версия', effective('fix_version_id', versionId), allVersionsQ.data?.versions)
+    add('Метка', effective('label_id', labelId), labelsQ.data?.labels)
+    const selectedPriority = effective('priority', priority)
+    add('Срочность', PRIORITY_LABEL[selectedPriority] ?? selectedPriority)
+    add('Поиск', q)
+    add('Строка запроса', queryText)
+    add('Срок с', parsed.due_from ?? '')
+    add('Срок по', parsed.due_to ?? '')
+    void exportTasks(tasks, meta?.label ?? 'Задачи', context)
+      .catch(() => toast.error('Не удалось выгрузить Excel. Повторите попытку.'))
+  }
   const hasFilter = !!(objectId || projectId || versionId || typeId || assigneeId
                        || authorId || priority || labelId || q || queryText || reportScope || closedFrom || closedTo)
 
@@ -299,8 +357,8 @@ export function TasksWorkPage({ embeddedView }: {
                 ...(sort !== 'created' && { sort }),
               }} />
               <Button variant="outline" size="sm" className="h-8"
-                disabled={tasks.length === 0}
-                onClick={() => exportTasks(tasks, meta?.label ?? 'Задачи')}>
+                disabled={tasks.length === 0 || listQ.isFetching || listQ.isPlaceholderData}
+                onClick={exportCurrentTasks}>
                 <Download className="mr-1.5 h-3.5 w-3.5" />Excel
               </Button>
             </>
@@ -332,8 +390,9 @@ export function TasksWorkPage({ embeddedView }: {
       {view !== 'closed' && view !== 'watching' && (
         <div className="flex items-center gap-2">
           <QuickCreate companyId={company.id} onCreated={refresh} />
-          <NewTaskDialog companyId={company.id} defaultObjectId={objectId || undefined}
+          <NewTaskDialog key={company.id} companyId={company.id} defaultObjectId={objectId || undefined}
             openSignal={newTaskSignal} draft={заготовка}
+            onDraftDone={() => передача.clear(pendingDraft)}
             onCreated={(id) => { refresh(); set({ task: id }) }} />
         </div>
       )}
@@ -987,7 +1046,7 @@ function SaveViewButton({ companyId, query }: {
 
 /** Выгрузка видимой страницы. Библиотека тянется лениво — в основной чанк
  *  четыреста килобайт ради кнопки, которую жмут раз в месяц, не кладём. */
-async function exportTasks(tasks: ListedTask[], sheetName: string) {
+async function exportTasks(tasks: ListedTask[], sheetName: string, context: [string, string | number][]) {
   const { loadXlsx } = await import('@/utils/xlsxLoader')
   const XLSX = await loadXlsx()
   const rows = tasks.map((t) => ({
@@ -1009,6 +1068,9 @@ async function exportTasks(tasks: ListedTask[], sheetName: string) {
   const sheet = XLSX.utils.json_to_sheet(rows)
   const book = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(book, sheet, sheetName.slice(0, 31))
+  const scopeSheet = XLSX.utils.aoa_to_sheet([['Параметр', 'Значение'], ...context])
+  scopeSheet['!cols'] = [{ wch: 24 }, { wch: 70 }]
+  XLSX.utils.book_append_sheet(book, scopeSheet, 'Отбор')
   XLSX.writeFile(book, `Задачи — ${sheetName}.xlsx`)
 }
 

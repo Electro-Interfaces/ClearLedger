@@ -32,7 +32,7 @@ import { SearchPicker } from './SearchPicker'
 import { useAuth } from '@/contexts/AuthContext'
 import { selectedTaskType } from '@/lib/taskCardInput'
 
-export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSignal, draft }: {
+export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSignal, draft, onDraftDone }: {
   companyId: string
   onCreated: (taskId: string) => void
   defaultObjectId?: string
@@ -49,6 +49,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
    * выбранный исполнитель терялись на переходе.
    */
   draft?: { title?: string; assigneeId?: string; description?: string }
+  onDraftDone?: () => void
 }) {
   const qc = useQueryClient()
   const { user } = useAuth()
@@ -70,11 +71,11 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
   const [dragOver, setDragOver] = useState(false)
   // Заготовку подставляем один раз, при появлении: дальше человек правит форму,
   // и перезапись затирала бы его работу.
-  const заготовкаПодставлена = useRef(false)
+  const заготовкаПодставлена = useRef<typeof draft>(undefined)
   useEffect(() => {
-    if (!draft || заготовкаПодставлена.current) return
+    if (!draft || заготовкаПодставлена.current === draft) return
     if (!draft.title && !draft.assigneeId) return
-    заготовкаПодставлена.current = true
+    заготовкаПодставлена.current = draft
     if (draft.title) setTitle(draft.title)
     if (draft.description) setDescription(draft.description)
     if (draft.assigneeId) setAssigneeId(draft.assigneeId)
@@ -206,14 +207,17 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
     onSuccess: (task) => {
       toast.success(`Задача ${tasksService.taskKey(task)} поставлена`)
       qc.invalidateQueries({ queryKey: ['tasks'] })
-      setOpen(false); reset()
+      setOpen(false); reset(); onDraftDone?.()
       onCreated(task.id)
     },
     onError: (e) => toast.error(`Не удалось поставить задачу: ${(e as Error).message}`),
   })
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset() }}>
+    <Dialog open={open} onOpenChange={(v) => {
+      setOpen(v)
+      if (!v) { reset(); onDraftDone?.() }
+    }}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="h-9">
           <Plus className="mr-1.5 h-3.5 w-3.5" />Поставить подробно

@@ -51,7 +51,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { useSectionOpen } from '@/hooks/useSectionOpen'
 import { SearchPicker } from '@/components/tasks/SearchPicker'
 import { workCounts } from '@/lib/workCounts'
-import { taskDraftParams, taskQueueIsCompact } from '@/lib/taskQueue'
+import { taskDraftHref, taskQueueIsCompact } from '@/lib/taskQueue'
 
 /** Срок словами: «сегодня» / «завтра» / «просрочена на 3 дн» — точная дата тут лишняя. */
 function dueText(due: string | null, overdue: boolean): string | null {
@@ -330,9 +330,7 @@ export function TasksQuickPanel({ compact: compactProp }: {
   // Иначе постановка проходится дважды — один раз здесь, второй раз там
   // (Чурилов, 12.09.2026).
   const goWithDraft = (href: string) => {
-    const q = taskDraftParams(draft, assigneeId)
-    const хвост = q.toString()
-    go(хвост ? `${href}${href.includes('?') ? '&' : '?'}${хвост}` : href)
+    go(taskDraftHref(href, draft, assigneeId))
   }
   // Очередь остаётся смонтированной под полной карточкой: её разрез, прокрутка
   // и черновик не теряются. Навигация в приложение — отдельное явное действие.

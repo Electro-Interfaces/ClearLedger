@@ -25,6 +25,12 @@ export function taskDraftParams(title: string, assigneeId: string) {
   return params
 }
 
+/** «Сегодня» и визы показывают смешанную работу; заготовку принимает реестр задач. */
+export function taskDraftHref(href: string, title: string, assigneeId: string) {
+  const draft = taskDraftParams(title, assigneeId).toString()
+  return draft ? `/tasks/company?view=registry&${draft}` : href
+}
+
 const REPORT_SCOPES = ['open', 'overdue', 'closed', 'mine', 'all', 'triage'] as const
 export type TaskReportScope = typeof REPORT_SCOPES[number]
 

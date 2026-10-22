@@ -1,7 +1,23 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { consumeTaskDraft, taskDraft, taskDraftParams, taskQueueIsCompact,
+import { consumeTaskDraft, taskDraft, taskDraftParams, taskDraftHref, taskQueueIsCompact,
   taskReportParams, taskReportScope } from './taskQueue.ts'
+
+test('передача из смешанной очереди попадает к форме с исходными полями', () => {
+  for (const href of ['/docs/work?view=today', '/docs/work?view=errands', '/docs/work?view=visas']) {
+    const target = new URL(taskDraftHref(href, ' Нужна проверка ', 'executor'), 'https://example.test')
+    assert.equal(target.pathname, '/tasks/company')
+    assert.equal(target.searchParams.get('view'), 'registry')
+    assert.deepEqual(taskDraft(target.searchParams), { title: 'Нужна проверка', assigneeId: 'executor' })
+    assert.equal(consumeTaskDraft(target.searchParams).toString(), 'view=registry')
+  }
+})
+
+test('переход без заготовки сохраняет выбранный разрез', () => {
+  assert.equal(taskDraftHref('/docs/work?view=today', '', ''), '/docs/work?view=today')
+  const target = new URL(taskDraftHref('/docs/work?view=today', '', 'executor'), 'https://example.test')
+  assert.deepEqual(taskDraft(target.searchParams), { title: undefined, assigneeId: 'executor' })
+})
 
 test('прямая ссылка и reload: исполнитель остаётся фильтром, форма не открывается', () => {
   const params = new URLSearchParams('view=registry&assignee=executor&q=счёт&sort=due')
