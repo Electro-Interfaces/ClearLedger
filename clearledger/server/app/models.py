@@ -10440,6 +10440,12 @@ class Task(Base):
     # отбор по состоянию должен идти в SQL: разбирать маршрут запросом — дорого
     # и нечитаемо, а фильтровать в приложении значит сломать постраничность.
     stage_column: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Идентификатор конкретного назначения, а не редакции всей задачи.
+    assignment_revision: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"))
+    assignment_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True)
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     author_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -10483,6 +10489,25 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TaskAssignmentRead(Base):
+    """Курсор просмотра назначения человеком, отдельно от личной раскладки.
+
+    Назначение и его поколение живут только в Task. Здесь нет копии статуса,
+    срока или получателя: только точная версия, успешно открытая пользователем.
+    ChatParticipant знает о прочтении комнаты, но не о карточке поручения.
+    """
+    __tablename__ = "task_assignment_reads"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    assignment_revision: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class TaskEvent(Base):
@@ -14019,3 +14044,23 @@ class TicketVideoRoom(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True),ForeignKey("users.id",ondelete="SET NULL"),nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),server_default=func.now())
     __table_args__ = (Index("uq_ticket_video_room", "company_id", "ticket_id",unique=True),)
+
+
+# Все канонические постановки (документ, чат, процесс, почта, повторение,
+# Пульс) создают Task через ORM. Отмечаем назначение здесь, независимо от
+# транспорта notify и настройки его каналов.
+from sqlalchemy import event as _task_event, inspect as _task_inspect
+
+
+@_task_event.listens_for(Task, "before_insert")
+def _task_assignment_created(mapper, connection, task):
+    task.assignment_revision = uuid.uuid4()
+    task.assignment_by_id = task.author_id
+
+
+@_task_event.listens_for(Task, "before_update")
+def _task_assignment_changed(mapper, connection, task):
+    if _task_inspect(task).attrs.assignee_id.history.has_changes():
+        task.assignment_revision = uuid.uuid4()
+        task.assignment_by_id = getattr(task, "_assignment_actor_id", None)
+        task.__dict__.pop("_assignment_actor_id", None)

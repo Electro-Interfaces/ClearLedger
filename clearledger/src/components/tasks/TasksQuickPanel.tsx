@@ -16,9 +16,9 @@
  * с первым на первой же правке: действие в строке, пустое состояние, цвет
  * просрочки.
  *
- * Что сюда НЕ тащим: маршруты и стадии целиком, историю, отборы по меткам и
- * объектам, командную строку над пачкой, доски и планирование. Это работа на
- * весь экран, и она живёт в «Треке» — кнопка ведёт ровно в открытый разрез.
+ * Поручение открывается той же полной карточкой поверх очереди. Закрытие
+ * возвращает к выбранному разрезу; явное «Открыть в Треке» переносит карточку
+ * в приложение. Отборы, массовая правка, доски и планирование остаются там.
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -29,6 +29,8 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TaskCard } from './TaskCard'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/contexts/AuthContext'
@@ -219,6 +221,7 @@ export function TasksQuickPanel({ compact: compactProp }: {
   const me = user?.id ?? ''
   const { closeInteraction } = useSupportContext()
   const [view, setView] = useState<ViewKey>(VIEWS[0]?.key ?? 'today')
+  const [selectedTask, setSelectedTask] = useState<string | null>(null)
   /** Что показывать в очереди: всё, только поручения или только документы. */
   const [kindFilter, setKindFilter] = useState<'all' | 'task' | 'doc'>('all')
   // Ширины полос человек ставит сам: у кого-то рельса с длинными словами, у
@@ -279,6 +282,7 @@ export function TasksQuickPanel({ compact: compactProp }: {
   const overdue = счёт.overdue
 
   const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['task-assignment-counts', companyId] })
     void qc.invalidateQueries({ queryKey: ['tasks'] })
     void qc.invalidateQueries({ queryKey: ['work-mine'] })
     void qc.invalidateQueries({ queryKey: ['placed'] })
@@ -320,11 +324,9 @@ export function TasksQuickPanel({ compact: compactProp }: {
     const хвост = q.toString()
     go(хвост ? `${href}${href.includes('?') ? '&' : '?'}${хвост}` : href)
   }
-  // Карточку поручения открывает реестр «Компании» — только он читает `?task=`.
-  // Раздел «Моё» показывает работу НА МНЕ строками, и поручение, отданное
-  // другому, там не появится вовсе: переход из окна вёл на список, в котором
-  // искомого нет, и выглядел как «кнопка ничего не сделала».
-  const openTask = (id: string) => go(`/docs/company?view=errands&task=${id}`)
+  // Очередь остаётся смонтированной под полной карточкой: её разрез, прокрутка
+  // и черновик не теряются. Навигация в приложение — отдельное явное действие.
+  const openTask = (id: string) => setSelectedTask(id)
   const current = VIEWS.find((v) => v.key === view) ?? VIEWS[0]
 
   const renderView = (v: typeof VIEWS[number]) => {
@@ -564,10 +566,26 @@ export function TasksQuickPanel({ compact: compactProp }: {
                 const box = shellRef.current?.getBoundingClientRect()
                 return box ? box.right - e.clientX : day.width
               })} />
-            <DayAside companyId={companyId} onOpen={go} width={day.width} />
+            <DayAside companyId={companyId} onOpen={go} onOpenTask={openTask} width={day.width} />
           </>
         )}
       </div>
+      <Dialog open={!!selectedTask} onOpenChange={(open) => { if (!open) setSelectedTask(null) }}>
+        <DialogContent className="flex max-h-[90dvh] w-[calc(100%_-_1rem)] max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+          <DialogHeader className="shrink-0 border-b px-4 py-3 pr-12">
+            <DialogTitle className="text-base">Карточка поручения</DialogTitle>
+            <Button variant="outline" size="sm" className="mt-2 w-fit gap-1.5"
+              onClick={() => { if (selectedTask) go(`/docs/company?view=errands&task=${selectedTask}`) }}>
+              Открыть в Треке<ArrowUpRight className="size-3.5" />
+            </Button>
+          </DialogHeader>
+          <div className="min-h-0 overflow-y-auto p-3 sm:p-4">
+            {selectedTask && <TaskCard key={`${companyId}:${selectedTask}`} id={selectedTask}
+              companyId={companyId} onChanged={refresh} onOpenOther={openTask}
+              onBack={() => setSelectedTask(null)} />}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -618,27 +636,27 @@ function ViewBody({ view, companyId, tasks, loading, onOpen, onChanged, kinds }:
     // Свои имена («горит», «очередь», «моё») окно уже носило, и разрез в нём
     // назывался не так, как тот же разрез на экране.
     case 'today':
-      return <MyWorkPage buckets={['overdue', 'today']} heading={false} hideDeferred kinds={kinds}
+      return <MyWorkPage onOpenTask={onOpen} buckets={['overdue', 'today']} heading={false} hideDeferred kinds={kinds}
         empty="На сегодня ничего не горит: сроки не поджимают." />
     case 'mine-all':
-      return <MyWorkPage heading={false} kinds={kinds} />
+      return <MyWorkPage onOpenTask={onOpen} heading={false} kinds={kinds} />
     case 'approvals':
-      return <MyWorkPage reasons={['approve']} heading={false} kinds={kinds}
+      return <MyWorkPage onOpenTask={onOpen} reasons={['approve']} heading={false} kinds={kinds}
         empty="Виз на вас нет." />
     case 'acquaints':
-      return <MyWorkPage reasons={['acquaint']} heading={false} kinds={kinds}
+      return <MyWorkPage onOpenTask={onOpen} reasons={['acquaint']} heading={false} kinds={kinds}
         empty="Ознакомиться пока не с чем." />
     case 'errands':
-      return <MyWorkPage reasons={['do']} heading={false} kinds={kinds}
+      return <MyWorkPage onOpenTask={onOpen} reasons={['do']} heading={false} kinds={kinds}
         empty="Поручений на вас нет." />
     case 'mine':
-      return <MyWorkPage reasons={['own']} heading={false} kinds={kinds}
+      return <MyWorkPage onOpenTask={onOpen} reasons={['own']} heading={false} kinds={kinds}
         empty="Документов, где вы автор или ответственный, сейчас нет." />
     case 'starred':
-      return <PlacedList companyId={companyId} scope="starred" onChanged={onChanged}
+      return <PlacedList companyId={companyId} scope="starred" onChanged={onChanged} onOpenTask={onOpen}
         empty="Ничего не помечено. Звёздочка ставится в строке работы." />
     case 'deferred':
-      return <PlacedList companyId={companyId} scope="deferred" onChanged={onChanged}
+      return <PlacedList companyId={companyId} scope="deferred" onChanged={onChanged} onOpenTask={onOpen}
         empty="Отложенного нет. Отложить можно в строке очереди — срок компании при этом не меняется." />
     default:
       return <TaskLines rows={tasks} loading={loading} view={view} onOpen={onOpen}
@@ -728,8 +746,8 @@ function TaskLines({ rows, loading, view, companyId, onOpen, onChanged }: {
 /** Правая полоса: день человека. Отвечает на «что у меня сегодня» — взятое в
  *  день, чем просил напомнить и когда встречи. Списки те же, что на экране
  *  «Сегодня». */
-function DayAside({ companyId, onOpen, width }: {
-  companyId: string; onOpen: (href: string) => void; width: number
+function DayAside({ companyId, onOpen, onOpenTask, width }: {
+  companyId: string; onOpen: (href: string) => void; onOpenTask: (id: string) => void; width: number
 }) {
   const from = new Date(); from.setHours(0, 0, 0, 0)
   const to = new Date(); to.setHours(23, 59, 59, 999)
@@ -760,7 +778,7 @@ function DayAside({ companyId, onOpen, width }: {
             весь день
           </button>
         </h3>
-        <PlacedList companyId={companyId} scope="day"
+        <PlacedList companyId={companyId} scope="day" onOpenTask={onOpenTask}
           empty="День пуст. Возьмите из очереди слева — или оставьте пустым: это тоже решение." />
       </section>
 

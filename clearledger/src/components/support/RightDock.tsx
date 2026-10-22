@@ -17,6 +17,7 @@ import {
   Bot, CalendarDays, CalendarPlus, Compass, HelpCircle, ListChecks, Maximize2, MessageCircle, NotebookPen, X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { TaskAssignmentBadges } from '@/components/tasks/TaskAssignmentBadges'
 import { useIsMobile, useMaxWidth } from '@/hooks/use-mobile'
 import { MobileShell } from '@/components/common/MobileShell'
 import { useSupportContext, type InteractionSection } from '@/contexts/SupportContext'
@@ -289,6 +290,7 @@ function DockHead({ tabs, section, badgeOf, isMobile, onTab, onPop, onClose }: {
   onPop: () => void
   onClose: () => void
 }) {
+  const { tasksOverdue } = useSupportContext()
   return (
     <div className="flex shrink-0 items-center gap-1 border-b border-border/50 bg-card px-2 py-1.5">
       {/* Подпись несёт только открытая вкладка: семь подписей в колонке 400 px
@@ -304,9 +306,11 @@ function DockHead({ tabs, section, badgeOf, isMobile, onTab, onPop, onClose }: {
                 active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
               <t.icon className="size-4 shrink-0" />
               {active && <span className="truncate">{t.label}</span>}
-              {badge > 0 && (
-                <span className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">{badge}</span>
-              )}
+              {t.key === 'tasks'
+                ? <TaskAssignmentBadges incoming={badge} overdue={tasksOverdue} inline />
+                : badge > 0 && (
+                  <span className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">{badge}</span>
+                )}
             </button>
           )
         })}
@@ -351,6 +355,7 @@ function RailButton({ tab, active, badge, primary, onClick, onDropItem }: {
   /** Бросок предмета на саму кнопку: у агента это «займись вот этим». */
   onDropItem?: (ref: string, label: string) => void
 }) {
+  const { tasksOverdue } = useSupportContext()
   const [ждём, setЖдём] = useState(false)
   const таймер = useRef<number | null>(null)
   // Глубина: `dragenter` и `dragleave` приходят на каждый вложенный элемент, и
@@ -403,9 +408,11 @@ function RailButton({ tab, active, badge, primary, onClick, onDropItem }: {
           иконку читается как уход с кнопки и рвёт отсчёт открытия. */}
       <tab.icon className="pointer-events-none size-5" />
       <span className="pointer-events-none">{tab.label}</span>
-      {badge > 0 && (
-        <span className="pointer-events-none absolute right-0.5 top-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white">{badge}</span>
-      )}
+      {tab.key === 'tasks'
+        ? <TaskAssignmentBadges incoming={badge} overdue={tasksOverdue} />
+        : badge > 0 && (
+          <span className="pointer-events-none absolute right-0.5 top-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-none text-white">{badge}</span>
+        )}
     </button>
   )
 }

@@ -31,7 +31,7 @@ function href(item: PlacedItem): string {
   return item.personal ? `/tasks/${item.id}` : `/docs/company?view=errands&task=${item.id}`
 }
 
-export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
+export function PlacedList({ companyId, scope, listId, on, empty, onChanged, onOpenTask }: {
   companyId: string
   scope: Scope
   listId?: string
@@ -39,6 +39,7 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
   on?: string
   empty: string
   onChanged?: () => void
+  onOpenTask?: (id: string) => void
 }) {
   const navigate = useNavigate()
   const q = useQuery({
@@ -78,7 +79,8 @@ export function PlacedList({ companyId, scope, listId, on, empty, onChanged }: {
             <DragHandle targetRef={workService.targetRef(item)}
               label={`${item.key} ${item.title}`} className="hidden sm:inline-flex" />
             <Icon className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:block" aria-hidden />
-            <button type="button" onClick={() => navigate(href(item))}
+            <button type="button" onClick={() => item.kind === 'task' && onOpenTask
+              ? onOpenTask(item.id) : navigate(href(item))}
               className="min-w-0 flex-1 text-left">
               <div className="break-words text-sm leading-snug sm:truncate">{item.title}</div>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
