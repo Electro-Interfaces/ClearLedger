@@ -247,6 +247,27 @@ async def test_postgres_identity_intervals_filters_and_history(db, occupied_scop
 
 
 @pytest.mark.asyncio
+async def test_passport_ports_without_sessions_remain_selectable_and_zero(db, occupied_scope):
+    own, other, a, b = occupied_scope
+    a.extra_metadata = {"connectors": [{"no": 1, "type": "CCS"},
+                                      {"no": 4, "type": "CCS"}, {"no": 5, "type": "AC"}]}
+    await db.flush()
+    f = PeriodFilter(company_id=own.id, date_from=DAY, date_to=DAY)
+    result = await hourly_occupancy(db, f, group_by="connector")
+    catalog = {port["id"] for port in result["connectors"]}
+    assert a.id + ":4" in catalog and a.id + ":5" in catalog
+    assert all(p["occupied_minutes"] == p["starts"] == 0 for p in points(result, a.id + ":4"))
+    assert "AC" in result["connector_types"]
+    selected = await hourly_occupancy(db, f, connector_ids=[a.id + ":4"], group_by="connector")
+    assert [s["id"] for s in selected["series"]] == [a.id + ":4"]
+    assert len(points(selected)) == 24
+    assert {port["id"] for port in selected["connectors"]} == catalog
+    by_type = await hourly_occupancy(db, f, connector_types=["CCS"], group_by="connector")
+    assert a.id + ":4" in {s["id"] for s in by_type["series"]}
+    assert a.id + ":5" not in {s["id"] for s in by_type["series"]}
+
+
+@pytest.mark.asyncio
 async def test_postgres_dim_filter_does_not_expand_company(db, occupied_scope):
     own, other, a, b = occupied_scope
     f = PeriodFilter(company_id=own.id, date_from=DAY, date_to=DAY,
