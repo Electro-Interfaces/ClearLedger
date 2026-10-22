@@ -4377,6 +4377,9 @@ async def create_all() -> None:
             "source = 'mail' AND source_ref IS NOT NULL) UPDATE doc_cards AS card SET "
             "source_ref = left(card.source_ref, 145) || '#legacy-duplicate-' || "
             "card.id::text FROM ranked WHERE ranked.id = card.id AND ranked.position > 1",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_cards_contract_source "
+            "ON doc_cards(company_id, source_ref) "
+            "WHERE source = 'manual' AND source_ref LIKE 'contract-document:%'",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_cards_mail_source "
             "ON doc_cards (company_id, source_ref) WHERE source = 'mail' "
             "AND source_ref IS NOT NULL",

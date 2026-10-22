@@ -22,6 +22,32 @@ def _col(table: str, col: str = "contract_id") -> str:
     return f"SELECT {col} AS cid FROM {table} WHERE {col} IS NOT NULL"
 
 
+def _subject(table: str, column: str = "subject_ref") -> str:
+    # Сравнение строк, без приведения произвольной ссылки к UUID: старое или
+    # незаполненное значение не должно ломать весь список договоров.
+    return (f"SELECT c.id AS cid FROM {table} r JOIN contracts c"
+            f" ON r.{column} = 'contract:' || c.id::text"
+            " AND r.company_id = c.company_id")
+
+
+# Основная карточка и бумаги договора — разные способы связи. UNION по паре
+# (договор, документ) учитывает бумагу один раз, даже если есть обе связи.
+_DOCUMENTS = """
+    SELECT cid FROM (
+        SELECT c.id AS cid, d.id AS doc_id FROM doc_cards d JOIN contracts c
+          ON d.company_id = c.company_id AND d.subject_ref = 'contract:' || c.id::text
+        UNION
+        SELECT c.id, d.id FROM doc_relations r
+          JOIN doc_cards d ON d.id = r.doc_id AND d.company_id = r.company_id
+          JOIN contracts c ON c.company_id = r.company_id
+            AND r.target_ref = 'contract:' || c.id::text
+        UNION
+        SELECT c.id, d.id FROM doc_cards d JOIN contracts c
+          ON d.company_id = c.company_id AND d.attrs->>'contract_id' = c.id::text
+    ) documents
+"""
+
+
 # (приложение, подпись, SELECT … AS cid — по строке на ссылку)
 _SOURCES: list[tuple[str, str, str]] = [
     ("ops", "Расчёты станций", _col("station_contract_settlements")),
@@ -42,8 +68,20 @@ _SOURCES: list[tuple[str, str, str]] = [
      "SELECT c.id AS cid FROM ezs_sites s"
      " CROSS JOIN jsonb_array_elements_text(COALESCE(s.workspace_data->'integration'->'contractIds', '[]'::jsonb)) x"
      " JOIN contracts c ON c.id::text = x"),
-    ("docs", "Документы «Трека»",
-     "SELECT c.id AS cid FROM doc_cards d JOIN contracts c ON d.subject_ref = 'contract:' || c.id::text"),
+    ("docs", "Документы «Трека»", _DOCUMENTS),
+    ("docs", "Поручения по договору", _subject("tasks")),
+    ("docs", "Календарь по договору", _subject("calendar_events")),
+    ("docs", "Напоминания по договору", _subject("personal_reminders", "target_ref")),
+    ("core", "Основания участия людей",
+     "SELECT c.id AS cid FROM user_companies u JOIN contracts c"
+     " ON c.company_id = u.company_id AND u.contract_ids @> jsonb_build_array(c.id::text)"),
+    ("core", "Явные привязки к приложениям и проектам", _col("contract_links")),
+    ("core", "Адресный охват договора", _col("contract_locations")),
+    ("core", "Аналитика договора", _col("contract_dimensions")),
+    ("market", "Предложения по договору", _subject("market_growth_leads")),
+    ("core", "Обсуждения с партнёрами", _subject("eco_partner_topics")),
+    ("core", "Сообщения партнёров", _subject("eco_partner_messages")),
+    ("conf", "Встречи по договору", _subject("conf_sessions")),
     ("shop", "Приёмки магазина", _col("store_receipts")),
     ("books", "Первичные документы", _col("accounting_docs")),
     ("books", "Входящие документы", _col("intake_items")),
@@ -56,8 +94,11 @@ async def _sources(db: AsyncSession) -> list[tuple[str, str, str]]:
     # То же разрешение имени через search_path, что и у запроса к источнику.
     # Наличие контура проверяем до SQL: ошибка отсутствующей таблицы уже
     # прервала бы транзакцию. Ошибки существующей схемы не скрываем.
-    if await db.scalar(text("SELECT to_regclass('service_contracts') IS NOT NULL")):
-        sources.append(("support", "Сервисные договоры «Поддержки»", _col("service_contracts")))
+    # Обе поставки могут присутствовать в одной БД. Нельзя проверять одну схему,
+    # а затем неявно читать одноимённую таблицу из другой через search_path.
+    for table in ("core.service_contracts", "public.service_contracts"):
+        if await db.scalar(text("SELECT to_regclass(:table) IS NOT NULL"), {"table": table}):
+            sources.append(("support", "Сервисные договоры «Поддержки»", _col(table)))
     return sources
 
 

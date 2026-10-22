@@ -12567,6 +12567,9 @@ class DocCard(Base):
         Index("uq_doc_cards_mail_source", "company_id", "source_ref", unique=True,
               postgresql_where=text(
                   "source = 'mail' AND source_ref IS NOT NULL")),
+        Index("uq_doc_cards_contract_source", "company_id", "source_ref", unique=True,
+              postgresql_where=text(
+                  "source = 'manual' AND source_ref LIKE 'contract-document:%'")),
         Index("idx_doc_cards_registry", "company_id", "family", "reg_date"),
         Index("idx_doc_cards_counterparty", "company_id", "counterparty_id"),
         Index("idx_doc_cards_retention", "company_id", "retention_state",
