@@ -5,6 +5,7 @@
  * и его договоры (с детальной карточкой каждого).
  */
 import { Fragment, useState, useMemo, useEffect, useRef } from 'react'
+import { ApiError } from '@/services/apiClient'
 import { localReferenceId, searchContractCounterparties, resumeCreation, type CreationProgress } from '@/lib/contractFormSave'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -1143,7 +1144,8 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
           await update.mutateAsync({ id: edit.id, updates: payload })
           return { id: edit.id }
         }
-        return create.mutateAsync(payload)
+        progress.current.creationKey ??= crypto.randomUUID()
+        return create.mutateAsync({ ...payload, creationKey: progress.current.creationKey })
       }, [
         { name: 'scope', run: (contractId) => !edit || scopeDirty
           ? setScope.mutateAsync({ contractId, scopeType: scope.scopeType,
@@ -1160,6 +1162,9 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
         setScopeDirty(false); setLinks([]); setLinksDirty(false)
       }
     } catch (e) {
+      if (!progress.current.id && e instanceof ApiError && [400, 401, 403, 404, 409, 422].includes(e.status)) {
+        progress.current.creationKey = undefined
+      }
       const message = `Ошибка: ${(e as Error).message}`
       setSaveError(message); toast.error(message)
     } finally { setSaving(false) }
@@ -1174,7 +1179,7 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
             {edit && <span className={`text-xs font-normal ${contractStatus(edit).cls}`}>{contractStatus(edit).label}</span>}
           </DialogTitle>
         </DialogHeader>
-        <fieldset disabled={pending || !!progress.current.id} className="space-y-3 min-w-0">
+        <fieldset disabled={pending || !!progress.current.id || !!progress.current.creationKey} className="space-y-3 min-w-0">
           {!fixedCp && <div className="space-y-1.5"><Label>Контрагент <span className="text-destructive">*</span></Label>
             <Input aria-label="Поиск контрагента" value={f.cpQuery} placeholder="Название или ИНН"
               onChange={(e) => setF((s) => ({ ...s, cpQuery: e.target.value }))} />
@@ -1302,9 +1307,10 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
         </fieldset>
         {saveError && <p role="alert" className="text-sm text-destructive">{saveError}</p>}
         {progress.current.id && <p className="text-xs text-muted-foreground">Карточка договора сохранена. Повторите сохранение, чтобы завершить охват и привязки.</p>}
+        {progress.current.creationKey && !progress.current.id && <p className="text-xs text-muted-foreground">Ответ о создании не получен. Повторите сохранение, чтобы найти договор и завершить привязки.</p>}
         <DialogFooter>
           <Button disabled={!canSave || pending} onClick={save}>
-            {pending && <Loader2 className="size-4 animate-spin mr-2" />} {progress.current.id ? 'Продолжить сохранение' : 'Сохранить'}
+            {pending && <Loader2 className="size-4 animate-spin mr-2" />} {progress.current.id || progress.current.creationKey ? 'Продолжить сохранение' : 'Сохранить'}
           </Button>
         </DialogFooter>
       </DialogContent>

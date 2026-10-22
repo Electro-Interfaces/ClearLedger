@@ -5,7 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
 import * as ref from '@/services/referenceService'
-import type { Counterparty, Organization, Nomenclature, Contract, ContractScopeType } from '@/types'
+import type { Counterparty, Organization, Nomenclature, ContractScopeType } from '@/types'
 
 // ---- Keys ----
 
@@ -152,7 +152,7 @@ export function useCreateContract() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (input: Omit<Contract, 'id' | 'companyId' | 'createdAt' | 'updatedAt'>) =>
+    mutationFn: (input: Parameters<typeof ref.createContract>[1]) =>
       ref.createContract(companyId, input),
     onSuccess: () => invalidateAll(qc, companyId),
   })

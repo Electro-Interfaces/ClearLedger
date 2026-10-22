@@ -118,6 +118,11 @@ def _validate(data: dict[str, Any]) -> None:
         raise ValueError("Переменная часть по счётчику не сочетается с фиксированной суммой")
 
 
+async def _lock_contract_terms(db: AsyncSession, company_id, contract_id):
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                     {"key": f"ops-term-window:{company_id}:{contract_id}"})
+
+
 async def _check_window(db: AsyncSession, company_id, contract_id, *, cost_item,
                         location_id, valid_from, valid_to, exclude_id=None):
     try:
@@ -128,8 +133,7 @@ async def _check_window(db: AsyncSession, company_id, contract_id, *, cost_item,
     if end and end < start:
         raise ValueError("Окончание условия не может быть раньше начала")
     # Все способы записи одного договора проверяют интервал под одной блокировкой.
-    await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-                     {"key": f"ops-term-window:{company_id}:{contract_id}"})
+    await _lock_contract_terms(db, company_id, contract_id)
     stmt = select(OpsContractTerm.id).where(
         OpsContractTerm.company_id == company_id,
         OpsContractTerm.contract_id == contract_id,
@@ -190,10 +194,18 @@ async def update_term(db: AsyncSession, company_id: uuid.UUID, term_id: uuid.UUI
     Новая версия — правильный способ поднять ставку: старая закрывается днём
     раньше начала новой, и суммы уже закрытых месяцев остаются как были.
     """
-    term = (await db.execute(select(OpsContractTerm).where(
+    contract_id = await db.scalar(select(OpsContractTerm.contract_id).where(
         OpsContractTerm.company_id == company_id,
         OpsContractTerm.id == term_id,
-    ))).scalar_one_or_none()
+    ))
+    if contract_id is None:
+        raise ValueError("Условие не найдено")
+    # Сначала общий барьер, затем свежий снимок. Иначе ожидающий PATCH проверял
+    # старую статью/дату, а записывал уже изменённую соседним запросом строку.
+    await _lock_contract_terms(db, company_id, contract_id)
+    term = (await db.execute(select(OpsContractTerm).where(
+        OpsContractTerm.company_id == company_id, OpsContractTerm.id == term_id,
+    ).execution_options(populate_existing=True))).scalar_one_or_none()
     if term is None:
         raise ValueError("Условие не найдено")
 

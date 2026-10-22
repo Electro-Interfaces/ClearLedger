@@ -24,6 +24,7 @@ export function counterpartyPatch(updates: Record<string, unknown>): Record<stri
 
 export interface CreationProgress {
   id?: string
+  creationKey?: string
   completed: string[]
   running?: boolean
 }

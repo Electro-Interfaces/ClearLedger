@@ -418,9 +418,11 @@ export async function findContractsByCounterparty(companyId: string, counterpart
   return list.filter((c) => c.counterpartyId === counterpartyId)
 }
 
+export type CreateContractInput = Omit<Contract, 'id' | 'companyId' | 'createdAt' | 'updatedAt'> & { creationKey?: string }
+
 export async function createContract(
   companyId: string,
-  input: Omit<Contract, 'id' | 'companyId' | 'createdAt' | 'updatedAt'>,
+  input: CreateContractInput,
 ): Promise<Contract> {
   if (isApiEnabled()) {
     return post<Contract>('/api/references/contracts', { ...input, company_id: companyId })

@@ -3,6 +3,8 @@ CRUD для НСИ (справочники): контрагенты, орган�
 Все ответы в camelCase для прямой совместимости с фронтендом.
 """
 
+import hashlib
+import json
 import uuid
 from datetime import datetime, timezone
 
@@ -321,11 +323,11 @@ async def update_counterparty(
 
     if body.inn is not None:
         cp.inn = body.inn
-    if body.kpp is not None:
+    if "kpp" in body.model_fields_set:
         cp.kpp = body.kpp
     if body.name is not None:
         cp.name = body.name
-    if body.shortName is not None:
+    if "shortName" in body.model_fields_set:
         cp.short_name = body.shortName
     if body.type is not None:
         cp.type = body.type
@@ -335,7 +337,7 @@ async def update_counterparty(
         cp.lifecycle_status = body.lifecycleStatus
     for camel, snake in _CP_EXTRA_FIELDS.items():
         val = getattr(body, camel)
-        if val is not None:
+        if camel in body.model_fields_set:
             setattr(cp, snake, val)
 
     mark_reference_changes(cp, before)
@@ -840,8 +842,21 @@ async def create_contract(
     cp_id, org_id = await _validate_contract_parties(
         db, cid, body.counterpartyId, body.organizationId)
     identity = contract_identity(body.number, body.date, body.type)
-    if identity:
+    request_hash = hashlib.sha256(json.dumps(
+        body.model_dump(mode="json", exclude={"company_id", "creationKey"}),
+        sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest() if body.creationKey else None
+    if identity or body.creationKey:
         await lock_manual_creation(db, cid, "contract")
+    if body.creationKey:
+        previous = (await db.execute(select(Contract).where(
+            Contract.company_id == cid, Contract.creation_key == body.creationKey,
+        ))).scalar_one_or_none()
+        if previous is not None:
+            if previous.creation_actor_id != current_user.id or previous.creation_request_hash != request_hash:
+                raise HTTPException(409, "Ключ создания договора уже использован с другими реквизитами")
+            return _contract_resp(previous)
+    if identity:
         candidates = (await db.execute(select(Contract).where(
             Contract.company_id == cid, Contract.counterparty_id == cp_id,
             Contract.organization_id == org_id,
@@ -852,6 +867,9 @@ async def create_contract(
                                 + ", ".join(sorted(str(c.id) for c in duplicates)))
     c = Contract(
         company_id=cid,
+        creation_key=body.creationKey,
+        creation_actor_id=current_user.id if body.creationKey else None,
+        creation_request_hash=request_hash,
         number=body.number,
         date=body.date,
         counterparty_id=cp_id,

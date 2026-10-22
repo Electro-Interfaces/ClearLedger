@@ -100,7 +100,7 @@ export function ContractDocumentsBlock({ contract: c }: { contract: Contract }) 
       draft.current = null
       setAdding(false); setFile(null); setF({ kindId: '', number: '', date: '', title: '', validUntil: '', amount: '' })
     } catch (e) {
-      if (!progress.current.id && e instanceof ApiError && e.status >= 400 && e.status < 500) draft.current = null
+      if (!progress.current.id && e instanceof ApiError && [400, 401, 403, 404, 409, 422].includes(e.status)) draft.current = null
       const message = e instanceof Error ? e.message : 'Не удалось добавить документ'
       setSaveError(message); toast.error(message)
     }

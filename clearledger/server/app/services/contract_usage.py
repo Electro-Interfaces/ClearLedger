@@ -75,7 +75,6 @@ _SOURCES: list[tuple[str, str, str]] = [
     ("core", "Основания участия людей",
      "SELECT c.id AS cid FROM user_companies u JOIN contracts c"
      " ON c.company_id = u.company_id AND u.contract_ids @> jsonb_build_array(c.id::text)"),
-    ("core", "Явные привязки к приложениям и проектам", _col("contract_links")),
     ("core", "Адресный охват договора", _col("contract_locations")),
     ("core", "Аналитика договора", _col("contract_dimensions")),
     ("market", "Предложения по договору", _subject("market_growth_leads")),
@@ -119,6 +118,10 @@ async def contract_usage(db: AsyncSession, contract_id: uuid.UUID) -> list[dict]
         n = (await db.execute(text(f"SELECT count(*) FROM ({sql}) u WHERE u.cid = :cid"), {"cid": contract_id})).scalar() or 0
         if n:
             out.append({"app": app, "label": label, "count": int(n)})
+    for app, count in (await db.execute(text(
+        "SELECT app_code, count(*) FROM contract_links WHERE contract_id = :cid GROUP BY app_code"
+    ), {"cid": contract_id})).all():
+        out.append({"app": app, "label": "Явные привязки к приложению и проектам", "count": int(count)})
     return out
 
 
@@ -134,4 +137,11 @@ async def usage_by_contract(db: AsyncSession, company_id: uuid.UUID) -> dict[uui
             out.setdefault(cid, {"apps": set(), "projects": set()})["apps"].add(app)
     for cid, ref in (await db.execute(text(f"SELECT u.cid, u.ref FROM ({_PROJECT_USAGE}) u WHERE {scope}"), {"co": company_id})).all():
         out.setdefault(cid, {"apps": set(), "projects": set()})["projects"].add(ref)
+    for cid, app, ref in (await db.execute(text(
+        "SELECT contract_id, app_code, project_ref FROM contract_links WHERE company_id = :co"
+    ), {"co": company_id})).all():
+        item = out.setdefault(cid, {"apps": set(), "projects": set()})
+        item["apps"].add(app)
+        if ref:
+            item["projects"].add(ref)
     return out

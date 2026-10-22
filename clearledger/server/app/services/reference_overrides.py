@@ -12,6 +12,7 @@ from typing import Any
 _SYSTEM_FIELDS = {
     "id", "company_id", "external_ref", "raw", "manual_overrides",
     "created_at", "updated_at",
+    "creation_key", "creation_actor_id", "creation_request_hash",
 }
 
 
