@@ -14,6 +14,7 @@ import type {
   EnergyPeriodsSummary, ReestrModel, DispenseRecon,
 } from '@/types/settlement'
 import { isApiEnabled, get, post, patch, put, del, upload } from './apiClient'
+import { counterpartyPatch } from '@/lib/contractFormSave'
 import {
   counterpartiesKey, organizationsKey, nomenclatureKey, contractsKey,
   warehousesKey, bankAccountsKey, balancesKey,
@@ -120,7 +121,7 @@ export async function updateCounterparty(
   updates: Partial<Omit<Counterparty, 'id' | 'companyId' | 'createdAt'>>,
 ): Promise<Counterparty | undefined> {
   if (isApiEnabled()) {
-    return patch<Counterparty>(`/api/references/counterparties/${id}`, updates)
+    return patch<Counterparty>(`/api/references/counterparties/${id}`, counterpartyPatch(updates))
   }
   const list = await loadList<Counterparty>(counterpartiesKey(companyId))
   const idx = list.findIndex((c) => c.id === id)
