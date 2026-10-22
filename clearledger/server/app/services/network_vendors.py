@@ -205,6 +205,9 @@ async def network_vendors(
                 "failedVisitsPct": _проц(неудачных, визитов),
                 "attemptsPerVisit": round(w.get("попыток", 0) / визитов, 2) if визитов else 0.0,
                 "energyKwh": decimal_round(w.get("энергия", 0), 1),
+                # Сводные и модели складывают исходную энергию и округляют итог
+                # один раз: сумма округлённых станций даёт другую цифру марки.
+                "energyKwhRaw": float(w.get("энергия", 0)),
                 "revenue": round(w.get("деньги", 0.0), 2),
             })
 
@@ -229,6 +232,7 @@ async def network_vendors(
             "attemptsPerVisit": round(g["attempts"] / визитов, 2) if визитов else 0.0,
             "failedSessionsPct": _проц(g["failedSessions"], g["attempts"]),
             "energyKwh": decimal_round(g["energyKwh"], 1),
+            "energyKwhRaw": float(g["energyKwh"]),
             "revenue": round(g["revenue"], 2),
             "badStations": g["badStations"],
             "models": sorted(g["models"])[:12],
