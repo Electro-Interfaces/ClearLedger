@@ -26,8 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-import calendar
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import String, and_, cast, func, or_, select, text
@@ -41,7 +40,7 @@ from app.models import (
     User, UserCompany,
 )
 from app.services import (
-    digest, doc_approvals, doc_exchange, process_templates, space_events,
+    calendar_series, digest, doc_approvals, doc_exchange, process_templates, space_events,
     space_time, task_mail, work_state)
 
 log = logging.getLogger("clearledger.tasks.scheduler")
@@ -70,11 +69,8 @@ WARN_FRACTION = 0.25
 # однажды вытащить в память полугодовой календарь.
 _MEETING_LIMIT = 500
 
-# На сколько вперёд материализуется серия и сколько встреч за проход.
-# Горизонт — чтобы занятость и подбор времени видели планёрки заранее;
-# предел за проход — чтобы включённая на год серия не вставила полсотни
-# строк одним заходом и не заперла таблицу.
-SERIES_HORIZON_DAYS = 60
+# Общий бюджет фонового прохода; сохранение одной встречи строит весь
+# горизонт в своей транзакции через тот же сервис calendar_series.
 SERIES_MAX_PER_TICK = 40
 
 # Проходы, которые не шлют сами, а кладут повод в сводку окна.
@@ -469,107 +465,26 @@ async def run_approval_reminders(db, now: datetime, bucket: digest.Bucket) -> in
 
 
 async def run_meeting_series(db, now: datetime) -> int:
-    """Материализовать повторяющиеся встречи вперёд, на горизонт.
+    """Продлить горизонты серий общим с сохранением встречи механизмом.
 
-    Серия — не правило, разворачиваемое на чтении, а настоящие строки. Так
-    участники, ответы, занятость, отмена и правка ОДНОЙ встречи работают тем же
-    кодом, что у обычной: «изменить эту» — это правка строки, а не машина
-    исключений из серии, ради которой пришлось бы завести второй способ
-    существовать у каждой встречи.
-
-    Ответ переносится с головы серии, а не спрашивается заново: «буду на
-    планёрке» сказано один раз, и переспрашивать каждую неделю значит отправить
-    человеку пятьдесят два вопроса в год — ровно тот поток, от которого мы уходим
-    окнами доставки. Отказаться от одной встречи он по-прежнему может.
+    Здесь выбираются только номера голов: правило и последняя дата читаются
+    сервисом заново под блокировкой. Занятую запросом или другим проходом голову
+    пропускаем; остальные серии продолжаются без ожидания чужой транзакции.
     """
-    from app.models import CalendarAttendee, CalendarEvent
+    from app.models import CalendarEvent
 
-    горизонт = now + timedelta(days=SERIES_HORIZON_DAYS)
-    головы = (await db.execute(
-        select(CalendarEvent).where(
-            CalendarEvent.recurrence.is_not(None),
-            CalendarEvent.status == "planned").limit(200))).scalars().all()
-    создано = 0
-    for head in головы:
-        правило = head.recurrence or {}
-        # Второй заслон к тому же: голова без внятного режима серией не
-        # считается. Один заслон здесь уже подводил.
-        if not isinstance(правило, dict) or not правило.get("mode"):
-            continue
-        # Комнату голова получает при первом входе — позже, чем созданы
-        # ближайшие повторения. Без этого они в «Конференции» не попадают.
-        if head.conference_url:
-            from app.services import jitsi
-            await jitsi.share_series_url(db, head)
-        зона = space_time.zone(head.tz)
-        длительность = head.ends_at - head.starts_at
-        предел = None
-        if head.recurrence_until:
-            предел = datetime.combine(head.recurrence_until, time(23, 59),
-                                      tzinfo=зона)
-
-        # Последняя уже созданная встреча серии — от неё и продолжаем. Считать
-        # от головы значило бы каждый проход перебирать всю историю серии.
-        последняя = await db.scalar(
-            select(func.max(CalendarEvent.starts_at)).where(
-                or_(CalendarEvent.series_id == head.id,
-                    CalendarEvent.id == head.id)))
-        курсор = space_time.as_utc(последняя or head.starts_at)
-
-        участники = (await db.execute(select(CalendarAttendee).where(
-            CalendarAttendee.event_id == head.id))).scalars().all()
-
-        while True:
-            следующая = _next_occurrence(курсор, правило, зона)
-            if следующая is None or следующая > горизонт:
-                break
-            if предел is not None and следующая > предел:
-                break
-            if создано >= SERIES_MAX_PER_TICK:
-                break
-            копия = CalendarEvent(
-                company_id=head.company_id, organizer_id=head.organizer_id,
-                title=head.title, description=head.description,
-                starts_at=следующая, ends_at=следующая + длительность,
-                all_day=head.all_day, tz=head.tz, location=head.location,
-                conference_url=head.conference_url, visibility=head.visibility,
-                subject_ref=head.subject_ref, series_id=head.id)
-            db.add(копия)
-            await db.flush()
-            for a in участники:
-                db.add(CalendarAttendee(
-                    event_id=копия.id, user_id=a.user_id, role=a.role,
-                    response=a.response, is_host=a.is_host))
-            курсор = следующая
-            создано += 1
-    return создано
-
-
-def _next_occurrence(after: datetime, rule: dict, zone) -> datetime | None:
-    """Следующее повторение после указанного момента.
-
-    Час и минута берутся у самой встречи, а не у правила: серия задаётся
-    временем головы, и второе место, где записано «в 10:00», разошлось бы с ней
-    при первом же переносе.
-    """
-    шаг = max(1, int(rule.get("interval") or 1))
-    # Без явного режима повторения нет. Умолчание «неделя» выглядело удобным и
-    # означало, что любая строка с пустым правилом становится еженедельной.
-    режим = str(rule.get("mode") or "").lower()
-    здесь = after.astimezone(zone)
-    if режим == "daily":
-        return (здесь + timedelta(days=шаг)).astimezone(timezone.utc)
-    if режим == "weekly":
-        return (здесь + timedelta(weeks=шаг)).astimezone(timezone.utc)
-    if режим == "monthly":
-        # Через сложение дней, а не подменой номера месяца: 31-е есть не в
-        # каждом, и «каждое 31-е» иначе то пропадает, то уезжает на март.
-        месяц = здесь.month - 1 + шаг
-        год = здесь.year + месяц // 12
-        месяц = месяц % 12 + 1
-        день = min(здесь.day, calendar.monthrange(год, месяц)[1])
-        return здесь.replace(year=год, month=месяц, day=день).astimezone(timezone.utc)
-    return None
+    heads = (await db.execute(select(CalendarEvent.id, CalendarEvent.company_id).where(
+        CalendarEvent.series_id.is_(None),
+        CalendarEvent.recurrence.is_not(None),
+        CalendarEvent.status == "planned").limit(200))).all()
+    made = 0
+    for head_id, company_id in heads:
+        if made >= SERIES_MAX_PER_TICK:
+            break
+        made += await calendar_series.materialize_series(
+            db, company_id, head_id, now,
+            limit=SERIES_MAX_PER_TICK - made, skip_locked=True)
+    return made
 
 
 async def run_meetings(db, now: datetime, bucket: digest.Bucket) -> int:
