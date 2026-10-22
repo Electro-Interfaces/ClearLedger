@@ -148,6 +148,9 @@ export function SheetTable({
   const ths = useRef<(HTMLTableCellElement | null)[]>([])
   const tableRef = useRef<HTMLTableElement>(null)
   const box = useRef<HTMLDivElement>(null)
+  const horizontal = useRef<HTMLDivElement>(null)
+  const [scrollWidth, setScrollWidth] = useState(0)
+  const [autoWidths, setAutoWidths] = useState<number[]>([])
   const panned = useRef(false)
   const [wide, setWide] = useState(false)
   const [panning, setPanning] = useState(false)
@@ -174,8 +177,48 @@ export function SheetTable({
     order.splice(order.indexOf(to) + (right ? 1 : 0), 0, from)
     patch({ order })
   }
-  const widthOf = (i: number) => (live?.col === i ? live.w : cols?.width?.[i] ?? defaultWidths?.[i])
+  const widthOf = (i: number) => (live?.col === i ? live.w : cols?.width?.[i] ?? defaultWidths?.[i] ?? autoWidths[i] ?? 120)
+  const tableWidth = lead + view.reduce((sum, i) => sum + widthOf(i), 0)
   const pin = Math.min(cols?.pin ?? 0, view.length)
+
+  // Авторазмер берётся со всего набора, а не с текущей страницы. Иначе длинная
+  // строка на странице 2 меняет геометрию таблицы и положение полосы прокрутки.
+  useLayoutEffect(() => {
+    const table = tableRef.current
+    const context = document.createElement('canvas').getContext('2d')
+    if (!table || !context) return
+    let disposed = false
+    const measure = () => {
+      if (disposed) return
+      const style = getComputedStyle(table)
+      context.font = `${style.fontSize} ${style.fontFamily}`
+      const cache = new Map<string, number>()
+      const textWidth = (value: Cell, col: number) => {
+        const text = String(showCell(value, head[col]) ?? '')
+        let width = cache.get(text)
+        if (width === undefined) {
+          width = context.measureText(text).width
+          cache.set(text, width)
+        }
+        return width
+      }
+      const widths = head.map((title, col) => {
+        // Заголовок может переноситься; значения читаются в одну строку.
+        let width = Math.min(180, context.measureText(title).width * 12 / 14 + 24)
+        for (const row of rows) width = Math.max(width, textWidth(row[col] ?? '', col) + 24)
+        if (total) width = Math.max(width, textWidth(total[col] ?? '', col) + 24)
+        return Math.ceil(Math.max(72, Math.min(480, width)))
+      })
+      setAutoWidths((was) => was.length === widths.length && was.every((w, i) => w === widths[i]) ? was : widths)
+    }
+    measure()
+    void document.fonts.ready.then(measure)
+    document.fonts.addEventListener('loadingdone', measure)
+    return () => {
+      disposed = true
+      document.fonts.removeEventListener('loadingdone', measure)
+    }
+  }, [head, rows, total])
 
   useLayoutEffect(() => {
     const measure = () => {
@@ -201,10 +244,16 @@ export function SheetTable({
     const check = () => {
       setWide(el.scrollWidth > el.clientWidth + 1)
       setMore(el.scrollLeft < el.scrollWidth - el.clientWidth - 1)
+      const bar = horizontal.current
+      // У основной области может быть вертикальная полоса. Уравниваем именно
+      // диапазоны прокрутки, чтобы верхняя полоса доходила до последнего столбца.
+      setScrollWidth(el.scrollWidth + (bar?.clientWidth || el.clientWidth) - el.clientWidth)
+      if (bar && Math.abs(bar.scrollLeft - el.scrollLeft) > 1) bar.scrollLeft = el.scrollLeft
     }
     check()
     const ro = new ResizeObserver(check)
     ro.observe(el)
+    if (horizontal.current) ro.observe(horizontal.current)
     if (tableRef.current) ro.observe(tableRef.current)
     el.addEventListener('scroll', check, { passive: true })
     return () => {
@@ -274,9 +323,7 @@ export function SheetTable({
     el.addEventListener('pointerup', up)
   }
   const autoWidth = (col: number) => {
-    const rest = { ...(cols?.width ?? {}) }
-    delete rest[col]
-    patch({ width: rest })
+    patch({ width: { ...cols?.width, [col]: autoWidths[col] ?? 120 } })
   }
   const edge = 'shadow-[6px_0_8px_-6px_rgb(0_0_0/0.25)]'
   const sticky = (k: number, base: string) =>
@@ -406,6 +453,29 @@ export function SheetTable({
         </p>
       </div>
 
+      <div
+        ref={horizontal}
+        role="region"
+        aria-label="Горизонтальная прокрутка таблицы"
+        tabIndex={wide ? 0 : -1}
+        hidden={!wide}
+        onKeyDown={(e) => {
+          const el = box.current
+          if (!el || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
+          e.preventDefault()
+          e.stopPropagation()
+          el.scrollLeft = e.key === 'Home' ? 0 : e.key === 'End' ? el.scrollWidth
+            : el.scrollLeft + (e.key === 'ArrowRight' ? 80 : -80)
+          e.currentTarget.scrollLeft = el.scrollLeft
+        }}
+        onScroll={(e) => {
+          const el = box.current
+          if (el && Math.abs(el.scrollLeft - e.currentTarget.scrollLeft) > 1) el.scrollLeft = e.currentTarget.scrollLeft
+        }}
+        className="h-4 overflow-x-auto overflow-y-hidden border-t border-di-outline-variant/60 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
+      >
+        <div aria-hidden style={{ width: scrollWidth, height: 1 }} />
+      </div>
       <div className="relative">
         <div
           ref={box}
@@ -456,7 +526,12 @@ export function SheetTable({
           }}
           className="max-h-[calc(100dvh-16rem)] min-h-[240px] overflow-auto border-t border-di-outline-variant/60 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40"
         >
-          <table ref={tableRef} {...tableAttrs} className="w-full border-separate border-spacing-0 text-sm">
+          <table ref={tableRef} {...tableAttrs} style={{ tableLayout: 'fixed', width: tableWidth, minWidth: '100%' }} className="border-separate border-spacing-0 text-sm">
+            <colgroup>
+              {mark && <col style={{ width: LEAD }} />}
+              {view.map((i) => <col key={i} style={{ width: widthOf(i) }} />)}
+              <col />
+            </colgroup>
             <thead>
               <tr>
                 {mark && (
@@ -604,7 +679,7 @@ export function SheetTable({
                     </th>
                   )
                 })}
-                <th aria-hidden className="sticky top-0 z-10 w-full border-b border-di-outline-variant bg-di-surface-low p-0" />
+                <th aria-hidden className="sticky top-0 z-10 border-b border-di-outline-variant bg-di-surface-low p-0" />
               </tr>
             </thead>
             <tbody
@@ -724,7 +799,7 @@ export function SheetTable({
                         </td>
                       )
                     })}
-                    <td aria-hidden className={cn('w-full border-b border-di-outline-variant/40 p-0', tint, active && '!bg-di-surface-high')} />
+                    <td aria-hidden className={cn('border-b border-di-outline-variant/40 p-0', tint, active && '!bg-di-surface-high')} />
                   </tr>
                   {detail && <tr>
                     <td colSpan={view.length + (mark ? 2 : 1)} className="max-w-0 border-b border-di-outline-variant/60 bg-background px-3 py-3">
@@ -785,7 +860,7 @@ export function SheetTable({
                       </td>
                     )
                   })}
-                  <td aria-hidden className="sticky bottom-0 z-10 w-full border-t border-di-outline-variant bg-di-surface-low p-0" />
+                  <td aria-hidden className="sticky bottom-0 z-10 border-t border-di-outline-variant bg-di-surface-low p-0" />
                 </tr>
               </tfoot>
             )}
