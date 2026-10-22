@@ -147,3 +147,121 @@ tests/test_docs_archive_flow.py::test_акт_уничтожения_требуе
 ......                                                                   [100%]
 6 passed in 0.97s
 ── tests/test_docs_next.py
+........................                                                 [100%]
+24 passed in 24.07s
+── tests/test_docs_register.py
+.......................                                                  [100%]
+23 passed in 27.06s
+── tests/test_docs_reports.py
+.....                                                                    [100%]
+5 passed in 15.33s
+── tests/test_document_requests.py
+........                                                                 [100%]
+8 passed in 0.91s
+── tests/test_dubli_smen.py
+...                                                                      [100%]
+3 passed in 0.09s
+── tests/test_eco_work_desk.py
+..                                                                       [100%]
+2 passed in 12.91s
+── tests/test_edge_chain.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_edge_kkt.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_edge_ns_codes_own.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_edge_packet_hash.py
+......                                                                   [100%]
+6 passed in 0.07s
+── tests/test_edge_stock.py
+..                                                                       [100%]
+2 passed in 0.06s
+── tests/test_edge_stock_alerts.py
+.......                                                                  [100%]
+7 passed in 0.89s
+── tests/test_edge_stock_nocode.py
+....                                                                     [100%]
+4 passed in 0.07s
+карантин, пропущен: tests/test_edge_to_bp_flow.py
+── tests/test_edge_transfers.py
+....                                                                     [100%]
+4 passed in 0.07s
+── tests/test_edo_upd_article.py
+.                                                                        [100%]
+1 passed in 0.10s
+── tests/test_edo_upd_seller.py
+..                                                                       [100%]
+2 passed in 0.06s
+── tests/test_entries.py
+.............                                                            [100%]
+13 passed in 16.34s
+── tests/test_equipment_docs.py
+..............                                                           [100%]
+14 passed in 0.11s
+── tests/test_equipment_reports.py
+.......                                                                  [100%]
+7 passed in 0.11s
+── tests/test_export_policy.py
+.....                                                                    [100%]
+5 passed in 0.07s
+── tests/test_external_approval.py
+........                                                                 [100%]
+8 passed in 0.08s
+── tests/test_ezs_accounting.py
+........                                                                 [100%]
+8 passed in 0.10s
+── tests/test_ezs_checklist.py
+..........                                                               [100%]
+10 passed in 0.10s
+── tests/test_ezs_exit_reasons.py
+...                                                                      [100%]
+3 passed in 0.06s
+── tests/test_ezs_gate_waiver.py
+........                                                                 [100%]
+8 passed in 1.07s
+── tests/test_ezs_tp_steps.py
+........                                                                 [100%]
+8 passed in 0.12s
+── tests/test_fuel_balance.py
+...                                                                      [100%]
+3 passed in 0.08s
+── tests/test_fuel_costing_allocation.py
+..                                                                       [100%]
+2 passed in 0.06s
+── tests/test_fuel_pricing_events.py
+........                                                                 [100%]
+8 passed in 0.08s
+── tests/test_gate_by_doc.py
+...                                                                      [100%]
+3 passed in 11.69s
+── tests/test_goods_report_list.py
+...                                                                      [100%]
+3 passed in 0.07s
+── tests/test_guard.py
+.....                                                                    [100%]
+5 passed in 0.08s
+── tests/test_health.py
+....                                                                     [100%]
+4 passed in 11.59s
+── tests/test_ics.py
+..........                                                               [100%]
+10 passed in 0.09s
+── tests/test_ics_invite.py
+......                                                                   [100%]
+6 passed in 0.11s
+── tests/test_info_cc.py
+..                                                                       [100%]
+2 passed in 16.18s
+── tests/test_info_center.py
+.....                                                                    [100%]
+5 passed in 0.10s
+── tests/test_info_seed_equipment.py
+.....                                                                    [100%]
+5 passed in 0.11s
+── tests/test_info_seed_station.py
+.....                                                                    [100%]
+5 passed in 0.09s
+── tests/test_info_seed_work_contexts.py

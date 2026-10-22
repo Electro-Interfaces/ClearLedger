@@ -89,6 +89,13 @@ VOICE_CORE_MIGRATION_DDL = (
     "ON users (phone_office_e164) WHERE phone_office_e164 IS NOT NULL",
     # Области именного ключа: ключ узла открывает только опознание (auth.KEY_SCOPES).
     "ALTER TABLE space_inbound_keys ADD COLUMN IF NOT EXISTS scopes JSONB",
+    # Работа «Трека» по процессу заявки: её читают витрина процесса (по одной
+    # заявке, запросом Поддержки) и сводка клиента (сразу по всем заявкам
+    # звонящего, до ответа оператора). Пара (компания, процесс) отбиралась
+    # перебором строк компании — у контура с тысячами просьб это стоит больше,
+    # чем весь бюджет сводки (650 мс на чтение Поддержки, 1800 мс на узле).
+    "CREATE INDEX IF NOT EXISTS ix_eco_approval_requests_process "
+    "ON eco_approval_requests (company_id, process_id)",
 )
 
 STORE_RECEIPT_MIGRATION_DDL = (
