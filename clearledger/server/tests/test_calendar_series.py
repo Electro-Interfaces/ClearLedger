@@ -296,6 +296,12 @@ async def test_запрос_и_scheduler_не_дублируют_серию_по
 
 
 async def test_запрос_ждёт_scheduler_и_перечитывает_голову_после_ожидания(db, series, monkeypatch):
+    # Проверяем ожидание блокировки, а не переход местных суток. После 17 UTC
+    # исходное «сейчас + день» сдвигалось на 4 часа уже в следующие сутки МСК,
+    # и recurrence_until закономерно отсекал второй повтор. Полдень МСК
+    # сохраняет один календарный день до и после сдвига независимо от запуска.
+    series.start = (datetime.now(timezone.utc) + timedelta(days=1)).replace(
+        hour=9, minute=0, second=0, microsecond=0)
     event = await create(db, series, recurrence={"mode": "weekly"},
                          recurrence_until=series.start.date())
     entered = asyncio.Event()
