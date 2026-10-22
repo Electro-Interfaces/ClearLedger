@@ -222,6 +222,8 @@ export interface TaskAttachment {
 }
 
 export interface TaskDetails extends SpaceTask {
+  /** Полномочие сервера: учитывает автора, исполнителя и управленческий охват. */
+  can_edit?: boolean
   description: string | null
   events: TaskEvent[]
   /** Пункты чек-листа. Прогресс «3 из 5» приходит отдельно, полем `checklist`. */
@@ -280,6 +282,8 @@ export interface TaskFilters {
   /** Круг записи: `personal` — своя записная книжка, её не видит никто. */
   visibility?: TaskVisibility
   dueFrom?: string; dueTo?: string
+  /** Когорта закрытых за период отчёта; включительно по местным датам пространства. */
+  closedFrom?: string; closedTo?: string
   sort?: string; limit?: number; offset?: number
 }
 
@@ -323,6 +327,7 @@ export async function listTasks(companyId: string, scope: TaskScope, opts?: Task
       label_id: opts?.labelId || undefined, q: opts?.q || undefined,
       visibility: opts?.visibility || undefined,
       due_from: opts?.dueFrom || undefined, due_to: opts?.dueTo || undefined,
+      closed_from: opts?.closedFrom || undefined, closed_to: opts?.closedTo || undefined,
       sort: opts?.sort || undefined,
       limit: opts?.limit ?? undefined, offset: opts?.offset || undefined,
     }).then((r) => ({ ...r, tasks: (r.tasks ?? []).map(fillTask) }))
@@ -583,7 +588,7 @@ export async function taskAction(id: string, data: {
   status?: string; priority?: string; dueAt?: string; note?: string
   title?: string; description?: string; objectId?: string | null
   projectId?: string
-  /** Задать тип живой работе: без него у неё нет маршрута. */
+  /** Задать тип живой работе вместо общего маршрута. */
   typeId?: string
   /** null = снять версию; undefined = не трогать. */
   fixVersionId?: string | null; foundVersionId?: string | null
