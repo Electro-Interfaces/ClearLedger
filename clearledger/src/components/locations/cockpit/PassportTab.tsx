@@ -2,6 +2,7 @@
  * Паспорт станции — свойства с точки зрения бизнеса и потребителя:
  * идентификация, тип, статусы, расположение, характеристики (кроме оборудования).
  */
+import { LocationContactsBlock } from './LocationContactsBlock'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { IdCard, MapPin, Pencil } from 'lucide-react'
@@ -43,6 +44,7 @@ export function PassportTab({
 
   return (
     <ScrollTab cols={2}>
+      <LocationContactsBlock key={location.id} locationId={location.id} />
       {/* Заголовок есть у каждой карточки, включая первую: без него блок
           читается как «шапка страницы», и в двухколоночной раскладке соседний
           блок справа выглядит подписанным, а этот — нет. */}

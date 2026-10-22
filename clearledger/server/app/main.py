@@ -95,6 +95,7 @@ from app.routers import (
     netservice_router,
     notifications_router,
     references_router,
+    location_contacts_router,
     reports_router,
     settings_router,
     source_types_router,
@@ -495,6 +496,7 @@ app.include_router(stats_router.router, prefix=API_PREFIX)
 app.include_router(settings_router.router, prefix=API_PREFIX)
 app.include_router(intake_router.router, prefix=API_PREFIX)
 app.include_router(references_router.router, prefix=API_PREFIX)
+app.include_router(location_contacts_router.router, prefix=API_PREFIX)
 app.include_router(accounting_docs_router.router, prefix=API_PREFIX)
 app.include_router(accounting_adjustments_router.router, prefix=API_PREFIX)
 app.include_router(reconciliation_router.router, prefix=API_PREFIX)
