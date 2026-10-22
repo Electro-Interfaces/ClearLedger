@@ -98,6 +98,7 @@ export interface TaskSprint {
 export interface SpaceTask {
   id: string
   number: number
+  assignment_revision?: string
   /** Как задачу называют вслух и пишут в коммите: `TF-42`. У задач без проекта —
    *  просто номер, чтобы строка списка не пустовала. */
   key?: string
@@ -356,6 +357,18 @@ export async function tasksSummary(
     company_id: companyId, days,
     ...(period?.from && period?.to
       ? { date_from: period.from, date_to: period.to } : {}),
+  })
+}
+
+export interface TaskAssignmentCounts { new: number; overdue: number }
+
+export function assignmentCounts(companyId: string) {
+  return get<TaskAssignmentCounts>('/api/tasks/assignment-counts', { company_id: companyId })
+}
+
+export function viewAssignment(id: string, companyId: string, revision: string) {
+  return post<{ acknowledged: boolean }>(`/api/tasks/${id}/assignment-view`, {
+    company_id: companyId, assignment_revision: revision,
   })
 }
 

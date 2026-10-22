@@ -15,9 +15,9 @@ import { getToken, isApiEnabled } from '@/services/apiClient'
 import { getRooms, isMuted } from '@/services/chatService'
 import { useAuth } from '@/contexts/AuthContext'
 import { useChatWs, type WsEvent } from '@/hooks/useChatWs'
-import { listTasks } from '@/services/tasksService'
+import { assignmentCounts } from '@/services/tasksService'
 import { useCompany } from '@/contexts/CompanyContext'
-import { useTasksApp } from '@/hooks/useTasksApp'
+import { useDocsApp } from '@/hooks/useDocsApp'
 import { openSectionOf, searchWithoutOpen } from '@/lib/openSection'
 
 // «Аудитор» здесь же, а не отдельным механизмом: он сквозной ровно как чат — его
@@ -50,6 +50,7 @@ interface SupportContextValue {
   setInteractionMode: (mode: InteractionMode) => void
   closeInteraction: () => void
   unreadCounts: { chat: number; tasks: number; tickets: number }
+  tasksOverdue: number
 }
 
 const SupportContext = createContext<SupportContextValue | undefined>(undefined)
@@ -131,6 +132,15 @@ export function SupportProvider({ children }: { children: ReactNode }) {
   sectionRef.current = state.section
   const channels = useMemo(() => (rooms || []).map((r) => `chat:${r.id}`), [rooms])
   const onChatEvent = useCallback((e: WsEvent) => {
+    if (e.type === 'task:assignments-changed') {
+      const cid = String(e.companyId)
+      for (const key of ['task-assignment-counts', 'tasks', 'work-mine', 'work', 'placed']) {
+        void qc.invalidateQueries({ queryKey: [key, cid] })
+      }
+      void qc.invalidateQueries({ predicate: (query) =>
+        query.queryKey[0] === 'task' && query.queryKey[2] === cid })
+      return
+    }
     if (e.type !== 'chat:message') return
     void qc.invalidateQueries({ queryKey: ['chat-rooms'] })
     if (!e.userId || String(e.userId) === user?.id || e.messageType === 'system') return
@@ -143,21 +153,21 @@ export function SupportProvider({ children }: { children: ReactNode }) {
       action: { label: 'Открыть', onClick: () => setState({ section: 'chat', mode: 'dock', context: `room:${room.id}` }) },
     })
   }, [qc, user?.id])
-  useChatWs(channels, onChatEvent)
+  const onReconnect = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ['task-assignment-counts'] })
+  }, [qc])
+  useChatWs(channels, onChatEvent, onReconnect)
 
-  // Задачи: на кнопке — только ПРОСРОЧЕННЫЕ. «Сколько всего на мне» в шапке ничего
-  // не решает и горит у всех постоянно; красная цифра должна значить «уже опоздали».
-  // Ключ и запрос те же, что у быстрой панели, — один кеш на кнопку и на её окно.
-  const tasksOn = useTasksApp()
-  const { data: myTasks } = useQuery({
-    queryKey: ['tasks', companyId, 'mine', '', '', ''],
-    queryFn: () => listTasks(companyId, 'mine'),
+  // Новый входящий и просрочка — разные серверные агрегаты всей очереди.
+  const tasksOn = useDocsApp()
+  const { data: taskCounts } = useQuery({
+    queryKey: ['task-assignment-counts', companyId, user?.id],
+    queryFn: () => assignmentCounts(companyId),
     enabled: isApiEnabled() && !!getToken() && !!companyId && tasksOn,
-    refetchInterval: 300000,
+    refetchInterval: 30000,
   })
-  const tasksOverdue = (myTasks?.tasks || []).filter((t) => t.status === 'open' && t.overdue).length
-
-  const unreadCounts = { chat: chatUnread, tasks: tasksOverdue, tickets: 0 }
+  const tasksOverdue = taskCounts?.overdue ?? 0
+  const unreadCounts = { chat: chatUnread, tasks: taskCounts?.new ?? 0, tickets: 0 }
 
   return (
     <SupportContext.Provider
@@ -165,7 +175,7 @@ export function SupportProvider({ children }: { children: ReactNode }) {
         interactionSection: state.section,
         interactionMode: state.mode,
         interactionContext: state.context ?? null,
-        toggleInteraction, openInteraction, setInteractionMode, closeInteraction, unreadCounts,
+        toggleInteraction, openInteraction, setInteractionMode, closeInteraction, unreadCounts, tasksOverdue,
       }}
     >
       {children}

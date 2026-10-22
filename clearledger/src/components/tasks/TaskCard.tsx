@@ -11,7 +11,7 @@
 import { WorkOriginLink } from '@/components/work/WorkOriginLink'
 import { StationLink } from '@/components/common/StationLink'
 import { WorkResults } from '@/components/work/WorkResults'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, Clock, Eye, EyeOff, Link2, ListChecks, Loader2, Lock, Mail, Maximize2, MessagesSquare, Minimize2, Paperclip, Pin, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -82,7 +82,25 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
   const q = useQuery({
     queryKey: ['task', id, companyId],
     queryFn: () => tasksService.taskDetails(id, companyId),
+    staleTime: 0, refetchOnMount: 'always',
   })
+  const viewed = useRef('')
+  const revision = q.data?.assignment_revision
+  const loadedId = q.data?.id
+  useEffect(() => {
+    if (!q.isSuccess || q.isFetching || !revision || !loadedId) return
+    const key = `${companyId}:${loadedId}:${revision}`
+    if (viewed.current === key) return
+    viewed.current = key
+    void tasksService.viewAssignment(loadedId, companyId, revision).then(() => {
+      void qc.invalidateQueries({ queryKey: ['task-assignment-counts', companyId] })
+    }).catch(() => {
+      // Сбой отметки не скрывает карточку и не гасит бейдж. Повтор — при
+      // следующей успешной загрузке или открытии карточки.
+      viewed.current = ''
+    })
+  }, [companyId, loadedId, revision, q.isSuccess, q.isFetching, qc])
+
   const peopleQ = useQuery({
     queryKey: ['task-people', companyId],
     queryFn: () => tasksService.listTaskPeople(companyId),
