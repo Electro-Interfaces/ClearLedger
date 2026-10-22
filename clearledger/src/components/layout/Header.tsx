@@ -27,7 +27,7 @@ export function Header() {
                        border-b border-border/50 bg-card/95 backdrop-blur-xl">
       <div className="flex h-full items-center justify-between gap-1 px-1 sm:gap-3 sm:px-4 md:px-6">
         {/* Левый блок: бургер (моб.) + лого + бренд + свёртка сайдбара */}
-        <div className="flex min-w-0 shrink-0 items-center gap-3 md:gap-4">
+        <div className="flex min-w-0 shrink-0 items-center gap-3 sm:shrink md:gap-4">
           <NavigationBackButton />
           {/* Бургера на телефоне нет (решение МАГа 06.09.2026): меню открывает
               кнопка «Приложения» в нижней панели — та, до которой достаёт большой
