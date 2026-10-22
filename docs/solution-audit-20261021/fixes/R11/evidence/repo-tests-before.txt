@@ -265,3 +265,21 @@ tests/test_docs_archive_flow.py::test_акт_уничтожения_требуе
 .....                                                                    [100%]
 5 passed in 0.09s
 ── tests/test_info_seed_work_contexts.py
+..                                                                       [100%]
+2 passed in 16.61s
+── tests/test_invitations.py
+.....                                                                    [100%]
+5 passed in 15.83s
+── tests/test_item_draft_atomic.py
+....                                                                     [100%]
+4 passed in 0.23s
+── tests/test_item_draft_auto.py
+..........                                                               [100%]
+10 passed in 0.11s
+── tests/test_item_draft_defaults.py
+....                                                                     [100%]
+4 passed in 0.08s
+── tests/test_launcher_favorites.py
+......                                                                   [100%]
+6 passed in 13.38s
+── tests/test_location_bindings.py

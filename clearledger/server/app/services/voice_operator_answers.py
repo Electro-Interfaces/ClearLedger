@@ -82,7 +82,7 @@ def _answers(items: list[dict[str, Any]], observed_at: str) -> dict[str, Any]:
                          value={"items": 0}),
             "delivery": fact("Работ Ядра по заявке нет — применять и доставлять нечего",
                              state="empty", reason="no_core_work", as_of=observed_at,
-                             value={"items": 0}),
+                             value={"total": 0, "awaited": 0}),
             "toClient": fact(None, state="empty", reason="no_core_work",
                              as_of=observed_at, code="no_core_work",
                              value={"items": 0}),
@@ -118,7 +118,7 @@ def _answers(items: list[dict[str, Any]], observed_at: str) -> dict[str, Any]:
     if not awaited:
         delivery = fact("Процесс исхода этих работ не ждёт — применять нечего",
                         state="empty", reason="outcome_not_awaited",
-                        as_of=observed_at, value={"items": len(items), "awaited": 0})
+                        as_of=observed_at, value={"total": len(items), "awaited": 0})
     else:
         broken = [i for i in awaited if i["delivery"]["state"] == "error"]
         delivery = fact(
@@ -130,7 +130,7 @@ def _answers(items: list[dict[str, Any]], observed_at: str) -> dict[str, Any]:
                    "core_delivery_partial" if broken else None,
             as_of=max((i["delivery"]["delivered_at"] or i["decided_at"] or "" for i in awaited),
                       default="") or observed_at,
-            value={"items": len(awaited), "failed": len(broken),
+            value={"total": len(items), "awaited": len(awaited), "failed": len(broken),
                    "applied": sync.count("applied"), "pending": sync.count("pending"),
                    "accepted": sync.count("accepted")})
 

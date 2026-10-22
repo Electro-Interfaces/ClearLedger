@@ -1,18 +1,18 @@
 {
  "sessions": [
   {
-   "ref": "s-uc2c343f1-0",
-   "objectRef": "loc-d0167292",
-   "startedAt": "2026-10-21T09:49:42.687709+03:00",
+   "ref": "s-ua5fd5b4b-0",
+   "objectRef": "loc-c55269b9",
+   "startedAt": "2026-10-21T10:02:26.689948+03:00",
    "result": "CompleteError",
    "failed": true,
    "energyKwh": 0.0,
    "amount": 0.0
   },
   {
-   "ref": "s-uc2c343f1-1",
-   "objectRef": "loc-d0167292",
-   "startedAt": "2026-10-20T09:49:42.687709+03:00",
+   "ref": "s-ua5fd5b4b-1",
+   "objectRef": "loc-c55269b9",
+   "startedAt": "2026-10-20T10:02:26.689948+03:00",
    "result": "Complete",
    "failed": false,
    "energyKwh": 31.5,
@@ -21,8 +21,8 @@
  ],
  "objects": [
   {
-   "ref": "loc-d0167292",
-   "code": "65.958597",
+   "ref": "loc-c55269b9",
+   "code": "65.011112",
    "name": "ЭЗС Саяногорск",
    "address": "ул. Ленина, 1",
    "status": "not_working"
@@ -34,7 +34,7 @@
  },
  "tickets": [
   {
-   "ref": "992a47a7-7c0a-4aa6-863c-42e1428e4b37",
+   "ref": "4753357b-ecc3-4a8e-8cd3-783202e2cdca",
    "number": "TS-1",
    "title": "Заявка TS-1",
    "status": "open",
@@ -47,7 +47,7 @@
      "text": "Поручение: №1 — В работе",
      "state": "available",
      "source": "core.track",
-     "asOf": "2026-10-22T06:49:42.704039+00:00",
+     "asOf": "2026-10-22T07:02:26.710081+00:00",
      "reason": null,
      "value": {
       "items": 1,
@@ -61,10 +61,11 @@
      "text": "Поручение: №1 — принято, применение не подтверждено",
      "state": "available",
      "source": "core.track",
-     "asOf": "2026-10-22T06:49:43.140476+00:00",
+     "asOf": "2026-10-22T07:02:27.079988+00:00",
      "reason": null,
      "value": {
-      "items": 1,
+      "total": 1,
+      "awaited": 1,
       "failed": 0,
       "applied": 0,
       "pending": 0,
@@ -75,7 +76,7 @@
      "text": null,
      "state": "available",
      "source": "core.track",
-     "asOf": "2026-10-22T06:49:43.140476+00:00",
+     "asOf": "2026-10-22T07:02:27.079988+00:00",
      "reason": null,
      "value": {
       "codes": [
@@ -91,7 +92,7 @@
    }
   },
   {
-   "ref": "955d3f21-0c7d-4f4d-a2ba-c9bd569ed52e",
+   "ref": "afd34dc1-5950-43f4-922c-20183da898b7",
    "number": "TS-2",
    "title": "Заявка TS-2",
    "status": "open",
@@ -104,7 +105,7 @@
      "text": "Поручение: №2 — В работе, выполнено",
      "state": "available",
      "source": "core.track",
-     "asOf": "2026-10-22T06:44:42.699927+00:00",
+     "asOf": "2026-10-22T06:57:26.707417+00:00",
      "reason": null,
      "value": {
       "items": 1,
@@ -118,10 +119,11 @@
      "text": "Поручение: №2 — ещё доставляется",
      "state": "available",
      "source": "core.track",
-     "asOf": "2026-10-22T06:44:42.699927+00:00",
+     "asOf": "2026-10-22T06:57:26.707417+00:00",
      "reason": null,
      "value": {
-      "items": 1,
+      "total": 1,
+      "awaited": 1,
       "failed": 0,
       "applied": 0,
       "pending": 1,
@@ -132,7 +134,7 @@
      "text": null,
      "state": "available",
      "source": "core.track",
-     "asOf": "2026-10-22T06:49:43.140476+00:00",
+     "asOf": "2026-10-22T07:02:27.079988+00:00",
      "reason": null,
      "value": {
       "codes": [
@@ -148,7 +150,7 @@
    }
   },
   {
-   "ref": "e054df26-b474-4688-97f4-d0cc61026288",
+   "ref": "43c7d662-732e-4cbd-9af5-363d0717ea6b",
    "number": "TS-3",
    "title": "Заявка TS-3",
    "status": "open",
@@ -161,7 +163,7 @@
      "text": "Поручение: №3 — Выполнено, выполнено",
      "state": "available",
      "source": "core.track",
-     "asOf": "2026-10-22T04:49:42.699927+00:00",
+     "asOf": "2026-10-22T05:02:26.707417+00:00",
      "reason": null,
      "value": {
       "items": 1,
@@ -175,10 +177,11 @@
      "text": "Поручение: №3 — применено",
      "state": "available",
      "source": "core.track",
-     "asOf": "2026-10-22T04:49:42.699927+00:00",
+     "asOf": "2026-10-22T05:02:26.707417+00:00",
      "reason": null,
      "value": {
-      "items": 1,
+      "total": 1,
+      "awaited": 1,
       "failed": 0,
       "applied": 1,
       "pending": 0,
@@ -189,7 +192,7 @@
      "text": null,
      "state": "available",
      "source": "core.track",
-     "asOf": "2026-10-22T06:49:43.140476+00:00",
+     "asOf": "2026-10-22T07:02:27.079988+00:00",
      "reason": null,
      "value": {
       "codes": [
@@ -205,7 +208,7 @@
    }
   },
   {
-   "ref": "11c324aa-8735-481e-af3d-9328af202bc5",
+   "ref": "67227974-3714-42b2-87ad-cba5ea120bf2",
    "number": "TS-4",
    "title": "Заявка TS-4",
    "status": "open",
@@ -218,7 +221,7 @@
      "text": "Поручение: №4 — В работе, выполнено",
      "state": "available",
      "source": "core.track",
-     "asOf": "2026-10-22T03:49:42.699927+00:00",
+     "asOf": "2026-10-22T04:02:26.707417+00:00",
      "reason": null,
      "value": {
       "items": 1,
@@ -232,10 +235,11 @@
      "text": "Поручение: №4 — не доставлено, ошибка обмена",
      "state": "unavailable",
      "source": "core.track",
-     "asOf": "2026-10-22T03:49:42.699927+00:00",
+     "asOf": "2026-10-22T04:02:26.707417+00:00",
      "reason": "core_delivery_failed",
      "value": {
-      "items": 1,
+      "total": 1,
+      "awaited": 1,
       "failed": 1,
       "applied": 0,
       "pending": 0,
@@ -246,7 +250,7 @@
      "text": null,
      "state": "unavailable",
      "source": "core.track",
-     "asOf": "2026-10-22T06:49:43.140476+00:00",
+     "asOf": "2026-10-22T07:02:27.079988+00:00",
      "reason": "core_delivery_failed",
      "value": {
       "codes": [
@@ -262,7 +266,7 @@
    }
   },
   {
-   "ref": "41ba3678-d233-4173-a1b0-1a539b9d1e54",
+   "ref": "ca56000f-0320-4313-a5c0-d8eea03c82d2",
    "number": "TS-5",
    "title": "Заявка TS-5",
    "status": "open",
@@ -275,7 +279,7 @@
      "text": "Работ «Трека» по этой заявке Ядро не заводило",
      "state": "empty",
      "source": "core.track",
-     "asOf": "2026-10-22T06:49:43.140476+00:00",
+     "asOf": "2026-10-22T07:02:27.079988+00:00",
      "reason": "no_core_work",
      "value": {
       "items": 0
@@ -285,17 +289,18 @@
      "text": "Работ Ядра по заявке нет — применять и доставлять нечего",
      "state": "empty",
      "source": "core.track",
-     "asOf": "2026-10-22T06:49:43.140476+00:00",
+     "asOf": "2026-10-22T07:02:27.079988+00:00",
      "reason": "no_core_work",
      "value": {
-      "items": 0
+      "total": 0,
+      "awaited": 0
      }
     },
     "toClient": {
      "text": null,
      "state": "empty",
      "source": "core.track",
-     "asOf": "2026-10-22T06:49:43.140476+00:00",
+     "asOf": "2026-10-22T07:02:27.079988+00:00",
      "reason": "no_core_work",
      "value": {
       "items": 0
@@ -310,7 +315,7 @@
   "source": "support.tickets",
   "state": "available",
   "reason": null,
-  "asOf": "2026-10-22T06:49:42.992764+00:00",
+  "asOf": "2026-10-22T07:02:26.969827+00:00",
   "total": 5,
   "shown": 5
  }
