@@ -88,4 +88,3 @@ export function ContactFormDialog({ counterpartyId, edit, onSaved, children }: {
     </Dialog>
   )
 }
-
