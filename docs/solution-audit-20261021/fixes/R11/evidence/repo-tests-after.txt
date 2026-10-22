@@ -1,1 +1,18 @@
 ── tests/test_access_keys.py
+.....                                                                    [100%]
+5 passed in 0.07s
+── tests/test_accounting_adjustment.py
+...........                                                              [100%]
+11 passed in 0.11s
+── tests/test_accounting_business_date.py
+....                                                                     [100%]
+4 passed in 0.07s
+карантин, пропущен: tests/test_accounting_egress.py
+карантин, пропущен: tests/test_accounting_group_v3.py
+── tests/test_accounting_outbox.py
+...................                                                      [100%]
+19 passed in 1.23s
+── tests/test_accounting_reconciliation.py
+.........                                                                [100%]
+9 passed in 0.09s
+── tests/test_acquaint_requests.py
