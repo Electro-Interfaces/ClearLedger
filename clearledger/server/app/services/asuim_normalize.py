@@ -47,6 +47,10 @@ from app.models import (
     EzsTariff, ServiceLocation,
 )
 from app.services.mapping import normalize_default
+from app.services.asuim_session_connectors import (
+    build_session_connector_index, load_session_connector_index,
+    resolve_session_connector, with_session_connector_numbers,
+)
 
 logger = logging.getLogger("clearledger.asuim")
 
@@ -377,6 +381,7 @@ async def ingest_connectors(db: AsyncSession, company_id, rows: list[dict[str, A
             if p:
                 powers.append(p)
             conns.append({k: v for k, v in {
+                "sourceId": _s(r.get("id_коннектора"), 64),
                 "no": _int(r.get("номер_коннектора")),
                 "evseId": _int(r.get("id_evse")),
                 "type": t,
@@ -1046,6 +1051,9 @@ async def ingest_asuim_book(
             rows = _read_sheet(wb[sheets[view]], INCREMENTAL.get(view), day, pending_ids)
             if view in ("stations", "connectors"):
                 срез[view] = rows
+            if view == "sessions" and "connectors" in срез:
+                rows = with_session_connector_numbers(
+                    rows, build_session_connector_index(срез["connectors"]))
             if not rows and day:
                 report.append({"view": view, "label": VIEW_LABELS.get(view, view), "since": day,
                                "status": "success", "created": 0, "skipped": 0,
@@ -1167,7 +1175,8 @@ async def _ingest_view(
         from app.services.charge_sessions_normalize import (
             enrich_session_cards, ingest_charge_sessions,
         )
-        res = await ingest_charge_sessions(db, company_id, map_sessions(rows),
+        index = await load_session_connector_index(db, company_id)
+        res = await ingest_charge_sessions(db, company_id, map_sessions(rows, connector_index=index),
                                            channel_id=channel_id, mode=mode, log_id=log_id)
         if res.get("status") == "success":
             cards = await enrich_session_cards(db, company_id)
@@ -1178,7 +1187,7 @@ async def _ingest_view(
                        f"файл не загружен ({len(rows)} строк)"}
 
 
-def map_sessions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def map_sessions(rows: list[dict[str, Any]], *, connector_index=None) -> list[dict[str, Any]]:
     """`charge_sessions_ru` → строки сессий в ключах `ingest_charge_sessions`.
 
     Проверено по многолистовой выгрузке: телефон клиента и постоянный ID
@@ -1197,7 +1206,7 @@ def map_sessions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "station_name": _s(r.get("название_станции"), 160),
             "region": _s(r.get("регион"), 120),
             "address": _s(r.get("адрес"), 300),
-            "connector_no": _s(r.get("номер_коннектора"), 20),
+            "connector_no": resolve_session_connector(r, connector_index or {}),
             "connector_type": _s(r.get("тип_коннектора"), 40),
             "started_at": started,
             "finished_at": finished,
