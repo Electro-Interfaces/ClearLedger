@@ -50,7 +50,12 @@ export function DocsRegistryPage() {
   const [params, setParams] = useSearchParams()
   const view = useDocsView('/docs')
   const scope = useDocsScope()
-  const [creating, setCreating] = useState(false)
+  const creating = params.get('new') === '1'
+  const setCreating = (value: boolean) => setParams((previous) => {
+    const next = new URLSearchParams(previous)
+    if (value) next.set('new', '1'); else next.delete('new')
+    return next
+  }, { replace: true })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
 
   const companyId = company?.id ?? ''
@@ -523,14 +528,26 @@ export function DocsRegistryPage() {
           </nav>
         )}
 
-        {creating && (
+        {creating && kindsQ.isPending && <DocsLoadingState>Загружаем виды для нового документа…</DocsLoadingState>}
+        {creating && kindsQ.isError && <div className="space-y-2">
+          <DocsErrorState error={kindsQ.error} title="Создание документа недоступно" onRetry={() => void kindsQ.refetch()} />
+          <Button variant="outline" onClick={() => setCreating(false)}>Закрыть создание</Button>
+        </div>}
+        {creating && kindsQ.isSuccess && видыПотока.length === 0 && <div role="alert" className="rounded-md border border-border p-4 text-sm">
+          <p>Для создания документа настройте хотя бы один активный вид в «Настройке» Трека.</p>
+          <Button variant="outline" className="mt-2" onClick={() => setCreating(false)}>Закрыть создание</Button>
+        </div>}
+        {creating && kindsQ.isSuccess && видыПотока.length > 0 && (
           <NewDocDialog companyId={companyId} kinds={kinds}
             defaultFamily={VIEW_FILTER[view]?.family}
             onClose={() => setCreating(false)}
             onCreated={(id) => {
-              setCreating(false)
               qc.invalidateQueries({ queryKey: ['docs', companyId] })
-              open(id)
+              setParams((previous) => {
+                const next = new URLSearchParams(previous)
+                next.delete('new'); next.set('doc', id)
+                return next
+              }, { replace: true })
             }} />
         )}
       </div>

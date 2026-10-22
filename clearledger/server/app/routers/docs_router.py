@@ -32,7 +32,7 @@ from urllib.parse import quote, unquote
 from fastapi import Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import Integer, and_, case, cast, false, func, literal_column, or_, select, true
+from sqlalchemy import Integer, and_, case, cast, false, func, literal_column, or_, select, text, true
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2681,25 +2681,44 @@ async def create_doc(
         if not name:
             name = found
 
-    d = DocCard(
-        company_id=cid, kind_id=kind.id, kind_code=kind.code,
-        family=kind.family, direction=kind.direction,
-        title=payload.title.strip(), summary=payload.summary,
-        organization_id=await _organization_id(db, cid, payload.organization_id),
-        counterparty_id=_uuid_or_400(payload.counterparty_id, "counterparty_id")
+    values = {
+        "title": payload.title.strip(), "summary": payload.summary,
+        "organization_id": await _organization_id(db, cid, payload.organization_id),
+        "counterparty_id": _uuid_or_400(payload.counterparty_id, "counterparty_id")
         if payload.counterparty_id else None,
-        counterparty_name=name,
-        external_number=payload.external_number, external_date=payload.external_date,
-        subject_ref=payload.subject_ref,
-        # Ключ объекта сети строковый, приводить его к UUID нельзя.
-        object_id=payload.object_id or None,
-        author_id=current_user.id,
-        responsible_id=await _company_user_id(
-            db, cid, payload.responsible_id, "responsible_id"),
-        signatory_id=await _company_user_id(
-            db, cid, payload.signatory_id, "signatory_id"),
-        due_at=payload.due_at, confidentiality=payload.confidentiality,
-        attrs=attrs or None, source=payload.source, source_ref=payload.source_ref)
+        "counterparty_name": name,
+        "external_number": payload.external_number, "external_date": payload.external_date,
+        "subject_ref": payload.subject_ref, "object_id": payload.object_id or None,
+        "responsible_id": await _company_user_id(db, cid, payload.responsible_id, "responsible_id"),
+        "signatory_id": await _company_user_id(db, cid, payload.signatory_id, "signatory_id"),
+        "due_at": payload.due_at, "confidentiality": payload.confidentiality,
+        "attrs": attrs or None, "source": payload.source, "source_ref": payload.source_ref,
+    }
+    # Ключ принадлежит одному намерению создать бумагу договора. Повтор после
+    # потери HTTP-ответа возвращает её прежний ID, а не сливает похожие документы.
+    if payload.source == "manual" and (payload.source_ref or "").startswith("contract-document:"):
+        token = _uuid_or_400(payload.source_ref.split(":", 1)[1], "source_ref")
+        values["source_ref"] = f"contract-document:{token}"
+        await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                         {"key": f"doc-create:{cid}:{values['source_ref']}"})
+        previous = (await db.execute(select(DocCard).where(
+            DocCard.company_id == cid, DocCard.source == "manual",
+            DocCard.source_ref == values["source_ref"],
+        ))).scalar_one_or_none()
+        if previous is not None:
+            # Даже знание ключа другого автора не даёт права получить карточку.
+            if previous.author_id != current_user.id:
+                raise HTTPException(409, "Ключ создания документа уже использован")
+            await _assert_doc_permission(db, cid, previous, current_user, "read")
+            if previous.kind_id != kind.id or any(
+                getattr(previous, field) != value for field, value in values.items()
+            ):
+                raise HTTPException(409, "Этот ключ создания уже использован с другими реквизитами документа")
+            return _card_out(previous, {str(kind.id): kind.name})
+
+    d = DocCard(company_id=cid, kind_id=kind.id, kind_code=kind.code,
+                family=kind.family, direction=kind.direction,
+                author_id=current_user.id, **values)
     db.add(d)
     await db.flush()
     db.add(DocEvent(doc_id=d.id, kind="created", user_id=current_user.id,

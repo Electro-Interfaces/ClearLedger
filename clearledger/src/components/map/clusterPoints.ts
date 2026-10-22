@@ -16,17 +16,14 @@
  * давало 25 млн операций, и карта замирала на каждом сдвиге.
  */
 import type { Map as LeafletMap } from 'leaflet'
+import { groupPointsByCoordinates, type PointGroup } from '../../lib/mapPointGroups.ts'
 
-export interface ClusterOf<T> {
-  key: string
-  lat: number
-  lon: number
-  items: T[]
-}
+export type ClusterOf<T> = PointGroup<T>
 
 /**
  * `radiusPx = 0` отключает прореживание: на близком масштабе точки должны стоять
- * каждая на своём месте, иначе пропадает то, ради чего карту и открыли.
+ * каждая на своём месте. Совпадающие координаты остаются одной группой, иначе
+ * верхний маркер закрывает остальные, а выбрать скрытые объекты невозможно.
  */
 export function clusterPoints<T>(
   map: LeafletMap,
@@ -36,10 +33,7 @@ export function clusterPoints<T>(
   getKey: (item: T) => string,
 ): ClusterOf<T>[] {
   if (radiusPx <= 0) {
-    return points.map((item) => {
-      const [lat, lon] = getLatLon(item)
-      return { key: getKey(item), lat, lon, items: [item] }
-    })
+    return groupPointsByCoordinates(points, getLatLon, getKey)
   }
   const cell = Math.max(1, radiusPx)
   const grid = new Map<string, ClusterOf<T>>()

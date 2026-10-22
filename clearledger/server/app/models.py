@@ -1121,6 +1121,10 @@ class Counterparty(Base):
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # v2.5: универсальный снимок ВСЕХ реквизитов источника (L1 RAW) + промо-колонки.
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Изменённые человеком реквизиты: повторный импорт их не перезаписывает.
+    manual_overrides: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     full_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     okpo: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Полная карточка контрагента (ручной ввод для компаний без 1С + промо из raw)
@@ -1308,6 +1312,16 @@ class CounterpartyContact(Base):
 # ---------------------------------------------------------------------------
 class Contract(Base):
     __tablename__ = "contracts"
+    __table_args__ = (
+        Index("uq_contract_creation", "company_id", "creation_key", unique=True,
+              postgresql_where=text("creation_key IS NOT NULL")),
+    )
+
+    # Намерение создать паспорт, отдельно от его юридических реквизитов.
+    creation_key: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    creation_actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    creation_request_hash: Mapped[str | None] = mapped_column(CHAR(64), nullable=True)
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -1338,6 +1352,10 @@ class Contract(Base):
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # v2.5: универсальный снимок ВСЕХ реквизитов 1С (L1 RAW) + промо-колонки.
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Изменённые человеком реквизиты: повторный импорт их не перезаписывает.
+    manual_overrides: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     # ВидДоговора 1С: СПокупателем | СПоставщиком | СКомитентом | ... (см. SCHEMA_REFS_GIG §2)
     kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
@@ -10444,6 +10462,12 @@ class Task(Base):
     # отбор по состоянию должен идти в SQL: разбирать маршрут запросом — дорого
     # и нечитаемо, а фильтровать в приложении значит сломать постраничность.
     stage_column: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Идентификатор конкретного назначения, а не редакции всей задачи.
+    assignment_revision: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, default=uuid.uuid4,
+        server_default=text("gen_random_uuid()"))
+    assignment_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True)
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     author_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -10487,6 +10511,25 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TaskAssignmentRead(Base):
+    """Курсор просмотра назначения человеком, отдельно от личной раскладки.
+
+    Назначение и его поколение живут только в Task. Здесь нет копии статуса,
+    срока или получателя: только точная версия, успешно открытая пользователем.
+    ChatParticipant знает о прочтении комнаты, но не о карточке поручения.
+    """
+    __tablename__ = "task_assignment_reads"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True)
+    assignment_revision: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class TaskEvent(Base):
@@ -12538,6 +12581,9 @@ class DocCard(Base):
         Index("uq_doc_cards_mail_source", "company_id", "source_ref", unique=True,
               postgresql_where=text(
                   "source = 'mail' AND source_ref IS NOT NULL")),
+        Index("uq_doc_cards_contract_source", "company_id", "source_ref", unique=True,
+              postgresql_where=text(
+                  "source = 'manual' AND source_ref LIKE 'contract-document:%'")),
         Index("idx_doc_cards_registry", "company_id", "family", "reg_date"),
         Index("idx_doc_cards_counterparty", "company_id", "counterparty_id"),
         Index("idx_doc_cards_retention", "company_id", "retention_state",
@@ -14023,3 +14069,23 @@ class TicketVideoRoom(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True),ForeignKey("users.id",ondelete="SET NULL"),nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),server_default=func.now())
     __table_args__ = (Index("uq_ticket_video_room", "company_id", "ticket_id",unique=True),)
+
+
+# Все канонические постановки (документ, чат, процесс, почта, повторение,
+# Пульс) создают Task через ORM. Отмечаем назначение здесь, независимо от
+# транспорта notify и настройки его каналов.
+from sqlalchemy import event as _task_event, inspect as _task_inspect
+
+
+@_task_event.listens_for(Task, "before_insert")
+def _task_assignment_created(mapper, connection, task):
+    task.assignment_revision = uuid.uuid4()
+    task.assignment_by_id = task.author_id
+
+
+@_task_event.listens_for(Task, "before_update")
+def _task_assignment_changed(mapper, connection, task):
+    if _task_inspect(task).attrs.assignee_id.history.has_changes():
+        task.assignment_revision = uuid.uuid4()
+        task.assignment_by_id = getattr(task, "_assignment_actor_id", None)
+        task.__dict__.pop("_assignment_actor_id", None)

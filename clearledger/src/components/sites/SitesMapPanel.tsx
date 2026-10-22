@@ -20,6 +20,8 @@ import {
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
 import { locationValues } from '@/types/location'
+import { groupPointsByCoordinates } from '@/lib/mapPointGroups'
+import { MapStationList } from '@/components/map/MapStationList'
 import { isTestStation } from '@/components/locations/fleet/locationFleetService'
 
 const nf1 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
@@ -75,8 +77,11 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
     const m = locationValues(l)
     const lat = typeof m.latitude === 'number' ? m.latitude : null
     const lon = typeof m.longitude === 'number' ? m.longitude : null
-    return lat != null && lon != null ? [{ id: l.id, name: l.name || l.code, lat, lon }] : []
+    return lat != null && lon != null ? [{ id: l.id, name: l.name || l.code,
+      number: String(m.number ?? ''), status: l.operationalStatus, lat, lon }] : []
   }), [net.data])
+  const stationGroups = useMemo(() => groupPointsByCoordinates(stations,
+    (p) => [p.lat, p.lon], (p) => p.id), [stations])
   const cannibalKm = pts.data?.thresholds.cannibalKm ?? 0.5
 
   const mapLayers = useMapLayers()
@@ -140,16 +145,16 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
                     попасть, и карточка станции не открывалась (замечание отдела
                     развития 07.08.2026). Растить саму точку нельзя — фон сети забьёт
                     проекты, ради которых карту и открывают. */}
-                {showNetwork && stations.map((l) => (
-                  <Fragment key={`n-${l.id}`}>
+                {showNetwork && stationGroups.map((l) => (
+                  <Fragment key={`n-${l.key}`}>
                     <CircleMarker center={[l.lat, l.lon]} radius={5} interactive={false}
                       pathOptions={{ color: '#64748b', fillColor: '#64748b', fillOpacity: 0.55, weight: 1 }} />
                     <CircleMarker center={[l.lat, l.lon]} radius={12}
                       pathOptions={{ opacity: 0, fillOpacity: 0 }}>
                       <Popup>
                         <div className="text-sm">
-                          <div className="font-medium">{l.name}</div>
-                          <div className="text-muted-foreground">действующая станция сети</div>
+                          <div className="font-medium">Объекты в точке: {l.items.length}</div>
+                          <MapStationList items={l.items} />
                         </div>
                       </Popup>
                     </CircleMarker>

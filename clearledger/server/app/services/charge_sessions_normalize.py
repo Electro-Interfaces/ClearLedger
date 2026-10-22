@@ -9,6 +9,12 @@
 """
 from __future__ import annotations
 
+from app.services.reference_identity import lock_manual_creation
+from app.services.reference_overrides import apply_import_values
+from app.services.reference_identity import (
+    ContractIndex, CounterpartyIndex, organization_for_import, require_organization,
+)
+
 import io
 import logging
 from datetime import datetime
@@ -621,15 +627,17 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
     """
     if not orgs:
         return
+    await lock_manual_creation(db, company_id, "counterparty")
+    await lock_manual_creation(db, company_id, "contract")
     cps = (await db.execute(select(Counterparty).where(
         Counterparty.company_id == company_id))).scalars().all()
-    by_norm = {n: c for c in cps if (n := _normname(c.name))}
+    cp_index = CounterpartyIndex(cps)
     existing = (await db.execute(select(Contract).where(
-        Contract.company_id == company_id,
-        Contract.type == CORP_CONTRACT_TYPE))).scalars().all()
-    by_cp = {c.counterparty_id: c for c in existing}
-    org_id = (await db.execute(select(Organization.id).where(
-        Organization.company_id == company_id).limit(1))).scalar()
+        Contract.company_id == company_id))).scalars().all()
+    contracts = ContractIndex(existing)
+    organizations = (await db.execute(select(Organization).where(
+        Organization.company_id == company_id))).scalars().all()
+    org_id = organization_for_import(organizations, existing)
 
     cp_by_phone: dict[str, Counterparty] = {}
     for o in orgs:
@@ -637,28 +645,24 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
         nn = _normname(name)
         if not nn:
             continue
-        cp = by_norm.get(nn)
+        cp = cp_index.resolve(_clean_cp_name(name), o.get("inn"), o.get("kpp"))
         if cp is None:
             cp = Counterparty(
-                company_id=company_id, inn=str(o.get("inn") or "")[:20],
+                company_id=company_id, inn=str(o.get("inn") or "")[:20], kpp=o.get("kpp") or None,
                 name=_clean_cp_name(name)[:500], type=_cp_type(name),
                 aliases=["corporate"], kind="external",
+                raw={"referenceIdentity": {"name": _clean_cp_name(name), "inn": str(o.get("inn") or ""), "kpp": o.get("kpp")}},
             )
             db.add(cp)
             await db.flush()
-            by_norm[nn] = cp
+            cp_index.add(cp)
         else:
             # Одно юрлицо может быть и покупателем, и поставщиком — роль в реестре
             # прикладная, поэтому она копится в aliases, а не заводит вторую карточку.
             if "corporate" not in (cp.aliases or []):
-                cp.aliases = sorted(set((cp.aliases or []) + ["corporate"]))
-            # Карточку могли завести без ИНН (например сопоставлением ролей — там его
-            # взять неоткуда). Справочник ИНН знает, и это единственное место, где он
-            # доезжает: иначе «без ИНН» осталось бы навсегда.
-            if not cp.inn and o.get("inn"):
-                cp.inn = str(o["inn"])[:20]
+                apply_import_values(cp, {"aliases": sorted(set((cp.aliases or []) + ["corporate"]))})
         cp_by_phone[str(o.get("phone") or "")] = cp
-        if any(by_cp.get(k) for k in (str(cp.id), cp.external_ref) if k):
+        if contracts.resolve(cp, CORP_CONTRACT_TYPE) is not None:
             continue
         start = str(o.get("contract_start") or "").strip()
         # «28.11.2023» → ISO: договоры живут датами ГГГГ-ММ-ДД, текстовая дата не
@@ -667,13 +671,16 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
             start = f"{start[6:]}-{start[3:5]}-{start[:2]}"
         contract = Contract(
             company_id=company_id, number="б/н", date=start,
-            counterparty_id=str(cp.id), organization_id=str(org_id or cp.id),
+            counterparty_id=str(cp.id), organization_id=require_organization(org_id),
             type=CORP_CONTRACT_TYPE, kind="СПокупателем", basis="договор",
             # Зарядка идёт по всей сети, а не по набору станций.
             scope_type="company",
+            raw={"referenceIdentity": {"counterparty_id": str(cp.id), "type": CORP_CONTRACT_TYPE,
+                                       "number": "б/н", "date": start}},
         )
         db.add(contract)
-        by_cp[str(cp.id)] = contract
+        await db.flush()
+        contracts.add(contract)
 
     # Ссылка клиента на карточку контрагента: реестр клиентов пересоздаётся при каждой
     # загрузке справочника, поэтому связь ставится здесь, а не разовым сопоставлением —

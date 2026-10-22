@@ -94,6 +94,17 @@ async def ensure_staff_room(db, cid, user, ticket_id):
     return room
 
 async def recipient_allowed(db, room, user_id):
+    if getattr(room, "scope_task_id", None) is not None:
+        from app.services.task_access import assert_task_room
+        user = await db.get(User, uuid.UUID(str(user_id)))
+        if user is None:
+            return False
+        try:
+            await assert_task_room(db, room, user)
+        except HTTPException:
+            return False
+        return user.is_superadmin or await db.scalar(select(ChatParticipant.id).where(
+            ChatParticipant.room_id == room.id, ChatParticipant.user_id == user.id)) is not None
     if not is_ticket_room(room):
         return True
     user = await db.get(User, uuid.UUID(str(user_id)))

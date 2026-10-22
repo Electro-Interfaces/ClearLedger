@@ -101,18 +101,19 @@ def push_room_mail_async(
         try:
             async with async_session_factory() as db:
                 rows = (await db.execute(
-                    select(User.email, User.name)
+                    select(User.id, User.email)
                     .join(ChatParticipant, ChatParticipant.user_id == User.id)
                     .where(ChatParticipant.room_id == room_id,
                            ChatParticipant.user_id != exclude_user_id,
                            User.mail_only.is_(True))
                 )).all()
                 from app.models import ChatRoom
-                from app.services.ticket_communications import is_ticket_room
+                from app.services.ticket_communications import is_ticket_room, recipient_allowed
                 room = await db.get(ChatRoom, room_id)
                 if room is not None and is_ticket_room(room):
                     return  # private staff discussion has no mail-only participants/bridge
-                emails = [e for e, _ in rows if e]
+                emails = [email for uid, email in rows if email and room is not None
+                          and await recipient_allowed(db, room, uid)]
                 if not emails:
                     return
                 reply = reply_address(room_id)

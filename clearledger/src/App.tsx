@@ -1,15 +1,16 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import {
   createBrowserRouter, RouterProvider, Outlet, Link, Navigate, useLocation, useParams,
 } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
-import { AuthProvider } from '@/contexts/AuthContext'
+import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext'
 import { isFuelProfile } from '@/config/profiles'
 import { useAppEnabled } from '@/hooks/useCompanyRegistry'
 import { SPACE_PAGES, SPACE_PRODUCTS, isCarvedProfile } from '@/config/spaceProducts'
 import { TabsProvider } from '@/contexts/TabsContext'
+import { NavigationHistoryProvider } from '@/contexts/NavigationHistoryContext'
 import { FilterProvider } from '@/contexts/FilterContext'
 import { StationCardProvider } from '@/contexts/StationCardContext'
 import { SupportProvider } from '@/contexts/SupportContext'
@@ -220,10 +221,27 @@ function Providers() {
 
 function CompanyScopedProviders() {
   const { companyId } = useCompany()
-  const { pathname } = useLocation()
+  const { user } = useAuth()
+  const location = useLocation()
+  const { pathname } = location
+  const [scopeCompany, setScopeCompany] = useState(companyId)
+  // До монтирования новой компании убираем адресный отбор предыдущей.
+  // Иначе проводник успевает сохранить его в новую историю, а FilterProvider
+  // конкурирует с запоздалой очисткой URL за параметр f.
+  if (scopeCompany !== companyId) {
+    const search = new URLSearchParams(location.search)
+    if (scopeCompany && companyId && /(?:^|\/)files\/?$/.test(pathname)
+        && ['folder', 'q', 'f'].some((key) => search.has(key))) {
+      search.delete('folder'); search.delete('q'); search.delete('f')
+      return <Navigate to={{ pathname, search: search.toString(), hash: location.hash }} replace />
+    }
+    setScopeCompany(companyId)
+  }
   const isStoreDemo = pathname.endsWith('/demo/shop') || (isDemoPath() && pathname === '/shop')
   return (
     <TabsProvider key={companyId}>
+      <NavigationHistoryProvider key={`${companyId}:${user?.id ?? ''}`}
+        scope={companyId && user?.id ? `${companyId}:${user.id}` : ''}>
       <FilterProvider syncUrl={!isStoreDemo}>
         {/* Карточка станции одна на пространство: любой экран открывает её поверх
             себя, не уходя в «Объекты» и не теряя отбор (РусГидро 18.09.2026). */}
@@ -254,6 +272,7 @@ function CompanyScopedProviders() {
           </TooltipProvider>
         </SupportProvider>
       </FilterProvider>
+      </NavigationHistoryProvider>
     </TabsProvider>
   )
 }

@@ -11,9 +11,9 @@
 import { WorkOriginLink } from '@/components/work/WorkOriginLink'
 import { StationLink } from '@/components/common/StationLink'
 import { WorkResults } from '@/components/work/WorkResults'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, Clock, Eye, EyeOff, Link2, ListChecks, Loader2, Lock, Mail, Maximize2, MessagesSquare, Minimize2, Paperclip, Pin, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, Clock, Download, Eye, EyeOff, Link2, ListChecks, Loader2, Lock, Mail, Maximize2, MessagesSquare, Minimize2, Paperclip, Pin, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -24,8 +24,10 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { QueryError } from '@/components/common/QueryError'
-import { openAuthAttachment } from '@/lib/authFiles'
+import { downloadAttachment, openAuthAttachment } from '@/lib/authFiles'
 import { cn } from '@/lib/utils'
+import { taskDueDay } from '@/lib/taskCardInput'
+import { useAuth } from '@/contexts/AuthContext'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
@@ -82,7 +84,25 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
   const q = useQuery({
     queryKey: ['task', id, companyId],
     queryFn: () => tasksService.taskDetails(id, companyId),
+    staleTime: 0, refetchOnMount: 'always',
   })
+  const viewed = useRef('')
+  const revision = q.data?.assignment_revision
+  const loadedId = q.data?.id
+  useEffect(() => {
+    if (!q.isSuccess || q.isFetching || !revision || !loadedId) return
+    const key = `${companyId}:${loadedId}:${revision}`
+    if (viewed.current === key) return
+    viewed.current = key
+    void tasksService.viewAssignment(loadedId, companyId, revision).then(() => {
+      void qc.invalidateQueries({ queryKey: ['task-assignment-counts', companyId] })
+    }).catch(() => {
+      // Сбой отметки не скрывает карточку и не гасит бейдж. Повтор — при
+      // следующей успешной загрузке или открытии карточки.
+      viewed.current = ''
+    })
+  }, [companyId, loadedId, revision, q.isSuccess, q.isFetching, qc])
+
   const peopleQ = useQuery({
     queryKey: ['task-people', companyId],
     queryFn: () => tasksService.listTaskPeople(companyId),
@@ -145,6 +165,12 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
   }
 
   const live = t.status === 'open'
+  // Полномочие вычисляет сервер тем же правилом, которым защищает изменения:
+  // кроме автора/исполнителя есть администратор и управленческий охват.
+  // Старый API без capability сохраняет прежний UX; контроль доступа всегда
+  // остаётся на сервере. Явный false нового API имеет приоритет для всех ролей.
+  const canEdit = t.can_edit ?? true
+  const editable = live && canEdit
 
   const stageIndex = t.route.findIndex((s) => s.code === t.stage_code)
   const next = stageIndex >= 0 ? t.route[stageIndex + 1] : t.route[0]
@@ -177,14 +203,15 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
         </div>
       ) : (
       <Header task={t} companyId={companyId} onBack={onBack} live={live} busy={act.isPending}
+        canRename={canEdit}
         onRename={(title) => act.mutate({ companyId, title })}
         // Закрытую работу этап возвращает в работу: одно действие, а не «сначала
         // переоткрой, потом двигай» (просьба МАГа 15.10.2026).
-        onStage={(code) => act.mutate({
+        onStage={canEdit ? (code) => act.mutate({
           companyId, stageCode: code, status: live ? undefined : 'open', note: note || undefined,
-        })}
-        onDone={live ? () => act.mutate({ companyId, status: 'done', note: note || undefined }) : undefined}
-        onCancel={live ? () => setCancelAsk(true) : undefined} />
+        }) : undefined}
+        onDone={editable ? () => act.mutate({ companyId, status: 'done', note: note || undefined }) : undefined}
+        onCancel={editable ? () => setCancelAsk(true) : undefined} />
       )}
 
       <div className="flex min-h-0 flex-1">
@@ -197,17 +224,17 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           {t.route.map((s, i) => (
             <span key={s.code} className="flex items-center gap-1">
               {i > 0 && <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />}
-              <button type="button" disabled={act.isPending}
+              <button type="button" disabled={!canEdit || act.isPending}
                 title={live ? undefined : 'Вернуть в работу на этот этап'}
                 onClick={() => act.mutate({
                   companyId, stageCode: s.code, status: live ? undefined : 'open',
                   note: note || undefined,
                 })}
-                className={cn('h-7 rounded-full px-3 text-xs transition-colors',
+                className={cn('h-7 rounded-full px-3 text-xs transition-colors disabled:cursor-default',
                   s.code === t.stage_code
                     ? 'bg-primary font-medium text-primary-foreground'
-                    : 'bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground',
-                  !live && 'opacity-60 hover:opacity-100')}>
+                    : 'bg-muted text-muted-foreground enabled:hover:bg-muted/70 enabled:hover:text-foreground',
+                  !live && 'opacity-60 enabled:hover:opacity-100')}>
                 {s.name}
               </button>
             </span>
@@ -225,7 +252,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             // своё. Искать её по тексту значит перечислять все этапы всех
             // типов работы и промахиваться на первом же новом.
             <Button size="sm" className="h-8" data-role="advance"
-              disabled={act.isPending}
+              disabled={!canEdit || act.isPending}
               onClick={() => act.mutate({
                 companyId, stageCode: next.code, note: note || undefined,
               })}>
@@ -241,13 +268,13 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
               исполнитель не назначен
             </span>
           )}
-          {/* Работа без типа не двигается по доске никуда, кроме «Готово»:
-              маршрута у неё нет. Тип задавался только при постановке, и
-              исправить это было нечем — теперь можно прямо здесь. */}
+          {/* Без типа сервер возвращает стандартный маршрут. Тип можно
+              выбрать, если работе нужен свой маршрут. */}
           {live && !t.type_id && (
-            <span className="inline-flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
-              тип не задан — работа не пойдёт по маршруту
+            <span className="inline-flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              Без типа: стандартный маршрут
               <select aria-label="Задать тип работы" defaultValue=""
+                disabled={!canEdit || act.isPending}
                 className="h-7 rounded-md border border-input bg-background px-1.5 text-xs text-foreground"
                 onChange={(e) => e.target.value
                   && act.mutate({ companyId, typeId: e.target.value })}>
@@ -259,7 +286,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             </span>
           )}
           {live && !phone && (
-            <Button size="sm" variant="outline" className="h-8" disabled={act.isPending}
+            <Button size="sm" variant="outline" className="h-8" disabled={!canEdit || act.isPending}
               onClick={() => act.mutate({ companyId, status: 'done', note: note || undefined })}>
               <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />Выполнена
             </Button>
@@ -273,12 +300,19 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           {live && !phone && (
             <Button size="sm" variant="ghost"
               className="ml-auto h-8 text-muted-foreground hover:text-foreground"
-              disabled={act.isPending}
+              disabled={!canEdit || act.isPending}
               onClick={() => setCancelAsk(true)}>
               Отменить задачу
             </Button>
           )}
         </div>
+        {!canEdit && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Реквизиты, этапы и закрытие доступны автору, исполнителю,
+            администратору и руководителю в пределах его полномочий.
+            Вы можете обсуждать задачу и записывать своё время.
+          </p>
+        )}
         {!(feedFull && phone) && <WorkOriginLink companyId={companyId} kind="task" id={t.id} />}
         {!(feedFull && phone) && t.visibility !== 'personal'
           && <WorkResults companyId={companyId} kind="task" id={t.id} />}
@@ -294,8 +328,8 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
               setTab('files')
               queueMicrotask(() => fileRef.current?.click())
             }} />
-            <QuickAdd icon={ListChecks} label="Пункт" onClick={() => setTab('work')} />
-            <QuickAdd icon={Link2} label="Связь" onClick={() => setTab('links')} />
+            {canEdit && <QuickAdd icon={ListChecks} label="Пункт" onClick={() => setTab('work')} />}
+            {canEdit && <QuickAdd icon={Link2} label="Связь" onClick={() => setTab('links')} />}
             <QuickAdd icon={Clock} label="Время" onClick={() => setTab('time')} />
           </div>
         )}
@@ -341,20 +375,20 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
           </TabsList>
 
           <TabsContent value="work" className="space-y-5 pt-4">
-        <Description task={t} disabled={!live || act.isPending}
+        <Description task={t} disabled={!editable || act.isPending}
           onSave={(description) => act.mutate({ companyId, description })} />
 
         {/* Работа выросла из обращения клиента — вопрос ему уходит туда же, где
             идёт разговор, а не отдельным письмом (docs/BRIDGE.md §4.4). */}
         {t.subject_ref?.startsWith('partner_topic:') && (
-          <AskClient taskId={t.id} companyId={companyId} live={live}
+          <AskClient taskId={t.id} companyId={companyId} live={editable}
             waiting={t.waiting_for === 'external'} onChanged={reload} />
         )}
 
-        <Checklist task={t} companyId={companyId} live={live} onChanged={reload} />
+        <Checklist task={t} companyId={companyId} live={editable} onChanged={reload} />
           </TabsContent>
           <TabsContent value="attrs" className="space-y-5 pt-4 xl:hidden">
-        <Attributes task={t} companyId={companyId} live={live}
+        <Attributes task={t} companyId={companyId} live={editable}
           people={peopleQ.data?.people ?? []} labels={labelsQ.data?.labels ?? []}
           pending={act.isPending} onAct={(d) => act.mutate(d)} onChanged={reload} />
           </TabsContent>
@@ -362,13 +396,13 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             <TaskChat taskId={t.id} taskNumber={t.number} selfName={t.assignee} />
           </TabsContent>
           <TabsContent value="links" className="space-y-5 pt-4">
-        <Links task={t} companyId={companyId} live={live}
+        <Links task={t} companyId={companyId} live={editable}
           onChanged={reload} onOpenOther={onOpenOther} />
-        <CodeRefs taskId={t.id} companyId={companyId} live={live} />
-        <External task={t} companyId={companyId} live={live} onChanged={reload} />
+        <CodeRefs taskId={t.id} companyId={companyId} live={editable} />
+        <External task={t} companyId={companyId} live={editable} onChanged={reload} />
           </TabsContent>
           <TabsContent value="time" className="space-y-5 pt-4">
-        <TimePanel task={t} companyId={companyId} live={live}
+        <TimePanel task={t} companyId={companyId} live={live} canEdit={canEdit}
           onChanged={reload} onEstimate={(v) => act.mutate({ companyId, estimate: v })} />
           </TabsContent>
           <TabsContent value="files" className="space-y-5 pt-4">
@@ -388,11 +422,21 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
                     тем же клиентом, что и вложения чата. */}
                 <button type="button"
                   onClick={() => {
-                    void openAuthAttachment(tasksService.taskFileUrl(a.id, companyId))
+                    void openAuthAttachment(tasksService.taskFileUrl(a.id, companyId), {
+                      fileName: a.file_name, cache: false,
+                    })
                       .catch(() => toast.error('Файл не открылся'))
                   }}
-                  className="truncate text-primary hover:underline">{a.file_name}</button>
+                  className="min-w-0 flex-1 truncate text-left text-primary hover:underline">{a.file_name}</button>
                 <span className="shrink-0 text-muted-foreground">{fileSize(a.size)}</span>
+                <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-1 px-2 text-xs"
+                  aria-label={`Скачать ${a.file_name}`}
+                  onClick={() => {
+                    void downloadAttachment(tasksService.taskFileUrl(a.id, companyId), a.file_name, { cache: false })
+                      .catch(() => toast.error('Не удалось скачать файл'))
+                  }}>
+                  <Download className="h-3.5 w-3.5" />Скачать
+                </Button>
                 {live && a.can_delete && (
                   <Button variant="ghost" size="sm" className="ml-auto h-6 px-1.5"
                     aria-label="Убрать файл"
@@ -469,7 +513,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
               ) : null)}
               renderActions={(event) => {
                 const source = events.find((e) => e.id === event.id)
-                if (!live || !source) return null
+                if (!editable || !source) return null
                 return (
                   <button type="button" title={source.pinned ? 'Открепить' : 'Закрепить'}
                     onClick={() => pin.mutate(source.id)}
@@ -499,7 +543,7 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
 
       {/* Свойства колонкой — только когда есть куда её положить. */}
       <aside className="hidden w-[320px] shrink-0 overflow-y-auto border-l px-4 py-4 text-sm xl:block">
-        <Attributes task={t} companyId={companyId} live={live}
+        <Attributes task={t} companyId={companyId} live={editable}
           people={peopleQ.data?.people ?? []} labels={labelsQ.data?.labels ?? []}
           pending={act.isPending} onAct={(d) => act.mutate(d)} onChanged={reload} />
       </aside>
@@ -583,16 +627,28 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             {t.attachments.map((a) => (
               // Файл закрыт JWT: прямая ссылка в новой вкладке отдаёт 401 —
               // тянем тем же клиентом, что и вложения чата.
-              <button key={a.id} type="button"
+              <div key={a.id} className="flex min-w-0 items-center gap-1">
+              <button type="button"
                 onClick={() => {
-                  void openAuthAttachment(tasksService.taskFileUrl(a.id, companyId))
+                  void openAuthAttachment(tasksService.taskFileUrl(a.id, companyId), {
+                    fileName: a.file_name, cache: false,
+                  })
                     .catch(() => toast.error('Файл не открылся'))
                 }}
-                className="flex w-full items-center gap-2 rounded px-1 py-1.5 text-left text-xs hover:bg-accent">
+                className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1.5 text-left text-xs hover:bg-accent">
                 <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate">{a.file_name}</span>
                 <span className="shrink-0 text-muted-foreground">{fileSize(a.size)}</span>
               </button>
+              <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-1 px-2 text-xs"
+                aria-label={`Скачать ${a.file_name}`}
+                onClick={() => {
+                  void downloadAttachment(tasksService.taskFileUrl(a.id, companyId), a.file_name, { cache: false })
+                    .catch(() => toast.error('Не удалось скачать файл'))
+                }}>
+                <Download className="h-3.5 w-3.5" />Скачать
+              </Button>
+              </div>
             ))}
           </div>
           {live && (
@@ -614,7 +670,8 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             <AlertDialogTitle>Отменить задачу?</AlertDialogTitle>
             <AlertDialogDescription>
               Работа закроется как отменённая: исполнитель увидит это в своей очереди,
-              а запись останется в ходе работы. Вернуть её потом можно только заново.
+              а запись останется в ходе работы. Эту же задачу можно вернуть в работу:
+              откройте меню состояния и выберите этап в разделе «Вернуть в работу».
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -638,12 +695,13 @@ function taskLinkRef(task: { key?: string; number: number }): string {
   return tasksService.taskKey(task).replace(/^№/, '')
 }
 
-function Header({ task, companyId, onRename, onBack, live, busy, onStage, onDone, onCancel }: {
+function Header({ task, companyId, onRename, onBack, live, busy, canRename, onStage, onDone, onCancel }: {
   task: LoadedTask; companyId: string; onRename: (title: string) => void
   onBack?: () => void
   /** Работа живая — состояние можно менять. */
   live?: boolean
   busy?: boolean
+  canRename: boolean
   onStage?: (code: string) => void
   onDone?: () => void
   onCancel?: () => void
@@ -658,7 +716,7 @@ function Header({ task, companyId, onRename, onBack, live, busy, onStage, onDone
           <ArrowLeft className="h-3.5 w-3.5" />к списку
         </button>
       )}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {/* Та же строка представления, что у документа (этап 13е): человек,
             перешедший из ленты работы, читает одни и те же слова. */}
         {onStage ? (
@@ -725,13 +783,13 @@ function Header({ task, companyId, onRename, onBack, live, busy, onStage, onDone
         {task.subject_ref && (
           <SubjectLink companyId={companyId} refKey={task.subject_ref} />
         )}
-        {/* Блокировка решает, браться ли сейчас, и во вкладке «Связи» её никто
-            не увидит вовремя. */}
+        {/* Зависимость видна до перехода, но сама по себе его не запрещает. */}
         {task.links?.filter((l) => l.kind === 'blocked_by').map((l) => (
           <span key={l.id}
-            className="inline-flex items-center gap-1 rounded border border-red-500/40 bg-red-500/5 px-1.5 py-px text-xs text-red-600 dark:text-red-400">
-            <Lock className="h-3 w-3" />
-            ждёт №{l.number}
+            title="Информационная зависимость: не запрещает смену этапа и закрытие"
+            className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-px text-xs text-muted-foreground">
+            <Link2 className="h-3 w-3" />
+            {l.status === 'open' ? 'Зависимость: ' : 'Зависимость закрыта: '}№{l.number}
           </span>
         ))}
         {task.labels.map((l) => (
@@ -762,7 +820,7 @@ function Header({ task, companyId, onRename, onBack, live, busy, onStage, onDone
           }} />
         </span>
       </div>
-      {editing ? (
+      {editing && canRename ? (
         <div className="mt-1 flex gap-2">
           <Input value={title} autoFocus maxLength={300} className="h-8 text-sm"
             onChange={(e) => setTitle(e.target.value)}
@@ -776,8 +834,10 @@ function Header({ task, companyId, onRename, onBack, live, busy, onStage, onDone
             onClick={() => { onRename(title.trim()); setEditing(false) }}>Сохранить</Button>
         </div>
       ) : (
-        <button type="button" onClick={() => { setTitle(task.title); setEditing(true) }}
-          className="mt-1 text-left text-sm hover:underline" title="Изменить заголовок">
+        <button type="button" disabled={!canRename || busy}
+          onClick={() => { setTitle(task.title); setEditing(true) }}
+          className="mt-1 max-w-full text-left text-sm [overflow-wrap:anywhere] enabled:hover:underline"
+          title={canRename ? 'Изменить заголовок' : undefined}>
           {task.title}
         </button>
       )}
@@ -838,7 +898,7 @@ function Description({ task, disabled, onSave }: {
         className="text-xs text-muted-foreground hover:text-foreground">изменить</button>
     )}>
       {task.description ? (
-        <RichText text={task.description} className="text-sm text-foreground/90" />
+        <RichText text={task.description} className="min-w-0 text-sm text-foreground/90 [overflow-wrap:anywhere]" />
       ) : disabled ? (
         <p className="text-xs text-muted-foreground">Описания нет.</p>
       ) : (
@@ -926,6 +986,8 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
   onAct: (d: Parameters<typeof tasksService.taskAction>[1]) => void
   onChanged: () => void
 }) {
+  const { user } = useAuth()
+  const open = task.status === 'open'
   const objectsQ = useQuery({
     queryKey: ['space-objects', companyId],
     queryFn: () => listSpaceObjects(companyId),
@@ -1002,7 +1064,8 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
           hint={task.overdue ? ('просрочена · ' + dt(task.due_at)) : undefined}
           tone={task.overdue ? 'text-red-600 dark:text-red-400' : undefined}>
           <Input type="date" disabled={!live || pending} className="h-8 text-xs"
-            defaultValue={task.due_at ? task.due_at.slice(0, 10) : ''}
+            key={task.due_at ?? 'no-due'}
+            defaultValue={taskDueDay(task.due_at)}
             onChange={(e) => e.target.value && onAct({
               companyId, dueAt: new Date(`${e.target.value}T00:00`).toISOString(),
             })} />
@@ -1115,7 +1178,7 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
               <span className="text-xs text-muted-foreground">
                 {w.reason === 'mention' ? 'по упоминанию' : ''}
               </span>
-              {live && (
+              {open && (live || w.user_id === user?.id) && (
                 <button type="button" aria-label={`Отписать ${w.name}`}
                   onClick={() => watch.mutate({ userId: w.user_id, on: false })}>
                   <EyeOff className="h-3 w-3 text-muted-foreground hover:text-foreground" />
@@ -1136,6 +1199,13 @@ function Attributes({ task, companyId, live, people, labels, pending, onAct, onC
                   .map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
               </SelectContent>
             </Select>
+          )}
+          {open && !live && user && !task.watchers.some((w) => w.user_id === user.id) && (
+            <button type="button" disabled={watch.isPending}
+              className="text-xs text-primary hover:underline"
+              onClick={() => watch.mutate({ userId: user.id, on: true })}>
+              Следить за задачей
+            </button>
           )}
         </div>
       </div>
@@ -1373,6 +1443,14 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
           </div>
         </div>
       )}
+      {task.links.some((l) => l.kind === 'blocks' || l.kind === 'blocked_by') && (
+        <p className="mb-2 text-xs text-muted-foreground">
+          «Блокирует» отмечает зависимость между работами и не запрещает закрытие.
+          Автор, исполнитель, администратор или руководитель с нужными полномочиями
+          могут снять ненужную связь в открытой задаче. Права на смену этапа и закрытие
+          остаются прежними.
+        </p>
+      )}
       {kids.length > 0 && (
         <div className="mb-3">
           <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
@@ -1436,8 +1514,9 @@ function Links({ task, companyId, live, onChanged, onOpenOther }: {
 
 /* ── Время: план и факт ──────────────────────────────────────────────── */
 
-function TimePanel({ task, companyId, live, onChanged, onEstimate }: {
+function TimePanel({ task, companyId, live, canEdit, onChanged, onEstimate }: {
   task: LoadedTask; companyId: string; live: boolean
+  canEdit: boolean
   onChanged: () => void; onEstimate: (v: string) => void
 }) {
   const [dur, setDur] = useState('')
@@ -1464,7 +1543,7 @@ function TimePanel({ task, companyId, live, onChanged, onEstimate }: {
   const over = time.estimate != null && time.spent > time.estimate
 
   return (
-    <Section title="Время" action={live && !editEstimate && (
+    <Section title="Время" action={live && canEdit && !editEstimate && (
       <button type="button"
         onClick={() => { setEstimateText(time.estimate_text.replace(' ', '')); setEditEstimate(true) }}
         className="text-xs text-muted-foreground hover:text-foreground">
@@ -1513,10 +1592,12 @@ function TimePanel({ task, companyId, live, onChanged, onEstimate }: {
                 {new Date(w.work_date).toLocaleDateString('ru-RU')}
               </span>
               <span className="truncate">{w.user}{w.description ? ` · ${w.description}` : ''}</span>
+              {(w.can_delete ?? canEdit) && (
               <Button variant="ghost" size="sm" className="ml-auto h-6 px-1.5"
                 aria-label="Убрать запись" onClick={() => drop.mutate(w.id)}>
                 <Trash2 className="h-3 w-3" />
               </Button>
+              )}
             </div>
           ))}
         </div>

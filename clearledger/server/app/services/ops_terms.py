@@ -18,7 +18,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -118,6 +118,37 @@ def _validate(data: dict[str, Any]) -> None:
         raise ValueError("Переменная часть по счётчику не сочетается с фиксированной суммой")
 
 
+async def _lock_contract_terms(db: AsyncSession, company_id, contract_id):
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                     {"key": f"ops-term-window:{company_id}:{contract_id}"})
+
+
+async def _check_window(db: AsyncSession, company_id, contract_id, *, cost_item,
+                        location_id, valid_from, valid_to, exclude_id=None):
+    try:
+        start = date.fromisoformat(valid_from).isoformat()
+        end = date.fromisoformat(valid_to).isoformat() if valid_to else None
+    except (ValueError, TypeError):
+        raise ValueError("Срок условия должен быть датой ГГГГ-ММ-ДД") from None
+    if end and end < start:
+        raise ValueError("Окончание условия не может быть раньше начала")
+    # Все способы записи одного договора проверяют интервал под одной блокировкой.
+    await _lock_contract_terms(db, company_id, contract_id)
+    stmt = select(OpsContractTerm.id).where(
+        OpsContractTerm.company_id == company_id,
+        OpsContractTerm.contract_id == contract_id,
+        OpsContractTerm.cost_item == cost_item,
+        func.coalesce(OpsContractTerm.location_id, "") == (location_id or ""),
+        or_(OpsContractTerm.valid_to.is_(None), OpsContractTerm.valid_to >= start),
+    )
+    if end:
+        stmt = stmt.where(OpsContractTerm.valid_from <= end)
+    if exclude_id:
+        stmt = stmt.where(OpsContractTerm.id != exclude_id)
+    if (await db.execute(stmt.limit(1))).first():
+        raise ValueError("Период пересекается с другим условием этого договора, статьи и объекта")
+
+
 async def create_term(db: AsyncSession, company_id: uuid.UUID,
                       payload: dict[str, Any]) -> dict[str, Any]:
     contract_id = payload.get("contractId") or payload.get("contract_id")
@@ -141,6 +172,9 @@ async def create_term(db: AsyncSession, company_id: uuid.UUID,
                   or contract.date or date.today().isoformat())[:10]
     valid_to = (payload.get("validTo") or payload.get("valid_to")
                 or contract.valid_until or None)
+    await _check_window(db, company_id, contract.id, cost_item=data["cost_item"],
+                        location_id=data.get("location_id"), valid_from=valid_from,
+                        valid_to=valid_to[:10] if valid_to else None)
 
     row = OpsContractTerm(
         company_id=company_id, contract_id=contract.id,
@@ -160,10 +194,18 @@ async def update_term(db: AsyncSession, company_id: uuid.UUID, term_id: uuid.UUI
     Новая версия — правильный способ поднять ставку: старая закрывается днём
     раньше начала новой, и суммы уже закрытых месяцев остаются как были.
     """
-    term = (await db.execute(select(OpsContractTerm).where(
+    contract_id = await db.scalar(select(OpsContractTerm.contract_id).where(
         OpsContractTerm.company_id == company_id,
         OpsContractTerm.id == term_id,
-    ))).scalar_one_or_none()
+    ))
+    if contract_id is None:
+        raise ValueError("Условие не найдено")
+    # Сначала общий барьер, затем свежий снимок. Иначе ожидающий PATCH проверял
+    # старую статью/дату, а записывал уже изменённую соседним запросом строку.
+    await _lock_contract_terms(db, company_id, contract_id)
+    term = (await db.execute(select(OpsContractTerm).where(
+        OpsContractTerm.company_id == company_id, OpsContractTerm.id == term_id,
+    ).execution_options(populate_existing=True))).scalar_one_or_none()
     if term is None:
         raise ValueError("Условие не найдено")
 
@@ -171,11 +213,18 @@ async def update_term(db: AsyncSession, company_id: uuid.UUID, term_id: uuid.UUI
     _validate({**{k: getattr(term, k) for k in EDITABLE if hasattr(term, k)}, **data})
 
     if not new_version:
+        start = str(payload.get("validFrom") or payload.get("valid_from") or term.valid_from)[:10]
+        end = term.valid_to
+        if "validTo" in payload or "valid_to" in payload:
+            end = payload.get("validTo", payload.get("valid_to")) or None
+            end = str(end)[:10] if end else None
+        await _check_window(db, company_id, term.contract_id,
+                            cost_item=data.get("cost_item", term.cost_item),
+                            location_id=data.get("location_id", term.location_id),
+                            valid_from=start, valid_to=end, exclude_id=term.id)
         for col, value in data.items():
             setattr(term, col, value)
-        for key, col in (("validFrom", "valid_from"), ("validTo", "valid_to")):
-            if payload.get(key):
-                setattr(term, col, str(payload[key])[:10])
+        term.valid_from, term.valid_to = start, end
         await db.flush()
         return _as_dict(term)
 
@@ -185,15 +234,18 @@ async def update_term(db: AsyncSession, company_id: uuid.UUID, term_id: uuid.UUI
         raise ValueError("Новая версия должна начинаться позже текущей")
     # Старая версия действует по день перед началом новой. Пересечения быть не
     # должно: иначе месяц развернулся бы дважды, по обеим версиям.
-    prev_day = date.fromisoformat(valid_from).toordinal() - 1
-    term.valid_to = date.fromordinal(prev_day).isoformat()
-
     fields = {col: getattr(term, col) for col in EDITABLE if hasattr(term, col)}
     fields.update(data)
+    end = str(payload.get("validTo"))[:10] if payload.get("validTo") else None
+    await _check_window(db, company_id, term.contract_id,
+                        cost_item=fields["cost_item"], location_id=fields.get("location_id"),
+                        valid_from=valid_from, valid_to=end, exclude_id=term.id)
+    prev_day = date.fromordinal(date.fromisoformat(valid_from).toordinal() - 1).isoformat()
+    term.valid_to = min(term.valid_to, prev_day) if term.valid_to else prev_day
     row = OpsContractTerm(
         company_id=company_id, contract_id=term.contract_id,
         valid_from=valid_from,
-        valid_to=(str(payload.get("validTo"))[:10] if payload.get("validTo") else None),
+        valid_to=end,
         source="manual", **fields)
     db.add(row)
     await db.flush()

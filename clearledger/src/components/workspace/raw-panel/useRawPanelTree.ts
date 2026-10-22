@@ -6,8 +6,8 @@
  *     и ТТН (/api/fuel/receipts).
  *  2. API + office-профиль — первичка из бухгалтерии (/api/books/docs):
  *     у компании без объектов документы приезжают не сменами, а учётом.
- *  3. API + прочие профили — реальные загрузки: каналы компании и история
- *     их прогонов (/api/channels + /channels/{id}/runs).
+ *  3. API + прочие профили — договоры, документы Трека/проектов и история
+ *     прогонов каналов компании.
  *  4. Без API — localStorage-прототип (`getAllLoadedDocs`).
  * У каждого документа готовый путь `catalog` (напр. `/Нефтепродукты АЗС/Смены/
  * {станция}/{год}-{месяц}/`). Дерево строится РОВНО по этим путям — папки =
@@ -16,7 +16,7 @@
 
 import { getSpaceDocuments, type SpaceDocument } from '@/services/referenceService'
 import { useMemo, useCallback, useState, useEffect } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useFilters } from '@/contexts/FilterContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { isApiEnabled } from '@/services/apiClient'
@@ -203,7 +203,6 @@ function isShiftOpen(doc: LoadedDocument): boolean {
 }
 
 export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig) {
-  const queryClient = useQueryClient()
   const { stationCode } = useFilters()
   const { company } = useCompany()
 
@@ -216,11 +215,11 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
   // Без API — localStorage-прототип (перечитать при монтировании: данные
   // могли пополниться в другом разделе).
   const [localDocs, setLocalDocs] = useState<LoadedDocument[]>(() => (apiMode ? [] : getAllLoadedDocs()))
-  const [dataUpdatedAt, setDataUpdatedAt] = useState<number>(() => Date.now())
+  const [localUpdatedAt, setLocalUpdatedAt] = useState<number>(() => apiMode ? 0 : Date.now())
   useEffect(() => {
     if (!apiMode) {
       setLocalDocs(getAllLoadedDocs())
-      setDataUpdatedAt(Date.now())
+      setLocalUpdatedAt(Date.now())
     }
   }, [apiMode])
 
@@ -260,13 +259,10 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
     enabled: apiRuns,
     queryFn: async () => {
       const channels = await loadChannels(company.id)
-      const perChannel = await Promise.all(channels.map(async (ch) => {
-        try {
-          return (await getChannelRuns(ch.id)).map((run) => runToDoc(ch, run))
-        } catch {
-          return [] as LoadedDocument[]
-        }
-      }))
+      // Ошибка отдельного канала — неполная история, а не пустой канал.
+      // Остальные документы пространства остаются видимыми через spaceQ.
+      const perChannel = await Promise.all(channels.map(async (ch) =>
+        (await getChannelRuns(ch.id)).map((run) => runToDoc(ch, run))))
       return perChannel.flat()
     },
     staleTime: 60_000,
@@ -289,7 +285,9 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
 
     // ── фильтрация документов ──
     let filtered = docs
-    if (stationCode !== 'all') {
+    // stationCode — фильтр топливных смен STS. Его сохранённое значение не
+    // должно скрывать все документы энергетического или офисного профиля.
+    if (stationCode !== 'all' && (apiFuel || !apiMode)) {
       const code = Number(stationCode)
       filtered = filtered.filter((d) => d.stationId === code)
     }
@@ -354,7 +352,7 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
     }
 
     return tree
-  }, [docs, stationCode, filters])
+  }, [docs, stationCode, filters, apiFuel, apiMode])
 
   // Плоский отсортированный список файлов (вид «Список»/«Таблица»).
   const flatFiles = useMemo(() => {
@@ -387,33 +385,36 @@ export function useRawPanelTree(filters: RawPanelFilters, sortConfig: SortConfig
   // совпадений, выбрасывал из режима списка обратно в дерево вместе со всем отбором.
   const hasBookDocs = useMemo(() => docs.some(isBookDoc), [docs])
 
-  const handleRefresh = useCallback(() => {
-    if (apiMode) {
-      queryClient.invalidateQueries({ queryKey: ['raw-docs-shifts'] })
-      queryClient.invalidateQueries({ queryKey: ['raw-docs-receipts'] })
-      queryClient.invalidateQueries({ queryKey: ['raw-docs-books'] })
-      queryClient.invalidateQueries({ queryKey: ['raw-docs-runs'] })
-    } else {
-      queryClient.invalidateQueries({ queryKey: ['sts-shifts'] })
-      queryClient.invalidateQueries({ queryKey: ['sts-all-receipts'] })
+  const refetch = useCallback(async () => {
+    // Только активный профиль и текущая компания. refetch обходит enabled,
+    // поэтому вызывать его у всех запросов значило обращаться к чужим API.
+    if (apiFuel) await Promise.all([shiftsQ.refetch(), receiptsQ.refetch()])
+    else if (apiBooks) await booksQ.refetch()
+    else if (apiRuns) await Promise.all([spaceQ.refetch(), runsQ.refetch()])
+    else {
       setLocalDocs(getAllLoadedDocs())
+      setLocalUpdatedAt(Date.now())
     }
-    setDataUpdatedAt(Date.now())
-  }, [apiMode, queryClient])
+  }, [apiFuel, apiBooks, apiRuns, shiftsQ.refetch, receiptsQ.refetch,
+    booksQ.refetch, spaceQ.refetch, runsQ.refetch])
+  const handleRefresh = useCallback(() => { void refetch() }, [refetch])
+  const activeQueries = apiFuel ? [shiftsQ, receiptsQ]
+    : apiBooks ? [booksQ] : apiRuns ? [spaceQ, runsQ] : []
+  // Время полного снимка — по самому старому из активных источников; нажатие
+  // «Обновить» само по себе не доказывает успешную загрузку.
+  const dataUpdatedAt = activeQueries.length
+    ? Math.min(...activeQueries.map((query) => query.dataUpdatedAt)) : localUpdatedAt
 
   return {
     fsTree,
     flatFiles,
     hasBookDocs,
-    isLoading: apiFuel ? (shiftsQ.isLoading || receiptsQ.isLoading)
-      : apiBooks ? booksQ.isLoading : apiRuns ? runsQ.isLoading : false,
-    isFetching: apiFuel ? (shiftsQ.isFetching || receiptsQ.isFetching)
-      : apiBooks ? booksQ.isFetching : apiRuns ? runsQ.isFetching : false,
+    isLoading: activeQueries.some((query) => query.isLoading),
+    isFetching: activeQueries.some((query) => query.isFetching),
     // Без этого экран показывает «Эта папка пуста» и на ошибке загрузки: человек
     // делает вывод «данных нет», хотя данные есть, а упал запрос.
-    isError: apiFuel ? (shiftsQ.isError || receiptsQ.isError)
-      : apiBooks ? booksQ.isError : apiRuns ? runsQ.isError : false,
-    refetch: () => { void booksQ.refetch(); void shiftsQ.refetch(); void receiptsQ.refetch(); void runsQ.refetch() },
+    isError: activeQueries.some((query) => query.isError),
+    refetch,
     totalItemCount,
     dataUpdatedAt,
     handleRefresh,

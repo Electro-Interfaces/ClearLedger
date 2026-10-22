@@ -23,6 +23,7 @@ import { useSupportContext } from '@/contexts/SupportContext'
 import { useDocsApp } from '@/hooks/useDocsApp'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
+import { TaskAssignmentBadges } from '@/components/tasks/TaskAssignmentBadges'
 
 /** Пилюля-кнопка: синий акцент, активное состояние — как у остальных кнопок шапки. */
 const btnCls = (active: boolean) =>
@@ -52,7 +53,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
   // «Агенты» там, где их несколько и их учат. Надпись живёт в реестре компании,
   // а не в коде кнопки.
   const agentName = appName('auditor', 'Аудитор')
-  const { interactionSection, toggleInteraction, unreadCounts } = useSupportContext()
+  const { interactionSection, toggleInteraction, unreadCounts, tasksOverdue } = useSupportContext()
   const [confBusy, setConfBusy] = useState(false)
   const tasksOn = useDocsApp()
 
@@ -133,10 +134,10 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
           реестры, маршруты, регламент — живёт приложением, и в него ведёт
           «Открыть Трек» из этого же окна. */}
       {tasksOn && (
-        <Button variant="outline" size="sm" onClick={() => toggleInteraction('tasks')} className={btnCls(interactionSection === 'tasks')} title="Трек: что на мне сейчас">
+        <Button variant="outline" size="sm" onClick={() => toggleInteraction('tasks')} className={btnCls(interactionSection === 'tasks')} title={`Трек · новые назначения: ${unreadCounts.tasks} · просрочено: ${tasksOverdue}`} aria-label={`Трек · новые назначения: ${unreadCounts.tasks} · просрочено: ${tasksOverdue}`}>
           <ListChecks className="h-4 w-4" />
           <span className="hidden lg:inline">Трек</span>
-          <Badge count={unreadCounts.tasks} />
+          <TaskAssignmentBadges incoming={unreadCounts.tasks} overdue={tasksOverdue} />
         </Button>
       )}
       {/* «Аудитор» — тот же жест, что чат: кнопка открывает окно, где спрашивают про

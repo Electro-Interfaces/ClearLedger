@@ -1,7 +1,7 @@
 {
   "name": "gig-fuel-ledger",
   "private": true,
-  "version": "1.2.732",
+  "version": "1.2.734",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test:unit": "node --test --experimental-strip-types src/lib/*.test.ts",
     "test:e2e": "playwright test",
+    "test:ops-usability": "playwright test --config e2e/ops-usability/playwright.config.ts",
     "test:e2e:voice": "node e2e/voice-real-node.check.mjs",
     "test:e2e:ui": "playwright test --ui",
     "deploy": "gh-pages -d dist"

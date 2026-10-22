@@ -4,12 +4,12 @@
 повторения не падает — она ставит планёрку не в тот день. Заметно это станет
 через неделю, когда никто не придёт.
 
-Без БД: `_next_occurrence` — чистая функция.
+Без БД: `next_occurrence` — чистая функция.
 """
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from app.services.task_scheduler import _next_occurrence
+from app.services.calendar_series import next_occurrence
 
 МСК = ZoneInfo("Europe/Moscow")
 
@@ -20,37 +20,37 @@ def мск(y, m, d, h=10, mi=0):
 
 def test_еженедельно_тот_же_день_недели():
     было = мск(2026, 8, 31)          # понедельник
-    стало = _next_occurrence(было, {"mode": "weekly"}, МСК)
+    стало = next_occurrence(было, {"mode": "weekly"}, МСК)
     assert стало.astimezone(МСК) == мск(2026, 9, 7)
     assert стало.astimezone(МСК).weekday() == 0
 
 
 def test_раз_в_две_недели():
-    стало = _next_occurrence(мск(2026, 8, 31), {"mode": "weekly", "interval": 2}, МСК)
+    стало = next_occurrence(мск(2026, 8, 31), {"mode": "weekly", "interval": 2}, МСК)
     assert стало.astimezone(МСК) == мск(2026, 9, 14)
 
 
 def test_ежедневно():
-    стало = _next_occurrence(мск(2026, 8, 31), {"mode": "daily"}, МСК)
+    стало = next_occurrence(мск(2026, 8, 31), {"mode": "daily"}, МСК)
     assert стало.astimezone(МСК) == мск(2026, 9, 1)
 
 
 def test_ежемесячно_короткий_месяц_не_проглатывает_встречу():
     # «Каждое 31-е» в сентябре не существует. Подмена номера месяца дала бы
     # ошибку, а прыжок «через 30 дней» уехал бы на 1 октября и дальше поплыл.
-    стало = _next_occurrence(мск(2026, 8, 31), {"mode": "monthly"}, МСК)
+    стало = next_occurrence(мск(2026, 8, 31), {"mode": "monthly"}, МСК)
     assert стало.astimezone(МСК) == мск(2026, 9, 30)
 
 
 def test_ежемесячно_после_короткого_месяца_не_плывёт_дальше():
     # Прижавшись к 30-му в сентябре, следующая не обязана остаться 30-й: она
     # считается от предыдущей, и это осознанная цена материализации вперёд.
-    стало = _next_occurrence(мск(2026, 9, 30), {"mode": "monthly"}, МСК)
+    стало = next_occurrence(мск(2026, 9, 30), {"mode": "monthly"}, МСК)
     assert стало.astimezone(МСК) == мск(2026, 10, 30)
 
 
 def test_ежемесячно_через_границу_года():
-    стало = _next_occurrence(мск(2026, 12, 15), {"mode": "monthly"}, МСК)
+    стало = next_occurrence(мск(2026, 12, 15), {"mode": "monthly"}, МСК)
     assert стало.astimezone(МСК) == мск(2027, 1, 15)
 
 
@@ -59,13 +59,13 @@ def test_время_дня_сохраняется_при_переводе_час
     # десятью часами по местным, а не уехать на девять.
     берлин = ZoneInfo("Europe/Berlin")
     до = datetime(2026, 10, 19, 10, 0, tzinfo=берлин)     # до перевода
-    стало = _next_occurrence(до, {"mode": "weekly"}, берлин).astimezone(берлин)
+    стало = next_occurrence(до, {"mode": "weekly"}, берлин).astimezone(берлин)
     assert (стало.year, стало.month, стало.day) == (2026, 10, 26)  # после перевода
     assert (стало.hour, стало.minute) == (10, 0)
 
 
 def test_возвращается_в_utc():
-    стало = _next_occurrence(мск(2026, 8, 31), {"mode": "weekly"}, МСК)
+    стало = next_occurrence(мск(2026, 8, 31), {"mode": "weekly"}, МСК)
     assert стало.tzinfo is timezone.utc or стало.utcoffset().total_seconds() == 0
 
 
@@ -74,12 +74,12 @@ def test_неизвестный_режим_ничего_не_порождает(
     # умолчание «неделя» выглядело удобным, а означало, что любая встреча с
     # пустым повторением становится еженедельной. На демонстрации одна планёрка
     # так породила сорок копий чужих встреч за один проход.
-    assert _next_occurrence(мск(2026, 8, 31), {"mode": "ежечасно"}, МСК) is None
-    assert _next_occurrence(мск(2026, 8, 31), {}, МСК) is None
-    assert _next_occurrence(мск(2026, 8, 31), {"interval": 2}, МСК) is None
+    assert next_occurrence(мск(2026, 8, 31), {"mode": "ежечасно"}, МСК) is None
+    assert next_occurrence(мск(2026, 8, 31), {}, МСК) is None
+    assert next_occurrence(мск(2026, 8, 31), {"interval": 2}, МСК) is None
 
 
 def test_нулевой_шаг_не_зацикливает():
     # interval=0 без защиты дал бы бесконечный цикл материализации.
-    стало = _next_occurrence(мск(2026, 8, 31), {"mode": "weekly", "interval": 0}, МСК)
+    стало = next_occurrence(мск(2026, 8, 31), {"mode": "weekly", "interval": 0}, МСК)
     assert стало.astimezone(МСК) > мск(2026, 8, 31)

@@ -31,6 +31,8 @@ export interface TaskTime {
 export interface TaskWorkItem {
   id: string; minutes: number; duration: string; work_date: string
   description: string | null; kind: string | null; user: string | null
+  /** Разрешение удалить конкретную запись времени, вычисленное сервером. */
+  can_delete?: boolean
 }
 export interface TaskSubtasks { total: number; open: number }
 
@@ -98,6 +100,7 @@ export interface TaskSprint {
 export interface SpaceTask {
   id: string
   number: number
+  assignment_revision?: string
   /** Как задачу называют вслух и пишут в коммите: `TF-42`. У задач без проекта —
    *  просто номер, чтобы строка списка не пустовала. */
   key?: string
@@ -221,6 +224,8 @@ export interface TaskAttachment {
 }
 
 export interface TaskDetails extends SpaceTask {
+  /** Полномочие сервера: учитывает автора, исполнителя и управленческий охват. */
+  can_edit?: boolean
   description: string | null
   events: TaskEvent[]
   /** Пункты чек-листа. Прогресс «3 из 5» приходит отдельно, полем `checklist`. */
@@ -279,6 +284,8 @@ export interface TaskFilters {
   /** Круг записи: `personal` — своя записная книжка, её не видит никто. */
   visibility?: TaskVisibility
   dueFrom?: string; dueTo?: string
+  /** Когорта закрытых за период отчёта; включительно по местным датам пространства. */
+  closedFrom?: string; closedTo?: string
   sort?: string; limit?: number; offset?: number
 }
 
@@ -322,6 +329,7 @@ export async function listTasks(companyId: string, scope: TaskScope, opts?: Task
       label_id: opts?.labelId || undefined, q: opts?.q || undefined,
       visibility: opts?.visibility || undefined,
       due_from: opts?.dueFrom || undefined, due_to: opts?.dueTo || undefined,
+      closed_from: opts?.closedFrom || undefined, closed_to: opts?.closedTo || undefined,
       sort: opts?.sort || undefined,
       limit: opts?.limit ?? undefined, offset: opts?.offset || undefined,
     }).then((r) => ({ ...r, tasks: (r.tasks ?? []).map(fillTask) }))
@@ -356,6 +364,18 @@ export async function tasksSummary(
     company_id: companyId, days,
     ...(period?.from && period?.to
       ? { date_from: period.from, date_to: period.to } : {}),
+  })
+}
+
+export interface TaskAssignmentCounts { new: number; overdue: number }
+
+export function assignmentCounts(companyId: string) {
+  return get<TaskAssignmentCounts>('/api/tasks/assignment-counts', { company_id: companyId })
+}
+
+export function viewAssignment(id: string, companyId: string, revision: string) {
+  return post<{ acknowledged: boolean }>(`/api/tasks/${id}/assignment-view`, {
+    company_id: companyId, assignment_revision: revision,
   })
 }
 
@@ -570,7 +590,7 @@ export async function taskAction(id: string, data: {
   status?: string; priority?: string; dueAt?: string; note?: string
   title?: string; description?: string; objectId?: string | null
   projectId?: string
-  /** Задать тип живой работе: без него у неё нет маршрута. */
+  /** Задать тип живой работе вместо общего маршрута. */
   typeId?: string
   /** null = снять версию; undefined = не трогать. */
   fixVersionId?: string | null; foundVersionId?: string | null
