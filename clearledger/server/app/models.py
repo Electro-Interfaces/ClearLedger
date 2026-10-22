@@ -1308,8 +1308,26 @@ class CounterpartyContact(Base):
 
 
 # ---------------------------------------------------------------------------
-# НСИ: Contract (Договоры)
+# Контактные лица: назначения на объекты
 # ---------------------------------------------------------------------------
+class LocationContact(Base):
+    """Явное назначение человека из общего реестра на объект.
+
+    ФИО/связь остаются в CounterpartyContact. Удаление назначения не удаляет
+    человека; удаление объекта или контакта убирает только его связи.
+    """
+    __tablename__ = "location_contacts"
+
+    location_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey("service_locations.id", ondelete="CASCADE"), primary_key=True)
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("counterparty_contacts.id", ondelete="CASCADE"), primary_key=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    responsibility: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Contract(Base):
     __tablename__ = "contracts"
     __table_args__ = (
