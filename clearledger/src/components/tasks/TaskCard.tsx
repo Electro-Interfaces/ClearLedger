@@ -13,7 +13,7 @@ import { StationLink } from '@/components/common/StationLink'
 import { WorkResults } from '@/components/work/WorkResults'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, Clock, Eye, EyeOff, Link2, ListChecks, Loader2, Lock, Mail, Maximize2, MessagesSquare, Minimize2, Paperclip, Pin, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, Clock, Download, Eye, EyeOff, Link2, ListChecks, Loader2, Lock, Mail, Maximize2, MessagesSquare, Minimize2, Paperclip, Pin, Plus, RefreshCw, Send, Trash2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { QueryError } from '@/components/common/QueryError'
-import { openAuthAttachment } from '@/lib/authFiles'
+import { downloadAttachment, openAuthAttachment } from '@/lib/authFiles'
 import { cn } from '@/lib/utils'
 import { taskDueDay } from '@/lib/taskCardInput'
 import { useAuth } from '@/contexts/AuthContext'
@@ -422,11 +422,21 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
                     тем же клиентом, что и вложения чата. */}
                 <button type="button"
                   onClick={() => {
-                    void openAuthAttachment(tasksService.taskFileUrl(a.id, companyId))
+                    void openAuthAttachment(tasksService.taskFileUrl(a.id, companyId), {
+                      fileName: a.file_name, cache: false,
+                    })
                       .catch(() => toast.error('Файл не открылся'))
                   }}
-                  className="truncate text-primary hover:underline">{a.file_name}</button>
+                  className="min-w-0 flex-1 truncate text-left text-primary hover:underline">{a.file_name}</button>
                 <span className="shrink-0 text-muted-foreground">{fileSize(a.size)}</span>
+                <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-1 px-2 text-xs"
+                  aria-label={`Скачать ${a.file_name}`}
+                  onClick={() => {
+                    void downloadAttachment(tasksService.taskFileUrl(a.id, companyId), a.file_name, { cache: false })
+                      .catch(() => toast.error('Не удалось скачать файл'))
+                  }}>
+                  <Download className="h-3.5 w-3.5" />Скачать
+                </Button>
                 {live && a.can_delete && (
                   <Button variant="ghost" size="sm" className="ml-auto h-6 px-1.5"
                     aria-label="Убрать файл"
@@ -617,16 +627,28 @@ export function TaskCard({ id, companyId, onChanged, onOpenOther, onBack }: {
             {t.attachments.map((a) => (
               // Файл закрыт JWT: прямая ссылка в новой вкладке отдаёт 401 —
               // тянем тем же клиентом, что и вложения чата.
-              <button key={a.id} type="button"
+              <div key={a.id} className="flex min-w-0 items-center gap-1">
+              <button type="button"
                 onClick={() => {
-                  void openAuthAttachment(tasksService.taskFileUrl(a.id, companyId))
+                  void openAuthAttachment(tasksService.taskFileUrl(a.id, companyId), {
+                    fileName: a.file_name, cache: false,
+                  })
                     .catch(() => toast.error('Файл не открылся'))
                 }}
-                className="flex w-full items-center gap-2 rounded px-1 py-1.5 text-left text-xs hover:bg-accent">
+                className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-1.5 text-left text-xs hover:bg-accent">
                 <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate">{a.file_name}</span>
                 <span className="shrink-0 text-muted-foreground">{fileSize(a.size)}</span>
               </button>
+              <Button variant="ghost" size="sm" className="h-8 shrink-0 gap-1 px-2 text-xs"
+                aria-label={`Скачать ${a.file_name}`}
+                onClick={() => {
+                  void downloadAttachment(tasksService.taskFileUrl(a.id, companyId), a.file_name, { cache: false })
+                    .catch(() => toast.error('Не удалось скачать файл'))
+                }}>
+                <Download className="h-3.5 w-3.5" />Скачать
+              </Button>
+              </div>
             ))}
           </div>
           {live && (
@@ -1570,7 +1592,7 @@ function TimePanel({ task, companyId, live, canEdit, onChanged, onEstimate }: {
                 {new Date(w.work_date).toLocaleDateString('ru-RU')}
               </span>
               <span className="truncate">{w.user}{w.description ? ` · ${w.description}` : ''}</span>
-              {((w as tasksService.TaskWorkItem & { can_delete?: boolean }).can_delete ?? canEdit) && (
+              {(w.can_delete ?? canEdit) && (
               <Button variant="ghost" size="sm" className="ml-auto h-6 px-1.5"
                 aria-label="Убрать запись" onClick={() => drop.mutate(w.id)}>
                 <Trash2 className="h-3 w-3" />

@@ -29,3 +29,10 @@ test('сокрытие за срок ограничено тем же местн
   assert.equal(clampTaskDefer('2026-10-24', due), '2026-10-24')
   assert.equal(clampTaskDefer('2026-10-26', null), '2026-10-26')
 })
+
+test('пояс профиля задаёт личную границу даже при другом поясе браузера', () => {
+  const due = '2026-10-24T21:00:00Z'
+  assert.equal(clampTaskDefer('2026-10-26', due, 'Europe/Moscow'), '2026-10-25')
+  assert.equal(clampTaskDefer('2026-10-26', due, 'America/Los_Angeles'), '2026-10-24')
+  assert.equal(clampTaskDefer('2026-10-26', due, 'invalid/timezone'), '2026-10-25')
+})
