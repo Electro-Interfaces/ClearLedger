@@ -28,6 +28,7 @@ import * as tasksService from '@/services/tasksService'
 import type { PersonalMark } from '@/services/workService'
 import { shortDay } from '@/lib/personalDay'
 import { cn } from '@/lib/utils'
+import { clampTaskDefer, taskDueDay } from '@/lib/taskCardInput'
 
 /** Ближайший день недели вперёд: «в понедельник» — самый частый ответ на
  *  вопрос «когда вернуться», и считать его человеку не должно приходиться. */
@@ -95,7 +96,9 @@ export function PlaceActions({
 
   const act = useMutation({
     mutationFn: (data: Parameters<typeof workService.place>[2]) =>
-      workService.place(companyId, targetRef, data),
+      workService.place(companyId, targetRef, data.deferUntil
+        ? { ...data, deferUntil: clampTaskDefer(data.deferUntil, dueAt) }
+        : data),
     onSuccess: (res) => {
       setPickingDate(null)
       // Ответ сервера — уже посчитанная отметка: кладём её в очередь и в списки
@@ -310,7 +313,7 @@ export function PlaceActions({
               </DropdownMenuLabel>
               {ветка({
                 icon: CalendarClock,
-                label: dueAt ? `Срок: ${shortDay(dueAt.slice(0, 10))}` : 'Поставить срок',
+                label: dueAt ? `Срок: ${shortDay(taskDueDay(dueAt))}` : 'Поставить срок',
                 children: (
                   <>
                     <DropdownMenuItem onClick={() => срок.mutate(workService.todayKey())}>

@@ -30,6 +30,7 @@ import { listSpaceObjects } from '@/services/spaceObjectsService'
 import { PRIORITY_LABEL, fileSize } from './taskWords'
 import { SearchPicker } from './SearchPicker'
 import { useAuth } from '@/contexts/AuthContext'
+import { selectedTaskType } from '@/lib/taskCardInput'
 
 export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSignal, draft }: {
   companyId: string
@@ -150,14 +151,12 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
     queryFn: () => tasksService.listTaskLabels(companyId),
     enabled: open, staleTime: 5 * 60 * 1000,
   })
-  // Тип по умолчанию — первый общий, а не «без типа». Работа без типа не имеет
-  // маршрута: на доске она стоит намертво и двигается только в «Готово». Быстрая
-  // постановка не должна рождать такую по умолчанию — «без типа» остаётся
-  // осознанным выбором в списке, а не тем, что получаешь, не глядя.
+  // Первый общий тип применяется, пока человек не сделал явный выбор.
+  // `none` сохраняется и в черновике, чтобы не подменить его умолчанием.
   const типПоУмолчанию = (typesQ.data?.types ?? [])
     .find((t) => t.is_active && !t.project_id)?.id ?? ''
-  const выбранныйТип = typeId || типПоУмолчанию
-  const type = (typesQ.data?.types ?? []).find((t) => t.id === typeId)
+  const выбранныйТип = selectedTaskType(typeId, типПоУмолчанию)
+  const type = (typesQ.data?.types ?? []).find((t) => t.id === выбранныйТип)
 
   const reset = () => {
     setTitle(''); setDescription(''); setProjectId(''); setTypeId(''); setAssigneeId('')
@@ -254,7 +253,10 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
               <div className="space-y-1.5">
                 <Label>Проект</Label>
                 <Select value={projectId || 'none'}
-                  onValueChange={(v) => { setProjectId(v === 'none' ? '' : v); setTypeId('') }}>
+                  onValueChange={(v) => {
+                    setProjectId(v === 'none' ? '' : v)
+                    setTypeId((chosen) => chosen === 'none' ? chosen : '')
+                  }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Без проекта</SelectItem>
@@ -268,7 +270,7 @@ export function NewTaskDialog({ companyId, onCreated, defaultObjectId, openSigna
             <div className="space-y-1.5">
               <Label>Тип</Label>
               <Select value={выбранныйТип || 'none'}
-                onValueChange={(v) => setTypeId(v === 'none' ? '' : v)}>
+                onValueChange={setTypeId}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Поручение (без типа)</SelectItem>
