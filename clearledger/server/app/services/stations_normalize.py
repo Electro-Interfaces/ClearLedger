@@ -821,6 +821,26 @@ async def ingest_stations(
             "ambiguous_keys": ambiguous[:50], "message": message}
 
 
+async def build_source_station_index(db: AsyncSession, company_id) -> dict[str, str | None]:
+    """Постоянный ID АСУиМ → объект компании; неоднозначный ID не разрешаем."""
+    index: dict[str, str | None] = {}
+    for loc in (await db.execute(select(ServiceLocation).where(
+        ServiceLocation.company_id == company_id,
+        ServiceLocation.type.in_(("ev_charging", "ezs")),
+    ))).scalars():
+        key = str((loc.extra_metadata or {}).get("asuimStationId") or "").strip()
+        if key:
+            index[key] = loc.id if key not in index or index[key] == loc.id else None
+    return index
+
+
+def resolve_session_location(row, station_index, source_index):
+    source_id = str(row.get("source_station_id") or "").strip()
+    if source_id in source_index:
+        return source_index[source_id]
+    return station_index.get(str(row.get("station_code") or "").strip())
+
+
 async def build_station_index(db: AsyncSession, company_id) -> dict[str, str]:
     """Индекс № станции → ServiceLocation.id (конформная размерность) для резолва
     сессий/оплат на объект. Ключ — station_number (типизир.) или extra_metadata.number.
@@ -942,10 +962,33 @@ async def backfill_session_locations(db: AsyncSession, company_id, auto_create: 
     if auto_create:
         created_stations = (await ensure_stations_from_sessions(db, company_id))["created"]
     idx = await build_station_index(db, company_id)
+    # Постоянный ID важнее текущих и прежних номеров. Общий бэкфилл не должен
+    # отменять связь, установленную при импорте сессии по ID источника.
+    from sqlalchemy import text
+    stable_params = {"company": company_id}
+    stable_cte = """
+        WITH registry AS (
+            SELECT extra_metadata->>'asuimStationId' AS source_id, min(id) AS location_id
+            FROM service_locations
+            WHERE company_id=:company AND type IN ('ev_charging','ezs')
+              AND nullif(extra_metadata->>'asuimStationId','') IS NOT NULL
+            GROUP BY extra_metadata->>'asuimStationId' HAVING count(*)=1
+        )
+    """
+    stable_moved = int((await db.execute(text(stable_cte + """
+        SELECT count(*) FROM charge_sessions s JOIN registry r ON r.source_id=s.source_station_id
+        WHERE s.company_id=:company AND s.location_id IS NOT NULL AND s.location_id<>r.location_id
+    """), stable_params)).scalar() or 0)
+    await db.execute(text(stable_cte + """
+        UPDATE charge_sessions s SET location_id=r.location_id FROM registry r
+        WHERE s.company_id=:company AND s.source_station_id=r.source_id
+          AND s.location_id IS DISTINCT FROM r.location_id
+    """), stable_params)
     codes = [str(x).strip() for x in (await db.execute(
         select(ChargeSession.station_code).where(ChargeSession.company_id == company_id).distinct()
     )).scalars() if x]
-    linked_rows = matched = moved = 0
+    linked_rows = matched = 0
+    moved = stable_moved
     for code in codes:
         lid = idx.get(code) or (idx.get(code.rsplit("-", 1)[0]) if "-" in code else None)
         if not lid:
@@ -956,13 +999,18 @@ async def backfill_session_locations(db: AsyncSession, company_id, auto_create: 
         # должен быть виден в отчёте загрузки.
         moved += int((await db.execute(select(func.count()).select_from(ChargeSession).where(
             ChargeSession.company_id == company_id, ChargeSession.station_code == code,
+            ChargeSession.source_station_id.is_(None),
             ChargeSession.location_id.is_not(None), ChargeSession.location_id != lid,
         ))).scalar() or 0)
         r = await db.execute(update(ChargeSession).where(
-            ChargeSession.company_id == company_id, ChargeSession.station_code == code
+            ChargeSession.company_id == company_id, ChargeSession.station_code == code,
+            ChargeSession.source_station_id.is_(None)
         ).values(location_id=lid))
         linked_rows += int(r.rowcount or 0)
     await db.flush()
+    linked_rows = int((await db.execute(select(func.count()).select_from(ChargeSession).where(
+        ChargeSession.company_id == company_id, ChargeSession.location_id.is_not(None),
+    ))).scalar() or 0)
     total = int((await db.execute(select(func.count()).select_from(ChargeSession).where(
         ChargeSession.company_id == company_id))).scalar() or 0)
     return {"status": "success", "sessions_linked": linked_rows, "sessions_total": total,

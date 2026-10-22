@@ -24,11 +24,11 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession, Region, ServiceLocation
-from app.services.ops_monitor_context import monitor_context, region_matches
+from app.services.ops_monitor_context import monitor_context, region_matches, session_time_iso
 
 # Станцией сети считаем зарядную точку; тестовые стенды в картину не идут.
 # Что считается парком — одно определение на все экраны (station_scope).
@@ -155,13 +155,21 @@ async def network_state(
 
     # Попытки без энергии за неделю: клиент приезжал, станция на связи, а тока не
     # дала. Это сигнал сильнее любой тишины — его и ищут инженеры.
+    last_charge = (select(ChargeSession.location_id.label("location_id"),
+                          func.max(ChargeSession.started_at).label("at"))
+                   .where(ChargeSession.company_id == company_id,
+                          ChargeSession.started_at <= сейчас,
+                          ChargeSession.energy_kwh > 0)
+                   .group_by(ChargeSession.location_id).subquery())
     пустые = dict((str(loc), (int(n), last)) for loc, n, last in (await db.execute(
         select(ChargeSession.location_id, func.count(), func.max(ChargeSession.started_at))
+        .outerjoin(last_charge, last_charge.c.location_id == ChargeSession.location_id)
         .where(ChargeSession.company_id == company_id,
                ChargeSession.location_id.is_not(None),
                ChargeSession.started_at > сейчас - timedelta(days=НЕДЕЛЯ),
                ChargeSession.started_at <= сейчас,
-               func.coalesce(ChargeSession.energy_kwh, 0) <= 0)
+               func.coalesce(ChargeSession.energy_kwh, 0) <= 0,
+               or_(last_charge.c.at.is_(None), ChargeSession.started_at > last_charge.c.at))
         .group_by(ChargeSession.location_id))).all())
 
     попытки = dict((str(loc), (last, int(total))) for loc, last, total in (await db.execute(
@@ -211,13 +219,13 @@ async def network_state(
             # Что витрина написала своими словами: «Нажата аварийная кнопка» в наш
             # справочник состояний не укладывается, но инженеру это важно.
             "statusRaw": (s.extra_metadata or {}).get("statusDev"),
-            "lastSessionAt": последняя.isoformat() if последняя else None,
-            "lastAttemptAt": попытки[str(s.id)][0].isoformat() if str(s.id) in попытки else None,
+            "lastSessionAt": session_time_iso(последняя),
+            "lastAttemptAt": session_time_iso(попытки.get(str(s.id), (None, 0))[0]),
             "attemptsEver": попытки.get(str(s.id), (None, 0))[1],
             "silentDays": дней,
             "typicalGap": ритм.get(str(s.id)),
             "dryAttempts": пустых,
-            "lastDryAt": пустая.isoformat() if пустых else None,
+            "lastDryAt": session_time_iso(пустая) if пустых else None,
             "sessions90d": w.get("сессий", 0),
             "sessions7d": w.get("сессий_7д", 0),
             "revenuePerMonth": деньги_в_месяц,

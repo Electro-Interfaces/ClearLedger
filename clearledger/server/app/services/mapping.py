@@ -64,6 +64,9 @@ _CONNECTOR_SEED = {
     "shuko": "SHUKO", "шуко": "SHUKO", "schuko": "SHUKO",
     "ac": "AC (переменный ток)", "dc": "DC (постоянный ток)",
 }
+# Повторная нормализация уже канонического имени не должна менять регистр.
+_CONNECTOR_SEED.update({value.lower(): value for value in list(_CONNECTOR_SEED.values())})
+
 # Тип пользователя ЭЗС → канон
 _USER_TYPE_SEED = {
     "фл": "ФЛ", "физическое лицо": "ФЛ", "individual": "ФЛ", "b2c": "ФЛ",

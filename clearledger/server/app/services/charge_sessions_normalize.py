@@ -162,6 +162,38 @@ def parse_sessions_xlsx(content: bytes) -> list[dict[str, Any]]:
     return rows
 
 
+PENDING_SESSION_RESULTS = ("Charging", "ChargeCommandSend")
+
+
+def pending_session_conditions(company_id, channel_id):
+    return (ChargeSession.company_id == company_id,
+            ChargeSession.channel_id == channel_id,
+            ChargeSession.finished_at.is_(None),
+            ChargeSession.result.in_(PENDING_SESSION_RESULTS))
+
+
+def finalize_pending_session(session, row) -> bool:
+    """Завершить ранее открытую сессию по источнику, сохранив обогащение учёта.
+
+    Повтор старой выгрузки не откатывает окончательный результат. Незавершённые
+    снимки не обновляем: у них нет признака свежести, и энергия могла бы убыть.
+    """
+    if (session.finished_at is not None or session.result not in PENDING_SESSION_RESULTS
+            or row.get("finished_at") is None
+            or row.get("result") not in ("Complete", "CompleteError")
+            or row.get("started_at") != session.started_at):
+        return False
+    fields = ("finished_at", "duration_min", "result", "energy_kwh", "amount", "tariff")
+    values = {field: row[field] for field in fields}
+    # Договорной тариф уже установлен учётным обогащением, изменился объём.
+    if session.client_tariff is not None:
+        from decimal import Decimal
+        values["client_amount"] = Decimal(str(row["energy_kwh"])) * Decimal(str(session.client_tariff))
+    for field, value in values.items():
+        setattr(session, field, value)
+    return True
+
+
 async def ingest_charge_sessions(
     db: AsyncSession, company_id, rows: list[dict[str, Any]], channel_id=None,
     mode: str = "append", log_id=None,
@@ -169,8 +201,8 @@ async def ingest_charge_sessions(
     """L1 RAW → нормализация (connector/user_type) → дедуп → сохранение (L2).
 
     mode:
-      • 'append'  — подгрузить: добавить только те сессии, которых ещё нет
-        (дедуп по «ID сессии»); существующие пропускаются.
+      • 'append'  — подгрузить: добавить новые сессии; ранее открытые завершить по источнику.
+        Окончательно загруженные сессии не переписываются.
       • 'replace' — переписать: удалить сессии ТЕКУЩЕГО скоупа загрузки и
         загрузить заново из таблицы. Скоуп = (company_id, channel_id): при
         загрузке через канал стираются только сессии этого канала; при прямом
@@ -181,8 +213,11 @@ async def ingest_charge_sessions(
     connector_map = await load_kind_map(db, company_id, "connector", channel_id)
     user_type_map = await load_kind_map(db, company_id, "user_type", channel_id)
     # Индекс объектов-станций (№ → location_id) — материализуем связь сессия→объект (FK).
-    from app.services.stations_normalize import _num_class, build_station_index
+    from app.services.stations_normalize import (
+        _num_class, build_station_index, build_source_station_index, resolve_session_location,
+    )
     station_idx = await build_station_index(db, company_id)
+    source_idx = await build_source_station_index(db, company_id)
 
     deleted = 0
     if mode == "replace":
@@ -201,7 +236,11 @@ async def ingest_charge_sessions(
         select(ChargeSession.session_ext_id).where(ChargeSession.company_id == company_id)
     )).scalars().all())
 
-    created = skipped = errors = 0
+    pending = {s.session_ext_id: s for s in (await db.execute(
+        select(ChargeSession).where(*pending_session_conditions(company_id, channel_id))
+        .with_for_update()
+    )).scalars()}
+    created = updated = skipped = errors = 0
     tests = 0                  # сессии тестовых станций — в учёт не берём
     rejected = 0               # отбракованные источником — тоже, но с журналом
     meter_errors = 0           # с невозможными показаниями счётчика — туда же
@@ -261,7 +300,7 @@ async def ingest_charge_sessions(
                         company_id=company_id, kind="session", ext_id=sid,
                         session_ext_id=sid, occurred_at=row.get("started_at"),
                         station_code=row.get("station_code"),
-                        location_id=station_idx.get((row.get("station_code") or "").strip()) or None,
+                        location_id=resolve_session_location(row, station_idx, source_idx),
                         user_id=row.get("user_id"),
                         energy_kwh=row.get("energy_kwh") or 0.0,
                         amount=row.get("amount") or 0.0,
@@ -274,7 +313,10 @@ async def ingest_charge_sessions(
                     rejected += 1
                 continue
             if sid in existing or sid in seen:
-                skipped += 1
+                if sid in pending and finalize_pending_session(pending[sid], row):
+                    updated += 1
+                else:
+                    skipped += 1
                 continue
             seen.add(sid)
 
@@ -287,7 +329,9 @@ async def ingest_charge_sessions(
                 channel_id=channel_id,
                 session_ext_id=sid,
                 station_code=row.get("station_code"),
-                location_id=station_idx.get((row.get("station_code") or "").strip()) or None,
+                source_station_id=row.get("source_station_id"),
+                source_customer_id=row.get("source_customer_id"),
+                location_id=resolve_session_location(row, station_idx, source_idx),
                 station_name=row.get("station_name"),
                 region=canon_region(row.get("region")),
                 address=row.get("address"),
@@ -351,6 +395,11 @@ async def ingest_charge_sessions(
     # extra_metadata.nameHistory) — каталог не отстаёт от загрузок.
     renamed = await refresh_location_names(db, company_id)
 
+    # И многолистовая АСУиМ-книга, и старый XLSX проходят один приёмник.
+    # Витринный путь раньше обходил авто-обогащение, оставляя ЮЛ с нулевой выручкой.
+    enrichment = await enrich_from_registry(db, company_id, channel_id=channel_id,
+                                           only_missing=True, commit=False)
+
     # Визиты: склейка смежных попыток одного клиента на одной станции. Считаем
     # по всей компании, а не только по загруженным строкам — новая сессия может
     # примкнуть к визиту, который уже лежит в базе, и изменить его исход.
@@ -360,7 +409,9 @@ async def ingest_charge_sessions(
     if mode == "replace":
         message = f"переписано: удалено {deleted}, загружено {created}"
     else:
-        message = f"загружено {created}, пропущено {skipped}"
+        message = f"загружено {created}, завершено ранее открытых {updated}, пропущено {skipped}"
+    if enrichment.get("priced"):
+        message += f"; рассчитана выручка ЮЛ-сессий: {enrichment['priced']}"
     if tests:
         message += f"; сессий тестовых станций исключено: {tests}"
     if rejected:
@@ -386,9 +437,10 @@ async def ingest_charge_sessions(
                    f"повторный прогон свяжет. · ") + message
     await rebuild_mart(db, company_id)  # витрина L3 — атомарно с данными (коммит в bump)
     await bump_version(db, company_id)  # инвалидировать кеш дашбордов «Продаж»
-    return {"status": "success", "mode": mode, "created": created, "skipped": skipped,
+    return {"status": "success", "mode": mode, "created": created, "updated": updated, "skipped": skipped,
             "errors": errors, "deleted": deleted, "tests": tests,
             "rejected": rejected, "meter_errors": meter_errors,
+            "corporate_priced": enrichment.get("priced", 0),
             "stations_created": heal.get("stations_created", 0),
             "unmatched_stations": unmatched_stations,
             "unmatched_sessions": unmatched_sessions,
@@ -530,8 +582,8 @@ async def enrich_sessions_with_orgs(
     await _sync_corporate_contracts(db, company_id, orgs)
 
     named, priced, matched = await _apply_org_enrichment(db, company_id, orgs, matrix, channel_id)
-    await rebuild_mart(db, company_id)  # витрина L3 — атомарно с данными (коммит в bump)
-    await bump_version(db, company_id)  # обогащение меняет выручку → сброс кеша
+    await rebuild_mart(db, company_id)
+    await bump_version(db, company_id)
     return await _enrichment_result(db, company_id, len(orgs), named, priced, matched)
 
 
@@ -620,59 +672,82 @@ async def _sync_corporate_contracts(db: AsyncSession, company_id, orgs: list[dic
     await db.flush()
 
 
-async def _apply_org_enrichment(db, company_id, orgs, matrix, channel_id) -> tuple[int, int, int]:
-    """Применить обогащение к сессиям: client_name + договорной тариф/выручка по
-    режиму. Идемпотентно (UPDATE по телефону). Реестр НЕ трогает."""
+def _org_price_steps(org, matrix):
+    """Те же тарифные шаги для SQL-обогащения и предварительного плана ремонта."""
+    from decimal import Decimal
+    mode, rate = org.get("mode"), org.get("rate")
+    discount = Decimal(1) - Decimal(str(org.get("discount") or 0)) / 100
+    if mode == "flat" and rate is not None:
+        return [(None, None, Decimal(str(rate)), Decimal(1))]
+    if mode == "retail":
+        return [(None, None, None, discount)]
+    if mode != "matrix":
+        return []
+    # Сохраняем действующее правило: при отсутствии региональной матрицы — тариф сессии.
+    steps = [(None, None, None, Decimal(1))]
+    for region, prices in matrix.get(org["name"], {}).items():
+        for col, conns in _MATRIX_CONN.items():
+            if prices.get(col) is not None:
+                price = round(Decimal(str(prices[col])) * discount, 4)
+                steps.append((region, conns, price, Decimal(1)))
+    return steps
+
+
+def missing_org_enrichment(session, org, matrix):
+    """Дозаполнение только отсутствующего обогащения, без пересмотра учтённых цен."""
+    from decimal import Decimal, ROUND_HALF_UP
+    if (session.client_name is not None or session.client_tariff is not None
+            or session.client_amount is not None
+            or not (session.user_type == "ЮЛ" or not session.amount)):
+        return {}
+    values = {"client_name": org["name"]}
+    for region, conns, fixed, multiplier in _org_price_steps(org, matrix):
+        if region is not None and (session.region != region or session.connector_type not in conns):
+            continue
+        rate = fixed if fixed is not None else Decimal(str(session.tariff)) * multiplier
+        values.update(client_tariff=rate.quantize(Decimal('.01'), rounding=ROUND_HALF_UP),
+                      client_amount=(Decimal(str(session.energy_kwh)) * rate).quantize(
+                          Decimal('.01'), rounding=ROUND_HALF_UP))
+    return values
+
+
+async def _apply_org_enrichment(db, company_id, orgs, matrix, channel_id,
+                                only_missing=False) -> tuple[int, int, int]:
+    """Применить сохранённые правила; автоматический импорт дозаполняет пустое."""
     S = ChargeSession
 
     def where(phone):
-        # Обогащаем только постоплатные сессии (amount=0) либо явно ЮЛ-помеченные:
-        # у телефона организации бывают розничные сессии с реальным списанием —
-        # подменять живую оплату расчётной договорной суммой (и уводить сессию
-        # из розницы через client_name) нельзя.
+        # Розничные сессии с реальным списанием не подменяем договорной суммой.
         conds = [S.company_id == company_id, S.user_id == phone,
                  or_(S.user_type == "ЮЛ", func.coalesce(S.amount, 0) == 0)]
         if channel_id is not None:
             conds.append(S.channel_id == channel_id)
+        if only_missing:
+            conds.extend((S.client_name.is_(None), S.client_tariff.is_(None), S.client_amount.is_(None)))
         return conds
 
     named = priced = matched = 0
-    for o in orgs:
-        phone, name = o.get("phone"), o.get("name")
+    for org in orgs:
+        phone, name = org.get("phone"), org.get("name")
         if not (phone and name):
             continue
-        mode, rate = (o.get("mode") or ""), o.get("rate")
-        disc = float(o.get("discount") or 0)  # скидка к рознице, % (каршеринг = 25)
-
-        n = int((await db.execute(update(S).where(*where(phone)).values(client_name=name))).rowcount or 0)
+        # В режиме дозаполнения отбор фиксируется ДО присвоения client_name.
+        ids = None
+        if only_missing:
+            ids = list((await db.execute(select(S.id).where(*where(phone)))).scalars())
+            if not ids:
+                continue
+        conditions = [S.company_id == company_id, S.id.in_(ids)] if ids is not None else where(phone)
+        n = int((await db.execute(update(S).where(*conditions).values(client_name=name))).rowcount or 0)
         named += n
-        if n:
-            matched += 1
-
-        if mode == "flat" and rate is not None:
-            r = await db.execute(update(S).where(*where(phone)).values(
-                client_tariff=rate, client_amount=S.energy_kwh * rate))
-            priced += int(r.rowcount or 0)
-        elif mode == "retail":
-            # розница сессии × (1 − скидка%): биллинг ПК для каршеринга — ровно так
-            k = 1 - disc / 100
-            r = await db.execute(update(S).where(*where(phone)).values(
-                client_tariff=S.tariff * k, client_amount=S.energy_kwh * S.tariff * k))
-            priced += int(r.rowcount or 0)
-        elif mode == "matrix":
-            r = await db.execute(update(S).where(*where(phone)).values(
-                client_tariff=S.tariff, client_amount=S.energy_kwh * S.tariff))
-            priced += int(r.rowcount or 0)
-            for region, prices in matrix.get(name, {}).items():
-                for col, conns in _MATRIX_CONN.items():
-                    price = prices.get(col)
-                    if price is None:
-                        continue
-                    # Матрица = РОЗНИЦА региона; договорная цена = розница × (1 − скидка%).
-                    eff = round(price * (1 - disc / 100), 4)
-                    await db.execute(update(S).where(
-                        *where(phone), S.region == region, S.connector_type.in_(conns),
-                    ).values(client_tariff=eff, client_amount=S.energy_kwh * eff))
+        matched += bool(n)
+        for region, conns, fixed, multiplier in _org_price_steps(org, matrix):
+            rate = fixed if fixed is not None else S.tariff * multiplier
+            filters = conditions if region is None else [*conditions, S.region == region, S.connector_type.in_(conns)]
+            n_priced = int((await db.execute(update(S).where(*filters).values(
+                client_tariff=rate, client_amount=S.energy_kwh * rate))).rowcount or 0)
+            if region is None:
+                priced += n_priced
     return named, priced, matched
 
 
@@ -684,7 +759,8 @@ async def _enrichment_result(db, company_id, orgs_count, named, priced, matched)
             "message": f"обогащено {named} сессий ({matched} орг), корп-выручка {round(revenue):,} ₽".replace(",", " ")}
 
 
-async def enrich_from_registry(db: AsyncSession, company_id, channel_id=None) -> dict[str, Any]:
+async def enrich_from_registry(db: AsyncSession, company_id, channel_id=None,
+                               *, only_missing=False, commit=True) -> dict[str, Any]:
     """Переприменить обогащение из СОХРАНЁННОГО реестра corporate_clients (без файла).
     Восстанавливает client_name/тариф/выручку после перезагрузки таблицы сессий."""
     clients = (await db.execute(
@@ -697,9 +773,11 @@ async def enrich_from_registry(db: AsyncSession, company_id, channel_id=None) ->
              "discount": float(c.discount_pct or 0)}
             for c in clients]
     matrix = {c.name: c.matrix for c in clients if c.matrix}
-    named, priced, matched = await _apply_org_enrichment(db, company_id, orgs, matrix, channel_id)
-    await rebuild_mart(db, company_id)  # витрина L3 — атомарно с данными (коммит в bump)
-    await bump_version(db, company_id)  # обогащение меняет выручку → сброс кеша
+    named, priced, matched = await _apply_org_enrichment(
+        db, company_id, orgs, matrix, channel_id, only_missing=only_missing)
+    if commit:
+        await rebuild_mart(db, company_id)  # витрина и данные коммитятся вместе
+        await bump_version(db, company_id)
     return await _enrichment_result(db, company_id, len(orgs), named, priced, matched)
 
 

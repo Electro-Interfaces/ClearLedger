@@ -5816,6 +5816,10 @@ class ChargeSession(Base):
     )
     session_ext_id: Mapped[str] = mapped_column(String(64), nullable=False)  # «ID сессии»
 
+    # Постоянные ключи источника хранятся отдельно от номера станции и телефона.
+    source_station_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Станция/объект
     station_code: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)   # «Номер станции» (65.245)
     # Материализованная связь с объектом-станцией (конформная размерность): резолв

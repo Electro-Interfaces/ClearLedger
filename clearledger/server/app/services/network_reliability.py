@@ -38,7 +38,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession, Region, ServiceLocation
-from app.services.ops_monitor_context import monitor_context, region_matches, visit_summary, decimal_round
+from app.services.ops_monitor_context import monitor_context, region_matches, session_time_iso, visit_summary, decimal_round
 from app.services.station_scope import в_сети, обслуживаем
 
 # Окно наблюдения по умолчанию: квартал сглаживает разовые сбои и даёт
@@ -170,7 +170,7 @@ async def network_reliability(
             # Сколько энергии приходится на попытку: у станции, которая «работает»,
             # но отдаёт 0,1 кВт·ч на подъезд, беда не в проценте, а в железе.
             "kwhPerSession": round(float(энергия or 0) / всего, 2) if всего else 0.0,
-            "lastSessionAt": последняя.isoformat() if последняя else None,
+            "lastSessionAt": session_time_iso(последняя),
             "connectors": объект.connectors_count,
         })
 

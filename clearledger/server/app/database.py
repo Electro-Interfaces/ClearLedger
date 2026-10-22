@@ -2393,6 +2393,9 @@ async def create_all() -> None:
             "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS rating DOUBLE PRECISION",
             "ALTER TABLE service_locations ADD COLUMN IF NOT EXISTS success_pct DOUBLE PRECISION",
             "CREATE INDEX IF NOT EXISTS idx_service_locations_type ON service_locations(company_id, type)",
+            # Постоянные ключи АСУиМ: номер станции и телефон могут меняться.
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS source_station_id VARCHAR(64)",
+            "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS source_customer_id VARCHAR(64)",
             # v2.7: материализованная связь сессии → объект-станция (конформная размерность)
             "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS location_id VARCHAR(40) REFERENCES service_locations(id) ON DELETE SET NULL",
             "CREATE INDEX IF NOT EXISTS idx_charge_sessions_location ON charge_sessions(location_id)",
