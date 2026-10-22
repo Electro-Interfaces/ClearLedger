@@ -31,6 +31,8 @@ export interface TaskTime {
 export interface TaskWorkItem {
   id: string; minutes: number; duration: string; work_date: string
   description: string | null; kind: string | null; user: string | null
+  /** Разрешение удалить конкретную запись времени, вычисленное сервером. */
+  can_delete?: boolean
 }
 export interface TaskSubtasks { total: number; open: number }
 
