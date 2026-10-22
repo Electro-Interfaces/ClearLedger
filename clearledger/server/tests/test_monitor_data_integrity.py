@@ -233,3 +233,67 @@ async def test_failed_rebuild_cannot_commit_partial_import_or_corporate_prices(d
             await ingest_charge_sessions(db, cid, [row])
     await db.rollback()
     assert not list((await db.execute(select(ChargeSession).where(ChargeSession.company_id == cid))).scalars())
+
+
+@pytest.mark.asyncio(loop_scope='session')
+@pytest.mark.parametrize('shadow', ['test', 'closed', 'real'])
+async def test_confirmed_old_number_beats_shadow_but_preserves_real_current_owner(db, shadow):
+    from app.services.stations_normalize import build_station_index, backfill_session_locations
+    cid, (actual, duplicate, _) = await fleet(db)
+    actual.extra_metadata = {'asuimStationId': '3503', 'number': '251-0075',
+                             'numberHistory': [{'было': '590'}]}
+    if shadow == 'test':
+        duplicate.is_test = True
+        duplicate.extra_metadata = {'number': '590'}
+    elif shadow == 'closed':
+        duplicate.status = 'closed'
+        duplicate.extra_metadata = {'number': '590'}
+    await db.flush()
+    expected = duplicate.id if shadow == 'real' else actual.id
+    assert (await build_station_index(db, cid))['590'] == expected
+    session = ChargeSession(company_id=cid, session_ext_id='legacy', station_code='590',
+                            location_id=duplicate.id, started_at=datetime(2026, 10, 1))
+    db.add(session)
+    await db.flush()
+    await backfill_session_locations(db, cid)
+    await db.refresh(session)
+    assert session.location_id == expected
+
+
+@pytest.mark.asyncio(loop_scope='session')
+async def test_historical_number_comes_from_source_id_not_wrong_session_location(db):
+    from app.services.stations_normalize import build_station_index, backfill_session_locations
+    cid, (actual, duplicate, _) = await fleet(db)
+    duplicate.is_test = True
+    duplicate.extra_metadata = {'number': '590'}
+    # У реального объекта уже новый номер, истории в старом JSON не осталось.
+    actual.extra_metadata = {'asuimStationId': '3503'}
+    known = ChargeSession(company_id=cid, session_ext_id='proven', station_code='590',
+                          source_station_id='3503', location_id=duplicate.id,
+                          started_at=datetime(2026, 10, 1))
+    legacy = ChargeSession(company_id=cid, session_ext_id='legacy', station_code='590',
+                           location_id=duplicate.id, started_at=datetime(2026, 10, 2))
+    db.add_all([known, legacy])
+    await db.flush()
+    assert (await build_station_index(db, cid))['590'] == actual.id
+    await backfill_session_locations(db, cid)
+    await db.refresh(known)
+    await db.refresh(legacy)
+    assert known.location_id == legacy.location_id == actual.id
+
+
+@pytest.mark.asyncio(loop_scope='session')
+async def test_number_alone_does_not_relocate_existing_real_object(db):
+    from app.services.stations_normalize import build_station_index, backfill_session_locations
+    cid, (actual, previous, _) = await fleet(db)
+    current = ChargeSession(company_id=cid, session_ext_id='current', station_code='old-number',
+                            source_station_id='3503', location_id=actual.id,
+                            started_at=datetime(2026, 10, 2))
+    historical = ChargeSession(company_id=cid, session_ext_id='history', station_code='old-number',
+                               location_id=previous.id, started_at=datetime(2026, 1, 1))
+    db.add_all([current, historical])
+    await db.flush()
+    assert (await build_station_index(db, cid))['old-number'] == actual.id
+    await backfill_session_locations(db, cid)
+    await db.refresh(historical)
+    assert historical.location_id == previous.id
