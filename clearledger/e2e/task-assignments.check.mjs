@@ -34,7 +34,8 @@ try {
     debugPage = page; debugErrors = errors
     page.on('pageerror', e => errors.push(e.stack ?? e.message))
     page.on('console', m => { if (m.type() === 'error' && !m.text().includes('WebSocket')) errors.push(m.text()) })
-    let incoming = 1, acks = 0, loaded = 0, fail = false, gate, release, queueVisible = true
+    let incoming = 1, acks = 0, loaded = 0, requested = 0, fail = false, gate, release, queueVisible = true
+    let currentRevision = rev
     const sockets = []
     await context.routeWebSocket('**/api/chat/ws*', ws => {
       sockets.push(ws)
@@ -50,12 +51,13 @@ try {
       else if (p === '/api/tasks/assignment-counts') data = { new: incoming, overdue: 1 }
       else if (p === `/api/tasks/${tid}/assignment-view`) {
         assert.ok(loaded > 0, 'ACK before detail load')
-        assert.equal(route.request().postDataJSON().assignment_revision, rev)
+        assert.equal(route.request().postDataJSON().assignment_revision, currentRevision)
         acks++; incoming = 0; data = { acknowledged: true }
       } else if (p === `/api/tasks/${tid}`) {
+        requested++
         if (gate) await gate
         if (fail) return route.fulfill({ status: 500, json: { detail: 'Тест · Карточка недоступна' } })
-        loaded++; data = task
+        loaded++; data = { ...task, assignment_revision: currentRevision }
       } else if (p === '/api/tasks') data = { tasks: queueVisible ? [task] : [], total: queueVisible ? 1 : 0 }
       else if (p === '/api/tasks/people') data = { people: [{ id: uid, name: 'Тест · Исполнитель', email: 'ui@example.test' }] }
       else if (p === '/api/tasks/types') data = { types: [] }
@@ -99,6 +101,20 @@ try {
     await expect(card).toBeVisible()
     await expect(card.locator('.animate-spin')).toBeVisible()
     assert.equal(acks, 0, 'Loading must not ACK')
+    // Закрытая до ответа карточка не означает просмотра назначения.
+    await page.keyboard.press('Escape')
+    await expect(card).toHaveCount(0)
+    release(); gate = null
+    await expect.poll(() => loaded).toBe(1)
+    assert.equal(acks, 0, 'Closed loading card must not ACK')
+    await expect(line()).toBeVisible()
+    // Старая версия из кеша не подтверждает новое назначение.
+    currentRevision = '55555555-5555-4555-8555-555555555555'
+    gate = new Promise(resolve => { release = resolve })
+    await line().click()
+    await expect(card).toBeVisible()
+    await expect.poll(() => requested).toBe(2)
+    assert.equal(acks, 0, 'Cached card must wait for the new revision')
     release(); gate = null
     await expect(card.getByText(description, { exact: true })).toBeVisible()
     await expect.poll(() => acks).toBe(1)
