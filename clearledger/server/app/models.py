@@ -1121,6 +1121,10 @@ class Counterparty(Base):
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # v2.5: универсальный снимок ВСЕХ реквизитов источника (L1 RAW) + промо-колонки.
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Изменённые человеком реквизиты: повторный импорт их не перезаписывает.
+    manual_overrides: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     full_name: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     okpo: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Полная карточка контрагента (ручной ввод для компаний без 1С + промо из raw)
@@ -1338,6 +1342,10 @@ class Contract(Base):
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # v2.5: универсальный снимок ВСЕХ реквизитов 1С (L1 RAW) + промо-колонки.
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Изменённые человеком реквизиты: повторный импорт их не перезаписывает.
+    manual_overrides: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     # ВидДоговора 1С: СПокупателем | СПоставщиком | СКомитентом | ... (см. SCHEMA_REFS_GIG §2)
     kind: Mapped[str | None] = mapped_column(String(40), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(10), nullable=True)

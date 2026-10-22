@@ -25,6 +25,7 @@ from app.models import (
 from app.services.onec.com_client import OneCComClient
 from app.services.onec.crypto import decrypt_password
 from app.services.onec.exceptions import OneCError
+from app.services.reference_overrides import apply_import_values
 from app.services.onec.odata_client import (
     ENTITY_CONTRACTS,
     ENTITY_COUNTERPARTIES,
@@ -1158,13 +1159,15 @@ class OneCSyncService:
                     ))
                     stats["created"] += 1
                 else:
-                    existing.name = name or existing.name
-                    existing.inn = inn or existing.inn
-                    existing.kpp = kpp or existing.kpp
-                    existing.full_name = full_name or existing.full_name
-                    existing.okpo = okpo or existing.okpo
-                    existing.head_ref = head_ref or existing.head_ref
-                    existing.type = cp_type or existing.type
+                    apply_import_values(existing, {
+                        "name": name or existing.name,
+                        "inn": inn or existing.inn,
+                        "kpp": kpp or existing.kpp,
+                        "full_name": full_name or existing.full_name,
+                        "okpo": okpo or existing.okpo,
+                        "head_ref": head_ref or existing.head_ref,
+                        "type": cp_type or existing.type,
+                    })
                     existing.raw = item
                     stats["updated"] += 1
             except Exception as exc:  # noqa: BLE001
@@ -1264,22 +1267,24 @@ class OneCSyncService:
                     ))
                     stats["created"] += 1
                 else:
-                    existing.number = number or existing.number
-                    existing.date = date or existing.date
-                    existing.counterparty_id = owner or existing.counterparty_id
-                    existing.organization_id = org or existing.organization_id
-                    existing.type = kind or existing.type
-                    existing.kind = kind or existing.kind
-                    existing.valid_until = valid_until
-                    existing.is_closed = is_closed
+                    imported = {
+                        "number": number or existing.number,
+                        "date": date or existing.date,
+                        "counterparty_id": owner or existing.counterparty_id,
+                        "organization_id": org or existing.organization_id,
+                        "type": kind or existing.type,
+                        "kind": kind or existing.kind,
+                        "valid_until": valid_until,
+                        "is_closed": is_closed,
+                        **req,
+                    }
                     if amount_limit is not None:
-                        existing.amount_limit = amount_limit
+                        imported["amount_limit"] = amount_limit
                     if incl_vat is not None:
-                        existing.amount_incl_vat = incl_vat
+                        imported["amount_incl_vat"] = incl_vat
                     if comment and not existing.comment:   # свой комментарий пространства не затираем
-                        existing.comment = comment
-                    for col, val in req.items():   # реквизиты 1С — источник 1С, если база их знает
-                        setattr(existing, col, val)
+                        imported["comment"] = comment
+                    apply_import_values(existing, imported)
                     existing.raw = item
                     # scope_type НЕ трогаем — наш слой охвата, не из 1С
                     stats["updated"] += 1

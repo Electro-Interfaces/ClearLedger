@@ -4019,6 +4019,8 @@ async def create_all() -> None:
             # тысячами (у НПК 17 398 из 18 045), а взаиморасчёты по оборотам нельзя
             # было открыть карточкой контрагента.
             "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS title VARCHAR(300)",
+            "ALTER TABLE counterparties ADD COLUMN IF NOT EXISTS manual_overrides JSONB NOT NULL DEFAULT '[]'::jsonb",
+            "ALTER TABLE contracts ADD COLUMN IF NOT EXISTS manual_overrides JSONB NOT NULL DEFAULT '[]'::jsonb",
             # Договор был единственным местом ядра, где контрагент и юрлицо хранились
             # СТРОКОЙ без внешнего ключа: целостность не проверялась, а каждый запрос
             # писал `::text`. Значения — валидные UUID (проверено на трёх компаниях),
