@@ -1,0 +1,257 @@
+Красный прогон ДО правки.
+Дерево: отдельный worktree на SHA 578b82c6 (база ветки, PR#21 R8).
+Продуктовый код Ядра — предправочный; файл проверок тот же, что зеленеет после.
+Команда: python -m pytest tests/test_voice_customer_summary_answers.py -q
+Дата: 2026-10-22T09:44:53+03:00
+
+FFF                                                                      [100%]
+=================================== FAILURES ===================================
+________ test_summary_answers_done_delivery_and_what_to_tell_the_client ________
+
+client = <httpx.AsyncClient object at 0x7f35bbe06ba0>
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7f35baf09d10>
+sso_key = <cryptography.hazmat.bindings._rust.openssl.rsa.RSAPublicKey object at 0x7f35badd37d0>
+
+    async def test_summary_answers_done_delivery_and_what_to_tell_the_client(client, db, sso_key):
+        """Три недостающих ответа есть, и каждое состояние доставки названо своим словом."""
+        own = await _company(db, "gig")
+        await _voice(db, own.id, True)
+        key = await _key(db, own.id, ["voice.identify"])
+        phone = f"+7900{uuid.uuid4().int % 10**7:07d}"
+        await _seed_caller(db, own, phone)
+        now = datetime.now(timezone.utc)
+        refs = {name: str(uuid.uuid4()) for name in
+                ("open", "pending", "applied", "failed", "bare")}
+    
+        # Работа заведена, решения ещё нет.
+        await _errand(db, own.id, refs["open"], "Выехать на объект")
+        # Решение есть, исход едет в процесс.
+        await _errand(db, own.id, refs["pending"], "Заменить коннектор",
+                      outcome="done", decided_at=now - timedelta(minutes=5), attempts=1)
+        # Исход доставлен и применён.
+        await _errand(db, own.id, refs["applied"], "Перезапустить станцию", status="done",
+                      outcome="done", decided_at=now - timedelta(hours=2),
+                      delivered_at=now - timedelta(hours=2), attempts=1)
+        # Доставка не удалась.
+        await _errand(db, own.id, refs["failed"], "Согласовать выезд подрядчика",
+                      outcome="done", decided_at=now - timedelta(hours=3),
+                      attempts=12, last_error="HTTPError: сосед не ответил")
+        # Пятая заявка без работ Ядра — подтверждённое отсутствие.
+    
+        with _Support() as support:
+            support.state["body"] = {"availability": "available", "tickets": [
+                _ticket(refs["open"], "TS-1"), _ticket(refs["pending"], "TS-2"),
+                _ticket(refs["applied"], "TS-3"), _ticket(refs["failed"], "TS-4"),
+                _ticket(refs["bare"], "TS-5"),
+            ]}
+            async with support_map(db, own.id) as (app, support_id):
+                app.config = {**(app.config or {}), "internalUrl": support.url}
+                await db.commit()
+                r = await client.post("/api/eco/ezs/customer-summary",
+                                      json={"phone": phone, "limit": 10},
+                                      headers={"X-Cloud-API-Key": key})
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["ticketAvailability"] == "available"
+        by_number = {t["number"]: t for t in data["tickets"]}
+        assert set(by_number) == {"TS-1", "TS-2", "TS-3", "TS-4", "TS-5"}
+    
+        # Каждая заявка отвечает на все три вопроса, и каждый ответ назван.
+        for number, ticket in by_number.items():
+            answers = ticket.get("answers")
+>           assert answers, f"{number}: сводка не отвечает на вопросы разговора"
+E           AssertionError: TS-1: сводка не отвечает на вопросы разговора
+E           assert None
+
+tests/test_voice_customer_summary_answers.py:156: AssertionError
+---------------------------- Captured stderr setup -----------------------------
+2026-10-22 06:45:17,143 [INFO] clearledger.seed: Создана компания: ООО ГИГ (ГазИнвестГрупп) (gig)
+2026-10-22 06:45:17,144 [INFO] clearledger.seed: Создана компания: РусГидро (rushydro)
+2026-10-22 06:45:17,157 [WARNING] passlib.handlers.bcrypt: (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.13/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+              ^^^^^^^^^^^^^^^^^
+AttributeError: module 'bcrypt' has no attribute '__about__'
+2026-10-22 06:45:17,505 [INFO] clearledger.seed: Создан сид-суперадмин: admin@clearledger.ru
+2026-10-22 06:45:17,515 [INFO] clearledger.seed: Создан шаблон проводок: ОРП/ОтчетККМОПродажах
+2026-10-22 06:45:17,515 [INFO] clearledger.seed: Создан шаблон проводок: ПТУ/Покупка
+2026-10-22 06:45:17,515 [INFO] clearledger.seed: Создан шаблон проводок: ПТУ/—
+2026-10-22 06:45:17,515 [INFO] clearledger.seed: Создан шаблон проводок: ОПЗС/ОтчетПроизводстваЗаСмену
+2026-10-22 06:45:17,515 [INFO] clearledger.seed: Создан шаблон проводок: КорректировкаПоступления/СогласованноеИзменение
+2026-10-22 06:45:17,527 [INFO] clearledger.seed: ГИГ: канал оплаты retail
+2026-10-22 06:45:17,528 [INFO] clearledger.seed: ГИГ: канал оплаты retail_cash
+2026-10-22 06:45:17,528 [INFO] clearledger.seed: ГИГ: канал оплаты retail_card
+2026-10-22 06:45:17,528 [INFO] clearledger.seed: ГИГ: канал оплаты cards
+2026-10-22 06:45:17,528 [INFO] clearledger.seed: ГИГ: канал оплаты online
+2026-10-22 06:45:17,528 [INFO] clearledger.seed: ГИГ: канал оплаты voucher
+2026-10-22 06:45:17,528 [INFO] clearledger.seed: ГИГ: канал оплаты coupon
+2026-10-22 06:45:17,528 [INFO] clearledger.seed: ГИГ: канал оплаты ledger
+2026-10-22 06:45:17,528 [INFO] clearledger.seed: ГИГ: канал оплаты writeoff_fuel
+2026-10-22 06:45:17,558 [INFO] clearledger.seed: ГИГ: источник «MSTO Онлайн-заказы»
+2026-10-22 06:45:17,596 [INFO] clearledger.seed: ГИГ: источник «STS Транзакции» создан (draft)
+2026-10-22 06:45:17,629 [INFO] clearledger.seed: Номенклатура дел заведена: ООО ГИГ (ГазИнвестГрупп) (3 дела)
+2026-10-22 06:45:17,633 [INFO] clearledger.seed: Виды документов заведены: ООО ГИГ (ГазИнвестГрупп) (4 вида)
+2026-10-22 06:45:17,640 [INFO] clearledger.seed: Номенклатура дел заведена: РусГидро (3 дела)
+2026-10-22 06:45:17,641 [INFO] clearledger.seed: Виды документов заведены: РусГидро (4 вида)
+2026-10-22 06:45:17,665 [INFO] clearledger.seed: Seed завершён
+------------------------------ Captured log setup ------------------------------
+INFO     clearledger.seed:seed.py:110 Создана компания: ООО ГИГ (ГазИнвестГрупп) (gig)
+INFO     clearledger.seed:seed.py:110 Создана компания: РусГидро (rushydro)
+WARNING  passlib.handlers.bcrypt:bcrypt.py:622 (trapped) error reading bcrypt version
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.13/site-packages/passlib/handlers/bcrypt.py", line 620, in _load_backend_mixin
+    version = _bcrypt.__about__.__version__
+              ^^^^^^^^^^^^^^^^^
+AttributeError: module 'bcrypt' has no attribute '__about__'
+INFO     clearledger.seed:seed.py:561 Создан сид-суперадмин: admin@clearledger.ru
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ОРП/ОтчетККМОПродажах
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ПТУ/Покупка
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ПТУ/—
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: ОПЗС/ОтчетПроизводстваЗаСмену
+INFO     clearledger.seed:seed.py:691 Создан шаблон проводок: КорректировкаПоступления/СогласованноеИзменение
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail_cash
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты retail_card
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты cards
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты online
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты voucher
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты coupon
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты ledger
+INFO     clearledger.seed:seed.py:488 ГИГ: канал оплаты writeoff_fuel
+INFO     clearledger.seed:seed.py:341 ГИГ: источник «MSTO Онлайн-заказы»
+INFO     clearledger.seed:seed.py:408 ГИГ: источник «STS Транзакции» создан (draft)
+INFO     clearledger.seed:seed.py:249 Номенклатура дел заведена: ООО ГИГ (ГазИнвестГрупп) (3 дела)
+INFO     clearledger.seed:seed.py:259 Виды документов заведены: ООО ГИГ (ГазИнвестГрупп) (4 вида)
+INFO     clearledger.seed:seed.py:249 Номенклатура дел заведена: РусГидро (3 дела)
+INFO     clearledger.seed:seed.py:259 Виды документов заведены: РусГидро (4 вида)
+INFO     clearledger.seed:seed.py:146 Seed завершён
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 06:45:18,515 [INFO] httpx: HTTP Request: POST http://127.0.0.1:39191/api/v1/eco/voice/context "HTTP/1.0 200 OK"
+2026-10-22 06:45:18,522 [INFO] httpx: HTTP Request: POST http://test/api/eco/ezs/customer-summary "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:39191/api/v1/eco/voice/context "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://test/api/eco/ezs/customer-summary "HTTP/1.1 200 OK"
+_____ test_summary_tells_silence_from_error_and_keeps_legacy_availability ______
+
+client = <httpx.AsyncClient object at 0x7f35bae8e350>
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7f35bc081ba0>
+sso_key = <cryptography.hazmat.bindings._rust.openssl.rsa.RSAPublicKey object at 0x7f35baec26d0>
+
+    async def test_summary_tells_silence_from_error_and_keeps_legacy_availability(client, db, sso_key):
+        """Молчание, ошибка и подтверждённое отсутствие — разные состояния источника.
+    
+        Второе утверждение проверки — положительный контроль совместимости: прежнее
+        поле `ticketAvailability` в каждом случае остаётся тем же, что и до правки.
+        """
+        own = await _company(db, "gig")
+        await _voice(db, own.id, True)
+        key = await _key(db, own.id, ["voice.identify"])
+        phone = f"+7900{uuid.uuid4().int % 10**7:07d}"
+        await _seed_caller(db, own, phone)
+        ref = str(uuid.uuid4())
+    
+        async def summary():
+            r = await client.post("/api/eco/ezs/customer-summary",
+                                  json={"phone": phone, "limit": 10},
+                                  headers={"X-Cloud-API-Key": key})
+            assert r.status_code == 200, r.text
+            return r.json()
+    
+        seen = []
+        with _Support() as support:
+            async with support_map(db, own.id) as (app, _support_id):
+                app.config = {**(app.config or {}), "internalUrl": support.url}
+                await db.commit()
+    
+                cases = [
+                    ("живой источник с заявками", 200,
+                     {"availability": "available", "tickets": [_ticket(ref, "TS-9")]},
+                     0.0, "available", None, "available"),
+                    ("живой источник без открытых заявок", 200,
+                     {"availability": "available", "tickets": []},
+                     0.0, "empty", "no_open_tickets", "available"),
+                    ("часть строк не прошла проверку", 200,
+                     {"availability": "available",
+                      "tickets": [_ticket(ref, "TS-9"), {"bad": "data"}]},
+                     0.0, "partial", "source_rows_dropped", "unavailable"),
+                    ("источник вернул код ошибки", 503, {}, 0.0,
+                     "unavailable", "source_rejected", "unavailable"),
+                    ("источник ответил не тем", 200, [], 0.0,
+                     "unavailable", "source_unexpected_answer", "unavailable"),
+                    ("источник не ответил вовремя", 200,
+                     {"availability": "available", "tickets": []}, 1.0,
+                     "unavailable", "source_timeout", "unavailable"),
+                ]
+                for name, status, body, delay, state, reason, availability in cases:
+                    support.state.update(status=status, body=body, delay=delay)
+                    data = await summary()
+                    source = data.get("ticketSource")
+>                   assert source, f"{name}: состояние источника в сводке не названо"
+E                   AssertionError: живой источник с заявками: состояние источника в сводке не названо
+E                   assert None
+
+tests/test_voice_customer_summary_answers.py:252: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 06:45:19,687 [INFO] httpx: HTTP Request: POST http://127.0.0.1:45541/api/v1/eco/voice/context "HTTP/1.0 200 OK"
+2026-10-22 06:45:19,691 [INFO] httpx: HTTP Request: POST http://test/api/eco/ezs/customer-summary "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:45541/api/v1/eco/voice/context "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://test/api/eco/ezs/customer-summary "HTTP/1.1 200 OK"
+_______________ test_legacy_shape_and_one_assembly_for_core_work _______________
+
+client = <httpx.AsyncClient object at 0x7f35bb903ce0>
+db = <sqlalchemy.ext.asyncio.session.AsyncSession object at 0x7f35bbcb3680>
+sso_key = <cryptography.hazmat.bindings._rust.openssl.rsa.RSAPublicKey object at 0x7f35bad524d0>
+
+    async def test_legacy_shape_and_one_assembly_for_core_work(client, db, sso_key):
+        """Положительные контроли: узел работает на прежних полях, Поддержка — на своей ручке.
+    
+        Правка не должна запретить ничего из того, что шло и раньше: узел читает ту
+        же сводку теми же полями, Поддержка теми же правами читает работу процесса,
+        а служебный токен Ядра по-прежнему называет арендатора (исправление R8).
+        """
+        own = await _company(db, "gig")
+        await _voice(db, own.id, True)
+        key = await _key(db, own.id, ["voice.identify"])
+        phone = f"+7900{uuid.uuid4().int % 10**7:07d}"
+        await _seed_caller(db, own, phone)
+        ref = str(uuid.uuid4())
+        task, request = await _errand(db, own.id, ref, "Проверить питание",
+                                      outcome="done", delivered_at=datetime.now(timezone.utc))
+    
+        with _Support() as support:
+            support.state["body"] = {"availability": "available",
+                                     "tickets": [_ticket(ref, "TS-7", priority="high",
+                                                         category="power",
+                                                         slaDeadline="2026-10-22T10:00:00+00:00")]}
+            async with support_map(db, own.id) as (app, support_id):
+                app.config = {**(app.config or {}), "internalUrl": support.url}
+                await db.commit()
+                r = await client.post("/api/eco/ezs/customer-summary",
+                                      json={"phone": phone, "limit": 10},
+                                      headers={"X-Cloud-API-Key": key})
+                assert r.status_code == 200, r.text
+                ticket = r.json()["tickets"][0]
+                # Прежние поля на месте и не переименованы; новое — только `answers`.
+                assert LEGACY_TICKET_FIELDS <= set(ticket)
+>               assert set(ticket) - LEGACY_TICKET_FIELDS == {"answers"}
+E               AssertionError: assert set() == {'answers'}
+E                 
+E                 Extra items in the right set:
+E                 'answers'
+E                 Use -v to get more diff
+
+tests/test_voice_customer_summary_answers.py:320: AssertionError
+----------------------------- Captured stderr call -----------------------------
+2026-10-22 06:45:20,718 [INFO] httpx: HTTP Request: POST http://127.0.0.1:41713/api/v1/eco/voice/context "HTTP/1.0 200 OK"
+2026-10-22 06:45:20,731 [INFO] httpx: HTTP Request: POST http://test/api/eco/ezs/customer-summary "HTTP/1.1 200 OK"
+------------------------------ Captured log call -------------------------------
+INFO     httpx:_client.py:1740 HTTP Request: POST http://127.0.0.1:41713/api/v1/eco/voice/context "HTTP/1.0 200 OK"
+INFO     httpx:_client.py:1740 HTTP Request: POST http://test/api/eco/ezs/customer-summary "HTTP/1.1 200 OK"
+=========================== short test summary info ============================
+FAILED tests/test_voice_customer_summary_answers.py::test_summary_answers_done_delivery_and_what_to_tell_the_client
+FAILED tests/test_voice_customer_summary_answers.py::test_summary_tells_silence_from_error_and_keeps_legacy_availability
+FAILED tests/test_voice_customer_summary_answers.py::test_legacy_shape_and_one_assembly_for_core_work
+3 failed in 16.52s
+RC=1

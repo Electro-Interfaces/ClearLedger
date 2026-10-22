@@ -7648,6 +7648,9 @@ class ApprovalRequest(Base):
               postgresql_where=text("outcome IS NULL")),
         Index("ix_eco_approval_requests_undelivered", "decided_at",
               postgresql_where=text("outcome IS NOT NULL AND delivered_at IS NULL")),
+        # Отбор по процессу: витрина работы заявки и сводка клиента для оператора
+        # КЦ спрашивают именно эту пару (`services/process_work.py`).
+        Index("ix_eco_approval_requests_process", "company_id", "process_id"),
     )
 
 

@@ -109,9 +109,16 @@ async def scope(header, user, db):
 
 
 async def support_request(db, cid, *, connector_id=None, check=False):
-    target = await _support_target(db, cid, "voice.connections")
-    if not target:
-        raise HTTPException(503, "Поддержка не подключена к компании или служебный обмен не настроен")
+    target, miss = await _support_target(db, cid, "voice.connections")
+    if target is None:
+        # Причина названа: администратор видит этот текст на экране «Подключения»,
+        # и «не подключена ИЛИ не настроена» не говорит ему, что чинить.
+        raise HTTPException(503, {
+            "support_not_enabled": "«Поддержка» не подключена этой компании",
+            "support_not_linked": "Для компании не задано соответствие компании "
+                                  "в «Поддержке» (Центр управления → Приложения)",
+            "sso_not_configured": "Служебный обмен не настроен: нет ключа подписи",
+        }.get(miss, "Поддержка недоступна"))
     app, token = target
     method = "POST" if check else "GET"
     suffix = "/check" if check else ""

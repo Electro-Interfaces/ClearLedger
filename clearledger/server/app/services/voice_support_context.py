@@ -177,26 +177,75 @@ async def charging_context(db, company_id, *, phones, ref, limit, detail, strict
     return out
 
 
+# ─── Молчание источника, его ошибка и подтверждённое отсутствие — три разных ───
+#
+# Прежде любая неудача чтения Поддержки сворачивалась в одно слово
+# `unavailable`: и выключенное у компании приложение, и незаполненная карта
+# компаний, и таймаут, и ответ не того вида. Оператор получал картину, в которой
+# «источник не ответил» неотличимо от «данных нет», — и обещал клиенту по
+# пустому месту (аудит 21.10.2026, C-09 и A-16 со стороны Ядра).
+#
+# Признак разнесён на два: `state` отвечает на вопрос «можно ли верить пустоте»,
+# `reason` — «почему её не удалось подтвердить». Прежнее поле
+# `ticketAvailability` и оба его значения сохранены байт-в-байт: выкатка Ядра
+# идёт раньше потребителей, и узел прежней сборки не должен заметить разницы.
+SOURCE_TICKETS = "support.tickets"
+
+
+def _failure_reason(error) -> str:
+    """Почему чтения не было. Порядок важен: ответ с кодом ошибки — тоже HTTPError."""
+    if isinstance(error, httpx.HTTPStatusError):
+        return "source_rejected"
+    if isinstance(error, httpx.TimeoutException):
+        return "source_timeout"
+    if isinstance(error, httpx.HTTPError):
+        return "source_unreachable"
+    return "source_unexpected_answer"
+
+
 async def _support_target(db, company_id, scope):
+    """`((приложение, токен), None)` либо `(None, причина)` — почему спросить нечем."""
     apps = await company_apps(db, company_id)
     if not any(a["code"] == "support" and a["enabled"] for a in apps):
-        return None
+        # Приложения у компании нет вовсе: заявок не бывает, и это
+        # подтверждённое отсутствие, а не молчание источника.
+        return None, "support_not_enabled"
     row = (await db.execute(select(App, AppCompanyLink).join(
         AppCompanyLink, AppCompanyLink.app_id == App.id,
     ).where(App.code == "support", AppCompanyLink.company_id == company_id))).first()
     if not row:
-        return None
+        return None, "support_not_linked"
     app, link = row
     token = sso.sign_service_token(aud="support", scope=scope, app_company_id=link.external_company_id)
     if not token:
-        return None
-    return app, token
+        return None, "sso_not_configured"
+    return (app, token), None
 
 
 async def support_tickets(db, company_id, *, phone, core_party_ref, object_refs, limit):
-    target = await _support_target(db, company_id, "voice.context")
-    if not target:
-        return [], "unavailable"
+    """Открытые заявки звонящего у Поддержки и три ответа Ядра по каждой.
+
+    Возвращает готовый блок сводки: `tickets`, прежнее `availability` и
+    `source` — состояние внутреннего источника. Ответы Ядра кладутся здесь, а
+    не в маршруте: через это место проходит вся выдача заявок клиенту, и
+    собирать их у каждого потребителя значило бы развести копии.
+    """
+    from app.services import voice_operator_answers
+
+    observed_at = datetime.now(timezone.utc).isoformat()
+
+    def block(tickets, *, state, reason=None, answered=False, total=0, shown=0, status=None):
+        source = {"source": SOURCE_TICKETS, "state": state, "reason": reason,
+                  "asOf": observed_at, "total": total, "shown": shown}
+        if status is not None:
+            source["status"] = status
+        return {"tickets": tickets, "source": source,
+                "availability": "available" if answered and shown == total else "unavailable"}
+
+    target, miss = await _support_target(db, company_id, "voice.context")
+    if target is None:
+        return block([], state="empty" if miss == "support_not_enabled" else "unavailable",
+                     reason=miss)
     app, token = target
     try:
         async with httpx.AsyncClient(timeout=0.65, follow_redirects=False) as client:
@@ -206,20 +255,30 @@ async def support_tickets(db, company_id, *, phone, core_party_ref, object_refs,
                                           "objectRefs": object_refs, "limit": limit})
         res.raise_for_status()
         body = res.json()
-        if not isinstance(body, dict) or body.get("availability") != "available" or not isinstance(body.get("tickets"), list):
-            return [], "unavailable"
-        fields = ("ref", "number", "title", "status", "priority", "category", "objectRef", "slaDeadline")
-        tickets = [{k: t.get(k) for k in fields} for t in body["tickets"][:limit]
-                   if isinstance(t, dict) and all(isinstance(t.get(k), str) for k in ("ref", "number", "title", "status"))]
-        return tickets, "available" if len(tickets) == len(body["tickets"][:limit]) else "unavailable"
-    except (httpx.HTTPError, ValueError, TypeError):
-        return [], "unavailable"
+    except (httpx.HTTPError, ValueError, TypeError) as error:
+        return block([], state="unavailable", reason=_failure_reason(error),
+                     status=getattr(getattr(error, "response", None), "status_code", None))
+    if not isinstance(body, dict) or body.get("availability") != "available" or not isinstance(body.get("tickets"), list):
+        return block([], state="unavailable", reason="source_unexpected_answer")
+    fields = ("ref", "number", "title", "status", "priority", "category", "objectRef", "slaDeadline")
+    offered = body["tickets"][:limit]
+    tickets = [{k: t.get(k) for k in fields} for t in offered
+               if isinstance(t, dict) and all(isinstance(t.get(k), str) for k in ("ref", "number", "title", "status"))]
+    dropped = len(offered) - len(tickets)
+    await voice_operator_answers.attach(db, company_id, tickets)
+    return block(tickets, answered=True, total=len(offered), shown=len(tickets),
+                 state="partial" if dropped else "available" if tickets else "empty",
+                 reason="source_rows_dropped" if dropped else None if tickets else "no_open_tickets")
 
 
 async def support_knowledge(db, company_id, *, topic, limit):
+    # Форма ответа здесь не менялась: база знаний отвечает на другой вопрос
+    # оператора, в границу кластера R11 не входила, и её витрина сверяется с
+    # ответом посимвольно. Тот же корень («отказ сворачивается в одно слово»)
+    # у неё остаётся — он назван в `docs/solution-audit-20261021/fixes/R11`.
     unavailable = {"availability": "unavailable", "items": []}
-    target = await _support_target(db, company_id, "voice.knowledge")
-    if not target:
+    target, _miss = await _support_target(db, company_id, "voice.knowledge")
+    if target is None:
         return unavailable
     app, token = target
     try:

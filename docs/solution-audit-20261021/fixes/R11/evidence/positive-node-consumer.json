@@ -1,0 +1,44 @@
+{
+ "источник": "настоящий адаптер узла, contact-hub node/src/adapters/core.ts (только чтение)",
+ "пунктов": 9,
+ "зелёных": 9,
+ "красных": 0,
+ "результаты": [
+  {
+   "пункт": "P-01 узел читает сводку с ответами Ядра",
+   "итог": "зелено"
+  },
+  {
+   "пункт": "P-02 новое поле не протекает в карточку",
+   "итог": "зелено"
+  },
+  {
+   "пункт": "P-03 прежний ответ Ядра читается без изменений",
+   "итог": "зелено"
+  },
+  {
+   "пункт": "P-04 summary-source-available-ok.json",
+   "итог": "зелено"
+  },
+  {
+   "пункт": "P-04 summary-source-empty-no_open_tickets.json",
+   "итог": "зелено"
+  },
+  {
+   "пункт": "P-04 summary-source-partial-source_rows_dropped.json",
+   "итог": "зелено"
+  },
+  {
+   "пункт": "P-04 summary-source-unavailable-source_rejected.json",
+   "итог": "зелено"
+  },
+  {
+   "пункт": "P-04 summary-source-unavailable-source_timeout.json",
+   "итог": "зелено"
+  },
+  {
+   "пункт": "P-04 summary-source-unavailable-source_unexpected_answer.json",
+   "итог": "зелено"
+  }
+ ]
+}

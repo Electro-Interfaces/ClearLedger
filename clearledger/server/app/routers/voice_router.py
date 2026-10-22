@@ -24,6 +24,11 @@
      поддержки платформы (`vendor`) клиентами заказчика не бывают и пропускаются.
 Имени физлица у клиента ЭЗС нет (решение МАГа 08.08.2026: из витрины берётся
 только телефон), поэтому `name` у водителя пустое — узел покажет «Водитель».
+
+Сводка клиента (`/ezs/customer-summary`) с 22.10.2026 отвечает ещё на три
+вопроса разговора — что сделано, применено ли это и что можно сказать клиенту —
+и называет состояние источника заявок отдельно от самих заявок. Описание
+контракта и правило совместимости — `docs/voice-customer-summary-20261022.md`.
 """
 from __future__ import annotations
 
@@ -296,11 +301,16 @@ async def customer_summary(
     from app.services.voice_support_context import support_tickets
 
     summary = await _customer_summary_data(body, company, db)
-    tickets, availability = await support_tickets(
+    # Заявки, три ответа Ядра по каждой и состояние источника собираются одним
+    # местом (`support_tickets`): сводка клиента — одна, и собирать её по частям
+    # в каждом маршруте значило бы развести копии (аудит 21.10.2026, C-09).
+    block = await support_tickets(
         db, company.id, phone=body.phone, core_party_ref=body.ref,
         object_refs=[o["ref"] for o in summary["objects"]], limit=body.limit,
     )
-    return {**summary, "tickets": tickets, "ticketAvailability": availability}
+    return {**summary, "tickets": block["tickets"],
+            "ticketAvailability": block["availability"],
+            "ticketSource": block["source"]}
 
 
 @router.post("/support/knowledge")

@@ -1,0 +1,12 @@
+{
+ "tickets": [],
+ "ticketAvailability": "unavailable",
+ "ticketSource": {
+  "source": "support.tickets",
+  "state": "unavailable",
+  "reason": "source_unexpected_answer",
+  "asOf": "2026-10-22T07:02:28.456199+00:00",
+  "total": 0,
+  "shown": 0
+ }
+}
