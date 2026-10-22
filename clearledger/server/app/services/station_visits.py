@@ -29,13 +29,14 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChargeSession, ServiceLocation
+from app.services.ops_monitor_context import monitor_context
 
 ОКНО_ДНЕЙ = 30
 ПРЕДЕЛ_ВИЗИТОВ = 200
@@ -81,6 +82,7 @@ async def station_visits(
     days: int = ОКНО_ДНЕЙ,
     only_failed: bool = False,
     limit: int = ПРЕДЕЛ_ВИЗИТОВ,
+    as_of: date | None = None,
 ) -> dict[str, Any]:
     """Приезды на станцию за окно, каждый — с попытками внутри."""
     loc = (await db.execute(select(ServiceLocation).where(
@@ -92,14 +94,15 @@ async def station_visits(
     граница = (await db.execute(
         select(func.max(ChargeSession.started_at))
         .where(ChargeSession.company_id == company_id))).scalar()
-    сейчас = граница or datetime.now(timezone.utc).replace(tzinfo=None)
+    сейчас, контекст = monitor_context(граница, as_of)
     с_даты = сейчас - timedelta(days=days)
 
     сессии = (await db.execute(
         select(ChargeSession)
         .where(ChargeSession.company_id == company_id,
                ChargeSession.location_id == location_id,
-               ChargeSession.started_at >= с_даты)
+               ChargeSession.started_at >= с_даты,
+               ChargeSession.started_at <= сейчас)
         .order_by(ChargeSession.started_at))).scalars().all()
 
     # Группируем по ключу визита. У старых строк его может не быть (ключи
@@ -196,7 +199,7 @@ async def station_visits(
     затяжных = sum(1 for s in пустые if float(s.duration_min or 0) >= 5)
 
     return {
-        "asOf": сейчас.isoformat(),
+        **контекст,
         "days": days,
         "station": {
             "locationId": str(loc.id),

@@ -294,6 +294,7 @@ async def get_station_visits(
     days: int = Query(30, ge=1, le=365),
     only_failed: bool = Query(False, description="только приезды, кончившиеся ничем"),
     limit: int = Query(200, ge=1, le=1000),
+    as_of: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -305,7 +306,7 @@ async def get_station_visits(
     cid = await assert_company_member(company_id, current_user, db)
     try:
         return await station_visits(db, cid, location_id, days=days,
-                                    only_failed=only_failed, limit=limit)
+                                    only_failed=only_failed, limit=limit, as_of=as_of)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -479,13 +480,14 @@ async def get_station_history(
     location_id: str,
     company_id: str = Query(...),
     days: int = Query(90, ge=7, le=365),
+    as_of: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """История станции: работа за окно, перерывы и смены состояния."""
     cid = await assert_company_member(company_id, current_user, db)
     try:
-        return await station_history(db, cid, location_id, days=days)
+        return await station_history(db, cid, location_id, days=days, as_of=as_of)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
