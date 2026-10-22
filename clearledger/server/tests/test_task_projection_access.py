@@ -312,6 +312,35 @@ async def test_code_refs_aliases_preserve_acl_and_empty_result(actors, db, visib
 
 @pytest.mark.parametrize("visibility,role,allowed", [
     ("private", "stranger", False), ("private", "watcher", True),
+    ("private", "admin", True), ("personal", "stranger", False),
+    ("personal", "admin", False), ("personal", "superadmin", False),
+    ("personal", "author", True), ("company", "stranger", True),
+])
+async def test_code_creation_cannot_probe_or_modify_hidden_task(actors, db, visibility, role, allowed):
+    from app.models import TaskEvent
+
+    task = await make(db, actors, visibility)
+    for ref in (str(task.id), str(task.number), "SYNTH-1", "synth-1"):
+        before_refs = await db.scalar(select(func.count()).select_from(TaskCodeRef).where(
+            TaskCodeRef.task_id == task.id))
+        before_events = await db.scalar(select(func.count()).select_from(TaskEvent).where(
+            TaskEvent.task_id == task.id))
+        url = f"https://example.test/synthetic/{uuid.uuid4()}"
+        response = await actors[2][role].post(f"/api/tasks/{ref}/code", json={
+            "company_id": str(task.company_id), "url": url})
+        assert response.status_code == (201 if allowed else 404), (ref, response.text)
+        assert await db.scalar(select(func.count()).select_from(TaskCodeRef).where(
+            TaskCodeRef.task_id == task.id)) == before_refs + int(allowed)
+        assert await db.scalar(select(func.count()).select_from(TaskEvent).where(
+            TaskEvent.task_id == task.id)) == before_events + int(allowed)
+        if allowed:
+            assert response.json()["url"] == url
+        else:
+            assert response.json() == {"detail": "Задача не найдена"}
+
+
+@pytest.mark.parametrize("visibility,role,allowed", [
+    ("private", "stranger", False), ("private", "watcher", True),
     ("private", "participant", True), ("private", "admin", True),
     ("personal", "stranger", False), ("personal", "admin", False),
     ("personal", "superadmin", False), ("personal", "author", True),

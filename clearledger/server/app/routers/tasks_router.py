@@ -3414,6 +3414,7 @@ async def add_code_ref(
     """Привязать к задаче ветку, коммит или запрос на слияние."""
     cid = await _assert_work(payload.company_id, current_user, db)
     task = await _task_or_404(db, cid, task_id)
+    await _assert_view_task(db, cid, current_user, task)
     url = payload.url.strip()
     if not url.lower().startswith(("http://", "https://")):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
