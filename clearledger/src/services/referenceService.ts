@@ -470,6 +470,10 @@ export interface ContractUsage { app: string; label: string; count: number }
 export interface SpaceDocument {
   id: string; docType: 'space_file' | 'contract_card'; title: string; catalog: string; date: string
   contractId?: string | null; docId?: string; fileId?: string | null; fileName?: string | null; size?: number | null; status?: string | null
+  contractIds?: string[]
+  siteId?: string
+  projectId?: string | null
+  siteDocId?: string
 }
 
 /** Дерево «Документов» пространства: договоры с их бумагами, документы проектов, «Трек». */

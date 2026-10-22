@@ -46,6 +46,18 @@ export function KeepAliveOutlet() {
 
   const pinnedKeys = tabs.map((tab) => tab.key)
   const keepKey = pinnedKeys.join('|')
+  const explorer = /(?:^|\/)files\/?$/.test(pathname)
+  const [slot, setSlot] = useState(() => ({ path: pathname, url: activeKey, key: activeKey }))
+  let liveKey = slot.key
+  if (slot.url !== activeKey || slot.path !== pathname
+      || (pinnedKeys.includes(activeKey) && slot.key !== activeKey)) {
+    // Query проводника обновляет живой экран, сохраняя фокус. Если он вышел
+    // из закреплённого вида, временно используем тот же экземпляр; его снимок
+    // с исходным URL снова станет скрытым при уходе на другой экран.
+    liveKey = explorer && slot.path === pathname && !pinnedKeys.includes(activeKey)
+      ? slot.key : activeKey
+    setSlot({ path: pathname, url: activeKey, key: liveKey })
+  }
 
   // Снимок делаем один раз на активацию полного URL.
   useEffect(() => {
@@ -79,18 +91,21 @@ export function KeepAliveOutlet() {
 
   // Рендерим: закреплённые (смонтированные) + текущую; активная — живьём.
   const keepSet = new Set(pinnedKeys)
-  const keys = [...mounted.keys()].filter((k) => keepSet.has(k))
+  const activeRenderKey = explorer ? liveKey : activeKey
+  const keys = [...mounted.keys()].filter((k) => keepSet.has(k)
+    && (k !== activeRenderKey || k === activeKey))
   if (!keys.includes(activeKey)) keys.push(activeKey)
 
   return (
     <div className="relative flex-1 min-h-0">
       {keys.map((k) => {
         const active = k === activeKey
+        const renderKey = active ? activeRenderKey : k
         const entry: Entry = active
           ? { outlet, routeCtx, locationCtx, workspace: resolved.workspace }
           : mounted.get(k)!
         return (
-          <div key={k} className={cn('absolute inset-0', active ? 'block' : 'hidden')} aria-hidden={!active}>
+          <div key={renderKey} className={cn('absolute inset-0', active ? 'block' : 'hidden')} aria-hidden={!active}>
             <div className={entry.workspace
               ? 'h-full min-h-0 overflow-hidden'
               : 'h-full min-h-0 overflow-y-auto px-4 md:px-6 pt-4 pb-12'}>

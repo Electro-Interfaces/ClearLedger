@@ -1040,9 +1040,9 @@ function isoDate(v?: string | null): string {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : (v ?? '')
 }
 
-function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, children }: {
+function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, children, routeCreate = false }: {
   /** Контрагент задан (карточка контрагента) — или выбирается в форме (раздел «Договоры»). */
-  counterpartyId?: string; counterparties?: Counterparty[]; edit?: Contract; children: React.ReactNode
+  counterpartyId?: string; counterparties?: Counterparty[]; edit?: Contract; children: React.ReactNode; routeCreate?: boolean
 }) {
   const { companyId } = useCompany()
   const qc = useQueryClient()
@@ -1061,7 +1061,17 @@ function ContractFormDialog({ counterpartyId: fixedCp, counterparties, edit, chi
   const progress = useRef<CreationProgress>({ completed: [] })
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
-  const [open, setOpen] = useState(false)
+  const [params, setParams] = useSearchParams()
+  const [localOpen, setLocalOpen] = useState(false)
+  const open = routeCreate ? params.get('new') === '1' : localOpen
+  const setOpen = (value: boolean) => {
+    if (!routeCreate) { setLocalOpen(value); return }
+    setParams((previous) => {
+      const next = new URLSearchParams(previous)
+      if (value) next.set('new', '1'); else next.delete('new')
+      return next
+    }, { replace: true })
+  }
   const initialForm = () => ({
     number: edit?.number ?? '', date: isoDate(edit?.date), kind: edit?.kind ?? 'СПокупателем',
     type: edit?.type ?? '', organizationId: edit?.organizationId ?? '',
@@ -1528,7 +1538,7 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
           <label className="flex items-center gap-1.5 text-xs whitespace-nowrap cursor-pointer">
             <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="size-3.5 accent-primary" />
             по контрагентам</label>
-          <ContractFormDialog counterparties={counterparties}>
+          <ContractFormDialog counterparties={counterparties} routeCreate>
             <Button size="sm" className="shrink-0"><Plus className="size-4 mr-1" /> Договор</Button>
           </ContractFormDialog>
         </div>

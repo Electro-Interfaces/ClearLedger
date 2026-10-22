@@ -9,8 +9,8 @@
 
 import { useMemo, useState } from 'react'
 import {
-  Plus, Scissors, Copy, ClipboardPaste, PencilLine, Share2, Trash2,
-  ArrowUpDown, LayoutList, MoreHorizontal, PanelRight,
+  Plus, ExternalLink,
+  ArrowUpDown, LayoutList, PanelRight,
   ArrowLeft, ArrowRight, ArrowUp, RotateCw, Search, ChevronRight, ChevronDown, ChevronUp,
   Folder, FolderOpen, FileText, Fuel, FileSpreadsheet, File as FileIcon, HardDrive,
   Home, Check,
@@ -26,7 +26,14 @@ import type { DocRow } from '@/services/booksService'
 import { useCompany } from '@/contexts/CompanyContext'
 import { BookDocDialog } from './BookDocDialog'
 import { FlatDocsView } from './FlatDocsView'
+import { useNavigate } from 'react-router-dom'
+import { useTouchInput } from '@/hooks/use-mobile'
+import type { ExplorerAction } from '@/lib/documentExplorerActions'
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+
+const EMPTY_NODES: FsNode[] = []
 
 const money = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 2 })
 
@@ -95,7 +102,8 @@ function NavTree({
         const hasChildren = (fsTree.get(node.path) ?? []).some((n) => n.type === 'folder')
         return (
           <div
-            key={node.path}
+            key={node.path} role="button" tabIndex={0}
+            onKeyDown={(event) => { if (event.key === 'Enter') onNavigate(node.path) }}
             onClick={() => onNavigate(node.path)}
             className={cn(
               'group flex items-center gap-1 h-7 pr-2 cursor-pointer rounded-sm mx-1 text-[13px] transition-colors',
@@ -103,7 +111,7 @@ function NavTree({
             )}
             style={{ paddingLeft: depth * 14 + 6 }}
           >
-            <button
+            <button aria-label={`Развернуть папку ${node.name}`}
               onClick={(e) => { e.stopPropagation(); onToggle(node.path) }}
               className={cn('flex h-4 w-4 items-center justify-center shrink-0', !hasChildren && 'invisible')}
             >
@@ -118,10 +126,28 @@ function NavTree({
   )
 }
 
+function DetailsHead({ col, label, className, sortConfig, onSort }: { col?: 'name' | 'date' | 'status'; label: string; className?: string; sortConfig: { column: string; direction: 'asc' | 'desc' }; onSort: (col: 'name' | 'date' | 'status') => void }) {
+  if (!col) return <span className={cn('flex items-center h-full px-2 text-[12px] text-muted-foreground', className)}>{label}</span>
+  return (
+    <button
+      onClick={() => onSort(col)}
+      className={cn('flex items-center gap-1 h-full px-2 text-left text-[12px] font-normal text-muted-foreground hover:bg-accent/70', className)}
+    >
+      {label}
+      {col && sortConfig.column === col && (
+        sortConfig.direction === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+      )}
+    </button>
+  )
+}
+
 /* ── таблица содержимого (Details view) ── */
 function DetailsList({
-  items, selectedPath, onSelect, onOpen, sortConfig, onSort, loading, failed, onRetry,
+  items, selectedPath, onSelect, onOpen, sortConfig, onSort, loading, failed, onRetry, getActions, onAction, searching,
 }: {
+  getActions: (node: FsNode) => ExplorerAction[]
+  onAction: (action: ExplorerAction) => void
+  searching: boolean
   items: FsNode[]
   selectedPath: string | null
   onSelect: (n: FsNode) => void
@@ -132,27 +158,22 @@ function DetailsList({
   failed: boolean
   onRetry: () => void
 }) {
-  const Head = ({ col, label, className }: { col?: 'name' | 'date' | 'status'; label: string; className?: string }) => (
-    <button
-      onClick={() => col && onSort(col)}
-      className={cn('flex items-center gap-1 h-full px-2 text-left text-[12px] font-normal text-muted-foreground hover:bg-accent/70', className)}
-    >
-      {label}
-      {col && sortConfig.column === col && (
-        sortConfig.direction === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-      )}
-    </button>
-  )
+  const mobile = useTouchInput()
+
 
   return (
     <div className="min-w-0 flex-1 flex flex-col">
-      {/* заголовки колонок — на мобиле только Имя + Дата */}
-      <div className="grid grid-cols-[minmax(0,1fr)_104px] md:grid-cols-[minmax(220px,1fr)_150px_180px_110px] h-9 border-b border-border shrink-0 bg-card sticky top-0 z-10">
-        <Head col="name" label="Имя" />
-        <Head col="date" label="Дата изменения" />
-        <Head label="Тип" className="hidden md:flex" />
-        <Head label="Размер" className="justify-end pr-3 hidden md:flex" />
+      {/* На телефоне оставляем имя и действия. */}
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(180px,1fr)_110px_120px_80px_180px] h-9 border-b border-border shrink-0 bg-card sticky top-0 z-10">
+        <DetailsHead sortConfig={sortConfig} onSort={onSort} col="name" label="Имя" />
+        <DetailsHead sortConfig={sortConfig} onSort={onSort} col="date" label="Дата" className="hidden md:flex" />
+        <DetailsHead sortConfig={sortConfig} onSort={onSort} label="Тип" className="hidden md:flex" />
+        <DetailsHead sortConfig={sortConfig} onSort={onSort} label="Размер" className="justify-end pr-3 hidden md:flex" />
+        <span className="px-2 flex items-center text-[12px] text-muted-foreground">Действия</span>
       </div>
+      {failed && items.length > 0 && <div role="alert" className="flex items-center gap-3 px-3 py-2 text-sm border-b border-border">
+        <span>Часть документов не загрузилась</span><button onClick={onRetry} className="underline underline-offset-4">Повторить</button>
+      </div>}
       {/* строки */}
       <div className="flex-1 overflow-y-auto scroll-thin">
         {/* Три РАЗНЫХ ответа. Раньше был один: «Эта папка пуста» — и во время загрузки
@@ -174,7 +195,7 @@ function DetailsList({
           ) : (
             <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground/60 py-16">
               <Folder className="h-9 w-9 opacity-30" />
-              <p className="text-sm">Эта папка пуста</p>
+              <p className="text-sm">{searching ? 'Документы не найдены' : 'Эта папка пуста'}</p>
             </div>
           )
         )}
@@ -182,14 +203,18 @@ function DetailsList({
           const selected = n.path === selectedPath
           const isFolder = n.type === 'folder'
           const { Icon, cls } = isFolder ? { Icon: Folder, cls: 'text-amber-400' } : fileIcon(n)
+          const actions = getActions(n)
           return (
+            <ContextMenu key={n.path}>
+            <ContextMenuTrigger asChild>
             <div
-              key={n.path}
-              onClick={() => onSelect(n)}
+              role="button" tabIndex={0} aria-label={n.name}
+              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); onOpen(n) } }}
+              onClick={() => { onSelect(n); if (mobile) onOpen(n) }}
               onDoubleClick={() => onOpen(n)}
               className={cn(
-                'group grid grid-cols-[minmax(0,1fr)_104px] md:grid-cols-[minmax(220px,1fr)_150px_180px_110px] items-center h-8 text-[13px] cursor-default select-none',
-                selected ? 'bg-primary/25' : 'hover:bg-accent/70',
+                'group grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(180px,1fr)_110px_120px_80px_180px] items-center min-h-11 md:min-h-8 text-[13px] cursor-default select-none focus-visible:outline-2 focus-visible:outline-primary focus-visible:-outline-offset-2',
+                selected ? 'bg-primary text-primary-foreground' : 'hover:bg-accent/70',
               )}
             >
               <div className="flex items-center gap-2 min-w-0 pl-2">
@@ -201,12 +226,24 @@ function DetailsList({
                 <Icon className={cn('h-4 w-4 shrink-0', cls)} />
                 <span className="truncate">{n.name}</span>
               </div>
-              <div className="px-2 text-muted-foreground tabular-nums truncate">{n.date ?? '—'}</div>
+              <div className="hidden md:block px-2 text-muted-foreground tabular-nums truncate">{n.date ?? '—'}</div>
               <div className="hidden md:block px-2 text-muted-foreground truncate">{typeLabel(n)}</div>
               <div className="hidden md:block px-3 text-right text-muted-foreground tabular-nums truncate">
                 {isFolder ? (n.childCount ? `${n.childCount} эл.` : '') : (n.size && n.size !== '—' ? n.size : '')}
               </div>
+              <div className="flex flex-wrap items-center justify-end gap-0.5 pr-1 max-w-40 md:max-w-none" onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+                {isFolder ? <button className="h-10 md:h-7 px-2 rounded hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary" onClick={() => onOpen(n)}>Открыть</button>
+                  : actions.length ? actions.map((action) => <button key={action.id} onClick={() => onAction(action)} className={cn('h-10 md:h-7 px-2 rounded hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary', selected ? 'text-primary-foreground' : 'text-primary')}>{action.label}</button>)
+                  : n.doc?.docType === 'space_file' || n.doc?.docType === 'contract_card' ? <span className="px-2 text-xs text-muted-foreground">Нет доступа</span>
+                  : <button className="h-10 md:h-7 px-2 rounded hover:bg-accent text-primary" onClick={() => onOpen(n)}>Открыть</button>}
+              </div>
             </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              {actions.length ? actions.map((action) => <ContextMenuItem key={action.id} onSelect={() => onAction(action)}>{action.label}</ContextMenuItem>)
+                : <ContextMenuItem disabled={!isFolder && (n.doc?.docType === 'space_file' || n.doc?.docType === 'contract_card')} onSelect={() => onOpen(n)}>{isFolder ? 'Открыть папку' : 'Открыть'}</ContextMenuItem>}
+            </ContextMenuContent>
+            </ContextMenu>
           )
         })}
       </div>
@@ -215,11 +252,11 @@ function DetailsList({
 }
 
 /* ── панель превью (правая) ── */
-function PreviewPane({ node }: { node: FsNode | null }) {
+function PreviewPane({ node, actions, onAction }: { node: FsNode | null; actions: ExplorerAction[]; onAction: (action: ExplorerAction) => void }) {
   if (!node) {
     return (
       <div className="hidden md:flex w-72 shrink-0 bg-card border-l border-border items-center justify-center text-xs text-muted-foreground/50 p-4 text-center">
-        Выберите файл для предпросмотра
+        Выберите документ для просмотра реквизитов
       </div>
     )
   }
@@ -233,6 +270,9 @@ function PreviewPane({ node }: { node: FsNode | null }) {
         <div className="text-sm font-medium text-center break-words">{node.name}</div>
         <div className="text-xs text-muted-foreground">{typeLabel(node)}</div>
       </div>
+      <div className="flex flex-wrap gap-1">{actions.map((action) => <button key={action.id} onClick={() => onAction(action)} className="h-8 rounded border border-border px-2 text-xs hover:bg-accent">{action.label}</button>)}</div>
+      {node.doc?.data && (node.doc.data as { projectId?: string; siteId?: string }).projectId && !(node.doc.data as { siteId?: string }).siteId
+        ? <p className="text-xs text-muted-foreground">Площадка проекта не указана: переход к проекту недоступен.</p> : null}
       <div className="space-y-1.5 text-xs">
         <Row k="Дата изменения" v={node.date ?? '—'} />
         {node.status && <Row k="Статус" v={node.status} />}
@@ -262,7 +302,8 @@ function Row({ k, v }: { k: string; v: string }) {
 
 /* ── главный компонент ── */
 export function ExplorerView() {
-  const state = useRawPanelState()
+  const state = useRawPanelState({ explorer: true })
+  const navigate = useNavigate()
   const tree = useRawPanelTree(state.filters, state.sortConfig)
   const [previewOpen, setPreviewOpen] = useState(true)
   const { companyId } = useCompany()
@@ -281,7 +322,7 @@ export function ExplorerView() {
   const asList = listable && (state.viewMode === 'list' || searching)
 
   const currentKey = state.currentPath.join('/')
-  const rawItems = tree.fsTree.get(currentKey) ?? []
+  const rawItems = searching && !listable ? tree.flatFiles : tree.fsTree.get(currentKey) ?? EMPTY_NODES
 
   // Сортировка: папки сверху, затем файлы; внутри — по sortConfig.
   const items = useMemo(() => {
@@ -318,20 +359,20 @@ export function ExplorerView() {
     state.openFile(n)
   }
 
-  const canBack = state.currentPath.length > 0
+  const canUp = state.currentPath.length > 0
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground">
       {/* Адресная строка */}
-      <div className="flex items-center gap-1 h-11 px-2 bg-card border-b border-border shrink-0">
-        <button onClick={() => canBack && state.goUp()} disabled={!canBack}
+      <div className="flex flex-wrap items-center gap-1 min-h-11 p-2 bg-card border-b border-border shrink-0">
+        <button onClick={state.goBack} disabled={!state.canBack}
           className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent disabled:opacity-30" title="Назад">
           <ArrowLeft className="h-4 w-4" />
         </button>
-        <button disabled className="flex h-8 w-8 items-center justify-center rounded-md disabled:opacity-30" title="Вперёд">
+        <button onClick={state.goForward} disabled={!state.canForward} className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent disabled:opacity-30" title="Вперёд">
           <ArrowRight className="h-4 w-4" />
         </button>
-        <button onClick={() => canBack && state.goUp()} disabled={!canBack}
+        <button onClick={state.goUp} disabled={!canUp}
           className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent disabled:opacity-30" title="Вверх">
           <ArrowUp className="h-4 w-4" />
         </button>
@@ -359,11 +400,12 @@ export function ExplorerView() {
         </div>
 
         {/* Поиск — на мобиле уже, чтобы не выдавливать крошки */}
-        <div className="flex items-center gap-1.5 h-8 w-36 md:w-64 shrink-0 px-2.5 rounded-md bg-background/70 border border-border">
+        <div className="flex items-center gap-1.5 h-8 w-full md:w-64 shrink-0 px-2.5 rounded-md bg-background/70 border border-border">
           <Search className="h-3.5 w-3.5 text-muted-foreground" />
           <input
             value={state.filters.searchQuery}
             onChange={(e) => state.updateFilter('searchQuery', e.target.value)}
+            aria-label="Поиск по всем документам"
             placeholder="Поиск по всем документам"
             className="bg-transparent outline-none text-[13px] w-full placeholder:text-muted-foreground/60"
           />
@@ -372,15 +414,17 @@ export function ExplorerView() {
 
       {/* Командная панель — свайп на мобиле без видимого скроллбара */}
       <div className="flex items-center gap-0.5 h-10 px-2 bg-card/60 border-b border-border shrink-0 overflow-x-auto scrollbar-hide">
-        <CmdButton icon={Plus} label="Создать" chevron disabled />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild><button className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[13px] hover:bg-accent"><Plus className="h-4 w-4" />Создать<ChevronDown className="h-3 w-3" /></button></DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuLabel>В общем реестре, без привязки к папке</DropdownMenuLabel>
+            <DropdownMenuItem disabled={!state.canOpenRoute('/docs')} onSelect={() => navigate('/docs?view=all&new=1')}>Документ</DropdownMenuItem>
+            <DropdownMenuItem disabled={!state.canOpenRoute(`${state.prefix}/contractors`)} onSelect={() => navigate(`${state.prefix}/contractors?sub=contracts&new=1`)}>Договор</DropdownMenuItem>
+            <DropdownMenuItem disabled={!state.canOpenRoute(`${state.prefix}/intake`)} onSelect={() => navigate(`${state.prefix}/intake`)}>Приём / загрузка</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Sep />
-        <CmdButton icon={Scissors} disabled />
-        <CmdButton icon={Copy} disabled />
-        <CmdButton icon={ClipboardPaste} disabled />
-        <CmdButton icon={PencilLine} disabled />
-        <CmdButton icon={Share2} disabled />
-        <CmdButton icon={Trash2} disabled />
-        <Sep />
+        {selected && state.getNodeActions(selected).map((action) => <CmdButton key={action.id} icon={ExternalLink} label={action.label} onClick={() => state.runAction(action)} />)}
         <CmdButton icon={ArrowUpDown} label="Сортировать" chevron
           onClick={() => state.toggleSort(state.sortConfig.column === 'name' ? 'date' : 'name')} />
         <CmdButton icon={LayoutList} label={asList ? 'Папками' : 'Списком'}
@@ -391,9 +435,8 @@ export function ExplorerView() {
             if (asList && searching) state.updateFilter('searchQuery', '')
             state.setViewMode(asList ? 'tree' : 'list')
           }} />
-        <CmdButton icon={MoreHorizontal} />
         <div className="ml-auto" />
-        <CmdButton icon={PanelRight} label="Просмотр" onClick={() => setPreviewOpen((v) => !v)} />
+        <CmdButton icon={PanelRight} label="Реквизиты" onClick={() => setPreviewOpen((v) => !v)} />
       </div>
 
       {/* Тело: дерево | таблица | превью. Дерево на мобиле скрыто —
@@ -435,9 +478,12 @@ export function ExplorerView() {
           loading={tree.isLoading || tree.isFetching}
           failed={tree.isError}
           onRetry={tree.refetch}
+          getActions={state.getNodeActions}
+          onAction={state.runAction}
+          searching={searching}
         />
 
-        {previewOpen && <PreviewPane node={selected} />}
+        {previewOpen && <PreviewPane node={selected} actions={selected ? state.getNodeActions(selected) : []} onAction={state.runAction} />}
         </>
         )}
       </div>
