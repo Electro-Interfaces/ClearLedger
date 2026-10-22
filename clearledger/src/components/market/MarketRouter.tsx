@@ -16,6 +16,7 @@ import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
 import { MapLayerSwitch, MapTiles, useMapLayers } from '@/components/map/MapLayers'
 import { clusterPoints, clusterRadiusForZoom } from '@/components/map/clusterPoints'
 import { MapResize } from '@/components/map/MapResize'
+import { MapStationList } from '@/components/map/MapStationList'
 import 'leaflet/dist/leaflet.css'
 import { Loader2, Maximize2, Minimize2, MapPin, Plus } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -141,14 +142,13 @@ function вОднойТочке(points: { lat: number; lon: number }[]): boolean
 /** Список объектов группы: когда их не развести, надо просто показать, кто это. */
 function СписокОбъектов({ items }: { items: { name: string; note?: string | null }[] }) {
   return (
-    <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
-      {items.slice(0, 8).map((it, i) => (
+    <ul className="mt-1 max-h-56 overflow-y-auto pl-4">
+      {items.map((it, i) => (
         <li key={`${it.name}-${i}`}>
           {it.name}
           {it.note && <span style={{ opacity: 0.7 }}> · {it.note}</span>}
         </li>
       ))}
-      {items.length > 8 && <li style={{ opacity: 0.7 }}>и ещё {items.length - 8}</li>}
     </ul>
   )
 }
@@ -273,19 +273,13 @@ function MarketPoints({ market, ourPoints, zoom, colorBy }: {
                 <>
                   <b>{c.items.length} объектов по одному адресу</b> — приближение их
                   не разведёт:
-                  <СписокОбъектов items={c.items.map((p) => ({
-                    name: p.name,
-                    note: p.status && p.status !== 'working' ? p.status : null,
-                  }))} />
+                  <MapStationList items={c.items} />
                 </>
               ) : (
                 <>
                   <b>{c.items.length} объектов</b> рядом — приблизьте, чтобы
                   увидеть каждый:
-                  <СписокОбъектов items={c.items.map((p) => ({
-                    name: p.name,
-                    note: p.status && p.status !== 'working' ? p.status : null,
-                  }))} />
+                  <MapStationList items={c.items} />
                 </>
               )}
             </Popup>
