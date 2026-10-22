@@ -24,6 +24,11 @@ import openpyxl
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.reference_identity import lock_manual_creation
+from app.services.reference_overrides import apply_import_values
+from app.services.reference_identity import (
+    ContractIndex, CounterpartyIndex, id_key, json_ids, organization_for_import, require_organization,
+)
 from app.models import (
     Contract,
     ContractLocation,
@@ -136,13 +141,7 @@ def _parse_payment(cell):
 
 def _jsonable(d: dict) -> dict:
     """Сырьё строки → JSON-сериализуемое (datetime → ISO) для DataEntry.meta (L1)."""
-    out = {}
-    for k, v in d.items():
-        if hasattr(v, "isoformat"):
-            out[k] = v.isoformat()
-        else:
-            out[k] = v
-    return out
+    return json_ids(d)
 
 
 def _cp_ids(cp: Counterparty) -> list[str]:
@@ -172,7 +171,9 @@ async def ingest_reestr(
 ) -> dict[str, Any]:
     """L1 RAW (DataEntry) → нормализация → L2 (контрагенты/договоры/settlements +
     DataEntry clean). Идемпотентно. Возвращает сводку для лога канала."""
-    # --- индексы прода ---
+    await lock_manual_creation(db, company_id, "counterparty")
+    await lock_manual_creation(db, company_id, "contract")
+    # --- индексы компании ---
     locs = (await db.execute(
         select(ServiceLocation).where(ServiceLocation.company_id == company_id)
     )).scalars().all()
@@ -186,33 +187,20 @@ async def ingest_reestr(
     cps = (await db.execute(
         select(Counterparty).where(Counterparty.company_id == company_id)
     )).scalars().all()
-    cp_by_norm: dict[str, Counterparty] = {}
-    for c in cps:
-        for name in [c.name, *((c.raw or {}).get("mergedNames") or [])]:
-            nn = _normname(name)
-            if nn:
-                cp_by_norm.setdefault(nn, c)
-
+    cp_index = CounterpartyIndex(cps)
     contracts = (await db.execute(
         select(Contract).where(Contract.company_id == company_id)
     )).scalars().all()
-    contr_by_key: dict[tuple, Contract] = {}
-    contr_by_cp_type: dict[tuple, list[Contract]] = {}
-    for c in contracts:
-        contr_by_key[(c.counterparty_id, str(c.number), c.type)] = c
-        contr_by_cp_type.setdefault((c.counterparty_id, c.type), []).append(c)
-
-    # организация-владелец договоров (для новых): наиболее частая у существующих, иначе первая Organization
-    org_id = ""
-    if contracts:
-        from collections import Counter
-        org_id = Counter(c.organization_id for c in contracts if c.organization_id).most_common(1)
-        org_id = org_id[0][0] if org_id else ""
-    if not org_id:
-        org = (await db.execute(
-            select(Organization).where(Organization.company_id == company_id)
-        )).scalars().first()
-        org_id = str(org.id) if org else ""
+    contract_index = ContractIndex(contracts)
+    organizations = (await db.execute(
+        select(Organization).where(Organization.company_id == company_id)
+    )).scalars().all()
+    org_id = organization_for_import(organizations, contracts)
+    contract_locations = {
+        (id_key(link.contract_id), id_key(link.location_id))
+        for link in (await db.execute(select(ContractLocation).where(
+            ContractLocation.company_id == company_id))).scalars().all()
+    }
 
     res = {"rows": 0, "raw": 0, "clean": 0, "settlements": 0,
            "counterparties": 0, "contracts": 0, "unmatched": 0}
@@ -268,48 +256,43 @@ async def ingest_reestr(
             disp = _clean_cp_name(cp_cell)
 
             # контрагент: существующий или создать
-            cp = cp_by_norm.get(cpn)
+            cp = cp_index.resolve(disp)
             if cp is None and cpn:
                 cp = Counterparty(
                     company_id=company_id, inn="", name=disp[:500],
                     type=_cp_type(cp_cell), aliases=[role], kind="external",
+                    raw={"referenceIdentity": {"name": disp, "inn": ""}},
                 )
                 db.add(cp)
                 await db.flush()
-                cp_by_norm[cpn] = cp
+                cp_index.add(cp)
                 res["counterparties"] += 1
             elif cp is not None and role not in (cp.aliases or []):
-                cp.aliases = sorted(set((cp.aliases or []) + [role]))
+                apply_import_values(cp, {"aliases": sorted(set((cp.aliases or []) + [role]))})
             if cp is None:
                 continue
 
             # договор: привязка к существующему; создаём только если у cp нет договора типа
             number, cdate = _parse_num_date(row.get(contr_k))
             basis = _detect_basis(row.get(contr_k), cp_cell)
-            ids = _cp_ids(cp)
-            contract = None
-            if number:
-                for cid in ids:
-                    contract = contr_by_key.get((cid, str(number), ctype))
-                    if contract:
-                        break
-            if contract is None and not number:
-                # см. reestr_rushydro.contract: только единственный договор вида, без номера
-                same = [c for cid in ids for c in contr_by_cp_type.get((cid, ctype), [])]
-                if len(same) == 1:
-                    contract = same[0]
+            contract = contract_index.resolve(cp, ctype, number, cdate)
             if contract is None and number:
                 contract = Contract(
                     company_id=company_id, number=str(number)[:100], date=cdate or "",
-                    counterparty_id=str(cp.id), organization_id=org_id or str(cp.id),
+                    counterparty_id=str(cp.id), organization_id=require_organization(org_id),
                     type=ctype, kind=ckind, basis=basis, scope_type="locations",
+                    raw={"referenceIdentity": {"counterparty_id": str(cp.id), "type": ctype,
+                                               "number": str(number), "date": cdate or ""}},
                 )
                 db.add(contract)
                 await db.flush()
-                contr_by_cp_type.setdefault((str(cp.id), ctype), []).append(contract)
+                contract_index.add(contract)
                 res["contracts"] += 1
-                # привязка договора к станции (scope=locations)
+            # Повтор в другом объекте использует тот же договор и добавляет охват.
+            link_key = (id_key(contract.id), id_key(loc.id)) if contract else None
+            if link_key and link_key not in contract_locations:
                 db.add(ContractLocation(company_id=company_id, contract_id=contract.id, location_id=loc.id))
+                contract_locations.add(link_key)
 
             # оплата → статус
             pstatus, paid_through, special = _parse_payment(row.get(pay_k))
@@ -354,7 +337,7 @@ async def ingest_reestr(
             )
         )).scalar_one_or_none()
         if clean_entry:
-            clean_entry.meta = normalized
+            clean_entry.meta = json_ids(normalized)
             clean_entry.derived_from_entry_id = raw_entry.id
         else:
             db.add(DataEntry(
@@ -363,7 +346,7 @@ async def ingest_reestr(
                 category_id="energy", subcategory_id="contracts_payments",
                 doc_type_id="reestr_row", status="verified",
                 source="upload", source_label=clean_label, source_id=clean_label,
-                layer="clean", meta=normalized, derived_from_entry_id=raw_entry.id,
+                layer="clean", meta=json_ids(normalized), derived_from_entry_id=raw_entry.id,
             ))
             res["clean"] += 1
 

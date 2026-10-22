@@ -39,6 +39,12 @@ import openpyxl
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.reference_identity import lock_manual_creation
+from app.services.reference_overrides import apply_import_values
+from app.services.reference_identity import (
+    ContractIndex, CounterpartyIndex, id_key, json_ids, name_key,
+    organization_for_import, require_organization,
+)
 from app.services.station_passport import (
     passport_value, stations_by_location, write_value)
 from app.models import (
@@ -207,10 +213,7 @@ def _parse_contract_req(v) -> tuple[str | None, str | None]:
 
 
 def _jsonable_row(d: dict) -> dict:
-    out = {}
-    for k, v in d.items():
-        out[k] = v.isoformat() if hasattr(v, "isoformat") else v
-    return out
+    return json_ids(d)
 
 
 def _compact(d: dict) -> dict:
@@ -350,7 +353,7 @@ async def _upsert_raw(db: AsyncSession, company_id, tag: str, key: str,
     label = f"{tag}-{key}"
     e = existing.get(label)
     if e is not None:
-        e.meta = meta
+        e.meta = json_ids(meta)
         e.status = "recognized"
         return 0
     e = DataEntry(
@@ -358,7 +361,7 @@ async def _upsert_raw(db: AsyncSession, company_id, tag: str, key: str,
         category_id="energy", subcategory_id="contracts_payments",
         doc_type_id="reestr_row", status="recognized",
         source="upload", source_label=label, source_id=label,
-        layer="raw", meta=meta,
+        layer="raw", meta=json_ids(meta),
     )
     db.add(e)
     existing[label] = e
@@ -381,9 +384,8 @@ class L2Cache:
     """Префетч контрагентов/договоров/расчётов/периодов компании для upsert без N+1."""
 
     def __init__(self) -> None:
-        self.cp_by_norm: dict[str, Counterparty] = {}
-        self.contr_by_key: dict[tuple, Contract] = {}
-        self.contr_by_cp_type: dict[tuple, list[Contract]] = {}
+        self.counterparties = CounterpartyIndex()
+        self.contracts = ContractIndex()
         self.settl: dict[tuple, StationContractSettlement] = {}
         self.periods: dict[tuple, StationEnergyPeriod] = {}
         self.dispense: dict[tuple, StationDispensePeriod] = {}
@@ -391,93 +393,68 @@ class L2Cache:
         self.org_id: str = ""
 
     async def build(self, db: AsyncSession, company_id) -> None:
-        for c in (await db.execute(
+        await lock_manual_creation(db, company_id, "counterparty")
+        await lock_manual_creation(db, company_id, "contract")
+        self.counterparties = CounterpartyIndex((await db.execute(
             select(Counterparty).where(Counterparty.company_id == company_id)
-        )).scalars().all():
-            # Имена слитых дублей (raw.mergedNames): иначе повторная загрузка реестра
-            # с прежним написанием заведёт дубль заново (чистка 05.10.2026).
-            for name in [c.name, *((c.raw or {}).get("mergedNames") or [])]:
-                nn = _normname(name)
-                if nn and nn not in self.cp_by_norm:
-                    self.cp_by_norm[nn] = c
+        )).scalars().all())
         contracts = (await db.execute(
             select(Contract).where(Contract.company_id == company_id)
         )).scalars().all()
-        for c in contracts:
-            self.contr_by_key[(c.counterparty_id, str(c.number), c.type)] = c
-            self.contr_by_cp_type.setdefault((c.counterparty_id, c.type), []).append(c)
+        self.contracts = ContractIndex(contracts)
         for s in (await db.execute(
             select(StationContractSettlement).where(
                 StationContractSettlement.company_id == company_id)
         )).scalars().all():
-            self.settl[(s.location_id, s.role)] = s
+            self.settl[(id_key(s.location_id), s.role)] = s
         for p in (await db.execute(
             select(StationEnergyPeriod).where(StationEnergyPeriod.company_id == company_id)
         )).scalars().all():
-            self.periods[(p.location_id, p.period)] = p
+            self.periods[(id_key(p.location_id), p.period)] = p
         for d in (await db.execute(
             select(StationDispensePeriod).where(StationDispensePeriod.company_id == company_id)
         )).scalars().all():
-            self.dispense[(d.location_id, d.period, d.connector_type or "")] = d
+            self.dispense[(id_key(d.location_id), d.period, d.connector_type or "")] = d
         for cl in (await db.execute(
             select(ContractLocation).where(ContractLocation.company_id == company_id)
         )).scalars().all():
-            self.contract_locs.add((str(cl.contract_id), cl.location_id))
-        if contracts:
-            from collections import Counter
-            top = Counter(c.organization_id for c in contracts if c.organization_id).most_common(1)
-            self.org_id = top[0][0] if top else ""
-        if not self.org_id:
-            org = (await db.execute(
-                select(Organization).where(Organization.company_id == company_id)
-            )).scalars().first()
-            self.org_id = str(org.id) if org else ""
+            self.contract_locs.add((id_key(cl.contract_id), id_key(cl.location_id)))
+        organizations = (await db.execute(
+            select(Organization).where(Organization.company_id == company_id)
+        )).scalars().all()
+        self.org_id = organization_for_import(organizations, contracts)
 
     async def counterparty(self, db: AsyncSession, company_id, raw_name,
                            inn: str | None = None, alias: str | None = None,
                            res: dict | None = None) -> Counterparty | None:
-        """Контрагент по имени (норм-форма): существующий (+дозаполнить ИНН) или новый."""
+        """ИНН имеет приоритет; имя не отменяет противоречащие реквизиты."""
         if _blank(raw_name) or "информац" in str(raw_name).lower():
             return None
         nn = _normname(raw_name)
         if not nn:
             return None
-        cp = self.cp_by_norm.get(nn)
+        cp = self.counterparties.resolve(_clean_cp_name(raw_name), inn)
         if cp is None:
             cp = Counterparty(
                 company_id=company_id, inn=_s(inn)[:20], name=_clean_cp_name(raw_name)[:500],
                 type=_cp_type(raw_name), aliases=[alias] if alias else [], kind="external",
+                raw={"referenceIdentity": {"name": _clean_cp_name(raw_name), "inn": _s(inn)}},
             )
             db.add(cp)
             await db.flush()
-            self.cp_by_norm[nn] = cp
+            self.counterparties.add(cp)
             if res is not None:
                 res["counterparties"] = res.get("counterparties", 0) + 1
         else:
-            if _s(inn) and not _s(cp.inn):
-                cp.inn = _s(inn)[:20]
             if alias and alias not in (cp.aliases or []):
-                cp.aliases = sorted(set((cp.aliases or []) + [alias]))
+                apply_import_values(cp, {"aliases": sorted(set((cp.aliases or []) + [alias]))})
         return cp
 
     async def contract(self, db: AsyncSession, company_id, cp: Counterparty,
                        ctype: str, number, cdate, basis, loc: ServiceLocation | None,
                        res: dict) -> Contract | None:
         """Договор: привязка к существующему (номер+тип у контрагента), иначе создать."""
-        ids = [x for x in (cp.external_ref, str(cp.id)) if x]
-        contract = None
-        if number:
-            for cid in ids:
-                contract = self.contr_by_key.get((cid, str(number), ctype))
-                if contract:
-                    break
-        if contract is None and not number:
-            # Без номера — договор контрагента этого вида, только если он единственный.
-            # Раньше брался первый попавшийся и при несовпавшем номере: так договор
-            # «4» «Разрешения администрации» встал на 21 станцию (чистка 05.10.2026).
-            same = [c for cid in ids for c in self.contr_by_cp_type.get((cid, ctype), [])]
-            if len(same) == 1:
-                contract = same[0]
+        contract = self.contracts.resolve(cp, ctype, number, cdate)
         if contract is None:
             # Без номера обязательство всё равно есть: часть площадок стоит на
             # муниципальной земле по разрешению или сервитуту, и раньше такие строки
@@ -486,16 +463,17 @@ class L2Cache:
             num = str(number)[:100] if number else "б/н"
             contract = Contract(
                 company_id=company_id, number=num, date=cdate or "",
-                counterparty_id=str(cp.id), organization_id=self.org_id or str(cp.id),
+                counterparty_id=str(cp.id), organization_id=require_organization(self.org_id),
                 type=ctype, kind="СПоставщиком", basis=basis, scope_type="locations",
+                raw={"referenceIdentity": {"counterparty_id": str(cp.id), "type": ctype,
+                                           "number": num, "date": cdate or ""}},
             )
             db.add(contract)
             await db.flush()
-            self.contr_by_key[(str(cp.id), num, ctype)] = contract
-            self.contr_by_cp_type.setdefault((str(cp.id), ctype), []).append(contract)
+            self.contracts.add(contract)
             res["contracts"] = res.get("contracts", 0) + 1
         if contract is not None and loc is not None:
-            key = (str(contract.id), loc.id)
+            key = (id_key(contract.id), id_key(loc.id))
             if key not in self.contract_locs:
                 db.add(ContractLocation(
                     company_id=company_id, contract_id=contract.id, location_id=loc.id))
@@ -505,11 +483,11 @@ class L2Cache:
     def settlement(self, db: AsyncSession, company_id, loc: ServiceLocation,
                    role: str, fields: dict, res: dict) -> StationContractSettlement:
         """Upsert StationContractSettlement (company+location+role); None-поля не затирают."""
-        s = self.settl.get((loc.id, role))
+        s = self.settl.get((id_key(loc.id), role))
         if s is None:
             s = StationContractSettlement(company_id=company_id, location_id=loc.id, role=role)
             db.add(s)
-            self.settl[(loc.id, role)] = s
+            self.settl[(id_key(loc.id), role)] = s
             res["settlements"] = res.get("settlements", 0) + 1
         for k, v in fields.items():
             if k == "extra":
@@ -526,12 +504,12 @@ class L2Cache:
                       tariff: float | None = None, source: str | None = None,
                       res: dict | None = None) -> None:
         """Upsert StationEnergyPeriod: intake/tariff приходят из разных файлов."""
-        p = self.periods.get((loc.id, period))
+        p = self.periods.get((id_key(loc.id), period))
         if p is None:
             p = StationEnergyPeriod(
                 company_id=company_id, location_id=loc.id, period=period, source=source)
             db.add(p)
-            self.periods[(loc.id, period)] = p
+            self.periods[(id_key(loc.id), period)] = p
             if res is not None:
                 res["periods"] = res.get("periods", 0) + 1
         if intake_kwh is not None:
@@ -546,7 +524,7 @@ class L2Cache:
                         kwh: float | None = None, rub: float | None = None,
                         source: str | None = None, res: dict | None = None) -> None:
         """Upsert StationDispensePeriod: кВт·ч и ₽ приходят из разных листов."""
-        key = (loc.id, period, connector or "")
+        key = (id_key(loc.id), period, connector or "")
         p = self.dispense.get(key)
         if p is None:
             p = StationDispensePeriod(
@@ -733,11 +711,11 @@ async def ingest_svodnaya(db: AsyncSession, company_id, parsed: dict) -> dict[st
         if loc is None:
             res["unmatched"] += 1
             continue
-        loc_by_id[loc.id] = loc
+        loc_by_id[id_key(loc.id)] = loc
 
         # объёмы входящей э/э: на объекте может стоять несколько станций → суммируем
         for period, kwh in (row["_months"] or {}).items():
-            intake[(loc.id, period)] = intake.get((loc.id, period), 0.0) + kwh
+            intake[(id_key(loc.id), period)] = intake.get((id_key(loc.id), period), 0.0) + kwh
 
         note = None if _blank(row["note"]) else str(row["note"]).strip()[:1000]
 
@@ -881,8 +859,8 @@ async def ingest_arenda(db: AsyncSession, company_id, parsed: dict) -> dict[str,
     # иначе последняя строка флапала бы значение при каждом прогоне.
     by_cp: dict[str, list[dict]] = {}
     for c in parsed.get("contacts", []):
-        nn = _normname(c["cp"])
-        if nn in l2.cp_by_norm:
+        nn = name_key(_clean_cp_name(c["cp"]))
+        if l2.counterparties.resolve(_clean_cp_name(c["cp"])) is not None:
             item = _compact({
                 "contacts": _s(c.get("contacts")) or None,
                 "exchange": _s(c.get("exchange")) or None,
@@ -891,13 +869,13 @@ async def ingest_arenda(db: AsyncSession, company_id, parsed: dict) -> dict[str,
             if item and item not in by_cp.setdefault(nn, []):
                 by_cp[nn].append(item)
     for nn, items in by_cp.items():
-        cp = l2.cp_by_norm[nn]
+        cp = l2.counterparties.resolve(nn)
         if not _s(cp.phone):
             for it in items:
                 m = re.search(r"(\+?[78][\s(]?\d{3}[\s)]?[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2})",
                               it.get("contacts") or "")
                 if m:
-                    cp.phone = m.group(1)[:100]
+                    apply_import_values(cp, {"phone": m.group(1)[:100]})
                     break
         raw = dict(cp.raw or {})
         if raw.get("reestrContacts") != items:
@@ -944,13 +922,13 @@ async def ingest_tariffs(db: AsyncSession, company_id, parsed: dict) -> dict[str
         if loc is None:
             res["unmatched"] += 1
             continue
-        loc_by_id[loc.id] = loc
+        loc_by_id[id_key(loc.id)] = loc
         for period, val in (row["_tariffs"] or {}).items():
-            per_loc[(loc.id, period)] = val
+            per_loc[(id_key(loc.id), period)] = val
 
         # контрагент э/э как добор (если «Сводная» ещё не грузилась)
         cp = await l2.counterparty(db, company_id, row["en_cp"], alias="energy", res=res)
-        if cp is not None and (loc.id, "energy") not in l2.settl:
+        if cp is not None and (id_key(loc.id), "energy") not in l2.settl:
             number, cdate = _parse_contract_req(row["en_contract"])
             contract = await l2.contract(db, company_id, cp, "Энергоснабжение",
                                          number, cdate, "договор", loc, res)
