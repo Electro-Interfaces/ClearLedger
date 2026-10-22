@@ -114,7 +114,7 @@ export function HourlyOccupancy({ companyId, dateFrom, dateTo, narrow, tz, onTzC
           </table></div>
         </details>
       </> : <p className="rounded-md border p-6 text-sm text-muted-foreground">Нет почасовых данных для выбранного периода и отборов.{connectorIds.length || connectorTypes.length ? ' Сбросьте отборы или измените общий контур.' : ' Измените период или общий контур.'}</p>}
-      <p className="max-w-4xl text-xs text-muted-foreground">Занятость — доля времени в каждом часе суток за выбранные дни. Для станции учитывается время, когда занят хотя бы один выбранный порт. Типы и физические порты ограничивают оба показателя. Каталог портов — из истории в текущем контуре.</p>
+      <p className="max-w-4xl text-xs text-muted-foreground">Занятость — доля времени в каждом часе суток за выбранные дни. Для станции учитывается время, когда занят хотя бы один выбранный порт. Типы и физические порты ограничивают оба показателя. Каталог портов — из паспорта и истории в текущем контуре.</p>
       {quality?.last_session_at ? <p className="text-xs text-muted-foreground">Последняя сессия в данных: {quality.last_session_at.replace('T', ' ')}</p> : null}
     </> : null}
   </section>

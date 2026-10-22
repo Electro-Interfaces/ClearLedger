@@ -163,13 +163,29 @@ async def hourly_occupancy(
     if f.dim_by == "region":
         fleet.append(func.coalesce(R.name, "—") == f.dim_val)
     region_join = and_(R.id == L.region_id, R.company_id == cid)
-    locations = (await db.execute(select(L.id, L.station_number, L.code, L.name, R.msk_offset)
+    locations = (await db.execute(select(L.id, L.station_number, L.code, L.name, R.msk_offset, L.extra_metadata)
                                  .outerjoin(R, region_join).where(*fleet).order_by(L.id))).all()
     stations = []
+    passport_ports = {}
     for loc in locations:
         code = loc.station_number or loc.code
-        stations.append(dict(station_id=loc.id, station_code=code, station_name=loc.name,
-                             label=f"{loc.name} ({code})", msk_offset=loc.msk_offset or 0))
+        station = dict(station_id=loc.id, station_code=code, station_name=loc.name,
+                       label=f"{loc.name} ({code})", msk_offset=loc.msk_offset or 0)
+        stations.append(station)
+        metadata = loc.extra_metadata if isinstance(loc.extra_metadata, dict) else {}
+        for port in metadata.get("connectors") or []:
+            if (not isinstance(port, dict) or isinstance(port.get("no"), bool)
+                    or not isinstance(port.get("no"), (str, int, float))):
+                continue
+            no = str(port["no"]).strip()
+            kind = port.get("type")
+            kind = kind.strip() or None if isinstance(kind, str) else None
+            if not no or (f.dim_by == "connector" and kind != f.dim_val):
+                continue
+            key = physical_id(loc.id, no)
+            passport_ports[key] = {k: station[k] for k in ("station_id", "station_code", "station_name")} | dict(
+                id=key, connector_no=no, connector_type=kind,
+                label=f"{station['label']} · №{no}" + (f" · {kind}" if kind else ""))
     station_map = {s["station_id"]: s for s in stations}
     scope = [S.company_id == cid, *scope_location_conds(S.location_id)]
     if f.regions:
@@ -185,21 +201,29 @@ async def hourly_occupancy(
                .where(*scope, S.location_id.in_(station_map), number.is_not(None))
                .distinct(S.location_id, number)
                .order_by(S.location_id, number, S.started_at.desc().nulls_last(), S.id.desc()))
-    connectors = []
+    port_catalog = dict(passport_ports)
     for row in (await db.execute(history)).all():
         station = station_map[row.location_id]
-        connectors.append({k: station[k] for k in ("station_id", "station_code", "station_name")} | dict(
-            id=physical_id(row.location_id, row.no), connector_no=row.no,
+        key = physical_id(row.location_id, row.no)
+        historical = {k: station[k] for k in ("station_id", "station_code", "station_name")} | dict(
+            id=key, connector_no=row.no,
             connector_type=row.connector_type,
-            label=f"{station['label']} · №{row.no}" + (f" · {row.connector_type}" if row.connector_type else "")))
+            label=f"{station['label']} · №{row.no}" + (f" · {row.connector_type}" if row.connector_type else ""))
+        if key not in port_catalog or port_catalog[key]["connector_type"] is None:
+            port_catalog[key] = historical
+    connectors = sorted(port_catalog.values(), key=lambda port: (port["station_id"], port["connector_no"]))
     type_history = (await db.execute(
         select(S.location_id, number.label("no"), S.connector_type).select_from(S)
         .outerjoin(L, and_(L.id == S.location_id, L.company_id == cid)).outerjoin(R, region_join)
         .where(*scope, S.location_id.in_(station_map), S.connector_type.is_not(None), S.connector_type != "")
         .distinct()
     )).all()
-    available_types = sorted({row.connector_type for row in type_history})
+    available_types = sorted({row.connector_type for row in type_history}
+                             | {port["connector_type"] for port in connectors if port["connector_type"]})
     physical_types = defaultdict(set)
+    for port in connectors:
+        if port["connector_type"]:
+            physical_types[port["id"]].add(port["connector_type"])
     for row in type_history:
         if row.no:
             physical_types[physical_id(row.location_id, row.no)].add(row.connector_type)

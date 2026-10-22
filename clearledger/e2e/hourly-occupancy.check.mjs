@@ -5,10 +5,11 @@
 import assert from 'node:assert/strict'
 import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { createServer } from 'vite'
 import { chromium } from '@playwright/test'
 
-const artifactDir = resolve(process.env.RH_HOURLY_ARTIFACT_DIR || 'e2e/hourly-occupancy-artifacts')
+const artifactDir = resolve(process.env.RH_HOURLY_ARTIFACT_DIR || resolve(tmpdir(), 'hourly-occupancy-artifacts'))
 mkdirSync(artifactDir, { recursive: true })
 const server = await createServer({
   server: { host: '127.0.0.1', port: 4318, strictPort: true, open: false },
