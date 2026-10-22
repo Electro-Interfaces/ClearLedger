@@ -294,6 +294,7 @@ async def get_station_visits(
     days: int = Query(30, ge=1, le=365),
     only_failed: bool = Query(False, description="только приезды, кончившиеся ничем"),
     limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     as_of: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -306,7 +307,7 @@ async def get_station_visits(
     cid = await assert_company_member(company_id, current_user, db)
     try:
         return await station_visits(db, cid, location_id, days=days,
-                                    only_failed=only_failed, limit=limit, as_of=as_of)
+                                    only_failed=only_failed, limit=limit, offset=offset, as_of=as_of)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
