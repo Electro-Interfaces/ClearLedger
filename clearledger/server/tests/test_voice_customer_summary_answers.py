@@ -88,6 +88,23 @@ class _Support:
         return f"http://127.0.0.1:{self.server.server_port}"
 
 
+def _evidence(name, payload):
+    """Снимок ответа в доказательства — когда прогон запущен за ними.
+
+    Тот же ответ, по которому проверка выносит суждение, читает потом узел в
+    положительном контроле: иначе контроль проверял бы выдуманный пример.
+    """
+    import os
+    import pathlib
+
+    target = os.environ.get("FIX_R11_EVIDENCE")
+    if not target:
+        return
+    path = pathlib.Path(target) / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 def _ticket(ref, number, **extra):
     return {"ref": ref, "number": number, "title": f"Заявка {number}",
             "status": "open", **extra}
@@ -146,6 +163,7 @@ async def test_summary_answers_done_delivery_and_what_to_tell_the_client(client,
                                   headers={"X-Cloud-API-Key": key})
     assert r.status_code == 200, r.text
     data = r.json()
+    _evidence("summary-answers.json", data)
     assert data["ticketAvailability"] == "available"
     by_number = {t["number"]: t for t in data["tickets"]}
     assert set(by_number) == {"TS-1", "TS-2", "TS-3", "TS-4", "TS-5"}
@@ -248,6 +266,9 @@ async def test_summary_tells_silence_from_error_and_keeps_legacy_availability(cl
             for name, status, body, delay, state, reason, availability in cases:
                 support.state.update(status=status, body=body, delay=delay)
                 data = await summary()
+                _evidence(f"summary-source-{state}-{reason or 'ok'}.json",
+                          {k: data[k] for k in
+                           ("tickets", "ticketAvailability", "ticketSource") if k in data})
                 source = data.get("ticketSource")
                 assert source, f"{name}: состояние источника в сводке не названо"
                 assert (source["state"], source["reason"]) == (state, reason), (name, source)

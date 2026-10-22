@@ -1,0 +1,56 @@
+{
+ "tickets": [
+  {
+   "ref": "c70828c8-f91c-46d6-bb97-b3a734678788",
+   "number": "TS-9",
+   "title": "Заявка TS-9",
+   "status": "open",
+   "priority": null,
+   "category": null,
+   "objectRef": null,
+   "slaDeadline": null,
+   "answers": {
+    "done": {
+     "text": "Работ «Трека» по этой заявке Ядро не заводило",
+     "state": "empty",
+     "source": "core.track",
+     "asOf": "2026-10-22T06:49:44.211004+00:00",
+     "reason": "no_core_work",
+     "value": {
+      "items": 0
+     }
+    },
+    "delivery": {
+     "text": "Работ Ядра по заявке нет — применять и доставлять нечего",
+     "state": "empty",
+     "source": "core.track",
+     "asOf": "2026-10-22T06:49:44.211004+00:00",
+     "reason": "no_core_work",
+     "value": {
+      "items": 0
+     }
+    },
+    "toClient": {
+     "text": null,
+     "state": "empty",
+     "source": "core.track",
+     "asOf": "2026-10-22T06:49:44.211004+00:00",
+     "reason": "no_core_work",
+     "value": {
+      "items": 0
+     },
+     "code": "no_core_work"
+    }
+   }
+  }
+ ],
+ "ticketAvailability": "available",
+ "ticketSource": {
+  "source": "support.tickets",
+  "state": "available",
+  "reason": null,
+  "asOf": "2026-10-22T06:49:44.133339+00:00",
+  "total": 1,
+  "shown": 1
+ }
+}

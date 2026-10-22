@@ -122,7 +122,7 @@ def _answers(items: list[dict[str, Any]], observed_at: str) -> dict[str, Any]:
     else:
         broken = [i for i in awaited if i["delivery"]["state"] == "error"]
         delivery = fact(
-            "; ".join(f"{_subject(i)}: {SYNC_WORD.get(i['delivery']['state'], i['delivery']['state'])}"
+            "; ".join(f"{_subject(i)} — {SYNC_WORD.get(i['delivery']['state'], i['delivery']['state'])}"
                       for i in awaited),
             state="unavailable" if len(broken) == len(awaited) else
                   "partial" if broken else "available",
