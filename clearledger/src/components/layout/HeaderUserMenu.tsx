@@ -127,7 +127,7 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
         <Button
           variant="ghost"
           aria-label="Профиль и настройки"
-          className="flex h-11 items-center gap-3 rounded-xl px-1 hover:bg-transparent md:px-1.5"
+          className="flex size-10 shrink-0 items-center justify-center gap-3 rounded-xl p-0 hover:bg-transparent sm:h-11 sm:w-auto sm:px-1 md:px-1.5"
         >
           <span className="flex size-10 items-center justify-center overflow-hidden rounded-xl
                            bg-primary ring-2 ring-primary/40">

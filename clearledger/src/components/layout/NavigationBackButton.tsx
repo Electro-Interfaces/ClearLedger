@@ -22,7 +22,7 @@ export function NavigationBackButton() {
   }
   return (
     <Button type="button" variant="ghost" size="icon"
-      className="size-11 shrink-0"
+      className="size-10 shrink-0 sm:size-11"
       aria-label="Назад" title={canGoBack ? 'На предыдущую страницу' : 'На рабочий стол'}
       disabled={!canGoBack && location.pathname === home && !location.search}
       onClick={goBack}>

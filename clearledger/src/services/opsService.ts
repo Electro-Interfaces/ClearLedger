@@ -228,6 +228,7 @@ export interface ReliabilityRow {
   clients: number
   clientsAffected: number
   energyKwh: number
+  energyKwhRaw?: number
   revenue: number
   kwhPerSession: number
   lastSessionAt: string | null
@@ -288,6 +289,8 @@ export interface VendorRow {
   attemptsPerVisit: number
   failedSessionsPct: number
   energyKwh: number
+  /** Точное значение для суммирования; округляется только отображение. */
+  energyKwhRaw?: number
   revenue: number
   badStations: number
   models: string[]
@@ -316,6 +319,7 @@ export interface VendorStationRow {
   failedVisitsPct: number
   attemptsPerVisit: number
   energyKwh: number
+  energyKwhRaw?: number
   revenue: number
 }
 
@@ -402,17 +406,23 @@ export interface StationVisits {
                 failed: number; failedPct: number; energyKwh: number }[]
   visits: StationVisit[]
   returned: number
+  /** Размер отфильтрованной ленты и положение страницы; totals относятся ко всему окну. */
+  totalMatching?: number
+  offset?: number
+  hasMore?: boolean
   note: string
 }
 
 export async function getStationVisits(
   companyId: string, locationId: string,
-  options?: { days?: number; onlyFailed?: boolean; limit?: number },
+  options?: { days?: number; onlyFailed?: boolean; limit?: number; offset?: number; asOf?: string },
 ): Promise<StationVisits> {
   const params: Record<string, string> = { company_id: companyId }
   if (options?.days) params.days = String(options.days)
   if (options?.onlyFailed) params.only_failed = 'true'
   if (options?.limit) params.limit = String(options.limit)
+  if (options?.offset !== undefined) params.offset = String(options.offset)
+  if (options?.asOf) params.as_of = options.asOf
   return get<StationVisits>(
     `/api/ops/station-visits/${encodeURIComponent(locationId)}`, params)
 }
@@ -443,11 +453,11 @@ export interface StationHistory {
 }
 
 export async function getStationHistory(
-  companyId: string, locationId: string, days = 90,
+  companyId: string, locationId: string, days = 90, asOf?: string,
 ): Promise<StationHistory> {
   return get<StationHistory>(
     `/api/ops/station-history/${encodeURIComponent(locationId)}`,
-    { company_id: companyId, days: String(days) })
+    { company_id: companyId, days: String(days), ...(asOf ? { as_of: asOf } : {}) })
 }
 
 /** Условия ответственности стороны договора: то, на что ссылается претензия. */
@@ -631,8 +641,8 @@ export interface WorklistRow {
   /** Приездов в сутки — загруженность площадки, третий ключ порядка очереди. */
   visitsPerDay: number | null
   /** Ход работы из «Поддержки»: сколько открытых заявок и есть ли срыв срока. */
-  openTickets: number
-  breachedTickets: number
+  openTickets: number | null
+  breachedTickets: number | null
   lastTicketId: string | null
   lastTicketNumber: string | null
   /** Последняя сессия станции (ISO), для колонки «Последняя зарядка». */
@@ -644,7 +654,7 @@ export interface OpsWorklist extends OpsSnapshot {
   dataLagHours: number | null
   threshold: number
   totals: {
-    rows: number; silent: number; failing: number; breached: number
+    rows: number; silent: number; failing: number; breached: number | null
     notTaken: number | null; lossPerMonth: number; lossNotTaken: number | null; clientsLost: number
     /** Профилактика: поверка счётчика, просроченное ТО, нарушения осмотра. */
     meter: number; service: number; check: number

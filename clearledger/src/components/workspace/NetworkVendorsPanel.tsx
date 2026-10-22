@@ -20,6 +20,7 @@ import { useFilters } from '@/contexts/FilterContext'
 import { useMonitorScope } from './useMonitorScope'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
+import { monitorEnergy } from '@/lib/monitorMetrics'
 import { StationLink } from '@/components/common/StationLink'
 import { getNetworkVendors, type NetworkVendors, type VendorRow, type VendorStationRow } from '@/services/opsService'
 
@@ -53,11 +54,11 @@ const количество = (n: number) => qty(n) + ' ' + plural(n, 'станц
 function строка(r: VendorRow): Cell[] {
   return [r.vendor, r.stations, r.charging2d, r.active ? r.livePct : '', r.silentWeek,
     r.visits, r.visitsFailed, r.visits ? r.failedVisitsPct : '', r.visits ? r.attemptsPerVisit : '',
-    r.badStations, r.active ? r.kwhPerStationDay : '', r.modelsCount, r.models.join('; '),
-    r.energyKwh, r.revenue, r.active, r.neverCharged, r.avgPowerKwt ?? '']
+    r.badStations, r.active ? r.kwhPerStationDay : '', r.modelsCount, r.models.join('; ') || 'Не указаны в паспортах',
+    monitorEnergy(r), r.revenue, r.active, r.neverCharged, r.avgPowerKwt ?? '']
 }
 function итоги(rows: VendorRow[], days: number): Cell[] {
-  const active = sum(rows, 'active'), visits = sum(rows, 'visits'), energy = sum(rows, 'energyKwh')
+  const active = sum(rows, 'active'), visits = sum(rows, 'visits'), energy = rows.reduce((n, r) => n + monitorEnergy(r), 0)
   return ['Итого', sum(rows, 'stations'), sum(rows, 'charging2d'), доля(sum(rows, 'charging2d'), active),
     sum(rows, 'silentWeek'), visits, sum(rows, 'visitsFailed'), доля(sum(rows, 'visitsFailed'), visits), '',
     sum(rows, 'badStations'), active && days ? Math.round(energy / active / days * 10) / 10 : '',
@@ -128,7 +129,7 @@ export function NetworkVendorsPanel() {
     vendor: r.vendor, model: r.model || 'Модель не указана', region: r.region || 'Регион не указан',
     state: r.silentDays === null ? 'Нет зарядок в истории' : r.silentDays <= 2 ? 'Заряжала за 2 суток'
       : r.silentDays <= 7 ? 'Без зарядок до недели' : 'Без зарядок больше недели',
-    stations: 1, visits: r.visits, visitsFailed: r.visitsFailed, energyKwh: r.energyKwh, revenue: r.revenue,
+    stations: 1, visits: r.visits, visitsFailed: r.visitsFailed, energyKwh: monitorEnergy(r), revenue: r.revenue,
   })), [qВсе.data, маркиСводной])
   const видимые = useMemo(() => {
     const { cols, head } = набор.table
@@ -276,7 +277,7 @@ function VendorInlineStations({ vendor, days, region, asOf, threshold }: {
       : 'Без зарядок ' + qty(r.silentDays) + ' дн'
     return [r.number ?? r.code ?? '', r.name, r.model ?? '',
       state + (сОтказами(r, threshold) ? ' · частые отказы' : ''), r.region ?? '', r.visits,
-      r.visits ? r.failedVisitsPct : '', r.silentDays ?? '', r.energyKwh, r.revenue]
+      r.visits ? r.failedVisitsPct : '', r.silentDays ?? '', monitorEnergy(r), r.revenue]
   }), [stations, threshold])
   if (q.isLoading) return <div role="status" className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
     <Loader2 className="size-4 animate-spin" />Загружаются станции {vendor}</div>
@@ -312,14 +313,14 @@ function VendorDrill({ vendor, kind, days, region, asOf, threshold, onClose }: {
   const stations = (q.data?.stations ?? []).filter((r) => kind === 'bad' ? сОтказами(r, threshold) : kind === 'silent' ? нетЗарядок(r) : true)
   let head = ['№', 'Станция', 'Регион', 'Модель', 'Приездов', 'Без зарядки, %', 'Без зарядок, дн', 'Энергия, кВт·ч', 'Выручка, ₽']
   let rows: Cell[][] = stations.map((r) => [r.number ?? r.code ?? '', r.name, r.region ?? '', r.model ?? '', r.visits,
-    r.visits ? r.failedVisitsPct : '', r.silentDays ?? 'Нет зарядок в истории', r.energyKwh, r.revenue])
+    r.visits ? r.failedVisitsPct : '', r.silentDays ?? 'Нет зарядок в истории', monitorEnergy(r), r.revenue])
   if (kind === 'models') {
     head = ['Модель', 'Станций', 'Приездов', 'Без зарядки', 'Без зарядки, %', 'Энергия, кВт·ч', 'Выручка, ₽']
     const groups = new Map<string, VendorStationRow[]>()
     for (const r of stations) { const key = r.model || 'Модель не указана'; groups.set(key, [...(groups.get(key) ?? []), r]) }
     rows = [...groups].map(([name, rs]) => {
       const visits = rs.reduce((n, r) => n + r.visits, 0), failed = rs.reduce((n, r) => n + r.visitsFailed, 0)
-      return [name, rs.length, visits, failed, доля(failed, visits), rs.reduce((n, r) => n + r.energyKwh, 0), rs.reduce((n, r) => n + r.revenue, 0)]
+      return [name, rs.length, visits, failed, доля(failed, visits), rs.reduce((n, r) => n + monitorEnergy(r), 0), rs.reduce((n, r) => n + r.revenue, 0)]
     })
   }
   const title = РАСШИФРОВКИ.find((r) => r.key === kind)?.title ?? ''
@@ -367,6 +368,8 @@ const ПОМОЩЬ = <div className="flex flex-col gap-3 text-sm leading-relaxed
     как минимум каждый пятый без зарядки. Несколько попыток подряд считаются одним приездом.</p>
   <p>Итоги процентов считаются из общих числителей и знаменателей, не суммой процентов марок.
     Отдача — энергия на действующую станцию в сутки. Попытки на приезд и средняя мощность в итог не складываются.</p>
+  <p>«Моделей» — число заполненных моделей в паспортах. Ноль означает отсутствие этих данных, а не отсутствие оборудования.
+    Энергия суммируется до округления, поэтому итоги списка, моделей и сводной согласованы.</p>
   <p>Строка производителя — группа. Щелчок по строке, стрелке слева или Enter раскрывает конкретные станции прямо под маркой.
     Можно раскрыть несколько марок. В списке станций видны модель, регион, зарядки и отказы; по названию открывается карточка станции.
     Значок документа справа от марки открывает её отдельную карточку с отчётами. Ограничения в 60 станций нет.</p>

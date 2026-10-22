@@ -8,6 +8,7 @@ import { Download, FileSpreadsheet, FileText, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { exportChargeExcel, exportChargePdf } from '@/services/chargeExport'
+import { toast } from 'sonner'
 
 export function ExportButton({ title, subtitle, getEl }: {
   title: string
@@ -23,10 +24,11 @@ export function ExportButton({ title, subtitle, getEl }: {
     setBusy(kind)
     try {
       if (kind === 'xlsx') await exportChargeExcel(el, title, subtitle)
-      else await exportChargePdf(el, title)
+      else await exportChargePdf(el, title, subtitle)
       setOpen(false)
     } catch (e) {
       console.error('[charge-export]', e)
+      toast.error('Не удалось подготовить выгрузку', { description: 'Повторите попытку. Данные отчёта сохранены.' })
     } finally {
       setBusy(null)
     }
@@ -58,7 +60,7 @@ export function ExportButton({ title, subtitle, getEl }: {
           <FileText className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0" />
           <div className="text-left leading-tight">
             <div className="font-medium">PDF</div>
-            <div className="text-[10px] text-muted-foreground">снимок пункта</div>
+            <div className="text-[10px] text-muted-foreground">таблицы · показатели · графики</div>
           </div>
         </button>
       </PopoverContent>

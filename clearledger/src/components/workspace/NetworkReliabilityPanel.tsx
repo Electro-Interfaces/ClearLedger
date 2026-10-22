@@ -12,6 +12,7 @@ import { useMonitorScope } from './useMonitorScope'
 import { useStationCard } from '@/contexts/StationCardContext'
 import { cn } from '@/lib/utils'
 import { matchesSearch } from '@/lib/textUtils'
+import { monitorEnergy } from '@/lib/monitorMetrics'
 import { getNetworkReliability, type NetworkReliability, type ReliabilityRow } from '@/services/opsService'
 import {
   PageSizeField, RelatedLink, RelatedReport, ReportTools, RowCard, SheetTable,
@@ -52,15 +53,15 @@ const процент = (n: number, all: number): Cell => доля(n * 100, all)
 function строка(r: ReliabilityRow): Cell[] {
   return [r.number ?? r.code ?? '', r.name, r.region ?? '', r.brand ?? '', r.model ?? '',
     r.visits, r.visitsFailed, r.failedVisitsPct, r.attemptsPerVisit, r.emptyPct, r.kwhPerSession,
-    r.clientsLost, r.sessions, r.failed, r.failedPct, r.empty, r.energyKwh, r.revenue,
+    r.clientsLost, r.sessions, r.failed, r.failedPct, r.empty, monitorEnergy(r), r.revenue,
     r.clients, r.clientsAffected, r.lastSessionAt ? дата(r.lastSessionAt) : '', r.city ?? '']
 }
 function итоги(rows: ReliabilityRow[]): Cell[] {
   const visits = сумма(rows, 'visits'), sessions = сумма(rows, 'sessions')
   return ['Итого', rows.length + ' станций', '', '', '', visits, сумма(rows, 'visitsFailed'),
     процент(сумма(rows, 'visitsFailed'), visits), доля(sessions, visits, 2), процент(сумма(rows, 'empty'), sessions),
-    доля(сумма(rows, 'energyKwh'), sessions, 2), сумма(rows, 'clientsLost'), sessions, сумма(rows, 'failed'),
-    процент(сумма(rows, 'failed'), sessions), сумма(rows, 'empty'), сумма(rows, 'energyKwh'), сумма(rows, 'revenue'),
+    доля(rows.reduce((n, r) => n + monitorEnergy(r), 0), sessions, 2), сумма(rows, 'clientsLost'), sessions, сумма(rows, 'failed'),
+    процент(сумма(rows, 'failed'), sessions), сумма(rows, 'empty'), rows.reduce((n, r) => n + monitorEnergy(r), 0), сумма(rows, 'revenue'),
     сумма(rows, 'clients'), сумма(rows, 'clientsAffected'), '', '']
 }
 function поРегионам(rows: ReliabilityRow[], threshold: number) {

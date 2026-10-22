@@ -6,9 +6,9 @@ import { cn } from '@/lib/utils'
  * смотрит на число «13 просрочено» и хочет увидеть эти тринадцать, а не искать
  * их селектами. Активная подсвечена рамкой, повторное нажатие снимает отбор.
  */
-export function Tile({ icon: Icon, label, value, hint, tone, onClick, active }: {
+export function Tile({ icon: Icon, label, value, hint, tone, onClick, active, disabled }: {
   icon: LucideIcon; label: string; value: string; hint?: string; tone?: string
-  onClick?: () => void; active?: boolean
+  onClick?: () => void; active?: boolean; disabled?: boolean
 }) {
   const inner = (
     <>
@@ -23,8 +23,8 @@ export function Tile({ icon: Icon, label, value, hint, tone, onClick, active }: 
     active ? 'border-primary ring-1 ring-primary/40' : 'border-border/60')
   if (!onClick) return <div data-kpi className={look}>{inner}</div>
   return (
-    <button type="button" data-kpi onClick={onClick} aria-pressed={!!active}
-      className={cn(look, 'transition-colors hover:border-primary/60')}>
+    <button type="button" data-kpi onClick={onClick} aria-pressed={!!active} disabled={disabled}
+      className={cn(look, 'transition-colors enabled:hover:border-primary/60 disabled:cursor-not-allowed')}>
       {inner}
     </button>
   )
