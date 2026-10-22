@@ -8,6 +8,7 @@ import { HeaderInteractionButtons } from '@/components/layout/HeaderInteractionB
 import { APP_VERSION } from '@/lib/appUpdate'
 import { ECOSYSTEM_BRAND } from '@/config/brand'
 import { OrganizationSelector } from '@/components/layout/OrganizationSelector'
+import { NavigationBackButton } from '@/components/layout/NavigationBackButton'
 import { CompanySelector } from '@/components/company/CompanySelector'
 import { useCompany } from '@/contexts/CompanyContext'
 import { coreAppTitle, isCarvedProfile, productForPath, productLabel } from '@/config/spaceProducts'
@@ -22,11 +23,12 @@ export function Header() {
   const coreTitle = product ? null : coreAppTitle(pathname)
 
   return (
-    <header className="mobile-safe-top box-content h-[var(--header-height)] shrink-0
+    <header className="relative z-20 mobile-safe-top box-content h-[var(--header-height)] shrink-0
                        border-b border-border/50 bg-card/95 backdrop-blur-xl">
       <div className="flex h-full items-center justify-between gap-2 px-2 sm:gap-3 sm:px-4 md:px-6">
         {/* Левый блок: бургер (моб.) + лого + бренд + свёртка сайдбара */}
         <div className="flex min-w-0 items-center gap-3 md:gap-4">
+          <NavigationBackButton />
           {/* Бургера на телефоне нет (решение МАГа 06.09.2026): меню открывает
               кнопка «Приложения» в нижней панели — та, до которой достаёт большой
               палец. Две кнопки в одно и то же меню, одна из них в самом дальнем
@@ -36,7 +38,7 @@ export function Header() {
               приложений. Рабочий стол самого Ledger — `/workspace`.
               На телефоне логотипа нет: он был третьим путём на стол (рядом стояли
               кнопка «Стол» и нижняя навигация), а место занимал в первом ряду. */}
-          <Link to="/" title="К рабочему столу экосистемы" className="hidden items-center gap-3 shrink-0 lg:flex">
+          <Link to="/" title="К рабочему столу экосистемы" className="hidden min-w-0 items-center gap-3 lg:flex">
             {/* Знак пространства, а не иконка продукта. Раньше здесь стоял общий
                 глиф книги на синем квадрате — одинаковый у всех компаний, хотя у
                 каждой уже есть свой знак: сборка кладёт его в `favicon.svg` по
@@ -51,8 +53,8 @@ export function Header() {
               className="h-11 w-11 shrink-0 rounded-xl" />
             {/* Шапка называет ТЕКУЩИЙ продукт: там, где Учёт разрезан на рабочие места
                 («Финансы», «Данные»), надпись «Учёт» врала бы о том, где человек. */}
-            <div className="flex flex-col leading-none">
-              <div className="font-semibold tracking-tight text-foreground text-lg">
+            <div className="flex min-w-0 flex-col leading-none">
+              <div className="truncate font-semibold tracking-tight text-foreground text-lg">
                 {product ? productLabel(product, company.profileId)
                   : coreTitle ?? `${ECOSYSTEM_BRAND} Учёт`}
               </div>
@@ -61,7 +63,7 @@ export function Header() {
                   появилось», должен уметь назвать свою версию не заходя в меню.
                   Число берётся из `package.json` на сборке (`__APP_VERSION__`) —
                   прежняя константа `config/version.ts` застряла на 1.2.1 и врала. */}
-              <p className="text-xs text-muted-foreground">
+              <p className="truncate text-xs text-muted-foreground">
                 {ECOSYSTEM_BRAND} · {APP_VERSION}
               </p>
             </div>

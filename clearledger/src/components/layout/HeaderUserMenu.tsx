@@ -135,7 +135,9 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
               ? <img src={user.avatar_url} alt="" className="size-full object-cover" />
               : <User className="size-5 text-white" />}
           </span>
-          <span className="hidden flex-col items-start leading-none xl:flex">
+          {/* На средней ширине место нужно стрелке, названию продукта и версии.
+              ФИО остаётся в меню, а в шапке — кнопка профиля. */}
+          <span className="hidden flex-col items-start leading-none 2xl:flex">
             <span className="max-w-[140px] truncate text-sm font-medium text-foreground">
               {userName}
             </span>
