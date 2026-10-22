@@ -8,6 +8,13 @@ from app.services.session_scope import station_locations_sql
 MSK = timezone(timedelta(hours=3))
 
 
+def session_time_iso(value):
+    """Время сессии в БД — МСК без tz; в API всегда передаём смещение явно."""
+    if value is None:
+        return None
+    return (value.replace(tzinfo=MSK) if value.tzinfo is None else value.astimezone(MSK)).isoformat()
+
+
 def decimal_round(value, places=1):
     return float(Decimal(str(value or 0)).quantize(Decimal(10) ** -places, rounding=ROUND_HALF_UP))
 

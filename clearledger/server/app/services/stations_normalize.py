@@ -28,7 +28,7 @@ import re as _re
 import uuid as _uuid
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.station_passport import (
@@ -821,6 +821,26 @@ async def ingest_stations(
             "ambiguous_keys": ambiguous[:50], "message": message}
 
 
+async def build_source_station_index(db: AsyncSession, company_id) -> dict[str, str | None]:
+    """Постоянный ID АСУиМ → объект компании; неоднозначный ID не разрешаем."""
+    index: dict[str, str | None] = {}
+    for loc in (await db.execute(select(ServiceLocation).where(
+        ServiceLocation.company_id == company_id,
+        ServiceLocation.type.in_(("ev_charging", "ezs")),
+    ))).scalars():
+        key = str((loc.extra_metadata or {}).get("asuimStationId") or "").strip()
+        if key:
+            index[key] = loc.id if key not in index or index[key] == loc.id else None
+    return index
+
+
+def resolve_session_location(row, station_index, source_index):
+    source_id = str(row.get("source_station_id") or "").strip()
+    if source_id in source_index:
+        return source_index[source_id]
+    return station_index.get(str(row.get("station_code") or "").strip())
+
+
 async def build_station_index(db: AsyncSession, company_id) -> dict[str, str]:
     """Индекс № станции → ServiceLocation.id (конформная размерность) для резолва
     сессий/оплат на объект. Ключ — station_number (типизир.) или extra_metadata.number.
@@ -850,21 +870,52 @@ async def build_station_index(db: AsyncSession, company_id) -> dict[str, str]:
         if cur is None or r < cur[0]:
             store[key] = (r, loc.id)
 
-    for loc in (await db.execute(select(ServiceLocation).where(
-        ServiceLocation.company_id == company_id, ServiceLocation.type == "ev_charging"))).scalars():
+    locations = list((await db.execute(select(ServiceLocation).where(
+        ServiceLocation.company_id == company_id, ServiceLocation.type == "ev_charging"))).scalars())
+    for loc in locations:
         md = loc.extra_metadata or {}
         num = loc.station_number or md.get("number")
         if num is not None and str(num).strip():
             put(idx_r, str(num).strip(), loc)
-        for h in (md.get("numberHistory") or []):
-            old = str((h or {}).get("было") or "").strip()
-            if old:
+        aliases = [md.get("number"), md.get("buNumber")]
+        aliases.extend((h or {}).get("было") for h in (md.get("numberHistory") or []))
+        for value in aliases:
+            old = str(value or "").strip()
+            if old and old != str(num or "").strip():
                 put(alias_r, old, loc)
+    # Старый номер подтверждается постоянным ID из самой выгрузки. Текущий
+    # location_id сессии здесь не используется: он мог ошибочно указывать на
+    # тестовый дубль. При повторном использовании номера неоднозначный алиас
+    # из фактов не создаётся; явный ID сессии всё равно разрешается отдельно.
+    source_index = await build_source_station_index(db, company_id)
+    proven: dict[str, set[str]] = {}
+    for number, source_id in (await db.execute(select(
+        ChargeSession.station_code, ChargeSession.source_station_id,
+    ).where(ChargeSession.company_id == company_id,
+            ChargeSession.station_code.is_not(None),
+            ChargeSession.source_station_id.is_not(None)).distinct())).all():
+        lid = source_index.get(source_id)
+        if lid and number:
+            proven.setdefault(number.strip(), set()).add(lid)
+    by_id = {loc.id: loc for loc in locations}
+    for number, lids in proven.items():
+        if len(lids) == 1:
+            loc = by_id.get(next(iter(lids)))
+            if loc is not None:
+                put(alias_r, number, loc)
     idx = {k: v[1] for k, v in idx_r.items()}
-    # Действующие номера приоритетнее прежних: алиас не должен перехватить номер,
-    # который сегодня принадлежит другой станции.
-    for old, (_r, lid) in alias_r.items():
-        idx.setdefault(old, lid)
+    # Номер действующего реального объекта приоритетнее прежнего. Тестовое
+    # зеркало и закрытая неподтверждённая заглушка не могут перехватить прежний
+    # номер реальной станции: так 123 Ангарска снова попадал в тестовую Казань.
+    for old, (alias_rank, lid) in alias_r.items():
+        current = idx_r.get(old)
+        shadow = current is not None and (
+            current[0][0] == 1
+            or (current[0][1] == 1 and current[0][2] == 1)
+        )
+        confirmed_real_alias = alias_rank[0] == 0 and alias_rank[1] == 0
+        if current is None or (shadow and confirmed_real_alias):
+            idx[old] = lid
     return idx
 
 
@@ -942,10 +993,42 @@ async def backfill_session_locations(db: AsyncSession, company_id, auto_create: 
     if auto_create:
         created_stations = (await ensure_stations_from_sessions(db, company_id))["created"]
     idx = await build_station_index(db, company_id)
+    # Постоянный ID важнее текущих и прежних номеров. Общий бэкфилл не должен
+    # отменять связь, установленную при импорте сессии по ID источника.
+    from sqlalchemy import text
+    stable_params = {"company": company_id}
+    stable_cte = """
+        WITH registry AS (
+            SELECT extra_metadata->>'asuimStationId' AS source_id, min(id) AS location_id
+            FROM service_locations
+            WHERE company_id=:company AND type IN ('ev_charging','ezs')
+              AND nullif(extra_metadata->>'asuimStationId','') IS NOT NULL
+            GROUP BY extra_metadata->>'asuimStationId' HAVING count(*)=1
+        )
+    """
+    stable_moved = int((await db.execute(text(stable_cte + """
+        SELECT count(*) FROM charge_sessions s JOIN registry r ON r.source_id=s.source_station_id
+        WHERE s.company_id=:company AND s.location_id IS NOT NULL AND s.location_id<>r.location_id
+    """), stable_params)).scalar() or 0)
+    await db.execute(text(stable_cte + """
+        UPDATE charge_sessions s SET location_id=r.location_id FROM registry r
+        WHERE s.company_id=:company AND s.source_station_id=r.source_id
+          AND s.location_id IS DISTINCT FROM r.location_id
+    """), stable_params)
     codes = [str(x).strip() for x in (await db.execute(
         select(ChargeSession.station_code).where(ChargeSession.company_id == company_id).distinct()
     )).scalars() if x]
-    linked_rows = matched = moved = 0
+    linked_rows = matched = 0
+    moved = stable_moved
+    shadows = list((await db.execute(select(ServiceLocation.id).where(
+        ServiceLocation.company_id == company_id,
+        or_(ServiceLocation.is_test.is_(True),
+            (ServiceLocation.status == "closed")
+            & ServiceLocation.extra_metadata["asuimStationId"].as_string().is_(None)),
+    ))).scalars())
+    # Один текстовый номер не отменяет действующую реальную привязку: это может
+    # быть историческое размещение. Переезд реального объекта требует ID источника.
+    rebind = or_(ChargeSession.location_id.is_(None), ChargeSession.location_id.in_(shadows))
     for code in codes:
         lid = idx.get(code) or (idx.get(code.rsplit("-", 1)[0]) if "-" in code else None)
         if not lid:
@@ -956,13 +1039,19 @@ async def backfill_session_locations(db: AsyncSession, company_id, auto_create: 
         # должен быть виден в отчёте загрузки.
         moved += int((await db.execute(select(func.count()).select_from(ChargeSession).where(
             ChargeSession.company_id == company_id, ChargeSession.station_code == code,
+            ChargeSession.source_station_id.is_(None), rebind,
             ChargeSession.location_id.is_not(None), ChargeSession.location_id != lid,
         ))).scalar() or 0)
         r = await db.execute(update(ChargeSession).where(
-            ChargeSession.company_id == company_id, ChargeSession.station_code == code
+            ChargeSession.company_id == company_id, ChargeSession.station_code == code,
+            ChargeSession.source_station_id.is_(None), rebind,
+            ChargeSession.location_id.is_distinct_from(lid),
         ).values(location_id=lid))
         linked_rows += int(r.rowcount or 0)
     await db.flush()
+    linked_rows = int((await db.execute(select(func.count()).select_from(ChargeSession).where(
+        ChargeSession.company_id == company_id, ChargeSession.location_id.is_not(None),
+    ))).scalar() or 0)
     total = int((await db.execute(select(func.count()).select_from(ChargeSession).where(
         ChargeSession.company_id == company_id))).scalar() or 0)
     return {"status": "success", "sessions_linked": linked_rows, "sessions_total": total,

@@ -957,7 +957,8 @@ async def _last_loaded_day(db: AsyncSession, company_id, view: str) -> str | Non
     return (last - timedelta(days=1)).strftime("%Y-%m-%d") if last else None
 
 
-def _read_sheet(ws, date_key: str | None = None, since: str | None = None) -> list[dict[str, Any]]:
+def _read_sheet(ws, date_key: str | None = None, since: str | None = None,
+                pending_ids: set[str] | None = None) -> list[dict[str, Any]]:
     """Лист книги → строки словарями; `since` оставляет только дни от этой даты."""
     it = ws.iter_rows(values_only=True)
     head = next(it, None)
@@ -965,6 +966,7 @@ def _read_sheet(ws, date_key: str | None = None, since: str | None = None) -> li
         return []
     hdr = [str(h).strip().lower() if h is not None else "" for h in head]
     di = hdr.index(date_key) if since and date_key and date_key in hdr else None
+    si = hdr.index("id_сессии") if pending_ids and "id_сессии" in hdr else None
     rows: list[dict[str, Any]] = []
     for r in it:
         if not r or not any(c is not None for c in r):
@@ -973,7 +975,9 @@ def _read_sheet(ws, date_key: str | None = None, since: str | None = None) -> li
             v = r[di]
             day = v.strftime("%Y-%m-%d") if hasattr(v, "strftime") else str(v or "")[:10]
             # Строку без даты не выбрасываем: потерять запись хуже, чем взять лишнюю.
-            if day and day < since:
+            if day and day < since and not (
+                si is not None and _s(r[si], 64) in pending_ids
+            ):
                 continue
         rows.append(dict(zip(hdr, r)))
     return rows
@@ -1033,7 +1037,13 @@ async def ingest_asuim_book(
             # от истории один хвост.
             if day is None and not single and mode == "append" and view in INCREMENTAL:
                 day = await _last_loaded_day(db, company_id, view)
-            rows = _read_sheet(wb[sheets[view]], INCREMENTAL.get(view), day)
+            pending_ids = None
+            if view == "sessions" and day and mode == "append":
+                from app.services.charge_sessions_normalize import pending_session_conditions
+                pending_ids = set((await db.execute(select(ChargeSession.session_ext_id).where(
+                    *pending_session_conditions(company_id, channel_id)
+                ))).scalars())
+            rows = _read_sheet(wb[sheets[view]], INCREMENTAL.get(view), day, pending_ids)
             if view in ("stations", "connectors"):
                 срез[view] = rows
             if not rows and day:
@@ -1171,9 +1181,8 @@ async def _ingest_view(
 def map_sessions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """`charge_sessions_ru` → строки сессий в ключах `ingest_charge_sessions`.
 
-    Представление в пробную выгрузку не попало, поэтому маппер написан по
-    приложению 1 постановки и на живых данных НЕ проверен: первую же выгрузку
-    сессий гонять с проверкой итогов по периоду."""
+    Проверено по многолистовой выгрузке: телефон клиента и постоянный ID
+    станции не подменяются внешним ID клиента и изменяемым номером станции."""
     out: list[dict[str, Any]] = []
     for r in rows:
         sid = _s(r.get("id_сессии"), 64)
@@ -1183,6 +1192,8 @@ def map_sessions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out.append({
             "session_ext_id": sid,
             "station_code": _s(r.get("номер_станции") or r.get("id_станции"), 40),
+            "source_station_id": _s(r.get("id_станции"), 64),
+            "source_customer_id": _s(r.get("id_пользователя"), 64),
             "station_name": _s(r.get("название_станции"), 160),
             "region": _s(r.get("регион"), 120),
             "address": _s(r.get("адрес"), 300),
@@ -1190,7 +1201,7 @@ def map_sessions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "connector_type": _s(r.get("тип_коннектора"), 40),
             "started_at": started,
             "finished_at": finished,
-            "duration_min": round((finished - started).total_seconds() / 60, 2)
+            "duration_min": max(0, round((finished - started).total_seconds() / 60, 2))
                             if started and finished else 0,
             # Состояние сессии — из графы «статус» (Complete / CompleteError).
             # «результат» и «описание_результата» несут одну и ту же фразу
@@ -1200,7 +1211,7 @@ def map_sessions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "result": _s(r.get("статус") or r.get("результат"), 40),
             "charge_type": _s(r.get("тип_зарядки"), 40),
             "user_type": _s(r.get("тип_пользователя"), 20),
-            "user_id": _s(r.get("телефон_пользователя") or r.get("id_пользователя"), 160),
+            "user_id": _phone(r.get("телефон") or r.get("телефон_пользователя")),
             "rfid": _s(r.get("rfid_карта") or r.get("номер_карты"), 120),
             "energy_kwh": _num(r.get("энергия_квтч")) or 0,
             # Деньги сессии витрина зовёт «стоимость_руб» (в платежах та же величина —
