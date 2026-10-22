@@ -35,3 +35,20 @@ export const queryClient = new QueryClient({
     },
   },
 })
+
+// Каталог — проекция тех же карточек, справочников и документов площадок.
+// Их штатная инвалидация должна обновлять и проводник, включая скрытую
+// закреплённую вкладку. Собираем компанию один раз за пачку инвалидаций.
+const pendingCatalogCompanies = new Set<string>()
+queryCache.subscribe((event) => {
+  if (event.type !== 'updated' || event.action.type !== 'invalidate') return
+  const [source, first, second] = event.query.queryKey
+  if (!['docs', 'doc', 'references', 'site-docs'].includes(String(source))) return
+  const companyId = source === 'doc' ? second : first
+  if (typeof companyId !== 'string' || !companyId || pendingCatalogCompanies.has(companyId)) return
+  pendingCatalogCompanies.add(companyId)
+  queueMicrotask(() => {
+    pendingCatalogCompanies.delete(companyId)
+    void queryClient.invalidateQueries({ queryKey: ['raw-docs-space', companyId] })
+  })
+})

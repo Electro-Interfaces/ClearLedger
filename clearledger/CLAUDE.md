@@ -200,6 +200,8 @@ Intake pipeline, DevTools, интеграция 1С раннего интерф�
 |----------|----------|
 | `docs/LEGACY_DATAENTRY.md` | ранний слой DataEntry, профили, Intake, интеграция 1С раннего UI |
 | `docs/WORKSPACE_CONTROLS.md` | полный свод правил рабочей области |
+| `docs/DOCUMENT_EXPLORER.md` | общий каталог документов, формы создания, владельцы и браузерная проверка |
+| `docs/SPACE_DOCUMENTS_PROJECTION.md` | серверная проекция без копий карточек, ID владельцев и основной файл |
 | `DESIGN.md` | токены, типографика, палитра бейджей |
 | `EZS_ANALYTICS_BLUEPRINT.md` | метрики, API, правила кода «Продаж» РусГидро |
 | `STORE_BP_EXPORT_CONTRACT.md` | контракт выгрузки «Торгового центра» в БП |

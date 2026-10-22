@@ -474,7 +474,6 @@ export interface SpaceDocument {
   siteId?: string
   projectId?: string | null
   siteDocId?: string
-  fileRole?: string | null
 }
 
 /** Дерево «Документов» пространства: договоры с их бумагами, документы проектов, «Трек». */

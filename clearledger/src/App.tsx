@@ -1,6 +1,6 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect, useRef } from 'react'
 import {
-  createBrowserRouter, RouterProvider, Outlet, Link, Navigate, useLocation, useParams,
+  createBrowserRouter, RouterProvider, Outlet, Link, Navigate, useLocation, useNavigate, useParams,
 } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/queryClient'
@@ -220,7 +220,21 @@ function Providers() {
 
 function CompanyScopedProviders() {
   const { companyId } = useCompany()
-  const { pathname } = useLocation()
+  const location = useLocation()
+  const { pathname } = location
+  const navigate = useNavigate()
+  const previousCompany = useRef(companyId)
+  // Эта граница переживает TabsProvider key={companyId}. Проводник ниже неё
+  // перемонтируется и уже не сможет отличить смену компании от прямой ссылки.
+  useEffect(() => {
+    const previous = previousCompany.current
+    previousCompany.current = companyId
+    if (!previous || !companyId || previous === companyId || !/(?:^|\/)files\/?$/.test(pathname)) return
+    const search = new URLSearchParams(location.search)
+    if (!search.has('folder') && !search.has('q')) return
+    search.delete('folder'); search.delete('q')
+    navigate({ pathname, search: search.toString(), hash: location.hash }, { replace: true })
+  }, [companyId, location.hash, location.search, navigate, pathname])
   const isStoreDemo = pathname.endsWith('/demo/shop') || (isDemoPath() && pathname === '/shop')
   return (
     <TabsProvider key={companyId}>

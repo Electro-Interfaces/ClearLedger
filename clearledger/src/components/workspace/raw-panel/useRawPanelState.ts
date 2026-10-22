@@ -69,7 +69,7 @@ export function useRawPanelState({ explorer = false } = {}) {
       if (folder.length) next.set('folder', folder.join('/')); else next.delete('folder')
       if (query) next.set('q', query); else next.delete('q')
       return next
-    }, { replace })
+    }, { replace, flushSync: true })
   }
 
   useEffect(() => {
