@@ -439,6 +439,15 @@ export function StoreView({ sub, companyId, dateFrom, dateTo, stations, demo = f
     // должна быть у самой станции, а не у обёртки вокруг неё.
     return <div className="h-full"><StoreStationConsolePanel /></div>
   }
+  // «Ценники» — тот же вход, сразу на экране очереди печати станции: принтер и
+  // очередь живут у АЗС, своего списка копий центр не ведёт.
+  if (sub === 'labels-queue') {
+    return (
+      <div className="h-full">
+        <StoreStationConsolePanel path="labels-queue" heading={пунктМеню(sub)} action="Ценники" />
+      </div>
+    )
+  }
   if (sub === 'stations') {
     return (
       <div className="h-full overflow-y-auto">

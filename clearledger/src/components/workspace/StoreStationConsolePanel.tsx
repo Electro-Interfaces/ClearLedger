@@ -9,6 +9,10 @@
  * Станция за CGNAT, поэтому запрос идёт через мастер и хаб TradeLink по тому же
  * overlay, по которому станция и так на связи. Офлайн-станция не открывается —
  * и это честно: её база живёт на месте, без канала центр до неё не дотянется.
+ *
+ * Тот же вход открывает и отдельный экран станции (`path`): пункт центра с
+ * собственным названием — «Ценники», — но без второй реализации под ним. Права
+ * и условия входа от экрана не зависят: назначение на эту АЗС и связь.
  */
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -19,7 +23,14 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { Button } from '@/components/ui/button'
 import { useStoreAccessPolicy } from './useStoreCommercialPolicy'
 
-export function StoreStationConsolePanel() {
+export function StoreStationConsolePanel({ path = '', heading, action = 'Работать' }: {
+  /** Экран станции за прокси: пусто — рабочее место целиком. */
+  path?: string
+  /** Заголовок и описание пункта — из каталога, второй копии текста нет. */
+  heading?: { title: string; subtitle: string }
+  /** Подпись кнопки: ею названо действие, а не экран. */
+  action?: string
+} = {}) {
   const { company } = useCompany()
   const accessPolicy = useStoreAccessPolicy()
   const [открываем, setОткрываем] = useState<number | null>(null)
@@ -34,7 +45,7 @@ export function StoreStationConsolePanel() {
     setОткрываем(id)
     try {
       await openStationSession(id)
-      const адрес = `/api/store/station/${id}/console/`
+      const адрес = `/api/store/station/${id}/console/${path}`
       if (вкладка) вкладка.location.href = адрес
       else window.open(адрес, '_blank') // попапы запрещены — пробуем ещё раз, уже с браузерным вопросом
     } catch (e) {
@@ -61,14 +72,14 @@ export function StoreStationConsolePanel() {
     <div className="max-w-4xl space-y-6 p-6">
       <div>
         <h3 className="flex items-center gap-2 text-base font-semibold">
-          <MonitorSmartphone className="h-4 w-4 text-primary" />Рабочее место АЗС
+          <MonitorSmartphone className="h-4 w-4 text-primary" />{heading?.title ?? 'Рабочее место АЗС'}
         </h3>
         <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-          Выберите станцию, чтобы работать на ней из центра: приёмка, инвентаризация, остатки,
-          карточки. Открывается сам агент станции, а не копия его экранов, — всё введённое
-          сразу становится учётом АЗС и помечается вашим именем. Станция открывается
-          отдельной вкладкой, эта остаётся здесь. Кнопка доступна только администратору,
-          назначенному именно на эту АЗС.
+          {heading?.subtitle ?? `Выберите станцию, чтобы работать на ней из центра: приёмка,
+          инвентаризация, остатки, карточки. Открывается сам агент станции, а не копия его
+          экранов, — всё введённое сразу становится учётом АЗС и помечается вашим именем.
+          Станция открывается отдельной вкладкой, эта остаётся здесь. Кнопка доступна только
+          администратору, назначенному именно на эту АЗС.`}
         </p>
       </div>
 
@@ -123,7 +134,7 @@ export function StoreStationConsolePanel() {
                 <Button size="sm" disabled={!можно}
                         onClick={(e) => { e.stopPropagation(); void войти(s.station_id) }}
                         title={почему}>
-                  {открываем === s.station_id ? 'Открываем…' : 'Работать'}
+                  {открываем === s.station_id ? 'Открываем…' : action}
                 </Button>
               </div>
             </div>
