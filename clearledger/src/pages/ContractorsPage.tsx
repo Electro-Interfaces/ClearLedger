@@ -5,7 +5,7 @@
  * и его договоры (с детальной карточкой каждого).
  */
 import { ContactFormDialog } from '@/components/reference/ContactFormDialog'
-import { Fragment, useState, useMemo, useEffect, useRef } from 'react'
+import { Fragment, Children, cloneElement, isValidElement, useId, useState, useMemo, useEffect, useRef, type ReactElement } from 'react'
 import { ApiError } from '@/services/apiClient'
 import { localReferenceId, searchContractCounterparties, resumeCreation, type CreationProgress } from '@/lib/contractFormSave'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -31,7 +31,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from '@/components/ui/dialog'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -177,9 +177,9 @@ function contactOf(raw: Record<string, unknown>, kind: string): string | undefin
 function Req({ label, value, span }: { label: string; value?: React.ReactNode; span?: boolean }) {
   if (value === undefined || value === null || value === '') return null
   return (
-    <div className={`space-y-0.5 ${span ? 'col-span-2' : ''}`}>
+    <div className={`min-w-0 space-y-0.5 ${span ? 'sm:col-span-2' : ''}`}>
       <div className="text-[11px] uppercase tracking-wide text-muted-foreground/70">{label}</div>
-      <div className="text-sm break-words">{value}</div>
+      <div className="text-sm [overflow-wrap:anywhere]">{value}</div>
     </div>
   )
 }
@@ -189,9 +189,10 @@ function Req({ label, value, span }: { label: string; value?: React.ReactNode; s
 const WHERE_WORKS_MAX = 10
 
 function WhereWorks({ counterpartyId }: { counterpartyId: string }) {
-  const { data, isLoading } = useCounterpartyLocations(counterpartyId)
+  const { data, isLoading, isError, refetch } = useCounterpartyLocations(counterpartyId)
   const [expanded, setExpanded] = useState(false)
   if (isLoading) return <Loader2 className="size-4 animate-spin text-muted-foreground" />
+  if (isError) return <p role="alert" className="text-sm text-destructive">Не удалось загрузить охват. <button className="underline" onClick={() => void refetch()}>Повторить</button></p>
   if (!data) return null
   const shown = expanded ? data.locations : data.locations.slice(0, WHERE_WORKS_MAX)
   const hidden = data.locations.length - shown.length
@@ -347,10 +348,15 @@ function ContactsBlock({ cp }: { cp: Counterparty }) {
     queryFn: () => refs.getCounterpartyContacts(cp.id),
   })
   const contacts = q.data ?? []
+  const [deleting, setDeleting] = useState<refs.CounterpartyContact | null>(null)
   const invalidate = () => qc.invalidateQueries({ queryKey: ['cp-contacts', cp.id] })
   const remove = useMutation({
     mutationFn: (id: string) => refs.deleteCounterpartyContact(cp.id, id),
-    onSuccess: () => { toast.success('Контакт удалён'); invalidate() },
+    onSuccess: () => {
+      toast.success('Контакт удалён'); setDeleting(null); invalidate()
+      void qc.invalidateQueries({ queryKey: ['location-contacts'] })
+      void qc.invalidateQueries({ queryKey: ['location-contact-options'] })
+    },
     onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
   })
 
@@ -366,12 +372,30 @@ function ContactsBlock({ cp }: { cp: Counterparty }) {
           </Button>
         </ContactFormDialog>
       </div>
-      {contacts.length === 0 ? (
+      {q.isPending ? <p role="status" className="text-sm text-muted-foreground">Загрузка контактов…</p>
+      : q.isError ? <div role="alert" className="text-sm text-destructive">
+        <p>Не удалось загрузить контакты.</p><Button variant="outline" size="sm" onClick={() => void q.refetch()}>Повторить загрузку контактов</Button>
+      </div> : contacts.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           Контактных лиц нет. Реквизиты связи самой организации — в блоке «Реквизиты».
         </p>
       ) : (
-        <div className="rounded-md border">
+        <div className="rounded-md border [&_[data-slot=table-container]]:max-w-full">
+          <div className="divide-y sm:hidden">
+            {contacts.map((k) => <div key={k.id} className="space-y-2 p-3 text-sm">
+              <div className="font-medium [overflow-wrap:anywhere]">{k.name}</div>
+              {k.position && <p className="text-muted-foreground [overflow-wrap:anywhere]">{k.position}</p>}
+              <Badge variant="outline">{refs.CONTACT_ROLE_LABEL[k.role] ?? k.role}</Badge>
+              {k.phone && <a className="block min-h-8 break-all text-primary underline" href={`tel:${k.phone}`}>{k.phone}</a>}
+              {k.email && <a className="block min-h-8 break-all text-primary underline" href={`mailto:${k.email}`}>{k.email}</a>}
+              {k.notes && <p className="[overflow-wrap:anywhere]">{k.notes}</p>}
+              <div className="flex flex-wrap gap-2">
+                <ContactFormDialog counterpartyId={cp.id} edit={k} onSaved={invalidate}><Button variant="outline" size="sm" className="min-h-11">Изменить контакт</Button></ContactFormDialog>
+                <Button variant="outline" size="sm" className="min-h-11 text-destructive" onClick={() => setDeleting(k)}>Удалить контакт</Button>
+              </div>
+            </div>)}
+          </div>
+          <div className="hidden sm:block">
           <Table>
             <TableHeader><TableRow>
               <TableHead>ФИО</TableHead>
@@ -398,12 +422,12 @@ function ContactsBlock({ cp }: { cp: Counterparty }) {
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-1">
                       <ContactFormDialog counterpartyId={cp.id} edit={k} onSaved={invalidate}>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Изменить контакт: ${k.name}`}>
                           <Pencil className="size-3.5" />
                         </Button>
                       </ContactFormDialog>
                       <Button variant="ghost" size="icon" className="h-8 w-8"
-                        onClick={() => remove.mutate(k.id)}>
+                        aria-label={`Удалить контакт: ${k.name}`} onClick={() => setDeleting(k)}>
                         <Trash2 className="size-3.5 text-destructive" />
                       </Button>
                     </div>
@@ -412,8 +436,18 @@ function ContactsBlock({ cp }: { cp: Counterparty }) {
               ))}
             </TableBody>
           </Table>
+          </div>
         </div>
       )}
+      <AlertDialog open={!!deleting} onOpenChange={(open) => { if (!open && !remove.isPending) setDeleting(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader><AlertDialogTitle>Удалить контакт «{deleting?.name}»?</AlertDialogTitle>
+            <AlertDialogDescription>Контакт удалится из общего реестра и со всех объектов, где он назначен. Чтобы снять только назначение, откройте карточку объекта.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel disabled={remove.isPending}>Отмена</AlertDialogCancel>
+            <AlertDialogAction disabled={remove.isPending} onClick={(event) => { event.preventDefault(); if (deleting) remove.mutate(deleting.id) }}>Удалить контакт</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -655,7 +689,7 @@ function ActivityBlock({ cp }: { cp: Counterparty }) {
 function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }) {
   const { company } = useCompany()
   const isEnergy = company.profileId === 'energy'
-  const { data: allContracts = [] } = useContracts()
+  const { data: allContracts = [], isPending: contractsLoading, isError: contractsError, refetch: reloadContracts } = useContracts()
   // Договоры из 1С хранят counterpartyId = GUID (externalRef); ручные — наш id.
   const contracts = useMemo(
     () => allContracts.filter(
@@ -685,11 +719,11 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
   return (
     <div className="space-y-5">
       {/* Заголовок */}
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <Building2 className="size-5 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">{cp.name}</h2>
+            <h2 className="min-w-0 text-lg font-semibold [overflow-wrap:anywhere]">{cp.name}</h2>
             <Badge variant="outline" className={TYPE_COLOR[cp.type] || ''}>{cp.type}</Badge>
             {cp.externalRef && (
               <Badge variant="secondary" className="gap-1"><Database className="size-3" /> Из 1С</Badge>
@@ -760,7 +794,21 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
             <Button size="sm" variant="outline" className="shrink-0"><Plus className="size-4 mr-1.5" /> Добавить</Button>
           </ContractFormDialog>
         </div>
-        <div className="rounded-md border">
+        {contractsError ? <div role="alert" className="text-sm text-destructive">
+          <p>Не удалось загрузить договоры.</p><Button variant="outline" size="sm" onClick={() => void reloadContracts()}>Повторить загрузку договоров</Button>
+        </div> : contractsLoading ? <p role="status">Загрузка договоров…</p> : <div className="min-w-0 rounded-md border">
+          <div className="divide-y sm:hidden">
+            {contracts.length === 0 && <p className="p-3 text-sm text-muted-foreground">Договоров пока нет</p>}
+            {contracts.map((c) => <div key={c.id} className="space-y-2 p-3 text-sm">
+              <ContractDetailDialog contract={c}><button className="min-h-11 break-all text-left font-medium text-primary underline">{c.number}</button></ContractDetailDialog>
+              <p className="text-muted-foreground">Дата: {c.date || '—'}</p>
+              <p className={contractStatus(c).cls}>{contractStatus(c).label}</p>
+              <ContractKindBadge contract={c} />
+              {isEnergy && <div><ContractScopeDialog contract={c}><Button variant="outline" size="sm" className="min-h-11">Охват: {ContractScopeBadgeLabel(c.scopeType, c.locationsCount)}</Button></ContractScopeDialog></div>}
+              <ContractButtons contract={c} counterpartyId={cp.id} mobile />
+            </div>)}
+          </div>
+          <div className="hidden sm:block">
           <Table>
             <TableHeader>
               <TableRow>
@@ -812,14 +860,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                   </TableCell>
                   )}
                   <TableCell>
-                    {!c.externalRef && (
-                      <div className="flex gap-1 justify-end">
-                        <ContractFormDialog counterpartyId={cp.id} edit={c}>
-                          <Button variant="ghost" size="icon" className="h-8 w-8"><Pencil className="size-4" /></Button>
-                        </ContractFormDialog>
-                        <DeleteContractButton contract={c} />
-                      </div>
-                    )}
+                    <ContractButtons contract={c} counterpartyId={cp.id} />
                   </TableCell>
                 </TableRow>
                 {isEnergy && !!settlementsByContract.get(c.id)?.length &&
@@ -828,7 +869,8 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
               ))}
             </TableBody>
           </Table>
-        </div>
+          </div>
+        </div>}
       </div>
 
       {/* Связь со слоем данных: energy — платёжная дисциплина по станциям,
@@ -850,6 +892,19 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
   )
 }
 
+function ContractButtons({ contract, counterpartyId, mobile = false }: { contract: Contract; counterpartyId: string; mobile?: boolean }) {
+  if (contract.externalRef) return null
+  return <div className={`flex gap-1 ${mobile ? 'flex-wrap' : 'justify-end'}`}>
+    <ContractFormDialog counterpartyId={counterpartyId} edit={contract}>
+      <Button variant={mobile ? 'outline' : 'ghost'} size={mobile ? 'sm' : 'icon'}
+        className={mobile ? 'min-h-11' : 'h-8 w-8'} aria-label={`Изменить договор: ${contract.number}`}>
+        <Pencil className="size-4" />{mobile && 'Изменить договор'}
+      </Button>
+    </ContractFormDialog>
+    <DeleteContractButton contract={contract} />
+  </div>
+}
+
 // ─── Форма контрагента (создание/правка) ─────────────────────────────────────
 const VID_OPTIONS: { value: CounterpartyType; label: string }[] = [
   { value: 'ЮЛ', label: 'Юр. лицо' }, { value: 'ИП', label: 'Инд. предприниматель' }, { value: 'ФЛ', label: 'Физ. лицо' },
@@ -867,10 +922,19 @@ function FSection({ title, children }: { title: string; children: React.ReactNod
 function LField({ label, required, span, children }: {
   label: string; required?: boolean; span?: boolean; children: React.ReactNode
 }) {
+  const id = useId()
+  const control = (node: React.ReactNode): React.ReactNode => {
+    if (!isValidElement(node)) return node
+    const element = node as ReactElement<{ id?: string; children?: React.ReactNode }>
+    if (element.type === Select) return cloneElement(element, {}, Children.map(element.props.children, control))
+    if (element.type === Input || element.type === Textarea || element.type === SelectTrigger)
+      return cloneElement(element, { id })
+    return element
+  }
   return (
-    <div className={`space-y-1.5 ${span ? 'col-span-2' : ''}`}>
-      <Label className="text-xs text-muted-foreground">{label}{required && <span className="text-destructive"> *</span>}</Label>
-      {children}
+    <div className={`min-w-0 space-y-1.5 ${span ? 'sm:col-span-2' : ''}`}>
+      <Label htmlFor={id} className="text-xs text-muted-foreground">{label}{required && <span className="text-destructive"> *</span>}</Label>
+      {control(children)}
     </div>
   )
 }
@@ -892,7 +956,7 @@ function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; child
   const [type, setType] = useState<CounterpartyType>(edit?.type ?? 'ЮЛ')
   const set = (k: CpField) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setF((s) => ({ ...s, [k]: e.target.value }))
-  const canSave = f.name.trim() !== '' && f.inn.trim() !== ''
+  const canSave = f.name.trim() !== '' && (f.inn.trim() !== '' || (!!edit && !edit.inn.trim()))
   const pending = create.isPending || update.isPending
   function save() {
     const c = (v: string) => v.trim() || undefined
@@ -907,19 +971,29 @@ function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; child
     }
     const opts = {
       onSuccess: () => { toast.success(edit ? 'Контрагент обновлён' : 'Контрагент добавлен'); setOpen(false) },
-      onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
+      onError: (e: unknown) => toast.error(e instanceof ApiError && e.status === 409
+        ? 'Контрагент с такими ИНН/КПП уже существует. Найдите его в списке.'
+        : `Ошибка: ${(e as Error).message}`),
     }
     if (edit) update.mutate({ id: edit.id, updates: base }, opts)
     else create.mutate({ ...base, aliases: [] }, opts)
   }
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(value) => {
+      if (pending) return
+      if (value) {
+        setF(Object.fromEntries(CP_FIELDS.map((k) => [k, edit?.[k] ?? ''])) as Record<CpField, string>)
+        setType(edit?.type ?? 'ЮЛ')
+      }
+      setOpen(value)
+    }}>
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto [&_input]:bg-muted/60! [&_textarea]:bg-muted/60! [&_[data-slot=select-trigger]]:bg-muted/60!">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="size-5" /> {edit ? 'Изменить контрагента' : 'Новый контрагент'}
           </DialogTitle>
+          <DialogDescription>Общие реквизиты организации. Изменения будут видны во всех связанных договорах и объектах.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <FSection title="Идентификация">
@@ -931,7 +1005,7 @@ function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; child
             </LField>
             <LField label="Краткое наименование" required><Input value={f.name} onChange={set('name')} placeholder="ООО …" /></LField>
             <LField label="Полное наименование" span><Input value={f.fullName} onChange={set('fullName')} /></LField>
-            <LField label="ИНН" required><Input value={f.inn} onChange={set('inn')} placeholder="7800…" /></LField>
+            <LField label="ИНН" required={!edit || !!edit.inn.trim()}><Input value={f.inn} onChange={set('inn')} placeholder="7800…" /></LField>
             <LField label="КПП"><Input value={f.kpp} onChange={set('kpp')} /></LField>
             <LField label="ОГРН / ОГРНИП"><Input value={f.ogrn} onChange={set('ogrn')} /></LField>
             <LField label="ОКПО"><Input value={f.okpo} onChange={set('okpo')} /></LField>
@@ -957,7 +1031,7 @@ function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; child
           </FSection>
         </div>
         <DialogFooter>
-          <Button disabled={!canSave || pending} onClick={save}>
+          <Button className="min-h-11" disabled={!canSave || pending} onClick={save}>
             {pending && <Loader2 className="size-4 animate-spin mr-2" />} Сохранить
           </Button>
         </DialogFooter>
@@ -1266,16 +1340,16 @@ function DeleteCounterpartyButton({ cp }: { cp: Counterparty }) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="sm" className="text-destructive"><Trash2 className="size-3.5" /></Button>
+        <Button variant="outline" size="sm" aria-label={`Удалить контрагента: ${cp.name}`} className="text-destructive"><Trash2 className="size-3.5" /></Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Удалить контрагента «{cp.name}»?</AlertDialogTitle>
-          <AlertDialogDescription>Действие необратимо. Договоры контрагента не удаляются автоматически.</AlertDialogDescription>
+          <AlertDialogDescription>Можно удалить только карточку без связанных договоров, контактов и других записей. Действие необратимо.</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Отмена</AlertDialogCancel>
-          <AlertDialogAction onClick={() => del.mutate(cp.id, {
+          <AlertDialogAction disabled={del.isPending} onClick={() => del.mutate(cp.id, {
             onSuccess: () => toast.success('Контрагент удалён'),
             onError: (e: unknown) => toast.error(`Ошибка: ${(e as Error).message}`),
           })}>Удалить</AlertDialogAction>
@@ -1726,8 +1800,8 @@ type CpFlag = (typeof CP_FLAGS)[number]['key']
 
 export function ContractorsPage() {
   const { companyId } = useCompany()
-  const { data: counterparties = [], isLoading } = useCounterparties()
-  const { data: allContracts = [] } = useContracts()
+  const { data: counterparties = [], isLoading, isError: counterpartiesError, refetch: reloadCounterparties } = useCounterparties()
+  const { data: allContracts = [], isError: contractsError, isPending: contractsLoading, refetch: reloadContracts } = useContracts()
   // Раздел страницы задаётся вертикальным меню (`?sub=`), а не своим
   // переключателем: один язык навигации на рабочий стол (20.09.2026).
   const [sub, setSub] = useSpacePageSub()
@@ -1768,7 +1842,7 @@ export function ContractorsPage() {
     return m
   }, [allContracts])
   const cpContracts = (c: Counterparty) =>
-    (c.externalRef ? contractCount.get(c.externalRef) ?? 0 : 0) + (contractCount.get(c.id) ?? 0)
+    (c.externalRef && c.externalRef !== c.id ? contractCount.get(c.externalRef) ?? 0 : 0) + (contractCount.get(c.id) ?? 0)
 
   // Номера договоров контрагента — чтобы его можно было найти по бумажке договора.
   const contractsByCp = useMemo(() => {
@@ -1790,7 +1864,7 @@ export function ContractorsPage() {
   const roleCounts = useMemo(() => {
     const m = new Map<string, number>()
     for (const c of counterparties)
-      for (const a of c.aliases ?? []) m.set(a, (m.get(a) ?? 0) + 1)
+      for (const a of new Set(c.aliases ?? [])) m.set(a, (m.get(a) ?? 0) + 1)
     return m
   }, [counterparties])
 
@@ -1833,7 +1907,7 @@ export function ContractorsPage() {
       // Без операций — в конец: пустая дата не должна конкурировать со свежей.
       case 'last': return [...list].sort((a, b) =>
         (st(b)?.lastDoc ?? '').localeCompare(st(a)?.lastDoc ?? ''))
-      default: return list
+      default: return [...list].sort((a, b) => a.name.localeCompare(b.name, 'ru'))
     }
   }, [counterparties, search, roleFilter, flag, sortBy, contractCount, stats, stationCps])
 
@@ -1855,8 +1929,12 @@ export function ContractorsPage() {
       {/* Счётчики остаются на виду: меню слева называет разделы, а сколько в
           них записей — вопрос этой страницы. */}
       <div className="mb-3 text-xs text-muted-foreground">
-        контрагентов {counterparties.length} · договоров {allContracts.length}
+        контрагентов {counterpartiesError || isLoading ? '—' : counterparties.length} · договоров {contractsError || contractsLoading ? '—' : allContracts.length}
       </div>
+      {contractsError && <div role="alert" className="mb-3 text-sm text-destructive">
+        <p>Не удалось загрузить договоры. Поиск по договорам и станциям может быть неполным.</p>
+        <Button variant="outline" size="sm" onClick={() => void reloadContracts()}>Повторить загрузку договоров</Button>
+      </div>}
 
       {view === 'quality' ? (
         // Из проверки — сразу в карточку: болезнь показана, чтобы её пошли лечить.
@@ -1871,26 +1949,26 @@ export function ContractorsPage() {
       ) : view === 'contracts' ? (
         <AllContractsView counterparties={counterparties} />
       ) : (
-      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[340px_minmax(0,1fr)] gap-4">
         {/* Список контрагентов. Высота капится и на мобиле: без капа список из
             тысячи записей раздувал страницу до ~60 000px, а карточка выбранного
             рендерилась за экраном — тап выглядел «ничего не произошло». */}
-        <Card className="h-[calc(100dvh-19rem)] lg:h-[calc(100vh-12rem)] flex flex-col">
+        <Card className="min-h-80 h-[calc(100dvh-19rem)] lg:h-[calc(100dvh-12rem)] flex flex-col">
           <CardContent className="p-3 flex flex-col gap-2.5 min-h-0">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input placeholder="Имя, ИНН, № договора, станция или проект…" value={search}
+              <Input aria-label="Поиск контрагентов" placeholder="Имя, ИНН, № договора, станция или проект…" value={search}
                 onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9" />
             </div>
             {stationCps && <p className="text-[11px] text-muted-foreground -mt-1">По локации {stationHitLabel(stationCps.hit)} · контрагентов {stationCps.ids.size}</p>}
 
             {/* Фильтр по ролям */}
             <div className="flex flex-wrap gap-1">
-              <button onClick={() => setRoleFilter('all')} className={chip(roleFilter === 'all')}>
+              <button aria-pressed={roleFilter === 'all'} onClick={() => setRoleFilter('all')} className={chip(roleFilter === 'all')}>
                 Все · {counterparties.length}
               </button>
               {ROLE_ORDER.filter((r) => roleCounts.get(r)).map((r) => (
-                <button key={r} onClick={() => setRoleFilter(r)} className={chip(roleFilter === r)}>
+                <button key={r} aria-pressed={roleFilter === r} onClick={() => setRoleFilter(r)} className={chip(roleFilter === r)}>
                   {ROLE_META[r].label} · {roleCounts.get(r)}
                 </button>
               ))}
@@ -1898,10 +1976,11 @@ export function ContractorsPage() {
 
             {/* Быстрые отборы. Показываем там, где есть чем отбирать: без цифр
                 бухгалтерии «с долгом» и «без документов» ответили бы пустотой. */}
-            {hasStats && (
+            {(
               <div className="flex flex-wrap gap-1">
-                {CP_FLAGS.map((f) => (
+                {CP_FLAGS.filter((f) => hasStats || f.key === 'noinn' || (f.key === 'nocontract' && !contractsError && !contractsLoading)).map((f) => (
                   <button key={f.key}
+                    aria-pressed={flag === f.key}
                     onClick={() => setFlag((cur) => (cur === f.key ? null : f.key))}
                     className={chip(flag === f.key)}>
                     {f.label}
@@ -1953,8 +2032,13 @@ export function ContractorsPage() {
 
             <div className="overflow-y-auto space-y-0.5 min-h-0 -mr-1 pr-1">
               {isLoading && <div className="text-sm text-muted-foreground p-2">Загрузка…</div>}
-              {!isLoading && filtered.length === 0 && (
-                <div className="text-sm text-muted-foreground p-2">Контрагенты не найдены.</div>
+              {counterpartiesError && <div role="alert" className="p-2 text-sm text-destructive">
+                <p>Не удалось загрузить контрагентов.</p><Button variant="outline" size="sm" onClick={() => void reloadCounterparties()}>Повторить загрузку контрагентов</Button>
+              </div>}
+              {!isLoading && !counterpartiesError && filtered.length === 0 && (
+                <div className="space-y-2 p-2 text-sm text-muted-foreground"><p>Контрагенты не найдены.</p>
+                  {(search || roleFilter !== 'all' || flag) && <Button variant="outline" size="sm" onClick={() => { setSearch(''); setRoleFilter('all'); setFlag(null) }}>Сбросить поиск и отборы</Button>}
+                </div>
               )}
               {filtered.map((c) => {
                 const roles = (c.aliases ?? []).filter((a) => ROLE_META[a])
@@ -1962,6 +2046,8 @@ export function ContractorsPage() {
                 return (
                   <button
                     key={c.id}
+                    aria-pressed={c.id === selectedId}
+                    title={c.name}
                     onClick={() => setSelectedId(c.id)}
                     className={`w-full text-left px-2.5 py-1.5 rounded-md text-sm transition-colors ${
                       c.id === selectedId ? 'bg-accent' : 'hover:bg-muted'
@@ -2002,7 +2088,7 @@ export function ContractorsPage() {
 
         {/* Детали выбранного контрагента — на десктопе правая колонка */}
         {!isNarrow && (
-        <Card className="lg:h-[calc(100vh-12rem)] overflow-y-auto">
+        <Card className="min-w-0 lg:h-[calc(100dvh-12rem)] overflow-y-auto">
           <CardContent className="p-4">
             {selected
               ? <ContractorDetail cp={selected} all={counterparties} />
@@ -2021,10 +2107,11 @@ export function ContractorsPage() {
       {isNarrow && (
         <Sheet open={!!selected && view === 'counterparties'}
           onOpenChange={(o) => { if (!o) setSelectedId(null) }}>
-          <SheetContent side="bottom" className="h-[92dvh] p-0 rounded-t-xl">
+          <SheetContent side="bottom" className="h-[92dvh] gap-0 p-0 rounded-t-xl">
             <SheetTitle className="sr-only">Карточка контрагента</SheetTitle>
             <SheetDescription className="sr-only">Реквизиты и договоры контрагента</SheetDescription>
-            <div className="h-full overflow-y-auto p-4 pt-5">
+            <div aria-hidden="true" className="h-12 shrink-0 border-b" />
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
               {selected && <ContractorDetail cp={selected} all={counterparties} />}
             </div>
           </SheetContent>

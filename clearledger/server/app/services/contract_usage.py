@@ -90,13 +90,19 @@ _SOURCES: list[tuple[str, str, str]] = [
 
 async def _sources(db: AsyncSession) -> list[tuple[str, str, str]]:
     sources = list(_SOURCES)
-    # То же разрешение имени через search_path, что и у запроса к источнику.
-    # Наличие контура проверяем до SQL: ошибка отсутствующей таблицы уже
-    # прервала бы транзакцию. Ошибки существующей схемы не скрываем.
-    # Обе поставки могут присутствовать в одной БД. Нельзя проверять одну схему,
-    # а затем неявно читать одноимённую таблицу из другой через search_path.
+    # В одной БД могут остаться обе поставки. Миграция116 добавляет ссылку
+    # активной таблице (core имеет приоритет); старая public может существовать
+    # без contract_id. Такая таблица не является источником UUID-связей.
+    # Проверяем колонку до запроса, не прерывая транзакцию и не подбирая договор
+    # по строковому номеру. Имена схем остаются явными и при проверке, и при чтении.
     for table in ("core.service_contracts", "public.service_contracts"):
-        if await db.scalar(text("SELECT to_regclass(:table) IS NOT NULL"), {"table": table}):
+        if await db.scalar(text("""
+            SELECT EXISTS (
+                SELECT 1 FROM pg_attribute
+                WHERE attrelid = to_regclass(:table) AND attname = 'contract_id'
+                  AND attnum > 0 AND NOT attisdropped
+            )
+        """), {"table": table}):
             sources.append(("support", "Сервисные договоры «Поддержки»", _col(table)))
     return sources
 

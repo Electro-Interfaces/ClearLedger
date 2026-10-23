@@ -133,7 +133,8 @@ export async function updateCounterparty(
 
 export async function deleteCounterparty(companyId: string, id: string): Promise<boolean> {
   if (isApiEnabled()) {
-    try { await del(`/api/references/counterparties/${id}`); return true } catch { return false }
+    await del(`/api/references/counterparties/${id}`)
+    return true
   }
   const list = await loadList<Counterparty>(counterpartiesKey(companyId))
   const filtered = list.filter((c) => c.id !== id)

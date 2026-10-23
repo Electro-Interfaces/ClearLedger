@@ -13,6 +13,7 @@ from typing import Any
 
 from sqlalchemy import and_, delete, false as sa_false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.auth import assert_company_member, get_current_user
 from app.business_access import has_network_merchandiser
@@ -258,6 +259,24 @@ async def search_counterparties(
     )
 
 
+async def _assert_unique_counterparty(db, company_id, inn, kpp, exclude_id=None):
+    identity = counterparty_identity(inn, kpp)
+    if not identity:
+        return
+    await lock_manual_creation(db, company_id, "counterparty")
+    stmt = select(Counterparty).where(
+        Counterparty.company_id == company_id, func.btrim(Counterparty.inn) == identity[0])
+    if exclude_id is not None:
+        stmt = stmt.where(Counterparty.id != exclude_id)
+    candidates = (await db.execute(stmt)).scalars().all()
+    duplicates = [c for c in candidates if not identity[1] or not str(c.kpp or '').strip()
+                  or counterparty_identity(c.inn, c.kpp) == identity]
+    if duplicates:
+        # Идентификаторы — часть существующего API-контракта сверки дублей.
+        raise HTTPException(409, "Контрагент с такими ИНН/КПП уже существует: "
+                            + ", ".join(sorted(str(c.id) for c in duplicates)))
+
+
 @router.post(
     "/counterparties",
     response_model=CounterpartyResponse,
@@ -272,19 +291,7 @@ async def create_counterparty(
     if str(body.lifecycleStatus) == "verified":
         await _assert_can_verify_counterparty(
             db, current_user, cid, inn=body.inn, kpp=body.kpp, name=body.name)
-    identity = counterparty_identity(body.inn, body.kpp)
-    if identity:
-        await lock_manual_creation(db, cid, "counterparty")
-        candidates = (await db.execute(select(Counterparty).where(
-            Counterparty.company_id == cid,
-            func.btrim(Counterparty.inn) == identity[0],
-        ))).scalars().all()
-        # Без КПП нельзя молча выбрать филиал или завести второе лицо того же ИНН.
-        duplicates = [c for c in candidates if not identity[1] or not str(c.kpp or "").strip()
-                      or counterparty_identity(c.inn, c.kpp) == identity]
-        if duplicates:
-            raise HTTPException(409, "Контрагент с такими ИНН/КПП уже существует: "
-                                + ", ".join(sorted(str(c.id) for c in duplicates)))
+    await _assert_unique_counterparty(db, cid, body.inn, body.kpp)
     cp = Counterparty(
         company_id=cid,
         inn=body.inn,
@@ -310,7 +317,16 @@ async def update_counterparty(
 ):
     uid = _parse_uuid(item_id)
     cp = await get_owned(Counterparty, uid, current_user, db)  # 404 для чужой/несуществующей
+    # PATCH может менять только ИНН или только КПП. После общего барьера читаем
+    # свежую пару, иначе два конкурентных изменения проверяли бы старую пару.
+    await lock_manual_creation(db, cp.company_id, "counterparty")
+    await db.refresh(cp)
     before = snapshot_reference_fields(cp)
+
+    target_inn = cp.inn if body.inn is None else body.inn
+    target_kpp = body.kpp if 'kpp' in body.model_fields_set else cp.kpp
+    if counterparty_identity(target_inn, target_kpp) != counterparty_identity(cp.inn, cp.kpp):
+        await _assert_unique_counterparty(db, cp.company_id, target_inn, target_kpp, cp.id)
 
     if body.lifecycleStatus is not None and str(body.lifecycleStatus) == "verified" \
             and cp.lifecycle_status != "verified":
@@ -354,7 +370,17 @@ async def delete_counterparty(
 ):
     uid = _parse_uuid(item_id)
     cp = await get_owned(Counterparty, uid, current_user, db)  # 404 для чужой/несуществующей
-    await db.delete(cp)
+    from app.services.counterparty_usage import counterparty_usage
+    await db.execute(select(Counterparty.id).where(Counterparty.id == uid).with_for_update())
+    message = "Нельзя удалить контрагента: есть связанные договоры, контакты или другие записи. Сначала удалите или переназначьте связи."
+    if await counterparty_usage(db, cp):
+        raise HTTPException(409, message)
+    try:
+        async with db.begin_nested():
+            await db.delete(cp)
+            await db.flush()
+    except IntegrityError as exc:
+        raise HTTPException(409, message) from exc
 
 
 # ---------------------------------------------------------------------------
