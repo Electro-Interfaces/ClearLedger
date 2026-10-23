@@ -682,41 +682,42 @@ class OcrResponse(BaseModel):
 
 CounterpartyTypeEnum = Literal["ЮЛ", "ФЛ", "ИП"]
 CounterpartyLifecycleEnum = Literal["draft", "verified", "blocked", "archived"]
+CounterpartyName = Annotated[str, BeforeValidator(lambda value: value.strip() if isinstance(value, str) else value), Field(min_length=1, max_length=500)]
 
 
 class _CpExtra(BaseModel):
     """Расширенные реквизиты контрагента — полная карточка (ручной ввод + промо из raw)."""
-    fullName: str | None = None
-    okpo: str | None = None
-    ogrn: str | None = None
-    okved: str | None = None
+    fullName: str | None = Field(None, max_length=1000)
+    okpo: str | None = Field(None, max_length=20)
+    ogrn: str | None = Field(None, max_length=20)
+    okved: str | None = Field(None, max_length=20)
     legalAddress: str | None = None
     actualAddress: str | None = None
-    phone: str | None = None
-    email: str | None = None
-    directorName: str | None = None
-    directorPosition: str | None = None
-    bankAccount: str | None = None
-    bankBik: str | None = None
-    bankName: str | None = None
+    phone: str | None = Field(None, max_length=100)
+    email: str | None = Field(None, max_length=255)
+    directorName: str | None = Field(None, max_length=255)
+    directorPosition: str | None = Field(None, max_length=150)
+    bankAccount: str | None = Field(None, max_length=30)
+    bankBik: str | None = Field(None, max_length=12)
+    bankName: str | None = Field(None, max_length=255)
 
 
 class CounterpartyCreate(_CpExtra):
     company_id: str
-    inn: str
-    kpp: str | None = None
-    name: str = Field(min_length=1, max_length=500)
-    shortName: str | None = None
+    inn: str = Field(max_length=20)
+    kpp: str | None = Field(None, max_length=20)
+    name: CounterpartyName
+    shortName: str | None = Field(None, max_length=255)
     type: CounterpartyTypeEnum = "ЮЛ"
     aliases: list[str] = Field(default_factory=list)
     lifecycleStatus: CounterpartyLifecycleEnum = "draft"
 
 
 class CounterpartyUpdate(_CpExtra):
-    inn: str | None = None
-    kpp: str | None = None
-    name: str | None = None
-    shortName: str | None = None
+    inn: str | None = Field(None, max_length=20)
+    kpp: str | None = Field(None, max_length=20)
+    name: CounterpartyName | None = None
+    shortName: str | None = Field(None, max_length=255)
     type: CounterpartyTypeEnum | None = None
     aliases: list[str] | None = None
     lifecycleStatus: CounterpartyLifecycleEnum | None = None
@@ -1191,11 +1192,11 @@ class CounterpartyActivityResponse(BaseModel):
 class CounterpartyContactIn(BaseModel):
     """Контактное лицо контрагента. Роль — по какому поводу к нему обращаться."""
 
-    name: str
-    position: str | None = None
+    name: Annotated[str, BeforeValidator(lambda value: value.strip() if isinstance(value, str) else value), Field(min_length=1, max_length=255)]
+    position: str | None = Field(None, max_length=150)
     role: str = "other"          # contract | tech | comm | other
-    phone: str | None = None
-    email: str | None = None
+    phone: str | None = Field(None, max_length=100)
+    email: str | None = Field(None, max_length=255)
     notes: str | None = None
 
 
