@@ -28,7 +28,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -36,7 +36,7 @@ from app.models import (
     EzsSparePartMovement, EzsSparePartStock, ServiceLocation, User,
 )
 from app.services.ezs_accounting import avg_cost, cost_details, money
-from app.services.ezs_equipment import _stock_row, check_period, value_delta
+from app.services.ezs_equipment import _stock_row, check_period, check_spare_order, value_delta
 from app.services.ezs_equipment_docs import (
     _locs, _primary, _responsible, check_contract, check_counterparty, contract_label, next_number,
 )
@@ -299,6 +299,9 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
         EzsSparePart.company_id == company_id, EzsSparePart.id.in_([uuid.UUID(i) for i in ids])))).scalars().all()
     if len(parts) != len(ids):
         raise HTTPException(400, "Номенклатура из документа не найдена в справочнике пространства")
+    from app.services.ezs_accounting import SERIAL_KINDS
+    if any(part.kind in SERIAL_KINDS for part in parts):
+        raise HTTPException(400, "Номенклатура по экземплярам проводится документами оборудования, а не количественного ЗИП")
     names = {str(x.id): x.name for x in parts}
 
     src = await _warehouse(db, company_id, p.get("from_location_id"), "склад, с которого выдаётся") if op in _FROM_OPS else None
@@ -355,13 +358,8 @@ async def post_document(db: AsyncSession, company_id, user: User | None, p: dict
     from_id, to_id = (src.id if src else None), (dst.id if dst else None)
     # Документ раньше уже проведённого по тем же позициям склада ломает остатки на
     # дату: количество проверяется и опись сверяется только с текущим остатком.
-    M, places = EzsSparePartMovement, [i for i in (from_id, to_id) if i]
-    last = (await db.execute(select(func.max(M.occurred_on)).where(
-        M.company_id == company_id, M.part_id.in_([uuid.UUID(i) for i in ids]),
-        or_(M.from_location_id.in_(places), M.to_location_id.in_(places))))).scalar()
-    if last and doc_date < last:
-        raise HTTPException(409, f"По этим позициям склада уже проведён документ от {last} — дата не может быть раньше")
     rows = await _lock_stock(db, company_id, ids, [i for i in (from_id, to_id) if i])
+    await check_spare_order(db, company_id, ids, [i for i in (from_id, to_id) if i], doc_date)
     stock = {k: Decimal(str(r.qty)) for k, r in rows.items()}
     sums = {k: money(r.amount) for k, r in rows.items()}
     if op == "inventory":
@@ -439,6 +437,24 @@ async def cancel_document(db: AsyncSession, company_id, user: User | None, doc_i
     names = dict((str(i), n) for i, n in (await db.execute(select(EzsSparePart.id, EzsSparePart.name).where(
         EzsSparePart.id.in_([uuid.UUID(i) for i in ids])))).all())
     rows = await _lock_stock(db, company_id, [e[0] for e in effects], [e[1] for e in effects])
+    # После более позднего расхода средняя стоимость уже использована другими
+    # документами. Даже достаточное количество не позволяет вычесть старую
+    # стоимость: иначе возможны отрицательная сумма и расхождение с журналом.
+    M = EzsSparePartMovement
+    first = (await db.execute(select(func.min(M.created_at)).where(M.document_id == d.id))).scalar()
+    pairs = [and_(M.part_id == uuid.UUID(pid), or_(M.from_location_id == loc, M.to_location_id == loc))
+             for pid, loc in rows]
+    if first is not None and pairs:
+        later = (await db.execute(select(M.id).where(
+            M.company_id == company_id, or_(*pairs),
+            or_(M.created_at > first, M.occurred_on > d.doc_date),
+            or_(M.document_id.is_(None), M.document_id != d.id),
+            or_(M.document_id.is_(None), M.document_id.notin_(
+                select(EzsSpareDocument.id).where(EzsSpareDocument.status == "cancelled"))),
+        ).limit(1))).first()
+        if later:
+            raise HTTPException(409, "Сначала отмените более поздние движения этой номенклатуры на затронутых складах: "
+                                     "они используют остаток и среднюю стоимость")
     new = apply_effects({k: Decimal(str(r.qty)) for k, r in rows.items()}, effects, names, cancel=True)
     for k, r in rows.items():
         r.qty = new[k]

@@ -32,7 +32,7 @@ from app.services.ezs_equipment import (
     _create_receipt_unit, _get_location, _serial_conflict,
     apply_movement, canon_vendor, spare_apply_movement,
 )
-from app.services.ezs_accounting import vat_amount
+from app.services.ezs_accounting import money, vat_amount
 
 DOC_TYPES = ("supply", "return")
 LINE_KINDS = ("station", "spare")
@@ -50,6 +50,49 @@ def _dec(x: Any) -> Decimal:
         return Decimal(str(x if x is not None else 0))
     except Exception:  # noqa: BLE001
         return Decimal(0)
+
+
+def _date(value: Any, label: str = "Дата документа") -> str:
+    try:
+        return date.fromisoformat(str(value).strip()).isoformat()
+    except (ValueError, TypeError):
+        raise HTTPException(400, f"{label} указана неверно")
+
+
+def _quantity(value: Any, *, station: bool = False) -> Decimal:
+    try:
+        qty = Decimal(str(value))
+        if not qty.is_finite() or qty <= 0 or qty >= Decimal("100000000000"):
+            raise ValueError
+        if qty != qty.quantize(Decimal("0.001")):
+            raise ValueError
+    except Exception:
+        raise HTTPException(400, "Количество должно быть положительным числом с точностью до 0,001")
+    if station and qty != qty.to_integral_value():
+        raise HTTPException(400, "Количество оборудования по экземплярам должно быть целым")
+    return qty
+
+
+def _price(value: Any) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        result = money(value)
+        if not result.is_finite() or result < 0 or result >= Decimal("1000000000000"):
+            raise ValueError
+        return result
+    except Exception:
+        raise HTTPException(400, "Цена должна быть конечным неотрицательным числом")
+
+
+async def _check_duplicate(db, company_id, doc_type, number, doc_date, cp_id, exclude_id=None):
+    conditions = [EzsSupplyDocument.company_id == company_id, EzsSupplyDocument.doc_type == doc_type,
+                  EzsSupplyDocument.number == number, EzsSupplyDocument.doc_date == doc_date,
+                  EzsSupplyDocument.counterparty_id == cp_id, EzsSupplyDocument.status != "cancelled"]
+    if exclude_id is not None:
+        conditions.append(EzsSupplyDocument.id != exclude_id)
+    if (await db.execute(select(EzsSupplyDocument.id).where(*conditions).limit(1))).first():
+        raise HTTPException(409, f"Документ № {number} от {doc_date} этого поставщика уже введён")
 
 
 # ─── роллап факта (принято) ─────────────────────────────────────────────────
@@ -167,14 +210,12 @@ def _line_fields(company_id, supply_id, payload: dict[str, Any]) -> dict[str, An
     line_kind = payload.get("line_kind") or "station"
     if line_kind not in LINE_KINDS:
         raise HTTPException(400, f"Недопустимый тип строки: {line_kind}")
-    qty = _dec(payload.get("qty_planned"))
-    if qty <= 0:
-        raise HTTPException(400, "Количество по строке должно быть больше нуля")
+    qty = _quantity(payload.get("qty_planned"), station=line_kind == "station")
     fields: dict[str, Any] = {
         "company_id": company_id, "supply_id": supply_id, "line_kind": line_kind,
         "name": (payload.get("name") or "").strip() or None,
         "qty_planned": qty,
-        "unit_price": payload.get("unit_price"),
+        "unit_price": _price(payload.get("unit_price")),
         "vat_rate": payload.get("vat_rate"),
         "note": payload.get("note"),
     }
@@ -226,7 +267,7 @@ async def create_supply(db: AsyncSession, company_id, user: User | None,
     number = (payload.get("number") or "").strip()
     if not number:
         raise HTTPException(400, "Укажите номер документа")
-    doc_date = (payload.get("doc_date") or "").strip() or date.today().isoformat()
+    doc_date = _date(payload.get("doc_date") or date.today().isoformat())
 
     cp_id = payload.get("counterparty_id")
     cp_name = (payload.get("counterparty_name") or "").strip() or None
@@ -238,20 +279,17 @@ async def create_supply(db: AsyncSession, company_id, user: User | None,
 
     # Одна накладная поставщика вводится один раз: тот же номер той же датой у того
     # же поставщика — повтор, а не второй документ.
-    twin = (await db.execute(select(EzsSupplyDocument.id).where(
-        EzsSupplyDocument.company_id == company_id, EzsSupplyDocument.doc_type == doc_type,
-        EzsSupplyDocument.number == number, EzsSupplyDocument.doc_date == doc_date,
-        EzsSupplyDocument.counterparty_id == cp_id, EzsSupplyDocument.status != "cancelled"))).first()
-    if twin:
-        raise HTTPException(409, f"Документ № {number} от {doc_date} этого поставщика уже введён")
-
     wh_id = payload.get("warehouse_id")
     if wh_id:
         await _get_location(db, company_id, wh_id, want_type="warehouse")
     # Договор поставки — из справочника пространства и того же поставщика: поле
     # было в модели, но интерфейс его не заполнял, а сервер не проверял.
     from app.services.ezs_equipment_docs import check_contract
-    await check_contract(db, company_id, payload.get("contract_id"), cp_id)
+    contract, _ = await check_contract(db, company_id, payload.get("contract_id"), cp_id, doc_date)
+    if contract is not None and not cp_id:
+        cp = await db.get(Counterparty, contract.counterparty_id)
+        cp_id, cp_name = cp.id, cp.short_name or cp.name
+    await _check_duplicate(db, company_id, doc_type, number, doc_date, cp_id)
 
     doc = EzsSupplyDocument(
         company_id=company_id, doc_type=doc_type, number=number, doc_date=doc_date,
@@ -282,13 +320,35 @@ async def update_supply(db: AsyncSession, company_id, user: User | None,
     doc = await _get_doc(db, company_id, supply_id, lock=True)
     if doc.status in ("closed", "cancelled"):
         raise HTTPException(400, "Документ закрыт/отменён — правка недоступна")
+    # Реквизиты уже породили приход, стоимость и основание движений: менять их
+    # отдельно от факта нельзя. Примечание остаётся доступным.
+    primary_fields = ("number", "doc_date", "counterparty_id", "counterparty_name",
+                      "contract_id", "warehouse_id", "currency", "vat_total")
+    changed = any(k in payload and (None if payload[k] is None else str(payload[k]))
+                  != (None if getattr(doc, k) is None else str(getattr(doc, k)))
+                  for k in primary_fields)
+    if changed and await _has_receipts(db, company_id, supply_id):
+        raise HTTPException(409, "По документу уже была приёмка — реквизиты первичного документа менять нельзя")
+    new_date = _date(payload["doc_date"]) if "doc_date" in payload else doc.doc_date
+    from app.services.ezs_equipment_docs import check_contract
+    # Проверяем итоговую пару даже при PATCH только поставщика: старый договор
+    # иначе оставался связанным с накладной другого контрагента.
+    cp_id = payload.get("counterparty_id", doc.counterparty_id)
+    contract_id = payload.get("contract_id", doc.contract_id)
+    if any(k in payload for k in ("counterparty_id", "contract_id", "doc_date")):
+        contract, _ = await check_contract(db, company_id, contract_id, cp_id, new_date)
+        if contract is not None and not cp_id:
+            raise HTTPException(400, "Укажите контрагента договора или снимите договор")
+    new_number = (payload.get("number", doc.number) or "").strip()
+    if not new_number:
+        raise HTTPException(400, "Номер не может быть пустым")
+    await _check_duplicate(db, company_id, doc.doc_type, new_number, new_date, cp_id, doc.id)
     if "number" in payload:
         n = (payload.get("number") or "").strip()
         if not n:
             raise HTTPException(400, "Номер не может быть пустым")
         doc.number = n
-    if payload.get("doc_date"):
-        doc.doc_date = payload["doc_date"].strip()
+    doc.doc_date = new_date
     if "counterparty_id" in payload:
         cp_id = payload.get("counterparty_id")
         if cp_id:
@@ -302,8 +362,6 @@ async def update_supply(db: AsyncSession, company_id, user: User | None,
             doc.counterparty_id = None
             doc.counterparty_name = (payload.get("counterparty_name") or "").strip() or None
     if "contract_id" in payload:
-        from app.services.ezs_equipment_docs import check_contract
-        await check_contract(db, company_id, payload.get("contract_id"), doc.counterparty_id)
         doc.contract_id = payload.get("contract_id") or None
     if "warehouse_id" in payload:
         wh_id = payload.get("warehouse_id")
@@ -421,7 +479,7 @@ async def receive_line(db: AsyncSession, company_id, user: User | None,
     recv = (await received_by_lines(db, company_id, doc.doc_type, [line])).get(line.id, Decimal(0))
     planned = _dec(line.qty_planned)
     allow_overage = bool(payload.get("allow_overage"))
-    occurred_on = (payload.get("occurred_on") or "").strip() or doc.doc_date
+    occurred_on = _date(payload.get("occurred_on") or doc.doc_date, "Дата приёмки")
     prefix = "Возврат" if doc.doc_type == "return" else "Поставка"
     basis = (payload.get("basis") or "").strip() or f"{prefix} №{doc.number} от {doc.doc_date}"
     comment = payload.get("comment")
@@ -440,8 +498,12 @@ async def receive_line(db: AsyncSession, company_id, user: User | None,
         if line.line_kind == "station":
             units_in = list(payload.get("units") or [])
             if not units_in:
-                qn = int(payload.get("qty") or 0)
+                qn = int(_quantity(payload.get("qty"), station=True))
+                if qn > 500:
+                    raise HTTPException(400, "Не больше 500 единиц в одной приёмке")
                 units_in = [{} for _ in range(qn)]
+            if len(units_in) > 500:
+                raise HTTPException(400, "Не больше 500 единиц в одной приёмке")
             if not units_in:
                 raise HTTPException(400, "Укажите единицы (units) или количество (qty) к приёмке")
             _guard(Decimal(len(units_in)))
