@@ -2,6 +2,20 @@
 @import "tw-animate-css";
 @import "./shadcn-theme.css";
 
+/* На коротком экране панели не должны выталкивать складскую таблицу из области
+   касания. Прокручивается весь мобильный раздел, включая его верхние панели. */
+@media (max-width: 1024px) and (max-height: 500px) {
+  [data-mobile-workspace="ops_equipment"] {
+    overflow-y: auto;
+  }
+
+  [data-mobile-workspace="ops_equipment"] [data-mobile-workspace-content] {
+    flex: none;
+    min-height: 24rem;
+    overflow: visible;
+  }
+}
+
 @media (max-width: 767px) {
   html[data-pwa-install="compact"] [data-mobile-shell] {
     padding-bottom: max(10rem, calc(env(safe-area-inset-bottom) + 9rem));

@@ -166,6 +166,11 @@ async def closed_until(db: AsyncSession, company_id) -> str | None:
 
 
 async def check_period(db: AsyncSession, company_id, day: str | None, what: str = "Документ") -> None:
+    if day:
+        try:
+            date.fromisoformat(day)
+        except (ValueError, TypeError):
+            raise HTTPException(400, f"{what}: дата указана неверно")
     closed = await closed_until(db, company_id)
     if closed and day and day[:10] <= closed:
         raise HTTPException(409, f"{what} от {day[:10]} попадает в закрытый период (по {closed}): "
@@ -803,7 +808,10 @@ async def import_units_xlsx(db: AsyncSession, company_id, user: User | None,
     """Импорт складского реестра оборудования: толерантный к колонкам/состояниям."""
     import openpyxl
 
-    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    except Exception:
+        raise HTTPException(400, "Не удалось прочитать Excel: загрузите исправную книгу .xlsx")
     # Реестр приходит вкладками по классу станции — «Быстрые ЭЗС» и «Медленные ЭЗС».
     # Брать только активный лист значило бы молча потерять половину склада, и
     # заметили бы это по недостаче на инвентаризации, а не при загрузке.
@@ -1127,6 +1135,9 @@ async def spare_apply_movement(db: AsyncSession, company_id, user: User | None,
         row.qty, qty = qty, abs(delta)
         row.amount = money(row.amount) + amount
 
+    await check_spare_order(db, company_id, [part_id], [i for i in (from_id, to_id) if i],
+                            payload.get("occurred_on") or date.today().isoformat())
+
     if payload.get("target_location_id"):
         await _get_location(db, company_id, payload["target_location_id"])
     target_unit_id = payload.get("target_unit_id")
@@ -1148,3 +1159,21 @@ async def spare_apply_movement(db: AsyncSession, company_id, user: User | None,
     )
     db.add(move)
     return move
+
+
+async def check_spare_order(db: AsyncSession, company_id, part_ids, location_ids, day: str) -> None:
+    """Единый порядок количественного учёта для документов и приёмки поставок.
+
+    Вызывать после блокировки остатков: проверка до ожидания блокировки может
+    пропустить документ, который успел провести другой запрос.
+    """
+    from app.models import EzsSpareDocument
+    M = EzsSparePartMovement
+    last = (await db.execute(select(func.max(M.occurred_on)).where(
+        M.company_id == company_id, M.part_id.in_([uuid.UUID(str(i)) for i in part_ids]),
+        or_(M.from_location_id.in_(location_ids), M.to_location_id.in_(location_ids)),
+        or_(M.document_id.is_(None), M.document_id.notin_(select(EzsSpareDocument.id).where(
+            EzsSpareDocument.status == "cancelled"))),
+    ))).scalar()
+    if last and day < last:
+        raise HTTPException(409, f"По этим позициям склада уже проведён документ от {last} — дата не может быть раньше")
