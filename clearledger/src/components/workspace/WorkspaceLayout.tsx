@@ -276,7 +276,7 @@ function MobileWorkspace() {
   }, { replace: true })
 
   return (
-    <div className="h-full min-h-0 flex flex-col">
+    <div data-mobile-workspace={coreMode} className="h-full min-h-0 flex flex-col">
       {/* Фильтр рабочей области (период/станции/…) — свайп без видимого скроллбара */}
       <div className="overflow-x-auto scrollbar-hide shrink-0"><WorkspaceToolbar /></div>
 
@@ -328,7 +328,7 @@ function MobileWorkspace() {
       </div>
 
       {/* Контент режима — тот же диспетчер, что на десктопе */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div data-mobile-workspace-content className="flex-1 min-h-0 overflow-hidden">
         <ModePanel />
       </div>
     </div>

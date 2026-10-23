@@ -57,6 +57,7 @@ import {
 } from '@/services/equipmentService'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
+const nfMoney = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 // ─── утилиты ────────────────────────────────────────────────────────────────
 
@@ -536,10 +537,10 @@ export function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClos
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl grid-cols-[minmax(0,1fr)] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex flex-wrap items-center gap-2">
-            Единица {unit?.serialNumber ?? unit?.inventoryNumber ?? ''}
+          <DialogTitle className="flex min-w-0 flex-wrap items-center gap-2 pr-7">
+            <span className="min-w-0 max-w-full [overflow-wrap:anywhere]">Единица {unit?.serialNumber ?? unit?.inventoryNumber ?? ''}</span>
             {unit && stateBadge(unit.state, unit.stateLabel)}
           </DialogTitle>
         </DialogHeader>
@@ -660,7 +661,7 @@ export function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClos
                     станций. На складской учёт вернётся демонтажем.
                   </p>
                 )}
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
                   <KV label="Вид" value={unitKindLabel(unit.kind)} />
                   <KV label="Серийный №" value={unit.serialNumber ?? undefined} />
                   <KV label="Инв. №" value={unit.inventoryNumber ?? undefined} />
@@ -680,8 +681,8 @@ export function UnitDetailsDialog({ companyId, unitId, warehouses, sites, onClos
                   <KV label="Счёт учёта сейчас" value={unit.account ?? undefined} />
                   <KV label="Поставщик в справочнике" value={unit.supplierName ?? undefined} />
                   <KV label="Балансодержатель" value={unit.ownerRefName ?? undefined} />
-                  <KV label="Стоимость" value={unit.purchaseAmount != null ? `${nf0.format(unit.purchaseAmount)} ₽` : undefined} />
-                  <KV label="В том числе НДС" value={unit.vatAmount != null ? `${nf0.format(unit.vatAmount)} ₽` : undefined} />
+                  <KV label="Стоимость без НДС" value={unit.purchaseAmount != null ? `${nfMoney.format(unit.purchaseAmount)} ₽` : undefined} />
+                  <KV label="НДС" value={unit.vatAmount != null ? `${nfMoney.format(unit.vatAmount)} ₽` : undefined} />
                   <KV label="Дата закупки" value={unit.purchaseDate ? fmtD(unit.purchaseDate) : undefined} />
                   <KV label="Гарантия до" value={unit.warrantyUntil ? fmtD(unit.warrantyUntil) : undefined} />
                   <KV label="Местонахождение" value={<Place u={unit} />} />

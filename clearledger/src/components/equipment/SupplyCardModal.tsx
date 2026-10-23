@@ -40,9 +40,10 @@ import {
 import { CounterpartyContractPicker } from './CounterpartyContractPicker'
 import { LoadError } from './equipmentShared'
 import { invalidateEquipment } from './useEquipmentScope'
+import { supplyLinesValid, supplyLinePayload as linePayload, type DraftLine } from './supplyValidation'
 
 const nf2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
+const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 })
 
 function errMsg(e: unknown): string {
   if (e instanceof ApiError) return e.detail
@@ -62,7 +63,7 @@ function useWarehouses(companyId: string) {
 // ─── строка спецификации в форме (создание и правка документа) ──────────────
 
 /** `id` — строка уже есть на сервере; `locked` — по ней была приёмка, править нельзя. */
-export type DraftLine = SupplyLinePayload & { _key: number; id?: string; locked?: boolean }
+export type { DraftLine } from './supplyValidation'
 
 export function LField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -121,9 +122,10 @@ export function SupplyLineFields({ companyId, line: l, parts, onChange, onRemove
           </Select>
         </LField>
       )}
-      <LField label="Кол-во"><Input type="number" min={1} value={l.qtyPlanned} className="h-8 w-16 text-xs"
+      <LField label="Кол-во"><Input type="number" aria-label="Количество по строке" min={l.lineKind === 'station' ? 1 : 0.001}
+        step={l.lineKind === 'station' ? 1 : 0.001} value={l.qtyPlanned} className="h-8 w-20 text-xs"
         onChange={(e) => onChange({ qtyPlanned: Number(e.target.value) })} /></LField>
-      <LField label="Цена без НДС"><Input type="number" value={l.unitPrice ?? ''} className="h-8 w-24 text-xs"
+      <LField label="Цена без НДС"><Input type="number" aria-label="Цена без НДС" min={0} step={0.01} value={l.unitPrice ?? ''} className="h-8 w-24 text-xs"
         onChange={(e) => onChange({ unitPrice: e.target.value ? Number(e.target.value) : null })} /></LField>
       <LField label="НДС">
         <select aria-label="Ставка НДС" className="h-8 w-24 rounded-md border bg-background px-2 text-xs" value={l.vatRate ?? ''}
@@ -139,17 +141,6 @@ export function SupplyLineFields({ companyId, line: l, parts, onChange, onRemove
   )
 }
 
-const linesValid = (lines: DraftLine[]) =>
-  lines.every((l) => l.locked || ((l.qtyPlanned ?? 0) > 0 && (l.lineKind === 'spare' ? !!l.partId : true)))
-
-/** Строка без служебных полей формы — то, что уходит на сервер. */
-function linePayload(l: DraftLine): SupplyLinePayload {
-  const p: Partial<DraftLine> = { ...l }
-  delete p._key
-  delete p.id
-  delete p.locked
-  return p as SupplyLinePayload
-}
 const toDraft = (ln: SupplyLine, i: number): DraftLine => ({
   _key: i, id: ln.id, locked: ln.qtyReceived > 0, lineKind: ln.lineKind, partId: ln.partId, name: ln.name,
   qtyPlanned: ln.qtyPlanned, unitPrice: ln.unitPrice, vatRate: ln.vatRate, note: ln.note, vendor: ln.vendor,
@@ -164,6 +155,7 @@ function SupplyEditForm({ companyId, doc, onDone }: { companyId: string; doc: Su
   const warehouses = useWarehouses(companyId)
   const partsQ = useQuery({ queryKey: ['equipment', 'spares', companyId], queryFn: () => listSpareParts({ companyId }) })
   const linesEditable = doc.status === 'draft' || doc.status === 'ordered'
+  const headEditable = doc.qtyReceived === 0
   const [number, setNumber] = useState(doc.number)
   const [docDate, setDocDate] = useState(doc.docDate)
   const [party, setParty] = useState({ counterpartyId: doc.counterpartyId ?? '', contractId: doc.contractId ?? '' })
@@ -174,10 +166,10 @@ function SupplyEditForm({ companyId, doc, onDone }: { companyId: string; doc: Su
 
   const save = useMutation({
     mutationFn: async () => {
-      await updateSupply(companyId, doc.id, {
+      await updateSupply(companyId, doc.id, headEditable ? {
         number: number.trim(), docDate, counterpartyId: party.counterpartyId || null,
         contractId: party.contractId || null, warehouseId: warehouseId || null, note: note.trim() || null,
-      })
+      } : { note: note.trim() || null })
       if (!linesEditable) return
       const before = new Map(doc.lines.map((ln, i) => [ln.id, JSON.stringify(linePayload(toDraft(ln, i)))]))
       const kept = new Set(lines.map((l) => l.id))
@@ -204,15 +196,15 @@ function SupplyEditForm({ companyId, doc, onDone }: { companyId: string; doc: Su
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="space-y-1">
           <Label className="text-xs">Номер</Label>
-          <Input value={number} onChange={(e) => setNumber(e.target.value)} className="h-9" />
+          <Input aria-label="Номер поставки" disabled={!headEditable} value={number} onChange={(e) => setNumber(e.target.value)} className="h-9" />
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Дата</Label>
-          <Input type="date" value={docDate} onChange={(e) => setDocDate(e.target.value)} className="h-9" />
+          <Input aria-label="Дата поставки" disabled={!headEditable} type="date" value={docDate} onChange={(e) => setDocDate(e.target.value)} className="h-9" />
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Склад по умолчанию</Label>
-          <Select value={warehouseId} onValueChange={setWarehouseId}>
+          <Select disabled={!headEditable} value={warehouseId} onValueChange={setWarehouseId}>
             <SelectTrigger className="h-9"><SelectValue placeholder="—" /></SelectTrigger>
             <SelectContent>
               {warehouses.map((w) => (<SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>))}
@@ -220,9 +212,10 @@ function SupplyEditForm({ companyId, doc, onDone }: { companyId: string; doc: Su
           </Select>
         </div>
         <div className="sm:col-span-3">
-          <CounterpartyContractPicker companyId={companyId} value={party} onChange={setParty}
+          {headEditable ? <CounterpartyContractPicker companyId={companyId} value={party} onChange={setParty}
             label={doc.docType === 'return' ? 'Кому возвращаем' : 'Поставщик'}
             preferredTypes={['Поставка ЭЗС', 'Поставка']} preferredTypeCodes={['supply']} />
+            : <p className="text-xs text-muted-foreground">{doc.counterpartyName} · Реквизиты после приёмки не меняются.</p>}
         </div>
       </div>
 
@@ -244,7 +237,7 @@ function SupplyEditForm({ companyId, doc, onDone }: { companyId: string; doc: Su
           ))}
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground">Спецификация после приёмки не меняется — правятся только реквизиты документа.</p>
+        <p className="text-xs text-muted-foreground">После приёмки можно изменить примечание. Реквизиты и спецификация сохраняются для сверки с первичным документом.</p>
       )}
 
       <div className="space-y-1">
@@ -253,7 +246,7 @@ function SupplyEditForm({ companyId, doc, onDone }: { companyId: string; doc: Su
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="outline" size="sm" onClick={onDone}>Отмена</Button>
-        <Button size="sm" disabled={!number.trim() || !docDate || !linesValid(lines) || save.isPending} onClick={() => save.mutate()}>
+        <Button size="sm" disabled={!number.trim() || !docDate || !supplyLinesValid(lines) || save.isPending} onClick={() => save.mutate()}>
           {save.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
           Сохранить
         </Button>
@@ -512,9 +505,9 @@ function ReceiveLineDialog({ companyId, doc, line, onClose, onDone }: {
           inventoryNumber: (u.inventoryNumber || '').trim() || null,
           warrantyUntil: (u.warrantyUntil || '').trim() || null,
         }))
-        const hasSerials = filled.some((u) => u.serial)
+        const hasDetails = filled.some((u) => u.serial || u.inventoryNumber || u.warrantyUntil)
         return receiveSupplyLine(companyId, doc.id, line.id,
-          hasSerials ? { ...base, units: filled } : { ...base, qty: Number(qty) })
+          hasDetails ? { ...base, units: filled } : { ...base, qty: Number(qty) })
       }
       return receiveSupplyLine(companyId, doc.id, line.id, { ...base, qty: Number(qty) })
     },
@@ -525,7 +518,8 @@ function ReceiveLineDialog({ companyId, doc, line, onClose, onDone }: {
   const needWh = !isReturn || !isStation  // возврат станций склад не требует
   const canSave = (!needWh || !!wh) && (
     isReturn && isStation ? pickedIds.length > 0
-      : isStation ? (units.some((u) => (u.serial || '').trim()) || Number(qty) > 0)
+      : isStation ? (units.some((u) => (u.serial || '').trim() || (u.inventoryNumber || '').trim() || u.warrantyUntil)
+          || (Number.isInteger(Number(qty)) && Number(qty) > 0 && Number(qty) <= 500))
         : Number(qty) > 0)
 
   return (
@@ -589,7 +583,7 @@ function ReceiveLineDialog({ companyId, doc, line, onClose, onDone }: {
                 <span className="text-[11px] text-muted-foreground">
                   или без серийников — количество:
                 </span>
-                <Input type="number" min={0} value={qty} onChange={(e) => setQty(e.target.value)}
+                <Input type="number" aria-label="Количество единиц без серийных номеров" min={1} max={500} step={1} value={qty} onChange={(e) => setQty(e.target.value)}
                   className="h-7 w-20 text-xs" />
               </div>
             </div>
@@ -599,7 +593,7 @@ function ReceiveLineDialog({ companyId, doc, line, onClose, onDone }: {
           {!isStation && (
             <div className="space-y-1">
               <Label className="text-xs">Количество</Label>
-              <Input type="number" min={0} value={qty} onChange={(e) => setQty(e.target.value)} className="h-9" />
+              <Input type="number" aria-label="Количество ЗИП к приёмке" min={0.001} step={0.001} value={qty} onChange={(e) => setQty(e.target.value)} className="h-9" />
             </div>
           )}
 
