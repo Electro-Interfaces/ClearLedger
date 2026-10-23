@@ -24,7 +24,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -506,7 +506,8 @@ async def cancel_document(db: AsyncSession, company_id, user: User | None, doc_i
     # Позже документа — только движения в силе: отменённый документ и его сторно не мешают.
     own = aliased(M)
     later = set((await db.execute(select(M.unit_id).join(own, own.unit_id == M.unit_id).where(
-        own.document_id == d.id, M.created_at > own.created_at, M.document_id != d.id, *live_moves()))).scalars().all())
+        own.document_id == d.id, M.created_at > own.created_at,
+        or_(M.document_id.is_(None), M.document_id != d.id), *live_moves()))).scalars().all())
     busy = [u.serial_number or str(u.id)[:8] for m, u in rows if u.id in later]
     if busy:
         raise HTTPException(409, "После этого документа по единицам проведены другие — сначала отмените их: "

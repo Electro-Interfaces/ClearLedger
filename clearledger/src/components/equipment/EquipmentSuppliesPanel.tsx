@@ -33,11 +33,12 @@ import {
   SUPPLY_STATUS_META, SUPPLY_TYPE_META,
   type SupplyDocType, type SupplyStatus, type SupplyLinePayload, type SparePart,
 } from '@/services/equipmentService'
-import { SupplyCardModal, SupplyLineFields, type DraftLine } from './SupplyCardModal'
+import { SupplyCardModal, SupplyLineFields } from './SupplyCardModal'
+import { supplyLinesValid, supplyLinePayload, type DraftLine } from './supplyValidation'
 import { ExportXlsxButton, LoadError, Pager } from './equipmentShared'
 import { allPages, invalidateEquipment } from './useEquipmentScope'
 
-const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
+const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 3 })
 const nf2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 function errMsg(e: unknown): string {
@@ -266,7 +267,7 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
       counterpartyName: suppliersQ.data?.items.find((x) => x.id === counterpartyId)?.name ?? null,
       contractId: party.contractId || null,
       warehouseId: warehouseId || null, note: note || null,
-      lines: lines.map(({ _key, ...l }) => l),
+      lines: lines.map(supplyLinePayload),
     }),
     onSuccess: (doc) => {
       void invalidateEquipment(qc)
@@ -277,7 +278,7 @@ function CreateSupplyDialog({ companyId, onClose, onCreated }: {
   })
 
   const canSave = number.trim().length > 0 && lines.length > 0 &&
-    lines.every((l) => (l.qtyPlanned ?? 0) > 0 && (l.lineKind === 'spare' ? !!l.partId : true))
+    supplyLinesValid(lines)
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
