@@ -200,6 +200,14 @@ const close = d => d.getByRole('button', { name: /^(?:Close|Закрыть)$/ })
       await p.getByRole('button',{name:'Тема',exact:true}).click()
       await selectAlpha(p)
       await expect(p.getByRole('heading',{name:'Тест Альфа',exact:true})).toBeVisible()
+      const openedSheet=p.getByRole('dialog',{name:'Карточка контрагента',exact:true})
+      if(await openedSheet.count()) {
+        await openedSheet.evaluate(el=>Promise.all(el.getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{}))))
+        await p.getByRole('button',{name:'ТЕСТ-42',exact:true}).locator('..').scrollIntoViewIfNeeded()
+        const closeBox=await openedSheet.getByRole('button',{name:'Close',exact:true}).boundingBox()
+        const scrollBox=await p.locator('[data-slot=sheet-content] > div.overflow-y-auto').boundingBox()
+        expect(closeBox.y+closeBox.height).toBeLessThanOrEqual(scrollBox.y)
+      }
     },{engine,device})
   }
   process.stdout.write(JSON.stringify({pass:results.results.filter(x=>x.status==='PASS').length,fail:results.results.filter(x=>x.status==='FAIL').length,errors:results.errors},null,2)+'\n')

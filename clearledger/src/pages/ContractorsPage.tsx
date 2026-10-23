@@ -2107,10 +2107,11 @@ export function ContractorsPage() {
       {isNarrow && (
         <Sheet open={!!selected && view === 'counterparties'}
           onOpenChange={(o) => { if (!o) setSelectedId(null) }}>
-          <SheetContent side="bottom" className="h-[92dvh] p-0 rounded-t-xl">
+          <SheetContent side="bottom" className="h-[92dvh] gap-0 p-0 rounded-t-xl">
             <SheetTitle className="sr-only">Карточка контрагента</SheetTitle>
             <SheetDescription className="sr-only">Реквизиты и договоры контрагента</SheetDescription>
-            <div className="h-full overflow-y-auto p-4 pt-12">
+            <div aria-hidden="true" className="h-12 shrink-0 border-b" />
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
               {selected && <ContractorDetail cp={selected} all={counterparties} />}
             </div>
           </SheetContent>
