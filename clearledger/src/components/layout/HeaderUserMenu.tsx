@@ -14,7 +14,7 @@
  * показывает (у Управления параметры ядра живут отдельным разделом).
  */
 import { useState } from 'react'
-import { Bell, Bot, LogOut, Moon, RefreshCw, Sun, User, Video } from 'lucide-react'
+import { Bell, Bot, LayoutDashboard, LogOut, Moon, RefreshCw, Sun, User, Video } from 'lucide-react'
 import { toast } from 'sonner'
 import { startMeeting } from '@/services/conferenceService'
 import { isDemoMode } from '@/services/apiClient'
@@ -31,6 +31,7 @@ import {
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/contexts/AuthContext'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useManagementStatus } from '@/pages/management/useManagementStatus'
 
 /** Пункт меню: действие, а под ним — что оно делает. */
 function MenuRow({ icon: Icon, title, note, danger, onSelect, disabled }: {
@@ -69,6 +70,7 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
   const { theme, toggle } = useTheme()
   const { canApp } = useCompany()
   const { user, logout } = useAuth()
+  const managementStatus = useManagementStatus()
   const { toggleInteraction } = useSupportContext()
   const [confBusy, setConfBusy] = useState(false)
 
@@ -149,6 +151,10 @@ export function HeaderUserMenu({ settingsPath }: { settingsPath?: string }) {
         </div>
 
         <div className="p-2">
+          {managementStatus.data?.enabled && !managementStatus.isError && !managementStatus.isFetching && (
+            <MenuRow icon={LayoutDashboard} title="Обзор пространств" note="Чаты, задачи и календарь · только просмотр"
+              onSelect={() => navigate('/management')} />
+          )}
           {settingsPath && (
             <MenuRow icon={User} title="Профиль" note="Личные данные и пароль"
               onSelect={() => navigate(settingsPath)} />
