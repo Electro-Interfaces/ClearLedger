@@ -22,7 +22,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.notify_catalog import CATEGORIES, action_label, category_for, label_of
@@ -39,6 +39,13 @@ ALERTS_CHANNEL_TITLE = "Оповещения"
 # ---------------------------------------------------------------------------
 SECRETARY_EMAIL = "secretary@space.local"
 SECRETARY_NAME = "Секретарь"
+
+
+async def _admins_only(db: AsyncSession, company_id: uuid.UUID) -> bool:
+    """Политика пространства для системных оповещений и Секретаря."""
+    company = await db.get(Company, company_id)
+    return bool(company and (company.customization or {}).get(
+        "system_notifications_admin_only") is True)
 
 
 async def _secretary(db: AsyncSession, company_id: uuid.UUID) -> User:
@@ -92,6 +99,9 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
     раз. `None` — доставка не состоялась.
     """
     from app.models import ChatMessage, ChatParticipant, ChatRoom
+
+    if await _admins_only(db, company_id) and not user.is_superadmin:
+        return None
 
     secretary = await _secretary(db, company_id)
     # Одна комната на пару «человек — Секретарь»: искать её по участникам, а не
@@ -239,6 +249,9 @@ async def _recipients(
     """
     q = (select(User).join(UserCompany, UserCompany.user_id == User.id)
          .where(UserCompany.company_id == company_id))
+    if await _admins_only(db, company_id):
+        q = q.where(User.is_superadmin.is_(True))
+        return list((await db.execute(q)).scalars().all())
     ids = [str(x) for x in (rule.recipients or []) if x]
     if ids:
         try:
@@ -264,6 +277,9 @@ async def post_alert(
     """
     from app.models import ChatMessage, ChatParticipant, ChatRoom
 
+    admins_only = await _admins_only(db, company_id)
+    if admins_only:
+        members = [person for person in members if person.is_superadmin]
     if not members:
         return False
     secretary = await _secretary(db, company_id)
@@ -278,6 +294,13 @@ async def post_alert(
         db.add(room)
         await db.flush()
         db.add(ChatParticipant(room_id=room.id, user_id=secretary.id, role="owner"))
+    if admins_only:
+        # Отзыв системной роли должен отзывать и чтение общего канала.
+        allowed = select(User.id).where(User.is_superadmin.is_(True))
+        await db.execute(delete(ChatParticipant).where(
+            ChatParticipant.room_id == room.id,
+            ChatParticipant.user_id != secretary.id,
+            ChatParticipant.user_id.not_in(allowed)))
     joined = set((await db.execute(select(ChatParticipant.user_id).where(
         ChatParticipant.room_id == room.id))).scalars().all())
     db.add_all([ChatParticipant(room_id=room.id, user_id=p.id)
