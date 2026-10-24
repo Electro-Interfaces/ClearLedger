@@ -1,9 +1,12 @@
 """V1: только чтение обзора; scoped credential принимается лишь source-overview."""
 from datetime import date
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import MutableHeaders
+from starlette.types import Message, Receive, Scope, Send
 
 from app.auth import assert_company_member, bearer_scheme, decode_token, get_current_user
 from app.database import get_db
@@ -15,7 +18,21 @@ from app.services.management_local import read_local
 from app.services.management_overview import calendar_bounds, now, overview
 from app.services.management_schemas import ManagementOverview, SourceOverview
 
-router = APIRouter(prefix="/management", tags=["Управляющее пространство"])
+
+class ManagementRoute(APIRoute):
+    async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+        async def send_private(message: Message) -> None:
+            # self.app включает штатные exception handlers FastAPI/Starlette:
+            # заголовок попадёт и в ошибки Depends/валидации до входа в endpoint.
+            if scope["method"] == "GET" and message["type"] == "http.response.start":
+                MutableHeaders(scope=message)["Cache-Control"] = "no-store"
+            await send(message)
+
+        await super().handle(scope, receive, send_private)
+
+
+router = APIRouter(prefix="/management", tags=["Управляющее пространство"],
+                   route_class=ManagementRoute)
 
 
 def _config():
@@ -27,12 +44,10 @@ def _config():
 
 @router.get("/status")
 async def management_status(
-    response: Response,
     x_company_id: str = Header(..., alias="X-Company-Id", min_length=1),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    response.headers["Cache-Control"] = "no-store"
     await assert_company_member(x_company_id, current_user, db)
     config = _config()
     return {"enabled": config.enabled and config.hub_enabled}
@@ -40,7 +55,6 @@ async def management_status(
 
 @router.get("/overview", response_model=ManagementOverview)
 async def management_overview(
-    response: Response,
     kind: Kind = Query(...),
     space: str = Query("all", max_length=40, pattern=r"^[a-z][a-z0-9_-]*$"),
     query: str = Query("", max_length=200),
@@ -53,7 +67,6 @@ async def management_overview(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ):
-    response.headers["Cache-Control"] = "no-store"
     # Заголовок обязателен: ни default company, ни соседние членства не подставляем.
     cid = await assert_company_member(x_company_id, current_user, db)
     await capture_company_header(str(cid))
@@ -66,7 +79,6 @@ async def management_overview(
 
 @router.get("/source-overview", response_model=SourceOverview)
 async def management_source_overview(
-    response: Response,
     kind: Kind = Query(...),
     query: str = Query("", max_length=200),
     date_from: date | None = Query(None),
@@ -76,7 +88,6 @@ async def management_source_overview(
     authorization: str | None = Header(None),
     db: AsyncSession = Depends(get_db),
 ):
-    response.headers["Cache-Control"] = "no-store"
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Требуется scoped доступ к источнику")
     config = _config()

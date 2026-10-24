@@ -35,10 +35,14 @@ def calendar_bounds(kind: Kind, date_from: date | None, date_to: date | None,
         return None, None
     if date_from is None or date_to is None or date_to < date_from:
         raise HTTPException(422, "Для календаря нужен корректный период date_from/date_to")
-    if (date_to - date_from).days > 366 or date_to == date.max:
+    if (date_to - date_from).days > 366:
         raise HTTPException(422, "Период календаря не должен превышать 367 дней")
-    return (datetime.combine(date_from, time.min, zone).astimezone(timezone.utc),
-            datetime.combine(date_to + timedelta(days=1), time.min, zone).astimezone(timezone.utc))
+    try:
+        return (datetime.combine(date_from, time.min, zone).astimezone(timezone.utc),
+                datetime.combine(date_to + timedelta(days=1), time.min, zone).astimezone(timezone.utc))
+    except OverflowError:
+        # Как следующий день после date.max, так и UTC до datetime.min.
+        raise HTTPException(422, "Границы периода календаря выходят за допустимый диапазон дат") from None
 
 
 def make_item(record: ManagementRecord, source: SourceIdentity, base_url: str = "") -> ManagementItem:

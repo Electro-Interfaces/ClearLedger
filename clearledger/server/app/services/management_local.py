@@ -34,7 +34,7 @@ async def read_local(db: AsyncSession, user: User, cid: uuid.UUID, kind: Kind, *
         sel = select(Task).where(Task.company_id == cid, _not_personal(),
                                  _visible_to(user, await _is_admin(db, cid, user)))
         if query:
-            sel = sel.where(Task.title.ilike(f"%{query}%"))
+            sel = sel.where(Task.title.icontains(query, autoescape=True, escape="\\"))
         rows = list((await db.execute(sel.order_by(Task.updated_at.desc(), Task.id)
                                      .limit(limit + 1))).scalars())
         truncated = len(rows) > limit
@@ -54,7 +54,7 @@ async def read_local(db: AsyncSession, user: User, cid: uuid.UUID, kind: Kind, *
         or_(_my_events_clause(user.id), CalendarEvent.visibility == "company"),
         CalendarEvent.starts_at < date_to, CalendarEvent.ends_at > date_from)
     if query:
-        sel = sel.where(CalendarEvent.title.ilike(f"%{query}%"))
+        sel = sel.where(CalendarEvent.title.icontains(query, autoescape=True, escape="\\"))
     rows = list((await db.execute(sel.order_by(CalendarEvent.starts_at, CalendarEvent.id)
                                  .limit(limit + 1))).scalars())
     truncated = len(rows) > limit
