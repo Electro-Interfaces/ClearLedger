@@ -49,10 +49,29 @@ export function initialManagementPeriod(timeZone: string) {
   return { from, to: end.toISOString().slice(0, 10) }
 }
 
-export function validManagementPeriod(from: string, to: string): boolean {
-  const valid = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)
+export const MANAGEMENT_QUERY_LIMIT = 200
+export const MANAGEMENT_PERIOD_LIMIT = 367
+
+/** Python/Pydantic считает Unicode code points, а не UTF-16 units или графемы. */
+export function managementSearchLength(value: string): number {
+  return [...value.trim()].length
+}
+
+export function managementPeriodError(from: string, to: string): string | null {
+  const valid = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number(value.slice(0, 4)) > 0
     && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value
-  return valid(from) && valid(to) && from <= to
+  if (!from || !to) return 'Укажите обе даты.'
+  if (!valid(from) || !valid(to)) return 'Укажите существующие даты в формате ДД.ММ.ГГГГ.'
+  if (from > to) return 'Дата окончания должна быть не раньше начала.'
+  // Длительность в календарных днях: переходы часового пояса/DST не меняют границу.
+  if ((Date.parse(to) - Date.parse(from)) / 86_400_000 + 1 > MANAGEMENT_PERIOD_LIMIT) {
+    return `Выберите период не более ${MANAGEMENT_PERIOD_LIMIT} дней, включая обе даты. Сократите период.`
+  }
+  return null
+}
+
+export function validManagementPeriod(from: string, to: string): boolean {
+  return managementPeriodError(from, to) === null
 }
 
 const MANAGEMENT_STATUS: Record<string, Record<string, string>> = {

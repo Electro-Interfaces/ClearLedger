@@ -15,7 +15,10 @@ import {
   getManagementOverview, managementAvailable, managementQueryKey, ManagementError,
   type ManagementItem, type ManagementKind, type ManagementParams, type ManagementSource,
 } from '@/services/managementService'
-import { initialManagementPeriod, managementDate, managementDateTimestamp, managementStatusLabel, managementTimeZone, safeManagementHref, validManagementPeriod } from './management/managementHelpers'
+import {
+  initialManagementPeriod, managementDate, managementDateTimestamp, managementStatusLabel, managementTimeZone,
+  safeManagementHref, managementPeriodError, managementSearchLength, MANAGEMENT_QUERY_LIMIT, MANAGEMENT_PERIOD_LIMIT,
+} from './management/managementHelpers'
 import { useManagementStatus } from './management/useManagementStatus'
 
 const VIEWS = [
@@ -92,7 +95,11 @@ function ManagementOverview({ companyId, userId }: { companyId: string; userId: 
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const isCalendar = kind === 'calendar'
-  const periodValid = !isCalendar || validManagementPeriod(period.from, period.to)
+  const periodError = isCalendar ? managementPeriodError(period.from, period.to) : null
+  const periodValid = !periodError
+  const searchLength = managementSearchLength(search)
+  const searchValid = searchLength <= MANAGEMENT_QUERY_LIMIT
+  const queryValid = managementSearchLength(query) <= MANAGEMENT_QUERY_LIMIT
   const params: ManagementParams = {
     kind, space, query, limit: 100,
     ...(isCalendar ? { date_from: period.from, date_to: period.to, time_zone: timeZone } : {}),
@@ -101,17 +108,22 @@ function ManagementOverview({ companyId, userId }: { companyId: string; userId: 
   const status = useManagementStatus()
   const requestKey = JSON.stringify(managementQueryKey(companyId, userId, params))
   const denied = denial?.key === requestKey ? denial : null
+  useEffect(() => {
+    // После смены условий старый отказ не блокирует новый выбор восстановленного источника.
+    setDenial((previous) => previous?.key !== requestKey ? null : previous)
+  }, [requestKey])
   const overview = useQuery({
     queryKey: managementQueryKey(companyId, userId, params),
     queryFn: async () => {
       try { return await getManagementOverview(params) } catch (error) {
-        if (error instanceof ManagementError && [401, 403, 404].includes(error.status)) {
+        // 422 нельзя повторять с теми же условиями, в том числе при focus/reconnect.
+        if (error instanceof ManagementError && [401, 403, 404, 422].includes(error.status)) {
           setDenial({ key: requestKey, error })
         }
         throw error
       }
     },
-    enabled: available && status.data?.enabled === true && !status.isError && !denied && !!companyId && !!userId && periodValid,
+    enabled: available && status.data?.enabled === true && !status.isError && !denied && !!companyId && !!userId && periodValid && queryValid,
     gcTime: 0, staleTime: 0, retry: false, placeholderData: undefined,
   })
   const accessError = overview.error instanceof ManagementError && [401, 403, 404].includes(overview.error.status)
@@ -122,6 +134,7 @@ function ManagementOverview({ companyId, userId }: { companyId: string; userId: 
     }
   }, [accessError, requestKey, status.isError, status.isSuccess, status.data?.enabled, companyId, userId, qc])
   const error = denied?.error ?? overview.error
+  const invalidRequest = error instanceof ManagementError && error.status === 422
   const snapshot = status.data?.enabled && !status.isError && !accessError && !denied ? overview.data : undefined
   const data = snapshot?.enabled ? snapshot : undefined
   const sources = data?.sources ?? []
@@ -131,8 +144,14 @@ function ManagementOverview({ companyId, userId }: { companyId: string; userId: 
   const items = data?.items.filter((item) => item.kind === kind) ?? []
   const view = VIEWS.find((v) => v.kind === kind)!
   const resetFilters = () => { setSpace('all'); setQuery(''); setSearch('') }
-  const submit = (event: FormEvent) => { event.preventDefault(); setQuery(search.trim()) }
-  const retryOverview = () => { if (denied) setDenial(null); else void overview.refetch() }
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    if (searchValid) setQuery(search.trim())
+  }
+  const retryOverview = () => {
+    if (!periodValid || !queryValid || invalidRequest) return
+    if (denied) setDenial(null); else void overview.refetch()
+  }
   const refresh = async () => {
     const checked = await status.refetch()
     if (!checked.error && checked.data?.enabled) retryOverview()
@@ -150,7 +169,7 @@ function ManagementOverview({ companyId, userId }: { companyId: string; userId: 
         <p className="text-sm text-muted-foreground">Чаты, задачи и календарь доступных вам пространств.</p>
         <Badge variant="outline"><Eye aria-hidden="true" />Только просмотр</Badge>
       </div>
-      <Button variant="outline" disabled={!available || !companyId || !periodValid || overview.isFetching || status.isFetching}
+      <Button variant="outline" disabled={!available || !companyId || !periodValid || !searchValid || invalidRequest || overview.isFetching || status.isFetching}
         onClick={() => void refresh()}>
         {overview.isFetching ? <Loader2 className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
         Обновить
@@ -161,24 +180,31 @@ function ManagementOverview({ companyId, userId }: { companyId: string; userId: 
       <TabsList className="w-full sm:w-fit" aria-label="Разделы обзора">
         {VIEWS.map(({ kind: value, title, icon: Icon }) => <TabsTrigger key={value} value={value}><Icon aria-hidden="true" />{title}</TabsTrigger>)}
       </TabsList>
-      <form onSubmit={submit} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-end" aria-label="Фильтры обзора">
-        <div className="flex flex-col gap-1.5 sm:w-56">
-          <Label htmlFor="management-space">Пространство</Label>
-          <Select value={space} onValueChange={setSpace}>
-            <SelectTrigger id="management-space" className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectGroup>
-              <SelectItem value="all">Все доступные</SelectItem>
-              {sources.map((source) => <SelectItem key={source.code} value={source.code}>{source.name}</SelectItem>)}
-              {space !== 'all' && !sources.some((s) => s.code === space) && <SelectItem value={space}>Выбранное пространство</SelectItem>}
-            </SelectGroup></SelectContent>
-          </Select>
+      <form onSubmit={submit} className="rounded-lg border border-border bg-card p-4" aria-label="Фильтры обзора">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="flex flex-col gap-1.5 sm:w-56">
+            <Label htmlFor="management-space">Пространство</Label>
+            <Select value={space} onValueChange={setSpace}>
+              <SelectTrigger id="management-space" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectGroup>
+                <SelectItem value="all">Все доступные</SelectItem>
+                {sources.map((source) => <SelectItem key={source.code} value={source.code}>{source.name}</SelectItem>)}
+                {space !== 'all' && !sources.some((s) => s.code === space) && <SelectItem value={space}>Выбранное пространство</SelectItem>}
+              </SelectGroup></SelectContent>
+            </Select>
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <Label htmlFor="management-search">Поиск</Label>
+            <Input id="management-search" value={search} aria-invalid={!searchValid} aria-describedby="management-search-note"
+              onChange={(event) => setSearch(event.target.value)} placeholder="Поиск по названию" />
+          </div>
+          <Button type="submit" variant="outline" disabled={!searchValid || !periodValid}><Search aria-hidden="true" />Найти</Button>
+          {(search || query || space !== 'all') && <Button type="button" variant="outline" onClick={resetFilters}>Сбросить</Button>}
         </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <Label htmlFor="management-search">Поиск</Label>
-          <Input id="management-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск по названию" />
-        </div>
-        <Button type="submit" variant="outline"><Search aria-hidden="true" />Найти</Button>
-        {(query || space !== 'all') && <Button type="button" variant="outline" onClick={resetFilters}>Сбросить</Button>}
+        <p id="management-search-note" aria-live="polite" className="mt-2 text-xs text-muted-foreground">
+          {searchValid ? `Поиск: до ${MANAGEMENT_QUERY_LIMIT} символов.`
+            : `В поиске ${searchLength} символов. Допустимо не более ${MANAGEMENT_QUERY_LIMIT}. Сократите текст и нажмите «Найти».`}
+        </p>
       </form>
       {isCalendar && <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-end gap-3">
@@ -189,8 +215,8 @@ function ManagementOverview({ companyId, userId }: { companyId: string; userId: 
             <Input id="management-to" type="date" value={period.to} aria-invalid={!periodValid} aria-describedby="management-period-note"
               onChange={(event) => setPeriod((p) => ({ ...p, to: event.target.value }))} /></div>
         </div>
-        <p id="management-period-note" className="text-xs text-muted-foreground">
-          {periodValid ? `Период включает обе даты. Даты и время: ${timeZone}.` : 'Укажите обе даты. Дата окончания должна быть не раньше начала.'}
+        <p id="management-period-note" aria-live="polite" className="text-xs text-muted-foreground">
+          {periodError ?? `Период: до ${MANAGEMENT_PERIOD_LIMIT} дней, включая обе даты. Даты и время: ${timeZone}.`}
         </p>
       </div>}
       <TabsContent value={kind} className="flex flex-col gap-4" aria-busy={overview.isFetching}>
@@ -207,7 +233,7 @@ function ManagementOverview({ companyId, userId }: { companyId: string; userId: 
                   {error && <div role="alert" className="flex flex-col items-start gap-3 rounded-lg border border-border bg-card p-4">
                     <p className="text-sm">{error.message}</p>
                     {data && <p className="text-xs text-muted-foreground">Показан предыдущий ответ. Сведения могли измениться.</p>}
-                    <Button variant="outline" disabled={overview.isFetching} onClick={retryOverview}>Повторить</Button>
+                    {!invalidRequest && <Button variant="outline" disabled={overview.isFetching} onClick={retryOverview}>Повторить</Button>}
                   </div>}
                   {snapshot && !snapshot.enabled ? <EmptyState icon={view.icon} title="Обзор отключён" description="Управляющее пространство отключено администратором. После включения обновите обзор." />
                     : data && <>
