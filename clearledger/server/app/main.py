@@ -32,6 +32,7 @@ from app.routers import (
     audit_router,
     auditor_router,
     auth_router,
+    management_router,
     books_router,
     client_errors_router,
     intake_docs_router,
@@ -428,6 +429,7 @@ async def organization_context(request, call_next):
 API_PREFIX = "/api"
 
 app.include_router(auth_router.router, prefix=API_PREFIX)
+app.include_router(management_router.router, prefix=API_PREFIX)
 # Журнал сбоев интерфейса: открыт без токена — экран входа падает до входа.
 app.include_router(client_errors_router.router, prefix=API_PREFIX)
 # Рабочее место станции: прокси к вебу агента через хаб TradeLink.
