@@ -59,6 +59,7 @@ const FUEL_ONLY = new Set<string>(oneCItems.map((i) => i.to))
 // Плоская карта статических путей → пункт меню.
 const STATIC: Record<string, NavItemDef> = {}
 STATIC['/elsy'] = { to: '/elsy', icon: Handshake, label: 'Элси+' }
+STATIC['/management'] = { to: '/management', icon: LayoutDashboard, label: 'Обзор пространств' }
 for (const it of [...mainNavItems, ...dataItems, ...oneCItems, ...settingsItems]) {
   STATIC[it.to] = it
 }

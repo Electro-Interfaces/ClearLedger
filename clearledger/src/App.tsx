@@ -25,6 +25,8 @@ import { Loader2 } from 'lucide-react'
 import { SpacePageLayout } from '@/components/layout/SpacePageLayout'
 
 const MainLayout = lazy(() => import('@/components/layout/MainLayout').then((m) => ({ default: m.MainLayout })))
+const ManagementOverviewPage = lazy(() => import('@/pages/ManagementOverviewPage').then((m) => ({ default: m.ManagementOverviewPage })))
+const ManagementLinkBridge = lazy(() => import('@/pages/management/ManagementLinkBridge').then((m) => ({ default: m.ManagementLinkBridge })))
 const InstallApp = lazy(() => import('@/components/common/MobileShell').then((m) => ({ default: m.InstallApp })))
 const UpdateBanner = lazy(() => import('@/components/common/MobileShell').then((m) => ({ default: m.UpdateBanner })))
 const OneCAutoSync = lazy(() => import('@/components/onec/OneCAutoSync').then((m) => ({ default: m.OneCAutoSync })))
@@ -301,7 +303,7 @@ const router = createBrowserRouter([
       { path: '/doc-verify/:token', element: <LazyPage><DocVerifyPage /></LazyPage> },
       {
         path: '/',
-        element: <ProtectedRoute><LazyPage><EcosystemHomePage /></LazyPage></ProtectedRoute>,
+        element: <ProtectedRoute><LazyPage><ManagementLinkBridge><EcosystemHomePage /></ManagementLinkBridge></LazyPage></ProtectedRoute>,
       },
       {
         // Витрина пространства БЕЗ шапки стола — её показывает фреймом панель
@@ -322,9 +324,10 @@ const router = createBrowserRouter([
         ],
       },
       {
-        element: <ProtectedRoute><LazyPage><MainLayout /></LazyPage></ProtectedRoute>,
+        element: <ProtectedRoute><LazyPage><ManagementLinkBridge><MainLayout /></ManagementLinkBridge></LazyPage></ProtectedRoute>,
         children: [
           { path: '/workspace', element: <LedgerWorkspace /> },
+          { path: '/management', element: <LazyPage><ManagementOverviewPage /></LazyPage> },
           // Продукты пространства — разделы Учёта, ставшие самостоятельными рабочими
           // местами (`config/spaceProducts.ts`): своя плитка на столе, свой ключ доступа
           // в роли, своё левое меню. Маршруты строятся из той же карты, что и меню.
