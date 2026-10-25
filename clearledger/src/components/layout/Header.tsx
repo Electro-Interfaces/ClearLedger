@@ -20,6 +20,7 @@ export function Header() {
   // Приложение Ядра («Чаты», «Управление») называет себя само: продукта у него нет, а
   // надпись «Учёт» в чужом приложении сбивает с толку.
   const coreTitle = product ? null : coreAppTitle(pathname)
+  const productTitle = product ? productLabel(product, company.profileId) : coreTitle ?? `${ECOSYSTEM_BRAND} Учёт`
 
   return (
     <header className="mobile-safe-top box-content h-[var(--header-height)] shrink-0
@@ -36,7 +37,7 @@ export function Header() {
               приложений. Рабочий стол самого Ledger — `/workspace`.
               На телефоне логотипа нет: он был третьим путём на стол (рядом стояли
               кнопка «Стол» и нижняя навигация), а место занимал в первом ряду. */}
-          <Link to="/" title="К рабочему столу экосистемы" className="hidden items-center gap-3 shrink-0 lg:flex">
+          <Link to="/" title="К рабочему столу экосистемы" className="hidden min-w-0 items-center gap-3 lg:flex">
             {/* Знак пространства, а не иконка продукта. Раньше здесь стоял общий
                 глиф книги на синем квадрате — одинаковый у всех компаний, хотя у
                 каждой уже есть свой знак: сборка кладёт его в `favicon.svg` по
@@ -51,10 +52,12 @@ export function Header() {
               className="h-11 w-11 shrink-0 rounded-xl" />
             {/* Шапка называет ТЕКУЩИЙ продукт: там, где Учёт разрезан на рабочие места
                 («Финансы», «Данные»), надпись «Учёт» врала бы о том, где человек. */}
-            <div className="flex flex-col leading-none">
-              <div className="font-semibold tracking-tight text-foreground text-lg">
-                {product ? productLabel(product, company.profileId)
-                  : coreTitle ?? `${ECOSYSTEM_BRAND} Учёт`}
+            {/* min-w-0 и truncate: при тесной шапке имя продукта раньше обрезалось предком
+                посреди буквы («Телефо») — теперь укорачивается многоточием, а целиком его
+                показывает подсказка. Пока места хватает, ничего не меняется. */}
+            <div className="flex min-w-0 flex-col leading-none">
+              <div className="truncate font-semibold tracking-tight text-foreground text-lg" title={productTitle}>
+                {productTitle}
               </div>
               {/* Компания и версия сборки — одной строкой под именем приложения.
                   Версия стоит здесь всегда: человек, который пишет «у меня не
