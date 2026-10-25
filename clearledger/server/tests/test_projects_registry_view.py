@@ -127,6 +127,33 @@ async def test_шаг_проекта_виден_в_строке_и_в_отбор
     assert site["id"] in {it["id"] for it in просрочка["items"]}, \
         "отбор «Просрочен следующий шаг» считает тот же источник, что и план работ"
 
+    # Внешнее ожидание важнее шага проекта — и в строке, и в отборе. Иначе
+    # просрочка ловила проекты, которые ждут ответа, а их дата контроля ещё
+    # не наступила: 82 строки вместо 64 на рабочих данных (26.10.2026).
+    ждёт = await _site(auth_client, cid, "ул. Ждём и шаг у проекта, 12")
+    async with async_session_factory() as session:
+        проект = (await session.execute(_select(EzsProject).where(
+            EzsProject.site_id == uuid.UUID(ждёт["id"]), EzsProject.closed_on.is_(None))
+        )).scalars().first()
+        проект.next_action = "Старый шаг проекта"
+        проект.next_action_due = "2026-10-01"
+        await session.commit()
+    r = await auth_client.put(f"/api/project-workspace/{ждёт['id']}/next",
+                              params={"company_id": cid},
+                              json={"waiting_for": "Ответ сетевой", "owner_id": me["id"],
+                                    "follow_up": "2099-01-01"})
+    assert r.status_code in (200, 201), r.text
+
+    rows = (await auth_client.get("/api/sites", params={
+        "company_id": cid, "stage": "active", "page_size": 200})).json()["items"]
+    строка = next(it for it in rows if it["id"] == ждёт["id"])
+    assert строка["nextStepSource"] == "wait", "в строке показываем ожидание, а не старый шаг проекта"
+
+    просрочка = (await auth_client.get("/api/sites", params={
+        "company_id": cid, "stage": "active", "risk": "step_overdue", "page_size": 200})).json()
+    assert ждёт["id"] not in {it["id"] for it in просрочка["items"]}, \
+        "ждём внешних с будущей датой контроля — это не просрочка шага"
+
 
 async def test_присоединение_считает_проекты_в_работе(auth_client: AsyncClient):
     me = (await auth_client.get("/api/auth/me")).json()
