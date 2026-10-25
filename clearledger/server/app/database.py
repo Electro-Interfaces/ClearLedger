@@ -3740,9 +3740,6 @@ async def create_all() -> None:
         for stmt in MODEL_DRIFT_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
-        # Проверка ограничений — последней: к этому моменту все колонки и связи на месте.
-        for stmt in VALIDATE_CONSTRAINTS_DDL:
-            await conn.execute(_sa.text(stmt))
 
         # Миграции магазина идут только там, где схема `edge` наполнена: её
         # таблицы заводит провижининг станции, и в пространстве без магазина
@@ -5383,6 +5380,14 @@ async def create_all() -> None:
 
         # v2.88: «Телефония» — опознание звонящего узлом заказчика (Я-1…Я-3).
         for stmt in VOICE_CORE_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # Проверка ограничений — в самом конце, и это не формальность. Блок
+        # стоял в середине, а `BUSINESS_SHIFT_MIGRATION_DDL` ниже добавляет
+        # `fk_export_packet_accounting_group` как NOT VALID: на чистой базе связь
+        # оставалась непроверенной, хотя она есть в списке проверяемых. Любой
+        # новый блок миграций добавляется ВЫШЕ этого места.
+        for stmt in VALIDATE_CONSTRAINTS_DDL:
             await conn.execute(_sa.text(stmt))
 
     await _ensure_active_group_readiness(engine)
