@@ -106,6 +106,9 @@ async def _fetch_remote(config: ManagementConfig, source: RemoteSource, grant: O
         identity = SourceIdentity(code=source.code, name=source.name,
                                   company_id=str(source.company_id), company_name=source.company_name)
         items = [make_item(r, identity, source.base_url) for r in result.items]
+        if not source.original_links_enabled:
+            # Старый frontend не должен открывать другой контекст вместо оригинала.
+            items = [item.model_copy(update={"href": ""}) for item in items]
         return items, status.model_copy(update={"state": "ok", "error": None,
                                                "fetched_at": result.fetched_at,
                                                "truncated": result.truncated})

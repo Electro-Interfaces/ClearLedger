@@ -29,6 +29,7 @@ class RemoteSource(StrictModel):
     code: Code
     # Алиас компании в hub может отличаться от фиксированного кода receiver.
     receiver_code: Code | None = None
+    original_links_enabled: bool = True
     name: str = Field(min_length=1, max_length=200)
     base_url: str
     company_id: UUID
