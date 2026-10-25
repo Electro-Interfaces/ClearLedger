@@ -573,11 +573,22 @@ def touch_key_used(key) -> None:
     который уже обработан.
     """
     now = datetime.now(timezone.utc)
-    if key.last_used_at is not None and now - key.last_used_at <= KEY_TOUCH_INTERVAL:
+    key_id = str(key.id)
+    # Когда писали последний раз — помним В ПАМЯТИ ПРОЦЕССА, а не в ORM-объекте.
+    #
+    # Сначала здесь стояло `key.last_used_at = now`, и это сводило правку на нет:
+    # объект принадлежит сессии ЗАПРОСА, SQLAlchemy отправляет такое присваивание при
+    # автофлаше, и UPDATE снова уходил в транзакции запроса. Проверка после выкатки
+    # v1591 это и показала: головной блокировщик (29-секундное чтение пакетов) держал
+    # RowExclusiveLock на `space_inbound_keys` и четырёх её индексах, в очереди стояли
+    # шесть запросов, станции отдавали 499. Запись шла дважды — фоновой задачей и
+    # внутри транзакции запроса, и вторая всё портила.
+    #
+    # Словарь не растёт: ключей у пространства единицы (на gig восемь).
+    posledniy = _last_touch.get(key_id) or key.last_used_at
+    if posledniy is not None and now - posledniy <= KEY_TOUCH_INTERVAL:
         return
-    # В объекте правим сразу, чтобы соседние проверки в этом же запросе не писали повторно.
-    key.last_used_at = now
-    key_id = key.id
+    _last_touch[key_id] = now
 
     async def _write() -> None:
         from app.database import async_session_factory
@@ -600,6 +611,10 @@ def touch_key_used(key) -> None:
 
 
 _touch_tasks: set[asyncio.Task] = set()
+# Когда по ключу последний раз писали отметку. В памяти процесса: при нескольких
+# воркерах каждый ведёт свой счёт, и в худшем случае запись пройдёт по разу на
+# воркер за интервал — это всё равно единицы в минуту вместо каждого запроса.
+_last_touch: dict[str, datetime] = {}
 
 
 async def _named_key(raw: str, db: AsyncSession):
