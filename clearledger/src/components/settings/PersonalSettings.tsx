@@ -32,7 +32,8 @@ import * as chat from '@/services/chatService'
 import { changePassword, logoutAll } from '@/services/authService'
 import {
   ВИДЫ_ПИСЕМ, ОШИБКА_ДНЯ, подписьПояса, порядокВидовПисем, поясаПоСмещению,
-  ошибкаПароля, ошибкаФото, рабочийДеньВерен, телефонНеРаспознан,
+  ошибкаОтсутствия, ошибкаПароля, ошибкаФото, периодСловами,
+  рабочийДеньВерен, телефонНеРаспознан,
 } from '@/lib/profileRules'
 import { AvatarCropper } from './AvatarCropper'
 import { SecurityHistory } from './SecurityHistory'
@@ -41,6 +42,9 @@ type Draft = {
   name: string
   /** Виды писем, которые человек согласен получать. */
   emailKinds: string[]
+  /** «Меня не будет с … по …», ISO-даты или пусто. */
+  awayFrom: string
+  awayTo: string
   mobile: string
   office: string
   tz: string
@@ -281,6 +285,8 @@ export function PersonalSettings() {
     workEnd: user?.work_end ?? '18:00',
     notify: порядокКаналов(user?.task_notify ?? КАНАЛЫ_ПО_УМОЛЧАНИЮ),
     emailKinds: порядокВидовПисем(user?.email_notify ?? ВИДЫ_ПИСЕМ.map((k) => k.id)),
+    awayFrom: user?.away_from ?? '',
+    awayTo: user?.away_to ?? '',
     theme: themePref,
     level,
     send: sendMode,
@@ -324,6 +330,7 @@ export function PersonalSettings() {
     || draft.workEnd !== (user?.work_end ?? '18:00')
     || draft.notify.join() !== порядокКаналов(user?.task_notify ?? КАНАЛЫ_ПО_УМОЛЧАНИЮ).join()
     || draft.emailKinds.join() !== порядокВидовПисем(user?.email_notify ?? ВИДЫ_ПИСЕМ.map((k) => k.id)).join()
+    || draft.awayFrom !== (user?.away_from ?? '') || draft.awayTo !== (user?.away_to ?? '')
     || draft.theme !== themePref || draft.level !== level || draft.send !== sendMode
     || !!draft.photo || draft.photoRemoved
 
@@ -354,6 +361,8 @@ export function PersonalSettings() {
     const имя = draft.name.trim()
     if (имя.length < 2) { toast.error('Имя слишком короткое'); return }
     if (!рабочийДеньВерен(draft.workStart, draft.workEnd)) { toast.error(ОШИБКА_ДНЯ); return }
+    const бедаОтсутствия = ошибкаОтсутствия(draft.awayFrom, draft.awayTo)
+    if (бедаОтсутствия) { toast.error(бедаОтсутствия); return }
     setSaving(true)
     try {
       // Сначала серверное — если оно не пройдёт, локальные настройки не должны
@@ -361,7 +370,7 @@ export function PersonalSettings() {
       const тело: {
         name?: string; avatarUrl?: string; phoneMobile?: string; phoneOffice?: string
         tz?: string; workStart?: string; workEnd?: string; taskNotify?: string[]
-        emailNotify?: string[]
+        emailNotify?: string[]; awayFrom?: string; awayTo?: string
       } = {}
       if (имя !== (user?.name ?? '')) тело.name = имя
       if (draft.mobile.trim() !== (user?.phone_mobile ?? '')) тело.phoneMobile = draft.mobile.trim()
@@ -375,6 +384,8 @@ export function PersonalSettings() {
       if (draft.emailKinds.join() !== порядокВидовПисем(user?.email_notify ?? ВИДЫ_ПИСЕМ.map((k) => k.id)).join()) {
         тело.emailNotify = draft.emailKinds
       }
+      if (draft.awayFrom !== (user?.away_from ?? '')) тело.awayFrom = draft.awayFrom
+      if (draft.awayTo !== (user?.away_to ?? '')) тело.awayTo = draft.awayTo
       if (draft.photoRemoved) тело.avatarUrl = ''
       else if (draft.photo) тело.avatarUrl = (await chat.uploadAttachment(draft.photo, company.id)).fileUrl
       if (Object.keys(тело).length) {
@@ -397,6 +408,8 @@ export function PersonalSettings() {
   }
 
   const деньВерен = рабочийДеньВерен(draft.workStart, draft.workEnd)
+  const бедаОтсутствия = ошибкаОтсутствия(draft.awayFrom, draft.awayTo)
+  const отсутствиеЗадано = !!(draft.awayFrom || draft.awayTo)
   const почтаВключена = draft.notify.includes('email')
   const фото = preview ?? (draft.photoRemoved ? null : user?.avatar_url ?? null)
 
@@ -560,6 +573,64 @@ export function PersonalSettings() {
             </div>
           </div>
           {!деньВерен && <p className="text-xs text-destructive">{ОШИБКА_ДНЯ}</p>}
+        </div>
+
+        {/* Отсутствие — личная отметка: человек сам знает, когда его нет.
+            Замещение рядом показано, но не правится: оно даёт право
+            расписываться за него, и его заводит администратор по приказу. */}
+        <div id="profile-away" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
+          <div>
+            <h3 className="text-sm font-medium">Меня не будет</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Отпуск, больничный, командировка. В эти дни не приходят регламентные
+              напоминания и сводка дня — поводы дождутся вашего возвращения. Поручения
+              и ответы по задачам приходят по-прежнему: они не должны потеряться.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="pers-away-from" className="text-xs font-normal text-muted-foreground">
+                С какого дня
+              </Label>
+              <Input id="pers-away-from" type="date" value={draft.awayFrom}
+                onChange={(e) => set('awayFrom', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pers-away-to" className="text-xs font-normal text-muted-foreground">
+                По какой включительно
+              </Label>
+              <Input id="pers-away-to" type="date" value={draft.awayTo}
+                aria-invalid={!!бедаОтсутствия}
+                onChange={(e) => set('awayTo', e.target.value)} />
+            </div>
+          </div>
+          {бедаОтсутствия && <p className="text-xs text-destructive">{бедаОтсутствия}</p>}
+          {отсутствиеЗадано && !бедаОтсутствия && (
+            <p className="text-xs text-muted-foreground">
+              Вас не будет {периодСловами(draft.awayFrom, draft.awayTo)}.{' '}
+              <button type="button" className="underline underline-offset-2"
+                onClick={() => { set('awayFrom', ''); set('awayTo', '') }}>
+                Отметку снять
+              </button>
+            </p>
+          )}
+          <div className="rounded-lg bg-muted/50 p-3 text-xs">
+            {user?.substitute ? (
+              <>
+                <span className="font-medium">Вас замещает: {user.substitute}</span>
+                {user.substitute_period && <span className="text-muted-foreground"> · {user.substitute_period}</span>}
+                <p className="mt-0.5 text-muted-foreground">
+                  Заместитель расписывается от своего имени; в листе согласования видно обоих.
+                </p>
+              </>
+            ) : (
+              <p className="text-muted-foreground">
+                Замещение не заведено. Если на время вашего отсутствия кто-то должен
+                согласовывать документы за вас, попросите администратора пространства —
+                это полномочие, его не ставят себе сами.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Канал поручений выбирает сам человек: кто-то живёт в чате, кто-то в почте.

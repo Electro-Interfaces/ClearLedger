@@ -134,3 +134,130 @@ async def test_телефон_сохраняется_в_едином_виде(au
         await auth_client.patch("/api/chat/me", json={
             "phoneMobile": было.get("phone_mobile") or "",
             "phoneOffice": было.get("phone_office") or ""})
+
+
+# ===== Отсутствие: отпуск, больничный, командировка =====
+
+def _на(день: str):
+    from datetime import date
+    return date.fromisoformat(день)
+
+
+def _человек(**kw) -> User:
+    return User(email="kto@example.com", name="Кто-то", **kw)
+
+
+def test_отсутствие_считается_по_границам_включительно():
+    from app.services import notify
+
+    u = _человек(away_from=_на("2026-11-03"), away_to=_на("2026-11-17"))
+    assert notify.is_away(u, _на("2026-11-03")) is True     # первый день
+    assert notify.is_away(u, _на("2026-11-17")) is True     # последний
+    assert notify.is_away(u, _на("2026-11-02")) is False
+    assert notify.is_away(u, _на("2026-11-18")) is False
+
+
+def test_одна_дата_тоже_считается():
+    from app.services import notify
+
+    ушёл = _человек(away_from=_на("2026-11-03"), away_to=None)
+    assert notify.is_away(ушёл, _на("2026-12-31")) is True
+    вернётся = _человек(away_from=None, away_to=_на("2026-11-17"))
+    assert notify.is_away(вернётся, _на("2026-01-01")) is True
+    assert notify.is_away(вернётся, _на("2026-11-18")) is False
+    assert notify.is_away(_человек(), _на("2026-11-18")) is False
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_отметка_отсутствия_сохраняется_и_снимается(auth_client):
+    try:
+        r = await auth_client.patch("/api/chat/me",
+                                    json={"awayFrom": "2026-11-03", "awayTo": "2026-11-17"})
+        assert r.status_code == 200, r.text
+        me = (await auth_client.get("/api/auth/me")).json()
+        assert me["away_from"] == "2026-11-03"
+        assert me["away_to"] == "2026-11-17"
+
+        # Возвращение раньше ухода не принимается.
+        r = await auth_client.patch("/api/chat/me",
+                                    json={"awayFrom": "2026-11-17", "awayTo": "2026-11-03"})
+        assert r.status_code == 400, r.text
+        assert "раньше" in r.text
+
+        # Мусор вместо даты тоже отбивается.
+        r = await auth_client.patch("/api/chat/me", json={"awayFrom": "третьего"})
+        assert r.status_code == 400, r.text
+
+        # Пустая строка снимает отметку.
+        r = await auth_client.patch("/api/chat/me", json={"awayFrom": "", "awayTo": ""})
+        assert r.status_code == 200, r.text
+        me = (await auth_client.get("/api/auth/me")).json()
+        assert me["away_from"] is None and me["away_to"] is None
+    finally:
+        await auth_client.patch("/api/chat/me", json={"awayFrom": "", "awayTo": ""})
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_в_отпуске_сводка_дня_не_уходит(auth_client, db):
+    """Отметка отсутствия убирает человека из рассылки «Пульса»."""
+    from datetime import date, datetime, timedelta, timezone
+
+    from app.models import UserCompany
+    from app.services import pulse_digest
+    from tests.helpers import seed_company_id
+
+    me = (await auth_client.get("/api/auth/me")).json()
+    cid = seed_company_id(me)
+    user = (await db.execute(select(User).where(User.id == uuid.UUID(me["id"])))).scalar_one()
+    членство = (await db.execute(select(UserCompany).where(
+        UserCompany.company_id == cid, UserCompany.user_id == user.id))).scalar_one_or_none()
+    if членство is None:
+        pytest.skip("суперадмин не состоит в компании сида")
+    было_видно = user.last_seen_at
+    user.last_seen_at = datetime.now(timezone.utc) - timedelta(days=1)
+    user.away_from = user.away_to = None
+    await db.commit()
+    try:
+        assert user.email in await pulse_digest._recipients(db, cid)
+
+        сегодня = date.today()
+        user.away_from, user.away_to = сегодня - timedelta(days=1), сегодня + timedelta(days=5)
+        await db.commit()
+        assert user.email not in await pulse_digest._recipients(db, cid), "сводка ушла в отпуск"
+    finally:
+        user.away_from = user.away_to = None
+        user.last_seen_at = было_видно
+        await db.commit()
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_профиль_показывает_кто_замещает(auth_client, db):
+    """Замещение видно в профиле, но заводит его администратор, не сам человек."""
+    from datetime import date, timedelta
+
+    from app.models import UserSubstitution
+
+    me = (await auth_client.get("/api/auth/me")).json()
+    user = (await db.execute(select(User).where(User.id == uuid.UUID(me["id"])))).scalar_one()
+    if user.company_id is None:
+        pytest.skip("у учётной записи нет компании по умолчанию")
+    assert me["substitute"] is None, "замещения не было, а профиль его показывает"
+
+    зам_id = uuid.uuid4()
+    db.add(User(id=зам_id, email=f"zam-{зам_id.hex[:8]}@example.com", name="Заместитель",
+                role="user", password_hash="x" * 20))
+    await db.flush()
+    сегодня = date.today()
+    сам = UserSubstitution(company_id=user.company_id, user_id=user.id, deputy_id=зам_id,
+                           starts_on=сегодня, ends_on=сегодня + timedelta(days=10),
+                           basis="Приказ № 1")
+    db.add(сам)
+    await db.commit()
+    try:
+        me = (await auth_client.get("/api/auth/me")).json()
+        assert me["substitute"] == "Заместитель"
+        assert me["substitute_period"].startswith(сегодня.strftime("%d.%m.%Y"))
+    finally:
+        await db.execute(UserSubstitution.__table__.delete().where(UserSubstitution.id == сам.id))
+        await db.execute(User.__table__.delete().where(User.id == зам_id))
+        await db.commit()

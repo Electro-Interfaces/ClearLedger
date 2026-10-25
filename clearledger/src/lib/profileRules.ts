@@ -124,3 +124,28 @@ export function телефонНеРаспознан(raw: string): boolean {
   const цифр = (основной.match(/[0-9]/g) ?? []).length
   return цифр < 10
 }
+
+/** Что не так с периодом отсутствия — или `null`. */
+export function ошибкаОтсутствия(с: string, по: string): string | null {
+  if (с && по && по < с) return 'Дата возвращения раньше даты ухода'
+  return null
+}
+
+/** «3 — 17 ноября 2026» для подписи под датами.
+ *  Повторять месяц и год дважды незачем: подпись читают глазами, а не парсят. */
+export function периодСловами(с: string, по: string): string {
+  const дата = (iso: string) => new Date(`${iso}T00:00:00`)
+  const полностью = (iso: string) =>
+    дата(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }).replace(' г.', '')
+  if (с && по) {
+    const a = дата(с)
+    const b = дата(по)
+    if (a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()) {
+      return `${a.getDate()} — ${полностью(по)}`
+    }
+    return `${полностью(с)} — ${полностью(по)}`
+  }
+  if (с) return `с ${полностью(с)}`
+  if (по) return `по ${полностью(по)}`
+  return ''
+}

@@ -44,6 +44,12 @@ export interface AuthUser {
   task_notify?: string[]
   /** Виды писем, которые человек согласен получать (notify.EMAIL_KINDS). */
   email_notify?: string[]
+  /** «Меня не будет с … по …» — ставит сам человек. */
+  away_from?: string | null
+  away_to?: string | null
+  /** Кто расписывается за него, пока его нет (заводит администратор). */
+  substitute?: string | null
+  substitute_period?: string | null
   /**
    * Место человека в пространстве — заполняет администратор.
    * party_type: internal — сотрудник организации пространства,

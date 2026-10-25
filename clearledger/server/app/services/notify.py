@@ -206,6 +206,25 @@ EMAIL_KIND_LABELS: dict[str, str] = {
 }
 
 
+def is_away(user: User, on: "date | None" = None) -> bool:
+    """Человека сейчас нет: отпуск, больничный, командировка.
+
+    Границы включительные: «с 3 по 17» значит, что 17-го он ещё отсутствует.
+    Одна дата без второй тоже считается: «с 3-го» — ушёл без известной даты
+    возвращения, «по 17-е» — вернётся 18-го.
+    """
+    from datetime import date as _date
+
+    if user.away_from is None and user.away_to is None:
+        return False
+    день = on or _date.today()
+    if user.away_from is not None and день < user.away_from:
+        return False
+    if user.away_to is not None and день > user.away_to:
+        return False
+    return True
+
+
 def email_kinds(user: User) -> set[str]:
     """Виды писем, которые человек согласен получать."""
     if user.email_notify is None:
