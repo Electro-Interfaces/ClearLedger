@@ -245,7 +245,7 @@ function MarketPositionTable() {
   // Вывод экрана словами. Без покрытия он был бы враньём: «дороже рынка на четырёх
   // объектах» из шестисот — это про четыре объекта, а не про сеть.
   const verdict = comparable.length === 0
-    ? 'Свежих сопоставимых цен для вывода недостаточно. Прошлые наблюдения доступны в расшифровке.'
+    ? 'Нет сравнения: нужны наша цена за период и свежие сопоставимые цены рынка.'
     : pricier > cheaper
       ? `Мы дороже рынка на ${pricier} объектах и дешевле на ${cheaper}.`
       : cheaper > 0
@@ -255,7 +255,7 @@ function MarketPositionTable() {
   const rivalsAll = all.reduce((acc, r) => acc + r.rivals, 0)
 
   return (
-    <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
+    <div ref={экран} className="h-full space-y-3 overflow-auto p-3 pb-20 sm:flex sm:min-h-0 sm:flex-col sm:gap-3 sm:space-y-0 sm:overflow-hidden sm:p-4">
       <div className="flex flex-wrap items-center gap-2">
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Объект или город"
           className="h-8 w-[220px] text-xs" />
@@ -293,8 +293,8 @@ function MarketPositionTable() {
 
       <div className="space-y-1 text-sm" role="note">
         <p>Наши объекты — эксплуатационный реестр, включая объекты без координат. Продажи: {pos.data?.salesFrom} — {pos.data?.salesTo}.</p>
-        <p className="text-muted-foreground">{pos.data?.comparisonNote}</p>
-        {stalePrices > 0 && <p className="font-medium text-foreground">В окружении есть цены старше {pos.data?.priceMaxAgeDays} дней. Они исключены из медианы; обновите наблюдения перед тарифным решением.</p>}
+        <details className="text-muted-foreground"><summary className="cursor-pointer py-1">Как сопоставляем цены</summary><p>{pos.data?.comparisonNote}</p></details>
+        {stalePrices > 0 && <p className="font-medium text-foreground">Цены старше {pos.data?.priceMaxAgeDays} дней исключены; прошлые значения доступны в расшифровке.</p>}
       </div>
       {/* Сначала вывод, потом данные, из которых он собран. */}
       <Card>
@@ -311,16 +311,9 @@ function MarketPositionTable() {
         </CardContent>
       </Card>
 
-      {all.length > 0 && comparable.length === 0 && (
-        <Card className="border-warning/40">
-          <CardContent className="p-3 text-xs text-muted-foreground">
-            Нет свежих однозначных публичных цен в выбранном классе зарядки. Старые, временные и неоднозначные тарифы не используются для вывода; их можно проверить в расшифровке.
-          </CardContent>
-        </Card>
-      )}
 
-      <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
-        <table className="w-full text-xs"
+      <div className="overflow-auto rounded-lg border border-border sm:min-h-0 sm:flex-1">
+        <table className="w-full min-w-[800px] text-xs"
           {...exportRows('Позиция', [
             'Наш объект', 'Город', 'Сессий', 'кВт·ч', 'Выручка, ₽', 'Наша ₽/кВт·ч',
             'Рынок ₽/кВт·ч', 'Разрыв, %', 'Соседей ЭЗС', 'Из них живых', 'Точек притяжения',

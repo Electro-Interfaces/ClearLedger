@@ -1028,7 +1028,7 @@ function MarketObservations() {
   const { rows, sort, toggle } = useTableSort(
     q.data?.pages.flatMap(p => p.observations) ?? [], карта, { key: 'date', dir: 'desc' })
   if (q.isPending) return <div className="p-4" role="status">Загружаем наблюдения…</div>
-  if (q.isError) return <div className="p-4" role="alert">Не удалось загрузить наблюдения. <button onClick={() => void q.refetch()}>Повторить</button></div>
+  if (q.isError && !q.data) return <div className="p-4" role="alert">Не удалось загрузить наблюдения. <button onClick={() => void q.refetch()}>Повторить</button></div>
   return (
     <div ref={экран} className="h-full overflow-auto p-4">
       <p className="mb-2 text-sm text-muted-foreground">Наблюдения за {period.from} — {period.to}: {rows.length} из {total}.
