@@ -1576,6 +1576,47 @@ MATRIX_MIGRATION_DDL = (
 )
 
 
+# Связи, которые объявлены в моделях, но до базы не доехали. create_all добавляет
+# ограничения и индексы только вместе с новой таблицей: если колонку завели позже
+# через ALTER, объявленные на ней ForeignKey и index=True остаются только в коде.
+# Нашла это сверка `alembic check` 25.10.2026 — на стенде rushydro обоих ключей и
+# обоих индексов не было, при чистых данных (ни одной висячей ссылки).
+MODEL_DRIFT_MIGRATION_DDL = (
+    "CREATE INDEX IF NOT EXISTS ix_task_work_items_doc_id ON task_work_items (doc_id)",
+    """
+    DO $$ BEGIN
+        IF to_regclass('task_work_items') IS NOT NULL
+           AND to_regclass('doc_cards') IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1 FROM pg_constraint
+                WHERE conname = 'task_work_items_doc_id_fkey'
+                  AND conrelid = to_regclass('task_work_items')
+           ) THEN
+            ALTER TABLE task_work_items
+              ADD CONSTRAINT task_work_items_doc_id_fkey
+              FOREIGN KEY (doc_id) REFERENCES doc_cards(id) ON DELETE CASCADE;
+        END IF;
+    END $$;
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_task_templates_doc_kind_id ON task_templates (doc_kind_id)",
+    """
+    DO $$ BEGIN
+        IF to_regclass('task_templates') IS NOT NULL
+           AND to_regclass('doc_kinds') IS NOT NULL
+           AND NOT EXISTS (
+               SELECT 1 FROM pg_constraint
+                WHERE conname = 'task_templates_doc_kind_id_fkey'
+                  AND conrelid = to_regclass('task_templates')
+           ) THEN
+            ALTER TABLE task_templates
+              ADD CONSTRAINT task_templates_doc_kind_id_fkey
+              FOREIGN KEY (doc_kind_id) REFERENCES doc_kinds(id) ON DELETE SET NULL;
+        END IF;
+    END $$;
+    """,
+)
+
+
 ACCOUNTING_REVISION_MIGRATION_DDL = (
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS document_id UUID",
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS revision INTEGER",
@@ -3559,6 +3600,10 @@ async def create_all() -> None:
         # v2.40: канонические ревизии L2 и ревизионный accounting-only outbox.
         # Legacy/fuel idem_key сохраняет прежнюю семантику отдельным predicate.
         for stmt in ACCOUNTING_REVISION_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # Связи из моделей, не доехавшие до базы (нашла сверка схемы).
+        for stmt in MODEL_DRIFT_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
         # Миграции магазина идут только там, где схема `edge` наполнена: её
