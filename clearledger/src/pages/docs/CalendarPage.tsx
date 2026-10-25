@@ -360,7 +360,10 @@ export function CalendarPage() {
     </header>
   )
 
-  return <div className="flex h-full min-h-0 min-w-0 flex-col gap-3 p-3 md:p-4">
+  // Нижний отступ на высоту плашки установки: иначе на столе она ложится на
+  // последнюю строку месяца, и записи этих дней не видно и не нажать.
+  return <div className="flex h-full min-h-0 min-w-0 flex-col gap-3 p-3 md:p-4"
+    style={{ paddingBottom: 'calc(0.75rem + var(--pwa-install-height, 0px) + var(--pwa-install-gap, 0px))' }}>
     {phone && (searchOpen || query) && (
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -553,9 +556,12 @@ export function CalendarPage() {
        */
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
+          {/* Над плашкой «поставьте приложением», а не под ней: она стоит на той же
+              высоте, и нажатие по кнопке попадало в её «Позже» — человек считал,
+              что кнопка не работает (проверка календаря 25.10.2026). */}
           <Button aria-label="Новое событие"
             className="fixed right-4 z-40 size-14 rounded-full p-0 shadow-lg"
-            style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom))' }}>
+            style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom) + var(--pwa-install-height, 0px) + var(--pwa-install-gap, 0px))' }}>
             <Plus className="h-6 w-6" />
           </Button>
         </DropdownMenuTrigger>

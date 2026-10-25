@@ -57,8 +57,10 @@ test('U-02 поля даты встречи различимы по доступ
   await page.getByRole('menuitem', { name: 'Встреча' }).click()
   const окно = page.getByRole('dialog')
   await expect(окно.getByRole('heading', { name: 'Новая встреча' })).toBeVisible()
+  // Доступное имя поля: aria-label, иначе связанная подпись <label for>.
   const имена = await окно.locator('input[placeholder="дд.мм.гггг"]').evaluateAll(
-    (поля) => поля.map((п) => п.getAttribute('aria-label') || ''))
+    (поля) => поля.map((п) => п.getAttribute('aria-label')
+      || (п.labels && п.labels[0] ? (п.labels[0].textContent || '').trim() : '')))
   await снимок(page, 'u02-event-form.png')
   // Ожидание: программа чтения с экрана различает начало и конец встречи
   expect(new Set(имена).size, `имена полей даты: ${имена.join(' / ')}`).toBe(имена.length)
@@ -86,4 +88,16 @@ test('U-04 управление календарём помещается в п�
       .toBeGreaterThanOrEqual(36)
   }
   await снимок(page, 'u04-mobile-controls.png')
+})
+
+test('U-05 первая метка часа видна целиком при открытии сетки', async ({ page }) => {
+  await page.goto(календарь({ calendarMode: 'day', date: ДЕНЬ }))
+  const метка = page.getByText('08:00').first()
+  await expect(метка).toBeVisible()
+  const зазор = await метка.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const окно = el.closest('[class*="overflow-y-auto"]')!.getBoundingClientRect()
+    return Math.round(r.top - окно.top)
+  })
+  expect(зазор, `верх метки относительно верха прокрутки: ${зазор} px`).toBeGreaterThanOrEqual(0)
 })

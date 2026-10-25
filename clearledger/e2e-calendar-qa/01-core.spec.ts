@@ -42,11 +42,11 @@ test('C-01 календарь открывается на выбранном м�
 
 test('C-02 встреча назначается на выбранный день и сразу видна в сетке', async ({ page }) => {
   const название = имя('встреча')
-  await открыть(page)
+  await открыть(page)   // ДЕНЬ выбран в адресе, форма должна предложить именно его
   const окно = await новаяВстреча(page, название)
   await окно.getByLabel('О чём').fill(название)
   // Дата должна совпадать с выбранным днём, а не с «сегодня»
-  await expect(окно.getByLabel('Дата').first()).toHaveValue('10.11.2026')
+  await expect(окно.getByLabel('Начало', { exact: true })).toHaveValue('10.11.2026')
   await expect(окно.getByLabel('Время начала')).toHaveValue('10:00')
   await expect(окно.getByLabel('Время окончания')).toHaveValue('11:00')
   await окно.getByRole('button', { name: 'Собрать' }).click()
@@ -85,7 +85,7 @@ test('C-05 «Весь день»: последний день включител
     await окно.getByLabel('О чём').fill(название)
     await окно.getByLabel('Весь день').check()
     await expect(окно.getByText('Последний день')).toBeVisible()
-    await expect(окно.getByLabel('Дата').nth(1)).toHaveValue('10.11.2026')
+    await expect(окно.getByLabel('Последний день', { exact: true })).toHaveValue('10.11.2026')
     await окно.getByRole('button', { name: 'Собрать' }).click()
     await expect(page.getByRole('dialog')).toHaveCount(0)
 

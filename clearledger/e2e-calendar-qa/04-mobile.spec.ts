@@ -145,13 +145,24 @@ test('M-08 три одновременные встречи в сетке нед
   }
   await page.goto(календарь({ calendarMode: 'week', date: день }))
   await expect(page.getByText('весь день', { exact: true })).toBeVisible()
-  const блок = page.getByRole('button', { name: new RegExp(названия[0]) }).first()
-  await expect(блок).toBeVisible()
-  const рамка = (await блок.boundingBox())!
+  const видимые = page.getByRole('button', { name: new RegExp('QA-CAL-20261025 ряд-') })
+  await expect(видимые.first()).toBeVisible()
   await снимок(page, 'm08-overlap-mobile.png')
-  // Ожидание: в сетке видно, что это за встреча, либо показан счётчик «+N».
-  expect(рамка.width, `ширина блока одной из трёх одновременных встреч: ${Math.round(рамка.width)} px`)
-    .toBeGreaterThanOrEqual(44)
+
+  // Ожидание: показанные встречи читаемы, а остальные названы счётчиком «+N»,
+  // который открывает день списком.
+  for (const блок of await видимые.all()) {
+    const рамка = (await блок.boundingBox())!
+    expect(рамка.width, `ширина показанного блока: ${Math.round(рамка.width)} px`)
+      .toBeGreaterThanOrEqual(40)   // порог раскладки 44 px минус рамки колонки
+  }
+  const свёрнуто = page.getByRole('button', { name: /^Ещё \d+ встреч/ })
+  await expect(свёрнуто.first()).toBeVisible()
+  await свёрнуто.first().click()
+  await expect(page).toHaveURL(/calendarMode=agenda/)
+  for (const название of названия) {
+    await expect(page.getByRole('button', { name: new RegExp(название) })).toBeVisible()
+  }
 })
 
 test('M-07 первое нажатие на кнопку записи попадает в баннер установки приложения',
