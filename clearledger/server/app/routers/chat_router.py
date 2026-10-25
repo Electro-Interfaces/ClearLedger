@@ -1224,6 +1224,14 @@ async def send_message(
     if not _can_write(room, current_user, room_role,
                       await _is_company_admin(db, room.company_id, current_user)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "В «Объявления» пишут только администраторы")
+    # Надзор: суперадмин входит в любой разговор, чтобы разобрать инцидент
+    # (`_assert_participant`), но говорить в нём — другое право. Личную переписку
+    # двоих он не ведёт вовсе, а в чужой группе его реплика помечается, чтобы
+    # участники видели, что писал не их человек (решение МАГа 25.10.2026).
+    надзор = room_role is None
+    if надзор and room.type == "direct":
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Это личная переписка двоих: читать её можно по надзору, писать — нет")
     mtype = body.type if body.type in ("text", "image", "video", "file") else "text"
     content = (body.content or "").strip()
     has_file = bool(body.fileUrl)
@@ -1271,6 +1279,10 @@ async def send_message(
         file_url=body.fileUrl or None, file_name=body.fileName or None,
         file_size=file_size, batch_id=batch_id,
         poster_url=body.posterUrl or None,
+        # Источник сообщения: «email» — пришло письмом, «supervision» — писал не
+        # участник разговора. Поле одно, потому что отвечает на один вопрос ленты:
+        # почему этот человек здесь говорит.
+        external_source="supervision" if надзор else None,
     )
     db.add(msg)
     room.updated_at = _now()

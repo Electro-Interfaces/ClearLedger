@@ -155,3 +155,46 @@ async def test_карточка_комнаты_показывает_непроч
     assert карточка["unreadCount"] == строка["unreadCount"], "карточка расходится со списком"
     assert карточка["lastMessageAt"] == строка["lastMessageAt"]
     assert карточка["lastMessage"] == строка["lastMessage"]
+
+
+async def test_надзор_не_пишет_в_личную_переписку_а_в_группе_помечен(
+        client: AsyncClient, db: AsyncSession):
+    """Право войти в разговор не делает надзор его участником.
+
+    В личной переписке двоих администратор контейнера не говорит вовсе, а в чужой
+    группе его реплика помечается источником `supervision`: участники видят, что
+    писал не их человек (решение МАГа 25.10.2026).
+    """
+    from app.models import User as UserModel
+    company = await _компания(db)
+    первый = await _человек(db, company.id, "Первый собеседник")
+    второй = await _человек(db, company.id, "Второй собеседник")
+    h1 = await _вход(client, первый.email)
+
+    личный = (await client.post("/api/chat/rooms", headers=h1,
+                                json={"type": "direct", "participantIds": [str(второй.id)]})).json()
+    группа = (await client.post("/api/chat/rooms", headers=h1,
+                                json={"type": "group", "name": "Чужая группа"})).json()
+
+    супер = (await db.execute(select(UserModel).where(UserModel.is_superadmin.is_(True)))).scalars().first()
+    assert супер is not None, "в тестовом пространстве нет суперадмина"
+    r = await client.post("/api/auth/login", json={"email": супер.email, "password": "admin123"})
+    assert r.status_code == 200, r.text
+    hs = {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    отказ = await client.post(f"/api/chat/rooms/{личный['id']}/messages", headers=hs,
+                              json={"content": "надзор в личке"})
+    assert отказ.status_code == 403, отказ.text
+
+    # Читать личную переписку по надзору по-прежнему можно: право входа не трогали.
+    assert (await client.get(f"/api/chat/rooms/{личный['id']}/messages", headers=hs)).status_code == 200
+
+    в_группе = await client.post(f"/api/chat/rooms/{группа['id']}/messages", headers=hs,
+                                 json={"content": "вопрос по инциденту"})
+    assert в_группе.status_code == 201, в_группе.text
+    assert в_группе.json()["externalSource"] == "supervision"
+
+    # Своё сообщение участника пометки не получает.
+    своё = await client.post(f"/api/chat/rooms/{группа['id']}/messages", headers=h1,
+                             json={"content": "обычная реплика"})
+    assert своё.json()["externalSource"] is None
