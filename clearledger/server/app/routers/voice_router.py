@@ -39,7 +39,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
-from app.auth import CompanyByKeyScope, _named_key, assert_company_member, get_current_user
+from app.auth import CompanyByKeyScope, _named_key, assert_company_member, get_current_user, touch_key_used
 from app.database import get_db
 from app.models import (
     ChargeSession, Company, CorporateClient, Counterparty, CounterpartyContact,
@@ -518,7 +518,7 @@ async def exchange_voice_key(
                                          actor_id=named.consumer)
     if not token:
         raise HTTPException(503, "Единый вход не настроен: нет ключа подписи")
-    named.last_used_at = datetime.now(timezone.utc)
+    touch_key_used(named)
     # Фиксация до ответа, как у выдачи и отзыва: get_db коммитит уже после отправки
     # ответа, а экран «Ключи систем» показывает время обмена сразу.
     await db.commit()
