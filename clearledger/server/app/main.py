@@ -419,6 +419,21 @@ async def _log_security_event(event: dict) -> None:
 
 
 @app.middleware("http")
+async def conditional_get(request, call_next):
+    """ETag на чтениях и 304, когда у клиента тот же ответ (`app/http_cache.py`).
+
+    Фактический порядок цепочки (проверено на собранном образе):
+    `organization_context` → этот → `rate_limit_public` → CORS → обработчик.
+    То есть лимит частоты и охрана остаются ВНУТРИ и обойти их условным запросом
+    нельзя: 304 отдаётся только после того, как обработчик уже отработал. Их
+    собственные ответы (429, 403) метку не получают — она ставится только на 200.
+    """
+    from app.http_cache import conditional_get as handler
+
+    return await handler(request, call_next)
+
+
+@app.middleware("http")
 async def organization_context(request, call_next):
     """Активная организация запроса — из заголовка `X-Organization-Id`.
 

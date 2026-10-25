@@ -474,8 +474,34 @@ def _default_app_on(code: str, profile_id: str | None = None) -> bool:
     return code in carved_products(profile_id)
 
 
+def _request_cache(db: AsyncSession) -> dict:
+    """Кэш на ОДИН запрос — в `db.info` сессии.
+
+    `company_apps` собирает ответ пятью выборками, а зовут её ради одного факта
+    («включён ли voice у этой компании») из двенадцати мест: `voice_router`,
+    `megafon_voice_router`, `ticket_communications`, `management_local`,
+    `support_context`, `project_scenario_settings`, `sso_router` и далее. В одном
+    HTTP-запросе это складывалось в несколько полных пересборок: за 4.7 часа
+    21 565 вызовов при 4.6 тыс. запросов к API, то есть по 4–5 на запрос.
+
+    Привязка к `db.info`, а не к contextvar, выбрана намеренно: сессия живёт ровно
+    один запрос и создаётся заново зависимостью `get_db`, поэтому кэш не может
+    протечь в соседний запрос и его не нужно чистить руками. Запись в тех же
+    функциях ниже сбрасывает его явно.
+    """
+    return db.info.setdefault("_app_registry_cache", {})
+
+
+def _drop_request_cache(db: AsyncSession) -> None:
+    db.info.pop("_app_registry_cache", None)
+
+
 async def company_apps(db: AsyncSession, company_id) -> list[dict[str, Any]]:
     """Эффективный список приложений компании + модули + признак enabled."""
+    cache = _request_cache(db)
+    cache_key = ("company_apps", str(company_id))
+    if cache_key in cache:
+        return cache[cache_key]
     apps = (await db.execute(
         select(App).where(App.is_active.is_(True)).order_by(App.sort))).scalars().all()
     ca = {r.app_id: r for r in (await db.execute(
@@ -512,6 +538,7 @@ async def company_apps(db: AsyncSession, company_id) -> list[dict[str, Any]]:
                 "enabled": cam.get((app.id, m.code), m.default_on),
             } for m in mods.get(app.id, [])],
         })
+    cache[cache_key] = out
     return out
 
 
@@ -563,6 +590,8 @@ async def set_app(db: AsyncSession, company_id, app_id, enabled: bool) -> None:
         db.add(CompanyApp(company_id=company_id, app_id=app_id, enabled=enabled))
     else:
         rec.enabled = enabled
+    # Состав приложений изменился — кэш запроса больше не отражает базу.
+    _drop_request_cache(db)
     await db.commit()
 
 
@@ -575,6 +604,8 @@ async def set_module(db: AsyncSession, company_id, app_id, module_code: str, ena
                                 module_code=module_code, enabled=enabled))
     else:
         rec.enabled = enabled
+    # Состав приложений изменился — кэш запроса больше не отражает базу.
+    _drop_request_cache(db)
     await db.commit()
 
 
@@ -611,5 +642,7 @@ async def update_app(db: AsyncSession, app_id, *, description=None, base_url=Non
         app.config = config
     if is_active is not None:
         app.is_active = is_active
+    # Реестр приложений изменился — кэш запроса больше не отражает базу.
+    _drop_request_cache(db)
     await db.commit()
     return True
