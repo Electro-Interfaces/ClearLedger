@@ -150,6 +150,9 @@ async def test_напоминания_встречи_отбираются_тол
             remind_at=event['starts_at'] - timedelta(minutes=15)), db=db, current_user=actor)
     result = await reminders_list(company_id=str(company.id), pending=False, target_ref=target, db=db, current_user=owner)
     assert len(result['items']) == 1 and result['items'][0]['target_ref'] == target
-    await calendar_action(event['id'], EventAction(company_id=str(company.id), cancel=True), db=db, current_user=owner)
+    # Причина обязательна, когда встречу ждут другие: её увидят в своих календарях.
+    await calendar_action(event['id'], EventAction(company_id=str(company.id), cancel=True,
+                                                   cancel_reason='планёрку перенесли'),
+                          db=db, current_user=owner)
     result = await reminders_list(company_id=str(company.id), pending=False, target_ref=target, db=db, current_user=guest)
     assert not result['items']

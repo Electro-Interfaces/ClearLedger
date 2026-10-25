@@ -1749,8 +1749,16 @@ async def calendar_action(
     if payload.cancel:
         # Не удаляем: встреча уже стоит в чужих календарях, и молча исчезнувшая
         # означает, что кто-то придёт в пустую переговорную.
+        причина = (payload.cancel_reason or "").strip()
+        # Правило держится на сервере, а не на кнопке: витрина гасит её заранее,
+        # но отменить встречу можно и запросом. Встречу, которой ждут только сам
+        # организатор, это не касается — объяснять некому.
+        if not причина and any(a.user_id != ev.organizer_id for a in parts):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Встречу с участниками отменяют с причиной: её увидят в своих календарях")
         ev.status = "cancelled"
-        ev.cancel_reason = (payload.cancel_reason or "").strip() or None
+        ev.cancel_reason = причина or None
         await reminders.drop_for(db, f"event:{ev.id}")
         if ev.recurrence:
             # Отменяя голову серии, гасим и продолжение: иначе завтра проход
