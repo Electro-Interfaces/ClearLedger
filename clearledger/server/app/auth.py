@@ -2,6 +2,8 @@
 JWT-аутентификация: создание токена, верификация, dependency.
 """
 
+import asyncio
+import logging
 import uuid
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
@@ -10,13 +12,15 @@ import jwt
 from fastapi import Depends, Header, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.context import CryptContext
-from sqlalchemy import select
+from sqlalchemy import select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
 from app.models import Company, User, UserCompany
 from app.utils import resolve_company_id
+
+logger = logging.getLogger("clearledger.auth")
 
 settings = get_settings()
 
@@ -540,15 +544,62 @@ KEY_SCOPES = {
 # минуты и отваливались по `statement_timeout`, в журнале 288 ошибок за четыре
 # минуты. Строка-счётчик на горячем пути — это точка сериализации всего обмена.
 #
-# Пишем не чаще раза в минуту: очередь исчезает, смысл отметки сохраняется.
+# Пишем не чаще раза в минуту — и ОТДЕЛЬНОЙ транзакцией.
+#
+# Сначала была сделана только частота, и этого не хватило. Вечером 25.10.2026 на gig
+# обмен со станциями встал совсем: за десять минут 27 ответов 499 («клиент ушёл, не
+# дождавшись») против одного 200, в базе 14 запросов в очереди, старший ждал 298
+# секунд. Замер показал, почему: записей стало 2.4 в минуту вместо каждого запроса,
+# но СРЕДНЕЕ ОЖИДАНИЕ на запись — 167 секунд. Отметка стояла атрибутом ORM, то есть
+# UPDATE уходил в транзакции запроса и держал строку до её конца; рядом жило
+# 29-секундное чтение пакетов станции (`edge_packets` 501 МБ, `edge_packet_revisions`
+# 481 МБ вместе с `payload`), и все станции ходят по ОДНОМУ ключу.
+#
+# Теперь отметка пишется своей короткой транзакцией: строка держится миллисекунды, и
+# длинные чтения её больше не блокируют. Сами чтения это не ускоряет — их чинят в
+# `store_router`, — но обмен работает, пока это делают.
+#
+# Семантика меняется в одну сторону, и в правильную: отметка останется, даже если
+# запрос потом откатится. Для «последнего обращения по ключу» это честнее, чем терять
+# факт обращения вместе с ошибкой обработки.
 KEY_TOUCH_INTERVAL = timedelta(minutes=1)
 
 
 def touch_key_used(key) -> None:
-    """Отметить обращение по ключу, но не чаще раза в минуту."""
+    """Отметить обращение по ключу, но не чаще раза в минуту и вне транзакции запроса.
+
+    Запись идёт фоновой задачей в своей сессии. Ошибку глотаем намеренно: «последнее
+    обращение» — отметка для экрана подключений, из-за неё не должен падать запрос,
+    который уже обработан.
+    """
     now = datetime.now(timezone.utc)
-    if key.last_used_at is None or now - key.last_used_at > KEY_TOUCH_INTERVAL:
-        key.last_used_at = now
+    if key.last_used_at is not None and now - key.last_used_at <= KEY_TOUCH_INTERVAL:
+        return
+    # В объекте правим сразу, чтобы соседние проверки в этом же запросе не писали повторно.
+    key.last_used_at = now
+    key_id = key.id
+
+    async def _write() -> None:
+        from app.database import async_session_factory
+        from app.models import SpaceInboundKey
+
+        try:
+            async with async_session_factory() as session:
+                await session.execute(
+                    sa_update(SpaceInboundKey)
+                    .where(SpaceInboundKey.id == key_id)
+                    .values(last_used_at=now))
+                await session.commit()
+        except Exception:  # noqa: BLE001 — отметка не стоит отказа в обслуживании
+            logger.debug("Отметка обращения по ключу не записана", exc_info=True)
+
+    # Задачу держим в множестве: без ссылки сборщик мусора может убить её до записи.
+    task = asyncio.create_task(_write())
+    _touch_tasks.add(task)
+    task.add_done_callback(_touch_tasks.discard)
+
+
+_touch_tasks: set[asyncio.Task] = set()
 
 
 async def _named_key(raw: str, db: AsyncSession):
