@@ -29,6 +29,7 @@ from app.models import ChargeSession, EzsCustomer, EzsRfidCard, Region, ServiceL
 from app.services.analytics_cache import cached_report
 from app.services.pii_account import account_hash, mask_phone
 from app.services.session_scope import session_scope_conds
+from app.services.charge_identity import client_type
 from app.services.tz_offsets import shifted_started_at
 
 S = ChargeSession
@@ -39,7 +40,7 @@ def _retail_conds(company_id) -> list:
     return [
         S.company_id == company_id,
         S.user_id.is_not(None),
-        S.client_name.is_(None),
+        client_type(S) == "ФЛ",
     ]
 
 

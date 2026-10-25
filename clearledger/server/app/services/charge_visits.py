@@ -34,6 +34,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
+from app.services.session_scope import station_scope_sql
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -173,7 +175,7 @@ def _scoped(sql: str, stations: list[str] | None, regions: list[str] | None = No
     Скоуп участника (app/scope.py) — та же граница, что в списках объектов."""
     flt = acl_sql("location_id")
     if stations is not None:
-        flt += " AND station_code = ANY(:stations)"
+        flt += " AND " + station_scope_sql()
     if regions is not None:
         flt += (" AND location_id IN (SELECT sl.id FROM service_locations sl"
                 " JOIN regions r ON r.id = sl.region_id"

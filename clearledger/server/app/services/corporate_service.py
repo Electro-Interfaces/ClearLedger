@@ -384,10 +384,10 @@ class CorporateService:
         lines: list[dict[str, Any]] = data["clients"]
         top = [x for x in lines if x["corp_revenue"] > 0][:5]
         alerts: list[dict[str, str]] = []
-        inactive = [x for x in lines if (x["status"] or "").strip().lower() not in ("действующая", "")]
+        inactive = [x for x in lines if (x["status"] or "").strip().lower() not in ("действующая", "действующий", "active", "")]
         if inactive:
             alerts.append({"level": "warn",
-                           "message": f"Договор не «Действующая»: {len(inactive)} — {', '.join(x['name'] for x in inactive[:3])}"})
+                           "message": f"Неактивный договор: {len(inactive)} — {', '.join(x['name'] for x in inactive[:3])}"})
         deep = [x for x in lines if x["corp_revenue"] > 0 and x["discount_pct"] <= -20]
         if deep:
             alerts.append({"level": "warn",

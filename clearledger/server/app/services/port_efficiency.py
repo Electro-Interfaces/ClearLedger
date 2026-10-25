@@ -31,6 +31,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from app.services.session_scope import station_scope_sql
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,7 +85,7 @@ async def port_efficiency(
     flt = ""
     if stations is not None:
         p["stations"] = stations
-        flt += " AND station_code = ANY(:stations)"
+        flt += " AND " + station_scope_sql()
     if regions is not None:
         p["regions"] = regions
         # Регион — из справочника (Ф1.3): location_id → region_id → regions.name.

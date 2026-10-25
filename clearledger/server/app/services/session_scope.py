@@ -14,7 +14,7 @@
 """
 from __future__ import annotations
 
-from sqlalchemy import String, bindparam, cast, or_, select, text
+from sqlalchemy import String, and_, bindparam, cast, or_, select, text
 from sqlalchemy.dialects.postgresql import ARRAY
 
 from app.models import ChargeSession, Region, ServiceLocation
@@ -57,7 +57,15 @@ def station_match(code_col, loc_col, company_id, codes) -> object:
     arr = text(station_locations_sql(":st_codes", ":st_cid")).bindparams(
         bindparam("st_codes", list(codes), type_=ARRAY(String), unique=True),
         bindparam("st_cid", str(company_id), unique=True))
-    return or_(code_col.in_(list(codes)), loc_col.op("= ANY")(arr))
+    return or_(loc_col.op("= ANY")(arr),
+               and_(loc_col.is_(None), code_col.in_(list(codes))))
+
+
+def station_scope_sql(codes=":stations", cid=":company_id", *,
+                      code_col="station_code", loc_col="location_id") -> str:
+    """Тот же отбор для SQL-отчётов. Имена задаёт код, значения — bind-параметры."""
+    return (f"({loc_col} = ANY{station_locations_sql(codes, cid)} OR "
+            f"({loc_col} IS NULL AND {code_col} = ANY(CAST({codes} AS varchar[]))))")
 
 
 def session_scope_conds(

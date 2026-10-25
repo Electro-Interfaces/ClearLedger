@@ -45,6 +45,8 @@ from app.models import (
 )
 from app.services.mapping import normalize_default
 from app.services.charge_payment_state import effective_paid_at
+from app.services.charge_identity import client_type, port_identity, station_identity
+from app.services.session_scope import session_scope_conds, station_match
 from app.services.fuel_balance import build_fuel_balance
 from app.services.tz_offsets import shifted_started_at
 from app.utils import msk_day_end, msk_day_start
@@ -585,7 +587,7 @@ class AnalyticsService:
         if group_by == "connector":
             return func.coalesce(S.connector_type, "—")
         if group_by == "user_type":
-            return func.coalesce(S.user_type, "—")
+            return func.coalesce(client_type(S), "—")
         if group_by == "client":
             # Наименование корпоративного клиента (обогащение справочником
             # «Организации»); ФЛ/несопоставленные → «Без клиента (ФЛ)».
@@ -613,13 +615,7 @@ class AnalyticsService:
             return func.to_char(S.started_at, "YYYY-MM")
         if group_by == "quarter":
             return func.concat(func.to_char(S.started_at, "YYYY"), "-Q", func.to_char(S.started_at, "Q"))
-        # station: идентичность станции = ТОЛЬКО код. Имя в ключ не включаем:
-        # CPO переименовывает станции (611 «Новая Рига Аутлет Вилладж»→«Новая Рига»
-        # 01.07.26), и ключ с именем раздваивал одну станцию на две строки. Имена
-        # при этом не уникальны («СНК» у 60 станций, «Новая Рига» = коды 611 и 643),
-        # так что группировать по имени нельзя вдвойне. Подпись «свежайшее имя (код)»
-        # подставляется после агрегации — см. _relabel_station_rows.
-        return func.coalesce(S.station_code, "—")
+        return station_identity(S)
 
     async def _station_names(self, company_id) -> dict[str, str]:
         """Код станции → СВЕЖАЙШЕЕ имя (по последней сессии кода, btrim).
@@ -629,7 +625,10 @@ class AnalyticsService:
         он алфавитный (для 611 выбрал бы старое «Новая Рига Аутлет Вилладж»)."""
         S = ChargeSession
         rows = (await self.session.execute(
-            select(S.station_code, S.station_name)
+            select(S.station_code, func.coalesce(
+                func.nullif(func.btrim(ServiceLocation.name), ""), S.station_name).label("station_name"))
+            .outerjoin(ServiceLocation, and_(ServiceLocation.id == S.location_id,
+                                          ServiceLocation.company_id == S.company_id))
             .where(S.company_id == company_id, S.station_code.is_not(None))
             .distinct(S.station_code)
             .order_by(S.station_code, S.started_at.desc().nulls_last())
@@ -639,7 +638,14 @@ class AnalyticsService:
     async def _station_labels(self, company_id) -> dict[str, str]:
         """Код → каноническая подпись «свежайшее имя (код)» для витрин."""
         names = await self._station_names(company_id)
-        return {c: f"{n or 'Станция'} ({c})" for c, n in names.items()}
+        labels = {f"code:{c}": f"{n or 'Станция'} ({c})" for c, n in names.items()}
+        locations = (await self.session.execute(select(
+            ServiceLocation.id, ServiceLocation.name, ServiceLocation.station_number, ServiceLocation.code,
+        ).where(ServiceLocation.company_id == company_id))).all()
+        for loc in locations:
+            code = loc.station_number or loc.code or loc.id
+            labels[f"location:{loc.id}"] = f"{loc.name or 'Станция'} ({code})"
+        return labels
 
     async def _relabel_station_rows(self, company_id, rows: list[Any], *fields: str) -> list[Any]:
         """Подменить в строках агрегата значение полей-кодов станции на подпись
@@ -668,7 +674,7 @@ class AnalyticsService:
         if dim_by == "region":
             return cls._region_label() == dim_val
         cols = {"station": S.station_code, "connector": S.connector_type,
-                "user_type": S.user_type, "client": S.client_name,
+                "user_type": client_type(S), "client": S.client_name,
                 "charge_type": S.charge_type, "result": S.result}
         if dim_by in cols:
             return cols[dim_by] == dim_val
@@ -695,13 +701,13 @@ class AnalyticsService:
                 select(func.cast(FuelStation.code, String)).where(
                     FuelStation.id == station_id, FuelStation.company_id == company_id)
             ))
-        if station_codes:
-            conds.append(S.station_code.in_(station_codes))
+        conds.extend(session_scope_conds(company_id, station_codes))
         if regions:
             # Регион — из справочника (единый источник). Требует region-join у
             # вызывающего запроса (см. _uses_region/_apply_region_join).
             conds.append(self._region_label().in_(regions))
-        dc = self._dim_cond(dim_by, dim_val)
+        dc = (station_match(S.station_code, S.location_id, company_id, [dim_val])
+              if dim_by == "station" and dim_val is not None else self._dim_cond(dim_by, dim_val))
         if dc is not None:
             conds.append(dc)
         return conds
@@ -710,7 +716,7 @@ class AnalyticsService:
     def _port_key():
         """Физический порт = станция + номер коннектора (для распределения на порты)."""
         S = ChargeSession
-        return func.concat(func.coalesce(S.station_code, ""), "|", func.coalesce(S.connector_no, ""))
+        return port_identity(S)
 
     async def _cs_aggregate(self, company_id, date_from, date_to, group_by: str,
                             station_codes=None, regions=None, dim_by=None, dim_val=None,
@@ -746,21 +752,21 @@ class AnalyticsService:
             # «Неоплачено» считаем только по не-ЮЛ: у ЮЛ paid_at штатно пуст
             # (постоплата по договору) — это не задолженность розницы.
             func.coalesce(func.sum(case(
-                (S.user_type.is_distinct_from("ЮЛ"), 1), else_=0)), 0).label("cnt_retail"),
+                (client_type(S) == "ФЛ", 1), else_=0)), 0).label("cnt_retail"),
             func.coalesce(func.sum(case(
-                (and_(paid_at.is_not(None), S.user_type.is_distinct_from("ЮЛ")), 1),
+                (and_(paid_at.is_not(None), client_type(S) == "ФЛ"), 1),
                 else_=0)), 0).label("paid"),
             # Настоящий долг розницы: ток отпущен, а оплаты нет. Без условия по
             # энергии сюда попадали сорвавшиеся попытки, и панель поднимала
             # тревогу на 3,7 % там, где не заплачено ровно ноль рублей.
             func.coalesce(func.sum(case(
-                (and_(S.user_type.is_distinct_from("ЮЛ"), S.energy_kwh > 0), 1),
+                (and_(client_type(S) == "ФЛ", S.energy_kwh > 0), 1),
                 else_=0)), 0).label("cnt_retail_charged"),
             func.coalesce(func.sum(case(
-                (and_(S.user_type.is_distinct_from("ЮЛ"), S.energy_kwh > 0,
+                (and_(client_type(S) == "ФЛ", S.energy_kwh > 0,
                       paid_at.is_(None)), 1), else_=0)), 0).label("unpaid_charged"),
             func.count(distinct(self._port_key())).label("ports"),
-            func.count(distinct(S.station_code)).label("stations"),
+            func.count(distinct(station_identity(S))).label("stations"),
             # ── Установленный тариф («Цена тарифа» сессии) ──────────────────
             # «₽/кВтч» — выручка на энергию, и её тянут вниз RFID-зарядки с нулевой
             # суммой. Заказчик спрашивал тариф, а видел среднюю цену. Тариф задан на
@@ -793,7 +799,7 @@ class AnalyticsService:
     async def _cs_stations(self, company_id, date_from, date_to, station_codes=None, regions=None, dim_by=None, dim_val=None,
                            *, station_id=None) -> int:
         """Число уникальных станций сети (distinct station_code) за период/сужение."""
-        stmt = select(func.count(distinct(ChargeSession.station_code))).where(
+        stmt = select(func.count(distinct(station_identity()))).where(
             *self._cs_conds(company_id, date_from, date_to, station_codes, regions, dim_by, dim_val,
                             station_id=station_id))
         if self._uses_region(None, regions, dim_by):
@@ -1010,7 +1016,8 @@ class AnalyticsService:
         rows = await self._cs_aggregate(f.company_id, f.date_from, f.date_to, group_by, f.station_codes, f.regions, f.dim_by, f.dim_val,
                                         station_id=f.station_id, tz=tz)
         lines = [self._cs_metrics(group_by, r, period_days) for r in rows]
-        total_amount = sum(l["amount"] for l in lines)
+        total_amount = sum((r.amount for r in rows), Decimal(0))
+        total_amount = float(total_amount)
         for l in lines:
             l["share_pct"] = round(l["amount"] / total_amount * 100, 2) if total_amount else 0.0
         if group_by in ("hour", "day"):
@@ -1019,7 +1026,8 @@ class AnalyticsService:
             lines.sort(key=lambda x: -x["amount"])
 
         ts = sum(l["sessions"] for l in lines)
-        te = sum(l["energy_kwh"] for l in lines)
+        te = sum((r.energy for r in rows), Decimal(0))
+        te = float(te)
         td = sum(l["_dur_sum"] for l in lines)
         tsucc = sum(l["_success"] for l in lines)
         tpaid = sum(l["_paid"] for l in lines)
@@ -1044,7 +1052,7 @@ class AnalyticsService:
             net_ports = net_stations = 0
         port_min = net_ports * period_days * 1440
         totals = {
-            "label": "Итого", "sessions": ts, "energy_kwh": round(te, 1), "amount": round(total_amount, 2),
+            "label": "Итого", "sessions": ts, "energy_kwh": float(round(te, 1)), "amount": float(round(total_amount, 2)),
             "stations": net_stations,
             "charged": tcharged,
             "avg_check": round(total_amount / tcharged, 2) if tcharged else 0.0,
@@ -1389,11 +1397,11 @@ class AnalyticsService:
         """
         S = ChargeSession
         st_counts = (await self.session.execute(
-            select(S.station_code, func.count().label("cnt"))
-            .where(S.company_id == company_id, S.station_code.is_not(None))
-            .group_by(S.station_code).order_by(func.count().desc())
+            select(station_identity(S).label("station_key"), func.count().label("cnt"))
+            .where(S.company_id == company_id)
+            .group_by(station_identity(S)).order_by(func.count().desc())
         )).all()
-        counts = {r.station_code: int(r.cnt) for r in st_counts}
+        counts = {r.station_key: int(r.cnt) for r in st_counts}
         # Имя — свежайшее по последней сессии кода (не max: он алфавитный и после
         # переименования показывал бы старое имя).
         names = await self._station_names(company_id)
@@ -1423,7 +1431,7 @@ class AnalyticsService:
                 "region": region_name or place.get("region"),
                 "city": loc.city or place.get("city"),
                 "address": loc.address or place.get("address"),
-                "sessions": counts.get(key, 0),
+                "sessions": counts.get(f"location:{loc.id}", 0),
                 # Паспорт: пустое значение остаётся пустым — фильтр покажет его
                 # отдельной строкой «не указано», а не спрячет станцию.
                 "speed": loc.speed_class,
@@ -1445,7 +1453,10 @@ class AnalyticsService:
             }
         # Коды, по которым сессии есть, а объекта в реестре нет: показать их
         # обязательно — иначе часть выручки не выбирается никаким фильтром.
-        for code, cnt in counts.items():
+        for identity, cnt in counts.items():
+            if not identity or not identity.startswith("code:"):
+                continue
+            code = identity.removeprefix("code:")
             if code in stations:
                 continue
             place = places.get(code) or {}
@@ -1833,7 +1844,7 @@ class AnalyticsService:
         ))
         paid_at = effective_paid_at(S)
         if user_type:
-            base_conds.append(S.user_type == user_type)
+            base_conds.append(client_type(S) == user_type)
         if region:
             base_conds.append(self._region_label() == region)
         if connector:
@@ -1859,7 +1870,7 @@ class AnalyticsService:
             "station": func.coalesce(S.station_name, S.station_code, ""),
             "region": func.coalesce(S.region, ""),
             "connector": func.coalesce(S.connector_type, ""),
-            "user_type": func.coalesce(S.user_type, ""),
+            "user_type": func.coalesce(client_type(S), ""),
             "client": func.coalesce(S.client_name, ""),
             "charge_type": func.coalesce(S.charge_type, ""),
             "energy_kwh": S.energy_kwh,
@@ -1875,7 +1886,7 @@ class AnalyticsService:
         stmt = select(
             S.session_ext_id, S.station_code, S.station_name,
             canonical_region.label("region"), S.connector_type,
-            S.started_at, S.finished_at, S.duration_min, S.result, S.charge_type, S.user_type,
+            S.started_at, S.finished_at, S.duration_min, S.result, S.charge_type, client_type(S).label("user_type"),
             S.client_name, S.energy_kwh, S.amount, S.client_amount, S.client_tariff,
             S.tariff, S.paid_at.label("session_paid_at"), S.cut_key,
             pay.c.paid, pay.c.pay_ok, pay.c.receipts, pay.c.paid_at.label("payment_paid_at"),
