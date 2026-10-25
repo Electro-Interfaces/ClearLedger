@@ -20,14 +20,32 @@ const SOURCE: Record<links.ConnectionSource, string> = {
 }
 const date = (value: string | null | undefined) => value && Number.isFinite(Date.parse(value))
   ? new Date(value).toLocaleString('ru-RU') : 'ещё не было'
-const errorText = (error: unknown) => error instanceof Error ? error.message : 'Не удалось проверить связь'
+const errorText = (error: unknown) => voice.узелНедоступен(error)
+  ? 'Узел заказчика не отвечает. Проверьте, запущен ли узел и виден ли он из пространства.'
+  : error instanceof Error ? error.message : 'Не удалось проверить связь'
+
+/**
+ * Узел отдаёт точную причину отказа пробы Ядра (`code`), а не только «не вышло».
+ * Показываем её словами: `not_configured` и `wrong_company` требуют разных действий.
+ */
+const CORE_CHECK: Record<string, string> = {
+  ok: 'Доступ узла к Ядру и компания подтверждены.',
+  not_configured: 'Проба не выполнялась: адрес Ядра или ключ не заданы в настройках установки узла.',
+  invalid_url: 'Адрес Ядра задан неверно: нужен http(s) без параметров, якоря и логина с паролем.',
+  timeout: 'Ядро не ответило за 3 секунды. Проверьте сеть между узлом и Ядром.',
+  unreachable: 'Узел не смог подключиться к Ядру по этому адресу.',
+  http_error: 'Ядро отклонило запрос узла. Чаще всего ключ недействителен или отозван.',
+  invalid_response: 'По адресу Ядра ответило не Ядро: ответ не той формы.',
+  wrong_company: 'Ключ узла принадлежит другой компании. Нужен ключ вашей компании.',
+}
 
 function Detail({ name, children }: { name: string; children: ReactNode }) {
   return <div className="grid min-w-0 gap-1 sm:grid-cols-[10rem_1fr]"><dt className="text-muted-foreground">{name}</dt>
     <dd className="min-w-0 break-words [overflow-wrap:anywhere]">{children}</dd></div>
 }
+/** Итог проверки отделён от пояснения над ним: иначе в узком окне строки сливаются. */
 function Result({ ok, children }: { ok: boolean; children: ReactNode }) {
-  return <p role="status" className={ok ? 'text-sm text-success' : 'text-sm text-destructive'}>{children}</p>
+  return <p role="status" className={`border-t pt-3 text-sm ${ok ? 'text-success' : 'text-destructive'}`}>{children}</p>
 }
 function QueryError({ error }: { error: unknown }) {
   return <p role="alert" className="text-sm text-destructive">{errorText(error)}</p>
@@ -108,7 +126,7 @@ export default function VoiceConnectionsPage() {
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
       <Shell title="МегаФон → история звонков" description="Выгрузка истории по API ВАТС. Действующий маршрут звонков сохраняется." status={historyStatus}
         actions={<><Button variant="outline" size="sm" onClick={() => void settings('megafon')} disabled={opening !== null}>Настроить МегаФон</Button>
-          <Button size="sm" variant="outline" disabled={!megafon || !historyConfigured || checkHistory.isPending} onClick={() => checkHistory.mutate()}>Проверить API истории</Button>
+          <Button size="sm" variant="outline" disabled={!megafon || !historyConfigured || checkHistory.isPending} onClick={() => checkHistory.mutate()}>{checkHistory.isPending ? 'Проверяем…' : 'Проверить API истории'}</Button>
           <Button asChild variant="ghost" size="sm"><Link to="/voice/megafon">Открыть историю</Link></Button></>}>
         {providers.isPending ? <Skeleton className="h-16" /> : providers.error ? <QueryError error={providers.error} /> : <dl className="flex flex-col gap-2">
           <Detail name="Адрес API">{megafon?.endpoint ?? 'Не задан'}</Detail>
@@ -122,17 +140,21 @@ export default function VoiceConnectionsPage() {
         {checkHistory.error ? <QueryError error={checkHistory.error} /> : null}
       </Shell>
       <Shell title="Узел ↔ пространство" description="Вход администратора, карточки клиентов и доступ узла к Ядру." status={node.error ? 'Нет подтверждения' : node.data ? 'Настройки установки прочитаны' : pending(node.isPending)}
-        actions={<><Button size="sm" variant="outline" disabled={!core?.keyConfigured || checkCore.isPending} onClick={() => checkCore.mutate()}>Проверить доступ к Ядру</Button>
+        actions={<><Button size="sm" variant="outline" disabled={checkCore.isPending} onClick={() => checkCore.mutate()}>
+            {/* кнопка доступна и без ключа: узел ответит not_configured, и человек увидит причину вместо погасшей кнопки */}
+            {checkCore.isPending ? 'Проверяем…' : 'Проверить доступ к Ядру'}</Button>
           <Button asChild size="sm" variant="ghost"><Link to="/voice/webhooks">Ключи систем</Link></Button></>}>
         {node.isPending ? <Skeleton className="h-20" /> : node.error ? <QueryError error={node.error} /> : <dl className="flex flex-col gap-2">
           <Detail name="Адрес узла">{node.data?.node.url ?? 'Не задан'}</Detail>
           <Detail name="Адрес Ядра">{core?.url ?? 'Не задан'}</Detail>
-          <Detail name="Ключ узла">{core?.keyConfigured ? 'Задан в настройках установки' : 'Не задан'}</Detail>
-          <Detail name="Вход пространства">{space?.jwksUrl ?? 'Не настроен'}</Detail>
+          <Detail name="Ключ узла для Ядра">{core?.keyConfigured ? 'Задан в настройках установки' : 'Не задан'}</Detail>
+          <Detail name="Проверка входа (JWKS)">{space?.jwksUrl ?? 'Не настроен'}</Detail>
+          <Detail name="Издатель входа">{space?.issuer ?? 'Нет данных'}</Detail>
+          <Detail name="Компания узла">{space?.companyIds.join(', ') || 'Нет данных'}</Detail>
           <Detail name="Защита канала">{space?.mtls ? 'Клиентский сертификат (mTLS)' : 'Без клиентского сертификата'}</Detail>
         </dl>}
         <p className="text-xs text-muted-foreground">Адреса и сертификаты задаются при установке узла. Проверка подтверждает ключ и компанию без чтения карточек клиентов.</p>
-        {checkCore.data ? <Result ok={checkCore.data.status === 'ok'}>{checkCore.data.status === 'ok' ? 'Доступ узла к Ядру и компания подтверждены.' : 'Доступ узла к Ядру не подтверждён. Проверьте адрес, ключ и компанию.'}</Result> : null}
+        {checkCore.data ? <Result ok={checkCore.data.status === 'ok'}>{CORE_CHECK[checkCore.data.code] ?? 'Доступ узла к Ядру не подтверждён. Проверьте адрес, ключ и компанию.'}</Result> : null}
         {checkCore.error ? <QueryError error={checkCore.error} /> : null}
       </Shell>
       <Shell title="Контакт-центр ↔ узел" description="Подключение КЦ, поток событий и допуск операторов." status={cc.error ? 'Нет подтверждения' : active ? active.online ? 'Подключён, поток на связи' : 'Подключён, поток вне сети' : current ? 'Требует завершения настройки' : pending(cc.isPending)}
