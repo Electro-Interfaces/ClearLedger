@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, BeforeValidator, EmailStr, Field, field_validator
 
 
 def _normalize_email(value: str) -> str:
@@ -702,9 +702,22 @@ class _CpExtra(BaseModel):
     bankName: str | None = Field(None, max_length=255)
 
 
+def _пусто_как_нет(значение: str | None) -> str | None:
+    """Пустой ИНН или КПП — это отсутствие, то есть NULL.
+
+    Отсутствие записывается ОДНИМ способом (`COUNTERPARTY_INN_MIGRATION_DDL`), иначе
+    уникальный индекс `uq_counterparties_inn_kpp` считает пустую строку значением:
+    две карточки без ИНН конфликтуют между собой, хотя ни у одной его нет.
+    """
+    if значение is None:
+        return None
+    очищено = значение.strip()
+    return очищено or None
+
+
 class CounterpartyCreate(_CpExtra):
     company_id: str
-    inn: str = Field(max_length=20)
+    inn: str | None = Field(None, max_length=20)
     kpp: str | None = Field(None, max_length=20)
     name: CounterpartyName
     shortName: str | None = Field(None, max_length=255)
@@ -712,10 +725,14 @@ class CounterpartyCreate(_CpExtra):
     aliases: list[str] = Field(default_factory=list)
     lifecycleStatus: CounterpartyLifecycleEnum = "draft"
 
+    _пустые_реквизиты = field_validator('inn', 'kpp', mode='after')(_пусто_как_нет)
+
 
 class CounterpartyUpdate(_CpExtra):
     inn: str | None = Field(None, max_length=20)
     kpp: str | None = Field(None, max_length=20)
+
+    _пустые_реквизиты = field_validator('inn', 'kpp', mode='after')(_пусто_как_нет)
     name: CounterpartyName | None = None
     shortName: str | None = Field(None, max_length=255)
     type: CounterpartyTypeEnum | None = None
@@ -726,7 +743,9 @@ class CounterpartyUpdate(_CpExtra):
 class CounterpartyResponse(_CpExtra):
     id: str
     companyId: str
-    inn: str
+    # ИНН может отсутствовать — тогда это NULL, а не пустая строка: карточку
+    # заводят и по названию, пока реквизиты не пришли.
+    inn: str | None = None
     kpp: str | None = None
     name: str
     shortName: str | None = None
