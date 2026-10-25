@@ -5343,6 +5343,13 @@ async def create_all() -> None:
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS reviews_count INTEGER",
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS closed_confirmations "
             "INTEGER NOT NULL DEFAULT 0",
+            # Страничная выдача точек рынка идёт с ORDER BY name, и без этого индекса
+            # каждый запрос карты читал таблицу целиком и сортировал 9 118 строк:
+            # 14 919 КБ памяти сортировки при `work_mem` 32 МБ, то есть два
+            # одновременных запроса уже сортировали бы на диске. С индексом сортировка
+            # исчезает (Index Scan), замер на rushydro: 79.7 мс → 23 мс.
+            "CREATE INDEX IF NOT EXISTS ix_market_sites_company_name "
+            "ON market_sites (company_id, name)",
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS connectors_total INTEGER",
             "ALTER TABLE IF EXISTS market_site_snapshots "
