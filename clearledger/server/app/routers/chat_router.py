@@ -7,6 +7,7 @@ REST /api/chat/* + WebSocket /api/chat/ws?token=JWT.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -3204,17 +3205,31 @@ async def presence(
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
 async def _ws_user(token: str) -> User | None:
-    """Аутентификация WS по JWT из query (WS не шлёт заголовки)."""
+    """Аутентификация WS по JWT из query (WS не шлёт заголовки).
+
+    Причина отказа пишется в журнал. Без неё отвергнутый апгрейд виден только как
+    403 в nginx: 25.10.2026 так разбирали 15 тыс. отказов в сутки с одного
+    браузера и причину нашли чтением кода, а не журнала. Токен в запись не
+    попадает — только почему он не принят.
+    """
     from app.auth import session_valid
+    журнал = logging.getLogger("clearledger.chat")
     try:
         payload = decode_token(token)
         uid = uuid.UUID(payload.get("sub"))
     except Exception:  # noqa: BLE001
+        журнал.info("WS чата отклонён: токен не разобран или просрочен")
         return None
     async with async_session_factory() as db:
         user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+    if user is None:
+        журнал.info("WS чата отклонён: пользователя %s больше нет", uid)
+        return None
     # Отозванный вход (смена пароля, «выйти со всех устройств») гасит и чат.
-    return user if user is not None and session_valid(payload, user) else None
+    if not session_valid(payload, user):
+        журнал.info("WS чата отклонён: сеанс %s отозван", uid)
+        return None
+    return user
 
 
 async def _ws_can_subscribe(user: User, channel: str, db: AsyncSession) -> bool:
