@@ -2041,8 +2041,6 @@ async def create_all() -> None:
             # ищет свои строки, и они же нужны на уже развёрнутых стендах.
             "CREATE INDEX IF NOT EXISTS idx_intake_items_batch "
             "ON intake_items(company_id, batch_id)",
-            "CREATE INDEX IF NOT EXISTS idx_intake_items_fp "
-            "ON intake_items(company_id, fingerprint)",
             # Почтовый коннектор (docs/MAIL.md). Таблицы заводит create_all, но
             # КОЛОНКИ в уже существующую таблицу он не добавляет — на стенде,
             # поднятом до этой правки, опрос падал на `password_enc does not exist`.
@@ -2079,7 +2077,6 @@ async def create_all() -> None:
             "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS layer VARCHAR(10) NOT NULL DEFAULT 'raw'",
             "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS derived_from_entry_id UUID REFERENCES data_entries(id) ON DELETE SET NULL",
             "CREATE INDEX IF NOT EXISTS idx_data_entries_layer ON data_entries(company_id, layer)",
-            "CREATE INDEX IF NOT EXISTS idx_data_entries_derived_from ON data_entries(derived_from_entry_id)",
             # Backfill: проставляем layer по существующему status — 'verified'/'transferred' → clean.
             "UPDATE data_entries SET layer = 'clean' WHERE layer = 'raw' AND status IN ('verified','transferred')",
             # v1.1: ExportPacket — L3 слой (что мы выгружаем в 1С).
@@ -2418,7 +2415,6 @@ async def create_all() -> None:
             "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS source_customer_id VARCHAR(64)",
             # v2.7: материализованная связь сессии → объект-станция (конформная размерность)
             "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS location_id VARCHAR(40) REFERENCES service_locations(id) ON DELETE SET NULL",
-            "CREATE INDEX IF NOT EXISTS idx_charge_sessions_location ON charge_sessions(location_id)",
             # v2.8: скидка корп-клиента к рознице (каршеринг = 25%; применяется к матрице)
             "ALTER TABLE corporate_clients ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0",
             # Обогащение сессии картой (витрина АСУиМ): в сессии от карты есть
@@ -4919,8 +4915,6 @@ async def create_all() -> None:
             # ссылки на одного человека, и отзыв одной ничего бы не закрыл.
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_guests_event_email "
             "ON calendar_guests (event_id, lower(email))",
-            "CREATE INDEX IF NOT EXISTS ix_calendar_guests_token "
-            "ON calendar_guests (token_hash)",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_materials "
             "ON calendar_materials (event_id, target_ref)",
         ):
@@ -4930,8 +4924,6 @@ async def create_all() -> None:
         # шаг 3). Опрос — состояние встречи, а не отдельная сущность: иначе у
         # него завелись бы свои гости, свои ссылки и своё приглашение.
         for stmt in (
-            "CREATE INDEX IF NOT EXISTS ix_calendar_poll_options_event "
-            "ON calendar_poll_options (event_id)",
             # Один голос человека за вариант. Без этого повторное нажатие
             # копило бы голоса, и «за вторник шестеро» означало бы двоих.
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_poll_vote_user "
