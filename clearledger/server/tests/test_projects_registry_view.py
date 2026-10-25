@@ -10,6 +10,8 @@
 Третий случай — свод «Присоединение»: он считал заявки отклонённых и
 замороженных проектов (70 из 79) и выдавал их за работу.
 """
+import uuid
+
 import pytest
 from httpx import AsyncClient
 from tests.helpers import seed_company_id
@@ -85,6 +87,45 @@ async def test_шаг_строки_берётся_из_ожидания_и_по�
     assert ждём["nextStepSource"] == "wait"
     # Ручное поле проекта ожиданием не подменяется: по нему правят карточку.
     assert ждём["nextAction"] is None
+
+
+async def test_шаг_проекта_виден_в_строке_и_в_отборе_просрочки(auth_client: AsyncClient):
+    """Шаг живёт на двух сущностях: у площадки и у проекта площадки.
+
+    «План работ» читает проекты, реестр — площадки, и 39 активных проектов
+    стояли в реестре с прочерком, хотя в плане у них есть шаг и срок; двое из
+    них ещё и просрочены — отсюда «64 просрочено» в плане против 62 в реестре
+    (приёмка 26.10.2026).
+    """
+    from sqlalchemy import select as _select
+    from app.models import EzsProject
+
+    me = (await auth_client.get("/api/auth/me")).json()
+    cid = seed_company_id(me)
+    site = await _site(auth_client, cid, "ул. Шаг у проекта, 11")
+
+    # Проект площадки заводится вместе с ней: ставим шаг именно ему.
+    from app.database import async_session_factory
+    async with async_session_factory() as session:
+        project = (await session.execute(_select(EzsProject).where(
+            EzsProject.site_id == uuid.UUID(site["id"]), EzsProject.closed_on.is_(None))
+        )).scalars().first()
+        assert project is not None, "у площадки должен быть незакрытый проект"
+        project.next_action = "Согласование коммерческих условий"
+        project.next_action_due = "2026-10-12"
+        await session.commit()
+
+    rows = (await auth_client.get("/api/sites", params={
+        "company_id": cid, "stage": "active", "page_size": 200})).json()["items"]
+    строка = next(it for it in rows if it["id"] == site["id"])
+    assert строка["nextStep"] == "Согласование коммерческих условий", "шаг проекта виден в строке"
+    assert строка["nextStepDue"] == "2026-10-12"
+    assert строка["nextStepSource"] == "project"
+
+    просрочка = (await auth_client.get("/api/sites", params={
+        "company_id": cid, "stage": "active", "risk": "step_overdue", "page_size": 200})).json()
+    assert site["id"] in {it["id"] for it in просрочка["items"]}, \
+        "отбор «Просрочен следующий шаг» считает тот же источник, что и план работ"
 
 
 async def test_присоединение_считает_проекты_в_работе(auth_client: AsyncClient):
