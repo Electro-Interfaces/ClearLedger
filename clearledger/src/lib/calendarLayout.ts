@@ -19,12 +19,22 @@ export function eventDaySegment(event: TimedEvent, day: Date) {
 export function layoutDayEvents<T extends TimedEvent>(events: T[], day: Date) {
   const segments = events.flatMap(event => {
     const segment = eventDaySegment(event, day)
-    return segment ? [{ event, ...segment, column: 0, columns: 1 }] : []
+    // `group` — номер цепочки пересекающихся встреч. Нужен тому, кто рисует:
+    // на узкой колонке показать все колонки нельзя, и свернуть лишнее в «+N»
+    // можно только внутри одной цепочки, а не по дню целиком.
+    return segment ? [{ event, ...segment, column: 0, columns: 1, group: 0 }] : []
   }).sort((a, b) => a.start.getTime() - b.start.getTime() || b.end.getTime() - a.end.getTime())
   let group: typeof segments = []
   let groupEnd = 0
+  let groupIndex = 0
   let columns: number[] = []
-  const finish = () => { for (const entry of group) entry.columns = columns.length }
+  const finish = () => {
+    for (const entry of group) {
+      entry.columns = columns.length
+      entry.group = groupIndex
+    }
+    if (group.length) groupIndex += 1
+  }
   for (const entry of segments) {
     const start = entry.start.getTime()
     const end = entry.end.getTime()

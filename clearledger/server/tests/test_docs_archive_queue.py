@@ -99,3 +99,97 @@ async def test_archive_queue_применяет_права_до_cursor_limit(
         "company_id": str(company.id), "cursor": "not-a-cursor",
     })
     assert malformed.status_code == 400
+
+
+async def test_отбор_очереди_считает_сервер(
+    client: AsyncClient, db: AsyncSession,
+):
+    """Кнопка «Срок истёк» обязана искать по всей очереди, а не по первой странице.
+
+    Раньше отбор шёл в витрине по уже загруженным строкам: при limit=1 человек
+    видел «подходящих документов нет», хотя документ с истёкшим сроком лежал
+    второй страницей. Поэтому проверяем отбор ВМЕСТЕ с маленьким лимитом.
+    """
+    marker = uuid.uuid4().hex
+    company = Company(
+        name=f"Отбор очереди {marker}", slug=f"queue-filter-{marker[:12]}",
+        profile_id="gig",
+    )
+    password = "queue-filter-123"
+    user = User(
+        company=company, email=f"queue-filter-{marker}@example.org",
+        name="Архивист отбора", password_hash=hash_password(password),
+    )
+    db.add_all([company, user])
+    await db.flush()
+    db.add(UserCompany(
+        user_id=user.id, company_id=company.id, role="admin", modules=["docs"],
+    ))
+    kind = DocKind(
+        company_id=company.id, code=f"qf_{marker[:8]}", name="Отбор",
+        family="internal", direction="none", number_scope="kind_year",
+        fields=[], route=[],
+    )
+    db.add(kind)
+    await db.flush()
+
+    def карточка(title: str, **kwargs) -> DocCard:
+        doc = DocCard(
+            company_id=company.id, kind_id=kind.id, kind_code=kind.code,
+            family="internal", direction="none", title=title,
+            status="archived", confidentiality="company", author_id=user.id,
+            retention_class="temporary", **kwargs,
+        )
+        db.add(doc)
+        return doc
+
+    # Срок истёк; стоит ПОСЛЕ свежих по сортировке — значит на первую страницу
+    # с маленьким лимитом не попадёт.
+    истёк = карточка("Срок истёк", storage_until=date(2019, 12, 31),
+                     retention_state="archived")
+    карточка("Хранится дальше", storage_until=date(2030, 12, 31),
+             retention_state="archived")
+    прежний = карточка("Прежняя версия", storage_until=date(2019, 12, 31),
+                       retention_state="legacy_review")
+    в_работе = карточка("Акт готовится", storage_until=date(2019, 12, 31),
+                        retention_state="destruction_ready")
+    await db.commit()
+
+    headers = await _headers(client, user.email, password)
+
+    async def очередь(отбор: str, limit: int = 1) -> list[str]:
+        найденные: list[str] = []
+        cursor = None
+        while True:
+            params = {"company_id": str(company.id), "limit": limit, "queue": отбор}
+            if cursor:
+                params["cursor"] = cursor
+            response = await client.get("/api/docs/archive/queue",
+                                        headers=headers, params=params)
+            assert response.status_code == 200, response.text
+            body = response.json()
+            найденные += [row["id"] for row in body["documents"]]
+            cursor = body["next_cursor"]
+            if not cursor:
+                return найденные
+
+    # Первая страница отбора «срок истёк» не пустая, хотя лимит — одна строка.
+    первая = await client.get("/api/docs/archive/queue", headers=headers, params={
+        "company_id": str(company.id), "limit": 1, "queue": "due",
+    })
+    assert первая.status_code == 200, первая.text
+    assert первая.json()["documents"], "отбор отдал пустую первую страницу"
+
+    assert str(истёк.id) in await очередь("due")
+    assert str(прежний.id) not in await очередь("due"), "прежняя версия уничтожению не подлежит"
+    # Документ, по которому готовится акт, препятствия к уничтожению не имеет —
+    # он остаётся и в «срок истёк», и в «в процессе» (как считал прежний экран).
+    assert str(в_работе.id) in await очередь("due")
+    assert await очередь("legacy") == [str(прежний.id)]
+    assert await очередь("active") == [str(в_работе.id)]
+    assert len(await очередь("all")) == 4
+
+    неизвестный = await client.get("/api/docs/archive/queue", headers=headers, params={
+        "company_id": str(company.id), "queue": "кто-то-придумал",
+    })
+    assert неизвестный.status_code == 400

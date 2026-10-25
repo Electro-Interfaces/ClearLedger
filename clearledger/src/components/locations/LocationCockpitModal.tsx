@@ -173,8 +173,8 @@ export function LocationCockpitModal({
           className="absolute inset-0 z-40 flex flex-col gap-0 overflow-hidden border-l border-border/50 bg-background shadow-xl outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-right-4 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-right-4"
         >
           {/* Шапка */}
-          <div className="flex items-start gap-3 border-b border-border/50 px-5 py-3">
-            <DialogPrimitive.Title className="flex flex-1 flex-wrap items-center gap-3 text-lg">
+          <div className="relative flex flex-wrap items-start gap-3 border-b border-border/50 px-3 py-3 pr-14 sm:px-5 sm:pr-14">
+            <DialogPrimitive.Title className="flex min-w-0 flex-1 flex-wrap items-center gap-2 break-words text-base sm:text-lg">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
                 <Icon className="h-4 w-4 text-muted-foreground" />
               </span>
@@ -198,7 +198,7 @@ export function LocationCockpitModal({
                 поручение, позвать людей в чат. В шапке, а не внутри раздела —
                 беда находится в «Работе», а чинится в «Сервисе», и ходить между
                 ними ради кнопки человек не станет. */}
-            <span className="ml-auto flex shrink-0 items-center gap-2">
+            <span className="ml-auto flex max-w-full flex-wrap items-center gap-2">
               <StationActions compact station={{
                 id: location.id, name: location.name, code: location.code,
                 number: String(meta.number ?? '') || null,
@@ -210,7 +210,7 @@ export function LocationCockpitModal({
             </span>
             <DialogPrimitive.Close
               aria-label="Закрыть окно станции"
-              className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="absolute right-2 top-2 flex size-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <X className="h-4 w-4" />
             </DialogPrimitive.Close>

@@ -743,9 +743,12 @@ export async function getArchiveQueue(
   companyId: string,
   cursor?: string,
   limit = 100,
+  /** Отбор очереди считает сервер: иначе кнопка фильтра отбирает только ту
+   *  порцию, что успела подгрузиться курсором. */
+  queue: 'all' | 'due' | 'hold' | 'legacy' | 'active' = 'all',
 ): Promise<DocArchiveQueuePage> {
   return get('/api/docs/archive/queue', {
-    company_id: companyId, cursor, limit,
+    company_id: companyId, cursor, limit, queue,
   })
 }
 
