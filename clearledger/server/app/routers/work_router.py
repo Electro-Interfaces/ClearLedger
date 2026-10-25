@@ -2587,7 +2587,7 @@ async def poll_vote(
     await _event_participant(db, cid, event_id, current_user)
     # Upsert, а не «прочитать и вставить»: два нажатия подряд успевали оба не
     # найти строку и оба вставить, и один человек считался двумя. Уникальность
-    # держит частичный индекс `calendar_poll_votes_user_uq`.
+    # держит частичный индекс `uq_calendar_poll_vote_user`.
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     stmt = (pg_insert(CalendarPollVote)

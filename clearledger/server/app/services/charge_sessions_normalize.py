@@ -759,14 +759,30 @@ async def _apply_org_enrichment(db, company_id, orgs, matrix, channel_id,
             if not ids:
                 continue
         conditions = [S.company_id == company_id, S.id.in_(ids)] if ids is not None else where(phone)
-        n = int((await db.execute(update(S).where(*conditions).values(client_name=name))).rowcount or 0)
+        # Пишем только то, что реально меняется. Обогащение переприменяют после каждой
+        # загрузки, и без этого условия каждый прогон перезаписывал ВСЕ сессии
+        # организации теми же значениями: на rushydro 9.4 млн обновлений на 221 353
+        # строки (43 полных прохода по таблице в 372 МБ). Для Postgres перезапись строки
+        # тем же значением — это новая версия строки, работа для autovacuum и лишняя
+        # блокировка; при живом обмене такие проходы встают в очередь друг за другом.
+        # Побочно `rowcount` становится честнее: он показывает «сколько изменилось», а
+        # не «сколько подошло под отбор» — в сообщении пользователю это и имелось в виду.
+        n = int((await db.execute(update(S).where(
+            *conditions, S.client_name.is_distinct_from(name)).values(client_name=name))).rowcount or 0)
         named += n
-        matched += bool(n)
+        # «Организация сопоставлена» — это «её сессии нашлись», а не «что-то изменилось».
+        # Считать по rowcount нельзя: на повторном прогоне менять уже нечего, и отчёт
+        # показал бы «0 организаций» там, где всё на месте.
+        matched += bool(n) or bool((await db.execute(
+            select(S.id).where(*conditions).limit(1))).first())
         for region, conns, fixed, multiplier in _org_price_steps(org, matrix):
             rate = fixed if fixed is not None else S.tariff * multiplier
             filters = conditions if region is None else [*conditions, S.region == region, S.connector_type.in_(conns)]
-            n_priced = int((await db.execute(update(S).where(*filters).values(
-                client_tariff=rate, client_amount=S.energy_kwh * rate))).rowcount or 0)
+            n_priced = int((await db.execute(update(S).where(
+                *filters,
+                or_(S.client_tariff.is_distinct_from(rate),
+                    S.client_amount.is_distinct_from(S.energy_kwh * rate)),
+            ).values(client_tariff=rate, client_amount=S.energy_kwh * rate))).rowcount or 0)
             if region is None:
                 priced += n_priced
     return named, priced, matched
