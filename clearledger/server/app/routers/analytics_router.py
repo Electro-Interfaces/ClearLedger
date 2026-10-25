@@ -681,8 +681,8 @@ async def get_charge_long_trend(
         scope_params["regions"] = scope_regions
     if scope_stations:
         from app.services.session_scope import station_locations_sql, station_scope_sql
-        file_scope += " AND sl.id = ANY" + station_locations_sql()
-        sess_scope += " AND " + station_scope_sql(code_col="s.station_code", loc_col="s.location_id")
+        file_scope += " AND sl.id = ANY" + station_locations_sql(cid=":cid")
+        sess_scope += " AND " + station_scope_sql(cid=":cid", code_col="s.station_code", loc_col="s.location_id")
         scope_params["stations"] = scope_stations
 
     dim_file = {

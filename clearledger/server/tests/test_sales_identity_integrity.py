@@ -120,3 +120,20 @@ async def test_sql_report_filters_share_classification_and_object_scope(db, sale
     visits = await visits_report(db, cid, DAY, DAY, stations=["NEW"])
     assert len(visits["stations"]) <= 1
     assert visits["totals"]["sessions"] == 3
+
+
+@pytest.mark.asyncio
+async def test_long_trend_accepts_aliases_with_its_own_company_binding(db, sales_history, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from app.routers import analytics_router
+    cid, *_ = sales_history
+    monkeypatch.setattr(analytics_router, "assert_company_product", AsyncMock(return_value=cid))
+    results = []
+    for code in ("NEW", "OLD"):
+        results.append(await analytics_router.get_charge_long_trend(
+            company_id=str(cid), group_by="none", stations=code, regions=None,
+            db=db, current_user=SimpleNamespace(),
+        ))
+    assert results[0] == results[1]
+    assert any(month["kwh"] > 0 for month in results[0]["months"])
