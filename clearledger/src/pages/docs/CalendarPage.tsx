@@ -72,9 +72,12 @@ export function CalendarPage() {
   const [showDue, setShowDue] = useState(() => {
     try { return localStorage.getItem('calendar-hide-due') !== '1' } catch { return true }
   })
-  // Отменённые по умолчанию скрыты: зачёркнутая встреча занимала клетку и
-  // мешала назначать новую на её время (РусГидро, 14.10.2026). Слот она и так
-  // не занимает — занятость считается только по запланированным.
+  // Скрываются ПРОШЕДШИЕ отменённые: именно они накапливались в сетке и мешали
+  // назначать новую встречу на то же время (РусГидро, 14.10.2026). Отменённая
+  // встреча, день которой ещё не прошёл, видна всегда и без этой галочки:
+  // пропав молча, она отправляет человека в пустую переговорную (docs/TRACK.md,
+  // «Календарь»). Слот она при этом не занимает — занятость считают только по
+  // запланированным.
   const [showCancelled, setShowCancelled] = useState(() => {
     try { return localStorage.getItem('calendar-show-cancelled') === '1' } catch { return false }
   })
@@ -236,7 +239,7 @@ export function CalendarPage() {
   if (!companyId) return null
 
   const events = (eventsQ.data?.events ?? []).filter(e => e.status !== 'cancelled'
-    || (showCancelled && new Date(e.ends_at) >= startOfDay(new Date())) || e.id === eventId)
+    || new Date(e.ends_at) >= startOfDay(new Date()) || showCancelled || e.id === eventId)
   const tasks = personal ? (tasksQ.data?.tasks ?? []).filter(t => !query || t.title.toLocaleLowerCase('ru').includes(query.toLocaleLowerCase('ru'))) : []
   const plan = personal && !query ? (planQ.data ?? {}) : {}
   const reminders = (personal ? remindersQ.data?.items ?? [] : [])
@@ -349,7 +352,7 @@ export function CalendarPage() {
           )}
           <DropdownMenuSeparator />
           <DropdownMenuCheckboxItem checked={showCancelled} onCheckedChange={value => переключитьОтменённые(!!value)}>
-            Отменённые встречи
+            Прошедшие отменённые
           </DropdownMenuCheckboxItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => update({ date: format(new Date(), 'yyyy-MM-dd') })}>
@@ -412,7 +415,7 @@ export function CalendarPage() {
           <input type="checkbox" checked={showDue} onChange={e => { const value = e.target.checked; setShowDue(value); try { localStorage.setItem('calendar-hide-due', value ? '0' : '1') } catch { /* пусто */ } }} />Сроки
         </label>}
         <label className="flex min-h-10 items-center gap-2 text-sm">
-          <input type="checkbox" checked={showCancelled} onChange={e => переключитьОтменённые(e.target.checked)} />Отменённые
+          <input type="checkbox" checked={showCancelled} onChange={e => переключитьОтменённые(e.target.checked)} />Прошедшие отменённые
         </label>
       </div>
       {/* Подпись периода — только на десктопе: на телефоне период стоит заголовком
