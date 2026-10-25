@@ -1184,6 +1184,10 @@ def next_step_overdue_sql(alias="ezs_sites"):
         or {alias}.workspace_data->'external_wait'->>'follow_up' < to_char(current_date, 'YYYY-MM-DD')
         or ({alias}.next_action is null
             and {alias}.workspace_data->>'next_ref' is null
+            -- Порядок источников тот же, что в `next_steps`: ожидание важнее
+            -- шага проекта. Без этой строки отбор ловил 82 проекта вместо 64 —
+            -- 34 из них ждут внешних с ещё не наступившей датой контроля.
+            and {alias}.workspace_data->'external_wait'->>'waiting_for' is null
             and exists (select 1 from ezs_projects p where p.site_id = {alias}.id
                 and p.closed_on is null and coalesce(p.next_action, '') <> ''
                 and p.next_action_due < to_char(current_date, 'YYYY-MM-DD')))
