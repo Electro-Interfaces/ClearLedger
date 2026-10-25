@@ -77,7 +77,8 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
                         text: str, *, edit_message_id: uuid.UUID | None = None,
                         ttl: int | None = None,
                         urgency: str = "normal",
-                        room_kind: str | None = None) -> uuid.UUID | None:
+                        room_kind: str | None = None,
+                        event_category: str | None = None) -> uuid.UUID | None:
     """Сообщение лично человеку — мимо подписок компании.
 
     `dispatch` рассылает по `NotificationRule` в общую комнату «Оповещения», и
@@ -101,7 +102,13 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
     from app.models import ChatMessage, ChatParticipant, ChatRoom
 
     if await _admins_only(db, company_id) and not user.is_superadmin:
-        return None
+        company = await db.get(Company, company_id)
+        # Только адресные события ТП с проверенными назначениями; остальные
+        # системные сообщения сохраняют общую политику пространства.
+        tp_allowed = (event_category == "tech_connection" and company is not None
+                      and (company.customization or {}).get("tp_notifications_to_assignees") is True)
+        if not tp_allowed:
+            return None
 
     secretary = await _secretary(db, company_id)
     # Одна комната на пару «человек — Секретарь»: искать её по участникам, а не

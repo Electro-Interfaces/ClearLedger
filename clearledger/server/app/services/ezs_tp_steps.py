@@ -39,9 +39,11 @@ STEPS: list[dict[str, Any]] = [
     {"key": "docs_ready", "no": "2.2", "label": "Комплект документов для заявки собран"},
     {"key": "applied", "no": "3.2", "field": "application_date", "status": "applied", "gate": "5.1",
      "label": "Заявка на ТП направлена в сетевую организацию"},
-    {"key": "accepted", "no": "3.3", "after": "applied", "norm": 3, "status": "applied",
-     "label": "Заявка принята сетевой: замечаний нет или они сняты",
-     "hint": "О недостающих документах сетевая сообщает за 3 дня; на досылку — 20 дней."},
+    {"key": "documents_review", "no": "3.3", "after": "applied", "norm": 3,
+     "label": "Получен результат проверки комплектности от сетевой",
+     "hint": "Ориентир схемы энергетика: 3 дня. Замечания и срок досылки ведутся ниже отдельно."},
+    {"key": "accepted", "no": "3.3", "status": "applied",
+     "label": "Заявка принята сетевой: замечаний нет или они сняты"},
     {"key": "contract", "no": "4.2", "field": "contract_date", "after": "accepted", "norm": 30,
      "status": "contract", "gate": "5.2", "label": "Получены договор ТП и технические условия"},
     {"key": "works_done", "no": "5.2", "status": "in_progress",
@@ -89,7 +91,7 @@ def kit_for(method: str | None, doc_kinds: set[str]) -> list[dict[str, Any]]:
 
 def steps_for(method: str | None) -> list[dict[str, Any]]:
     if method not in ("direct", "indirect"):
-        return []
+        return [s for s in STEPS if s.get("branch") == "supply"]
     return [s for s in STEPS if s.get("only") in (None, method)]
 
 

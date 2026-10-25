@@ -7322,6 +7322,8 @@ class EzsTechConnection(Base):
     # Способ присоединения и даты шагов хода — см. services/ezs_tp_steps.py.
     method: Mapped[str | None] = mapped_column(String(16), nullable=True)
     steps: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    workflow: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    workflow_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     # Сведения заявки на ТП (п. 12.1 Правил), которых не было в графах банка ЗУ.
     reliability_category: Mapped[str | None] = mapped_column(String(8), nullable=True)
     load_kind: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -14134,3 +14136,15 @@ def _task_assignment_changed(mapper, connection, task):
         task.assignment_revision = uuid.uuid4()
         task.assignment_by_id = getattr(task, "_assignment_actor_id", None)
         task.__dict__.pop("_assignment_actor_id", None)
+
+
+class TpOrganizationDocument(Base):
+    """Общий файл юрлица для ТП; проект ссылается на него без копирования."""
+    __tablename__ = "tp_organization_documents"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    valid_until: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

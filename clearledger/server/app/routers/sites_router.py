@@ -1075,6 +1075,118 @@ async def project_roadmap(
     return await ezs_project.project_roadmap(db, cid, site)
 
 
+async def _tp_record(db, cid, site_id, *, lock=False):
+    from app.models import EzsTechConnection
+    site = await _owned(db, cid, site_id)
+    from app.scope import in_scope
+    if not in_scope(site.location_id): raise HTTPException(404, "Проект недоступен")
+    if lock:
+        await db.execute(select(EzsSite.id).where(EzsSite.id == site_id).with_for_update())
+    query = select(EzsTechConnection).where(EzsTechConnection.company_id == cid,
+                                           EzsTechConnection.site_id == site_id)
+    if lock: query = query.with_for_update()
+    tc = (await db.execute(query)).scalars().first()
+    if not tc: raise HTTPException(404, "Сначала сохраните способ присоединения")
+    return tc
+
+
+from app.services.ezs_tp_workflow import SaveWorkflow
+
+
+@router.get("/{site_id}/tech-connection/workflow")
+async def get_tp_workflow(site_id: uuid.UUID, company_id: str = Query(...),
+                          user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services import ezs_tp_workflow as tp
+    from app.models import Organization, Contract
+    cid = await assert_company_member(company_id, user, db)
+    tc = await _tp_record(db, cid, site_id)
+    out = await tp.read(db, tc)
+    out["people"] = await ezs_site_work.company_members(db, cid)
+    out["organizations"] = [dict(id=str(x.id), name=x.name) for x in
+        (await db.execute(select(Organization).where(Organization.company_id == cid))).scalars()]
+    out["contracts"] = [dict(id=str(x.id), name=x.number) for x in
+        (await db.execute(select(Contract).where(Contract.company_id == cid))).scalars()]
+    return out
+
+
+@router.put("/{site_id}/tech-connection/workflow")
+async def save_tp_workflow(site_id: uuid.UUID, payload: SaveWorkflow, company_id: str = Query(...),
+                           user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services import ezs_tp_workflow as tp
+    cid = await assert_company_member(company_id, user, db)
+    tc = await _tp_record(db, cid, site_id, lock=True)
+    result = await tp.save(db, tc, payload, user)
+    await db.commit()
+    return result
+
+
+@router.post("/{site_id}/tech-connection/shared-documents", status_code=201)
+async def upload_tp_shared_document(site_id: uuid.UUID, organization_id: uuid.UUID,
+                                    kind: str, valid_until: date | None = None,
+                                    company_id: str = Query(...), file: UploadFile = File(...),
+                                    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    import hashlib
+    import os
+    from pathlib import Path
+    from app.models import Organization, SourceFile, TpOrganizationDocument, UserCompany
+    from app.services.ezs_tp_workflow import SHARED_KINDS
+    cid = await assert_company_member(company_id, user, db)
+    await _owned(db, cid, site_id)
+    member = await db.get(UserCompany, (user.id, cid))
+    if not user.is_superadmin and (not member or member.role != "admin"):
+        raise HTTPException(403, "Общие документы юрлица обновляет администратор компании")
+    org = await db.get(Organization, organization_id)
+    if not org or org.company_id != cid: raise HTTPException(404, "Заявитель не найден")
+    if kind not in SHARED_KINDS: raise HTTPException(400, "Этот вид документа относится к отдельному проекту")
+    content = await file.read(20 * 1024 * 1024 + 1)
+    if not content or len(content) > 20 * 1024 * 1024:
+        raise HTTPException(400, "Загрузите непустой PDF размером до 20 МБ")
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(400, "Общий документ должен быть PDF")
+    fid = uuid.uuid4()
+    folder = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{fid}.pdf"
+    path.write_bytes(content)
+    try:
+        db.add(SourceFile(id=fid, company_id=cid, file_name=file.filename or "document.pdf",
+                          mime_type="application/pdf", purpose="attachment", size=len(content), storage_path=str(path),
+                          fingerprint=hashlib.sha256(content).hexdigest()))
+        await db.flush()
+        doc = TpOrganizationDocument(company_id=cid, organization_id=organization_id,
+                                     file_id=fid, kind=kind,
+                                     valid_until=valid_until.isoformat() if valid_until else None)
+        db.add(doc)
+        await db.flush()
+        await ezs_site_work.log_event(db, await _owned(db, cid, site_id), "doc", user=user,
+            text=f"Добавлена общая версия документа заявителя: {kind}")
+        await db.commit()
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    return {"id": str(doc.id)}
+
+
+@router.get("/{site_id}/tech-connection/shared-documents/{doc_id}/file")
+async def download_tp_shared_document(site_id: uuid.UUID, doc_id: uuid.UUID,
+                                      company_id: str = Query(...), user: User = Depends(get_current_user),
+                                      db: AsyncSession = Depends(get_db)):
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    from app.models import TpOrganizationDocument, SourceFile
+    from app.services.ezs_tp_workflow import data_of
+    cid = await assert_company_member(company_id, user, db)
+    tc = await _tp_record(db, cid, site_id)
+    doc = await db.get(TpOrganizationDocument, doc_id)
+    if not doc or doc.company_id != cid or doc.organization_id != data_of(tc).organization_id:
+        raise HTTPException(404, "Документ не относится к выбранному заявителю")
+    source = await db.get(SourceFile, doc.file_id)
+    if not source or source.company_id != cid or not Path(source.storage_path).is_file():
+        raise HTTPException(404, "Файл недоступен")
+    return FileResponse(source.storage_path, filename=source.file_name, media_type="application/pdf",
+                        headers={"Cache-Control": "private, no-store"})
+
+
 @router.get("/{site_id}/tech-connection/application")
 async def tech_connection_application(
     site_id: uuid.UUID, company_id: str = Query(...),
@@ -1084,7 +1196,10 @@ async def tech_connection_application(
     from fastapi.responses import HTMLResponse
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
-    page = await ezs_project.tech_connection_application(db, cid, site)
+    try:
+        page = await ezs_project.tech_connection_application(db, cid, site)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if page is None:
         raise HTTPException(404, "Присоединение не заведено")
     return HTMLResponse(page, headers={"Cache-Control": "private, no-store"})

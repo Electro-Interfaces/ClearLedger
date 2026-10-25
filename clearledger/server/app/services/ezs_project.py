@@ -88,6 +88,9 @@ DOC_KINDS = [
     {"key": "equipment_doc", "label": "Документы на оборудование"},
     {"key": "other", "label": "Прочее"},
 ]
+from app.services.ezs_tp_workflow import DOC_LABELS as TP_DOC_LABELS
+DOC_KINDS.extend({"key": k, "label": v} for k, v in TP_DOC_LABELS.items()
+                 if k not in {d["key"] for d in DOC_KINDS})
 DOC_LABELS = {d["key"]: d["label"] for d in DOC_KINDS}
 
 
@@ -198,6 +201,7 @@ def _tc_out(tc: EzsTechConnection) -> dict[str, Any]:
         "reliabilityCategory": tc.reliability_category, "loadKind": tc.load_kind,
         "existingPowerKwt": tc.existing_power_kwt, "energySupplier": tc.energy_supplier,
         "tpCoords": tc.tp_coords,
+        "workflowVersion": tc.workflow_version or 0,
         "method": tc.method, "methodLabel": ezs_tp_steps.METHOD_LABELS.get(tc.method or ""),
         "steps": ezs_tp_steps.steps_out(tc),
         "overdue": overdue,
@@ -224,10 +228,19 @@ async def tech_connection_application(db: AsyncSession, company_id, site: EzsSit
         EzsTechConnection.site_id == site.id))).scalars().first()
     if tc is None:
         return None
-    # ponytail: заявитель — первое юрлицо компании; выбор в проекте — когда юрлиц станет несколько.
-    org = (await db.execute(select(Organization).where(
-        Organization.company_id == company_id).order_by(Organization.created_at).limit(1))).scalars().first()
-    kit = ezs_tp_steps.kit_for(tc.method, await site_doc_kinds(db, site.id))
+    from app.services import ezs_tp_workflow
+    w = ezs_tp_workflow.data_of(tc)
+    org_query = select(Organization).where(Organization.company_id == company_id)
+    if tc.workflow is not None:
+        if not w.organization_id:
+            raise HTTPException(400, "Выберите заявителя в условиях присоединения")
+        org_query = org_query.where(Organization.id == w.organization_id)
+    org = (await db.execute(org_query.order_by(Organization.created_at).limit(1))).scalars().first()
+    if tc.workflow is not None:
+        state = await ezs_tp_workflow.read(db, tc)
+        kit = [dict(d, optional=False) for d in state["kit"]]
+    else:
+        kit = ezs_tp_steps.kit_for(tc.method, await site_doc_kinds(db, site.id))
     return ezs_tp_application.render(org, site, tc, kit)
 
 
@@ -263,13 +276,16 @@ def _gate_from_step(site: EzsSite, key: str, done: bool, user: User | None) -> d
 async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
                                  patch: dict[str, Any], user: User | None,
                                  may_waive: bool = False) -> dict[str, Any]:
+    await db.execute(select(EzsSite.id).where(EzsSite.id == site.id).with_for_update())
     tc = (await db.execute(select(EzsTechConnection).where(
         EzsTechConnection.company_id == company_id,
-        EzsTechConnection.site_id == site.id))).scalars().first()
+        EzsTechConnection.site_id == site.id).with_for_update())).scalars().first()
     created = tc is None
     if tc is None:
         tc = EzsTechConnection(company_id=company_id, site_id=site.id)
         db.add(tc)
+    if (tc.workflow or {}).get("archived") and any(k != "note" for k in patch):
+        raise HTTPException(409, "Сначала верните присоединение из архива")
     changes: list[dict[str, Any]] = []
     for f, v in patch.items():
         if f not in TC_FIELDS:
@@ -312,6 +328,21 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
                 elif mark.get("waive_reason") == ezs_tp_steps.LANDLORD_WAIVE_REASON:
                     await set_gate_waiver(db, site, "5.1", False, "", user)
             tc.method = method
+    if tc.workflow is not None:
+        from app.services import ezs_tp_workflow
+        w = ezs_tp_workflow.data_of(tc)
+        if w.archived and any(k != "note" for k in patch):
+            raise HTTPException(409, "Сначала верните присоединение из архива")
+        state = await ezs_tp_workflow.read(db, tc)
+        marks = patch.get("steps") or {}
+        if (marks.get("docs_ready") or marks.get("applied")) and not state["ready"]:
+            raise HTTPException(400, "Сначала соберите и проверьте комплект документов и сведения заявки")
+        if marks.get("accepted") and any(not x.resolved and x.branch == "application" for x in w.remarks):
+            raise HTTPException(400, "Остались неснятые замечания к заявке")
+        if marks.get("checked") and any(not x.resolved and x.branch == "inspection" for x in w.remarks):
+            raise HTTPException(400, "Остались неснятые замечания приёмки")
+        if marks.get("works_done") and w.stages and any(not x.done for x in w.stages):
+            raise HTTPException(400, "Не все этапы ТУ выполнены")
     for key, value in (patch.get("steps") or {}).items():
         step = ezs_tp_steps.STEP_BY_KEY.get(key)
         if step is None:
@@ -350,6 +381,7 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
                                        old_display=TC_LABELS.get(tc.status or ""),
                                        new_display=TC_LABELS.get(status)))
             tc.status = status
+    tc.workflow_version = (tc.workflow_version or 0) + 1
     tc.updated_at = datetime.now(timezone.utc)
     # Пункт 5.6 гейта («фиксация сроков мероприятий ТУ») смотрит в графу площадки,
     # а срок задают здесь — месяцами заявителя или датой мероприятий. Без зеркала
