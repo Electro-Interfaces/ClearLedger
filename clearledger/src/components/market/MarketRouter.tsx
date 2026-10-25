@@ -555,6 +555,17 @@ function MarketSites() {
   // «сравнивать ли с этой точкой» принимается именно по ним.
   const [открыта, setОткрыта] = useState<MarketSite | null>(null)
   const мы = company.shortName || company.name || 'наш'
+  const exportColumns = [
+              'Точка', 'Наша', 'Вид', 'Владелец', 'Эксплуатирует', 'Город', 'Регион', 'Адрес',
+              'Портов', 'Цена, ₽', 'Основание цены', 'Проверено', 'Снимков', 'Дубль',
+            ]
+  const exportValues = (s: MarketSite) => [
+    s.name, s.isOurs ? мы : null, SITE_KIND_LABEL[s.kind as MarketSiteKind],
+    s.ownerName, s.operatorName, s.city, s.region, s.address, s.ports, s.price?.value ?? null,
+    s.price?.basis ?? null, s.price?.observedOn ?? s.lastSeenAt ?? null,
+    s.photoCount ?? 0, s.duplicateOfId ? 'та же станция заведена другой записью' : null,
+  ]
+
   const [kind, setKind] = useState('all')
   const [q, setQ] = useState('')
   // Ищет сервер, а не браузер. Прежде список брал первую страницу в 5 000 строк и
@@ -653,9 +664,7 @@ function MarketSites() {
           {вид === 'list' ? <MarketExportButton title="Точки рынка" total={всего} loaded={rows}
             getAll={() => allMarketSites(companyId, { ...(kind === 'all' ? {} : { kind }), ...(запрос ? { search: запрос } : {}) })}
             subtitle={`Внешний реестр${запрос ? ` · поиск: ${запрос}` : ''}`}
-            columns={['Точка', 'Владелец', 'Эксплуатирует', 'Город', 'Регион', 'Адрес', 'Портов', 'Цена, ₽', 'Основание цены', 'Дата цены', 'Последний срез']}
-            values={s => [s.name, s.ownerName, s.operatorName, s.city, s.region, s.address, s.ports, s.price?.value,
-              s.price?.basis, s.price?.observedOn, s.lastSeenAt]} />
+            columns={exportColumns} values={exportValues} />
             : <ExportButton title="Точки рынка" subtitle="Разрез по всем точкам" getEl={() => экран.current} />}
           <MarketObservationDialog sites={sites.data?.sites ?? []} trigger={
             <button type="button" className="rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent">
@@ -904,15 +913,7 @@ function MarketSites() {
       ) : (
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
           <table className="w-full text-xs"
-            {...exportRows('Точки рынка', [
-              'Точка', 'Наша', 'Вид', 'Владелец', 'Эксплуатирует', 'Город', 'Адрес',
-              'Портов', 'Цена, ₽', 'Основание цены', 'Проверено', 'Снимков', 'Дубль',
-            ], rows.map((s) => [
-              s.name, s.isOurs ? мы : null, SITE_KIND_LABEL[s.kind as MarketSiteKind],
-              s.ownerName, s.operatorName, s.city, s.address, s.ports, s.price?.value ?? null,
-              s.price?.basis ?? null, s.price?.observedOn ?? s.lastSeenAt ?? null,
-              s.photoCount ?? 0, s.duplicateOfId ? 'та же станция заведена другой записью' : null,
-            ]))}>
+            {...exportRows('Точки рынка', exportColumns, rows.map(exportValues))}>
             <thead className="sticky top-0 bg-muted text-muted-foreground">
               <tr>
                 <SortTh sortKey="name" sort={sort} onSort={toggle}>Точка</SortTh>
@@ -1039,7 +1040,7 @@ function MarketObservations() {
           <MarketExportButton title="Наблюдения" total={total} loaded={rows}
             subtitle={`${period.from} — ${period.to}`} getAll={() => allMarketObservations(companyId, params)}
             columns={['Дата', 'Точка', 'Что наблюдали', 'Основание', 'Цена, ₽', 'Канал', 'Автор']}
-            values={o => [o.observedOn, o.siteName, o.kind, o.basis, o.price, CHANNEL_LABEL[o.channel] ?? o.channel, o.author]} />
+            values={o => [o.observedOn, o.siteName, ({ price: 'цена', availability: 'доступность', closed: 'закрыта', opened: 'открылась' } as Record<string, string>)[o.kind] ?? o.kind, o.basis, o.price, CHANNEL_LABEL[o.channel] ?? o.channel, o.author]} />
         </div>
       )}
       {подача === 'pivot' && rows.length > 0 ? (
