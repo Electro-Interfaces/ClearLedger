@@ -1366,7 +1366,7 @@ class Contract(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False
     )
     type: Mapped[str] = mapped_column(String(100), nullable=False)
-    amount_limit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount_limit: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     external_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # v2.5: универсальный снимок ВСЕХ реквизитов 1С (L1 RAW) + промо-колонки.
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -1548,8 +1548,8 @@ class StationContractSettlement(Base):
     period: Mapped[str | None] = mapped_column(String(20), nullable=True)
     source: Mapped[str | None] = mapped_column(String(60), nullable=True)
     # v2.9 (реестры РусГидро): ежемесячная плата по договору (постоянная часть).
-    amount_gross: Mapped[float | None] = mapped_column(Float, nullable=True)   # с НДС, руб/мес
-    amount_net: Mapped[float | None] = mapped_column(Float, nullable=True)     # без НДС, руб/мес
+    amount_gross: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)   # с НДС, руб/мес
+    amount_net: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)     # без НДС, руб/мес
     vat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)        # ставка НДС, %
     contract_start: Mapped[str | None] = mapped_column(String(20), nullable=True)  # ISO-дата
     contract_end: Mapped[str | None] = mapped_column(String(20), nullable=True)    # ISO-дата
@@ -1598,7 +1598,9 @@ class StationEnergyPeriod(Base):
     # Объём входящей э/э за месяц, кВт·ч (выставлено контрагентом).
     intake_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Входящий тариф, руб/кВт·ч с НДС (помесячный, ведётся с июня 2026).
-    tariff_rub_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Шесть знаков: тариф здесь расчётный (деньги / кВт·ч), и при двух знаках
+    # обратный счёт «энергия × тариф» перестаёт сходиться с суммой.
+    tariff_rub_kwh: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)
     # Показания прибора учёта и коэффициент трансформации: объём = (curr − prev) × КТ.
     # Именно так объём считает заказчик — в исходном файле лежат формулы `=46*30`
     # и пометка `198 - ПУ | К/Т = 50`. Без этих полей «нет расчёта» неотличимо от
@@ -1652,7 +1654,7 @@ class StationDispensePeriod(Base):
     # Отпуск за месяц, кВт·ч (кВтч-листы ведутся с 03.2024).
     dispense_kwh: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Выручка за месяц, ₽ (₽-лист ведётся 01.2024–07.2025; дальше — сессии).
-    amount_rub: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount_rub: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     source: Mapped[str | None] = mapped_column(String(60), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -2751,8 +2753,8 @@ class IntakeItem(Base):
     contract_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
     contract_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
-    vat_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    vat_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     lines: Mapped[dict] = mapped_column(JSONB, nullable=False, default=list)
     # Исходная строка файла — чтобы человек видел, из чего распознали, и мог
     # спорить с разбором, а не с системой.
@@ -2807,8 +2809,8 @@ class AccountingDoc(Base):
     contract_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("contracts.id", ondelete="SET NULL"), nullable=True)
     organization_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
-    vat_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
+    vat_amount: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)
     status_1c: Mapped[str] = mapped_column(String(50), nullable=False, default="Проведён")
     lines: Mapped[dict] = mapped_column(JSONB, nullable=False, default=list)
     matched_entry_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -8097,7 +8099,7 @@ class DedupCard(Base):
     marked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_assortment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # «в ассортименте» — НЕ дубль
     group_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    price: Mapped[float | None] = mapped_column(Float, nullable=True)  # розн. цена (РС.ЦеныНоменклатуры «Розничная 208»)
+    price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)  # розн. цена (РС.ЦеныНоменклатуры «Розничная 208»)
     sold_qty: Mapped[float | None] = mapped_column(Float, nullable=True)  # продано за 30 дн (ОРП) — «продаётся сейчас»
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -8124,7 +8126,7 @@ class DedupNsBinding(Base):
     card_marked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)  # цель помечена → касса бьёт дубль
     barcode: Mapped[str | None] = mapped_column(String(64), nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)  # Актуальность
-    retail_price: Mapped[float | None] = mapped_column(Float, nullable=True)   # ЦенаВРознице
+    retail_price: Mapped[float | None] = mapped_column(Numeric(14, 2), nullable=True)   # ЦенаВРознице
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -9309,7 +9311,7 @@ class OpsPayment(Base):
     # Имя из выгрузки хранится всегда, даже когда контрагент опознан: сопоставление
     # может оказаться ошибочным, и тогда нужно видеть, что было написано в источнике.
     counterparty_name: Mapped[str] = mapped_column(String(300), nullable=False)
-    amount: Mapped[float] = mapped_column(Float, nullable=False, default=0)
+    amount: Mapped[float] = mapped_column(Numeric(14, 2), nullable=False, default=0)
     # Бухгалтерские номера объектов заказчика, к которым относится платёж.
     object_numbers: Mapped[list[str] | None] = mapped_column(ARRAY(String(40)), nullable=True)
     source_label: Mapped[str | None] = mapped_column(String(200), nullable=True)

@@ -1576,6 +1576,106 @@ MATRIX_MIGRATION_DDL = (
 )
 
 
+# Ограничения, заведённые как NOT VALID, проверить на существующих строках.
+# NOT VALID означает «проверяем только новые строки»: старые могут нарушать правило,
+# и планировщик на такое ограничение не опирается. На стенде rushydro все одиннадцать
+# висели непроверенными — восемь на пустых таблицах, три на data_entries (5565 строк,
+# ни одного нарушения), то есть проверка ничего не ломает, её просто не сделали.
+#
+# Каждое проверяется отдельно и ошибка не роняет старт: если в каком-то пространстве
+# данные правилу не отвечают, приложение поднимется, а в журнале останется
+# предупреждение с именем ограничения — это повод чистить данные, а не падать.
+VALIDATE_CONSTRAINTS_DDL = (
+    """
+    DO $$
+    DECLARE
+        r record;
+    BEGIN
+        FOR r IN SELECT * FROM (VALUES
+            ('data_entries', 'ck_data_entry_content_hash'),
+            ('data_entries', 'ck_data_entry_fact_origin'),
+            ('data_entries', 'ck_data_entry_revision_positive'),
+            ('export_packets', 'ck_export_packet_accounting_contract'),
+            ('export_packets', 'ck_export_packet_business_group'),
+            ('export_packets', 'ck_export_packet_content_hash'),
+            ('export_packets', 'ck_export_packet_fact_origin'),
+            ('export_packets', 'ck_export_packet_revision_positive'),
+            ('export_packets', 'fk_export_packet_accounting_group'),
+            ('store_cheques', 'ck_store_cheque_version'),
+            ('store_doc_files', 'ck_store_doc_file_sha256')
+        ) AS t(tab, con)
+        LOOP
+            IF EXISTS (
+                SELECT 1 FROM pg_constraint c
+                 WHERE c.conname = r.con
+                   AND c.conrelid = to_regclass(r.tab)
+                   AND NOT c.convalidated
+            ) THEN
+                BEGIN
+                    EXECUTE format('ALTER TABLE %I VALIDATE CONSTRAINT %I', r.tab, r.con);
+                    RAISE NOTICE 'ограничение %.% проверено', r.tab, r.con;
+                EXCEPTION WHEN others THEN
+                    RAISE WARNING 'ограничение %.% не прошло проверку, данные нарушают правило: %',
+                        r.tab, r.con, SQLERRM;
+                END;
+            END IF;
+        END LOOP;
+    END $$;
+    """,
+)
+
+
+# Деньги из double precision в numeric. Во float «1234.73» хранится как
+# 1234.7299999999999, и сумма сотни таких строк зависит от порядка слагаемых:
+# на стенде rushydro 252 платежа из 2852 уже лежали как 12303284.729999999.
+# Это и есть копеечные расхождения в сверке «Хозяйства» и «Закрытия периода»,
+# которые не воспроизводятся дважды.
+#
+# Масштаб взят по фактическим данным (максимальный платёж 12.3 млн ₽). Тариф за
+# кВт·ч — расчётный, ему шесть знаков, иначе обратный счёт «энергия × тариф»
+# не сходится с суммой.
+#
+# ALTER COLUMN TYPE перезаписывает таблицу целиком, поэтому проверяем текущий тип:
+# без этого каждый старт приложения переписывал бы все денежные таблицы заново.
+MONEY_NUMERIC_MIGRATION_DDL = (
+    """
+    DO $$
+    DECLARE
+        r record;
+    BEGIN
+        FOR r IN SELECT * FROM (VALUES
+            ('ops_payments', 'amount', 14, 2),
+            ('contracts', 'amount_limit', 14, 2),
+            ('station_contract_settlements', 'amount_gross', 14, 2),
+            ('station_contract_settlements', 'amount_net', 14, 2),
+            ('station_dispense_periods', 'amount_rub', 14, 2),
+            ('station_energy_periods', 'tariff_rub_kwh', 12, 6),
+            ('intake_items', 'amount', 14, 2),
+            ('intake_items', 'vat_amount', 14, 2),
+            ('accounting_docs', 'amount', 14, 2),
+            ('accounting_docs', 'vat_amount', 14, 2),
+            ('dedup_cards', 'price', 14, 2),
+            ('dedup_ns_bindings', 'retail_price', 14, 2)
+        ) AS t(tab, col, p, s)
+        LOOP
+            IF EXISTS (
+                SELECT 1 FROM pg_attribute a
+                 WHERE a.attrelid = to_regclass(r.tab)
+                   AND a.attname = r.col
+                   AND NOT a.attisdropped
+                   AND a.atttypid = 'double precision'::regtype
+            ) THEN
+                EXECUTE format(
+                    'ALTER TABLE %I ALTER COLUMN %I TYPE numeric(%s,%s) USING round(%I::numeric, %s)',
+                    r.tab, r.col, r.p, r.s, r.col, r.s);
+                RAISE NOTICE 'деньги: %.% переведён в numeric(%,%)', r.tab, r.col, r.p, r.s;
+            END IF;
+        END LOOP;
+    END $$;
+    """,
+)
+
+
 ACCOUNTING_REVISION_MIGRATION_DDL = (
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS document_id UUID",
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS revision INTEGER",
@@ -3559,6 +3659,14 @@ async def create_all() -> None:
         # v2.40: канонические ревизии L2 и ревизионный accounting-only outbox.
         # Legacy/fuel idem_key сохраняет прежнюю семантику отдельным predicate.
         for stmt in ACCOUNTING_REVISION_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # Деньги в numeric — после того, как таблицы и колонки заведены.
+        for stmt in MONEY_NUMERIC_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # Проверка ограничений — последней: к этому моменту все колонки и связи на месте.
+        for stmt in VALIDATE_CONSTRAINTS_DDL:
             await conn.execute(_sa.text(stmt))
 
         # Миграции магазина идут только там, где схема `edge` наполнена: её
