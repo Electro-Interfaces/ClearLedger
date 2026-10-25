@@ -15,6 +15,7 @@ import { useCallback, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { plural } from '@/lib/textUtils'
 import { Button } from '@/components/ui/button'
 import {
   Loader2, Download, AlertTriangle, ChevronRight, ChevronDown, TrendingUp,
@@ -412,7 +413,8 @@ export function ProjectsPortfolioPanel({ companyId, embedded }: {
                 <Line label="Факт по статьям" value={money(d.budget.fact)} />
                 <Line label="Оборудование в заказе" value={money(d.budget.equipment)} />
                 <div className="text-xs text-muted-foreground pt-1">
-                  Бюджет заполнен у {nf0.format(d.budget.sites)} проектов из {nf0.format(d.active)}.
+                  Бюджет заполнен у {nf0.format(d.budget.sites)}{' '}
+                  {plural(d.budget.sites, 'проекта', 'проектов', 'проектов')} из {nf0.format(d.active)}.
                 </div>
               </div>
             )}
