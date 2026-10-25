@@ -5930,6 +5930,10 @@ class ChargeSession(Base):
 
     __table_args__ = (
         Index("uq_charge_sessions", "company_id", "session_ext_id", unique=True),
+        # «Давность данных» (services/intake_watch.py) берёт max(created_at) по компании
+        # раз в час и на каждом открытии экрана. Без этой пары запрос шёл параллельным
+        # проходом по всей таблице: 19 719 страниц и 139 мс против 5 страниц и 0.3 мс.
+        Index("ix_charge_sessions_company_created", "company_id", "created_at"),
     )
 
 
