@@ -88,7 +88,10 @@ def observe(request: Request, kind: str) -> None:
 
     def done(completed):
         _pending.pop(key, None)
-        if not completed.cancelled() and completed.exception() is not None:
-            logger.error("Не удалось обработать эпизод API-приманки", exc_info=completed.exception())
+        if not completed.cancelled():
+            error = completed.exception()
+            if error is not None:
+                logger.error("Не удалось обработать эпизод API-приманки",
+                             exc_info=(type(error), error, error.__traceback__))
 
     task.add_done_callback(done)

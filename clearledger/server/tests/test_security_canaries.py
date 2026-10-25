@@ -180,3 +180,9 @@ async def test_cors_preflight_has_normal_response_without_alert(configured, monk
     assert ordinary.content == canary.content
     assert headers(ordinary) == headers(canary)
     record.assert_not_awaited()
+
+
+def test_legacy_traps_do_not_match_registered_api():
+    from app.main import app
+    assert not [route.path for route in app.routes
+                if hasattr(route, 'path') and guard.is_trap(route.path)]
