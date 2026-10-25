@@ -18,30 +18,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import AuditEvent, User
 
 
-def log_export(db: AsyncSession, company_id: uuid.UUID, user: User, details: str, rows: int = 0) -> None:
+def log_export(db: AsyncSession, company_id: uuid.UUID, user: User, details: str, rows: int | None = None) -> None:
     """Записать факт выгрузки.
 
     details пишем так, чтобы след читался без раскопок в коде: что выгружено,
     за какой период и сколько строк. «Экспорт xlsx» без объёма бесполезен —
     по нему не отличить выгрузку одной смены от выгрузки всей базы.
     """
+    from app.security_context import current
+    context = current.get()
+    trace = (f" [ip={context.ip}; request_id={context.request_id}; path={context.path}]"
+             if context else " [источник: вне HTTP]")
     db.add(AuditEvent(
         company_id=company_id,
         user_id=str(user.id),
         user_name=user.name,
         action="exported",
-        details=details,
+        details=details + trace,
     ))
     # Объём выгрузок человека за час: одна большая выгрузка (xlsx, zip) — один запрос,
     # счётчик запросов её не видит. Порог — эпизод журнала безопасности и тревога
     # суперадминам и админам компании, с именем (аудит 07.10.2026).
     from app import guard
-    count, total = guard.note_export(str(user.id), rows or _rows_in(details))
+    count, total = guard.note_export(f"{company_id}:{user.id}",
+                                     _rows_in(details) if rows is None else rows)
     if count > guard.EXPORT_COUNT or total > guard.EXPORT_ROWS:
         import asyncio
+        large = total > guard.EXPORT_ROWS
         asyncio.create_task(guard.record(
-            "mass_export", who=user.email, company_id=company_id, path=details[:200], hits=count,
-            detail=f"{count} выгрузок, {total} строк за час; последняя: {details}"[:900]))
+            "mass_export" if large else "export_frequency", who=user.email,
+            company_id=company_id, path=context.path if context else details[:200], hits=count,
+            alert=large,
+            detail=f"{count} выгрузок, {total} строк за час; последняя: {details}"[:700]))
 
 
 def _rows_in(details: str) -> int:
