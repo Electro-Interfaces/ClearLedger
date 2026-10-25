@@ -5,6 +5,7 @@
  * по ним. Наши объекты сюда не копируются — карта складывается из двух реестров.
  */
 import { get as httpGet, post, patch } from './apiClient'
+import { collectPages } from '@/lib/collectPages'
 
 /**
  * Область учёта из шапки пространства — контур раздела «Маркетинг».
@@ -296,9 +297,10 @@ export const listMarketOperators = (companyId: string) =>
 export const getMarketOperatorCard = (companyId: string, operatorId: string) =>
   get<MarketOperatorCard>(`/api/market/operators/${operatorId}`, { company_id: companyId })
 
-export const listMarketObservations = (companyId: string, siteId?: string) =>
+export type ObservationParams = { date_from?: string; date_to?: string; offset?: number; limit?: number }
+export const listMarketObservations = (companyId: string, siteId?: string, params?: ObservationParams) =>
   get<{ observations: MarketObservation[]; total: number }>('/api/market/observations',
-    { company_id: companyId, ...(siteId ? { site_id: siteId } : {}) })
+    { company_id: companyId, ...(siteId ? { site_id: siteId } : {}), ...params })
 
 export const getMarketSummary = (companyId: string) =>
   get<{ byKind: Record<string, number>; competitors: number; observations: number; lastObservedOn: string | null }>(
@@ -346,6 +348,11 @@ export interface MarketNeighbour {
   /** Дата последней зарядки в источнике — единственный честный признак спроса. */
   lastSessionAt: string | null
   alive: boolean
+  currentType: string | null
+  priceBasis: string | null
+  priceVariants: number
+  priceStale: boolean
+  includedInPrice: boolean
 }
 
 /** Строка «Позиции»: наш объект + наши продажи + рынок вокруг него. */
@@ -370,10 +377,14 @@ export interface MarketPositionRow {
   marketPricePerKwh: number | null
   priceGapPct: number | null
   neighbours: MarketNeighbour[]
+  priceCoverage: number
+  stalePrices: number
+  marketObservedFrom: string | null
+  marketObservedTo: string | null
 }
 
-export const getMarketPosition = (companyId: string, params?: { days?: number; radius_km?: number }) =>
-  get<{ days: number; radiusKm: number; objects: MarketPositionRow[]; total: number }>(
+export const getMarketPosition = (companyId: string, params?: { days?: number; radius_km?: number; date_from?: string; date_to?: string; current_type?: string; min_power?: number }) =>
+  get<{ days: number; radiusKm: number; objects: MarketPositionRow[]; total: number; salesFrom: string; salesTo: string; priceMaxAgeDays: number; comparisonNote: string }>(
     '/api/market/position', { company_id: companyId, ...params })
 
 /** Источник рынка: сколько точек принёс, когда виделся, что в нём заполнено. */
@@ -1158,3 +1169,22 @@ export const getMarketPivot = (p: {
   ...(p.search ? { search: p.search } : {}),
   ...(p.includeHome ? { include_home: 'true' } : {}),
 })
+
+
+/** Фиксируем компанию, территорию и условия до начала выгрузки. */
+export function allMarketSites(companyId: string, params: { kind?: string; search?: string }) {
+  const scope = { ...контур }
+  return collectPages<MarketSite>(async (offset, limit) => {
+    const page = await httpGet<{ sites: MarketSite[]; total: number }>('/api/market/sites',
+      { ...params, ...scope, company_id: companyId, offset, limit })
+    return { rows: page.sites, total: page.total }
+  })
+}
+export function allMarketObservations(companyId: string, params: ObservationParams) {
+  const scope = { ...контур }
+  return collectPages<MarketObservation>(async (offset, limit) => {
+    const page = await httpGet<{ observations: MarketObservation[]; total: number }>('/api/market/observations',
+      { ...params, ...scope, company_id: companyId, offset, limit })
+    return { rows: page.observations, total: page.total }
+  })
+}

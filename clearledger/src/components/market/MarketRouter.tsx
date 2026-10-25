@@ -9,7 +9,7 @@
  * «кто это» (точки, конкуренты), и только потом «откуда мы это знаем» (наблюдения).
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { MapContainer, CircleMarker, Popup, AttributionControl, useMap,
   useMapEvents } from 'react-leaflet'
 import { MAP_ATTRIBUTION_PREFIX, MAP_CRS } from '@/lib/mapTiles'
@@ -32,9 +32,11 @@ import { exportRows } from '@/components/workspace/analytics/exportRows'
 import { MarketSiteCard } from './MarketSiteCard'
 import { useFullscreenPanel } from '@/hooks/useFullscreenPanel'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useFilters } from '@/contexts/FilterContext'
+import { MarketExportButton } from './MarketExportButton'
 import { StationLink } from '@/components/common/StationLink'
 import {
-  listMarketSites, listMarketObservations, listMarketOperators, getOurMapPoints,
+  allMarketSites, allMarketObservations, listMarketSites, listMarketObservations, listMarketOperators, getOurMapPoints,
   getSitesBreakdown, getMarketPivot, getMarketPivotCatalog,
   SITE_KIND_LABEL, CHANNEL_LABEL, type MarketObservation, type MarketSite,
   type MarketSiteKind, type OurMapPoint,
@@ -415,7 +417,7 @@ function MarketMap() {
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground">
-          наших объектов: {ourPoints.length} · точек рынка в кадре: {market.length}
+          Объекты нашего реестра с координатами: {ourPoints.length} · точек рынка в кадре: {market.length}
           {sites.isFetching && ' · обновляем…'}
           {cut && (
             <span className="text-warning">
@@ -546,12 +548,24 @@ const nf1m = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 /** Реестр точек рынка: что известно и насколько это свежо. */
 function MarketSites() {
   const { companyId, company } = useCompany()
+  const { regionIds } = useFilters()
   const экран = useRef<HTMLDivElement>(null)
   const [вид, setВид] = useState<string>('list')
   // Карточка станции: полсотни полей парсера в списке не помещаются, а решение
   // «сравнивать ли с этой точкой» принимается именно по ним.
   const [открыта, setОткрыта] = useState<MarketSite | null>(null)
   const мы = company.shortName || company.name || 'наш'
+  const exportColumns = [
+              'Точка', 'Наша', 'Вид', 'Владелец', 'Эксплуатирует', 'Город', 'Регион', 'Адрес',
+              'Портов', 'Цена, ₽', 'Основание цены', 'Проверено', 'Снимков', 'Дубль',
+            ]
+  const exportValues = (s: MarketSite) => [
+    s.name, s.isOurs ? мы : null, SITE_KIND_LABEL[s.kind as MarketSiteKind],
+    s.ownerName, s.operatorName, s.city, s.region, s.address, s.ports, s.price?.value ?? null,
+    s.price?.basis ?? null, s.price?.observedOn ?? s.lastSeenAt ?? null,
+    s.photoCount ?? 0, s.duplicateOfId ? 'та же станция заведена другой записью' : null,
+  ]
+
   const [kind, setKind] = useState('all')
   const [q, setQ] = useState('')
   // Ищет сервер, а не браузер. Прежде список брал первую страницу в 5 000 строк и
@@ -562,36 +576,30 @@ function MarketSites() {
     const t = setTimeout(() => setЗапрос(q.trim()), 300)
     return () => clearTimeout(t)
   }, [q])
-  const [страниц, setСтраниц] = useState(1)
   const PAGE = 500
-  // У рынка нет периода: реестр — это срез на сегодня. Дата нужна книге выгрузки.
-  const сегодня = new Date().toISOString().slice(0, 10)
-  // Сброс на первую страницу при смене условий делается ПРИ ОТРИСОВКЕ, а не в
-  // эффекте: эффект вызывал вторую отрисовку следом за первой, и список успевал
-  // мигнуть старой выдачей.
-  const условия = `${запрос}|${kind}`
-  const [прежние, setПрежние] = useState(условия)
-  if (условия !== прежние) {
-    setПрежние(условия)
-    setСтраниц(1)
-  }
-
+  const сегодня = new Date().toLocaleDateString('sv-SE')
   const разрез = useQuery({
     queryKey: ['market-breakdown', companyId],
     queryFn: () => getSitesBreakdown(companyId),
     enabled: !!companyId && вид !== 'list' && вид !== 'pivot',
   })
 
-  const sites = useQuery({
-    queryKey: ['market-sites-list', companyId, kind, запрос, страниц],
-    queryFn: () => listMarketSites(companyId, {
-      ...(kind === 'all' ? {} : { kind }),
-      ...(запрос ? { search: запрос } : {}),
-      limit: PAGE * страниц,
+  const sitePages = useInfiniteQuery({
+    queryKey: ['market-sites-list', companyId, kind, запрос, regionIds],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => listMarketSites(companyId, {
+      ...(kind === 'all' ? {} : { kind }), ...(запрос ? { search: запрос } : {}),
+      offset: pageParam, limit: PAGE,
     }),
+    getNextPageParam: (last, pages) => {
+      const count = pages.reduce((n, p) => n + p.sites.length, 0)
+      return count < last.total && last.sites.length ? count : undefined
+    },
     enabled: !!companyId,
-    placeholderData: (prev) => prev,
   })
+  const sites = { ...sitePages, data: sitePages.data ? {
+    sites: sitePages.data.pages.flatMap(p => p.sites), total: sitePages.data.pages[0].total,
+  } : undefined }
   // Реестр в девять тысяч строк без сортировки читать нельзя: вопросы к нему —
   // «где дороже», «где больше портов», «что давно не проверяли» (замечание
   // РусГидро 14.09.2026).
@@ -653,12 +661,11 @@ function MarketSites() {
           {запрос && ` по запросу «${запрос}»`}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          {/* Выгружается загруженная часть списка: постранично докачанное и есть то,
-              что человек видит. Сколько именно — сказано в подписи книги. */}
-          <ExportButton title="Точки рынка"
-            subtitle={`${вид === 'list' ? `${rows.length} из ${всего} точек` : 'разрез по всем точкам'}`
-              + `${запрос ? ` · запрос «${запрос}»` : ''}`}
-            getEl={() => экран.current} />
+          {вид === 'list' ? <MarketExportButton title="Точки рынка" total={всего} loaded={rows}
+            getAll={() => allMarketSites(companyId, { ...(kind === 'all' ? {} : { kind }), ...(запрос ? { search: запрос } : {}) })}
+            subtitle={`Внешний реестр${запрос ? ` · поиск: ${запрос}` : ''}`}
+            columns={exportColumns} values={exportValues} />
+            : <ExportButton title="Точки рынка" subtitle="Разрез по всем точкам" getEl={() => экран.current} />}
           <MarketObservationDialog sites={sites.data?.sites ?? []} trigger={
             <button type="button" className="rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent">
               Наблюдение
@@ -906,15 +913,7 @@ function MarketSites() {
       ) : (
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
           <table className="w-full text-xs"
-            {...exportRows('Точки рынка', [
-              'Точка', 'Наша', 'Вид', 'Владелец', 'Эксплуатирует', 'Город', 'Адрес',
-              'Портов', 'Цена, ₽', 'Основание цены', 'Проверено', 'Снимков', 'Дубль',
-            ], rows.map((s) => [
-              s.name, s.isOurs ? мы : null, SITE_KIND_LABEL[s.kind as MarketSiteKind],
-              s.ownerName, s.operatorName, s.city, s.address, s.ports, s.price?.value ?? null,
-              s.price?.basis ?? null, s.price?.observedOn ?? s.lastSeenAt ?? null,
-              s.photoCount ?? 0, s.duplicateOfId ? 'та же станция заведена другой записью' : null,
-            ]))}>
+            {...exportRows('Точки рынка', exportColumns, rows.map(exportValues))}>
             <thead className="sticky top-0 bg-muted text-muted-foreground">
               <tr>
                 <SortTh sortKey="name" sort={sort} onSort={toggle}>Точка</SortTh>
@@ -980,7 +979,7 @@ function MarketSites() {
           </table>
           {ещё > 0 && (
             <div className="border-t border-border p-2 text-center">
-              <button type="button" onClick={() => setСтраниц((n) => n + 1)}
+              <button type="button" onClick={() => void sitePages.fetchNextPage()}
                 disabled={sites.isFetching}
                 className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-60">
                 {sites.isFetching ? 'Загружаем…' : `Показать ещё (осталось ${ещё.toLocaleString('ru-RU')})`}
@@ -1002,13 +1001,21 @@ const ВИДЫ_НАБЛЮДЕНИЙ = [
 
 function MarketObservations() {
   const { companyId } = useCompany()
+  const { period, regionIds } = useFilters()
+  const params = { date_from: period.from, date_to: period.to }
   const экран = useRef<HTMLDivElement>(null)
   const [подача, setПодача] = useState<string>('list')
-  const q = useQuery({
-    queryKey: ['market-observations', companyId],
-    queryFn: () => listMarketObservations(companyId),
+  const q = useInfiniteQuery({
+    queryKey: ['market-observations', companyId, period.from, period.to, regionIds],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => listMarketObservations(companyId, undefined, { ...params, offset: pageParam, limit: 200 }),
+    getNextPageParam: (last, pages) => {
+      const count = pages.reduce((n, p) => n + p.observations.length, 0)
+      return count < last.total && last.observations.length ? count : undefined
+    },
     enabled: !!companyId,
   })
+  const total = q.data?.pages[0]?.total ?? 0
   // Лента наблюдений читается и как журнал (что свежее), и как разрез по точке или
   // автору: «кто давно не ездил» и «где цену давно не снимали».
   const карта = useMemo(() => ({
@@ -1020,14 +1027,20 @@ function MarketObservations() {
     author: (o: MarketObservation) => o.author ?? null,
   }), [])
   const { rows, sort, toggle } = useTableSort(
-    q.data?.observations ?? [], карта, { key: 'date', dir: 'desc' })
+    q.data?.pages.flatMap(p => p.observations) ?? [], карта, { key: 'date', dir: 'desc' })
+  if (q.isPending) return <div className="p-4" role="status">Загружаем наблюдения…</div>
+  if (q.isError && !q.data) return <div className="p-4" role="alert">Не удалось загрузить наблюдения. <button onClick={() => void q.refetch()}>Повторить</button></div>
   return (
     <div ref={экран} className="h-full overflow-auto p-4">
+      <p className="mb-2 text-sm text-muted-foreground">Наблюдения за {period.from} — {period.to}: {rows.length} из {total}.
+        {подача === 'pivot' && ' Сводная по загруженным строкам.'}</p>
       {rows.length > 0 && (
         <div className="mb-2 flex flex-wrap items-center justify-end gap-2" data-export-ignore>
           <PanelViewTabs tabs={ВИДЫ_НАБЛЮДЕНИЙ} value={подача} onChange={setПодача} />
-          <ExportButton title="Наблюдения" subtitle={`${rows.length} записей`}
-            getEl={() => экран.current} />
+          <MarketExportButton title="Наблюдения" total={total} loaded={rows}
+            subtitle={`${period.from} — ${period.to}`} getAll={() => allMarketObservations(companyId, params)}
+            columns={['Дата', 'Точка', 'Что наблюдали', 'Основание', 'Цена, ₽', 'Канал', 'Автор']}
+            values={o => [o.observedOn, o.siteName, ({ price: 'цена', availability: 'доступность', closed: 'закрыта', opened: 'открылась' } as Record<string, string>)[o.kind] ?? o.kind, o.basis, o.price, CHANNEL_LABEL[o.channel] ?? o.channel, o.author]} />
         </div>
       )}
       {подача === 'pivot' && rows.length > 0 ? (
@@ -1048,8 +1061,7 @@ function MarketObservations() {
         />
       ) : rows.length === 0 ? (
         <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-          Наблюдений пока нет. Наблюдение — это факт с датой и автором: заезд сервиса,
-          снимок ценника, ответ партнёра. Без него цифра на карте не значит ничего.
+          За выбранный период и территорию наблюдений нет. Измените период или область учёта. Это не означает, что данных о рынке нет вообще.
         </CardContent></Card>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
@@ -1093,6 +1105,9 @@ function MarketObservations() {
           </table>
         </div>
       )}
+      {q.hasNextPage && <button className="mt-3 min-h-11 rounded-md border px-4 text-sm" disabled={q.isFetchingNextPage}
+        onClick={() => void q.fetchNextPage()}>{q.isFetchingNextPage ? 'Загружаем…' : `Показать ещё (осталось ${total - rows.length})`}</button>}
+      {q.isFetchNextPageError && <p role="alert">Не удалось догрузить записи. Уже полученные строки сохранены; повторите попытку.</p>}
     </div>
   )
 }
