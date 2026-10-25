@@ -1101,11 +1101,16 @@ async def get_tp_workflow(site_id: uuid.UUID, company_id: str = Query(...),
     cid = await assert_company_member(company_id, user, db)
     tc = await _tp_record(db, cid, site_id)
     out = await tp.read(db, tc)
+    from app.services.ezs_tp_method import prefill
+    out["handover"]["canAcknowledge"] = any(x["id"] == str(user.id) and x["status"] == "pending" for x in out["handover"]["recipients"])
+    out["prefill"] = await prefill(db, tc, await _owned(db, cid, site_id))
     out["people"] = await ezs_site_work.company_members(db, cid)
     out["organizations"] = [dict(id=str(x.id), name=x.name) for x in
         (await db.execute(select(Organization).where(Organization.company_id == cid))).scalars()]
-    out["contracts"] = [dict(id=str(x.id), name=x.number) for x in
-        (await db.execute(select(Contract).where(Contract.company_id == cid))).scalars()]
+    contract_query = select(Contract).where(Contract.company_id == cid, Contract.type == "energy")
+    if out["data"]["organization_id"]:
+        contract_query = contract_query.where(Contract.organization_id == uuid.UUID(out["data"]["organization_id"]))
+    out["contracts"] = [dict(id=str(x.id), name=x.number) for x in (await db.execute(contract_query)).scalars()]
     return out
 
 
@@ -1118,6 +1123,38 @@ async def save_tp_workflow(site_id: uuid.UUID, payload: SaveWorkflow, company_id
     result = await tp.save(db, tc, payload, user)
     await db.commit()
     return result
+
+
+@router.post("/{site_id}/tech-connection/prefill")
+async def prefill_tp(site_id: uuid.UUID, company_id: str = Query(...),
+                     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services.ezs_tp_method import prefill
+    from app.services import ezs_tp_workflow as tp
+    cid = await assert_company_member(company_id, user, db)
+    tc = await _tp_record(db, cid, site_id, lock=True)
+    if (tc.workflow or {}).get("archived"): raise HTTPException(409, "Сначала верните ТП в работу")
+    site = await _owned(db, cid, site_id)
+    changed = await prefill(db, tc, site, apply=True)
+    if changed:
+        tc.workflow_version = (tc.workflow_version or 0) + 1
+        tc.workflow = dict(tc.workflow or {}, _prefill=changed)
+        await ezs_site_work.log_event(db, site, "edit", user=user,
+             text="Подставлены исходные данные ТП: " + ", ".join(x["source"] for x in changed))
+    await db.commit()
+    return {"applied": changed}
+
+
+@router.post("/{site_id}/tech-connection/acquaint")
+async def acquaint_tp(site_id: uuid.UUID, company_id: str = Query(...),
+                       user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services.ezs_tp_method import handover_state
+    from app.routers.docs_router import mark_acquainted, AcquaintReadIn
+    cid = await assert_company_member(company_id, user, db)
+    tc = await _tp_record(db, cid, site_id)
+    state = await handover_state(db, tc)
+    if not state["exists"]: raise HTTPException(409, "Итоговый комплект ещё не передан")
+    # Штатный обработчик проверяет личную отметку, доступ и точный снимок файлов.
+    return await mark_acquainted(state["docId"], AcquaintReadIn(company_id=company_id), db, user)
 
 
 @router.post("/{site_id}/tech-connection/shared-documents", status_code=201)

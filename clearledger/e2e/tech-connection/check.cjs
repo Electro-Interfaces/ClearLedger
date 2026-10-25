@@ -16,6 +16,7 @@ const fs=require('fs');
  await page.getByLabel('Исполнитель',{exact:true}).first().selectOption(identity.personId);
  await page.getByLabel('Контролирующий',{exact:true}).first().selectOption(identity.personId);
  await page.getByLabel('Поставщик данных',{exact:true}).first().selectOption(identity.personId);
+ await page.getByLabel('Вести работу по методике энергетика',{exact:true}).check();
  await page.getByRole('button',{name:'Сохранить условия',exact:true}).click();
  await expect(page.getByText('Условия и контроль ТП сохранены')).toBeVisible();
  await expect(page.getByText('Соглашение о перераспределении мощности · не приложен',{exact:true})).toBeVisible();

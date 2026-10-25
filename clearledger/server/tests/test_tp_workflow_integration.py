@@ -32,9 +32,9 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
     def setUpClass(cls):
         cls.engine = create_async_engine(URL, poolclass=NullPool)
         cls.sessions = async_sessionmaker(cls.engine, expire_on_commit=False)
-        names = ['AuditEvent', 'Company', 'User', 'UserCompany', 'Organization', 'Contract', 'EzsSite', 'EzsTechConnection',
+        names = ['ApprovalRequest', 'OutboxEvent', 'EventSubscription', 'AuditEvent', 'Company', 'User', 'UserCompany', 'Organization', 'Contract', 'EzsSite', 'EzsTechConnection',
                  'EzsSiteDoc', 'EzsSiteParticipant', 'EzsSiteEquipment', 'EzsSiteCost', 'EzsSiteEvent', 'SourceFile', 'TpOrganizationDocument', 'DocCard', 'DocKind',
-                 'DocRelation', 'ChatMessage', 'ChatRoom', 'ChatParticipant']
+                 'DocRelation', 'DocAcquaint', 'DocVersion', 'DocEvent', 'DocAccessGrant', 'ChatMessage', 'ChatRoom', 'ChatParticipant']
         tables = {getattr(m, n).__table__ for n in names}
         while True:
             parents = {fk.column.table for t in tables for fk in t.foreign_keys}
@@ -94,6 +94,7 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
         return await self.client.put(self.path+'/workflow', params=self.q, json={'version': version, 'evidence_token': current.json()['evidenceToken'], 'data': w or self.w})
 
     async def doc(self, kind, shared=False, expired=False):
+        if kind == 'contract': await self.doc('tp_layout')
         async with self.sessions() as db:
             f = m.SourceFile(company_id=self.company.id, file_name='test.pdf', storage_path='/tmp/test-tp.pdf', mime_type='application/pdf')
             db.add(f); await db.flush()
@@ -114,7 +115,7 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_document_readiness_shared_expiry_and_notification_idempotency(self):
         await self.doc('contract'); await self.doc('egrul', shared=True, expired=True)
-        self.w['reviewed_kinds'] = ['contract']
+        self.w['reviewed_kinds'] = ['contract', 'tp_layout']
         r = await self.save(); self.assertEqual(r.status_code, 200, r.text); self.assertFalse(r.json()['ready'])
         await self.doc('egrul', shared=True)
         self.w['reviewed_kinds'].append('egrul')
@@ -132,7 +133,7 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_suppressed_notification_is_not_confirmed(self):
         await self.doc('contract'); await self.doc('egrul')
-        self.w['reviewed_kinds'] = ['contract', 'egrul']; await self.save()
+        self.w['reviewed_kinds'] = ['contract', 'egrul', 'tp_layout']; await self.save()
         delivery = AsyncMock(return_value=None)
         with patch('app.services.notify.notify_person', delivery):
             async with self.sessions() as db:
@@ -182,7 +183,7 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_real_chat_notification_and_archive(self):
         await self.doc('contract'); await self.doc('egrul')
-        self.w['reviewed_kinds'] = ['contract', 'egrul']
+        self.w['reviewed_kinds'] = ['contract', 'egrul', 'tp_layout']
         await self.save()
         with patch('app.services.web_push.push_room_async'):
             async with self.sessions() as db:
@@ -217,7 +218,7 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
             company.customization={'system_notifications_admin_only':True}
             await db.commit()
         self.w['responsibilities']['default']['executor']=str(normal.id)
-        self.w['reviewed_kinds']=['contract','egrul']; await self.save()
+        self.w['reviewed_kinds']=['contract','egrul','tp_layout']; await self.save()
         with patch('app.services.web_push.push_room_async'):
             async with self.sessions() as db:
                 tc=await db.get(m.EzsTechConnection,self.tc.id)
@@ -245,6 +246,100 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
             r=await self.client.post(self.path+'/shared-documents',params=params,
                 files={'file': ('test.pdf',b'not a pdf','application/pdf')})
             self.assertEqual(r.status_code,400)
+
+    async def test_capacity_matrix_boundaries(self):
+        from app.services.ezs_tp_method import capacity_profile
+        from types import SimpleNamespace
+        for power, band in ((150,'до 150 кВт'),(151,'свыше 150 до 670 кВт'),(670,'свыше 150 до 670 кВт'),(671,'свыше 670 кВт')):
+            tc=SimpleNamespace(power_kwt=power,existing_power_kwt=0,voltage='35 кВ',method='direct')
+            self.assertEqual(capacity_profile(tc)['band'],band)
+            self.assertIn('tp_single_line',tp.required_kinds(tc,tp.Workflow()))
+        tc.voltage='400 В'
+        self.assertNotIn('tp_single_line',tp.required_kinds(tc,tp.Workflow()))
+        self.assertIn('tp_automation',tp.required_kinds(tc,tp.Workflow(emergency_automation=True)))
+
+    async def test_prefill_uses_passport_and_keeps_manual_values(self):
+        async with self.sessions() as db:
+            loc=m.ServiceLocation(id='tp-object',company_id=self.company.id,code='test',name='Тест',power_kwt=350,
+                extra_metadata={'connectedPowerKwt':45,'connectionVoltageKv':6,'gridOperator':'Из паспорта'})
+            db.add(loc); await db.flush()
+            site=await db.get(m.EzsSite,self.site.id);site.location_id=loc.id
+            tc=await db.get(m.EzsTechConnection,self.tc.id);tc.existing_power_kwt=None
+            await db.commit()
+        r=await self.client.post(self.path+'/prefill',params=self.q)
+        self.assertEqual(r.status_code,200,r.text)
+        async with self.sessions() as db:
+            tc=await db.get(m.EzsTechConnection,self.tc.id)
+            self.assertEqual(tc.existing_power_kwt,45)
+            self.assertEqual(tc.grid_operator,'Тест сети')
+            self.assertEqual(tc.voltage,'6')
+        r=await self.client.post(self.path+'/prefill',params=self.q)
+        self.assertEqual(r.json()['applied'],[])
+
+    async def test_handover_is_immutable_idempotent_and_personal(self):
+        import tempfile
+        from pathlib import Path
+        from app.services.ezs_tp_method import create_handover,handover_state
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'UPLOAD_DIR':folder}), patch('app.services.web_push.push_room_async'):
+            for kind in ('contract','egrul','tu','tp_contract','tp_act','tp_avtu','tp_meter_act'): await self.doc(kind)
+            async with self.sessions() as db:
+                for f in (await db.execute(select(m.SourceFile))).scalars():
+                    p=Path(folder)/str(f.id);p.write_bytes(b'%PDF-1.4 test');f.storage_path=str(p)
+                tc=await db.get(m.EzsTechConnection,self.tc.id);tc.done_date='2026-10-26'
+                await db.commit()
+            self.w['archived']=True
+            r=await self.save();self.assertEqual(r.status_code,200,r.text)
+            async with self.sessions() as db:
+                tc=await db.get(m.EzsTechConnection,self.tc.id)
+                await create_handover(db,tc);await create_handover(db,tc);await db.commit()
+                state=await handover_state(db,tc)
+                self.assertEqual(len(state['recipients']),1);self.assertFalse(state['done'])
+                self.assertEqual(len((await db.execute(select(m.DocCard))).scalars().all()),1)
+            r=await self.client.post(self.path+'/acquaint',params=self.q)
+            self.assertEqual(r.status_code,200,r.text)
+            r=await self.client.post(self.path+'/acquaint',params=self.q)
+            self.assertTrue(r.json()['repeated'])
+            async with self.sessions() as db:
+                tc=await db.get(m.EzsTechConnection,self.tc.id)
+                self.assertTrue((await handover_state(db,tc))['done'])
+
+    async def test_supply_needs_document_not_only_date(self):
+        self.w['supply_mode']='direct'; await self.save()
+        async with self.sessions() as db:
+            tc=await db.get(m.EzsTechConnection,self.tc.id)
+            tc.steps={'supply_contract':{'date':'2026-10-26'}};await db.commit()
+            self.assertFalse((await tp.read(db,tc))['supplyComplete'])
+        await self.doc('power_contract')
+        async with self.sessions() as db:
+            tc=await db.get(m.EzsTechConnection,self.tc.id)
+            self.assertTrue((await tp.read(db,tc))['supplyComplete'])
+
+    async def test_supplier_prefill_uses_selected_energy_contract(self):
+        async with self.sessions() as db:
+            cp=m.Counterparty(company_id=self.company.id,name='Сбыт из договора',inn='2');db.add(cp);await db.flush()
+            contract=m.Contract(company_id=self.company.id,organization_id=self.org.id,counterparty_id=cp.id,type='energy',number='Э-1',date='2026-10-01')
+            db.add(contract);tc=await db.get(m.EzsTechConnection,self.tc.id);tc.energy_supplier=None;await db.commit()
+        self.w['supply_contract_id']=str(contract.id);self.w['supply_mode']='existing'
+        r=await self.save();self.assertEqual(r.status_code,200,r.text)
+        r=await self.client.post(self.path+'/prefill',params=self.q);self.assertEqual(r.status_code,200,r.text)
+        async with self.sessions() as db:
+            tc=await db.get(m.EzsTechConnection,self.tc.id);self.assertEqual(tc.energy_supplier,'Сбыт из договора')
+            contract=await db.get(m.Contract,contract.id);contract.type='rent';await db.commit()
+        r=await self.save(version=2);self.assertEqual(r.status_code,400)
+
+    async def test_process_sync_preserves_subject_and_retries(self):
+        from app.services.ezs_tp_method import reconcile
+        self.w['process_enabled']=True;self.w['supply_mode']='direct'
+        self.assertEqual((await self.save()).status_code,200)
+        calls=AsyncMock(return_value={'processId':str(uuid.uuid4()),'currentStep':{'code':'collect','name':'Сбор'},'state':'running'})
+        with patch('app.services.projects_process.sync_subject_process',calls),patch('app.services.notify.notify_person',AsyncMock(return_value=uuid.uuid4())):
+            async with self.sessions() as db:
+                tc=await db.get(m.EzsTechConnection,self.tc.id)
+                await reconcile(db,tc);await db.commit()
+                self.assertEqual(set(tc.workflow['_process']['items']),{'tp_connection','tp_supply'})
+        self.assertEqual(calls.await_count,2)
+        for call in calls.await_args_list:
+            self.assertEqual(call.args[3],'tech_connection');self.assertEqual(call.args[4],self.tc.id)
 
     async def test_stages_reject_acceptance_before_work(self):
         self.w['stages']=[dict(id=str(uuid.uuid4()),title='Монтаж',accepted='2026-10-20')]

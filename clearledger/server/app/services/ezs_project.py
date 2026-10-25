@@ -286,6 +286,11 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
         db.add(tc)
     if (tc.workflow or {}).get("archived") and any(k != "note" for k in patch):
         raise HTTPException(409, "Сначала верните присоединение из архива")
+    from app.services.ezs_tp_method import assert_step_actor
+    for step_key, step_value in (patch.get("steps") or {}).items():
+        await assert_step_actor(db, tc, user, step_key)
+    for field, step_key in (("application_date", "applied"), ("contract_date", "contract"), ("done_date", "atp")):
+        if field in patch: await assert_step_actor(db, tc, user, step_key)
     changes: list[dict[str, Any]] = []
     for f, v in patch.items():
         if f not in TC_FIELDS:
@@ -337,6 +342,8 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
         marks = patch.get("steps") or {}
         if (marks.get("docs_ready") or marks.get("applied")) and not state["ready"]:
             raise HTTPException(400, "Сначала соберите и проверьте комплект документов и сведения заявки")
+        if marks.get("supply_applied") and not state.get("supplyReady"):
+            raise HTTPException(400, "Сначала соберите и проверьте комплект для договора со сбытом")
         if marks.get("accepted") and any(not x.resolved and x.branch == "application" for x in w.remarks):
             raise HTTPException(400, "Остались неснятые замечания к заявке")
         if marks.get("checked") and any(not x.resolved and x.branch == "inspection" for x in w.remarks):
@@ -397,6 +404,10 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
         if months:
             changes.append(make_change("tp_term_months", site.tp_term_months, months))
             site.tp_term_months = months
+    from app.services.ezs_tp_method import prefill
+    filled = await prefill(db, tc, site, apply=True)
+    if filled:
+        tc.workflow = dict(tc.workflow or {}, _prefill=filled)
     await db.flush()
     if changes:
         await log_event(

@@ -70,6 +70,9 @@ class WorkStage(Strict):
 
 
 class Workflow(Strict):
+    process_enabled: bool = False
+    emergency_automation: bool = False
+    design_required: bool = False
     scenario: Literal["new", "increase", "redistribution"] = "new"
     organization_id: uuid.UUID | None = None
     supply_mode: Literal["landlord", "direct", "via_grid", "existing"] = "landlord"
@@ -107,6 +110,13 @@ class SaveWorkflow(Strict):
 SCENARIOS = {"new": "Новое присоединение", "increase": "Увеличение мощности",
              "redistribution": "Перераспределение мощности"}
 DOC_LABELS = {
+    "tp_layout": "План расположения энергопринимающих устройств",
+    "tp_single_line": "Однолинейная схема электрических сетей",
+    "tp_automation": "Перечень устройств противоаварийной автоматики",
+    "tp_external_scheme": "Согласованная схема внешнего электроснабжения",
+    "tp_design": "Разделы проектной документации по выполнению ТУ",
+    "tp_tests": "Протоколы пусконаладочных и приёмо-сдаточных испытаний",
+    "tp_circuit": "Нормальная схема электрических соединений",
     "contract": "Право на участок / помещение", "egrul": "Выписка ЕГРЮЛ",
     "poa": "Доверенность представителя", "tp_indirect": "Соглашение об опосредованном ТП",
     "tp_power_share": "Соглашение о перераспределении мощности",
@@ -128,7 +138,12 @@ def data_of(tc):
 def required_kinds(tc, w):
     kinds = []
     if tc.method in ("direct", "indirect"):
-        kinds = ["contract", "egrul"]
+        kinds = ["contract", "egrul", "tp_layout"]
+        from app.services.ezs_tp_method import capacity_profile
+        profile = capacity_profile(tc)
+        if (profile["voltageKv"] or 0) >= 35: kinds.append("tp_single_line")
+        if (profile["totalKw"] or 0) > 50000: kinds.append("tp_external_scheme")
+        if w.emergency_automation: kinds.append("tp_automation")
         if tc.method == "indirect": kinds.append("tp_indirect")
         if w.scenario != "new": kinds.append("tp_existing_act")
         if w.scenario == "redistribution": kinds.append("tp_power_share")
@@ -139,9 +154,19 @@ def required_kinds(tc, w):
     return list(dict.fromkeys(kinds + w.additional_requirements))
 
 
+def supply_kinds(tc, w):
+    if w.supply_mode in ("landlord", "existing"): return []
+    result = ["contract", "egrul", "tp_meter_act"]
+    result.append("tp_avtu" if tc.method in ("direct", "indirect") else "tp_existing_act")
+    if w.representative: result.append("poa")
+    return result
+
+
 def outstanding(tc, w, kinds):
     missing = [DOC_LABELS.get(k, k) for k in required_kinds(tc, w) if k not in kinds]
     if tc.method in ("direct", "indirect"):
+        from app.services.ezs_tp_method import capacity_profile
+        if capacity_profile(tc)["voltageKv"] is None: missing.append("Уточните класс напряжения в кВ")
         if not w.organization_id: missing.append("Заявитель")
         if not tc.grid_operator: missing.append("Сетевая организация")
         if tc.power_kwt is None or tc.power_kwt <= 0: missing.append("Запрашиваемая мощность")
@@ -165,6 +190,14 @@ def final_missing(tc, w, kinds):
     if not tc.method: missing.append("Способ присоединения")
     if tc.method in ("direct", "indirect"):
         for k in ("tu", "tp_contract", "tp_act", "tp_avtu", "tp_meter_act"):
+            if k not in kinds: missing.append(DOC_LABELS[k])
+        from app.services.ezs_tp_method import capacity_profile
+        profile = capacity_profile(tc)
+        completion = []
+        if w.design_required: completion.append("tp_design")
+        if (profile["totalKw"] or 0) > 670 and (profile["voltageKv"] or 0) > 1:
+            completion += ["tp_tests", "tp_circuit"]
+        for k in completion:
             if k not in kinds: missing.append(DOC_LABELS[k])
         if not tc.done_date: missing.append("Дата завершения ТП")
         if any(not x.accepted for x in w.stages): missing.append("Приёмка всех этапов ТУ")
@@ -217,10 +250,22 @@ async def read(db, tc):
     unreviewed = [k for k in required if k not in valid_reviews]
     public_data = w.model_dump(mode="json")
     public_data["reviewed_kinds"] = sorted(valid_reviews)
-    return dict(version=tc.workflow_version or 0, data=public_data, evidenceToken=evidence_token(signatures),
+    from app.services.ezs_tp_method import capacity_profile, handover_state
+    return dict(profile=capacity_profile(tc), process=(tc.workflow or {}).get("_process", {}),
+                handover=await handover_state(db, tc),
+                version=tc.workflow_version or 0, data=public_data, evidenceToken=evidence_token(signatures),
                 scenarios=SCENARIOS, documentKinds=DOC_LABELS,
                 kit=[dict(kind=k, label=DOC_LABELS.get(k, k), present=k in kinds,
                           reviewed=k in valid_reviews) for k in required],
+                supplyKit=[dict(kind=k,label=DOC_LABELS[k],present=k in kinds,reviewed=k in valid_reviews) for k in supply_kinds(tc,w)],
+                supplyComplete=bool(w.supply_mode == "existing" and w.supply_contract_id) or
+                    bool(w.supply_mode not in ("landlord", "existing") and
+                         (tc.steps or {}).get("supply_contract", {}).get("date") and
+                         (w.supply_contract_id or "power_contract" in kinds) and
+                         not any(not x.resolved and x.branch == "supply" for x in w.remarks)),
+                supplyReady=bool(w.supply_mode == "existing" and w.supply_contract_id) or
+                    bool(w.supply_mode not in ("landlord", "existing") and tc.energy_supplier and
+                         all(k in kinds and k in valid_reviews for k in supply_kinds(tc,w))),
                 sharedDocuments=shared, missing=missing,
                 ready=bool(tc.method in ("direct", "indirect") and not missing and not unreviewed),
                 remarks=remarks_out(w), finalMissing=final_missing(tc, w, kinds),
@@ -237,6 +282,10 @@ async def validate_refs(db, tc, w):
         contract = await db.get(Contract, w.supply_contract_id)
         if not contract or contract.company_id != tc.company_id:
             raise HTTPException(400, "Договор не принадлежит компании")
+        if contract.type != "energy":
+            raise HTTPException(400, "Выберите договор энергоснабжения")
+        if w.organization_id and contract.organization_id != w.organization_id:
+            raise HTTPException(400, "Договор оформлен на другое юрлицо")
     people = {x for r in w.responsibilities.values() for x in (r.executor, r.controller, r.provider) if x}
     people |= {x.executor for x in w.stages if x.executor}
     for person in people:
@@ -257,6 +306,10 @@ async def save(db, tc, payload, user):
         raise HTTPException(409, "Присоединение изменено другим пользователем. Обновите данные и повторите правку")
     w = payload.data
     await validate_refs(db, tc, w)
+    if w.process_enabled:
+        default = w.responsibilities.get("default", Responsibility())
+        if not tc.method or not w.organization_id or not all((default.provider, default.executor, default.controller)):
+            raise HTTPException(400, "Для запуска методики выберите способ, заявителя, поставщика данных, исполнителя и контролирующего")
     kinds, _, signatures = await evidence(db, tc, w)
     if w.reviewed_kinds and payload.evidence_token != evidence_token(signatures):
         raise HTTPException(409, "Состав файлов изменился. Обновите комплект и проверьте новые документы")
@@ -270,8 +323,18 @@ async def save(db, tc, payload, user):
     old = copy.deepcopy(tc.workflow or {})
     if old.get("archived") and w.archived and w.model_dump(mode="json") != data_of(tc).model_dump(mode="json"):
         raise HTTPException(409, "Сначала снимите отметку завершения, чтобы изменить архивный комплект")
-    tc.workflow = dict(w.model_dump(mode="json"), _delivery=old.get("_delivery", {}),
+    tc.workflow = dict({k: v for k, v in old.items() if k.startswith("_")}, **w.model_dump(mode="json"), _delivery=old.get("_delivery", {}),
                        _review_files={k: signatures.get(k, []) for k in w.reviewed_kinds})
+    if not w.archived:
+        if old.get("_handover") and old.get("archived"):
+            from app.models import DocAcquaint
+            pending = (await db.execute(select(DocAcquaint).where(
+                DocAcquaint.company_id == tc.company_id,
+                DocAcquaint.doc_id == uuid.UUID(old["_handover"]["docId"]),
+                DocAcquaint.status == "pending"))).scalars().all()
+            for row in pending: row.status = "superseded"
+        tc.workflow.pop("_archive", None)
+        tc.workflow.pop("_handover", None)
     if w.archived:
         tc.workflow["_archive"] = old.get("_archive") or {
             "at": datetime.now(timezone.utc).isoformat(), "by": str(user.id),
@@ -342,8 +405,21 @@ async def deliver(db, tc):
 
 
 async def run_notifications(db, now):
-    rows = (await db.execute(select(EzsTechConnection).where(EzsTechConnection.workflow.is_not(None))
-                             .with_for_update(skip_locked=True))).scalars().all()
-    for tc in rows:
-        await deliver(db, tc)
-    return len(rows)
+    ids = (await db.execute(select(EzsTechConnection.id).where(EzsTechConnection.workflow.is_not(None)))).scalars().all()
+    await db.commit()
+    count = 0
+    for ident in ids:
+        tc = (await db.execute(select(EzsTechConnection).where(EzsTechConnection.id == ident)
+                              .with_for_update(skip_locked=True))).scalar_one_or_none()
+        if tc is None: continue
+        try:
+            await deliver(db, tc)
+            from app.services.ezs_tp_method import reconcile
+            await reconcile(db, tc)
+            await db.commit()
+            count += 1
+        except Exception:
+            await db.rollback()
+            import logging
+            logging.getLogger(__name__).exception("Не завершена проверка одного ТП; следующий проход повторит её")
+    return count
