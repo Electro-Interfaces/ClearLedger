@@ -139,6 +139,10 @@ class User(Base):
     # в любом сочетании. Выбирает сам человек в личных настройках; NULL —
     # умолчание `notify.TASK_CHANNELS_DEFAULT`.
     task_notify: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Какие письма человек хочет получать на свою почту: подмножество
+    # `notify.EMAIL_KINDS`. NULL — всё, как было до появления настройки:
+    # молчаливое отключение писем обновлением было бы хуже лишнего письма.
+    email_notify: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     # Версия входа: кладётся в JWT и сверяется на каждом запросе. Смена пароля, «выйти
     # со всех устройств» и сброс сессий админом поднимают её — выданные токены гаснут.
     token_version: Mapped[int] = mapped_column(

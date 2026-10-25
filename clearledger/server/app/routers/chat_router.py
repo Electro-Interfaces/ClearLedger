@@ -3098,6 +3098,9 @@ class MyProfileBody(BaseModel):
     workEnd: str | None = None     # «18:00»
     # Куда присылать уведомления о поручениях: secretary | notices | email.
     taskNotify: list[str] | None = None
+    # Какие письма человек хочет получать (notify.EMAIL_KINDS). Пустой список —
+    # осознанный выбор «ничего на почту», он сохраняется как есть.
+    emailNotify: list[str] | None = None
 
 
 @router.patch("/me")
@@ -3147,6 +3150,12 @@ async def update_me(
     if current_user.work_start >= current_user.work_end:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Рабочий день должен заканчиваться позже, чем начинается")
+    if body.emailNotify is not None:
+        from app.services import notify
+
+        # Порядок каталога, а не присланный: интерфейс сравнивает списки, и
+        # «те же виды в другом порядке» выглядели бы несохранённой правкой.
+        current_user.email_notify = [k for k in notify.EMAIL_KINDS if k in body.emailNotify]
     if body.taskNotify is not None:
         from app.services import notify
 

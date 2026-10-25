@@ -1,8 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  ПОЯСА, МИН_ДЛИНА_ПАРОЛЯ, ПРЕДЕЛ_ФОТО_МБ,
-  поясаПоСмещению, подписьПояса, рабочийДеньВерен, ошибкаПароля, ошибкаФото,
+  ПОЯСА, ВИДЫ_ПИСЕМ, МИН_ДЛИНА_ПАРОЛЯ, ПРЕДЕЛ_ФОТО_МБ,
+  поясаПоСмещению, подписьПояса, порядокВидовПисем,
+  рабочийДеньВерен, ошибкаПароля, ошибкаФото,
 } from './profileRules.ts'
 
 test('пояса покрывают все смещения России и не повторяются', () => {
@@ -58,4 +59,20 @@ test('фото: тип и предел размера', () => {
   assert.equal(ошибкаФото(файл('application/pdf', 1)), 'Нужна картинка')
   assert.match(ошибкаФото(файл('image/jpeg', ПРЕДЕЛ_ФОТО_МБ + 1)) ?? '', /больше/)
   assert.equal(ошибкаФото(файл('image/jpeg', 1)), null)
+})
+
+test('виды писем совпадают с серверным каталогом и не повторяются', () => {
+  // Порядок и состав — как в notify.EMAIL_KINDS: по ним сравнивается черновик.
+  assert.deepEqual(ВИДЫ_ПИСЕМ.map((k) => k.id),
+    ['task_assigned', 'task_mention', 'task_reply', 'task_status', 'digest'])
+  assert.equal(new Set(ВИДЫ_ПИСЕМ.map((k) => k.id)).size, ВИДЫ_ПИСЕМ.length)
+  for (const k of ВИДЫ_ПИСЕМ) {
+    assert.ok(k.label.length > 3 && k.hint.length > 3, k.id)
+  }
+})
+
+test('порядок видов писем — каталожный, лишнее отбрасывается', () => {
+  assert.deepEqual(порядокВидовПисем(['digest', 'task_assigned']), ['task_assigned', 'digest'])
+  assert.deepEqual(порядокВидовПисем(['чужое', 'task_reply']), ['task_reply'])
+  assert.deepEqual(порядокВидовПисем([]), [])
 })
