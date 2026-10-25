@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import app.database as db_module
-from app.auth import KEY_TOUCH_INTERVAL, touch_key_used
+from app.auth import KEY_TOUCH_INTERVAL, _last_touch, touch_key_used
 
 
 class _Key:
@@ -46,6 +46,14 @@ class _FakeSession:
         self.journal.append("commit")
 
 
+@pytest.fixture(autouse=True)
+def _chistaya_pamyat():
+    """Счёт «когда писали» живёт в памяти процесса — между тестами его обнуляем."""
+    _last_touch.clear()
+    yield
+    _last_touch.clear()
+
+
 @pytest.fixture
 def zapisi(monkeypatch):
     journal: list = []
@@ -67,9 +75,35 @@ async def _dozhdatsya_zapisi():
 async def test_pervoe_obrashchenie_pishetsya_otdelnoy_tranzakciey(zapisi):
     k = _Key()
     touch_key_used(k)
-    assert k.last_used_at is not None, "в объекте отметка ставится сразу"
     await _dozhdatsya_zapisi()
     assert "commit" in zapisi, "запись обязана уйти своей транзакцией, а не транзакцией запроса"
+
+
+@pytest.mark.asyncio
+async def test_orm_obekt_ne_menyaetsya(zapisi):
+    """Главное условие правки: объект сессии ЗАПРОСА не трогаем.
+
+    Присваивание `key.last_used_at` пометило бы объект грязным, и SQLAlchemy отправил
+    бы UPDATE при автофлаше — в транзакции запроса. Именно это свело на нет первую
+    версию правки: на gig головной запрос держал RowExclusiveLock на space_inbound_keys,
+    в очереди стояли шесть запросов, станции отдавали 499.
+    """
+    k = _Key()
+    touch_key_used(k)
+    await _dozhdatsya_zapisi()
+    assert k.last_used_at is None, "ORM-объект обязан остаться чистым"
+
+
+@pytest.mark.asyncio
+async def test_vtoroy_vyzov_podryad_ne_pishet(zapisi):
+    """Счёт ведётся в памяти процесса: второй вызов в том же запросе не пишет."""
+    k = _Key()
+    touch_key_used(k)
+    await _dozhdatsya_zapisi()
+    bylo = len(zapisi)
+    touch_key_used(k)
+    await _dozhdatsya_zapisi()
+    assert len(zapisi) == bylo, "повтор по тому же ключу не должен идти в базу"
 
 
 @pytest.mark.asyncio
@@ -78,7 +112,6 @@ async def test_povtor_v_predelah_minuty_ne_pishet(zapisi):
     k = _Key(byla)
     touch_key_used(k)
     await _dozhdatsya_zapisi()
-    assert k.last_used_at == byla
     assert zapisi == [], "запись в пределах интервала означала бы прежнюю очередь"
 
 
@@ -88,7 +121,6 @@ async def test_posle_intervala_pishet(zapisi):
     k = _Key(byla)
     touch_key_used(k)
     await _dozhdatsya_zapisi()
-    assert k.last_used_at > byla
     assert "commit" in zapisi
 
 
@@ -102,4 +134,3 @@ async def test_oshibka_zapisi_ne_lomaet_zapros(monkeypatch):
     k = _Key()
     touch_key_used(k)  # не должно бросить
     await _dozhdatsya_zapisi()
-    assert k.last_used_at is not None
