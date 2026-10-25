@@ -8,6 +8,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { formatDate } from '@/lib/formatDate'
 import { Loader2, AlertTriangle } from 'lucide-react'
 import { ExportButton } from './ExportButton'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
@@ -28,10 +29,10 @@ const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
  * тоже нельзя (они зависят от мощности площадки), поэтому рядом стоимость на
  * киловатт.
  */
-function GridOperators({ companyId }: { companyId: string }) {
+function GridOperators({ companyId, includeClosed }: { companyId: string; includeClosed: boolean }) {
   const q = useQuery({
-    queryKey: ['pr-tc-operators', companyId],
-    queryFn: () => getTechConnectionsByOperator(companyId),
+    queryKey: ['pr-tc-operators', companyId, includeClosed],
+    queryFn: () => getTechConnectionsByOperator(companyId, includeClosed),
   })
   const d = q.data
   if (!d || d.total === 0) return null
@@ -101,11 +102,18 @@ function GridOperators({ companyId }: { companyId: string }) {
 export function TechConnectionsPanel({ companyId }: { companyId: string }) {
   const [status, setStatus] = useState('')
   const [onlyOverdue, setOnlyOverdue] = useState(false)
+  // Свод отвечает про работу: заявки отклонённых и замороженных проектов
+  // показываются по просьбе, а не молча (проверка 25.10.2026 — 70 строк из 79
+  // и 3,6 млн ₽ в плитке стоимости приходились на мёртвые площадки).
+  const [includeClosed, setIncludeClosed] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
   // Клик по строке открывает рабочий экран проекта; Alt+клик — быстрый просмотр.
   const openProject = useOpenProject()
 
-  const q = useQuery({ queryKey: ['pr-tc', companyId], queryFn: () => getTechConnections(companyId) })
+  const q = useQuery({
+    queryKey: ['pr-tc', companyId, includeClosed],
+    queryFn: () => getTechConnections(companyId, includeClosed),
+  })
   const d = q.data
 
   const rows = useMemo(() => (d?.items ?? []).filter(
@@ -125,22 +133,27 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
           сетевой. Именно этот срок определяет, когда станция выйдет в сеть. Строка ведёт в проект.
         </p>
         </div>
-        <ExportButton companyId={companyId} report="tech-connections" fileName="tech_connections.xlsx" />
+        <ExportButton companyId={companyId} report="tech-connections" fileName="tech_connections.xlsx"
+          params={{ include_closed: includeClosed || undefined }} />
       </div>
 
       <ProjectPhaseStrip current="build"
         note="Третий этап тех же проектов. Строка ведёт в проект целиком." />
 
-      <GridOperators companyId={companyId} />
+      <GridOperators companyId={companyId} includeClosed={includeClosed} />
 
       {d.total === 0 ? (
         <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Присоединения ещё не заводились. Открывается в карточке проекта, вкладка «Присоединение».
+          {d.closedTotal > 0 && !includeClosed
+            ? <>У проектов в работе присоединений нет. По отклонённым и замороженным их {nf0.format(d.closedTotal)} —{' '}
+                <button type="button" className="text-primary hover:underline" onClick={() => setIncludeClosed(true)}>показать</button>.</>
+            : <>Присоединения ещё не заводились. Открывается в карточке проекта, вкладка «Присоединение».</>}
         </CardContent></Card>
       ) : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <KpiCard label="Всего присоединений" value={nf0.format(d.total)} />
+            <KpiCard label="Всего присоединений" value={nf0.format(d.total)}
+              hint={includeClosed ? 'вместе с отклонёнными и замороженными' : 'по проектам в работе'} />
             <KpiCard label="Исполнено" value={nf0.format(d.byStatus.find((s) => s.key === 'done')?.count ?? 0)} />
             <KpiCard label="Просрочено" value={nf0.format(d.overdue)}
               accent={d.overdue ? 'warning' : undefined} hint="срок мероприятий прошёл" />
@@ -164,6 +177,13 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
               className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${onlyOverdue ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
               Только просроченные
             </button>
+            {(d.closedTotal > 0 || includeClosed) && (
+              <button type="button" onClick={() => setIncludeClosed((v) => !v)}
+                title="Заявки проектов, которые отклонили или заморозили: в работе их нет, но история присоединения осталась"
+                className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${includeClosed ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
+                С отклонёнными и замороженными{d.closedTotal ? ` (${nf0.format(d.closedTotal)})` : ''}
+              </button>
+            )}
           </div>
 
           <Card>
@@ -198,15 +218,15 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
                       <td className="p-2 max-w-[160px] truncate text-muted-foreground">{t.gridOperator ?? '—'}</td>
                       <td className="p-2 whitespace-nowrap">{t.statusLabel}</td>
                       <td className="p-2 whitespace-nowrap text-muted-foreground">
-                        {t.applicationNo ?? '—'}{t.applicationDate ? ` · ${t.applicationDate}` : ''}
+                        {t.applicationNo ?? '—'}{t.applicationDate ? ` · ${formatDate(t.applicationDate)}` : ''}
                       </td>
                       <td className="p-2 whitespace-nowrap text-muted-foreground">
-                        {t.specsNo ?? '—'}{t.specsDate ? ` · ${t.specsDate}` : ''}
+                        {t.specsNo ?? '—'}{t.specsDate ? ` · ${formatDate(t.specsDate)}` : ''}
                       </td>
                       <td className="p-2 text-right font-mono">{t.powerKwt ?? '—'}</td>
                       <td className="p-2 text-right font-mono">{t.cost != null ? nf0.format(t.cost) : '—'}</td>
                       <td className={`p-2 whitespace-nowrap font-mono ${t.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
-                        {t.doneDate ? `✓ ${t.doneDate}` : (t.dueDate ?? '—')}
+                        {t.doneDate ? `✓ ${formatDate(t.doneDate)}` : (t.dueDate ? formatDate(t.dueDate) : '—')}
                         {t.overdue && <AlertTriangle className="inline h-3 w-3 ml-1" />}
                       </td>
                     </tr>

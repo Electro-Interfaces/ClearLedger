@@ -14,6 +14,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2, Plus, RefreshCw, AlertTriangle } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
+import { formatDate } from '@/lib/formatDate'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -181,7 +182,7 @@ function IntegrationsRegistry({ companyId }: { companyId: string }) {
                     <span>{r.owner ?? 'без руководителя'}</span>
                   </div>
                   {r.nextAction && <div className={`text-xs ${r.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
-                    {r.nextAction}{r.nextActionDue ? ` · до ${r.nextActionDue}` : ''}</div>}
+                    {r.nextAction}{r.nextActionDue ? ` · до ${formatDate(r.nextActionDue)}` : ''}</div>}
                 </button>
               </li>
             ))}
@@ -213,7 +214,7 @@ function IntegrationsRegistry({ companyId }: { companyId: string }) {
                     <td className="p-2 whitespace-nowrap text-muted-foreground">{r.owner ?? '—'}</td>
                     <td className={`p-2 max-w-[260px] ${r.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
                       <div className="truncate" title={r.nextAction ?? ''}>{r.nextAction ?? '—'}</div>
-                      {r.nextActionDue && <div className="text-xs font-mono">{r.nextActionDue}</div>}
+                      {r.nextActionDue && <div className="text-xs font-mono">{formatDate(r.nextActionDue)}</div>}
                     </td>
                   </tr>
                 ))}

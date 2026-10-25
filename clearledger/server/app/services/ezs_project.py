@@ -377,14 +377,31 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
     return _tc_out(tc)
 
 
-async def tech_connections_report(db: AsyncSession, company_id) -> dict[str, Any]:
-    """Реестр присоединений по проектам: статусы, сроки, просрочки, стоимость."""
+async def tech_connections_report(db: AsyncSession, company_id, *,
+                                  include_closed: bool = False) -> dict[str, Any]:
+    """Реестр присоединений по проектам: статусы, сроки, просрочки, стоимость.
+
+    Считаем работу, а не историю: отклонённые и замороженные проекты входят
+    только по явной просьбе (`include_closed`). Иначе плитки отвечали про
+    мёртвые площадки — 70 строк из 79 и почти вся «стоимость подключений».
+    """
+    from app.services.ezs_sites import STAGE_ORDER
+
+    conds = [EzsTechConnection.company_id == company_id]
+    if not include_closed:
+        conds.append(EzsSite.stage.in_(STAGE_ORDER))
     rows = (await db.execute(
         select(EzsTechConnection, EzsSite.project_no, EzsSite.title, EzsSite.region_norm,
                EzsSite.region, EzsSite.city, EzsSite.address, EzsSite.stage)
         .join(EzsSite, EzsSite.id == EzsTechConnection.site_id)
-        .where(EzsTechConnection.company_id == company_id)
+        .where(*conds)
         .order_by(EzsTechConnection.due_date.nulls_last()))).all()
+    # Сколько скрыто — чтобы переключатель на экране назывался числом, а не догадкой.
+    closed_total = int((await db.execute(
+        select(func.count()).select_from(EzsTechConnection)
+        .join(EzsSite, EzsSite.id == EzsTechConnection.site_id)
+        .where(EzsTechConnection.company_id == company_id,
+               EzsSite.stage.not_in(STAGE_ORDER)))).scalar_one() or 0)
     items = []
     by_status: dict[str, int] = {}
     overdue = 0
@@ -400,13 +417,15 @@ async def tech_connections_report(db: AsyncSession, company_id) -> dict[str, Any
         cost_sum += out["cost"] or 0
     return {
         "total": len(items), "overdue": overdue, "costSum": round(cost_sum, 2),
+        "closedTotal": closed_total, "includeClosed": include_closed,
         "byStatus": [{"key": s["key"], "label": s["label"], "count": by_status.get(s["key"], 0)}
                      for s in TC_STATUSES],
         "items": items,
     }
 
 
-async def tech_connections_by_operator(db: AsyncSession, company_id) -> dict[str, Any]:
+async def tech_connections_by_operator(db: AsyncSession, company_id, *,
+                                       include_closed: bool = False) -> dict[str, Any]:
     """Присоединения в разрезе сетевой организации.
 
     Сетевая — первый разрез этой части работы, а не подпись в карточке: процессы,
@@ -418,6 +437,8 @@ async def tech_connections_by_operator(db: AsyncSession, company_id) -> dict[str
     Отдельно — владелец подстанции и линии (графы осмотра AQ–AR): у собственных
     сетей «Общество» присоединение идёт иначе, чем через чужую организацию.
     """
+    from app.services.ezs_sites import STAGE_ORDER
+
     rows = (await db.execute(text("""
         select coalesce(nullif(trim(t.grid_operator), ''), '— не указана') as operator,
                t.grid_operator_counterparty_id as counterparty_id,
@@ -427,7 +448,9 @@ async def tech_connections_by_operator(db: AsyncSession, company_id) -> dict[str
                s.stage
         from ezs_tech_connections t join ezs_sites s on s.id = t.site_id
         where t.company_id = :cid
-    """), {"cid": company_id})).mappings().all()
+          and (:all_stages or s.stage = any(:live))
+    """), {"cid": company_id, "all_stages": include_closed,
+           "live": list(STAGE_ORDER)})).mappings().all()
 
     def days(a: str | None, b: str | None) -> int | None:
         if not a or not b:
@@ -2062,11 +2085,16 @@ async def export_accounting_xlsx(db: AsyncSession, company_id) -> bytes:
     }])
 
 
-async def export_tech_connections_xlsx(db: AsyncSession, company_id) -> bytes:
-    """Присоединения: заявки, ТУ, договоры, сроки и просрочки по сетевым."""
-    rep = await tech_connections_report(db, company_id)
+async def export_tech_connections_xlsx(db: AsyncSession, company_id, *,
+                                       include_closed: bool = False) -> bytes:
+    """Присоединения: заявки, ТУ, договоры, сроки и просрочки по сетевым.
+
+    Стадия проекта — отдельной графой: в файле без неё нельзя было отличить
+    заявку действующего проекта от заявки отклонённой площадки.
+    """
+    rep = await tech_connections_report(db, company_id, include_closed=include_closed)
     rows = [[
-        i["projectNo"], i["title"], i["region"], i["city"],
+        i["projectNo"], i["title"], i["stageLabel"], i["region"], i["city"],
         i["statusLabel"], i["gridOperator"], i["applicationNo"], i["applicationDate"],
         i["specsNo"], i["specsDate"], i["contractNo"], i["contractDate"],
         i["powerKwt"], i["cost"], i["dueDate"], i["doneDate"],
@@ -2074,12 +2102,12 @@ async def export_tech_connections_xlsx(db: AsyncSession, company_id) -> bytes:
     ] for i in rep["items"]]
     return build_xlsx([{
         "title": "Присоединение",
-        "headers": ["Проект", "Название", "Регион", "Город", "Статус", "Сетевая",
+        "headers": ["Проект", "Название", "Стадия проекта", "Регион", "Город", "Статус", "Сетевая",
                     "№ заявки", "Дата заявки", "№ ТУ", "Дата ТУ", "№ договора",
                     "Дата договора", "Мощность, кВт", "Стоимость, ₽",
                     "Срок мероприятий", "Исполнено", "Просрочено"],
         "rows": rows,
-        "widths": [16, 26, 22, 18, 18, 26, 18, 13, 18, 13, 18, 13, 14, 14, 16, 13, 12],
+        "widths": [16, 26, 18, 22, 18, 18, 26, 18, 13, 18, 13, 18, 13, 14, 14, 16, 13, 12],
     }])
 
 

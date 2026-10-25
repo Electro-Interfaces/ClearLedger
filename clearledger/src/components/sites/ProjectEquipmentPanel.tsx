@@ -8,6 +8,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { formatDate } from '@/lib/formatDate'
 import { Loader2, AlertTriangle } from 'lucide-react'
 import { ExportButton } from './ExportButton'
 import { KpiCard } from '@/components/workspace/analytics/AnalyticsPeriodPicker'
@@ -126,7 +127,7 @@ export function ProjectEquipmentPanel({ companyId }: { companyId: string }) {
                       <td className="p-2 max-w-[150px] truncate text-muted-foreground">{e.supplier ?? '—'}</td>
                       <td className="p-2 whitespace-nowrap">{e.statusLabel}</td>
                       <td className={`p-2 whitespace-nowrap font-mono ${e.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
-                        {e.suppliedDate ? `✓ ${e.suppliedDate}` : (e.dueDate ?? '—')}
+                        {e.suppliedDate ? `✓ ${formatDate(e.suppliedDate)}` : (e.dueDate ? formatDate(e.dueDate) : '—')}
                         {e.overdue && <AlertTriangle className="inline h-3 w-3 ml-1" />}
                       </td>
                       <td className="p-2 text-right font-mono">{e.price != null ? nf0.format(e.price) : '—'}</td>

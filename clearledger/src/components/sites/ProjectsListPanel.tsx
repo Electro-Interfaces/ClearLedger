@@ -5,7 +5,7 @@
  * ход стройки (как доводим до станции). Поэтому первым столбцом номер проекта,
  * а фильтр — по этапу, а не по стадии подбора.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTabParams } from '@/hooks/useTabParams'
 import { useAuth } from '@/contexts/AuthContext'
@@ -19,18 +19,19 @@ import { Input } from '@/components/ui/input'
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
-import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { Loader2, Search, X, ChevronLeft, ChevronRight, Plus, Printer } from 'lucide-react'
 import { ExportButton } from './ExportButton'
+import { formatDate } from '@/lib/formatDate'
+import { plural } from '@/lib/textUtils'
+import { nextStepDue, nextStepText } from '@/lib/projectPlan'
 import { SortTh } from '@/components/workspace/SortableTh'
-import { useTableSort } from '@/hooks/useTableSort'
 import {
   getSites, getRouteNodes, getPortfolio, getSiteMembers, getSitesOverview, bulkAssignOwner, bulkExit, getProjectKinds, projectObjectLabel,
   PHASE_META, STAGE_META, FUNNEL_STAGES, QUADRANT_META, EXIT_REASONS, type SiteStage, type SiteRow,
 } from '@/services/sitesService'
 
 // Решение по проекту — не настраиваемая колонка: ради неё реестр и открывают.
-// Сортировка ставит вверх то, по чему есть на чём решать.
-const DECISION_ORDER = { do_now: 0, unblock: 1, option: 2, drop: 3, need_data: 4 } as const
+// Порядок «сначала то, по чему есть на чём решать» считает сервер (sort=decision).
 function DecisionChip({ d, row }: { d: SiteRow['decision']; row?: SiteRow }) {
   // Отказ и пауза: решать нечего, важно — почему вышли и когда возвращаться.
   if (!d && row && (row.stage === 'archive' || row.stage === 'on_hold')) {
@@ -65,6 +66,14 @@ const PAGE = 100
 /** Порция колонки доски: столько карточек стадии подтягивается за одну прокрутку. */
 const COLUMN_PAGE = 50
 const today = () => new Date().toISOString().slice(0, 10)
+/** Что показывать в колонках «Следующий шаг» и «Срок».
+ *
+ *  Строка брала только ручной `next_action`, и отбор «Ждём внешних» (53 проекта)
+ *  стоял сплошными прочерками — чего ждём и до какой даты, приходилось открывать
+ *  каждую карточку (проверка 25.10.2026). */
+const шаг = (s: SiteRow) => nextStepText(s)
+const срок = (s: SiteRow) => nextStepDue(s)
+const дата = (iso?: string | null) => (iso ? formatDate(iso) : '—')
 
 /** Отбор доски без стадии: стадию каждая колонка подставляет свою. */
 type BoardFilters = Omit<Parameters<typeof getSites>[0], 'companyId' | 'stage' | 'page' | 'pageSize'>
@@ -191,8 +200,9 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const [f, patch, setF] = useTabParams('pr_list', {
     phase: '', stage: '', node: '', ownerId: '', region: '', closed: false,
     overdue: false, search: '', view: 'table' as 'table' | 'board', page: 1,
+    sortKey: '', sortDir: 'asc' as 'asc' | 'desc',
   })
-  const { phase, node, ownerId, region, closed, overdue, search, view, page } = f
+  const { phase, node, ownerId, region, closed, overdue, search, view, page, sortKey, sortDir } = f
   // Блок и этап взаимно исключают друг друга: выбрали этап — блок снимается.
   // Этап воронки и узел маршрута отвечают на разные вопросы («далеко ли до
   // станции» и «у кого сейчас работа»), но в одном списке выбирается одно: два
@@ -270,9 +280,10 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
   const exitRisk = risk === 'no_exit_kind' || risk === 'no_hold_date'
   const [historyDays, setHistoryDays] = useState(90)
   const q = useQuery({
-    queryKey: ['pr-projects', companyId, phase, stagePick, node, ownerId, region, closed, overdue, search, risk, page, kind, placeKind],
+    queryKey: ['pr-projects', companyId, phase, stagePick, node, ownerId, region, closed, overdue, search, risk, page, kind, placeKind, sortKey, sortDir],
     queryFn: () => getSites({
       companyId,
+      sort: sortKey || undefined, direction: sortDir,
       // «Отклонённые» — тоже проекты, просто закрытые с причиной: держим их за
       // фильтром, а не в отдельном разделе, иначе теряется история места.
       stage: closed ? 'archive'
@@ -301,19 +312,25 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
 
   // Список ведут по сроку и по ответственному: «что горит» и «что на мне» — два
   // главных вопроса к нему, и отвечать на них перебором глазами нельзя.
-  const сортировка = useMemo(() => ({
-    projectNo: (s: typeof отобранные[number]) => s.projectNo,
-    title: (s: typeof отобранные[number]) => s.title || s.address || s.fullAddress,
-    decision: (s: typeof отобранные[number]) => (s.decision ? DECISION_ORDER[s.decision.quadrant] : 9),
-    kind: (s: typeof отобранные[number]) => s.kind,
-    placeKind: (s: typeof отобранные[number]) => s.placeKind,
-    phase: (s: typeof отобранные[number]) => s.phaseLabel ?? s.phase,
-    stage: (s: typeof отобранные[number]) => s.stageLabel,
-    owner: (s: typeof отобранные[number]) => s.ownerName,
-    nextAction: (s: typeof отобранные[number]) => s.nextAction,
-    due: (s: typeof отобранные[number]) => s.nextActionDue,
-  }), [])
-  const { rows, sort, toggle } = useTableSort(отобранные, сортировка)
+  //
+  // Порядок считает сервер, а не страница. Клиентская сортировка упорядочивала
+  // только загруженные 100 строк из 244: по «Срок» ↑ наверх вставал 07.09, хотя
+  // в выборке был 04.09, — и «самый срочный» оказывался не самым срочным
+  // (проверка 25.10.2026). Исключение — фильтр по этапу из нескольких стадий:
+  // он досеивается на клиенте, там порядок и так в пределах видимого.
+  const rows = отобранные
+  const sort = useMemo(() => ({ key: sortKey || null, dir: sortDir }), [sortKey, sortDir])
+  // Первый клик по тексту — от «А», по решению — от «делаем сейчас». Срок —
+  // исключение из правила «числа от большего»: от списка ждут ближайшую дату
+  // сверху, ради этого по нему и сортируют.
+  const DESC_FIRST = ['decision']
+  const toggle = (key: string) => {
+    const первое: 'asc' | 'desc' = DESC_FIRST.includes(key) ? 'desc' : 'asc'
+    const второе = первое === 'asc' ? 'desc' : 'asc'
+    if (sortKey !== key) patch({ sortKey: key, sortDir: первое, page: 1 })
+    else if (sortDir === первое) patch({ sortDir: второе, page: 1 })
+    else patch({ sortKey: '', sortDir: 'asc', page: 1 })
+  }
 
   const total = q.data?.total ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE))
@@ -345,11 +362,69 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
     onError: (e) => toast.error(e instanceof Error ? e.message : 'Не удалось проставить'),
   })
 
+  // Печать реестра: на лист уходит ВЕСЬ отбор, а не загруженная страница.
+  // Кнопка «PDF» печатала текущий DOM — 100 строк из 244, вместе с фильтрами и
+  // обрезанной колонкой «Срок» (проверка 25.10.2026).
+  const [printRows, setPrintRows] = useState<SiteRow[] | null>(null)
+  const [printing, setPrinting] = useState(false)
+  const печатьОтбора = async () => {
+    setPrinting(true)
+    try {
+      const all = await getSites({
+        companyId,
+        stage: closed ? 'archive'
+          : stagePick
+          || (phase && stagesOfPhase.length === 1 ? stagesOfPhase[0] : (phase || exitRisk ? undefined : 'active')),
+        region: region || undefined,
+        kind: kind || undefined, placeKind: placeKind || undefined, withoutKind: OWN_SECTION,
+        ownerId: ownerId || undefined, overdue, search: search || undefined,
+        risk: risk || undefined, node: node || undefined,
+        sort: sortKey || undefined, direction: sortDir,
+        page: 1, pageSize: 2000,
+      })
+      const items = phase && stagesOfPhase.length > 1
+        ? all.items.filter((i) => (stagesOfPhase as string[]).includes(i.stage))
+        : all.items
+      setPrintRows(items)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось собрать реестр для печати')
+    } finally { setPrinting(false) }
+  }
+  // Печатаем, когда строки уже нарисованы: window.print() в том же такте
+  // отправил бы на лист пустую таблицу.
+  useEffect(() => {
+    if (!printRows) return
+    const t = setTimeout(() => { window.print(); setPrintRows(null) }, 150)
+    return () => clearTimeout(t)
+  }, [printRows])
+
   const [filtersOpen, setFiltersOpen] = useState(false)
   const changeWorkspace = (next: Partial<ProjectWorkspacePreferences>) => {
     patchWorkspace(next)
     if ('kind' in next || 'placeKind' in next) { reset(); setPicked(new Set()) }
   }
+  // Отбор словами — для шапки печатного документа: лист без описания отбора
+  // читается как «весь реестр», даже если на нём 62 строки из 244.
+  const RISK_WORDS: Record<string, string> = {
+    no_next: 'без следующего действия', step_overdue: 'просрочен следующий шаг',
+    external_wait: 'ждём внешних', contact_overdue: 'просрочен контакт',
+    result_pending: 'ожидается возврат результата', no_owner: 'без ответственного',
+    no_exit_kind: 'отказ или пауза без типа причины', no_hold_date: 'пауза без даты возврата',
+  }
+  const отборСловами = [
+    closed ? 'отклонённые' : '',
+    stagePick ? `стадия «${STAGE_META[stagePick as SiteStage]?.label ?? stagePick}»` : '',
+    phase ? `этап «${pf.data?.phases.find((x) => x.key === phase)?.label ?? phase}»` : '',
+    node ? `узел маршрута «${nodes.data?.nodes.find((n) => n.code === node)?.label ?? node}»` : '',
+    region ? `регион «${region}»` : '',
+    ownerId ? `ответственный «${members.data?.find((m) => m.id === ownerId)?.name ?? ownerId}»` : '',
+    overdue ? 'просрочено' : '',
+    risk ? RISK_WORDS[risk] ?? 'отбор из обзора' : '',
+    kind ? `вид работ «${kindLabel(kind)}»` : '',
+    placeKind ? `тип объекта «${projectObjectLabel(placeKind)}»` : '',
+    search ? `поиск «${search}»` : '',
+  ].filter(Boolean)
+
   // Сколько фильтров сейчас сужают выдачу — чтобы свёрнутая панель не скрывала
   // того, что список показан не целиком.
   const activeFilters = [phase, region, ownerId, overdue ? '1' : '', closed ? '1' : '',
@@ -357,8 +432,10 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-3">
-      <ProjectsWorkspaceControls value={workspace} onChange={changeWorkspace} kinds={kinds.data?.kinds ?? []} />
-      <label className="inline-flex flex-wrap items-center gap-2 text-sm">Контроль работы
+      <div className="no-print">
+        <ProjectsWorkspaceControls value={workspace} onChange={changeWorkspace} kinds={kinds.data?.kinds ?? []} />
+      </div>
+      <label className="no-print inline-flex flex-wrap items-center gap-2 text-sm">Контроль работы
         <select className="h-9 max-w-full rounded-md border bg-background px-2" value={risk} onChange={(e) => { const value = e.target.value; setParams((prev) => { const next = new URLSearchParams(prev); if (value) next.set('risk', value); else next.delete('risk'); return next }, { replace: true }); reset() }}>
           <option value="">Все проекты</option><option value="no_next">Без следующего действия</option><option value="step_overdue">Просрочен следующий шаг</option><option value="external_wait">Ждём внешних</option><option value="contact_overdue">Просрочен контакт</option><option value="result_pending">Ожидается возврат результата</option><option value="no_owner">Без ответственного</option><option value="no_exit_kind">Отказ или пауза без типа причины</option><option value="no_hold_date">Пауза без даты возврата</option>
           {risk && !['no_next', 'step_overdue', 'external_wait', 'contact_overdue', 'result_pending', 'no_owner', 'no_exit_kind', 'no_hold_date'].includes(risk) && <option value={risk}>Фильтр из обзора</option>}
@@ -366,7 +443,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
       </label>
       {/* Телефон: сначала данные, настройки по требованию. На широком экране
           панель всегда развёрнута — там она ничего не заслоняет. */}
-      <div className="sm:hidden flex items-center gap-2">
+      <div className="no-print sm:hidden flex items-center gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input value={search} onChange={(e) => { setSearch(e.target.value); reset() }}
@@ -380,7 +457,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
         </Button>
       </div>
 
-      <div className={`${filtersOpen ? 'flex' : 'hidden'} sm:flex flex-wrap items-center gap-2`}>
+      <div className={`no-print ${filtersOpen ? 'flex' : 'hidden'} sm:flex flex-wrap items-center gap-2`}>
         {/* Блок и его этапы в одном списке. Раньше выбирать можно было только блок
             («Подбор 272»), и по нему не видно, у кого проект в работе: на переговорах,
             в проработке или уже на пусконаладке (замечание И. Ступина 10.08.2026). */}
@@ -411,7 +488,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
             ))}
             <SelectGroup>
               <SelectItem value="st:on_hold" className="text-sm">
-                Не трогать ({nf0.format(regions.data?.onHold ?? 0)})
+                Заморожены ({nf0.format(regions.data?.onHold ?? 0)})
               </SelectItem>
             </SelectGroup>
             {/* Узел маршрута — второй способ спросить о том же списке: «у кого
@@ -430,7 +507,8 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                 ))}
                 <div className="px-2 pb-1 pt-0.5 text-[11px] text-muted-foreground">
                   по маршруту ведутся {nf0.format(nodes.data?.known ?? 0)} из{' '}
-                  {nf0.format(nodes.data?.active ?? 0)} проектов в работе
+                  {nf0.format(nodes.data?.active ?? 0)}{' '}
+                  {plural(nodes.data?.active ?? 0, 'проекта', 'проектов', 'проектов')} в работе
                 </div>
               </SelectGroup>
             )}
@@ -468,9 +546,9 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           patch({ stage: !closed && stagePick === 'on_hold' ? '' : 'on_hold', phase: '', closed: false, page: 1 })
           clearStage()
         }}
-          title="Проекты, поставленные на паузу со статусом «Не трогать»"
+          title="Проекты на паузе с датой пересмотра — стадия «Заморожен»"
           className={`px-2.5 py-1 text-sm rounded-md border transition-colors ${!closed && stagePick === 'on_hold' ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-          Не трогать
+          Заморожены
         </button>
 
         <button type="button" onClick={() => {
@@ -516,7 +594,13 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           <option value={30}>История: 30 дней</option><option value={90}>История: 90 дней</option>
           <option value={365}>История: год</option><option value={3650}>История: вся</option>
         </select>
-        <ExportButton companyId={companyId} report="portfolio" fileName="projects_portfolio.xlsx" params={{ ...exportParams, history_days: historyDays }} />
+        <ExportButton companyId={companyId} report="portfolio" fileName="projects_portfolio.xlsx"
+          print={false} params={{ ...exportParams, history_days: historyDays }} />
+        <Button size="sm" variant="outline" className="h-8 text-sm" disabled={printing}
+          title="Печать или сохранение в PDF: на лист уходит весь отбор"
+          onClick={() => void печатьОтбора()}>
+          {printing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Printer className="h-3.5 w-3.5 mr-1" />}PDF
+        </Button>
         {risk && (
           <button type="button" onClick={clearRisk}
             className="px-2.5 py-1 text-sm rounded-md border border-primary bg-primary/10 text-primary">
@@ -533,15 +617,17 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
             271 в выдаче читается как потеря данных. Исключение — фильтр по этапу
             из нескольких стадий: он досеивается на клиенте, и честно только видимое. */}
         <span className="text-xs text-muted-foreground ml-auto">
-          {q.isLoading ? '…'
-            : `${nf0.format(phase && stagesOfPhase.length > 1 ? rows.length : total)} проектов`}
+          {q.isLoading ? '…' : (() => {
+            const n = phase && stagesOfPhase.length > 1 ? rows.length : total
+            return `${nf0.format(n)} ${plural(n, 'проект', 'проекта', 'проектов')}`
+          })()}
         </span>
       </div>
 
       {/* Раздача проектов пачкой: по одному триста карточек не назначить, и
           «кто ведёт» остаётся пустым, а с ним половина строк «что горит». */}
       {picked.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-sm">
+        <div className="no-print flex flex-wrap items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-sm">
           <span className="font-medium">Выбрано {picked.size}</span>
           <Select value={assignTo} onValueChange={setAssignTo}>
             <SelectTrigger className="h-8 w-[220px] text-sm"><SelectValue placeholder="Ответственный" /></SelectTrigger>
@@ -584,7 +670,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           проектов нет ни ведущего, ни следующего шага. Говорим числом и даём
           действие прямо здесь, вместо того чтобы менеджер листал строки. */}
       {view === 'table' && !q.isLoading && ownerless > 0 && picked.size === 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm">
+        <div className="no-print flex flex-wrap items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-sm">
           <span>
             Без ответственного {nf0.format(ownerless)} из {nf0.format(rows.length)} на странице —
             колонки «Ответственный» и «Следующий шаг» у них пустые не по ошибке.
@@ -601,7 +687,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
           onOpen={openProject} />
       )}
 
-      <Card className={view === 'board' ? 'hidden' : undefined}>
+      <Card className={view === 'board' ? 'hidden' : 'no-print'}>
         <CardContent className="p-0 overflow-x-auto">
           {q.isLoading ? (
             <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
@@ -622,7 +708,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                 сразу — номер, место, стадия, ответственный и срок, без прокрутки вбок. */}
             <ul className="sm:hidden divide-y divide-border/40">
               {rows.map((s) => {
-                const late = !!s.nextActionDue && s.nextActionDue < today()
+                const late = !!срок(s) && срок(s)! < today()
                 return (
                   <li key={s.id}>
                     <button type="button" onClick={() => openProject(s.id)}
@@ -643,9 +729,9 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                         {columns.includes('kind') && <span>{kindLabel(s.kind)}</span>}
                         {columns.includes('placeKind') && s.placeKind && <span>{projectObjectLabel(s.placeKind)}</span>}
                         {columns.includes('owner') && <span>{s.ownerName ?? 'ответственный не назначен'}</span>}
-                        {columns.includes('nextAction') && s.nextAction && <span className="truncate max-w-[60%]">{s.nextAction}</span>}
-                        {columns.includes('due') && s.nextActionDue && (
-                          <span className={late ? 'text-red-600 dark:text-red-400' : ''}>до {s.nextActionDue}</span>
+                        {columns.includes('nextAction') && шаг(s) && <span className="truncate max-w-[60%]">{шаг(s)}</span>}
+                        {columns.includes('due') && срок(s) && (
+                          <span className={late ? 'text-red-600 dark:text-red-400' : ''}>до {дата(срок(s))}</span>
                         )}
                       </div>
                     </button>
@@ -675,7 +761,7 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
               </thead>
               <tbody>
                 {rows.map((s) => {
-                  const late = !!s.nextActionDue && s.nextActionDue < today()
+                  const late = !!срок(s) && срок(s)! < today()
                   return (
                     <tr key={s.id} className="border-b border-border/30 hover:bg-muted/30 cursor-pointer"
                       onClick={(ev) => (ev.altKey ? setDetailId(s.id) : openProject(s.id))}>
@@ -708,11 +794,11 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
                         </span>
                       </td>}
                       {columns.includes('owner') && <td className="p-2 whitespace-nowrap text-muted-foreground">{s.ownerName ?? '—'}</td>}
-                      {columns.includes('nextAction') && <td className="p-2 max-w-[220px] truncate text-muted-foreground" title={s.nextAction ?? ''}>
-                        {s.nextAction ?? '—'}
+                      {columns.includes('nextAction') && <td className="p-2 max-w-[220px] truncate text-muted-foreground" title={шаг(s) ?? ''}>
+                        {шаг(s) ?? '—'}
                       </td>}
                       {columns.includes('due') && <td className={`p-2 whitespace-nowrap font-mono ${late ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
-                        {s.nextActionDue ?? '—'}
+                        {дата(срок(s))}
                       </td>}
                     </tr>
                   )
@@ -726,10 +812,57 @@ export function ProjectsListPanel({ companyId }: { companyId: string }) {
 
       {/* Страницы — только у таблицы: на доске остаток стадии добирается прокруткой колонки. */}
       {view === 'table' && pages > 1 && !phase && (
-        <div className="flex items-center justify-end gap-2 text-sm">
+        <div className="no-print flex items-center justify-end gap-2 text-sm">
           <Button variant="outline" size="sm" className="h-8 px-2" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft className="h-3.5 w-3.5" /></Button>
           <span className="text-muted-foreground">стр. {page} из {pages}</span>
           <Button variant="outline" size="sm" className="h-8 px-2" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}><ChevronRight className="h-3.5 w-3.5" /></Button>
+        </div>
+      )}
+
+      {/* Версия для листа: весь отбор, все колонки, без элементов управления. */}
+      {printRows && (
+        <div className="print-only">
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>Проекты — реестр</div>
+            <div style={{ fontSize: 11 }}>
+              {`Отбор: ${отборСловами.join('; ') || 'все проекты в работе'}`}
+            </div>
+            <div style={{ fontSize: 11 }}>
+              {`Строк: ${nf0.format(printRows.length)} · срез ${formatDate(today())}`}
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left' }}>Проект</th>
+                <th style={{ textAlign: 'left' }}>Объект</th>
+                <th style={{ textAlign: 'left' }}>Решение</th>
+                <th style={{ textAlign: 'left' }}>Вид работ</th>
+                <th style={{ textAlign: 'left' }}>Тип объекта</th>
+                <th style={{ textAlign: 'left' }}>Этап</th>
+                <th style={{ textAlign: 'left' }}>Стадия</th>
+                <th style={{ textAlign: 'left' }}>Ответственный</th>
+                <th style={{ textAlign: 'left' }}>Следующий шаг</th>
+                <th style={{ textAlign: 'left' }}>Срок</th>
+              </tr>
+            </thead>
+            <tbody>
+              {printRows.map((s) => (
+                <tr key={s.id}>
+                  <td>{s.projectNo ?? '—'}</td>
+                  <td>{[s.title || s.address || s.installPlace || s.fullAddress || '—', s.city ?? s.region].filter(Boolean).join(' · ')}</td>
+                  <td>{s.decision ? QUADRANT_META[s.decision.quadrant].label : (s.exitText ?? '—')}</td>
+                  <td>{kindLabel(s.kind)}</td>
+                  <td>{s.placeKind ? projectObjectLabel(s.placeKind) : '—'}</td>
+                  <td>{s.phaseLabel ?? (s.phase ? PHASE_META[s.phase]?.label : '—')}</td>
+                  <td>{s.stageLabel}</td>
+                  <td>{s.ownerName ?? '—'}</td>
+                  <td>{шаг(s) ?? '—'}</td>
+                  <td>{дата(срок(s))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

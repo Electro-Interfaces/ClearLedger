@@ -9,6 +9,7 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { formatDate } from '@/lib/formatDate'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -190,7 +191,7 @@ export function SitesListPanel({ companyId }: { companyId: string }) {
                       <td className="p-2 whitespace-nowrap text-muted-foreground">{s.ownerName ?? '—'}</td>
                       <td className="p-2 max-w-[220px] truncate text-muted-foreground" title={s.nextAction ?? ''}>{s.nextAction ?? '—'}</td>
                       <td className={`p-2 whitespace-nowrap font-mono ${late ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
-                        {s.nextActionDue ?? '—'}
+                        {s.nextActionDue ? formatDate(s.nextActionDue) : '—'}
                       </td>
                       <td className="p-2 max-w-[160px] truncate text-muted-foreground" title={s.owner ?? ''}>{s.owner ?? '—'}</td>
                     </tr>
