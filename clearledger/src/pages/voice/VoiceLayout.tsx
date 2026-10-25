@@ -12,6 +12,7 @@
  * Перед разделами оболочка спрашивает у узла `/me`: пускает ли он этого человека.
  * Отказ узла объясняется здесь, один раз, а не в каждом разделе отдельно.
  */
+import { lazy, Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { PhoneOff } from 'lucide-react'
@@ -21,11 +22,19 @@ import { useCompany } from '@/contexts/CompanyContext'
 import * as voice from '@/services/voiceService'
 import { EmptyBlock } from '@/pages/conf/EmptyBlock'
 import { VOICE_GROUPS, VOICE_VIEWS, voicePath, voiceViewFor } from './views'
+import { useVoiceDataSource, VoiceDataSourceBar } from './VoiceDataSource'
+
+const MegafonVoicePage = lazy(() => import('./MegafonVoicePage'))
+const MegafonMonthlyReportPage = lazy(() => import('./MegafonMonthlyReportPage'))
 
 export function VoiceLayout() {
   const { companyId } = useCompany()
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const connections = pathname.replace(/\/$/, '') === '/voice/connections'
+  // Историю МегаФона читает Ядро: компанию, продукт и роль проверяет Core API.
+  const source = useVoiceDataSource(pathname)
+  const megafon = source.megafon
   // ≤1024 рельсы пространства на экране нет (MainLayout прячет её в шторку), поэтому раздел
   // выбирается списком сверху — как у «Конференций» на телефоне.
   const компакт = useMaxWidth(1024)
@@ -33,7 +42,7 @@ export function VoiceLayout() {
   const кто = useQuery({
     queryKey: ['voice-me', companyId],
     queryFn: () => voice.me(companyId),
-    enabled: !!companyId,
+    enabled: !!companyId && !connections && !megafon && !source.loading && !source.error,
     // Повторяем только обрыв/временный 5xx. 403 role/company — окончательный ответ,
     // а 401 уже один раз обновляет токен в voiceService: других скрытых повторов нет.
     retry: (failureCount, error) => failureCount < 1 && voice.узелНедоступен(error),
@@ -41,7 +50,15 @@ export function VoiceLayout() {
   })
 
   // Ключ по компании: другой узел — экраны начинают с чистого листа, без чужой правки и выбранного звонка.
-  const содержимое = !companyId || кто.isLoading ? <AccessLoading />
+  const содержимое = connections ? <Outlet key={companyId} />
+    : source.loading ? <AccessLoading />
+    : source.error ? null
+    : megafon ? (source.managed
+      ? <Suspense fallback={<AccessLoading />}>{pathname.endsWith('/report')
+        ? <MegafonMonthlyReportPage key={companyId} />
+        : <MegafonVoicePage key={`${companyId}:${pathname}`} section={pathname.endsWith('/stats') ? 'stats' : 'calls'} />}</Suspense>
+      : <Outlet key={companyId} />)
+    : !companyId || кто.isLoading ? <AccessLoading />
     : кто.isError ? <Refusal ошибка={кто.error} />
       : <Outlet key={companyId} />
 
@@ -49,7 +66,12 @@ export function VoiceLayout() {
   // На телефоне запас снизу под нижнюю навигацию и плашку установки, как у «Трека» и «Конференций».
   const экран = (
     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto"
-      style={узкий ? { paddingBottom: 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))' } : undefined}>
+      style={{ paddingBottom: узкий
+        // На широком экране плашка установки тоже висит поверх (md:bottom-4), поэтому запас нужен
+        // всегда, иначе она закрывает нижнюю карточку. Нет плашки — переменной нет и запас нулевой.
+        ? 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))'
+        : 'calc(var(--pwa-install-height, 0px) + 1rem)' }}>
+      <VoiceDataSourceBar state={source} pathname={pathname} />
       {содержимое}
     </div>
   )

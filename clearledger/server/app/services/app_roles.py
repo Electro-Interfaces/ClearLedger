@@ -11,8 +11,9 @@
 затем роль доступа (`company_roles.app_roles`), затем карта «роль в пространстве →
 роль в приложении». У «Телефонии» роль одна — `admin` (решение МАГа 16.10.2026,
 ContactHub docs/node-data-api.html §6): её получает администратор компании или
-тот, кому её назначили явно. Суперадмин платформы роли в «Телефонии» не
-получает: записи и номера звонящих — данные заказчика, а не платформы.
+тот, кому её назначили явно. Суперадмин платформы получает `admin` в выбранной
+компании (решение МАГа 19.10.2026). Выдающий токен маршрут проверяет существование
+компании и подключение продукта; узел проверяет компанию, подпись и аудит доступа.
 """
 from __future__ import annotations
 
@@ -33,16 +34,15 @@ async def app_roles(db: AsyncSession, user: User, company_id: uuid.UUID | str | 
     """Роли человека в приложении `app_code` в компании. Пусто — роли нет."""
     from app.services.space_projection import DEFAULT_ROLE_MAP
 
-    # Суперадмин управляет контейнером, но не получает доступ к данным звонков клиента,
-    # даже если у него осталось членство или явное назначение роли в этой компании.
-    if app_code == "voice" and user.is_superadmin:
-        return []
     if not company_id:
         return []
     try:
         cid = uuid.UUID(str(company_id))
     except ValueError:
         return []
+    # Полномочия платформы не зависят от наличия личного членства в компании.
+    if app_code == "voice" and user.is_superadmin:
+        return ["admin"]
     m = await db.get(UserCompany, (user.id, cid))
     if m is None:
         return []

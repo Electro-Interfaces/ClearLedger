@@ -210,6 +210,27 @@ export interface Me {
 
 export const me = (cid: string) => дай<Me>(cid, '/me')
 
+/** Параметры установки узла. Изменение runtime-конфигурации выполняет установщик. */
+export interface NodeConnections {
+  readonly: true
+  node: { url: string | null }
+  core: { url: string | null; keyConfigured: boolean }
+  space: { jwksUrl: string | null; issuer: string; mtls: boolean; companyIds: string[] }
+  asr: { configured: boolean; ready: boolean }
+  llm: { configured: boolean; ready: boolean }
+  trunkConfigured: boolean
+}
+export async function nodeConnections(cid: string) {
+  const data = await дай<NodeConnections>(cid, '/connections')
+  if (!data.space.companyIds.includes(cid)) throw new Error('Настройки узла относятся к другой компании. Обновите страницу.')
+  return data
+}
+export async function checkCoreConnection(cid: string) {
+  const data = (await запрос<{ status: 'ok' | 'error'; code: string; companyId: string }>(cid, '/connections/check', { method: 'POST' })).data
+  if (data.companyId !== cid) throw new Error('Ответ относится к другой компании. Обновите страницу.')
+  return data
+}
+
 // ——— Сейчас ———
 
 export type LiveState = 'ivr' | 'waiting' | 'offered' | 'dialing' | 'connected' | 'held' | 'parked'
@@ -1118,7 +1139,7 @@ export async function deleteRecordings(cid: string, contactId: string, reason: s
 
 // ——— Получатели событий (волна 4) ———
 
-export type EventType = 'call.completed' | 'call.recording_ready' | 'call.transcript_ready' | 'callback.closed'
+export type EventType = 'call.completed' | 'call.recording_ready' | 'call.transcript_ready' | 'callback.opened' | 'callback.merged' | 'callback.closed'
   | 'config.applied' | 'alert.raised' | 'alert.cleared' | 'audit.recorded'
 
 export interface Webhook {
@@ -1156,6 +1177,11 @@ export async function addWebhook(cid: string, url: string, types: EventType[]) {
 
 export async function deleteWebhook(cid: string, id: string) {
   await запрос<void>(cid, `/webhooks/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+/** Меняется только состав будущих событий; адрес, ключ и прежняя очередь сохраняются. */
+export async function setWebhookTypes(cid: string, id: string, types: EventType[]) {
+  return (await запрос<Webhook>(cid, `/webhooks/${encodeURIComponent(id)}/types`, { method: 'PUT', body: { types } })).data
 }
 
 export const webhookDeliveries = (cid: string, id: string, limit = 100) =>

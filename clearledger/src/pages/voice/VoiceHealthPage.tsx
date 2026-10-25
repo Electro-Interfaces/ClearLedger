@@ -122,9 +122,9 @@ export default function VoiceHealthPage() {
           h.status === 'down' ? 'border-destructive/40 bg-destructive/5' : h.status === 'degraded' ? 'border-warning/50 bg-warning/5' : 'border-border bg-card')}>
           <Значок s={h.status === 'down' ? 'down' : h.status === 'degraded' ? 'warn' : 'up'} className="mt-0.5" />
           <p>
-            {h.status === 'down' ? 'Не работает обязательная часть: линия не принимается как надо.'
-              : h.status === 'degraded' ? 'Линия принимается, но часть узла требует внимания.'
-                : 'Все части работают.'}
+            {h.status === 'down' ? 'Обязательная часть узла недоступна.'
+              : h.status === 'degraded' ? 'Часть узла требует внимания.'
+                : 'Проверка обязательных частей узла прошла.'}
             {h.at && <span className="text-muted-foreground"> Проверено {когда(h.at)}.</span>}
           </p>
         </div>

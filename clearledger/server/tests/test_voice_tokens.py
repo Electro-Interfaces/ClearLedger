@@ -3,8 +3,8 @@
 Ловим:
   * в токене нет роли в приложении — узел пускает по роли в пространстве, и
     «Телефония» достаётся всем администраторам чего угодно;
-  * суперадмин платформы получает роль в «Телефонии» — записи и номера это данные
-    заказчика;
+  * суперадмин платформы не получает admin выбранной компании, либо выдача
+    обходит проверку компании и подключения продукта;
   * у токенов нет `jti` — узлу нечем отсечь повтор и найти выдачу в журнале;
   * ключ системы открывает больше своей области, живёт после отзыва или
     выдаётся не администратором.
@@ -123,7 +123,7 @@ async def test_voice_token_carries_role_jti_and_bounded_ttl(
         assert len(c["jti"]) == 32 and c["jti"] not in seen
         seen.add(c["jti"])
 
-    # Суперадмин роли в «Телефонии» не получает даже при членстве и явном назначении.
+    # Суперадмин сохраняет полный доступ при членстве и явном назначении.
     superadmin = (await db.execute(select(User).where(
         User.email == "admin@clearledger.ru"))).scalar_one()
     membership = await db.get(UserCompany, (superadmin.id, cid))
@@ -145,14 +145,48 @@ async def test_voice_token_carries_role_jti_and_bounded_ttl(
         r = await client.get("/api/sso/token", params={"app": "voice", "company_id": "rushydro"},
                              headers=_h(sa))
         assert r.status_code == 200, r.text
-        assert r.json()["roles"] == []
-        assert _claims(r.json()["token"], sso_key)["roles"] == []
+        assert r.json()["roles"] == ["admin"]
+        assert _claims(r.json()["token"], sso_key)["roles"] == ["admin"]
     finally:
         if created_membership:
             await db.delete(membership)
         else:
             membership.role = previous_role
             membership.app_roles = previous_app_roles
+        await db.commit()
+
+
+async def test_platform_superadmin_voice_without_membership_keeps_company_guards(
+    client: AsyncClient, db: AsyncSession, sso_key,
+):
+    cid = await _voice(db, "rushydro")
+    tag = uuid.uuid4().hex[:6]
+    email = f"platform-voice-{tag}@test.ru"
+    bearer = await _user(client, email, "gig", "user")
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one()
+    user.is_superadmin = True
+    await db.commit()
+    try:
+        assert await db.get(UserCompany, (user.id, cid)) is None
+        r = await client.get("/api/sso/token", params={"app": "voice", "company_id": "rushydro"},
+                             headers=_h(bearer))
+        assert r.status_code == 200, r.text
+        assert r.json()["roles"] == ["admin"]
+        claims = _claims(r.json()["token"], sso_key)
+        assert claims["roles"] == ["admin"] and claims["cid"] == str(cid)
+        assert claims["exp"] - claims["iat"] == 300 and claims["jti"]
+
+        r = await client.get("/api/sso/token", params={"app": "voice", "company_id": str(uuid.uuid4())},
+                             headers=_h(bearer))
+        assert r.status_code == 400, r.text
+        await _voice(db, "rushydro", False)
+        r = await client.get("/api/sso/token", params={"app": "voice", "company_id": "rushydro"},
+                             headers=_h(bearer))
+        assert r.status_code == 403, r.text
+        assert r.json() == {"detail": "Приложение не подключено компании"}
+    finally:
+        user.is_superadmin = False
+        await _voice(db, "rushydro")
         await db.commit()
 
 
@@ -218,7 +252,8 @@ async def test_support_voice_token_uses_exact_mapping_and_existing_guards(
     await db.commit()
     url = "/api/sso/voice-token-for-support"
     try:
-        for bearer, roles in [(admin, ["admin"]), (reader, [])]:
+        platform = await _login(client, "admin@clearledger.ru", "admin123")
+        for bearer, roles in [(admin, ["admin"]), (reader, []), (platform, ["admin"])]:
             r = await client.get(url, params={"company_id": str(local_gig)}, headers=_h(bearer))
             assert r.status_code == 200, r.text
             payload = r.json()
