@@ -33,7 +33,7 @@ const TONE_ALIAS: Record<string, Tone> = {
 
 const TONE_CLASS: Record<Tone, string> = {
   success: "text-emerald-600 dark:text-emerald-400",
-  warning: "text-amber-600 dark:text-amber-400",
+  warning: "text-warning",
   danger: "text-red-600 dark:text-red-400",
   info: "text-blue-600 dark:text-blue-400",
 }
@@ -96,7 +96,7 @@ export function MetricTile({
         <span className="line-clamp-2">{label}</span>
         {info && <MetricHint text={info} />}
       </div>
-      <div className={cn("mt-1 truncate text-2xl font-semibold leading-tight tabular-nums",
+      <div className={cn("mt-1 break-words text-2xl font-semibold leading-tight tabular-nums",
         t && TONE_CLASS[t], valueClass)}>{value}</div>
       {/* Пояснение рендерится всегда: выгрузка читает первых трёх детей плитки
           по индексу, и пропуск строки увёл бы в колонку «пояснение» спарклайн. */}

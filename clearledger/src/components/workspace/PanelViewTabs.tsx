@@ -27,17 +27,26 @@ export function PanelViewTabs({
   ariaLabel?: string
 }) {
   return (
-    <div data-zone="Вид раздела" className="flex min-w-0 items-center gap-2 py-2">
+    <div data-zone="Вид раздела" className="flex min-w-0 items-center gap-2 py-2 max-sm:order-last max-sm:w-full max-sm:basis-full">
       {label ? (
         <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           {label}
         </span>
       ) : null}
 
+      <select
+        aria-label={ariaLabel}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="min-h-11 min-w-0 flex-1 rounded-md border border-border bg-background px-3 text-base text-foreground sm:hidden"
+      >
+        {tabs.map((tab) => <option key={tab.k} value={tab.k}>{tab.label}</option>)}
+      </select>
+
       <div
         role="tablist"
         aria-label={ariaLabel}
-        className="flex min-w-0 items-center gap-0.5 overflow-x-auto rounded-lg border border-border bg-muted/60 p-1 scrollbar-hide"
+        className="hidden min-w-0 items-center gap-0.5 overflow-x-auto rounded-lg border border-border bg-muted/60 p-1 sm:flex"
       >
         {tabs.map((t) => {
           const on = t.k === value
@@ -50,7 +59,7 @@ export function PanelViewTabs({
               onClick={() => onChange(t.k)}
               // На мобиле цель пальца: 28 px по высоте — промах через раз.
               // Ниже sm поднимаем до 40 px, на десктопе компактность сохраняем.
-              className={`min-h-10 whitespace-nowrap rounded-md px-3.5 py-2 text-[13px] transition-colors sm:min-h-0 ${
+              className={`min-h-10 shrink-0 whitespace-nowrap rounded-md px-3.5 py-2 text-[13px] transition-colors sm:min-h-0 ${
                 on
                   ? 'bg-primary font-semibold text-primary-foreground shadow-soft'
                   : 'text-muted-foreground hover:bg-card/70 hover:text-foreground'

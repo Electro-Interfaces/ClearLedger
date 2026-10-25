@@ -21,6 +21,7 @@ import {
 import { Loader2, AlertTriangle, Info, ArrowUpRight, ArrowDownRight, Zap } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { ExportButton } from './analytics/ExportButton'
+import { useScopeSubtitle } from '@/hooks/useScopeReset'
 import { CHART_SERIES as SERIES, seriesColor } from './analytics/palette'
 import { MetricHint, HINTS } from './analytics/MetricHint'
 import { TzToggle, type Tz } from './analytics/TzToggle'
@@ -914,6 +915,7 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo, embedded }
    */
   embedded?: boolean
 }) {
+  const scopeSubtitle = useScopeSubtitle()
   const ref = useRef<HTMLDivElement>(null)
   // Вид-срез: период — только из контура рабочей области.
   const period = { from: dateFrom, to: dateTo }
@@ -962,7 +964,7 @@ export function OverviewDashboardPanel({ companyId, dateFrom, dateTo, embedded }
               {data.meta.is_stale && data.meta.data_lag_days != null ? ` · отставание ${data.meta.data_lag_days} дн.` : ''}
             </span>
           )}
-          <ExportButton title="Обзор сети ЭЗС" subtitle={`Период: ${period.from} — ${period.to}`} getEl={() => ref.current} />
+          <ExportButton title="Обзор сети ЭЗС" subtitle={scopeSubtitle} getEl={() => ref.current} />
         </div>
       </div>
 

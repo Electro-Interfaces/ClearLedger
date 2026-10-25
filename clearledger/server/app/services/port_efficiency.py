@@ -32,6 +32,8 @@ from decimal import Decimal
 from typing import Any
 
 from app.services.session_scope import station_scope_sql
+from app.services.charge_identity import client_type_sql, session_source_sql
+from app.scope import acl_params, acl_sql
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,12 +50,12 @@ IDLE_MIN_ABOVE = 60.0
 # околонулевую длительность даёт сотни кВт и ломает перцентили.
 MIN_DURATION_MIN = 2.0
 
-_BASE = """
-WITH s AS (
-    SELECT station_code, station_name, connector_type, duration_min, energy_kwh,
+_BASE = "WITH _sales_source AS (" + session_source_sql() + ")," + """
+s AS (
+    SELECT canonical_code AS station_code, canonical_name AS station_name, connector_type, duration_min, energy_kwh,
            energy_kwh / (duration_min / 60.0) AS kw,
            connector_type = ANY(:dc) AS is_dc
-      FROM charge_sessions
+      FROM _sales_source AS charge_sessions
      WHERE company_id = :company_id
        AND started_at >= CAST(:date_from AS date)
        AND started_at < CAST(:date_to AS date) + 1
@@ -75,14 +77,15 @@ async def port_efficiency(
     db: AsyncSession, company_id, date_from: date, date_to: date,
     stations: list[str] | None = None, top: int = 15,
     regions: list[str] | None = None,
+    user_type: str | None = None,
 ) -> dict[str, Any]:
     """Idle, мощность и dwell по сети, коннекторам и станциям."""
     p = {
-        "company_id": str(company_id), "date_from": date_from, "date_to": date_to,
+        "company_id": str(company_id), **acl_params(), "date_from": date_from, "date_to": date_to,
         "dc": list(DC_CONNECTORS), "min_dur": MIN_DURATION_MIN,
         "idle_kw": IDLE_KW_BELOW, "idle_min": IDLE_MIN_ABOVE, "top": top,
     }
-    flt = ""
+    flt = acl_sql("location_id")
     if stations is not None:
         p["stations"] = stations
         flt += " AND " + station_scope_sql()
@@ -92,6 +95,9 @@ async def port_efficiency(
         flt += (" AND location_id IN (SELECT sl.id FROM service_locations sl"
                 " JOIN regions r ON r.id = sl.region_id"
                 " WHERE sl.company_id = :company_id AND r.name = ANY(:regions))")
+    if user_type:
+        p["user_type"] = user_type
+        flt += " AND (" + client_type_sql() + ") = :user_type"
     base = _BASE.format(station_filter=flt)
 
     async def q(sql: str) -> list[dict[str, Any]]:

@@ -31,7 +31,7 @@ const pct = (v: number) => nf1.format(v) + '%'
 const MODE_LABEL: Record<string, string> = { matrix: 'Матрица', flat: 'Плоский', retail: 'Розница' }
 
 /** Цвет для скидки/наценки к рознице: скидка (<0, сеть недополучает) — amber; наценка — emerald. */
-const gapCls = (v: number) => (v < -0.5 ? 'text-amber-600/90 dark:text-amber-400/90' : v > 0.5 ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-muted-foreground')
+const gapCls = (v: number) => (v < -0.5 ? 'text-warning' : v > 0.5 ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-muted-foreground')
 
 function Loading() { return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> }
 function Empty({ text }: { text: string }) { return <div className="p-6 text-sm text-muted-foreground text-center">{text}</div> }
@@ -170,7 +170,7 @@ function CorpOverview({ companyId, dateFrom, dateTo }: TabProps) {
       {ov.data.alerts.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {ov.data.alerts.map((a, i) => (
-            <div key={i} className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs ${a.level === 'warn' ? 'border-amber-400/40 text-amber-300/90' : 'border-border text-muted-foreground'}`}>
+            <div key={i} className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs ${a.level === 'warn' ? 'border-amber-400/40 text-warning' : 'border-border text-muted-foreground'}`}>
               {a.level === 'warn' ? <AlertTriangle className="h-3.5 w-3.5" /> : <Info className="h-3.5 w-3.5" />}{a.message}
             </div>
           ))}
@@ -254,7 +254,7 @@ function CorpClients({ companyId, dateFrom, dateTo }: TabProps) {
   const cols: Col[] = [
     { key: 'name', label: 'Клиент', left: true, get: (c) => c.name, cell: (c) => c.name },
     { key: 'mode', label: 'Тариф', get: (c) => c.mode, cell: (c) => MODE_LABEL[c.mode] ?? c.mode },
-    { key: 'status', label: 'Договор', get: (c) => c.status ?? '', cell: (c) => <span className="text-[11px]">{c.contract_start ?? '—'}{c.status && c.status !== 'Действующая' ? ` · ${c.status}` : ''}</span> },
+    { key: 'status', label: 'Договор', get: (c) => c.status ?? '', cell: (c) => <span className="text-[11px]">{c.contract_start ?? '—'}{c.status && !['active', 'действующая', 'действующий'].includes(c.status.trim().toLowerCase()) ? ` · ${c.status}` : ''}</span> },
     { key: 'sessions', label: 'Сессий', get: (c) => c.sessions, cell: (c) => nf0.format(c.sessions) },
     { key: 'energy_kwh', label: 'Энергия кВтч', get: (c) => c.energy_kwh, cell: (c) => nf0.format(c.energy_kwh) },
     { key: 'corp_revenue', label: 'Дог. выручка', get: (c) => c.corp_revenue, cell: (c) => money(c.corp_revenue) },
@@ -297,7 +297,7 @@ function CorpTariffs({ companyId, dateFrom, dateTo }: TabProps) {
     { key: 'tariff', label: 'Условие тарифа', left: true, get: (c) => c.mode, cell: (c) => <span className="text-[11px] text-muted-foreground">{tariffDesc(c)}</span> },
     { key: 'avg_tariff', label: 'Эфф. ₽/кВтч', get: (c) => c.avg_tariff, cell: (c) => nf1.format(c.avg_tariff) },
     { key: 'contract_start', label: 'Договор с', get: (c) => c.contract_start ?? '', cell: (c) => <span className="text-[11px]">{c.contract_start ?? '—'}</span> },
-    { key: 'status', label: 'Статус', get: (c) => c.status ?? '', cell: (c) => <span className={`text-[11px] ${c.status && c.status !== 'Действующая' ? 'text-amber-600/90 dark:text-amber-400/90' : ''}`}>{c.status ?? '—'}</span> },
+    { key: 'status', label: 'Статус', get: (c) => c.status ?? '', cell: (c) => <span className={`text-[11px] ${c.status && !['active', 'действующая', 'действующий'].includes(c.status.trim().toLowerCase()) ? 'text-warning' : ''}`}>{c.status ?? '—'}</span> },
     { key: 'users', label: 'Юзеров', get: (c) => c.users ?? 0, cell: (c) => c.users ?? '—' },
   ]
   return (
@@ -413,7 +413,7 @@ export function CorporatePanel({ companyId, dateFrom, dateTo }: TabProps) {
   const p: TabProps = { companyId, dateFrom, dateTo }
   return (
     <div>
-      <div className="flex items-center gap-3 border-b border-border px-4">
+      <div className="flex flex-wrap items-center gap-3 border-b border-border px-4">
         <span className="text-[11px] rounded-md border border-primary/40 px-2 py-0.5 text-primary/80 shrink-0 my-2">Только ЮЛ</span>
         <PanelViewTabs tabs={CORP_TABS} value={t.sub} onChange={(k) => patch({ sub: k })} label={null} ariaLabel="Виды раздела «Корпоратив»" />
       </div>

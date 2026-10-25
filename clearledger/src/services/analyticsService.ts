@@ -1245,11 +1245,11 @@ export interface UnpaidStationDetail {
   corp: { label: string; sessions: number; kwh: number; amount: number }[]
   probes: number
 }
-export async function getChargeUnpaidStation(p: {
-  companyId: string; dateFrom: string; dateTo: string; code: string
+export async function getChargeUnpaidStation(p: PeriodParams & {
+  code: string
 }): Promise<UnpaidStationDetail> {
   return get<UnpaidStationDetail>('/api/analytics/charge-sessions/unpaid/station', {
-    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, code: p.code,
+    company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo, code: p.code, ...narrowParams(p),
   })
 }
 

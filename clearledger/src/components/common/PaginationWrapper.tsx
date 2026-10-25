@@ -6,11 +6,10 @@ import {
   Pagination,
   PaginationContent,
   PaginationItem,
-  PaginationLink,
-  PaginationPrevious,
-  PaginationNext,
   PaginationEllipsis,
 } from '@/components/ui/pagination'
+import { Button } from '@/components/ui/button'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 interface PaginationWrapperProps {
@@ -49,7 +48,7 @@ export function PaginationWrapper({ total, page, pageSize, onPageChange, onPageS
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <span>Показано {from}–{to} из {total}</span>
         <Select value={String(pageSize)} onValueChange={(v) => { onPageSizeChange(Number(v)); onPageChange(1) }}>
-          <SelectTrigger className="w-20 h-8">
+          <SelectTrigger className="w-20 h-8" aria-label="Строк на странице">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -61,14 +60,13 @@ export function PaginationWrapper({ total, page, pageSize, onPageChange, onPageS
       </div>
 
       {totalPages > 1 && (
-        <Pagination>
+        <Pagination aria-label="Страницы отчёта">
           <PaginationContent>
             <PaginationItem>
-              <PaginationPrevious
+              <Button type="button" variant="ghost" size="icon" aria-label="Предыдущая страница"
                 onClick={() => onPageChange(Math.max(1, page - 1))}
-                aria-disabled={page === 1}
-                className={page === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-              />
+                disabled={page === 1}
+              ><ChevronLeft /></Button>
             </PaginationItem>
             {getVisiblePages().map((p, i) =>
               p === 'ellipsis' ? (
@@ -77,22 +75,21 @@ export function PaginationWrapper({ total, page, pageSize, onPageChange, onPageS
                 </PaginationItem>
               ) : (
                 <PaginationItem key={p}>
-                  <PaginationLink
-                    isActive={p === page}
+                  <Button type="button" variant={p === page ? 'outline' : 'ghost'} size="icon"
+                    aria-current={p === page ? 'page' : undefined}
+                    aria-label={`Страница ${p}`}
                     onClick={() => onPageChange(p)}
-                    className="cursor-pointer"
                   >
                     {p}
-                  </PaginationLink>
+                  </Button>
                 </PaginationItem>
               ),
             )}
             <PaginationItem>
-              <PaginationNext
+              <Button type="button" variant="ghost" size="icon" aria-label="Следующая страница"
                 onClick={() => onPageChange(Math.min(totalPages, page + 1))}
-                aria-disabled={page === totalPages}
-                className={page === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-              />
+                disabled={page === totalPages}
+              ><ChevronRight /></Button>
             </PaginationItem>
           </PaginationContent>
         </Pagination>

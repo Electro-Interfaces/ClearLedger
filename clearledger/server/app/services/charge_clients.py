@@ -24,6 +24,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ChargeSession
 from app.services.analytics_service import AnalyticsService
 
+from app.services.charge_identity import client_type
+from app.services.session_scope import session_scope_conds, station_match
+
 S = ChargeSession
 CLIENT_KEY = func.coalesce(func.nullif(S.client_name, ""), func.nullif(S.user_id, ""))
 REVENUE = func.coalesce(S.client_amount, S.amount)
@@ -32,7 +35,7 @@ _DIM_COLS = {
     "station": S.station_code,
     "region": S.region,
     "connector": S.connector_type,
-    "user_type": S.user_type,
+    "user_type": client_type(S),
     "charge_type": S.charge_type,
     "result": S.result,
     "client": S.client_name,
@@ -43,11 +46,11 @@ def _conds(company_id, station_codes: list[str] | None, regions: list[str] | Non
            dim: str | None, dim_val: str | None) -> list:
     conds = [S.company_id == company_id, CLIENT_KEY.is_not(None),
              S.started_at.is_not(None)]
-    if station_codes:
-        conds.append(S.station_code.in_(station_codes))
-    if regions:
-        conds.append(S.region.in_(regions))
+    conds.extend(session_scope_conds(company_id, station_codes, regions))
     if dim and dim_val is not None:
+        if dim == "station":
+            conds.append(station_match(S.station_code, S.location_id, company_id, [dim_val]))
+            return conds
         col = _DIM_COLS.get(dim)
         if col is not None:
             conds.append(col == dim_val)
@@ -162,7 +165,7 @@ async def new_clients_list(
     rows = (await db.execute(
         select(
             CLIENT_KEY.label("k"),
-            func.max(S.user_type).label("user_type"),
+            func.max(client_type(S)).label("user_type"),
             func.max(S.client_name).label("client_name"),
             func.max(S.user_id).label("user_id"),
             first_sq.c.fa.label("first_at"),

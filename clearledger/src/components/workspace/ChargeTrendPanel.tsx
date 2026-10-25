@@ -16,7 +16,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { getChargeLongTrend } from '@/services/analyticsService'
-import { useNetScope } from '@/hooks/useScopeReset'
+import { useNetScope, useScopeSubtitle } from '@/hooks/useScopeReset'
 import { seriesColor } from './analytics/palette'
 import { rechartsTooltipTheme } from '@/components/ui/chart-utils'
 import { formatMonth } from '@/lib/formatDate'
@@ -48,6 +48,13 @@ export function ChargeTrendPanel({ companyId, dateFrom, dateTo }: {
     queryFn: () => getChargeLongTrend(companyId, groupBy, { stations: sc.stations, regions: sc.regions }),
     enabled: !!companyId,
     staleTime: 5 * 60_000,
+  })
+
+  const subtitle = useScopeSubtitle({
+    periodLabel: 'Горизонт (общий период не применяется)',
+    period: data?.months.length ? {
+      from: data.months[0].period.slice(0, 7), to: data.months[data.months.length - 1].period.slice(0, 7),
+    } : undefined,
   })
 
   if (isLoading) return <div className="p-6 text-sm text-muted-foreground">Загрузка динамики…</div>
@@ -86,11 +93,14 @@ export function ChargeTrendPanel({ companyId, dateFrom, dateTo }: {
     || (dateTo && last.period.slice(0, 7) > dateTo.slice(0, 7)))
 
   return (
-    <div ref={rootRef} className="space-y-4 p-6">
+    <div ref={rootRef} className="space-y-4 p-6" data-export-meta={JSON.stringify([
+      ['Разрез', GROUPS.find((g) => g.key === groupBy)?.label ?? groupBy],
+      ['Общий период (не применяется)', `${dateFrom ?? '—'} — ${dateTo ?? '—'}`],
+    ])}>
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-base font-semibold">Динамика отпуска · длинный горизонт</h2>
         <Badge className="bg-emerald-500/15 text-[10px] text-emerald-600 dark:text-emerald-400">реальные данные</Badge>
-        <ExportButton title="Динамика отпуска 2024+" getEl={() => rootRef.current} />
+        <ExportButton title="Динамика отпуска 2024+" subtitle={subtitle} getEl={() => rootRef.current} />
         <span className="text-xs text-muted-foreground">
           {formatMonth(months[0].period.slice(0, 7))} — {formatMonth(last.period.slice(0, 7))}
           {' · до '}{cutoffLabel ? formatMonth(cutoffLabel) : '—'} — сводная контрагента, далее — сессии
@@ -142,7 +152,7 @@ export function ChargeTrendPanel({ companyId, dateFrom, dateTo }: {
         ))}
       </div>
 
-      <Card><CardContent className="pt-5">
+      <Card data-export-chart><CardContent className="pt-5">
         <ResponsiveContainer width="100%" height={340}>
           <ComposedChart data={chart} margin={{ top: 8, right: 12, left: 8, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="currentColor" opacity={0.08} />
@@ -189,7 +199,10 @@ export function ChargeTrendPanel({ companyId, dateFrom, dateTo }: {
           Помесячная таблица ({months.length})
         </summary>
         <div className="mt-2 max-h-[380px] overflow-auto rounded-lg border border-border/50">
-          <Table><TableHeader className="sticky top-0 bg-card"><TableRow>
+          <Table data-export-name="Помесячная динамика" data-export-rows={JSON.stringify({
+            columns: ['Месяц', 'Источник', 'Отпуск, кВт·ч', 'Выручка, ₽', ...dimKeys.map((k) => DIM_LABEL[k] ?? k)],
+            rows: [...months].reverse().map((m) => [m.period.slice(0, 7), m.source === 'sessions' ? 'сессии' : 'сводная', m.kwh, m.rub ?? null, ...dimKeys.map((k) => m.dims?.[k] ?? null)]),
+          })}><TableHeader className="sticky top-0 bg-card"><TableRow>
             <TableHead>Месяц</TableHead>
             <TableHead>Источник</TableHead>
             <TableHead className="text-right">Отпуск, кВт·ч</TableHead>

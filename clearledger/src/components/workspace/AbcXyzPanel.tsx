@@ -136,7 +136,10 @@ export function AbcXyzPanel({ companyId, dateFrom, dateTo }: {
       {isLoading || !data ? (
         <div className="flex h-64 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
       ) : (
-        <div ref={ref} className="space-y-4 px-4">
+        <div ref={ref} className="space-y-4 px-4" data-export-meta={JSON.stringify([
+          ['Метрика ABC', isMoney ? 'Выручка' : 'Энергия'], ['Шаг XYZ', p.bucket === 'week' ? 'Неделя' : 'Месяц'],
+          ['Класс', `${sel.abc ?? '*'}${sel.xyz ?? '*'}`],
+        ])}>
           {/* Итоговые карточки: ядро AX и хвост CZ */}
           <div className="grid gap-3 sm:grid-cols-3">
             <SummaryCard title="Всего станций" value={nf0.format(data.stations_total)}
@@ -211,7 +214,10 @@ export function AbcXyzPanel({ companyId, dateFrom, dateTo }: {
                 Станций: {nf0.format(rows.length)}
                 {(sel.abc || sel.xyz) && <span> · фильтр: {sel.abc ?? '*'}{sel.xyz ?? '*'}</span>}
               </div>
-              <table className="w-full text-xs">
+              <table className="w-full text-xs" data-export-name="ABC-XYZ станции" data-export-rows={JSON.stringify({
+                columns: ['Станция', 'Регион', 'Владелец', isMoney ? 'Выручка, ₽' : 'Энергия, кВт·ч', 'Доля, %', 'Накопл., %', 'Сессии', 'CV', 'Класс'],
+                rows: rows.map((s) => [`${s.name}${s.station_number ? ` №${s.station_number}` : ''}`, s.region, s.owner_label, s.measure, s.share_pct, s.cum_share_pct, s.sessions, s.cv, s.class]),
+              })}>
                 <thead className="sticky top-0 bg-card">
                   <tr className="border-b text-muted-foreground">
                     <th className="p-2 text-left font-medium">Станция</th>

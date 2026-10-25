@@ -682,15 +682,18 @@ async def export_sessions(
 
     st_codes = [x.strip() for x in stations.split(",") if x.strip()] if stations else None
     regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
+    from app.services.charge_identity import client_type
     S = ChargeSession
-    q = select(S).where(S.company_id == cid, S.started_at.is_not(None),
+    q = select(S, client_type(S).label("effective_user_type")).where(S.company_id == cid, S.started_at.is_not(None),
                         S.started_at >= lo, S.started_at <= hi,
                         *session_scope_conds(cid, st_codes, regs))
     if user_type:
-        q = q.where(S.user_type == user_type)
+        q = q.where(client_type(S) == user_type)
     if client:
         q = q.where(S.client_name == client)
-    rows = (await db.execute(q.order_by(S.started_at).limit(limit))).scalars().all()
+    rows = (await db.execute(q.order_by(S.started_at).limit(limit + 1))).all()
+    if len(rows) > limit:
+        raise HTTPException(413, "Слишком много сессий для выгрузки. Сузьте период или отбор.")
 
     import openpyxl
     wb = openpyxl.Workbook()
@@ -700,7 +703,7 @@ async def export_sessions(
                "Тип клиента", "Клиент (ЮЛ)",
                "Тариф станции ₽/кВтч", "Выручка по рознице ₽",
                "Тариф ЮЛ ₽/кВтч", "Выручка ЮЛ ₽", "Разница ЮЛ−розница ₽"])
-    for s in rows:
+    for s, effective_user_type in rows:
         energy = float(s.energy_kwh or 0)
         retail_tariff = float(s.tariff or 0)
         retail_rev = round(energy * retail_tariff, 2)   # розница-эквивалент (что было бы по станции)
@@ -709,7 +712,7 @@ async def export_sessions(
         ws.append([
             s.session_ext_id, s.station_code, s.region, s.connector_type,
             s.started_at.strftime("%d.%m.%Y %H:%M") if s.started_at else "",
-            round(energy, 3), s.user_type, s.client_name,
+            round(energy, 3), effective_user_type, s.client_name,
             retail_tariff, retail_rev,
             float(s.client_tariff) if s.client_tariff is not None else None,
             corp_amount, diff,

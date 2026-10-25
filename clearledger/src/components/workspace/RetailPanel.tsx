@@ -20,7 +20,7 @@ import { exportChargePdf } from '@/services/chargeExport'
 import { BarChart, Bar, LineChart, Line, Legend, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useTabParams, saveTabParams } from '@/hooks/useTabParams'
 import { useSearchParams } from 'react-router-dom'
-import { useResetOnScopeChange, useNetScope } from '@/hooks/useScopeReset'
+import { useResetOnScopeChange, useNetScope, useScopeSubtitle } from '@/hooks/useScopeReset'
 import { TzToggle, type Tz } from './analytics/TzToggle'
 import { ApplyToScope } from './ApplyToScope'
 import {
@@ -72,8 +72,12 @@ function Heatmap({ cells }: { cells: HeatCell[] }) {
     }
   })
   return (
-    <div className="space-y-1.5">
-      <div className="overflow-x-auto">
+    <div className="space-y-1.5" data-export-chart>
+      <table hidden aria-hidden data-export-name="Активность 7×24" data-export-rows={JSON.stringify({
+        columns: ['День недели', ...Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`)],
+        rows: WD_SHORT.map((wd, di) => [wd, ...Array.from({ length: 24 }, (_, h) => grid.get(`${di + 1}-${h}`) ?? 0)]),
+      })} />
+      <div className="overflow-x-auto" data-export-expand>
         <div className="inline-grid min-w-[560px] gap-0.5" style={{ gridTemplateColumns: '28px repeat(24, 1fr)' }}>{items}</div>
       </div>
       {/* легенда-шкала интенсивности (число сессий) — чтобы цвет читался без наведения */}
@@ -172,7 +176,7 @@ function AccountDetailDialog({ companyId, dateFrom, dateTo, account, onClose }: 
   const d = q.data
   const maxStRev = Math.max(1, ...(d?.by_station ?? []).map((s) => s.revenue))
   const maxConn = Math.max(1, ...(d?.connectors ?? []).map((c) => c.sessions))
-  const resTint = (r: string | null) => (r === 'Complete' ? 'text-emerald-600/80 dark:text-emerald-400/80' : 'text-amber-600/80 dark:text-amber-400/80')
+  const resTint = (r: string | null) => (r === 'Complete' ? 'text-emerald-600/80 dark:text-emerald-400/80' : 'text-warning')
   return (
     <Dialog open={!!account} onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="max-w-[calc(100vw-1rem)] sm:max-w-3xl max-h-[88vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6">
@@ -264,6 +268,7 @@ function AccountDetailDialog({ companyId, dateFrom, dateTo, account, onClose }: 
 // ── Таб: Обзор (собранный BI-дашборд частных клиентов) ──
 const AX = { tick: { fontSize: 10, fill: 'hsl(var(--muted-foreground))' } }
 function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
+  const subtitle = useScopeSubtitle()
   const sc = useNetScope()
   const p = { companyId, dateFrom, dateTo, stations: sc.stations, regions: sc.regions }
   const ov = useQuery({ queryKey: ['retail-ov', companyId, dateFrom, dateTo, sc.key], queryFn: () => getRetailOverview(p) })
@@ -273,9 +278,9 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
   const exportRef = useRef<HTMLDivElement>(null)
   const [exporting, setExporting] = useState(false)
   async function exportPdf() {
-    if (!exportRef.current) return
+    if (!exportRef.current || [ov, seg, mk, dash].some((q) => q.isFetching || q.isError)) return
     setExporting(true)
-    try { await exportChargePdf(exportRef.current, `Обзор частных клиентов · ${dateFrom} — ${dateTo}`) }
+    try { await exportChargePdf(exportRef.current, `Обзор частных клиентов`, subtitle) }
     catch (e) { toast.error(e instanceof Error ? e.message : 'Не удалось выгрузить PDF') }
     finally { setExporting(false) }
   }
@@ -301,7 +306,7 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2" data-export-ignore>
         <div className="text-xs text-muted-foreground">Аналитическая витрина частных клиентов (ФЛ) · телефоны псевдонимизированы</div>
-        <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" disabled={exporting} onClick={exportPdf}>
+        <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" disabled={exporting || [ov, seg, mk, dash].some((q) => q.isFetching || q.isError)} onClick={exportPdf}>
           {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}Выгрузить PDF
         </Button>
       </div>
@@ -321,8 +326,8 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-6">
           <Kpi label="Повторные" value={pct(k.repeat_rate ?? 0)} sub="заряжаются >1 раза" />
           <Kpi label="Разовые" value={pct(k.one_time_share ?? 0)} sub={`${pct(k.one_time_revenue_share ?? 0)} выручки`} />
-          <Kpi label="Ядро выручки" value={pct(k.core_revenue_share ?? 0)} sub={`ядро — ${pct(k.core_accounts_share ?? 0)} базы`} cls="text-emerald-600/90 dark:text-emerald-400/90" />
-          <Kpi label="Выручка в риске" value={pct(k.risk_revenue_share ?? 0)} sub="отток / сон / риск" cls="text-amber-600/90 dark:text-amber-400/90" />
+          <Kpi label="Ядро выручки" value={pct(k.core_revenue_share ?? 0)} sub={`ядро — ${pct(k.core_accounts_share ?? 0)} базы`} cls="text-success" />
+          <Kpi label="Выручка в риске" value={pct(k.risk_revenue_share ?? 0)} sub="отток / сон / риск" cls="text-warning" />
           <Kpi label="Удержание M1" value={k.retention_m1 != null ? pct(k.retention_m1) : '—'} sub={k.retention_m3 != null ? `M3 ${pct(k.retention_m3)}` : 'по когортам'} />
           <Kpi label="Топ-20% → выручки" value={pct(k.top20_revenue_share ?? 0)} sub={`топ-10% — ${pct(k.top10_revenue_share ?? 0)}`} />
         </div>
@@ -336,7 +341,7 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
             {mk.data.insights.map((it, i) => (
               <div key={i} className="flex items-start gap-2 text-xs leading-snug">
                 <span className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${it.level === 'good' ? 'bg-emerald-400/80' : it.level === 'warn' ? 'bg-amber-400/80' : 'bg-zinc-400/70'}`} />
-                <span className={it.level === 'warn' ? 'text-amber-200/90' : it.level === 'good' ? 'text-emerald-200/90' : ''}>{it.text}</span>
+                <span className={it.level === 'warn' ? 'text-warning' : it.level === 'good' ? 'text-success' : ''}>{it.text}</span>
               </div>
             ))}
           </CardContent></Card>
@@ -393,7 +398,7 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
             </Widget>
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                <Kpi label="LTV (оценка)" value={money(dd.clv.ltv)} sub={`${money(dd.clv.monthly_arpu)}/мес × ${nf1.format(dd.clv.expected_months)} мес активн.`} cls="text-emerald-600/90 dark:text-emerald-400/90" />
+                <Kpi label="LTV (оценка)" value={money(dd.clv.ltv)} sub={`${money(dd.clv.monthly_arpu)}/мес × ${nf1.format(dd.clv.expected_months)} мес активн.`} cls="text-success" />
                 <Kpi label="Срок жизни" value={`${nf1.format(dd.clv.avg_lifetime_months)} мес`} sub="в среднем по базе" />
               </div>
               <Widget title="LTV по сегментам (оценка)">
@@ -417,7 +422,7 @@ function RetailOverviewTab({ companyId, dateFrom, dateTo }: TabProps) {
               <div className="grid grid-cols-3 gap-2">
                 <Kpi label="Приложение" value={pct(dd.payment.app_pct)} sub="vs RFID" />
                 <Kpi label="RFID-карта" value={pct(dd.payment.rfid_pct)} sub="доля сессий" />
-                <Kpi label="Успешных" value={pct(dd.success.pct)} sub={`неоплач. ${pct(dd.payment.unpaid_pct)}`} cls={dd.success.pct < 75 ? 'text-amber-600/90 dark:text-amber-400/90' : undefined} />
+                <Kpi label="Успешных" value={pct(dd.success.pct)} sub={`неоплач. ${pct(dd.payment.unpaid_pct)}`} cls={dd.success.pct < 75 ? 'text-warning' : undefined} />
               </div>
               <Widget title="Коннекторы (сессии)">
                 {conns.slice(0, 6).map((c) => (
@@ -583,10 +588,10 @@ function RetailGeoTab({ companyId, dateFrom, dateTo }: TabProps) {
         <Kpi label="Аккаунтов" value={nf0.format(data.totals.accounts)} />
         <Kpi label="Объектов L2 на аккаунт" value={nf1.format(data.avg_stations)} sub="среди привязанных" />
         <Kpi label="Моно-объект" value={pct(mono / data.totals.accounts * 100)} sub="один объект L2" />
-        <Kpi label="Привязано к L2" value={pct(cov.resolved_pct)} sub={`${nf0.format(cov.sessions_orphan)} сессий-сирот`} cls={cov.resolved_pct < 90 ? 'text-amber-600/90 dark:text-amber-400/90' : undefined} />
+        <Kpi label="Привязано к L2" value={pct(cov.resolved_pct)} sub={`${nf0.format(cov.sessions_orphan)} сессий-сирот`} cls={cov.resolved_pct < 90 ? 'text-warning' : undefined} />
       </div>
       {cov.orphan_revenue_pct > 0.5 && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-xs text-amber-300/90">
+        <div className="flex items-start gap-2 rounded-md border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-xs text-warning">
           <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
           <span>
             <b>{pct(cov.orphan_revenue_pct)}</b> выручки ({moneyK(cov.revenue_orphan)}) — на сессиях <b>без привязки к объекту L2</b> (station_code не сматчен на <span className="whitespace-nowrap">service_locations</span>). Станции и регионы по ним не атрибутированы — это разрыв нормализации, а не поведение клиентов.
@@ -596,7 +601,7 @@ function RetailGeoTab({ companyId, dateFrom, dateTo }: TabProps) {
       <div className="grid gap-4 lg:grid-cols-2">
         <Widget title="Мобильность: сколько объектов L2 посещает аккаунт">
           {data.mobility.map((m) => (
-            <BarRow key={m.bucket} label={<span className={isOrphan(m.bucket) ? 'text-amber-300/80' : undefined}>{m.bucket}</span>}
+            <BarRow key={m.bucket} label={<span className={isOrphan(m.bucket) ? 'text-warning' : undefined}>{m.bucket}</span>}
               tint={isOrphan(m.bucket) ? 'bg-amber-400/50' : undefined}
               value={`${nf0.format(m.accounts)} акк`} frac={m.accounts / maxMob} sub={`${pct(m.accounts_pct)} · ${moneyK(m.revenue)}`} />
           ))}
@@ -604,7 +609,7 @@ function RetailGeoTab({ companyId, dateFrom, dateTo }: TabProps) {
         <Widget title="Топ-регионы розницы (канон L2) по выручке">
           {data.regions.length === 0 ? <Empty text="Нет данных" />
             : data.regions.slice(0, 12).map((r) => (
-              <BarRow key={r.region} label={<span className={isOrphan(r.region) ? 'text-amber-300/80' : undefined}>{r.region}</span>}
+              <BarRow key={r.region} label={<span className={isOrphan(r.region) ? 'text-warning' : undefined}>{r.region}</span>}
                 tint={isOrphan(r.region) ? 'bg-amber-400/50' : undefined}
                 value={moneyK(r.revenue)} frac={r.revenue / maxReg} sub={`${nf0.format(r.accounts)} акк`} />
             ))}
@@ -1036,7 +1041,7 @@ export function RetailPanel({ companyId, dateFrom, dateTo, group = 'retail' }: T
   const initialSegment = (t as { drillSegment?: string }).drillSegment ?? drillSeg
   return (
     <div>
-      <div className="flex items-center gap-3 border-b border-border px-4">
+      <div className="flex flex-wrap items-center gap-3 border-b border-border px-4">
         <span className="inline-flex items-center gap-1 text-[11px] rounded-md border border-primary/40 px-2 py-0.5 text-primary/80 shrink-0 my-2" title="Телефоны маскированы, аккаунт = псевдоним">
           <ShieldCheck className="h-3 w-3" />ФЛ · псевдонимы
         </span>

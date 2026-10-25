@@ -16,12 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ChargeSession
 from app.services.analytics_cache import cached_report
 from app.services.session_scope import session_scope_conds
+from app.services.charge_identity import client_type, station_identity
+from app.services.analytics_service import AnalyticsService
 
 _GROUP_COLS = {
     "region": ChargeSession.region,
-    "station": ChargeSession.station_code,
+    "station": station_identity(),
     "connector": ChargeSession.connector_type,
-    "user_type": ChargeSession.user_type,
+    "user_type": client_type(),
 }
 
 
@@ -40,7 +42,7 @@ class TariffService:
                  S.started_at >= lo, S.started_at <= hi, S.energy_kwh > 0,
                  *session_scope_conds(company_id, stations, regions)]
         if user_type:
-            conds.append(S.user_type == user_type)
+            conds.append(client_type(S) == user_type)
         return conds
 
     @cached_report("tariff:grid")
@@ -56,7 +58,7 @@ class TariffService:
         # свежайшее из сессий; имя в ключе группировки двоило строку при
         # переименованиях CPO — «идентичность станции = код»), либо регион.
         if by == "station":
-            rowdim = func.coalesce(S.station_code, "—")
+            rowdim = station_identity(S)
         else:
             rowdim = func.coalesce(S.region, "—")
         stmt = select(
@@ -75,13 +77,7 @@ class TariffService:
         # подпись станции: свежайшее имя из сессий + код
         label_of: dict[str, str] = {}
         if by == "station":
-            fresh = (await self.db.execute(
-                select(S.station_code, S.station_name)
-                .where(S.company_id == company_id, S.station_name.is_not(None))
-                .distinct(S.station_code)
-                .order_by(S.station_code, S.started_at.desc())
-            )).all()
-            label_of = {str(c): f"{n} ({c})" for c, n in fresh if c is not None}
+            label_of = await AnalyticsService(self.db)._station_labels(company_id)
 
         cells: list[dict[str, Any]] = []
         rows_vol: dict[str, int] = {}
@@ -124,6 +120,8 @@ class TariffService:
             func.coalesce(func.sum(S.energy_kwh * S.tariff), 0).label("nominal_rev"),
         ).where(*self._base_conds(company_id, lo, hi, user_type, stations, regions)).group_by("g")
         rows = (await self.db.execute(stmt)).all()
+        if group_by == "station":
+            rows = await AnalyticsService(self.db)._relabel_station_rows(company_id, rows, "g")
 
         lines: list[dict[str, Any]] = []
         tot_e = tot_a = tot_n = 0.0

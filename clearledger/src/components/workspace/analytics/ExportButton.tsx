@@ -9,12 +9,15 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { exportChargeExcel, exportChargePdf } from '@/services/chargeExport'
 import { toast } from 'sonner'
+import { useScopeSubtitle } from '@/hooks/useScopeReset'
 
 export function ExportButton({ title, subtitle, getEl }: {
   title: string
   subtitle?: string
   getEl: () => HTMLElement | null
 }) {
+  const defaultSubtitle = useScopeSubtitle()
+  const exportSubtitle = subtitle ?? defaultSubtitle
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState<'xlsx' | 'pdf' | null>(null)
 
@@ -27,8 +30,8 @@ export function ExportButton({ title, subtitle, getEl }: {
     }
     setBusy(kind)
     try {
-      if (kind === 'xlsx') await exportChargeExcel(el, title, subtitle)
-      else await exportChargePdf(el, title, subtitle)
+      if (kind === 'xlsx') await exportChargeExcel(el, title, exportSubtitle)
+      else await exportChargePdf(el, title, exportSubtitle)
       setOpen(false)
     } catch (e) {
       console.error('[charge-export]', e)

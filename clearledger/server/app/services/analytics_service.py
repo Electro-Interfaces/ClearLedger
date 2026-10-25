@@ -674,7 +674,7 @@ class AnalyticsService:
         if dim_by == "region":
             return cls._region_label() == dim_val
         cols = {"station": S.station_code, "connector": S.connector_type,
-                "user_type": client_type(S), "client": S.client_name,
+                "user_type": func.coalesce(client_type(S), "—"), "client": S.client_name,
                 "charge_type": S.charge_type, "result": S.result}
         if dim_by in cols:
             return cols[dim_by] == dim_val
@@ -860,7 +860,7 @@ class AnalyticsService:
         return {
             "label": self._cs_label(group_by, r.g),
             "sessions": cnt,
-            "energy_kwh": round(energy, 1),
+            "energy_kwh": round(energy, 3),
             "amount": round(amount, 2),
             "charged": charged,
             "avg_check": round(amount / charged, 2) if charged else 0.0,
@@ -949,7 +949,7 @@ class AnalyticsService:
         cnt = int(cnt); energy = float(energy); amount = float(amount)
         dur = float(dur); success = int(success)
         m = {
-            "sessions": cnt, "energy_kwh": round(energy, 1), "amount": round(amount, 2),
+            "sessions": cnt, "energy_kwh": round(energy, 3), "amount": round(amount, 2),
             "avg_check": amount / cnt if cnt else 0.0,
             "avg_energy": energy / cnt if cnt else 0.0,
             "avg_duration_min": dur / cnt if cnt else 0.0,
@@ -1016,7 +1016,7 @@ class AnalyticsService:
         rows = await self._cs_aggregate(f.company_id, f.date_from, f.date_to, group_by, f.station_codes, f.regions, f.dim_by, f.dim_val,
                                         station_id=f.station_id, tz=tz)
         lines = [self._cs_metrics(group_by, r, period_days) for r in rows]
-        total_amount = sum((r.amount for r in rows), Decimal(0))
+        total_amount = sum((Decimal(str(r.amount or 0)) for r in rows), Decimal(0))
         total_amount = float(total_amount)
         for l in lines:
             l["share_pct"] = round(l["amount"] / total_amount * 100, 2) if total_amount else 0.0
@@ -1026,7 +1026,7 @@ class AnalyticsService:
             lines.sort(key=lambda x: -x["amount"])
 
         ts = sum(l["sessions"] for l in lines)
-        te = sum((r.energy for r in rows), Decimal(0))
+        te = sum((Decimal(str(r.energy or 0)) for r in rows), Decimal(0))
         te = float(te)
         td = sum(l["_dur_sum"] for l in lines)
         tsucc = sum(l["_success"] for l in lines)
@@ -1052,7 +1052,7 @@ class AnalyticsService:
             net_ports = net_stations = 0
         port_min = net_ports * period_days * 1440
         totals = {
-            "label": "Итого", "sessions": ts, "energy_kwh": float(round(te, 1)), "amount": float(round(total_amount, 2)),
+            "label": "Итого", "sessions": ts, "energy_kwh": float(round(te, 3)), "amount": float(round(total_amount, 2)),
             "stations": net_stations,
             "charged": tcharged,
             "avg_check": round(total_amount / tcharged, 2) if tcharged else 0.0,
@@ -1235,13 +1235,13 @@ class AnalyticsService:
     async def charge_sessions_compare_multi(
         self, company_id, periods: list[tuple[date, date]],
         group_by: str = "station", metric: str = "amount",
-        station_codes=None, regions=None,
+        station_codes=None, regions=None, dim_by=None, dim_val=None,
     ) -> dict[str, Any]:
         """Сравнение N периодов (2–4) по разрезу: значения метрики каждого + дельты."""
         maps: list[dict[str, Any]] = []
         totals: list[float] = []
         for pf, pt in periods:
-            rows = await self._cs_aggregate(company_id, pf, pt, group_by, station_codes, regions)
+            rows = await self._cs_aggregate(company_id, pf, pt, group_by, station_codes, regions, dim_by, dim_val)
             maps.append({self._cs_label(group_by, r.g): r for r in rows})
             # total метрики за период из сырых сумм всех групп (корректно для ratio-метрик)
             tc = sum(int(r.cnt) for r in rows)
@@ -1396,10 +1396,11 @@ class AnalyticsService:
         выбрать (её отсутствие в цифрах — это и есть вопрос к ней).
         """
         S = ChargeSession
+        identity = station_identity(S)
         st_counts = (await self.session.execute(
-            select(station_identity(S).label("station_key"), func.count().label("cnt"))
+            select(identity.label("station_key"), func.count().label("cnt"))
             .where(S.company_id == company_id)
-            .group_by(station_identity(S)).order_by(func.count().desc())
+            .group_by(identity).order_by(func.count().desc())
         )).all()
         counts = {r.station_key: int(r.cnt) for r in st_counts}
         # Имя — свежайшее по последней сессии кода (не max: он алфавитный и после
@@ -1903,7 +1904,7 @@ class AnalyticsService:
             func.coalesce(func.sum(S.energy_kwh), 0).label("energy"),
             func.coalesce(func.sum(revenue), 0).label("revenue"),
         ).where(*base_conds)
-        if f.regions or region:
+        if f.regions or region or f.dim_by == "region":
             summary_stmt = self._apply_region_join(summary_stmt)
         summary = (await self.session.execute(summary_stmt)).one()
 
@@ -1955,7 +1956,7 @@ class AnalyticsService:
             "total": int(summary.total or 0),
             "truncated": has_more,
             "totals": {
-                "energy_kwh": round(float(summary.energy or 0), 1),
+                "energy_kwh": round(float(summary.energy or 0), 3),
                 "revenue": round(float(summary.revenue or 0), 2),
             },
             "facets": {

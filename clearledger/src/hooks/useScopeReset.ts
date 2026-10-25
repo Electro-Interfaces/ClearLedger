@@ -14,6 +14,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useFilters } from '@/contexts/FilterContext'
+import { useCompany } from '@/contexts/CompanyContext'
 
 /**
  * Контурное сужение сети для запросов панели: станции (коды) + регионы (имена).
@@ -58,10 +59,12 @@ export function useScopeKey(): string {
  * (CLAUDE.md, правило 7). Пример:
  * `Период: 2026-06-30 — 2026-07-18 · Регион: Москва · Типов данных: 2`
  */
-export function useScopeSubtitle(opts?: { scopeApplied?: boolean }): string {
+export function useScopeSubtitle(opts?: { scopeApplied?: boolean; period?: { from: string; to: string }; periodLabel?: string }): string {
   const { period, stationCode, locationIds, regionIds, stationCodes, fuelCodes } = useFilters()
 
-  const parts = [`Период: ${period.from} — ${period.to}`]
+  const { company } = useCompany()
+  const actual = opts?.period ?? period
+  const parts = [`Организация: ${company.name}`, `${opts?.periodLabel ?? 'Период'}: ${actual.from} — ${actual.to}`]
 
   // Панель не умеет сужать выборку по сети (нет параметра в API) — тогда в шапке
   // файла НЕЛЬЗЯ заявлять сужение: цифры-то по всей сети. Лучше отсутствие
@@ -71,11 +74,11 @@ export function useScopeSubtitle(opts?: { scopeApplied?: boolean }): string {
     return parts.join(' · ')
   }
 
-  if (stationCodes.length > 0) parts.push(`ЭЗС: ${stationCodes.length}`)
-  else if (locationIds.length > 0) parts.push(`Точек: ${locationIds.length}`)
-  else if (regionIds.length === 1) parts.push(`Регион: ${regionIds[0]}`)
-  else if (regionIds.length > 1) parts.push(`Регионов: ${regionIds.length}`)
-  else parts.push('Вся сеть')
+  if (stationCodes.length > 0) parts.push(`ЭЗС: ${stationCodes.map(String).join(", ")}`)
+  if (locationIds.length > 0) parts.push(`Объекты: ${locationIds.join(", ")}`)
+  if (regionIds.length === 1) parts.push(`Регион: ${regionIds[0]}`)
+  else if (regionIds.length > 1) parts.push(`Регионы: ${regionIds.join(", ")}`)
+  else if (!stationCodes.length && !locationIds.length) parts.push('Доступная сеть')
 
   if (stationCode !== 'all') parts.push(`Источник STS: ${stationCode}`)
 
@@ -84,7 +87,7 @@ export function useScopeSubtitle(opts?: { scopeApplied?: boolean }): string {
   if (fuelCodes.length > 0) {
     parts.push(fuelCodes.length === 1
       ? `Топливо: код ${fuelCodes[0]}`
-      : `Видов топлива: ${fuelCodes.length}`)
+      : `Топливо: коды ${fuelCodes.join(", ")}`)
   }
 
   return parts.join(' · ')
@@ -100,7 +103,7 @@ export function useScopeSubtitle(opts?: { scopeApplied?: boolean }): string {
 export function useResetOnScopeChange(reset: () => void): void {
   const key = useScopeKey()
   const resetRef = useRef(reset)
-  resetRef.current = reset
+  useEffect(() => { resetRef.current = reset }, [reset])
   const prevKey = useRef<string | null>(null)
 
   useEffect(() => {
