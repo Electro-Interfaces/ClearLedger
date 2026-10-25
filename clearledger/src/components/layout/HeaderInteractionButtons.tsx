@@ -85,6 +85,10 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
     // Блок виден и на телефоне: чат, задачи и конференция — то, ради чего человек
     // берёт трубку в руки. Прежде он прятался на md:, и в мобильной шапке от него
     // оставалась одна кнопка чата.
+    // Подписи кнопок появляются с xl, а не с lg: на 1024–1279 они вытесняли из
+    // шапки название продукта и строку «<Компания> · <версия>» — та обрезалась до
+    // «Ау,,» (проверка 25.10.2026). Имя действия при этом не теряется: оно
+    // остаётся в title и aria-label, то есть и в подсказке, и для скринридера.
     <div className="flex items-center gap-1 pl-0 sm:gap-1.5 sm:pl-1 md:gap-2">
       <div className="hidden h-6 w-px bg-border/50 md:block" />
       {/* Конференция стоит во всех шапках (просьба МАГа 10.09.2026): созвон зовут из
@@ -98,7 +102,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
               className={cn(btnCls(false), !conference && 'hidden md:inline-flex')}
               title="Конференции">
               <Video className="h-4 w-4" />
-              <span className="hidden lg:inline">Конференция</span>
+              <span className="hidden xl:inline">Конференция</span>
             </Button>
           </DropdownMenuTrigger>
           {/* Два действия, а не одно: созвониться сейчас и посмотреть, что идёт,
@@ -121,12 +125,12 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
         <Button variant="outline" size="sm" onClick={() => toggleInteraction('calendar')}
           className={btnCls(interactionSection === 'calendar')} title="Календарь пространства">
           <CalendarDays className="h-4 w-4" />
-          <span className="hidden lg:inline">Календарь</span>
+          <span className="hidden xl:inline">Календарь</span>
         </Button>
       )}
       <Button variant="outline" size="sm" onClick={() => toggleInteraction('chat')} className={btnCls(interactionSection === 'chat')} title="Чаты пространства">
         <MessageCircle className="h-4 w-4" />
-        <span className="hidden lg:inline">Чат</span>
+        <span className="hidden xl:inline">Чат</span>
         <Badge count={unreadCounts.chat} />
       </Button>
       {/* «Трек» — как чат рядом: кнопка открывает окно «что на мне сейчас» (визы и
@@ -136,7 +140,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
       {tasksOn && (
         <Button variant="outline" size="sm" onClick={() => toggleInteraction('tasks')} className={btnCls(interactionSection === 'tasks')} title={`Трек · новые назначения: ${unreadCounts.tasks} · просрочено: ${tasksOverdue}`} aria-label={`Трек · новые назначения: ${unreadCounts.tasks} · просрочено: ${tasksOverdue}`}>
           <ListChecks className="h-4 w-4" />
-          <span className="hidden lg:inline">Трек</span>
+          <span className="hidden xl:inline">Трек</span>
           <TaskAssignmentBadges incoming={unreadCounts.tasks} overdue={tasksOverdue} />
         </Button>
       )}
@@ -148,7 +152,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
           className={`hidden lg:inline-flex ${btnCls(interactionSection === 'auditor')}`}
           title={`${agentName}: спросить про этот экран`}>
           <Bot className="h-4 w-4" />
-          <span className="hidden lg:inline">{agentName}</span>
+          <span className="hidden xl:inline">{agentName}</span>
         </Button>
       )}
       {/* «Инфо» — четвёртая кнопка, на телефоне уже теснит имя экрана. Справка
@@ -156,7 +160,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
       <Button variant="outline" size="sm" onClick={() => toggleInteraction('help')}
         className={btnCls(interactionSection === 'help')} title="Инфо (Ctrl+K)">
         <HelpCircle className="h-4 w-4" />
-        <span className="hidden lg:inline">Инфо</span>
+        <span className="hidden xl:inline">Инфо</span>
       </Button>
       {/* Поддержка поставщика программы — иконкой, в одном ряду с лампочкой и
           режимом работы: обращение редкое, а место в шапке дорогое. */}
