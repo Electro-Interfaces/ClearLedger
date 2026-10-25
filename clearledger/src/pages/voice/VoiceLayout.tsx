@@ -66,7 +66,11 @@ export function VoiceLayout() {
   // На телефоне запас снизу под нижнюю навигацию и плашку установки, как у «Трека» и «Конференций».
   const экран = (
     <div className="min-h-0 min-w-0 flex-1 overflow-y-auto"
-      style={узкий ? { paddingBottom: 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))' } : undefined}>
+      style={{ paddingBottom: узкий
+        // На широком экране плашка установки тоже висит поверх (md:bottom-4), поэтому запас нужен
+        // всегда, иначе она закрывает нижнюю карточку. Нет плашки — переменной нет и запас нулевой.
+        ? 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))'
+        : 'calc(var(--pwa-install-height, 0px) + 1rem)' }}>
       <VoiceDataSourceBar state={source} pathname={pathname} />
       {содержимое}
     </div>
