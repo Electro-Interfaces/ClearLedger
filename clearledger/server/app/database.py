@@ -2880,15 +2880,29 @@ async def create_all() -> None:
             "REFERENCES regions(id) ON DELETE SET NULL",
             "CREATE INDEX IF NOT EXISTS idx_service_locations_region "
             "ON service_locations(company_id, region_id)",
-            # Уникальные federalSubject → regions
+            # Уникальные federalSubject → regions.
+            #
+            # Группируем и сверяем по НОРМАЛИЗОВАННОМУ имени, как это делает
+            # `uq_regions_company_name_ci` (btrim+lower). Раньше здесь стояло
+            # `GROUP BY ... name` и `ON CONFLICT (company_id, name)`: «Тест» и
+            # «тест» считались разными, индекс — одинаковыми, и миграция падала
+            # на UniqueViolation. 25.10.2026 так не стартовало Ядро РусГидро —
+            # пространство лежало, пока дубль не убрали руками.
             "INSERT INTO regions (id, company_id, name, federal_subject) "
-            "SELECT gen_random_uuid(), company_id, extra_metadata->>'federalSubject', "
-            "       extra_metadata->>'federalSubject' "
-            "FROM service_locations "
-            "WHERE extra_metadata->>'federalSubject' IS NOT NULL "
-            "  AND extra_metadata->>'federalSubject' <> '' "
-            "GROUP BY company_id, extra_metadata->>'federalSubject' "
-            "ON CONFLICT (company_id, name) DO NOTHING",
+            "SELECT gen_random_uuid(), company_id, имя, имя FROM ("
+            "  SELECT DISTINCT ON (company_id, btrim(lower(extra_metadata->>'federalSubject'))) "
+            "         company_id, extra_metadata->>'federalSubject' AS имя "
+            "  FROM service_locations "
+            "  WHERE extra_metadata->>'federalSubject' IS NOT NULL "
+            "    AND extra_metadata->>'federalSubject' <> '' "
+            "  ORDER BY company_id, btrim(lower(extra_metadata->>'federalSubject')), "
+            "           extra_metadata->>'federalSubject'"
+            ") AS источник "
+            "WHERE NOT EXISTS ("
+            "  SELECT 1 FROM regions r WHERE r.company_id = источник.company_id "
+            "    AND btrim(lower(r.name)) = btrim(lower(источник.имя))"
+            ") "
+            "ON CONFLICT DO NOTHING",
             # Проставить region_id точкам по совпадению названия региона
             "UPDATE service_locations sl SET region_id = r.id "
             "FROM regions r "
