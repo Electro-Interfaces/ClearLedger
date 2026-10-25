@@ -204,6 +204,8 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(tc.workflow['_archive']['files'])
         r=await self.client.put(self.path,params=self.q,json={'power_kwt':10})
         self.assertEqual(r.status_code,409)
+        r=await self.client.put(self.path,params=self.q,json={'method':'landlord'})
+        self.assertEqual(r.status_code,409)
 
     async def test_shared_upload_download_and_non_pdf_rejected(self):
         import tempfile

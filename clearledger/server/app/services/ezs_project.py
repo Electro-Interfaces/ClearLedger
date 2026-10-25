@@ -284,6 +284,8 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
     if tc is None:
         tc = EzsTechConnection(company_id=company_id, site_id=site.id)
         db.add(tc)
+    if (tc.workflow or {}).get("archived") and any(k != "note" for k in patch):
+        raise HTTPException(409, "Сначала верните присоединение из архива")
     changes: list[dict[str, Any]] = []
     for f, v in patch.items():
         if f not in TC_FIELDS:
