@@ -64,6 +64,15 @@ async def conditional_get(request: Request, call_next):
     # Чужой ETag не перебиваем: ручка могла выставить его осознанно и дешевле нас.
     if response.headers.get("etag"):
         return response
+    # Чужой `Cache-Control` — тем более. Десяток ручек ставит `no-store` намеренно:
+    # токены телефонии, ссылки на документы, ответы управляющего пространства, чаты.
+    # `no-store` значит «не храни вообще», наш `no-cache` — «храни, но перепроверяй»;
+    # подменять первое вторым нельзя, а дописывать второе к первому — мусор в заголовке
+    # (85 падений в полном наборе 25.10.2026 были ровно про это). Условный запрос такому
+    # ответу и не нужен: клиент, уважающий `no-store`, ничего не хранит и `If-None-Match`
+    # не пришлёт.
+    if response.headers.get("cache-control"):
+        return response
 
     body_iterator = getattr(response, "body_iterator", None)
     if body_iterator is None:

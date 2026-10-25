@@ -27,6 +27,11 @@ def _app() -> Starlette:
     async def s_vary(request):
         return JSONResponse({"ok": True}, headers={"Vary": "Origin"})
 
+    async def sekret(request):
+        # Так отвечает десяток ручек: токены телефонии, ссылки на документы,
+        # управляющее пространство. `no-store` значит «не хранить вообще».
+        return JSONResponse({"token": "x"}, headers={"Cache-Control": "no-store"})
+
     async def otkaz_limita(request):
         # Ровно то, что отдаёт `rate_limit_public`: JSON с кодом 429.
         return JSONResponse({"detail": "Слишком много попыток"}, status_code=429,
@@ -37,6 +42,7 @@ def _app() -> Starlette:
         Route("/tekst", tekst),
         Route("/oshibka", oshibka),
         Route("/s-vary", s_vary),
+        Route("/sekret", sekret),
         Route("/limit", otkaz_limita),
         Route("/zapis", spravochnik, methods=["POST"]),
     ])
@@ -115,6 +121,21 @@ async def test_otkaz_limita_ne_keshiruetsya(client):
 async def test_zapis_metku_ne_poluchaet(client):
     r = await client.post("/zapis")
     assert r.status_code == 200 and "etag" not in r.headers
+
+
+@pytest.mark.asyncio
+async def test_chuzhoj_cache_control_ne_podmenyaem(client):
+    """`no-store` от ручки остаётся один: не подменяется и не разбавляется.
+
+    `no-cache` разрешает хранить ответ и перепроверять его, `no-store` — не хранить
+    вовсе. Подмена первого вторым на ответе с токеном означала бы токен в кэше на
+    диске; дописывание рядом даёт заголовок `no-store, private, no-cache`, от которого
+    в полном наборе 25.10.2026 упало 85 тестов.
+    """
+    r = await client.get("/sekret")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store"
+    assert "etag" not in r.headers, "условный запрос ответу, который не хранят, не нужен"
 
 
 @pytest.mark.asyncio
