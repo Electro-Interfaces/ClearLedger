@@ -25,6 +25,7 @@ from app.database import (
     database_startup_lock,
     get_db,
 )
+from app.routers import management_router
 from app.routers import (
     accounting_adjustments_router,
     accounting_docs_router,
@@ -453,6 +454,7 @@ async def organization_context(request, call_next):
 # Роутеры — все под /api
 API_PREFIX = "/api"
 
+app.include_router(management_router.router, prefix=API_PREFIX)
 app.include_router(auth_router.router, prefix=API_PREFIX)
 # Журнал сбоев интерфейса: открыт без токена — экран входа падает до входа.
 app.include_router(client_errors_router.router, prefix=API_PREFIX)
