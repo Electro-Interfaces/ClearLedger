@@ -20,7 +20,7 @@ from sqlalchemy import and_, case, func, or_ as sa_or, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
-from app.services.market_quality import observed_rating, rating_expression
+from app.services.market_quality import RATING_DIGITS, observed_rating, rating_expression
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
@@ -185,9 +185,11 @@ async def list_operators(
         "maxPowerKw": float(power) if power else None,
         "quality": round(float(quality), 1) if quality is not None else None,
         "success": round(float(success), 1) if success is not None else None,
-        "rating": round(float(rating), 2) if rating is not None else None,
+        "rating": round(float(rating), RATING_DIGITS) if rating is not None else None,
         "reviews": int(reviews or 0),
-    } for oid, sites, ports, alive, power, quality, success, rating, reviews in (
+        "citiesCount": int(cities or 0),
+        "avgPowerKw": round(float(avg_power), 1) if avg_power is not None else None,
+    } for oid, sites, ports, alive, power, quality, success, rating, reviews, cities, avg_power in (
         await db.execute(
             select(MarketSite.operator_id, func.count(),
                    func.sum(MarketSite.ports),
@@ -196,7 +198,9 @@ async def list_operators(
                    func.avg(MarketSite.connection_quality_24h),
                    func.avg(MarketSite.success_charge_pct),
                    func.avg(rating_expression(MarketSite.rating, MarketSite.reviews_count)),
-                   func.sum(MarketSite.reviews_count))
+                   func.sum(MarketSite.reviews_count),
+                   func.count(func.distinct(func.nullif(func.lower(func.trim(MarketSite.city)), ""))),
+                   func.avg(MarketSite.max_power_kw))
             .where(MarketSite.company_id == cid, *обл,
                    MarketSite.operator_id.is_not(None),
                    MarketSite.site_class != "home",
@@ -349,14 +353,16 @@ async def operator_card(
     last_price = await _last_prices(db, cid)
     prices = [last_price[str(s.id)]["price"] for s in network if str(s.id) in last_price]
 
-    def _avg(values: list[float | None]) -> float | None:
+    def _avg(values: list[float | None], digits: int = 1) -> float | None:
         clean = [v for v in values if v is not None]
-        return round(sum(clean) / len(clean), 1) if clean else None
+        return round(sum(clean) / len(clean), digits) if clean else None
 
     return {
         "id": str(op.id), "name": op.name, "relation": op.relation,
         "notes": op.notes,
         **_operator_facts(op),
+        "citiesCount": len({s.city.strip().lower() for s in network if s.city and s.city.strip()}),
+        "avgPowerKw": _avg([float(s.max_power_kw) if s.max_power_kw is not None else None for s in network]),
         "totals": {
             "sites": len(network),
             "homeSockets": len(sites) - len(network),
@@ -370,7 +376,7 @@ async def operator_card(
                              if s.connection_quality_24h is not None]),
             "success": _avg([float(s.success_charge_pct) for s in network
                              if s.success_charge_pct is not None]),
-            "rating": _avg([observed_rating(s.rating, s.reviews_count) for s in network]),
+            "rating": _avg([observed_rating(s.rating, s.reviews_count) for s in network], digits=RATING_DIGITS),
             "reviews": sum(s.reviews_count or 0 for s in network),
         },
         "cities": sorted(({"name": k, "sites": v} for k, v in by_city.items()),
@@ -3743,7 +3749,7 @@ async def market_self_view(
         },
         "peers": [{"name": name, "quality": round(float(q), 1) if q is not None else None,
                    "success": round(float(sc), 1) if sc is not None else None,
-                   "rating": round(float(rt), 2) if rt is not None else None,
+                   "rating": round(float(rt), RATING_DIGITS) if rt is not None else None,
                    "sites": int(cnt)}
                   for name, q, sc, rt, cnt in rivals],
         "note": ("сопоставление с реестром по расстоянию; расхождение «рынок молчит, "

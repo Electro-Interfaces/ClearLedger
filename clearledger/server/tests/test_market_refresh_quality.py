@@ -22,7 +22,7 @@ async def test_live_metrics_share_one_scope_and_ignore_unrated(auth_client,db):
     player=MarketPlayer(company_id=cid,app='QA app '+uuid.uuid4().hex,package='qa.market.'+uuid.uuid4().hex,operator_id=op.id,own_stations=777)
     db.add(player)
     seen=datetime(2026,10,25,tzinfo=timezone.utc)
-    for i,(rating,count,power,city) in enumerate([(3,1,10,'Город А'),(5,2,20,' город а '),(0,0,None,'Город Б')]):
+    for i,(rating,count,power,city) in enumerate([(3.1,1,10,'Город А'),(4.2,2,20,' город а '),(0,0,None,'Город Б')]):
         db.add(MarketSite(company_id=cid,operator_id=op.id,kind='ezs',site_class='network',status='active',name=f'QA {op.id} {i}',city=city,region='Регион А',max_power_kw=power,rating=rating,reviews_count=count,last_seen_at=seen,raw={'federal_district_id':str(1 if i<2 else 2)}))
     await db.flush()
     canonical=(await db.scalars(select(MarketSite.id).where(MarketSite.operator_id==op.id))).first()
@@ -32,9 +32,12 @@ async def test_live_metrics_share_one_scope_and_ignore_unrated(auth_client,db):
     await db.commit()
     params={'company_id':str(cid)}
     res=await auth_client.get('/api/market/operators',params=params);assert res.status_code==200,res.text
-    row=next(x for x in res.json()['operators'] if x['id']==str(op.id));assert row['rating']==4
+    row=next(x for x in res.json()['operators'] if x['id']==str(op.id));assert row['rating']==3.65
+    assert row['citiesCount']==3 and row['avgPowerKw']==343.3
     card=(await auth_client.get('/api/market/operators/'+str(op.id),params=params)).json()
-    assert card['totals']['rating']==4
+    assert card['totals']['rating']==3.65
+    # Карточка сохраняет свою прежнюю выборку, включая закрытые точки.
+    assert card['citiesCount']==3 and card['avgPowerKw']==507.5
     assert all(x['rating'] is None for x in card['sites'] if x['name'].endswith(' 2'))
     landscape=await auth_client.get('/api/market/landscape',params=params);assert landscape.status_code==200,landscape.text
     row=next(x for x in landscape.json()['networks'] if x['id']==str(op.id))
