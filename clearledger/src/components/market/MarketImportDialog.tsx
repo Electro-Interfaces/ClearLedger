@@ -103,7 +103,7 @@ export function MarketImportDialog({ trigger }: { trigger: React.ReactNode }) {
               Разобрано строк: <b className="text-foreground">{rows.length}</b> ·
               с координатами: {withGeo} · с ценой: {withPrice}
               {withGeo < rows.length && (
-                <span className="ml-1 text-warning">
+                <span className="ml-1 text-warning-foreground">
                   — точки без координат не попадут на карту и в окружение объектов
                 </span>
               )}

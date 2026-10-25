@@ -43,7 +43,7 @@ function GapCell({ gap }: { gap: number | null }) {
   if (gap == null) return <span className="text-muted-foreground">нет сравнения</span>
   const dearer = gap > 5
   const cheaper = gap < -5
-  const cls = dearer ? 'text-warning' : cheaper ? 'text-success' : 'text-foreground'
+  const cls = dearer ? 'text-warning-foreground' : cheaper ? 'text-success' : 'text-foreground'
   return (
     <span className={`font-medium tabular-nums ${cls}`}>
       {gap > 0 ? '+' : ''}{nf1.format(gap)} %

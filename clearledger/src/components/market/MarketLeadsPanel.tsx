@@ -62,7 +62,7 @@ function LeadRow({ lead, onMove, onToProject, sending }: {
         </div>
         {lead.note && <p className="text-xs text-muted-foreground">{lead.note}</p>}
         {lead.rejectReason && (
-          <p className="text-xs text-warning">Отклонён: {lead.rejectReason}</p>
+          <p className="text-xs text-warning-foreground">Отклонён: {lead.rejectReason}</p>
         )}
         <div className="flex flex-wrap items-center gap-2">
           <Select value={lead.status}

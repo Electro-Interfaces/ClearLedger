@@ -95,6 +95,7 @@
   --color-sidebar-ring: hsl(var(--sidebar-ring));
   --color-success: hsl(var(--success));
   --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
   --color-error: hsl(var(--error));
   --color-accent-blue: hsl(var(--accent-blue));
   --color-accent-purple: hsl(var(--accent-purple));
@@ -215,6 +216,7 @@
     /* Status colors */
     --success: 152 69% 31%;
     --warning: 45 93% 47%;
+    --warning-foreground: 32 90% 28%;
     --error: 0 43% 44%;
 
     /* Layout */
@@ -297,6 +299,7 @@
        значения стоят в агенте станции: палитра одна на два места. */
     --success: 152 58% 45%;
     --warning: 42 92% 58%;
+    --warning-foreground: 42 92% 68%;
     --error: 0 72% 62%;
 
     /* Shadows */
