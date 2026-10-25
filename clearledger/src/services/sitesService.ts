@@ -764,6 +764,7 @@ export interface TpStep {
   date: string | null; plannedDate: string | null; normDays: number | null; overdue: boolean
 }
 export interface TechConnection {
+  workflowVersion?: number
   method?: string | null; methodLabel?: string | null; steps?: TpStep[]
   /** Комплект документов к заявке для выбранного способа: что уже приложено к проекту. */
   kit?: { kind: string; label: string; optional: boolean; present: boolean }[]

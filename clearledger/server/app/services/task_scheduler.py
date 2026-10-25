@@ -844,6 +844,9 @@ async def run_digests(db, now: datetime, bucket: digest.Bucket) -> int:
     return await digest.deliver(db, now, bucket)
 
 
+from app.services.ezs_tp_workflow import run_notifications as run_tp_notifications
+
+
 async def tick() -> dict[str, int]:
     """Один проход регламента. Ошибка одной части не отменяет остальные."""
     now = datetime.now(timezone.utc)
@@ -855,7 +858,8 @@ async def tick() -> dict[str, int]:
     # окна — это про число сообщений человеку, а не про удобство планировщика.
     bucket = digest.Bucket()
     async with async_session_factory() as db:
-        for key, fn in (("recurrences", run_recurrences),
+        for key, fn in (("tp_notifications", run_tp_notifications),
+                        ("recurrences", run_recurrences),
                         ("reminders", run_due_reminders),
                         ("escalations", run_escalations),
                         ("acquaints", run_acquaint_reminders),

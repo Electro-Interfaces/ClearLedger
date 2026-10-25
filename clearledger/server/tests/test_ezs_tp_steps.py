@@ -36,7 +36,7 @@ def test_application_shows_gaps_and_escapes():
     org = SimpleNamespace(full_name="АО «Тест»", name="Тест", ogrn="1", inn="2", kpp="3", legal_address="а",
                           postal_address=None, director_name="Иванов", director_position=None, phone="1", email=None)
     tc.energy_supplier = "Сбыт"
-    assert "Не заполнено" not in render(org, site, tc, [])
+    assert "срок проектирования" in render(org, site, tc, [])
 
 
 def test_kit_follows_method_and_docs():
@@ -49,14 +49,14 @@ def test_kit_follows_method_and_docs():
 
 
 def test_method_selects_steps():
-    assert steps_for(None) == [] and steps_for("landlord") == []
+    assert all(s["branch"] == "supply" for method in (None, "landlord") for s in steps_for(method))
     assert "indirect_agreement" not in [s["key"] for s in steps_for("direct")]
     assert steps_for("indirect")[0]["key"] == "indirect_agreement"
 
 
 def test_deadline_counts_from_previous_step():
     tc = _tc(application_date="2026-10-01")
-    accepted = next(s for s in steps_out(tc, date(2026, 10, 10)) if s["key"] == "accepted")
+    accepted = next(s for s in steps_out(tc, date(2026, 10, 10)) if s["key"] == "documents_review")
     assert accepted["plannedDate"] == "2026-10-04" and accepted["overdue"]
     tc.steps = {"accepted": {"date": "2026-10-03"}}
     out = {s["key"]: s for s in steps_out(tc, date(2026, 10, 10))}

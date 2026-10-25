@@ -1,3 +1,4 @@
+import { TechConnectionWorkflow } from './TechConnectionWorkflow'
 /**
  * Вкладки проекта ЭЗС — общий набор для быстрого просмотра (диалог) и для
  * полноэкранной работы в разделе.
@@ -1755,30 +1756,11 @@ export function TechConnectionTab({ site, companyId, onDone }: {
             переход не держит: обязательность снимается при сохранении способа ответственным за проект или отделом развития.
           </p>
         )}
-        {!('method' in draft) && (tc?.kit?.length ?? 0) > 0 && (
-          <div className="space-y-1">
-            <div className="pt-1 text-sm font-semibold">Комплект документов к заявке</div>
-            {tc!.kit!.map((d) => (
-              <div key={d.kind} className="flex items-baseline gap-2 text-sm">
-                <span className={`w-4 shrink-0 ${d.present ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>{d.present ? '✓' : '—'}</span>
-                <span className={d.present ? '' : 'text-muted-foreground'}>{d.label}</span>
-                {!d.present && <span className="text-xs text-muted-foreground">{d.optional ? 'по обстоятельствам' : 'не приложен'}</span>}
-              </div>
-            ))}
-            <p className="text-xs text-muted-foreground">
-              {tc!.kit!.every((d) => d.present || d.optional)
-                ? 'Комплект собран — можно подавать заявку.'
-                : 'Документы прикладываются на вкладке «Документы» с этим же видом.'}
-            </p>
-            <Button size="sm" variant="outline" className="h-8 text-sm" disabled={dirty}
-              title={dirty ? 'Сначала сохраните изменения' : 'Откроется в новой вкладке — печать или «Сохранить как PDF»'}
-              onClick={() => openAuthAttachment(
-                `/api/sites/${site.id}/tech-connection/application?company_id=${companyId}`, { cache: false },
-              ).catch((error) => toast.error(`Заявка не открыта: ${error.message}`))}>
-              Заявка на ТП — печатная форма
-            </Button>
-          </div>
-        )}
+        {(method === 'direct' || method === 'indirect') && <Button size="sm" variant="outline" disabled={dirty}
+          onClick={() => openAuthAttachment(`/api/sites/${site.id}/tech-connection/application?company_id=${companyId}`, { cache: false })
+            .catch((error) => toast.error(`Заявка не открыта: ${error.message}`))}>
+          Заявка на ТП — печатная форма
+        </Button>}
         {(['main', 'supply'] as const).map((branch) => {
           const list = steps.filter((s) => s.branch === branch)
           if (!list.length) return null
@@ -1865,6 +1847,8 @@ export function TechConnectionTab({ site, companyId, onDone }: {
             onChange={(e) => set('note', e.target.value)} />
         </div>
       </section>
+
+      {tc && <TechConnectionWorkflow key={`${companyId}:${site.id}`} tc={tc} blocked={dirty} siteId={site.id} companyId={companyId} onDone={onDone} />}
 
       <TpSiteDocs site={site} companyId={companyId} kinds={ctx.data.docKinds ?? []} />
 

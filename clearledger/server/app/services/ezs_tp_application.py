@@ -38,6 +38,9 @@ def _num(value: Any) -> str:
 
 def render(org: Any, site: Any, tc: Any, kit: list[dict[str, Any]]) -> str:
     """HTML заявки. `org` — карточка юрлица или None; `kit` — комплект с отметкой наличия."""
+    from app.services.ezs_tp_workflow import data_of, SCENARIOS
+    w = data_of(tc) if hasattr(tc, "workflow") else None
+    scenario = SCENARIOS.get(w.scenario, "Новое присоединение") if w else "Новое присоединение"
     gaps: list[str] = []
 
     def val(value: Any, label: str) -> str:
@@ -57,7 +60,10 @@ def render(org: Any, site: Any, tc: Any, kit: list[dict[str, Any]]) -> str:
     new_power = tc.power_kwt if tc.power_kwt is not None else site.planned_power_kwt
     old_power = tc.existing_power_kwt or 0
     power = val(_num(new_power), "запрашиваемая мощность")
-    total = _num((new_power or 0) + old_power) if new_power is not None else BLANK
+    total_power = (new_power or 0) + old_power
+    if total_power > 150:
+        raise ValueError("Печатная форма рассчитана на суммарную мощность до 150 кВт включительно")
+    total = _num(total_power) if new_power is not None else BLANK
     supplier = val(tc.energy_supplier, "сбытовая организация")
     director = val(org and org.director_name, "руководитель заявителя")
     position = html.escape((org and org.director_position) or "Руководитель")
@@ -71,6 +77,8 @@ def render(org: Any, site: Any, tc: Any, kit: list[dict[str, Any]]) -> str:
     if missing:
         gaps.append("не приложены: " + "; ".join(missing))
 
+    design_date = val(w.design_date.isoformat() if w and w.design_date else None, "срок проектирования")
+    commissioning_date = val(w.commissioning_date.isoformat() if w and w.commissioning_date else None, "срок ввода")
     gaps_html = (f'<div class="gaps"><b>Не заполнено:</b> {html.escape(", ".join(gaps))}. '
                  "В печать этот блок не попадает.</div>") if gaps else ""
     return f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
@@ -81,7 +89,7 @@ def render(org: Any, site: Any, tc: Any, kit: list[dict[str, Any]]) -> str:
 энергопринимающих устройств с максимальной мощностью до 150 кВт включительно</h1>
 <p>1. Заявитель: {name}, ОГРН {ogrn}, ИНН {inn}{f", КПП {kpp}" if kpp else ""}.</p>
 <p>2. Место нахождения заявителя: {legal}. Почтовый адрес: {postal}.</p>
-<p>3. В связи с новым строительством просит осуществить технологическое присоединение
+<p>3. В связи с основанием «{html.escape(scenario)}» просит осуществить технологическое присоединение
 энергопринимающих устройств: {obj}, расположенных по адресу: {address}.</p>
 <p>4. Максимальная мощность энергопринимающих устройств (присоединяемых и ранее присоединённых)
 составляет {total} кВт при напряжении {voltage} кВ, в том числе:<br>
@@ -90,8 +98,8 @@ def render(org: Any, site: Any, tc: Any, kit: list[dict[str, Any]]) -> str:
 <p>5. Заявляемая категория надёжности энергопринимающих устройств — {html.escape(tc.reliability_category or DEFAULT_RELIABILITY)}
 (по одному источнику электроснабжения).</p>
 <p>6. Характер нагрузки (вид экономической деятельности): {html.escape(tc.load_kind or DEFAULT_LOAD)}.</p>
-<p>7. Сроки проектирования и поэтапного введения в эксплуатацию: срок проектирования {BLANK},
-срок введения в эксплуатацию {BLANK}, максимальная мощность {power} кВт, категория надёжности
+<p>7. Сроки проектирования и поэтапного введения в эксплуатацию: срок проектирования {design_date},
+срок введения в эксплуатацию {commissioning_date}, максимальная мощность {power} кВт, категория надёжности
 {html.escape(tc.reliability_category or DEFAULT_RELIABILITY)}.</p>
 <p>8. Гарантирующий поставщик (энергосбытовая организация), с которым планируется заключение
 договора энергоснабжения: {supplier}.</p>
