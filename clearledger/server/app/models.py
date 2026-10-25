@@ -5930,6 +5930,10 @@ class ChargeSession(Base):
 
     __table_args__ = (
         Index("uq_charge_sessions", "company_id", "session_ext_id", unique=True),
+        # «Давность данных» (services/intake_watch.py) берёт max(created_at) по компании
+        # раз в час и на каждом открытии экрана. Без этой пары запрос шёл параллельным
+        # проходом по всей таблице: 19 719 страниц и 139 мс против 5 страниц и 0.3 мс.
+        Index("ix_charge_sessions_company_created", "company_id", "created_at"),
     )
 
 
@@ -6164,8 +6168,9 @@ class MetrikaConnection(Base):
     __tablename__ = "metrika_connections"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # index=True здесь не нужен: ниже уже уникальный uq_metrika_company по company_id.
     company_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     counter_id: Mapped[str] = mapped_column(String(40), nullable=False)      # № счётчика Метрики
     token_encrypted: Mapped[str] = mapped_column(String(2048), nullable=False)  # OAuth-токен (Fernet)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -6854,9 +6859,10 @@ class EzsSupplyLine(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Без index=True: тот же supply_id уже проиндексирован ix_ezs_supply_line_doc.
     supply_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ezs_supply_documents.id", ondelete="CASCADE"),
-        nullable=False, index=True)
+        nullable=False)
     line_kind: Mapped[str] = mapped_column(String(10), nullable=False, default="station")  # station|spare
     part_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ezs_spare_parts.id", ondelete="SET NULL"), nullable=True)
@@ -7100,8 +7106,9 @@ class EzsProject(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Без index=True: тот же site_id уже проиндексирован ix_ezs_project_site.
     site_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False, index=True)
+        UUID(as_uuid=True), ForeignKey("ezs_sites.id", ondelete="CASCADE"), nullable=False)
     # Объект сети: у стройки появляется в конце, у ретрофита известен с начала.
     location_id: Mapped[str | None] = mapped_column(
         String(40), ForeignKey("service_locations.id", ondelete="SET NULL"), nullable=True)
