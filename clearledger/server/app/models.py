@@ -1108,7 +1108,12 @@ class Counterparty(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False
     )
-    inn: Mapped[str] = mapped_column(String(20), nullable=False)
+    # ИНН известен не у всех: физлица, госорганы, «Розничный покупатель». Пока колонка
+    # была NOT NULL, отсутствие записывали подручными значениями — на стендах нашлись
+    # и пустая строка (277 карточек), и '0' (16). Ни то, ни другое не отличить от
+    # настоящего ИНН проверкой «заполнен», и уникальный индекс на такую колонку
+    # не поставить. У своих организаций (модель Organization) ИНН остаётся обязательным.
+    inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
     kpp: Mapped[str | None] = mapped_column(String(20), nullable=True)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     short_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
