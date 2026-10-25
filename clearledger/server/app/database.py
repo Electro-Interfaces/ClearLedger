@@ -3740,7 +3740,6 @@ async def create_all() -> None:
         for stmt in MODEL_DRIFT_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
-
         # Миграции магазина идут только там, где схема `edge` наполнена: её
         # таблицы заводит провижининг станции, и в пространстве без магазина
         # (энергетический профиль) их нет вовсе. Отдельные операторы этих
@@ -5382,11 +5381,12 @@ async def create_all() -> None:
         for stmt in VOICE_CORE_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
-        # Проверка ограничений — в самом конце, и это не формальность. Блок
-        # стоял в середине, а `BUSINESS_SHIFT_MIGRATION_DDL` ниже добавляет
-        # `fk_export_packet_accounting_group` как NOT VALID: на чистой базе связь
-        # оставалась непроверенной, хотя она есть в списке проверяемых. Любой
-        # новый блок миграций добавляется ВЫШЕ этого места.
+        # Проверка ограничений — САМОЙ последней. Не раньше: наборы ниже пересоздают
+        # часть ограничений заново как NOT VALID (`ck_export_packet_accounting_contract`,
+        # `fk_export_packet_accounting_group` из `BUSINESS_SHIFT_MIGRATION_DDL`), и
+        # проверка, стоявшая в середине, их уже не заставала — после выпуска v1517
+        # одно ограничение осталось непроверенным, а новое пространство получало
+        # непроверенную связь с первого прохода. Новые наборы добавляются ВЫШЕ.
         for stmt in VALIDATE_CONSTRAINTS_DDL:
             await conn.execute(_sa.text(stmt))
 
