@@ -131,7 +131,7 @@ export function MarketSiteCard({ site, onBack }: { site: MarketSite; onBack: () 
                     <span className="text-muted-foreground"> · {site.price.basis}</span>
                   )}
                 </>
-              ) : <span className="text-muted-foreground">нет отзывов</span>}
+              ) : <span className="text-muted-foreground">нет данных</span>}
             </Поле>
           </div>
         </CardContent>
@@ -158,7 +158,7 @@ export function MarketSiteCard({ site, onBack }: { site: MarketSite; onBack: () 
                     {' '}по {nf.format(site.reviews ?? 0)} отзывам
                   </span>
                 </>
-              ) : <span className="text-muted-foreground">нет отзывов</span>}
+              ) : <span className="text-muted-foreground">{site.reviews === 0 ? 'нет отзывов' : 'нет данных'}</span>}
             </Поле>
           </div>
           {(site.closedConfirmations ?? 0) > 0 && (
