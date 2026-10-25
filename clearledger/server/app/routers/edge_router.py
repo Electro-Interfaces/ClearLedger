@@ -28,7 +28,7 @@ from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_company_by_api_key
+from app.auth import get_company_by_api_key, touch_key_used
 from app.database import get_db
 from app.models import (
     Company, Contract, Counterparty, DataEntry, EdgeAgent, EdgeDownlink, EdgeHeartbeat,
@@ -81,7 +81,7 @@ async def get_edge_identity(
             status.HTTP_403_FORBIDDEN,
             "Ключ станции не связан с зарегистрированным EdgeAgent",
         )
-    key.last_used_at = datetime.now(timezone.utc)
+    touch_key_used(key)
     return EdgeIdentity(company, int(key.station_id), key.id)
 
 
