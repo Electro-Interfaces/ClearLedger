@@ -334,8 +334,8 @@ async def deliver(db, tc):
         if member.own_organization_id and member.own_organization_id != w.organization_id: continue
         msg = await notify_person(db, tc.company_id, target,
             f"{site.title or site.project_no or 'Проект'}: {message}\n"
-            f"[Открыть присоединение](/workspace?mode=projects&sub=pr_project&project={tc.site_id}&ptab=tp)",
-            room_kind=NOTICES_ROOM_KIND)
+            f"[Открыть присоединение](/projects?mode=projects&sub=pr_project&project={tc.site_id}&ptab=tp)",
+            room_kind=NOTICES_ROOM_KIND, event_category="tech_connection")
         if msg: delivered[delivery_key] = {"messageId": str(msg), "at": datetime.now(timezone.utc).isoformat()}
     if delivered != (tc.workflow or {}).get("_delivery", {}):
         tc.workflow = dict(tc.workflow or {}, _delivery=delivered)

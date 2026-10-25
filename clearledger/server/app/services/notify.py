@@ -77,7 +77,8 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
                         text: str, *, edit_message_id: uuid.UUID | None = None,
                         ttl: int | None = None,
                         urgency: str = "normal",
-                        room_kind: str | None = None) -> uuid.UUID | None:
+                        room_kind: str | None = None,
+                        event_category: str | None = None) -> uuid.UUID | None:
     """Сообщение лично человеку — мимо подписок компании.
 
     `dispatch` рассылает по `NotificationRule` в общую комнату «Оповещения», и
@@ -101,7 +102,13 @@ async def notify_person(db: AsyncSession, company_id: uuid.UUID, user: User,
     from app.models import ChatMessage, ChatParticipant, ChatRoom
 
     if await _admins_only(db, company_id) and not user.is_superadmin:
-        return None
+        company = await db.get(Company, company_id)
+        # Только адресные события ТП с проверенными назначениями; остальные
+        # системные сообщения сохраняют общую политику пространства.
+        tp_allowed = (event_category == "tech_connection" and company is not None
+                      and (company.customization or {}).get("tp_notifications_to_assignees") is True)
+        if not tp_allowed:
+            return None
 
     secretary = await _secretary(db, company_id)
     # Одна комната на пару «человек — Секретарь»: искать её по участникам, а не
@@ -185,9 +192,74 @@ def task_channels(user: User) -> set[str]:
     return set(user.task_notify or TASK_CHANNELS_DEFAULT) & set(TASK_CHANNELS)
 
 
+# ---------------------------------------------------------------------------
+# Какие письма человек хочет получать
+# ---------------------------------------------------------------------------
+# Канал «почта» отвечал на вопрос «писать или нет» целиком: человек, которому
+# мешал поток ответов по чужим задачам, выключал почту и переставал получать
+# в том числе «вам поручено». Теперь канал решает, писать ли вообще, а эти виды —
+# что именно писать.
+EMAIL_KINDS = ("task_assigned", "task_mention", "task_reply", "task_status", "digest")
+# NULL в профиле — получать всё: обновление не вправе молча отключить человеку
+# письма, которые он получал вчера.
+EMAIL_KINDS_DEFAULT = EMAIL_KINDS
+
+EMAIL_KIND_LABELS: dict[str, str] = {
+    "task_assigned": "Мне поручили задачу",
+    "task_mention": "Меня упомянули в задаче",
+    "task_reply": "Ответы и переписка по задаче",
+    "task_status": "Задачу передали, выполнили или отменили",
+    "digest": "Сводка дня",
+}
+
+
+def is_away(user: User, on: "date | None" = None) -> bool:
+    """Человека сейчас нет: отпуск, больничный, командировка.
+
+    Границы включительные: «с 3 по 17» значит, что 17-го он ещё отсутствует.
+    Одна дата без второй тоже считается: «с 3-го» — ушёл без известной даты
+    возвращения, «по 17-е» — вернётся 18-го.
+    """
+    from datetime import date as _date
+
+    if user.away_from is None and user.away_to is None:
+        return False
+    день = on or _date.today()
+    if user.away_from is not None and день < user.away_from:
+        return False
+    if user.away_to is not None and день > user.away_to:
+        return False
+    return True
+
+
+def email_kinds(user: User) -> set[str]:
+    """Виды писем, которые человек согласен получать."""
+    if user.email_notify is None:
+        return set(EMAIL_KINDS_DEFAULT)
+    return set(user.email_notify) & set(EMAIL_KINDS)
+
+
+def wants_email(user: User, kind: str) -> bool:
+    """Писать ли этому человеку письмо такого вида.
+
+    Почтовому участнику письмо — единственный канал: отключить его значило бы
+    отрезать человека от работы, и настройка видов к нему не применяется.
+    Неизвестный вид доставляется: лучше лишнее письмо, чем потерянное.
+    """
+    if user.mail_only:
+        return True
+    if kind not in EMAIL_KINDS:
+        return True
+    return kind in email_kinds(user)
+
+
 async def tell(db: AsyncSession, company_id: uuid.UUID, people, subject: str,
-               text: str, task=None) -> None:
+               text: str, task=None, kind: str = "task_assigned") -> None:
     """Уведомление о поручении — в каналы, которые выбрал каждый получатель.
+
+    `kind` — вид письма (`EMAIL_KINDS`): почта уходит, только если человек
+    согласен получать письма этого вида. На чат вид не влияет: там уведомление
+    лежит в ленте, а не приходит в личный ящик.
 
     Письма уходят в фоне (`task_mail`), сообщения чата пишутся в сессию
     вызывающего: коммит за ним. Каждое сообщение — в своей точке сохранения,
@@ -203,7 +275,7 @@ async def tell(db: AsyncSession, company_id: uuid.UUID, people, subject: str,
     emails: list[str] = []
     for person in people:
         channels = task_channels(person)
-        if "email" in channels and person.email:
+        if "email" in channels and person.email and wants_email(person, kind):
             emails.append(person.email)
         for code, kind in (("secretary", None), ("notices", NOTICES_ROOM_KIND)):
             if code not in channels:

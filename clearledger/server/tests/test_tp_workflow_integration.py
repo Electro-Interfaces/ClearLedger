@@ -190,7 +190,7 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
                 await tp.deliver(db, tc); await db.commit()
                 messages = (await db.execute(select(m.ChatMessage))).scalars().all()
                 self.assertEqual(len(messages), 1)
-                self.assertIn('/workspace?mode=projects', messages[0].content)
+                self.assertIn('/projects?mode=projects', messages[0].content)
                 await tp.deliver(db, tc); await db.commit()
                 self.assertEqual(len((await db.execute(select(m.ChatMessage))).scalars().all()), 1)
         for kind in ('tu','tp_contract','tp_act','tp_avtu','tp_meter_act'): await self.doc(kind)
@@ -206,6 +206,30 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status_code,409)
         r=await self.client.put(self.path,params=self.q,json={'method':'landlord'})
         self.assertEqual(r.status_code,409)
+
+    async def test_targeted_notifications_require_explicit_policy_exception(self):
+        await self.doc('contract'); await self.doc('egrul')
+        async with self.sessions() as db:
+            normal=m.User(name='Тест исполнитель',email='executor@example.invalid',password_hash='!')
+            db.add(normal); await db.flush()
+            db.add(m.UserCompany(user_id=normal.id,company_id=self.company.id,role='user'))
+            company=await db.get(m.Company,self.company.id)
+            company.customization={'system_notifications_admin_only':True}
+            await db.commit()
+        self.w['responsibilities']['default']['executor']=str(normal.id)
+        self.w['reviewed_kinds']=['contract','egrul']; await self.save()
+        with patch('app.services.web_push.push_room_async'):
+            async with self.sessions() as db:
+                tc=await db.get(m.EzsTechConnection,self.tc.id)
+                await tp.deliver(db,tc); self.assertFalse(tc.workflow['_delivery'])
+                company=await db.get(m.Company,self.company.id)
+                company.customization=dict(company.customization,tp_notifications_to_assignees=True)
+                await db.flush()
+                await tp.deliver(db,tc); self.assertTrue(tc.workflow['_delivery'])
+                from app.services.notify import notify_person
+                self.assertIsNone(await notify_person(db,self.company.id,normal,'Обычное системное сообщение'))
+                await db.commit()
+                self.assertEqual(len((await db.execute(select(m.ChatMessage))).scalars().all()),1)
 
     async def test_shared_upload_download_and_non_pdf_rejected(self):
         import tempfile
