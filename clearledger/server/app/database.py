@@ -1983,6 +1983,13 @@ async def create_all() -> None:
         # чтобы обновление не объявляло их новыми входящими.
         for statement in TASK_ASSIGNMENT_MIGRATION_DDL:
             await conn.execute(text(statement))
+        # v2.x: «меня не будет с … по …» — личная отметка отсутствия.
+        for _col in ("away_from", "away_to"):
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {_col} DATE"
+                )
+            )
         # v2.x: чем подписались на уведомления — для списка устройств в профиле.
         await conn.execute(
             __import__("sqlalchemy").text(

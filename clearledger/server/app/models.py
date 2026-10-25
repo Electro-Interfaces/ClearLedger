@@ -143,6 +143,12 @@ class User(Base):
     # `notify.EMAIL_KINDS`. NULL — всё, как было до появления настройки:
     # молчаливое отключение писем обновлением было бы хуже лишнего письма.
     email_notify: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # «Меня не будет с … по …»: отпуск, больничный, командировка. Ставит сам
+    # человек. Регламентные напоминания и сводка дня в эти дни не приходят —
+    # поводы вернутся, когда он выйдет. Право подписи это не передаёт: за этим
+    # стоит замещение (`user_substitutions`), и его заводит администратор.
+    away_from: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    away_to: Mapped[date_type | None] = mapped_column(Date, nullable=True)
     # Версия входа: кладётся в JWT и сверяется на каждом запросе. Смена пароля, «выйти
     # со всех устройств» и сброс сессий админом поднимают её — выданные токены гаснут.
     token_version: Mapped[int] = mapped_column(

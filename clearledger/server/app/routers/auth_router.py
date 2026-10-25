@@ -700,6 +700,30 @@ async def get_me(
         орг = (await db.execute(select(Counterparty.name).where(
             Counterparty.id == членство[0].organization_id))).scalar_one_or_none()
 
+    # Кто расписывается за человека, пока его нет. Показываем в профиле только
+    # для чтения: замещение — это полномочие, его заводит администратор, и
+    # человек перед отпуском должен видеть, есть оно или нет.
+    замещение = None
+    if current_user.company_id is not None:
+        from app.models import UserSubstitution
+
+        сегодня = datetime.now(timezone.utc).date()
+        строка = (await db.execute(
+            select(UserSubstitution, User.name, User.email)
+            .join(User, User.id == UserSubstitution.deputy_id)
+            .where(UserSubstitution.company_id == current_user.company_id,
+                   UserSubstitution.user_id == current_user.id,
+                   UserSubstitution.is_active.is_(True),
+                   UserSubstitution.ends_on >= сегодня)
+            .order_by(UserSubstitution.starts_on)
+        )).first()
+        if строка is not None:
+            sub, имя, почта = строка
+            замещение = (
+                имя or почта,
+                f"{sub.starts_on.strftime('%d.%m.%Y')} — {sub.ends_on.strftime('%d.%m.%Y')}",
+            )
+
     return MeResponse(
         id=str(current_user.id),
         email=current_user.email,
@@ -716,6 +740,10 @@ async def get_me(
         task_notify=sorted(notify.task_channels(current_user)),
         email_notify=[k for k in notify.EMAIL_KINDS
                       if k in notify.email_kinds(current_user)],
+        away_from=current_user.away_from.isoformat() if current_user.away_from else None,
+        away_to=current_user.away_to.isoformat() if current_user.away_to else None,
+        substitute=замещение[0] if замещение else None,
+        substitute_period=замещение[1] if замещение else None,
         position=членство[0].position if членство else None,
         party_type=членство[0].party_type if членство else None,
         party_org=орг,

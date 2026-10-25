@@ -3109,6 +3109,9 @@ class MyProfileBody(BaseModel):
     # Какие письма человек хочет получать (notify.EMAIL_KINDS). Пустой список —
     # осознанный выбор «ничего на почту», он сохраняется как есть.
     emailNotify: list[str] | None = None
+    # «Меня не будет»: «2026-11-03» или "" — отметка снята.
+    awayFrom: str | None = None
+    awayTo: str | None = None
 
 
 @router.patch("/me")
@@ -3163,6 +3166,27 @@ async def update_me(
     if current_user.work_start >= current_user.work_end:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Рабочий день должен заканчиваться позже, чем начинается")
+    if body.awayFrom is not None or body.awayTo is not None:
+        from datetime import date as _date
+
+        def _день(значение: str | None, прежнее):
+            if значение is None:
+                return прежнее
+            значение = значение.strip()
+            if not значение:
+                return None
+            try:
+                return _date.fromisoformat(значение)
+            except ValueError:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "Дата в формате ГГГГ-ММ-ДД") from None
+
+        с = _день(body.awayFrom, current_user.away_from)
+        по = _день(body.awayTo, current_user.away_to)
+        if с is not None and по is not None and по < с:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Дата возвращения раньше даты ухода")
+        current_user.away_from, current_user.away_to = с, по
     if body.emailNotify is not None:
         from app.services import notify
 
