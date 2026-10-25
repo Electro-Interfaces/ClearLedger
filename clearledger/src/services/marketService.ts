@@ -1093,6 +1093,8 @@ export interface MarketPlayer {
   classChecked: boolean
   adjacent: boolean
   ownStations: number | null
+  networkSites?: number | null
+  networkObservedAt?: string | null
   assetLight: boolean | null
   operatorId: string | null
   operatorName: string | null

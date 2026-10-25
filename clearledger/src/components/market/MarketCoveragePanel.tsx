@@ -32,7 +32,7 @@ function Num({ v, digits = 0 }: { v: number | null | undefined; digits?: number 
 function Load({ row }: { row: MarketCoverageRow }) {
   const v = row.carsPerAlive
   if (v == null) return <span className="text-muted-foreground">—</span>
-  const tone = v >= 40 ? 'text-warning' : v <= 15 ? 'text-success' : ''
+  const tone = v >= 40 ? 'text-warning-foreground' : v <= 15 ? 'text-success' : ''
   return (
     <span className={`tabular-nums ${tone}`}>
       {nf1.format(v)}
@@ -168,7 +168,7 @@ export function MarketCoveragePanel() {
                 <td className="p-2 text-right"><Load row={r} /></td>
                 <td className="p-2 text-right">
                   {r.deadGapRatio == null ? <span className="text-muted-foreground">—</span> : (
-                    <span className={`tabular-nums ${r.deadGapRatio >= 2 ? 'text-warning' : ''}`}>
+                    <span className={`tabular-nums ${r.deadGapRatio >= 2 ? 'text-warning-foreground' : ''}`}>
                       ×{nf1.format(r.deadGapRatio)}
                     </span>
                   )}

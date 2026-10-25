@@ -36,12 +36,16 @@ const ВИДЫ = [
   { k: 'pivot', label: 'Сводная' },
 ] as const
 
+function networkDate(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleDateString('ru-RU') : 'дата не указана'
+}
+
 function PlayerLine({ p }: { p: MarketPlayer }) {
   return (
-    <li className="flex items-baseline justify-between gap-2 text-xs">
+    <li className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1 text-xs">
       <span className="min-w-0 truncate">
         {p.app}
-        {!p.isActive && <span className="ml-1 text-warning">· не работает</span>}
+        {!p.isActive && <span className="ml-1 text-warning-foreground">· не работает</span>}
         {p.operatorName && p.operatorName !== p.app && (
           <span className="text-muted-foreground"> · {p.operatorName}</span>
         )}
@@ -50,9 +54,14 @@ function PlayerLine({ p }: { p: MarketPlayer }) {
         )}
       </span>
       <span className="shrink-0 tabular-nums text-muted-foreground">
-        {(p.ownStations ?? 0) > 0 ? `${nf.format(p.ownStations ?? 0)} станций` : p.class}
+        {p.networkSites != null
+          ? `${nf.format(p.networkSites)} точек сети · ${networkDate(p.networkObservedAt)}`
+          : 'сеть не сопоставлена'}
         {p.rating != null && ` · ${nf1.format(p.rating)}`}
       </span>
+      {(p.ownStations ?? 0) > 0 && <span className="w-full text-muted-foreground">
+        Заявлено своих станций: {nf.format(p.ownStations!)} · дата не указана
+      </span>}
     </li>
   )
 }
@@ -76,7 +85,7 @@ export function MarketPlayersPanel() {
   const сортировкаКачества = useMemo(() => ({
     app: (p: MarketPlayer) => p.app,
     class: (p: MarketPlayer) => p.class,
-    stations: (p: MarketPlayer) => p.ownStations,
+    stations: (p: MarketPlayer) => p.networkSites ?? null,
     rating: (p: MarketPlayer) => p.rating,
     reviews: (p: MarketPlayer) => p.reviews,
     developer: (p: MarketPlayer) => p.developer,
@@ -128,13 +137,13 @@ export function MarketPlayersPanel() {
 
   return (
     <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
-      <p className="text-sm text-muted-foreground">Приложения и заявленные сети по внешним источникам. Число станций здесь не равно числу объектов нашего реестра. Непроверенные классы — гипотезы, а не подтверждённая бизнес-модель.</p>
+      <p className="text-sm text-muted-foreground">Точки сети — текущий внешний реестр по оператору, а не подтверждённое владение. Заявленное число собственных станций хранится отдельно; дата этого сведения не установлена. Непроверенные классы — гипотезы, а не подтверждённая бизнес-модель.</p>
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
             <Users className="size-4 text-primary" aria-hidden />
             За того же водителя борются {nf.format(q.data?.total ?? 0)} игроков, и у{' '}
-            {nf.format(t.assetLight)} из них нет ни одной своей станции.
+            {nf.format(t.assetLight)} из них своя инфраструктура не подтверждена.
           </span>
           <span className="text-xs text-muted-foreground">
             {/* Приложения не привязаны к территории: 123 игрока в срезе Бурятии
@@ -163,7 +172,7 @@ export function MarketPlayersPanel() {
                   <span className="text-xs tabular-nums text-muted-foreground">
                     {nf.format(qd.count)} приложений
                     {qd.networks ? ` · ${nf.format(qd.networks)} сетей` : ''}
-                    {qd.stations > 0 && ` · ${nf.format(qd.stations)} станций`}
+                    {qd.stations > 0 && ` · ${nf.format(qd.stations)} заявленных станций, дата не указана`}
                   </span>
                 </div>
                 <p className="mb-2 mt-0.5 text-xs text-muted-foreground">{qd.hint}</p>
@@ -176,10 +185,10 @@ export function MarketPlayersPanel() {
           {/* Квадранты показаны карточками, а выгрузка работает с таблицами: эта
               таблица не рисуется, её дело — уложить игроков по моделям в строки. */}
           <table hidden {...exportRows('Модели бизнеса', [
-            'Модель', 'Игрок', 'Оператор', 'Класс', 'Своих станций', 'Оценка', 'Работает',
+            'Модель', 'Игрок', 'Оператор', 'Класс', 'Точек сети в текущем реестре', 'Последнее наблюдение сети', 'Заявлено своих станций (дата неизвестна)', 'Оценка', 'Работает',
             'Класс проверен',
           ], quadrants.flatMap((qd) => qd.players.map((p) => [
-            qd.label, p.app, p.operatorName, p.class, p.ownStations, p.rating,
+            qd.label, p.app, p.operatorName, p.class, p.networkSites, networkDate(p.networkObservedAt), p.ownStations, p.rating,
             p.isActive ? 'да' : 'нет', p.classChecked ? 'да' : 'нет',
           ])))} />
         </div>
@@ -192,13 +201,13 @@ export function MarketPlayersPanel() {
           <ReportPivot
             fields={['class', 'developer', 'active', 'own', 'rating',
                      'players', 'stations', 'reviews']}
-            columns={['Класс', 'Разработчик', 'Работает', 'Свои станции', 'Оценка',
-                      'Игроков', 'Станций', 'Отзывов']}
+            columns={['Класс', 'Разработчик', 'Работает', 'Инфраструктура заявлена', 'Оценка',
+                      'Игроков', 'Заявлено станций (дата неизвестна)', 'Отзывов']}
             rows={quality.map((p) => ({
               class: p.class,
               developer: p.developer ?? '— не указан —',
               active: p.isActive ? 'да' : 'нет',
-              own: (p.ownStations ?? 0) > 0 ? 'есть' : 'нет',
+              own: (p.ownStations ?? 0) > 0 ? 'заявлена' : 'не подтверждена',
               rating: p.rating == null ? 'нет оценки'
                 : p.rating >= 4 ? 'высокая (4+)'
                 : p.rating >= 2.5 ? 'средняя (2,5–4)' : 'низкая (до 2,5)',
@@ -214,7 +223,7 @@ export function MarketPlayersPanel() {
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
           <table className="w-full text-xs"
             {...exportRows('Откуда приходят', [
-              'Класс', 'Смежные', 'Игроков', 'Без своих станций', 'Станций у класса',
+              'Класс', 'Смежные', 'Игроков', 'Без подтверждения активов', 'Заявлено станций',
               'Медиана оценки', 'Оценок в основе', 'Кто это',
             ], классы.rows.map((c) => [
               c.class, c.adjacent ? 'да' : 'нет', c.players, c.assetLight, c.stations,
@@ -224,8 +233,8 @@ export function MarketPlayersPanel() {
               <tr>
                 <SortTh sortKey="class" sort={классы.sort} onSort={классы.toggle}>Класс</SortTh>
                 <SortTh sortKey="players" sort={классы.sort} onSort={классы.toggle} align="right">Игроков</SortTh>
-                <SortTh sortKey="assetLight" sort={классы.sort} onSort={классы.toggle} align="right">Без своих станций</SortTh>
-                <SortTh sortKey="stations" sort={классы.sort} onSort={классы.toggle} align="right">Станций у класса</SortTh>
+                <SortTh sortKey="assetLight" sort={классы.sort} onSort={классы.toggle} align="right">Без подтверждения активов</SortTh>
+                <SortTh sortKey="stations" sort={классы.sort} onSort={классы.toggle} align="right">Заявлено станций</SortTh>
                 <SortTh sortKey="rating" sort={классы.sort} onSort={классы.toggle} align="right">Медиана оценки</SortTh>
                 <th className="p-2 text-left font-medium">Кто это</th>
               </tr>
@@ -270,16 +279,16 @@ export function MarketPlayersPanel() {
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
           <table className="w-full text-xs"
             {...exportRows('Качество против размера', [
-              'Приложение', 'Работает', 'Класс', 'Своих станций', 'Оценка', 'Отзывов', 'Разработчик',
+              'Приложение', 'Работает', 'Класс', 'Точек сети в текущем реестре', 'Последнее наблюдение сети', 'Оценка', 'Отзывов', 'Разработчик',
             ], quality.map((p) => [
-              p.app, p.isActive ? 'да' : 'нет', p.class, p.ownStations, p.rating, p.reviews,
+              p.app, p.isActive ? 'да' : 'нет', p.class, p.networkSites, networkDate(p.networkObservedAt), p.rating, p.reviews,
               p.developer,
             ]))}>
             <thead className="sticky top-0 z-10 bg-muted text-muted-foreground">
               <tr>
                 <SortTh sortKey="app" sort={сортК} onSort={жмиК}>Приложение</SortTh>
                 <SortTh sortKey="class" sort={сортК} onSort={жмиК}>Класс</SortTh>
-                <SortTh sortKey="stations" sort={сортК} onSort={жмиК} align="right">Своих станций</SortTh>
+                <SortTh sortKey="stations" sort={сортК} onSort={жмиК} align="right">Точек сети</SortTh>
                 <SortTh sortKey="rating" sort={сортК} onSort={жмиК} align="right">Оценка</SortTh>
                 <SortTh sortKey="reviews" sort={сортК} onSort={жмиК} align="right">Отзывов</SortTh>
                 <SortTh sortKey="developer" sort={сортК} onSort={жмиК}>Разработчик</SortTh>
@@ -291,16 +300,17 @@ export function MarketPlayersPanel() {
                   <td className="p-2 font-medium">
                     {p.app}
                     {!p.isActive && (
-                      <span className="ml-2 text-xs text-warning">· не работает</span>
+                      <span className="ml-2 text-xs text-warning-foreground">· не работает</span>
                     )}
                   </td>
                   <td className="p-2 text-muted-foreground">{p.class}</td>
                   <td className="p-2 text-right tabular-nums">
-                    {p.ownStations ? nf.format(p.ownStations) : '—'}
+                    {p.networkSites != null ? nf.format(p.networkSites) : '—'}
+                    {p.networkSites != null && <div className="text-muted-foreground">{networkDate(p.networkObservedAt)}</div>}
                   </td>
                   <td className="p-2 text-right">
                     <span className={`tabular-nums ${(p.rating ?? 0) >= 4 ? 'text-success'
-                      : (p.rating ?? 5) < 2.5 ? 'text-warning' : ''}`}>
+                      : (p.rating ?? 5) < 2.5 ? 'text-warning-foreground' : ''}`}>
                       {p.rating != null ? nf1.format(p.rating) : '—'}
                     </span>
                   </td>
@@ -348,7 +358,7 @@ export function MarketPlayersPanel() {
                     {sh.hasShop
                       ? <span className="text-success">есть</span>
                       : <span className="text-muted-foreground">не нашли</span>}
-                    {sh.note && <span className="ml-1 text-warning">· {sh.note}</span>}
+                    {sh.note && <span className="ml-1 text-warning-foreground">· {sh.note}</span>}
                   </td>
                   <td className="p-2 text-muted-foreground">{sh.goods ?? '—'}</td>
                   <td className="p-2 text-right tabular-nums">

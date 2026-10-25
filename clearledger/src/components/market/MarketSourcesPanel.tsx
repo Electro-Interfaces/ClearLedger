@@ -79,7 +79,7 @@ function SourceCard({ s }: { s: MarketSource }) {
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
           <span className="tabular-nums">{nf.format(s.sites)} точек</span>
-          <span className={seen.stale ? 'text-warning' : 'text-muted-foreground'}>
+          <span className={seen.stale ? 'text-warning-foreground' : 'text-muted-foreground'}>
             последний контакт: {seen.text}
           </span>
           {s.homeSockets > 0 && (
