@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi.security import HTTPAuthorizationCredentials
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -191,8 +191,17 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     ip = _client_ip(request)
     if user.company_id is not None:
         new_place = await _is_new_place(db, user, ip)
+        from app.services import user_agent as ua_service
+
+        отметка = ip or "-"
+        ua_строка = ua_service.short(request.headers.get("user-agent"), 200)
+        if ua_строка:
+            # Формат «IP · UA»: разбор нового места читает первую часть до пробела,
+            # поэтому IP обязан остаться первым.
+            отметка = f"{отметка} · {ua_строка}"
         await log_audit(db, actor=user, company_id=user.company_id,
-                        action="auth.login_new_ip" if new_place else "auth.login", target=ip)
+                        action="auth.login_new_ip" if new_place else "auth.login",
+                        target=отметка)
         if new_place:
             await _notify_new_login(db, user, ip, request.headers.get("user-agent") or "")
     await db.commit()
@@ -344,6 +353,98 @@ async def reset_password(
                         action="auth.password_reset")
     await db.flush()
     return {"ok": True}
+
+
+# ===== Безопасность учётной записи: что видно самому человеку =====
+
+# Что показываем в профиле. Берём из общего журнала, но только свои события и
+# только про вход и пароль: профиль — не аудит пространства.
+ВХОДЫ_ДЛЯ_ЧЕЛОВЕКА: dict[str, str] = {
+    "auth.login": "Вход",
+    "auth.login_new_ip": "Вход с нового адреса",
+    "auth.login_failed": "Неудачная попытка входа",
+    "auth.password_change": "Пароль изменён",
+    "auth.password_reset": "Пароль восстановлен по письму",
+    "auth.logout_all": "Выход на всех устройствах",
+    "auth.sessions_reset": "Сеансы сброшены администратором",
+}
+
+
+@router.get("/security/logins")
+async def my_logins(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(20, ge=1, le=50),
+):
+    """Последние события входа этой учётной записи.
+
+    Человек должен иметь возможность сам увидеть, что в его учётку заходили, —
+    раньше единственной реакцией на подозрение было «выйти на всех устройствах»
+    вслепую, без ответа на вопрос «а было ли что-то вообще».
+    """
+    from app.models import AuditEvent
+    from app.services import user_agent as ua_service
+
+    rows = (await db.execute(
+        select(AuditEvent.action, AuditEvent.details, AuditEvent.timestamp)
+        .where(AuditEvent.user_id == str(current_user.id),
+               AuditEvent.action.in_(tuple(ВХОДЫ_ДЛЯ_ЧЕЛОВЕКА)))
+        .order_by(AuditEvent.timestamp.desc())
+        .limit(limit)
+    )).all()
+    события = []
+    for action, details, ts in rows:
+        # Формат details для входа — «IP · UA» (см. login), у остальных событий
+        # его может не быть вовсе.
+        ip, _, хвост = (details or "").partition(" · ")
+        события.append({
+            "action": action,
+            "label": ВХОДЫ_ДЛЯ_ЧЕЛОВЕКА.get(action, action),
+            "at": ts.isoformat() if ts else None,
+            "ip": ip or None,
+            "device": ua_service.describe(хвост) if хвост else None,
+            "newPlace": action == "auth.login_new_ip",
+            "failed": action == "auth.login_failed",
+        })
+    return {"logins": события}
+
+
+@router.get("/security/devices")
+async def my_devices(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Устройства, подписанные на уведомления этой учётной записи."""
+    from app.models import ChatPushSubscription
+    from app.services import user_agent as ua_service
+
+    rows = (await db.execute(
+        select(ChatPushSubscription)
+        .where(ChatPushSubscription.user_id == current_user.id)
+        .order_by(ChatPushSubscription.created_at.desc())
+    )).scalars().all()
+    return {"devices": [{
+        "id": str(d.id),
+        "device": ua_service.describe(d.user_agent),
+        "showPreview": d.show_preview,
+        "since": d.created_at.isoformat() if d.created_at else None,
+    } for d in rows]}
+
+
+@router.delete("/security/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_device(
+    device_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отвязать устройство от уведомлений. Только своё: чужая подписка не ищется."""
+    from app.models import ChatPushSubscription
+    from sqlalchemy import delete as sa_delete
+
+    await db.execute(sa_delete(ChatPushSubscription).where(
+        ChatPushSubscription.id == device_id,
+        ChatPushSubscription.user_id == current_user.id))
+    await db.commit()
 
 
 @router.post("/change-password")

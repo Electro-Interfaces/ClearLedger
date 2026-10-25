@@ -2211,6 +2211,12 @@ async def create_all() -> None:
         # чтобы обновление не объявляло их новыми входящими.
         for statement in TASK_ASSIGNMENT_MIGRATION_DDL:
             await conn.execute(text(statement))
+        # v2.x: чем подписались на уведомления — для списка устройств в профиле.
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE chat_push_subscriptions ADD COLUMN IF NOT EXISTS user_agent VARCHAR(300)"
+            )
+        )
         # v2.x: выбор видов писем в личных настройках (NULL — получать всё).
         await conn.execute(
             __import__("sqlalchemy").text(

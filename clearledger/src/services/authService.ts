@@ -146,6 +146,33 @@ export async function changePassword(currentPassword: string, newPassword: strin
   if (r.access_token) api.setToken(r.access_token)
 }
 
+export interface LoginEvent {
+  action: string
+  label: string
+  at: string | null
+  ip: string | null
+  device: string | null
+  newPlace: boolean
+  failed: boolean
+}
+
+export interface PushDevice {
+  id: string
+  device: string
+  showPreview: boolean
+  since: string | null
+}
+
+/** Последние входы в учётную запись — свои, из журнала пространства. */
+export const myLogins = () => api.get<{ logins: LoginEvent[] }>('/api/auth/security/logins')
+
+/** Устройства, которым разрешены уведомления. */
+export const myDevices = () => api.get<{ devices: PushDevice[] }>('/api/auth/security/devices')
+
+/** Отвязать устройство от уведомлений. */
+export const revokeDevice = (id: string) =>
+  api.del<void>(`/api/auth/security/devices/${encodeURIComponent(id)}`)
+
 /** Запросить восстановление пароля — письмо со ссылкой на email. */
 export async function forgotPassword(email: string): Promise<void> {
   await api.post('/api/auth/forgot-password', { email })
