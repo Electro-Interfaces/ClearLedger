@@ -2,6 +2,9 @@
 from math import isfinite
 from sqlalchemy import and_, case
 
+# Контракт API рейтинга сети; видимую точность интерфейс выбирает отдельно.
+RATING_DIGITS = 2
+
 
 def observed_rating(value, reviews_count) -> float | None:
     """Технический ноль без отзывов не является пользовательской оценкой."""
