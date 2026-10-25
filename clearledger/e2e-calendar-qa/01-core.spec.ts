@@ -235,9 +235,8 @@ test('C-11 отмена: подтверждение, причина, запре�
     await подтверждение.getByLabel('Причина отмены').fill('QA: проверка отмены')
     await подтверждение.getByRole('button', { name: 'Подтвердить отмену' }).click()
     await expect(page.getByRole('dialog')).toHaveCount(0)
-    // Отменённая по умолчанию скрыта
-    await expect(page.getByRole('button', { name: new RegExp(название) })).toHaveCount(0)
-    await page.getByLabel('Отменённые').check()
+    // Будущая отменённая остаётся на виду зачёркнутой и с причиной: пропав молча,
+    // она отправила бы человека в пустую переговорную (src/lib/calendarVisibility.ts).
     const строка = page.getByRole('button', { name: new RegExp(название) })
     await expect(строка).toBeVisible()
     await expect(строка).toContainText('Отменена: QA: проверка отмены')
@@ -248,6 +247,30 @@ test('C-11 отмена: подтверждение, причина, запре�
     await expect(отменённая.getByRole('button', { name: 'Отменить встречу' })).toHaveCount(0)
     await снимок(page, 'c11-cancelled.png')
   })
+
+test('C-15 прошедшая отменённая скрыта и возвращается галочкой', async ({ page, request }) => {
+  const t = await токен(request, 'qa-cal-energy', 'organizer')
+  const company = пространства['qa-cal-energy'].companyId
+  const название = имя('прошлая отмена')
+  const создана = await апи(request, t, '/api/work/calendar', {
+    method: 'POST',
+    data: {
+      company_id: company, title: название,
+      starts_at: '2026-10-20T07:00:00Z', ends_at: '2026-10-20T08:00:00Z', visibility: 'private',
+    },
+  })
+  expect(создана.status(), await создана.text()).toBe(201)
+  const id = (await создана.json()).id
+  const отменена = await апи(request, t, `/api/work/calendar/${id}`, {
+    method: 'POST', data: { company_id: company, cancel: true, cancel_reason: 'QA: прошедшая' },
+  })
+  expect(отменена.ok(), await отменена.text()).toBeTruthy()
+
+  await page.goto(календарь({ calendarMode: 'day', date: '2026-10-20' }))
+  await expect(page.getByRole('button', { name: new RegExp(название) })).toHaveCount(0)
+  await page.getByLabel('Прошедшие отменённые').check()
+  await expect(page.getByRole('button', { name: new RegExp(название) })).toBeVisible()
+})
 
 test('C-12 прямая ссылка открывает карточку встречи', async ({ page, request }) => {
   const t = await токен(request, 'qa-cal-energy', 'organizer')
