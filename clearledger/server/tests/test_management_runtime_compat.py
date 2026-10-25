@@ -5,7 +5,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.main import app
 from app.routers import chat_router
-from test_management_api import headers, management_data  # noqa: F401
+from tests.test_management_api import headers, management_data  # noqa: F401
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 

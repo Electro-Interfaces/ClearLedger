@@ -16,7 +16,7 @@ from app.models import CalendarEvent, ChatParticipant, ChatRoom, Task
 from app.routers import management_router
 from app.services.management_config import ManagementConfig, RemoteSource
 from app.services.management_delegation import sign_access
-from test_management_api import headers, management_data  # noqa: F401 — общая SQL-фикстура
+from tests.test_management_api import headers, management_data  # noqa: F401 — общая SQL-фикстура
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 

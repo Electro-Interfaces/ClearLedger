@@ -13,8 +13,8 @@ from pydantic import ValidationError
 from app.routers import management_router
 from app.services import management_delegation as delegation, management_overview as aggregation
 from app.services.management_config import ManagementConfig, RemoteSource
-from test_management_api import headers, management_data  # noqa: F401
-from test_management_unit import signing_keys  # noqa: F401
+from tests.test_management_api import headers, management_data  # noqa: F401
+from tests.test_management_unit import signing_keys  # noqa: F401
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
