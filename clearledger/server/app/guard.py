@@ -4,7 +4,8 @@
 
 * `trap` — обращение к ловушке: путь, который ищут сканеры и которого у нас нет
   (`/.env`, `/.git`, `wp-*`, `phpmyadmin`, «выгрузить всё» в API). Честный клиент туда
-  не ходит никогда, поэтому адрес сразу блокируется на час.
+  обычно не ходит, поэтому адрес блокируется на час. Исключение: одиночный
+  запрос /api/openapi.json остаётся наблюдением; 5 за минуту — тревога и блок.
 * `bad_ua` — инструмент взлома в User-Agent (sqlmap, nuclei, nikto…): блок на час.
 * `probe` — шквал 404/401/403 с одного адреса: перебор адресов API или чужих токенов.
   От 40 в минуту — запись и тревога, от 120 — блок.
@@ -22,8 +23,9 @@
 воркерах пороги умножаются на их число. Блокировки — в базе, чтобы их видели все
 воркеры и экран «Безопасность»; процесс перечитывает их раз в 30 секунд.
 
-Адрес клиента — первый в `X-Forwarded-For`: кромка Traefik доверяет заголовку только от
-rproxy (с 07.10.2026), до этого весь трафик выглядел адресом rproxy.
+Адрес клиента передаёт nginx одним значением X-Forwarded-For после realip-проверки.
+Backend доступен только из внутренней сети стека; публиковать его порт напрямую
+нельзя без отдельной проверки доверия прокси.
 """
 from __future__ import annotations
 
@@ -69,7 +71,9 @@ _blocks_at = 0.0
 _MAX = 20_000
 
 KIND_LABEL = {
-    "trap": "обращение к ловушке (сканер ищет уязвимости)",
+    "trap": "обращение к ловушке (возможное сканирование)",
+    "api_schema_probe": "запрос описания API (наблюдение)",
+    "export_frequency": "частые небольшие выгрузки (наблюдение)",
     "bad_ua": "инструмент взлома в заголовке браузера",
     "probe": "шквал отказов 404/401/403 — перебор адресов API или токенов",
     "login_failed": "подбор пароля к учётной записи",
@@ -111,6 +115,25 @@ def is_trap(path: str) -> bool:
     return bool(TRAP_RE.search(path))
 
 
+SCHEMA_WINDOW, SCHEMA_ALERT = 60, 5
+_schema_probes: dict[str, deque[float]] = defaultdict(deque)
+
+
+async def record_trap(request: Request, *, path: str = "") -> None:
+    path = path or request.url.path
+    if path.rstrip("/").lower() == "/api/openapi.json" and not is_bad_ua(request.headers.get("user-agent")):
+        now = time.monotonic()
+        hits = _window(_schema_probes, client_ip(request), now, SCHEMA_WINDOW)
+        hits.append(now)
+        if len(hits) < SCHEMA_ALERT:
+            await record("api_schema_probe", request, path=path, hits=len(hits), alert=False)
+            return
+        await record("trap", request, path=path, hits=len(hits), block=True,
+                     detail=f"{len(hits)} запросов описания API за минуту")
+        return
+    await record("trap", request, path=path, block=True)
+
+
 def is_bad_ua(ua: str | None) -> bool:
     return bool(ua and BAD_UA_RE.search(ua))
 
@@ -138,17 +161,28 @@ async def blocked(ip: str) -> bool:
 
 async def record(kind: str, request: Request | None = None, *, ip: str | None = None, path: str = "",
                  hits: int = 1, detail: str | None = None, block: bool = False,
-                 who: str | None = None, company_id=None) -> None:
+                 who: str | None = None, company_id=None, alert: bool = True) -> None:
     """Записать эпизод, при необходимости заблокировать адрес и поднять тревогу.
 
     `who` — учётная запись (выгрузка, подбор пароля): эпизоды склеиваются по ней, а не
     по адресу. `company_id` — тревога уходит и админам этой компании, а не только
     суперадминам: своих людей они знают лучше (аудит 07.10.2026).
     """
-    ip = ip or (client_ip(request) if request else "-")
-    path = (path or (request.url.path if request else ""))[:200]
-    ua = (request.headers.get("user-agent") or "")[:300] if request else None
-    key = f"{kind}|{who or ip}"
+    from app.security_context import current
+    context = current.get()
+    ip = ip or (client_ip(request) if request else context.ip if context else "-")
+    path = (path or (request.url.path if request else context.path if context else ""))[:200]
+    ua = ((request.headers.get("user-agent") or "")[:300] if request
+          else context.user_agent if context else None)
+    # Личность и корреляция сохраняются в журнале, а не только в тексте уведомления.
+    trace = []
+    if who:
+        trace.append(f"user={who}")
+    if context:
+        trace.append(f"request_id={context.request_id}; peer={context.peer}")
+    detail = "; ".join([*trace, detail or ""])[:1000] or None
+    # Наблюдение не подавляет последующую тревогу, тревога — последующий блок.
+    key = f"{kind}|{company_id}|{who or ip}|{alert}|{block}"
     now = time.monotonic()
     if now - _said.get(key, -1e9) < EVENT_EVERY:
         return
@@ -170,7 +204,7 @@ async def record(kind: str, request: Request | None = None, *, ip: str | None = 
             await db.commit()
     except Exception:  # noqa: BLE001 — журнал не должен ронять ответ
         logger.warning("Эпизод не записан: %s %s", kind, ip, exc_info=True)
-    if now - _alerted.get(key, -1e9) >= ALERT_EVERY:
+    if alert and now - _alerted.get(key, -1e9) >= ALERT_EVERY:
         _alerted[key] = now
         text = (f"Безопасность: {KIND_LABEL.get(kind, kind)}{f'\nУчётная запись: {who}' if who else ''}"
                 f"\nАдрес: {ip}\nПуть: {path or '—'}"

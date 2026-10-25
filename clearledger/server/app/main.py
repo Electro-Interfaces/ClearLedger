@@ -383,7 +383,7 @@ async def rate_limit_public(request, call_next):
             await guard.record("bad_ua", request, block=True)
             return JSONResponse(status_code=403, content={"detail": "Forbidden"})
         if guard.is_trap(path):
-            await guard.record("trap", request, block=True)
+            await guard.record_trap(request)
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
     blocked, event = check(request)
@@ -797,3 +797,8 @@ async def debug_state(current_user=Depends(get_current_user)):
         "version": APP_VERSION,
         "companies": sorted(per, key=lambda x: x["slug"]),
     }
+
+
+# Внешний ASGI-слой: контекст сохраняется и для отказов охраны, и для выгрузок.
+from app.security_context import SecurityContextMiddleware
+app.add_middleware(SecurityContextMiddleware)

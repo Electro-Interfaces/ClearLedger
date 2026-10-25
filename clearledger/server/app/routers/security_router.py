@@ -35,7 +35,10 @@ async def trap(request: Request):
     что его заметили."""
     original = (request.headers.get("x-original-uri") or request.url.path)[:200]
     kind = "bad_ua" if request.headers.get("x-trap-reason") == "1" else "trap"
-    await guard.record(kind, request, path=original, block=True)
+    if kind == "trap":
+        await guard.record_trap(request, path=original)
+    else:
+        await guard.record(kind, request, path=original, block=True)
     return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
 
