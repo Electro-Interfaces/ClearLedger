@@ -1576,6 +1576,72 @@ MATRIX_MIGRATION_DDL = (
 )
 
 
+# Связи, которые объявлены в моделях, но до базы не доехали. create_all добавляет
+# ограничения и индексы только вместе с новой таблицей: если колонку завели позже
+# через ALTER, объявленные на ней ForeignKey и index=True остаются только в коде.
+# Нашла это сверка `alembic check` 25.10.2026 — на стенде rushydro обоих ключей и
+# обоих индексов не было, при чистых данных (ни одной висячей ссылки).
+MODEL_DRIFT_MIGRATION_DDL = (
+    # Индексы под связи, которых не было в базе.
+    "CREATE INDEX IF NOT EXISTS ix_task_work_items_doc_id ON task_work_items (doc_id)",
+    "CREATE INDEX IF NOT EXISTS ix_task_templates_doc_kind_id ON task_templates (doc_kind_id)",
+    # Девятнадцать связей, объявленных в моделях, но до базы не доехавших. Список снят
+    # сверкой `alembic check` и черновиком `alembic revision --autogenerate` на стенде
+    # rushydro 25.10.2026; висячих ссылок не было ни по одной из них.
+    #
+    # Создаём по одной и ошибку не роняем наверх: в другом пространстве данные могут
+    # правилу не отвечать, и тогда правильнее поднять приложение с предупреждением в
+    # журнале, чем не подняться вовсе.
+    """
+    DO $$
+    DECLARE
+        r record;
+    BEGIN
+        FOR r IN SELECT * FROM (VALUES
+            ('task_work_items', 'doc_id', 'doc_cards', 'id', 'CASCADE'),
+            ('task_templates', 'doc_kind_id', 'doc_kinds', 'id', 'SET NULL'),
+            ('chat_rooms', 'scope_object_id', 'service_locations', 'id', 'SET NULL'),
+            ('conf_sessions', 'conf_room_id', 'conf_rooms', 'id', 'SET NULL'),
+            ('contracts', 'organization_id', 'organizations', 'id', NULL),
+            ('contracts', 'counterparty_id', 'counterparties', 'id', NULL),
+            ('doc_cards', 'case_id', 'doc_cases', 'id', 'SET NULL'),
+            ('doc_kinds', 'default_case_id', 'doc_cases', 'id', 'SET NULL'),
+            ('doc_share_links', 'approval_id', 'doc_approvals', 'id', 'CASCADE'),
+            ('eco_approval_requests', 'task_id', 'tasks', 'id', 'CASCADE'),
+            ('edge_downlink', 'cancelled_by', 'users', 'id', 'SET NULL'),
+            ('ezs_sites', 'contract_id', 'contracts', 'id', 'SET NULL'),
+            ('ezs_sites', 'owner_user_id', 'users', 'id', 'SET NULL'),
+            ('ezs_sites', 'location_id', 'service_locations', 'id', 'SET NULL'),
+            ('ezs_sites', 'region_id', 'regions', 'id', 'SET NULL'),
+            ('gl_turnovers', 'kt_contract_id', 'contracts', 'id', NULL),
+            ('gl_turnovers', 'dt_contract_id', 'contracts', 'id', NULL),
+            ('gl_turnovers', 'dt_counterparty_id', 'counterparties', 'id', NULL),
+            ('gl_turnovers', 'kt_counterparty_id', 'counterparties', 'id', NULL)
+        ) AS t(tab, col, ref, refcol, ondel)
+        LOOP
+            IF to_regclass(r.tab) IS NOT NULL
+               AND to_regclass(r.ref) IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM pg_constraint
+                    WHERE conname = r.tab || '_' || r.col || '_fkey'
+                      AND conrelid = to_regclass(r.tab)
+               ) THEN
+                BEGIN
+                    EXECUTE format(
+                        'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I(%I)%s',
+                        r.tab, r.tab || '_' || r.col || '_fkey', r.col, r.ref, r.refcol,
+                        CASE WHEN r.ondel IS NULL THEN '' ELSE ' ON DELETE ' || r.ondel END);
+                    RAISE NOTICE 'связь создана: %.% -> %', r.tab, r.col, r.ref;
+                EXCEPTION WHEN others THEN
+                    RAISE WARNING 'связь %.% -> % не создана: %', r.tab, r.col, r.ref, SQLERRM;
+                END;
+            END IF;
+        END LOOP;
+    END $$;
+    """,
+)
+
+
 ACCOUNTING_REVISION_MIGRATION_DDL = (
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS document_id UUID",
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS revision INTEGER",
@@ -3559,6 +3625,10 @@ async def create_all() -> None:
         # v2.40: канонические ревизии L2 и ревизионный accounting-only outbox.
         # Legacy/fuel idem_key сохраняет прежнюю семантику отдельным predicate.
         for stmt in ACCOUNTING_REVISION_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # Связи из моделей, не доехавшие до базы (нашла сверка схемы).
+        for stmt in MODEL_DRIFT_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
         # Миграции магазина идут только там, где схема `edge` наполнена: её
