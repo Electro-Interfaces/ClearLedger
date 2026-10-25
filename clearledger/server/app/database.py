@@ -1751,6 +1751,59 @@ MODEL_DRIFT_MIGRATION_DDL = (
 )
 
 
+
+# ИНН контрагента: отсутствие записывается одним способом — NULL.
+# До этого колонка была NOT NULL, и «ИНН неизвестен» приходилось кодировать подручными
+# значениями: на стендах нашлись пустая строка (277 карточек) и '0' (16). Беда не в
+# неаккуратности, а в том, что проверкой «заполнен» такие значения не отличить от
+# настоящего ИНН, и уникальный индекс на колонку с 277 пустыми строками не поставить.
+# У своих организаций (organizations) ИНН остаётся обязательным — там он всегда есть.
+COUNTERPARTY_INN_MIGRATION_DDL = (
+    """
+    DO $$ BEGIN
+        IF EXISTS (
+            SELECT 1 FROM pg_attribute
+             WHERE attrelid = to_regclass('counterparties') AND attname = 'inn'
+               AND attnotnull AND NOT attisdropped
+        ) THEN
+            ALTER TABLE counterparties ALTER COLUMN inn DROP NOT NULL;
+            RAISE NOTICE 'counterparties.inn: снято NOT NULL';
+        END IF;
+    END $$;
+    """,
+    # Заполнители к NULL. '0' и '000…' не бывают ИНН: он всегда 10 или 12 значащих цифр.
+    "UPDATE counterparties SET inn = NULL WHERE inn = '' OR inn ~ '^0+$'",
+    # КПП страдает тем же: '0' вместо «нет значения».
+    "UPDATE counterparties SET kpp = NULL WHERE kpp = '' OR kpp ~ '^0+$'",
+    # Защита от повторных карточек. Ключ — ИНН вместе с КПП, а не один ИНН: у юрлица с
+    # филиалами ИНН один, а КПП разные, и в бухгалтерии это РАЗНЫЕ контрагенты. На стендах
+    # так и оказалось: из 23 групп с общим ИНН в gig 17 различаются КПП (семь отделений УФК
+    # по Санкт-Петербургу, филиалы ЛОЭСК, подразделения Леноблводоканала) — уникальность
+    # по одному ИНН объявила бы их дублями и запретила бы заводить филиал.
+    # У предпринимателей и самозанятых КПП нет, поэтому coalesce — тогда ключ сводится к ИНН.
+    # Ошибка не роняет старт: где настоящие дубли есть, в журнале останется предупреждение.
+    """
+    DO $$ BEGIN
+        -- Прежний индекс по одному ИНН, если он успел появиться, снимаем: модель неверна.
+        IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'uq_counterparties_company_inn') THEN
+            DROP INDEX uq_counterparties_company_inn;
+            RAISE NOTICE 'counterparties: снят индекс по одному ИНН (филиалы различаются КПП)';
+        END IF;
+        IF to_regclass('counterparties') IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = 'uq_counterparties_inn_kpp') THEN
+            BEGIN
+                CREATE UNIQUE INDEX uq_counterparties_inn_kpp
+                    ON counterparties (company_id, inn, coalesce(kpp, '')) WHERE inn IS NOT NULL;
+                RAISE NOTICE 'counterparties: включена защита от дублей по паре ИНН и КПП';
+            EXCEPTION WHEN unique_violation THEN
+                RAISE WARNING 'counterparties: есть карточки с одинаковыми ИНН и КПП, защита не включена: %', SQLERRM;
+            END;
+        END IF;
+    END $$;
+    """,
+)
+
+
 ACCOUNTING_REVISION_MIGRATION_DDL = (
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS document_id UUID",
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS revision INTEGER",
@@ -3730,6 +3783,10 @@ async def create_all() -> None:
         # v2.40: канонические ревизии L2 и ревизионный accounting-only outbox.
         # Legacy/fuel idem_key сохраняет прежнюю семантику отдельным predicate.
         for stmt in ACCOUNTING_REVISION_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # ИНН контрагента: одно соглашение об отсутствии и защита от дублей.
+        for stmt in COUNTERPARTY_INN_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
         # Деньги в numeric — после того, как таблицы и колонки заведены.
