@@ -135,6 +135,15 @@ export async function logoutAll(): Promise<void> {
   try { await api.post('/api/auth/logout-all') } finally { api.clearToken() }
 }
 
+/** Сменить свой пароль, зная текущий.
+ *  Сервер гасит прежние входы и сразу выдаёт токен этому окну — подменяем его,
+ *  иначе человек выпадет на форму входа ровно в момент смены. */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const r = await api.post<{ ok: boolean; access_token: string }>(
+    '/api/auth/change-password', { currentPassword, newPassword })
+  if (r.access_token) api.setToken(r.access_token)
+}
+
 /** Запросить восстановление пароля — письмо со ссылкой на email. */
 export async function forgotPassword(email: string): Promise<void> {
   await api.post('/api/auth/forgot-password', { email })

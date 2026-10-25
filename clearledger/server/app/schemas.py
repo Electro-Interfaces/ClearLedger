@@ -75,6 +75,16 @@ class ResetPasswordRequest(BaseModel):
     password: Password
 
 
+class ChangePasswordRequest(BaseModel):
+    """Смена своего пароля изнутри сеанса — человек помнит текущий.
+
+    Текущий пароль без правил длины: он задан когда-то и проверяется сверкой
+    с хэшем, а не на соответствие сегодняшнему требованию.
+    """
+    currentPassword: str = Field(min_length=1, max_length=200)
+    newPassword: Password
+
+
 class RegisterRequest(BaseModel):
     email: NormEmail
     password: Password

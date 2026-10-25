@@ -11,7 +11,7 @@
  * показывается превью, а на сервер уходит тем же «Сохранить».
  */
 import { useEffect, useRef, useState } from 'react'
-import { Camera, CornerDownLeft, Gauge, Loader2, Monitor, Moon, Sparkles, Sun, Trash2, User } from 'lucide-react'
+import { Camera, CornerDownLeft, Gauge, KeyRound, Loader2, LogOut, Monitor, Moon, Sparkles, Sun, Trash2, User } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { SearchPicker } from '@/components/tasks/SearchPicker'
@@ -29,6 +29,11 @@ import { useTheme, type ThemePreference } from '@/hooks/useTheme'
 import { useUiLevel, type UiLevel } from '@/hooks/useUiLevel'
 import { useSendMode, type SendMode } from '@/hooks/useSendMode'
 import * as chat from '@/services/chatService'
+import { changePassword, logoutAll } from '@/services/authService'
+import {
+  ОШИБКА_ДНЯ, подписьПояса, поясаПоСмещению,
+  ошибкаПароля, ошибкаФото, рабочийДеньВерен,
+} from '@/lib/profileRules'
 
 type Draft = {
   name: string
@@ -44,23 +49,6 @@ type Draft = {
   photo: File | null
   photoRemoved: boolean
 }
-
-/** Пояса России, в которых работают пространства. Список, а не свободный ввод:
- *  имя IANA руками не наберут, а «Moscow» вместо «Europe/Moscow» сервер отобьёт.
- *  Смещение в подписи — чтобы человек узнал свой пояс, не вспоминая его имени. */
-const ПОЯСА: { id: string; label: string }[] = [
-  { id: 'Europe/Kaliningrad', label: 'Калининград (UTC+2)' },
-  { id: 'Europe/Moscow', label: 'Москва, Санкт-Петербург (UTC+3)' },
-  { id: 'Europe/Samara', label: 'Самара (UTC+4)' },
-  { id: 'Asia/Yekaterinburg', label: 'Екатеринбург (UTC+5)' },
-  { id: 'Asia/Omsk', label: 'Омск (UTC+6)' },
-  { id: 'Asia/Krasnoyarsk', label: 'Красноярск (UTC+7)' },
-  { id: 'Asia/Irkutsk', label: 'Иркутск (UTC+8)' },
-  { id: 'Asia/Yakutsk', label: 'Якутск (UTC+9)' },
-  { id: 'Asia/Vladivostok', label: 'Владивосток (UTC+10)' },
-  { id: 'Asia/Magadan', label: 'Магадан (UTC+11)' },
-  { id: 'Asia/Kamchatka', label: 'Петропавловск-Камчатский (UTC+12)' },
-]
 
 /** Куда приходят уведомления о поручениях. Порядок — как на сервере
  *  (`notify.TASK_CHANNELS`), иначе сравнение черновика с профилем врёт. */
@@ -124,7 +112,12 @@ function CalendarDelegates({ companyId }: { companyId: string }) {
         <div key={d.id} className="flex items-center gap-2 text-sm">
           <span className="min-w-0 flex-1 truncate">{d.name}</span>
           <Button size="sm" variant="ghost" className="h-7 px-2 text-xs"
-            disabled={отозвать.isPending} onClick={() => отозвать.mutate(d.id)}>
+            disabled={отозвать.isPending}
+            onClick={() => {
+              if (window.confirm(`Забрать полномочие у ${d.name}? Встречи останутся, вести ваш календарь он больше не сможет.`)) {
+                отозвать.mutate(d.id)
+              }
+            }}>
             Забрать
           </Button>
         </div>
@@ -144,20 +137,24 @@ function CalendarDelegates({ companyId }: { companyId: string }) {
   )
 }
 
-/** Сегменты выбора — один язык на все настройки страницы. */
-function Segments<T extends string>({ value, onChange, options }: {
+/** Сегменты выбора — один язык на все настройки страницы.
+ *  Это выбор одного из нескольких, поэтому группа объявлена радиогруппой:
+ *  обычные кнопки не сообщают незрячему, что именно выбрано. */
+function Segments<T extends string>({ value, onChange, options, label }: {
   value: T
   onChange: (v: T) => void
   options: { value: T; label: string; icon: typeof Sun; hint: string }[]
+  label: string
 }) {
   return (
     <div className="space-y-2">
-      <div className="inline-flex rounded-lg border p-0.5">
+      <div role="radiogroup" aria-label={label} className="inline-flex rounded-lg border p-0.5">
         {options.map((o) => {
           const I = o.icon
           const active = o.value === value
           return (
-            <button key={o.value} type="button" onClick={() => onChange(o.value)}
+            <button key={o.value} type="button" role="radio" aria-checked={active}
+              onClick={() => onChange(o.value)}
               className={cn('flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors',
                 active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
               <I className="h-4 w-4" />
@@ -168,6 +165,94 @@ function Segments<T extends string>({ value, onChange, options }: {
       </div>
       <p className="text-xs text-muted-foreground">
         {options.find((o) => o.value === value)?.hint}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * Смена пароля изнутри сеанса.
+ *
+ * До этого пароль можно было поменять только через «забыли пароль» — то есть
+ * выйти и пойти в почту, имея на руках рабочий вход. Пункт меню при этом
+ * обещал «личные данные и пароль», а пароля на экране не было.
+ *
+ * Своя кнопка, а не общий «Сохранить»: пароль фиксируется отдельным действием
+ * и отдельным подтверждением, и смешивать его с черновиком телефонов нельзя.
+ */
+function PasswordBlock() {
+  const [текущий, setТекущий] = useState('')
+  const [новый, setНовый] = useState('')
+  const [повтор, setПовтор] = useState('')
+  const [занят, setЗанят] = useState(false)
+  const тронуто = !!(текущий || новый || повтор)
+  const ошибка = тронуто ? ошибкаПароля(текущий, новый, повтор) : null
+
+  async function сменить() {
+    const беда = ошибкаПароля(текущий, новый, повтор)
+    if (беда) { toast.error(беда); return }
+    setЗанят(true)
+    try {
+      await changePassword(текущий, новый)
+      setТекущий(''); setНовый(''); setПовтор('')
+      toast.success('Пароль изменён', {
+        description: 'На других устройствах придётся войти заново — здесь вход сохранён.',
+      })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось сменить пароль')
+    } finally {
+      setЗанят(false)
+    }
+  }
+
+  async function выйтиВезде() {
+    if (!window.confirm('Выйти на всех устройствах? Входить придётся заново везде, включая это окно.')) return
+    try { await logoutAll() } catch { /* токен уже снят */ }
+    window.location.assign('/login')
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="pers-pass-cur" className="text-xs font-normal text-muted-foreground">
+            Текущий пароль
+          </Label>
+          <Input id="pers-pass-cur" type="password" autoComplete="current-password"
+            value={текущий} onChange={(e) => setТекущий(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="pers-pass-new" className="text-xs font-normal text-muted-foreground">
+            Новый пароль
+          </Label>
+          <Input id="pers-pass-new" type="password" autoComplete="new-password"
+            value={новый} onChange={(e) => setНовый(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="pers-pass-rep" className="text-xs font-normal text-muted-foreground">
+            Ещё раз новый
+          </Label>
+          <Input id="pers-pass-rep" type="password" autoComplete="new-password"
+            value={повтор} onChange={(e) => setПовтор(e.target.value)} />
+        </div>
+      </div>
+      {ошибка && <p className="text-xs text-destructive">{ошибка}</p>}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" size="sm" disabled={!!ошибка || !тронуто || занят}
+          onClick={() => void сменить()}>
+          {занят && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+          <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+          Сменить пароль
+        </Button>
+        <Button type="button" variant="ghost" size="sm" className="text-destructive"
+          onClick={() => void выйтиВезде()}>
+          <LogOut className="mr-1.5 h-3.5 w-3.5" />
+          Выйти на всех устройствах
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Смена пароля гасит вход на других устройствах; это окно остаётся рабочим.
+        Если пароль мог утечь — сначала смените его, затем выйдите везде.
       </p>
     </div>
   )
@@ -227,7 +312,8 @@ export function PersonalSettings() {
 
   function выбратьФайл(file: File | null) {
     if (!file) return
-    if (!file.type.startsWith('image/')) { toast.error('Нужна картинка'); return }
+    const бедаФото = ошибкаФото(file)
+    if (бедаФото) { toast.error(бедаФото); return }
     if (preview) URL.revokeObjectURL(preview)
     setPreview(URL.createObjectURL(file))
     setDraft((d) => ({ ...d, photo: file, photoRemoved: false }))
@@ -236,6 +322,7 @@ export function PersonalSettings() {
   async function сохранить() {
     const имя = draft.name.trim()
     if (имя.length < 2) { toast.error('Имя слишком короткое'); return }
+    if (!рабочийДеньВерен(draft.workStart, draft.workEnd)) { toast.error(ОШИБКА_ДНЯ); return }
     setSaving(true)
     try {
       // Сначала серверное — если оно не пройдёт, локальные настройки не должны
@@ -273,6 +360,7 @@ export function PersonalSettings() {
     }
   }
 
+  const деньВерен = рабочийДеньВерен(draft.workStart, draft.workEnd)
   const фото = preview ?? (draft.photoRemoved ? null : user?.avatar_url ?? null)
 
   return (
@@ -283,9 +371,11 @@ export function PersonalSettings() {
           Личные настройки
         </CardTitle>
         <CardDescription>
-          Ваш профиль и то, как ведёт себя интерфейс лично у вас. Настройки
-          действуют во всех приложениях пространства; фото видно везде, где вы
-          появляетесь, — в чате, составе группы, обсуждении задачи.
+          Ваш профиль и то, как ведёт себя интерфейс лично у вас. Имя, фото, связь,
+          рабочее время и уведомления действуют во всех приложениях пространства и на
+          любом устройстве; оформление, режим и способ отправки — настройки этого
+          устройства. Фото видно везде, где вы появляетесь, — в чате, составе группы,
+          обсуждении задачи.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -327,7 +417,7 @@ export function PersonalSettings() {
         </div>
 
         {/* Связь — как с человеком связаться помимо пространства */}
-        <div className="space-y-3 border-t pt-5">
+        <div id="profile-contacts" className="scroll-mt-24 space-y-3 border-t pt-5">
           <div>
             <Label>Связь</Label>
             <p className="text-xs text-muted-foreground">
@@ -337,10 +427,12 @@ export function PersonalSettings() {
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label htmlFor="pers-mail" className="text-xs font-normal text-muted-foreground">
+              <span className="block text-xs font-normal text-muted-foreground">
                 Электронная почта
-              </Label>
-              <Input id="pers-mail" value={user?.email ?? ''} readOnly disabled />
+              </span>
+              <p id="pers-mail" className="flex h-9 items-center text-sm font-medium">
+                {user?.email || '—'}
+              </p>
               <p className="text-[11px] text-muted-foreground">Ею же вы входите — меняет администратор.</p>
             </div>
             <div className="space-y-1.5">
@@ -360,11 +452,24 @@ export function PersonalSettings() {
           </div>
         </div>
 
+        {/* Доступ к учётной записи. Стоит сразу за почтой: почта — это логин,
+            и пароль человек ищет рядом с ним, а не в конце страницы. */}
+        <div id="profile-security" className="scroll-mt-24 space-y-3 border-t pt-5">
+          <div>
+            <h3 className="text-sm font-medium">Безопасность</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Пароль от входа в пространство. Меняется здесь — выходить и ждать
+              письмо для этого не нужно.
+            </p>
+          </div>
+          <PasswordBlock />
+        </div>
+
         {/* Когда человека можно трогать. Настройка не косметическая: по ней
             планировщик решает, доставить регламентное сейчас или сдвинуть на
             утро. Пространство растянуто от Владивостока до Москвы, и «за сутки
             до срока» не бывает срочнее сна. */}
-        <div className="space-y-3 border-t pt-5">
+        <div id="profile-worktime" className="scroll-mt-24 space-y-3 border-t pt-5">
           <div>
             <h3 className="text-sm font-medium">Рабочее время</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -382,8 +487,12 @@ export function PersonalSettings() {
               <select id="pers-tz" value={draft.tz}
                 onChange={(e) => set('tz', e.target.value)}
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm">
-                {ПОЯСА.map((z) => (
-                  <option key={z.id} value={z.id}>{z.label}</option>
+                {поясаПоСмещению().map(({ offset, зоны }) => (
+                  <optgroup key={offset} label={`UTC+${offset}`}>
+                    {зоны.map((z) => (
+                      <option key={z.id} value={z.id}>{подписьПояса(z)}</option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </div>
@@ -399,14 +508,15 @@ export function PersonalSettings() {
                 Конец дня
               </Label>
               <Input id="pers-we" type="time" value={draft.workEnd}
-                onChange={(e) => set('workEnd', e.target.value)} />
+                aria-invalid={!деньВерен} onChange={(e) => set('workEnd', e.target.value)} />
             </div>
           </div>
+          {!деньВерен && <p className="text-xs text-destructive">{ОШИБКА_ДНЯ}</p>}
         </div>
 
         {/* Канал поручений выбирает сам человек: кто-то живёт в чате, кто-то в почте.
             Снять все галочки нельзя — поручение тогда не дошло бы никуда. */}
-        <div className="space-y-3 border-t pt-5">
+        <div id="profile-notifications" className="scroll-mt-24 space-y-3 border-t pt-5">
           <div>
             <h3 className="text-sm font-medium">Уведомления о поручениях</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -445,7 +555,8 @@ export function PersonalSettings() {
             <p className="mt-0.5 text-xs text-muted-foreground">
               Помощник сможет собирать, переносить и отменять ваши встречи и звать
               участников — от своего имени, с пометкой «от имени вас». Почты,
-              документов и записной книжки это не открывает.
+              документов и записной книжки это не открывает. Полномочие выдаётся и
+              забирается сразу, без кнопки «Сохранить».
             </p>
           </div>
           <CalendarDelegates companyId={company.id} />
@@ -494,9 +605,16 @@ export function PersonalSettings() {
         </div>
 
         {/* Оформление */}
-        <div className="space-y-2 border-t pt-5">
+        <div id="profile-appearance" className="scroll-mt-24 space-y-2 border-t pt-5">
+          <div>
+            <h3 className="text-sm font-medium">Настройки этого устройства</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Оформление, режим и способ отправки хранятся в этом браузере. На другом
+              компьютере или телефоне их нужно выбрать заново.
+            </p>
+          </div>
           <Label>Оформление</Label>
-          <Segments value={draft.theme} onChange={(v) => set('theme', v)} options={[
+          <Segments label="Оформление" value={draft.theme} onChange={(v) => set('theme', v)} options={[
             { value: 'light', label: 'Светлая', icon: Sun, hint: 'Всегда светлый экран.' },
             { value: 'dark', label: 'Тёмная', icon: Moon, hint: 'Всегда тёмный экран.' },
             { value: 'system', label: 'Как в системе', icon: Monitor, hint: 'Следовать настройке устройства — светлая днём, тёмная вечером, если так настроена система.' },
@@ -506,7 +624,7 @@ export function PersonalSettings() {
         {/* Режим работы */}
         <div className="space-y-2">
           <Label>Режим работы</Label>
-          <Segments value={draft.level} onChange={(v) => set('level', v)} options={[
+          <Segments label="Режим работы" value={draft.level} onChange={(v) => set('level', v)} options={[
             { value: 'simple', label: 'Простой', icon: Gauge, hint: 'На экранах остаётся то, что нужно каждый день. Ничего не отключается: где что-то убрано, видно, сколько именно и как открыть.' },
             { value: 'advanced', label: 'Все функции', icon: Sparkles, hint: 'Показывать всё сразу, включая редкие разделы и настройки.' },
           ]} />
@@ -515,7 +633,7 @@ export function PersonalSettings() {
         {/* Отправка сообщений */}
         <div className="space-y-2">
           <Label>Отправка сообщений</Label>
-          <Segments value={draft.send} onChange={(v) => set('send', v)} options={[
+          <Segments label="Отправка сообщений" value={draft.send} onChange={(v) => set('send', v)} options={[
             { value: 'enter', label: 'По Enter', icon: CornerDownLeft, hint: 'Enter отправляет, Shift+Enter переносит строку. Быстро для коротких реплик.' },
             { value: 'ctrlEnter', label: 'По Ctrl+Enter', icon: CornerDownLeft, hint: 'Enter переносит строку, отправляет Ctrl+Enter или кнопка. Удобно, когда пишете абзацами.' },
           ]} />
@@ -525,9 +643,12 @@ export function PersonalSettings() {
           </p>
         </div>
 
-        {/* Фиксация */}
-        <div className="flex items-center gap-2 border-t pt-4">
-          <Button type="button" onClick={сохранить} disabled={!dirty || saving}>
+        {/* Фиксация. Пока есть несохранённое — строка держится у нижнего края
+            окна: иначе человек правит телефон вверху, а кнопка ждёт его через
+            два экрана прокрутки. */}
+        <div className={cn('flex items-center gap-2 border-t pt-4',
+          dirty && 'sticky bottom-0 -mx-6 -mb-6 border-t bg-background/95 px-6 pb-4 backdrop-blur')}>
+          <Button type="button" onClick={сохранить} disabled={!dirty || saving || !деньВерен}>
             {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             Сохранить
           </Button>
@@ -535,7 +656,9 @@ export function PersonalSettings() {
             Отменить
           </Button>
           {dirty && !saving && (
-            <span className="text-xs text-muted-foreground">Есть несохранённые изменения</span>
+            <span className="text-xs text-muted-foreground">
+              {деньВерен ? 'Есть несохранённые изменения' : ОШИБКА_ДНЯ}
+            </span>
           )}
         </div>
       </CardContent>
