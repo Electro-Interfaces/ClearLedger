@@ -24,7 +24,7 @@ import { formatMonth } from '@/lib/formatDate'
 const nf = (n: number, d = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(n)
 
 const GROUPS = [
-  { key: 'none', label: 'Вся сеть' },
+  { key: 'none', label: 'Сумма контура' },
   { key: 'connector', label: 'По коннекторам' },
   { key: 'speed', label: 'Быстрые / медленные' },
   { key: 'location_class', label: 'Город / трасса' },
@@ -90,7 +90,7 @@ export function ChargeTrendPanel({ companyId, dateFrom, dateTo }: {
   // сказать об этом надо ровно тогда, когда расхождение действительно есть.
   const widerThanPeriod = Boolean(
     (dateFrom && months[0].period.slice(0, 7) < dateFrom.slice(0, 7))
-    || (dateTo && last.period.slice(0, 7) > dateTo.slice(0, 7)))
+    || (dateTo && months[months.length - 1].period.slice(0, 7) > dateTo.slice(0, 7)))
 
   return (
     <div ref={rootRef} className="space-y-4 p-6" data-export-meta={JSON.stringify([
