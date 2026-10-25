@@ -8,13 +8,14 @@
  *
  * Разворот строки показывает само окружение — с расстоянием, ценой и её датой.
  */
-import { useMemo, useRef, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Loader2, ChevronDown, ChevronRight } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCompany } from '@/contexts/CompanyContext'
+import { useFilters } from '@/contexts/FilterContext'
 import { StationLink } from '@/components/common/StationLink'
 import { PanelViewTabs } from '@/components/workspace/PanelViewTabs'
 import { SortTh } from '@/components/workspace/SortableTh'
@@ -74,7 +75,8 @@ function Neighbours({ row }: { row: MarketPositionRow }) {
     )
   }
   return (
-    <div className="px-4 py-2">
+    <div className="overflow-x-auto px-4 py-2">
+      <p className="mb-2 text-sm">Все соседи: {row.neighbours.length}. В медиане: {row.priceCoverage ?? 0}. Наша сеть показана для ориентира и в медиану не входит.</p>
       <table className="w-full text-xs"
         {...exportRows(`Соседи · ${row.name}`.slice(0, 28), [
           'Кто рядом', 'Оператор', 'Вид', 'Спрос', 'Расстояние, км', 'Портов',
@@ -121,7 +123,10 @@ function Neighbours({ row }: { row: MarketPositionRow }) {
               <td className="py-1 text-right tabular-nums">
                 {n.pricePerKwh != null ? nf1.format(n.pricePerKwh) : '—'}
               </td>
-              <td className="py-1 text-muted-foreground">{n.observedOn ?? 'не наблюдалась'}</td>
+              <td className="py-1 text-muted-foreground">{n.observedOn ?? 'не наблюдалась'}
+                <div>{n.priceStale ? 'Цена устарела' : n.includedInPrice ? 'Входит в медиану' : 'В медиану не входит'}</div>
+                <div>{n.currentType ?? 'Тип тока неизвестен'} · {n.maxPowerKw ?? '—'} кВт · {n.priceBasis ?? 'Основание неизвестно'}</div>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -171,16 +176,18 @@ export function MarketPositionPanel() {
 
 function MarketPositionTable() {
   const { companyId } = useCompany()
+  const { period, regionIds } = useFilters()
   const экран = useRef<HTMLDivElement>(null)
   const [radius, setRadius] = useState('5')
-  const [days, setDays] = useState('30')
+  const [currentType, setCurrentType] = useState('all')
+  const [minPower, setMinPower] = useState('0')
   const [q, setQ] = useState('')
   const [onlyRivals, setOnlyRivals] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
 
   const pos = useQuery({
-    queryKey: ['market-position', companyId, radius, days],
-    queryFn: () => getMarketPosition(companyId, { radius_km: Number(radius), days: Number(days) }),
+    queryKey: ['market-position', companyId, radius, period.from, period.to, regionIds, currentType, minPower],
+    queryFn: () => getMarketPosition(companyId, { radius_km: Number(radius), date_from: period.from, date_to: period.to, ...(currentType === 'all' ? {} : { current_type: currentType }), min_power: Number(minPower) }),
     enabled: !!companyId,
   })
 
@@ -230,6 +237,7 @@ function MarketPositionTable() {
 
   const all = pos.data?.objects ?? []
 
+  const stalePrices = all.reduce((n, r) => n + (r.stalePrices ?? 0), 0)
   const withRivals = all.filter((r) => r.rivals > 0).length
   const comparable = all.filter((r) => r.priceGapPct != null)
   const pricier = comparable.filter((r) => (r.priceGapPct ?? 0) > 5).length
@@ -237,7 +245,7 @@ function MarketPositionTable() {
   // Вывод экрана словами. Без покрытия он был бы враньём: «дороже рынка на четырёх
   // объектах» из шестисот — это про четыре объекта, а не про сеть.
   const verdict = comparable.length === 0
-    ? 'Сравнивать пока не с чем: у соседей нет наблюдаемых цен в рублях за киловатт-час.'
+    ? 'Свежих сопоставимых цен для вывода недостаточно. Прошлые наблюдения доступны в расшифровке.'
     : pricier > cheaper
       ? `Мы дороже рынка на ${pricier} объектах и дешевле на ${cheaper}.`
       : cheaper > 0
@@ -260,13 +268,13 @@ function MarketPositionTable() {
             <SelectItem value="25">Радиус 25 км</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={days} onValueChange={setDays}>
-          <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="30">Продажи 30 дн</SelectItem>
-            <SelectItem value="90">Продажи 90 дн</SelectItem>
-            <SelectItem value="365">Продажи год</SelectItem>
-          </SelectContent>
+        <Select value={currentType} onValueChange={setCurrentType}>
+          <SelectTrigger className="h-9 w-[150px] text-xs" aria-label="Тип зарядки рынка"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="all">Рынок: AC и DC</SelectItem><SelectItem value="AC">Рынок: AC</SelectItem><SelectItem value="DC">Рынок: DC</SelectItem></SelectContent>
+        </Select>
+        <Select value={minPower} onValueChange={setMinPower}>
+          <SelectTrigger className="h-9 w-[150px] text-xs" aria-label="Мощность рынка"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="0">Любая мощность</SelectItem><SelectItem value="50">От 50 кВт</SelectItem><SelectItem value="150">От 150 кВт</SelectItem></SelectContent>
         </Select>
         <button type="button" onClick={() => setOnlyRivals((v) => !v)}
           className={`rounded-md border px-2.5 py-1.5 text-xs transition-colors
@@ -278,11 +286,16 @@ function MarketPositionTable() {
         </span>
         <span data-export-ignore>
           <ExportButton title="Позиция"
-            subtitle={`радиус ${radius} км · продажи ${days} дн · ${rows.length} объектов`}
+            subtitle={`радиус ${radius} км · продажи ${period.from} — ${period.to} · ${rows.length} объектов`}
             getEl={() => экран.current} />
         </span>
       </div>
 
+      <div className="space-y-1 text-sm" role="note">
+        <p>Наши объекты — эксплуатационный реестр, включая объекты без координат. Продажи: {pos.data?.salesFrom} — {pos.data?.salesTo}.</p>
+        <p className="text-muted-foreground">{pos.data?.comparisonNote}</p>
+        {stalePrices > 0 && <p className="font-medium text-foreground">В окружении есть цены старше {pos.data?.priceMaxAgeDays} дней. Они исключены из медианы; обновите наблюдения перед тарифным решением.</p>}
+      </div>
       {/* Сначала вывод, потом данные, из которых он собран. */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
@@ -301,8 +314,7 @@ function MarketPositionTable() {
       {all.length > 0 && comparable.length === 0 && (
         <Card className="border-warning/40">
           <CardContent className="p-3 text-xs text-muted-foreground">
-            Сравнивать пока не с чем: у соседей нет наблюдаемых цен. Заведите точки рынка
-            и запишите по ним хотя бы одно ценовое наблюдение — колонка «Рынок» оживёт.
+            Нет свежих однозначных публичных цен в выбранном классе зарядки. Старые, временные и неоднозначные тарифы не используются для вывода; их можно проверить в расшифровке.
           </CardContent>
         </Card>
       )}
@@ -332,14 +344,17 @@ function MarketPositionTable() {
             {rows.map((r) => {
               const expanded = open === r.locationId
               return (
-                <>
-                  <tr key={r.locationId}
+                <Fragment key={r.locationId}>
+                  <tr
                     onClick={() => setOpen(expanded ? null : r.locationId)}
                     className="cursor-pointer border-t border-border/60 hover:bg-accent/30">
                     <td className="p-2">
                       <span className="flex items-center gap-1.5">
-                        {expanded ? <ChevronDown className="size-3.5 opacity-60" />
-                          : <ChevronRight className="size-3.5 opacity-60" />}
+                        <button type="button" className="flex size-9 shrink-0 items-center justify-center rounded hover:bg-accent"
+                          aria-label={`${expanded ? 'Скрыть' : 'Показать'} соседей: ${r.name}`} aria-expanded={expanded}
+                          onClick={e => { e.stopPropagation(); setOpen(expanded ? null : r.locationId) }}>
+                          {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                        </button>
                         <span className="font-medium text-foreground">
                           <StationLink station={r.locationId}>{r.name}</StationLink>
                         </span>
@@ -356,6 +371,7 @@ function MarketPositionTable() {
                     </td>
                     <td className="p-2 text-right tabular-nums">
                       {r.marketPricePerKwh != null ? nf1.format(r.marketPricePerKwh) : '—'}
+                      <div className="text-xs text-muted-foreground">{r.priceCoverage ?? 0} цен{r.marketObservedFrom ? ` · ${r.marketObservedFrom} — ${r.marketObservedTo}` : ' · нет свежих'}</div>
                     </td>
                     <td className="p-2 text-right"><GapCell gap={r.priceGapPct} /></td>
                     <td className="p-2 text-right tabular-nums">
@@ -370,7 +386,7 @@ function MarketPositionTable() {
                       <td colSpan={8}><Neighbours row={r} /></td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               )
             })}
           </tbody>
@@ -393,11 +409,13 @@ function MarketPositionTable() {
  */
 function MarketPositionPivot() {
   const { companyId } = useCompany()
+  const { period, regionIds } = useFilters()
   const [radius, setRadius] = useState('5')
-  const [days, setDays] = useState('30')
+  const [currentType, setCurrentType] = useState('all')
+  const [minPower, setMinPower] = useState('0')
   const pos = useQuery({
-    queryKey: ['market-position', companyId, radius, days],
-    queryFn: () => getMarketPosition(companyId, { radius_km: Number(radius), days: Number(days) }),
+    queryKey: ['market-position', companyId, radius, period.from, period.to, regionIds, currentType, minPower],
+    queryFn: () => getMarketPosition(companyId, { radius_km: Number(radius), date_from: period.from, date_to: period.to, ...(currentType === 'all' ? {} : { current_type: currentType }), min_power: Number(minPower) }),
     enabled: !!companyId,
   })
 
@@ -437,13 +455,13 @@ function MarketPositionPivot() {
             <SelectItem value="25">Радиус 25 км</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={days} onValueChange={setDays}>
-          <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="30">Продажи 30 дн</SelectItem>
-            <SelectItem value="90">Продажи 90 дн</SelectItem>
-            <SelectItem value="365">Продажи год</SelectItem>
-          </SelectContent>
+        <Select value={currentType} onValueChange={setCurrentType}>
+          <SelectTrigger className="h-9 w-[150px] text-xs" aria-label="Тип зарядки рынка"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="all">Рынок: AC и DC</SelectItem><SelectItem value="AC">Рынок: AC</SelectItem><SelectItem value="DC">Рынок: DC</SelectItem></SelectContent>
+        </Select>
+        <Select value={minPower} onValueChange={setMinPower}>
+          <SelectTrigger className="h-9 w-[150px] text-xs" aria-label="Мощность рынка"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="0">Любая мощность</SelectItem><SelectItem value="50">От 50 кВт</SelectItem><SelectItem value="150">От 150 кВт</SelectItem></SelectContent>
         </Select>
         <span className="text-xs text-muted-foreground">
           {строки.length} объектов · цена входит разрезом, а не мерой: сумма цен по

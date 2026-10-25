@@ -159,6 +159,7 @@ export function MarketLandscapePanel() {
 
   return (
     <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
+      <p className="text-sm text-muted-foreground">Внешний реестр сетевых точек с известным владельцем. Это охват наблюдений рынка, а не количество объектов нашего эксплуатационного реестра.</p>
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
