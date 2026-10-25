@@ -5238,10 +5238,12 @@ async def create_all() -> None:
             "DELETE FROM calendar_poll_votes v USING calendar_poll_votes d"
             " WHERE v.option_id = d.option_id AND v.guest_id = d.guest_id"
             "   AND v.guest_id IS NOT NULL AND v.id < d.id",
-            "CREATE UNIQUE INDEX IF NOT EXISTS calendar_poll_votes_user_uq"
-            " ON calendar_poll_votes (option_id, user_id) WHERE user_id IS NOT NULL",
-            "CREATE UNIQUE INDEX IF NOT EXISTS calendar_poll_votes_guest_uq"
-            " ON calendar_poll_votes (option_id, guest_id) WHERE guest_id IS NOT NULL",
+            # Индексы здесь НЕ создаём: ровно те же два частичных уникальных индекса
+            # (те же колонки, то же условие) заводит набор v2.80 выше под именами
+            # `uq_calendar_poll_vote_user` и `uq_calendar_poll_vote_guest`. `IF NOT
+            # EXISTS` проверяет имя, а не определение, поэтому второе объявление
+            # молча создавало ВТОРОЙ индекс: каждый голос обновлял оба. Чистка дублей
+            # голосов выше нужна и остаётся — она готовит данные для уникальности.
         ):
             await conn.execute(_sa.text(stmt))
 
