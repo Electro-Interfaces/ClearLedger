@@ -22,6 +22,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import * as workService from '@/services/workService'
 import type { CalendarEvent } from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
+import { видимаВКалендаре } from '@/lib/calendarVisibility'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { eventDaySegment, recurrenceTimes } from '@/lib/calendarLayout'
@@ -238,8 +239,8 @@ export function CalendarPage() {
   }
   if (!companyId) return null
 
-  const events = (eventsQ.data?.events ?? []).filter(e => e.status !== 'cancelled'
-    || new Date(e.ends_at) >= startOfDay(new Date()) || showCancelled || e.id === eventId)
+  const events = (eventsQ.data?.events ?? []).filter(e => видимаВКалендаре(e,
+    { сейчас: new Date(), показыватьПрошедшие: showCancelled, открытая: eventId }))
   const tasks = personal ? (tasksQ.data?.tasks ?? []).filter(t => !query || t.title.toLocaleLowerCase('ru').includes(query.toLocaleLowerCase('ru'))) : []
   const plan = personal && !query ? (planQ.data ?? {}) : {}
   const reminders = (personal ? remindersQ.data?.items ?? [] : [])

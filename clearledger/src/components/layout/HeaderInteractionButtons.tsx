@@ -21,6 +21,7 @@ import {
 import { isDemoMode } from '@/services/apiClient'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { useDocsApp } from '@/hooks/useDocsApp'
+import { usePulseMobileNav } from '@/pulse/usePulseMobileNav'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
 import { TaskAssignmentBadges } from '@/components/tasks/TaskAssignmentBadges'
@@ -56,6 +57,10 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
   const { interactionSection, toggleInteraction, unreadCounts, tasksOverdue } = useSupportContext()
   const [confBusy, setConfBusy] = useState(false)
   const tasksOn = useDocsApp()
+  // Чат, «Трек» и календарь на телефоне уже стоят внизу — крупной кнопкой под
+  // большим пальцем. Те же пилюли в шапке были вторым местом для одного действия
+  // (решение МАГа 06.09.2026), а место в мобильной шапке нужно имени экрана.
+  const дублируетПульт = usePulseMobileNav() ? 'hidden md:inline-flex' : ''
 
   // Быстрый созвон заводится тем же путём, что и назначенный: встреча в
   // календаре плюс строка в журнале «Конференций». Иначе созвон «на ходу»
@@ -123,12 +128,12 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
           рельсе и открывается доком. */}
       {tasksOn && (
         <Button variant="outline" size="sm" onClick={() => toggleInteraction('calendar')}
-          className={btnCls(interactionSection === 'calendar')} title="Календарь пространства">
+          className={`${дублируетПульт} ${btnCls(interactionSection === 'calendar')}`} title="Календарь пространства">
           <CalendarDays className="h-4 w-4" />
           <span className="hidden xl:inline">Календарь</span>
         </Button>
       )}
-      <Button variant="outline" size="sm" onClick={() => toggleInteraction('chat')} className={btnCls(interactionSection === 'chat')} title="Чаты пространства">
+      <Button variant="outline" size="sm" onClick={() => toggleInteraction('chat')} className={`${дублируетПульт} ${btnCls(interactionSection === 'chat')}`} title="Чаты пространства">
         <MessageCircle className="h-4 w-4" />
         <span className="hidden xl:inline">Чат</span>
         <Badge count={unreadCounts.chat} />
@@ -138,7 +143,7 @@ export function HeaderInteractionButtons({ conference = false }: { conference?: 
           реестры, маршруты, регламент — живёт приложением, и в него ведёт
           «Открыть Трек» из этого же окна. */}
       {tasksOn && (
-        <Button variant="outline" size="sm" onClick={() => toggleInteraction('tasks')} className={btnCls(interactionSection === 'tasks')} title={`Трек · новые назначения: ${unreadCounts.tasks} · просрочено: ${tasksOverdue}`} aria-label={`Трек · новые назначения: ${unreadCounts.tasks} · просрочено: ${tasksOverdue}`}>
+        <Button variant="outline" size="sm" onClick={() => toggleInteraction('tasks')} className={`${дублируетПульт} ${btnCls(interactionSection === 'tasks')}`} title={`Трек · новые назначения: ${unreadCounts.tasks} · просрочено: ${tasksOverdue}`} aria-label={`Трек · новые назначения: ${unreadCounts.tasks} · просрочено: ${tasksOverdue}`}>
           <ListChecks className="h-4 w-4" />
           <span className="hidden xl:inline">Трек</span>
           <TaskAssignmentBadges incoming={unreadCounts.tasks} overdue={tasksOverdue} />
