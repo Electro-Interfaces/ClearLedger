@@ -16,6 +16,17 @@
   }
 }
 
+/* Плашка «поставьте приложением» висит поверх правого нижнего угла и на широком
+   экране накрывает последние строки списка вместе с их действиями («…», отметка
+   выполнения) — проверка «Трека» 25.10.2026. Высоту плашка публикует сама в
+   `--pwa-install-height`; здесь она превращается в запас под содержимым.
+   Мобильная ветка ниже делает то же для нижней панели. */
+@media (min-width: 768px) {
+  html[data-pwa-install] [data-app-scroll] {
+    padding-bottom: calc(var(--pwa-install-height, 0px) + 0.75rem);
+  }
+}
+
 @media (max-width: 767px) {
   html[data-pwa-install="compact"] [data-mobile-shell] {
     padding-bottom: max(10rem, calc(env(safe-area-inset-bottom) + 9rem));

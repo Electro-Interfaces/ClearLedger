@@ -559,7 +559,7 @@ export function DocsLayout() {
         {/* Настройка — про справочники: у них нет ни периода, ни объектов, и
             кнопка «Создать» на экране видов заводит документ, а не вид. */}
         {route !== '/docs/setup' && <DocsScopeBar personal={route === '/docs/work'} />}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div data-app-scroll className="min-h-0 flex-1 overflow-y-auto">
           <Outlet />
         </div>
       </div>

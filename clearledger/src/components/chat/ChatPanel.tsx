@@ -21,6 +21,7 @@ import {
   Folder, AtSign, Loader2, Paperclip, Camera, Search as SearchIcon,
   Shield, ShieldOff, UserMinus, LogOut, Bell, BellOff, Forward, MapPin, ClipboardList, Workflow,
   Mail, Palette, Smile, Images, Volume2, VolumeX, Mic, BarChart3, WifiOff,
+  ShieldAlert,
   CheckSquare, Copy, Square, ListPlus,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -1540,6 +1541,15 @@ function CreateChatDialog({ open, onOpenChange, onCreated, scopeProduct }: {
             ))}
             {users.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Никого не найдено</p>}
           </div>
+          {/* Группа здесь получается сама — как только выбран второй человек. Пока
+              об этом не сказано, окно читается как «только личный чат», и рабочую
+              группу идут заводить в приложение «Чаты пространства», куда рядовой
+              сотрудник не ходит (проверка 25.10.2026). */}
+          {!isGroup && (
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              Выберите двоих и больше — получится группа с названием
+            </p>
+          )}
           <Button className="mt-3 w-full" disabled={!ids.length || busy} onClick={create}>
             {busy && <Loader2 className="mr-1 size-3.5 animate-spin" />}
             {isGroup ? 'Создать группу' : 'Открыть чат'}
@@ -1867,6 +1877,18 @@ function ChatBubble({
             <div className={cn('mb-0.5 flex items-center gap-1 text-[11px]',
               isOwn ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
               <Mail className="size-3" /> письмом
+            </div>
+          )}
+
+          {/* Писал не участник разговора: администратор контейнера входит в чат по
+              надзору, и его реплика не должна выглядеть репликой своего человека —
+              иначе в группе не понять, откуда взялся собеседник (решение МАГа
+              25.10.2026). Личную переписку двоих он не ведёт вовсе — сервер отвечает
+              отказом. */}
+          {message.externalSource === 'supervision' && (
+            <div className={cn('mb-0.5 flex items-center gap-1 text-[11px]',
+              isOwn ? 'text-primary-foreground/80' : 'text-amber-600')}>
+              <ShieldAlert className="size-3" /> надзор платформы
             </div>
           )}
 
