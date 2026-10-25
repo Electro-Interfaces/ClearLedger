@@ -39,10 +39,30 @@ config.set_main_option("sqlalchemy.url", get_settings().database_url)
 CORE_SCHEMA = "core"
 
 
+def include_object(obj, name, type_, reflected, compare_to):  # noqa: ANN001, ARG001
+    """Сравнивать только то, чем владеют модели Ядра.
+
+    В схеме `core` живут и таблицы, которые заводит не Ядро: налоговые справочники и
+    часть договорных таблиц приходят SQL-скриптами поставки (`scripts/tax-*.sql`,
+    `schema-sync.sql`), что-то создаёт ручной DDL. Без этого фильтра сверка объявляет
+    их лишними вместе со всеми их индексами — 150 «лишних индексов» и 30 «лишних
+    таблиц» в первом прогоне были именно этим шумом, в котором не видно настоящих
+    расхождений.
+
+    Правило простое: таблица есть в базе, но её нет в моделях — не предмет сверки.
+    Для таблиц, которыми модели владеют, сверка остаётся строгой: типы, значения по
+    умолчанию, индексы и связи.
+    """
+    if type_ == "table" and reflected and compare_to is None:
+        return False
+    return True
+
+
 def _configure(connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
+        include_object=include_object,
         version_table="alembic_version",
         version_table_schema=CORE_SCHEMA,
         include_schemas=False,

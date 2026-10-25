@@ -1582,36 +1582,61 @@ MATRIX_MIGRATION_DDL = (
 # Нашла это сверка `alembic check` 25.10.2026 — на стенде rushydro обоих ключей и
 # обоих индексов не было, при чистых данных (ни одной висячей ссылки).
 MODEL_DRIFT_MIGRATION_DDL = (
+    # Индексы под связи, которых не было в базе.
     "CREATE INDEX IF NOT EXISTS ix_task_work_items_doc_id ON task_work_items (doc_id)",
-    """
-    DO $$ BEGIN
-        IF to_regclass('task_work_items') IS NOT NULL
-           AND to_regclass('doc_cards') IS NOT NULL
-           AND NOT EXISTS (
-               SELECT 1 FROM pg_constraint
-                WHERE conname = 'task_work_items_doc_id_fkey'
-                  AND conrelid = to_regclass('task_work_items')
-           ) THEN
-            ALTER TABLE task_work_items
-              ADD CONSTRAINT task_work_items_doc_id_fkey
-              FOREIGN KEY (doc_id) REFERENCES doc_cards(id) ON DELETE CASCADE;
-        END IF;
-    END $$;
-    """,
     "CREATE INDEX IF NOT EXISTS ix_task_templates_doc_kind_id ON task_templates (doc_kind_id)",
+    # Девятнадцать связей, объявленных в моделях, но до базы не доехавших. Список снят
+    # сверкой `alembic check` и черновиком `alembic revision --autogenerate` на стенде
+    # rushydro 25.10.2026; висячих ссылок не было ни по одной из них.
+    #
+    # Создаём по одной и ошибку не роняем наверх: в другом пространстве данные могут
+    # правилу не отвечать, и тогда правильнее поднять приложение с предупреждением в
+    # журнале, чем не подняться вовсе.
     """
-    DO $$ BEGIN
-        IF to_regclass('task_templates') IS NOT NULL
-           AND to_regclass('doc_kinds') IS NOT NULL
-           AND NOT EXISTS (
-               SELECT 1 FROM pg_constraint
-                WHERE conname = 'task_templates_doc_kind_id_fkey'
-                  AND conrelid = to_regclass('task_templates')
-           ) THEN
-            ALTER TABLE task_templates
-              ADD CONSTRAINT task_templates_doc_kind_id_fkey
-              FOREIGN KEY (doc_kind_id) REFERENCES doc_kinds(id) ON DELETE SET NULL;
-        END IF;
+    DO $$
+    DECLARE
+        r record;
+    BEGIN
+        FOR r IN SELECT * FROM (VALUES
+            ('task_work_items', 'doc_id', 'doc_cards', 'id', 'CASCADE'),
+            ('task_templates', 'doc_kind_id', 'doc_kinds', 'id', 'SET NULL'),
+            ('chat_rooms', 'scope_object_id', 'service_locations', 'id', 'SET NULL'),
+            ('conf_sessions', 'conf_room_id', 'conf_rooms', 'id', 'SET NULL'),
+            ('contracts', 'organization_id', 'organizations', 'id', NULL),
+            ('contracts', 'counterparty_id', 'counterparties', 'id', NULL),
+            ('doc_cards', 'case_id', 'doc_cases', 'id', 'SET NULL'),
+            ('doc_kinds', 'default_case_id', 'doc_cases', 'id', 'SET NULL'),
+            ('doc_share_links', 'approval_id', 'doc_approvals', 'id', 'CASCADE'),
+            ('eco_approval_requests', 'task_id', 'tasks', 'id', 'CASCADE'),
+            ('edge_downlink', 'cancelled_by', 'users', 'id', 'SET NULL'),
+            ('ezs_sites', 'contract_id', 'contracts', 'id', 'SET NULL'),
+            ('ezs_sites', 'owner_user_id', 'users', 'id', 'SET NULL'),
+            ('ezs_sites', 'location_id', 'service_locations', 'id', 'SET NULL'),
+            ('ezs_sites', 'region_id', 'regions', 'id', 'SET NULL'),
+            ('gl_turnovers', 'kt_contract_id', 'contracts', 'id', NULL),
+            ('gl_turnovers', 'dt_contract_id', 'contracts', 'id', NULL),
+            ('gl_turnovers', 'dt_counterparty_id', 'counterparties', 'id', NULL),
+            ('gl_turnovers', 'kt_counterparty_id', 'counterparties', 'id', NULL)
+        ) AS t(tab, col, ref, refcol, ondel)
+        LOOP
+            IF to_regclass(r.tab) IS NOT NULL
+               AND to_regclass(r.ref) IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM pg_constraint
+                    WHERE conname = r.tab || '_' || r.col || '_fkey'
+                      AND conrelid = to_regclass(r.tab)
+               ) THEN
+                BEGIN
+                    EXECUTE format(
+                        'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I(%I)%s',
+                        r.tab, r.tab || '_' || r.col || '_fkey', r.col, r.ref, r.refcol,
+                        CASE WHEN r.ondel IS NULL THEN '' ELSE ' ON DELETE ' || r.ondel END);
+                    RAISE NOTICE 'связь создана: %.% -> %', r.tab, r.col, r.ref;
+                EXCEPTION WHEN others THEN
+                    RAISE WARNING 'связь %.% -> % не создана: %', r.tab, r.col, r.ref, SQLERRM;
+                END;
+            END IF;
+        END LOOP;
     END $$;
     """,
 )
