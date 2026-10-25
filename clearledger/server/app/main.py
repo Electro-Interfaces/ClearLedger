@@ -362,15 +362,6 @@ app = FastAPI(
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 @app.middleware("http")
 async def rate_limit_public(request, call_next):
     """Ограничение частоты на публичных ручках — до всякой работы с базой.
@@ -449,6 +440,22 @@ async def organization_context(request, call_next):
             org = None      # мусор в заголовке — это «все», а не ошибка запроса
     set_request_organization(org)
     return await call_next(request)
+
+
+# CORS — последним, то есть САМЫМ ВНЕШНИМ слоем.
+#
+# Starlette применяет middleware в обратном порядке добавления. Когда CORS стоял
+# первым, охрана и лимит частоты отвечали 403/429 уже внутри него, и их ответ
+# уходил без `Access-Control-Allow-Origin`: браузер гасил его, а человек видел
+# «Failed to fetch» вместо «Слишком много попыток». На одном домене это незаметно,
+# но фронт не обязан жить на одном домене с API (проверка календаря 25.10.2026).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # Роутеры — все под /api
