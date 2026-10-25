@@ -7979,6 +7979,9 @@ class ChatPushSubscription(Base):
     # человека: рабочий ноутбук и личный телефон — разные обстоятельства.
     show_preview: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,
                                                server_default=text("true"))
+    # Чем подписались: «Chrome · Windows». Нужен, чтобы человек в своём профиле
+    # узнал устройство и мог отвязать чужое, не гадая по строке endpoint.
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

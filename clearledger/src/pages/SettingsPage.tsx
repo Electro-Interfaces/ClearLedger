@@ -99,8 +99,10 @@ export function SettingsPage() {
     setSettings((prev) => ({ ...prev, stations }))
   }
 
+  // Узкая колонка оставалась узкой и на широком мониторе: карточка личных
+  // настроек раскладывается в две колонки начиная с xl, и ей нужно место.
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-2xl xl:max-w-6xl">
       <h1 className="text-2xl font-bold">Настройки</h1>
 
       {/* Личное — первым: человек пришёл сюда за своими настройками, а не за

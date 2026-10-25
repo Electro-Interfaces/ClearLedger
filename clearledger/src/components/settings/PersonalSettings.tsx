@@ -19,7 +19,7 @@ import * as workService from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
@@ -32,8 +32,10 @@ import * as chat from '@/services/chatService'
 import { changePassword, logoutAll } from '@/services/authService'
 import {
   ВИДЫ_ПИСЕМ, ОШИБКА_ДНЯ, подписьПояса, порядокВидовПисем, поясаПоСмещению,
-  ошибкаПароля, ошибкаФото, рабочийДеньВерен,
+  ошибкаПароля, ошибкаФото, рабочийДеньВерен, телефонНеРаспознан,
 } from '@/lib/profileRules'
+import { AvatarCropper } from './AvatarCropper'
+import { SecurityHistory } from './SecurityHistory'
 
 type Draft = {
   name: string
@@ -60,6 +62,7 @@ const КАНАЛЫ: { id: string; label: string; hint: string }[] = [
   { id: 'email', label: 'Почта', hint: 'Письмом на адрес, которым вы входите.' },
 ]
 const КАНАЛЫ_ПО_УМОЛЧАНИЮ = ['secretary', 'email']
+const ПОДСКАЗКА_НОМЕРА = 'Похоже на неполный номер: по нему не дозвонятся из карточки и не найдут поиском.'
 const порядокКаналов = (list: string[]) => КАНАЛЫ.map((k) => k.id).filter((id) => list.includes(id))
 
 /** Кем человек приходится этому пространству. Заполняет администратор. */
@@ -286,6 +289,9 @@ export function PersonalSettings() {
   })
   const [draft, setDraft] = useState<Draft>(исходный)
   const [preview, setPreview] = useState<string | null>(null)
+  // Выбранный файл сначала попадает в рамку кадрирования и только потом —
+  // в черновик: круглый аватар обрезал снимки по центру вслепую.
+  const [кадрируем, setКадрируем] = useState<File | null>(null)
 
   // Профиль приезжает асинхронно, а черновик собирается при первом рендере —
   // до его прихода в нём стоят умолчания. Пока человек ничего не трогал,
@@ -332,10 +338,16 @@ export function PersonalSettings() {
     if (!file) return
     const бедаФото = ошибкаФото(file)
     if (бедаФото) { toast.error(бедаФото); return }
+    setКадрируем(file)
+  }
+
+  /** Готовый квадрат из рамки кадрирования — в черновик, как раньше файл. */
+  function принятьКадр(file: File) {
     if (preview) URL.revokeObjectURL(preview)
     setPreview(URL.createObjectURL(file))
     setТронут(true)
     setDraft((d) => ({ ...d, photo: file, photoRemoved: false }))
+    setКадрируем(null)
   }
 
   async function сохранить() {
@@ -391,10 +403,10 @@ export function PersonalSettings() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <h2 data-slot="card-title" className="flex items-center gap-2 font-semibold leading-none">
           <User className="h-5 w-5" />
           Личные настройки
-        </CardTitle>
+        </h2>
         <CardDescription>
           Ваш профиль и то, как ведёт себя интерфейс лично у вас. Имя, фото, связь,
           рабочее время и уведомления действуют во всех приложениях пространства и на
@@ -404,8 +416,13 @@ export function PersonalSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* На широком экране карточка занимала узкую колонку, а справа пустовала
+            половина экрана: девять блоков тянулись одной простынёй на три
+            прокрутки. Колонки включаются только с xl — на ноутбуке и телефоне
+            порядок остаётся прежним, одностолбцовым. */}
+        <div className="xl:columns-2 xl:gap-10 [&>div]:xl:mb-6">
         {/* Фото и имя */}
-        <div className="flex items-start gap-4">
+        <div className="mb-6 break-inside-avoid flex items-start gap-4 xl:mb-0">
           <input ref={fileRef} type="file" accept="image/*" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0] ?? null; e.target.value = ''; выбратьФайл(f) }} />
           <button type="button" onClick={() => fileRef.current?.click()}
@@ -442,12 +459,13 @@ export function PersonalSettings() {
         </div>
 
         {/* Связь — как с человеком связаться помимо пространства */}
-        <div id="profile-contacts" className="scroll-mt-24 space-y-3 border-t pt-5">
+        <div id="profile-contacts" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
           <div>
-            <Label>Связь</Label>
+            <h3 className="text-sm font-medium">Связь</h3>
             <p className="text-xs text-muted-foreground">
               Эти сведения видят участники пространства, когда нужно с вами связаться
-              напрямую. Заполняете вы сами.
+              напрямую. Заполняете вы сами; номер сохраняется в едином виде — так по
+              нему находят и звонят из карточек.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -465,21 +483,25 @@ export function PersonalSettings() {
                 Мобильный
               </Label>
               <Input id="pers-mob" value={draft.mobile} maxLength={40} inputMode="tel"
+                aria-invalid={телефонНеРаспознан(draft.mobile)}
                 onChange={(e) => set('mobile', e.target.value)} placeholder="+7 900 000-00-00" />
+              {телефонНеРаспознан(draft.mobile) && <p className="text-[11px] text-amber-600 dark:text-amber-500">{ПОДСКАЗКА_НОМЕРА}</p>}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="pers-off" className="text-xs font-normal text-muted-foreground">
                 Городской
               </Label>
               <Input id="pers-off" value={draft.office} maxLength={40} inputMode="tel"
+                aria-invalid={телефонНеРаспознан(draft.office)}
                 onChange={(e) => set('office', e.target.value)} placeholder="+7 812 000-00-00, доб. 123" />
+              {телефонНеРаспознан(draft.office) && <p className="text-[11px] text-amber-600 dark:text-amber-500">{ПОДСКАЗКА_НОМЕРА}</p>}
             </div>
           </div>
         </div>
 
         {/* Доступ к учётной записи. Стоит сразу за почтой: почта — это логин,
             и пароль человек ищет рядом с ним, а не в конце страницы. */}
-        <div id="profile-security" className="scroll-mt-24 space-y-3 border-t pt-5">
+        <div id="profile-security" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
           <div>
             <h3 className="text-sm font-medium">Безопасность</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -488,13 +510,14 @@ export function PersonalSettings() {
             </p>
           </div>
           <PasswordBlock />
+          <SecurityHistory />
         </div>
 
         {/* Когда человека можно трогать. Настройка не косметическая: по ней
             планировщик решает, доставить регламентное сейчас или сдвинуть на
             утро. Пространство растянуто от Владивостока до Москвы, и «за сутки
             до срока» не бывает срочнее сна. */}
-        <div id="profile-worktime" className="scroll-mt-24 space-y-3 border-t pt-5">
+        <div id="profile-worktime" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
           <div>
             <h3 className="text-sm font-medium">Рабочее время</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -541,7 +564,7 @@ export function PersonalSettings() {
 
         {/* Канал поручений выбирает сам человек: кто-то живёт в чате, кто-то в почте.
             Снять все галочки нельзя — поручение тогда не дошло бы никуда. */}
-        <div id="profile-notifications" className="scroll-mt-24 space-y-3 border-t pt-5">
+        <div id="profile-notifications" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
           <div>
             <h3 className="text-sm font-medium">Уведомления о поручениях</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -574,7 +597,7 @@ export function PersonalSettings() {
             поток ответов по чужим задачам лечился только полным отключением
             почты — вместе с «вам поручено». Сводка дня живёт здесь же: для
             человека это такое же письмо в его ящик, а не отдельная подписка. */}
-        <div id="profile-email" className="scroll-mt-24 space-y-3 border-t pt-5">
+        <div id="profile-email" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
           <div>
             <h3 className="text-sm font-medium">Что присылать на почту</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -613,7 +636,7 @@ export function PersonalSettings() {
             способом получить доступ без ведома того, чей он. Это именно
             полномочие, а не доступ к учётной записи: помощник действует от
             своего имени, и в журнале видно обоих. */}
-        <div className="space-y-3 border-t pt-5">
+        <div className="mb-6 break-inside-avoid space-y-3 border-t pt-5 xl:mb-0">
           <div>
             <h3 className="text-sm font-medium">Кто ведёт мой календарь</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -627,9 +650,9 @@ export function PersonalSettings() {
         </div>
 
         {/* Место в пространстве — сведения администратора, не личное дело */}
-        <div className="space-y-3 border-t pt-5">
+        <div className="mb-6 break-inside-avoid space-y-3 border-t pt-5 xl:mb-0">
           <div>
-            <Label>Место в пространстве</Label>
+            <h3 className="text-sm font-medium">Место в пространстве</h3>
             <p className="text-xs text-muted-foreground">
               Кем вы здесь являетесь и что вам открыто. Эти сведения ведёт
               администратор пространства — если что-то указано неверно, обратитесь к нему.
@@ -669,7 +692,7 @@ export function PersonalSettings() {
         </div>
 
         {/* Оформление */}
-        <div id="profile-appearance" className="scroll-mt-24 space-y-2 border-t pt-5">
+        <div id="profile-appearance" className="mb-6 break-inside-avoid scroll-mt-24 space-y-2 border-t pt-5 xl:mb-0">
           <div>
             <h3 className="text-sm font-medium">Настройки этого устройства</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -707,6 +730,8 @@ export function PersonalSettings() {
           </p>
         </div>
 
+        </div>
+
         {/* Фиксация. Пока есть несохранённое — строка держится у нижнего края
             окна: иначе человек правит телефон вверху, а кнопка ждёт его через
             два экрана прокрутки. */}
@@ -728,6 +753,7 @@ export function PersonalSettings() {
           )}
         </div>
       </CardContent>
+      <AvatarCropper file={кадрируем} onCancel={() => setКадрируем(null)} onReady={принятьКадр} />
     </Card>
   )
 }
