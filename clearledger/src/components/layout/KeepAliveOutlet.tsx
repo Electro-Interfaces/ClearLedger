@@ -86,7 +86,7 @@ export function KeepAliveOutlet() {
 
   // Нетабуемый путь (напр. 404) — рендерим напрямую, без keep-alive.
   if (!resolved) {
-    return <div className="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 pt-4 pb-12">{outlet}</div>
+    return <div data-app-scroll className="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 pt-4 pb-12">{outlet}</div>
   }
 
   // Рендерим: закреплённые (смонтированные) + текущую; активная — живьём.
@@ -106,7 +106,7 @@ export function KeepAliveOutlet() {
           : mounted.get(k)!
         return (
           <div key={renderKey} className={cn('absolute inset-0', active ? 'block' : 'hidden')} aria-hidden={!active}>
-            <div className={entry.workspace
+            <div data-app-scroll={entry.workspace ? undefined : ''} className={entry.workspace
               ? 'h-full min-h-0 overflow-hidden'
               : 'h-full min-h-0 overflow-y-auto px-4 md:px-6 pt-4 pb-12'}>
               <LocationContext.Provider value={entry.locationCtx}>
