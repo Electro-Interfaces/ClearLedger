@@ -139,3 +139,25 @@ async def test_record_observation_does_not_suppress_alert_or_block(monkeypatch):
     await asyncio.sleep(0)
     assert "8.8.4.4" in guard._blocks
     assert "user=test@example.invalid" in db.add.call_args_list[0].args[0].detail
+
+
+@pytest.mark.asyncio
+async def test_real_application_guard_and_context(monkeypatch):
+    from app.main import app
+    guard._schema_probes.clear()
+    monkeypatch.setattr(guard, "blocked", AsyncMock(return_value=False))
+    record = AsyncMock()
+    monkeypatch.setattr(guard, "record", record)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/openapi.json")
+        assert response.status_code == 404
+        assert len(response.headers["x-request-id"]) == 32
+        assert record.call_args.args[0] == "api_schema_probe"
+        assert record.call_args.kwargs["alert"] is False
+        for _ in range(4):
+            response = await client.get("/api/openapi.json")
+        assert record.call_args.args[0] == "trap"
+        assert record.call_args.kwargs["block"] is True
+        response = await client.get("/api/config")
+        assert response.status_code == 404
+        assert record.call_args.kwargs["block"] is True
