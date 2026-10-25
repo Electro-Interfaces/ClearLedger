@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -1071,6 +1072,84 @@ def project_reporting_stage(model=EzsSite):
     return case((and_(model.stage.in_(STAGE_ORDER), model.workspace_data["scenario"]["stage"].astext == "done"), "completed"), else_=model.stage)
 
 
+# Московский пояс плана: срок связанной работы — календарная дата, а не момент.
+_STEP_TZ = timezone(timedelta(hours=3))
+
+
+async def next_steps(db: AsyncSession, company_id, user, sites: list[EzsSite]) -> dict[str, dict[str, Any]]:
+    """Следующий шаг строки реестра: ручной, связанная работа или ожидание.
+
+    Отборы «Ждём внешних» и «Просрочен следующий шаг» считают внешнее ожидание и
+    связанное поручение (`_risk_conditions`), а строка показывала только ручной
+    `next_action` — и весь отобранный список стоял с прочерками: 53 строки «ждём
+    внешних» без единого признака, чего ждём и до какой даты (проверка 25.10.2026).
+    Порядок источников тот же, что у «Ближайшего результата» карточки
+    (`ezs_lifecycle._nearest_result`), чтобы строка и карточка не расходились.
+    """
+    from fastapi import HTTPException
+    from app.services.work_links import readable_entity
+
+    out: dict[str, dict[str, Any]] = {}
+    for s in sites:
+        data = s.workspace_data or {}
+        ref = data.get("next_ref")
+        if ref and user is not None:
+            kind, _, eid = ref.partition(":")
+            try:
+                row = await readable_entity(db, company_id, user, kind, uuid.UUID(eid))
+            except (HTTPException, ValueError):
+                # Названия чужой работы в реестре не показываем — только факт связи.
+                out[str(s.id)] = {"text": "Связанная работа", "due": None, "source": "link"}
+                continue
+            if row.status in ("done", "executed"):
+                out[str(s.id)] = {"text": f"{row.title} — результат готов",
+                                  "due": None, "source": kind}
+                continue
+            due = row.due_at.astimezone(_STEP_TZ).date().isoformat() if row.due_at else None
+            out[str(s.id)] = {"text": row.title, "due": due, "source": kind}
+            continue
+        wait = data.get("external_wait") or {}
+        if wait.get("waiting_for"):
+            out[str(s.id)] = {"text": f"Ожидание: {wait['waiting_for']}",
+                              "due": wait.get("follow_up"), "source": "wait"}
+            continue
+        if (s.next_action or "").strip():
+            out[str(s.id)] = {"text": s.next_action, "due": s.next_action_due, "source": "manual"}
+    return out
+
+
+# Сортировка реестра: порядок считает БД, иначе «первый по сроку» оказывается
+# первым лишь на загруженной странице (проверка 25.10.2026: по «Срок» ↑ наверх
+# вставал 07.09 при 04.09 в выборке из 244 проектов).
+_DECISION_RANK = {"do_now": 0, "unblock": 1, "option": 2, "drop": 3, "need_data": 4}
+
+
+def _sort_expression(key: str, owner_name):
+    S = EzsSite
+    if key == "projectNo":
+        return S.project_no
+    if key == "title":
+        return func.coalesce(func.nullif(S.title, ""), S.address, S.full_address)
+    if key == "kind":
+        return func.coalesce(S.kind, "new_build")
+    if key == "placeKind":
+        return S.place_kind
+    if key == "stage":
+        # По порядку воронки, а не по алфавиту кода: «Лид» раньше «Реализации».
+        return case({st: i for i, st in enumerate(ALL_STAGES)}, value=S.stage, else_=99)
+    if key == "phase":
+        return case({st: i for i, st in enumerate(ALL_STAGES)}, value=S.stage, else_=99)
+    if key == "owner":
+        return owner_name
+    if key == "nextAction":
+        return func.coalesce(func.nullif(S.next_action, ""),
+                             S.workspace_data["external_wait"]["waiting_for"].astext)
+    if key == "due":
+        return func.coalesce(func.nullif(S.next_action_due, ""),
+                             S.workspace_data["external_wait"]["follow_up"].astext)
+    return None
+
+
 def next_step_overdue_sql(alias="ezs_sites"):
     if alias not in ("ezs_sites", "a", "s"):
         raise ValueError("Неизвестный источник проекта")
@@ -1258,7 +1337,8 @@ async def list_sites(
     risk: str | None = None, node: str | None = None,
     kind: str | None = None, place_kind: str | None = None,
     without_kind: str | None = None,
-    page: int = 1, page_size: int = 100,
+    sort: str | None = None, direction: str = "asc",
+    page: int = 1, page_size: int = 100, user=None,
 ) -> dict[str, Any]:
     from app.models import User
 
@@ -1301,21 +1381,48 @@ async def list_sites(
             + func.coalesce(S.city, "") + " " + func.coalesce(S.owner, "") + " "
             + func.coalesce(S.install_place, "")).like(like))
     total = int((await db.execute(select(func.count()).select_from(S).where(*conds))).scalar_one() or 0)
-    rows = (await db.execute(
-        select(S, func.coalesce(User.name, User.email))
-        .outerjoin(User, User.id == S.owner_user_id).where(*conds)
-        .order_by(func.coalesce(S.region_norm, S.region).nulls_last(), S.city.nulls_last(), S.id)
-        .offset((page - 1) * page_size).limit(page_size)
-    )).all()
+    owner_name = func.coalesce(User.name, User.email)
+    base = select(S, owner_name).outerjoin(User, User.id == S.owner_user_id).where(*conds)
+    # Порядок по умолчанию — география: список читают по регионам и городам.
+    default_order = (func.coalesce(S.region_norm, S.region).nulls_last(), S.city.nulls_last(), S.id)
+    desc = direction == "desc"
     from app.services.ezs_site_analysis import verdicts
     from app.services.ezs_site_work import exit_texts
-    decisions = await verdicts(db, company_id, [s for s, _ in rows])
+
+    decisions: dict[str, Any] = {}
+    if sort == "decision":
+        # Вердикт считается в Python, в SQL его нет. Чтобы сортировка всё равно
+        # относилась ко всему отбору, а не к странице, считаем его для выборки
+        # целиком и режем страницу уже после упорядочивания.
+        every = (await db.execute(base.order_by(*default_order))).all()
+        decisions = await verdicts(db, company_id, [s for s, _ in every])
+        every.sort(key=lambda r: (
+            _DECISION_RANK.get((decisions.get(str(r[0].id)) or {}).get("quadrant"), 9),
+            r[0].project_no or ""), reverse=desc)
+        rows = every[(page - 1) * page_size: page * page_size]
+    else:
+        expr = _sort_expression(sort, owner_name) if sort else None
+        # Пустое значение всегда внизу — в обе стороны: иначе первый экран займут
+        # строки, про которые ничего не известно (правило SortableTh).
+        order = ((expr.desc().nulls_last(),) if desc else (expr.asc().nulls_last(),)) + default_order \
+            if expr is not None else default_order
+        rows = (await db.execute(
+            base.order_by(*order).offset((page - 1) * page_size).limit(page_size))).all()
+        decisions = await verdicts(db, company_id, [s for s, _ in rows])
     # У старых пауз причина только в событии перехода — показываем её в строке.
     texts = await exit_texts(db, [s for s, _ in rows if s.stage in ("archive", "on_hold")])
+    steps = await next_steps(db, company_id, user, [s for s, _ in rows])
     items = []
-    for s, owner_name in rows:
+    for s, owner in rows:
         row = _site_out(s)
-        row.update({"ownerName": owner_name, "nextAction": s.next_action,
+        step = steps.get(str(s.id)) or {}
+        row.update({"ownerName": owner,
+                    # Шаг строки — тот же, что в карточке: ручной, связанная
+                    # работа или внешнее ожидание. `nextAction` остаётся ручным
+                    # полем: по нему правят проект, и подменять его нельзя.
+                    "nextStep": step.get("text"), "nextStepDue": step.get("due"),
+                    "nextStepSource": step.get("source"),
+                    "nextAction": s.next_action,
                     "nextActionDue": s.next_action_due,
                     "lastTouchAt": s.last_touch_at.isoformat() if s.last_touch_at else None,
                     "decision": decisions.get(str(s.id)),

@@ -878,5 +878,17 @@
      читается как ошибка данных. */
   table { break-inside: auto; }
   tr, .rounded-lg { break-inside: avoid; }
+  /* Версия документа для листа: на экране её нет, при печати она заменяет
+     страницу реестра целиком. Экран показывает сотню строк и прокрутку вбок —
+     на бумаге и то и другое превращается в обрезанный отчёт. */
+  .print-only { display: block !important; }
+  .print-only table { width: 100%; font-size: 10px; }
+  .print-only th, .print-only td {
+    padding: 2px 4px; vertical-align: top; word-break: break-word;
+    border-bottom: 1px solid #e5e7eb;
+  }
   @page { margin: 12mm; size: A4 landscape; }
 }
+
+/* Печатная версия экрана на дисплее не показывается. */
+.print-only { display: none; }

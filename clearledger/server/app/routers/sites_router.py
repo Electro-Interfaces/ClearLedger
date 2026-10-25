@@ -82,18 +82,26 @@ async def list_sites(
     node: str | None = Query(None, description="узел маршрута: ezs_contract_approval и т. п."),
     kind: str | None = Query(None), place_kind: str | None = Query(None),
     without_kind: str | None = Query(None, description="исключить вид работ: реестр стройки без интеграций"),
+    sort: Literal["projectNo", "title", "decision", "kind", "placeKind", "phase",
+                  "stage", "owner", "nextAction", "due"] | None = Query(None),
+    direction: Literal["asc", "desc"] = Query("asc"),
     page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=2000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Список площадок с фильтрами. `risk` раскрывает цифры обзора портфеля
     (без ответственного, без шага, просрочки ТП и поставок, застрявшие);
-    `node` отбирает по узлу маршрута — «у кого сейчас работа»."""
+    `node` отбирает по узлу маршрута — «у кого сейчас работа».
+
+    `sort`/`direction` упорядочивают весь отбор, а не загруженную страницу:
+    реестр постраничный, и сортировка на клиенте отвечала «что горит» по
+    случайной сотне строк."""
     cid = await assert_company_member(company_id, user, db)
     return await ezs_sites.list_sites(db, cid, stage=stage, region=region, search=search,
                                       owner_id=owner_id, overdue=overdue, risk=risk,
                                       node=node, kind=kind, place_kind=place_kind,
                                       without_kind=without_kind,
-                                      page=page, page_size=page_size)
+                                      sort=sort, direction=direction,
+                                      page=page, page_size=page_size, user=user)
 
 
 @router.get("/meta/suggestions")
@@ -474,11 +482,16 @@ async def changes_overview(
 @router.get("/tech-connections")
 async def tech_connections(
     company_id: str = Query(...),
+    include_closed: bool = Query(False, description="вместе с отклонёнными и замороженными проектами"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Реестр техприсоединений по всем проектам: статусы, сроки, просрочки."""
+    """Реестр техприсоединений по проектам в работе: статусы, сроки, просрочки.
+
+    Отклонённые и замороженные проекты по умолчанию не считаются: их заявки
+    давали 70 строк из 79 и 3,6 млн ₽ в плитке «стоимость подключений», то есть
+    свод отвечал про мёртвые площадки (проверка 25.10.2026)."""
     cid = await assert_company_member(company_id, user, db)
-    return await ezs_project.tech_connections_report(db, cid)
+    return await ezs_project.tech_connections_report(db, cid, include_closed=include_closed)
 
 
 @router.get("/phase-durations")
@@ -517,6 +530,7 @@ async def export_report(
     node: str | None = Query(None), kind: str | None = Query(None),
     place_kind: str | None = Query(None), without_kind: str | None = Query(None),
     history_days: int = Query(90, ge=1, le=3650, description="портфель: глубина листа «История», дней"),
+    include_closed: bool = Query(False, description="присоединение: вместе с отклонёнными и замороженными"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Выгрузка экрана в xlsx: воронка, приоритеты, бюджет, учёт, ТП, оборудование."""
@@ -537,6 +551,8 @@ async def export_report(
         data = await fn(db, cid, site_ids=[it["id"] for it in listed["items"]], user=user, history_days=history_days)
     elif report == "portfolio":
         data = await fn(db, cid, user=user, history_days=history_days)
+    elif report == "tech-connections":
+        data = await fn(db, cid, include_closed=include_closed)
     else:
         data = await fn(db, cid)
     # След выгрузки реестров проектов (аудит 07.10.2026).
@@ -562,6 +578,7 @@ async def equipment_report(
 @router.get("/tech-connections/by-operator")
 async def tech_connections_by_operator(
     company_id: str = Query(...),
+    include_closed: bool = Query(False, description="вместе с отклонёнными и замороженными проектами"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Присоединения по сетевым организациям: сроки, стоимость, отказы.
@@ -570,7 +587,7 @@ async def tech_connections_by_operator(
     без ответа «у кого» — бесполезная средняя по больнице.
     """
     cid = await assert_company_member(company_id, user, db)
-    return await ezs_project.tech_connections_by_operator(db, cid)
+    return await ezs_project.tech_connections_by_operator(db, cid, include_closed=include_closed)
 
 
 @router.get("/costs/report")
