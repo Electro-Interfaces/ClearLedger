@@ -41,6 +41,7 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("/api/auth/login", "auth"),
     ("/api/auth/forgot-password", "auth"),
     ("/api/auth/reset-password", "auth"),
+    ("/api/auth/change-password", "auth"),
     ("/api/auth/register", "auth"),
     ("/api/invitations/accept", "invite"),
     ("/api/doc-share", "public_doc"),
