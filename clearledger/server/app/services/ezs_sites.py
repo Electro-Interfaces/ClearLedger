@@ -1087,7 +1087,22 @@ async def next_steps(db: AsyncSession, company_id, user, sites: list[EzsSite]) -
     (`ezs_lifecycle._nearest_result`), чтобы строка и карточка не расходились.
     """
     from fastapi import HTTPException
+    from app.models import EzsProject
     from app.services.work_links import readable_entity
+
+    # Шаг площадки и шаг проекта — два разных поля. «План работ» читает проекты,
+    # реестр — площадки, и 39 активных проектов стояли в реестре с прочерком,
+    # хотя в плане у них есть шаг и срок (приёмка 26.10.2026, 1.2.801).
+    по_проекту: dict[uuid.UUID, tuple[str, str | None]] = {}
+    if sites:
+        rows = (await db.execute(
+            select(EzsProject.site_id, EzsProject.next_action, EzsProject.next_action_due)
+            .where(EzsProject.site_id.in_([s.id for s in sites]),
+                   EzsProject.closed_on.is_(None),
+                   func.coalesce(EzsProject.next_action, "") != "")
+            .order_by(EzsProject.site_id, EzsProject.created_at.desc()))).all()
+        for site_id, action, due in rows:
+            по_проекту.setdefault(site_id, (action, due))
 
     out: dict[str, dict[str, Any]] = {}
     for s in sites:
@@ -1115,6 +1130,10 @@ async def next_steps(db: AsyncSession, company_id, user, sites: list[EzsSite]) -
             continue
         if (s.next_action or "").strip():
             out[str(s.id)] = {"text": s.next_action, "due": s.next_action_due, "source": "manual"}
+            continue
+        шаг = по_проекту.get(s.id)
+        if шаг:
+            out[str(s.id)] = {"text": шаг[0], "due": шаг[1], "source": "project"}
     return out
 
 
@@ -1163,6 +1182,11 @@ def next_step_overdue_sql(alias="ezs_sites"):
             and 'doc:' || w.id::text = {alias}.workspace_data->>'next_ref'
             and w.status not in ('executed', 'archived', 'cancelled') and w.due_at < now())
         or {alias}.workspace_data->'external_wait'->>'follow_up' < to_char(current_date, 'YYYY-MM-DD')
+        or ({alias}.next_action is null
+            and {alias}.workspace_data->>'next_ref' is null
+            and exists (select 1 from ezs_projects p where p.site_id = {alias}.id
+                and p.closed_on is null and coalesce(p.next_action, '') <> ''
+                and p.next_action_due < to_char(current_date, 'YYYY-MM-DD')))
     )"""
 
 
