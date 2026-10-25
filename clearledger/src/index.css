@@ -95,6 +95,7 @@
   --color-sidebar-ring: hsl(var(--sidebar-ring));
   --color-success: hsl(var(--success));
   --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
   --color-error: hsl(var(--error));
   --color-accent-blue: hsl(var(--accent-blue));
   --color-accent-purple: hsl(var(--accent-purple));
@@ -215,6 +216,7 @@
     /* Status colors */
     --success: 152 69% 31%;
     --warning: 45 93% 47%;
+    --warning-foreground: 32 90% 28%;
     --error: 0 43% 44%;
 
     /* Layout */
@@ -297,6 +299,7 @@
        значения стоят в агенте станции: палитра одна на два места. */
     --success: 152 58% 45%;
     --warning: 42 92% 58%;
+    --warning-foreground: 42 92% 68%;
     --error: 0 72% 62%;
 
     /* Shadows */
@@ -878,5 +881,17 @@
      читается как ошибка данных. */
   table { break-inside: auto; }
   tr, .rounded-lg { break-inside: avoid; }
+  /* Версия документа для листа: на экране её нет, при печати она заменяет
+     страницу реестра целиком. Экран показывает сотню строк и прокрутку вбок —
+     на бумаге и то и другое превращается в обрезанный отчёт. */
+  .print-only { display: block !important; }
+  .print-only table { width: 100%; font-size: 10px; }
+  .print-only th, .print-only td {
+    padding: 2px 4px; vertical-align: top; word-break: break-word;
+    border-bottom: 1px solid #e5e7eb;
+  }
   @page { margin: 12mm; size: A4 landscape; }
 }
+
+/* Печатная версия экрана на дисплее не показывается. */
+.print-only { display: none; }

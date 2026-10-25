@@ -59,6 +59,7 @@ import { ProjectTrackTab } from './ProjectTrackTab'
 import { ProjectRoadmapTab } from './ProjectRoadmapTab'
 import { useOpenProject } from './useOpenProject'
 import { formatDate } from '@/lib/formatDate'
+import { plural } from '@/lib/textUtils'
 import { IntegrationGantt } from './IntegrationGantt'
 import { StationGantt } from './StationGantt'
 import { IntegrationPassport, IntegrationChecklist, IntegrationDocuments, IntegrationWorkPlan, IntegrationAccountingFields, IntegrationPartnerContacts } from './IntegrationProjectPanels'
@@ -1571,7 +1572,8 @@ export function PassportTab({ site, companyId, onDone }: { site: SiteDetail; com
         <p className="text-xs text-muted-foreground">
           Изменённые поля перестают обновляться из файла — в них истина ваша, а не выгрузки.
           {wantedCount > 0 && (
-            <> {' '}Подсвечено то, чего ждёт стадия «{site.stageLabel}»: {wantedCount} графы.</>
+            <> {' '}Подсвечено то, чего ждёт стадия «{site.stageLabel}»: {wantedCount}{' '}
+              {plural(wantedCount, 'графа', 'графы', 'граф')}.</>
           )}
         </p>
         <Button size="sm" className="h-8 text-sm" disabled={!dirty || m.isPending} onClick={() => m.mutate()}>
@@ -2061,7 +2063,7 @@ export function EquipmentTab({ site, companyId, onDone }: {
                 </td>
                 <td className="px-2 py-1.5 text-muted-foreground">{e.supplier ?? '—'}</td>
                 <td className={`px-2 py-1.5 font-mono ${e.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground'}`}>
-                  {e.suppliedDate ? `\u2713 ${e.suppliedDate}` : (e.dueDate ?? '—')}
+                  {e.suppliedDate ? `\u2713 ${formatDate(e.suppliedDate)}` : (e.dueDate ? formatDate(e.dueDate) : '—')}
                 </td>
                 <td className="px-2 py-1.5 text-right font-mono">{e.price != null ? nf0.format(e.price) : '—'}</td>
                 <td className="px-2 py-1.5">
@@ -3123,9 +3125,12 @@ function Metric({ label, value, warn, source }: {
 
 /* ── Вкладка «История» ──────────────────────────────────────────────────── */
 
+// Подписи те же, что в выгрузках и PDF (`server/app/services/project_report.py`):
+// коды `result` и `decision` оставались непереведёнными и стояли в одном ряду с
+// «Правкой» и «Прогнозом» — различить их было нельзя (проверка 25.10.2026).
 const KIND_LABEL: Record<string, string> = {
   stage: 'Стадия', touch: 'Касание', note: 'Заметка', edit: 'Правка', import: 'Импорт', gate: 'Гейт',
-  doc: 'Документ', forecast: 'Прогноз',
+  doc: 'Документ', forecast: 'Прогноз', result: 'Результат', decision: 'Решение', system: 'Система',
 }
 
 export function HistoryTab({ site, companyId }: { site: SiteDetail; companyId: string }) {

@@ -159,18 +159,18 @@ export function MarketLandscapePanel() {
 
   return (
     <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
-      <p className="text-sm text-muted-foreground">Внешний реестр сетевых точек с известным владельцем. Это охват наблюдений рынка, а не количество объектов нашего эксплуатационного реестра.</p>
+      <p className="text-sm text-muted-foreground">Внешний реестр сетевых точек с известным оператором. Это охват наблюдений рынка, а не количество объектов нашего эксплуатационного реестра.</p>
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
             <Swords className="size-4 text-primary" aria-hidden />
             {ours
-              ? `Мы ${ours.sharePct} % среди сетей с известным владельцем: ${nf.format(ours.sites)} точек в ${nf.format(ours.citiesCount ?? 0)} городах.`
+              ? `Мы ${ours.sharePct} % среди сетей с известным оператором: ${nf.format(ours.sites)} точек в ${nf.format(ours.citiesCount ?? 0)} населённых пунктах.`
               : `На рынке ${t?.networks ?? 0} сетей.`}
           </span>
           {(t?.unnamedSites ?? 0) > 0 && (
-            <span className="text-xs text-warning">
-              Ещё {nf.format(t!.unnamedSites!)} точек без названного владельца в долю не вошли.
+            <span className="text-xs text-warning-foreground">
+              Ещё {nf.format(t!.unnamedSites!)} точек без названного оператора в долю не вошли.
             </span>
           )}
           <span className="text-xs text-muted-foreground">
@@ -195,7 +195,7 @@ export function MarketLandscapePanel() {
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
           <table className="w-full text-xs"
             {...exportRows('Расклад сил', [
-              'Сеть', 'Мы', 'Точек', 'Доля, %', 'Городов', 'Округов', 'Модель', 'Штаб-квартира',
+              'Сеть', 'Мы', 'Точек', 'Доля, %', 'Нас. пунктов', 'Округов', 'Модель', 'Штаб-квартира',
               'Средняя мощность, кВт', 'Медиана цены, ₽/кВт·ч',
             ], rows.map((r) => [
               r.name, r.isOurs ? 'мы' : null, r.sites, r.sharePct, r.citiesCount, r.districts,
@@ -206,7 +206,7 @@ export function MarketLandscapePanel() {
                 <SortTh sortKey="name" sort={sort} onSort={toggle}>Сеть</SortTh>
                 <SortTh sortKey="sites" sort={sort} onSort={toggle} align="right">Точек</SortTh>
                 <SortTh sortKey="share" sort={sort} onSort={toggle} align="right">Доля</SortTh>
-                <SortTh sortKey="cities" sort={sort} onSort={toggle} align="right">Городов</SortTh>
+                <SortTh sortKey="cities" sort={sort} onSort={toggle} align="right">Нас. пунктов</SortTh>
                 {!региональный && <SortTh sortKey="districts" sort={sort} onSort={toggle} align="right">Округов</SortTh>}
                 <SortTh sortKey="model" sort={sort} onSort={toggle}>Модель</SortTh>
                 {!региональный && <SortTh sortKey="base" sort={sort} onSort={toggle}>Штаб-квартира</SortTh>}
@@ -252,7 +252,7 @@ export function MarketLandscapePanel() {
             платформы. Колонка «под чужим именем» и показывает такие точки: с их
             владельцами и говорят об интеграции.
             {(t?.ownerUnclear ?? 0) > 0 && (
-              <span className="ml-1 text-warning">
+              <span className="ml-1 text-warning-foreground">
                 У {nf.format(t!.ownerUnclear)} точек владелец пока унаследован от
                 платформы и не подтверждён — разбор в «Источниках и свежести».
               </span>
@@ -293,7 +293,7 @@ export function MarketLandscapePanel() {
                     <td className="p-2 text-right"><Num v={r.operatedSelf} /></td>
                     <td className="p-2 text-right">
                       {r.operatedByOthers > 0 ? (
-                        <span className="tabular-nums text-warning">
+                        <span className="tabular-nums text-warning-foreground">
                           {nf.format(r.operatedByOthers)}
                         </span>
                       ) : <span className="text-muted-foreground">—</span>}
@@ -483,7 +483,7 @@ export function MarketLandscapePanel() {
                   <td className="p-2 text-right">
                     {r.appRating == null ? <span className="text-muted-foreground">нет данных</span> : (
                       <span className={`tabular-nums ${r.appRating >= 4 ? 'text-success'
-                        : r.appRating < 2.5 ? 'text-warning' : ''}`}>
+                        : r.appRating < 2.5 ? 'text-warning-foreground' : ''}`}>
                         {nf1.format(r.appRating)}
                       </span>
                     )}
@@ -537,7 +537,7 @@ export function MarketLandscapePanel() {
                     <td className="p-2 font-mono">{r.ogrn ?? '—'}</td>
                     <td className="p-2 text-muted-foreground">{r.director ?? '—'}</td>
                     <td className="p-2">
-                      <span className={r.legalTrusted ? 'text-success' : 'text-warning'}>
+                      <span className={r.legalTrusted ? 'text-success' : 'text-warning-foreground'}>
                         {r.legalConfidence ?? 'не проверено'}
                       </span>
                       {!r.legalTrusted && (

@@ -37,6 +37,7 @@ from app.models import (ChannelSyncLog, MarketObservation, MarketOperator,
                         MarketSite, MarketSiteSnapshot)
 from app.services.mapping import canon_city, canon_region
 from app.services import ru_geo
+from app.services.market_quality import observed_rating
 from app.services.market_ocm import _canon_operator
 
 logger = logging.getLogger("clearledger.market")
@@ -555,7 +556,7 @@ async def ingest_registry(
         site.is_alive = _bool(row.get("is_alive"))
         site.connection_quality_24h = _num(row.get("connection_quality_24h"))
         site.success_charge_pct = _num(row.get("success_charge_pct"))
-        site.rating = _num(row.get("rating"))
+        site.rating = observed_rating(_num(row.get("rating")), _int(row.get("reviews_count")))
         site.reviews_count = _int(row.get("reviews_count"))
         site.updated_at = now
         site.raw = dict(row)
@@ -580,7 +581,7 @@ async def ingest_registry(
         snap.connectors_charging = _int(row.get("connectors_charging"))
         snap.connectors_broken = _int(row.get("connectors_broken"))
         snap.last_session_at = last_session
-        snap.rating = _num(row.get("rating"))
+        snap.rating = observed_rating(_num(row.get("rating")), _int(row.get("reviews_count")))
         snap.reviews_count = _int(row.get("reviews_count"))
         snap.stars_1_pct = _num(row.get("stars_1_pct"))
         snap.stars_5_pct = _num(row.get("stars_5_pct"))

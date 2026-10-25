@@ -12,6 +12,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { formatDate } from '@/lib/formatDate'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Loader2, CalendarClock, Upload, MessageSquarePlus } from 'lucide-react'
@@ -203,7 +204,7 @@ export function ParkWorkPlanPanel({ companyId }: { companyId: string }) {
                       <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
                         <span>{p.ownerName ?? 'не назначен'}</span>
                         {p.nextActionDue && (
-                          <span className={late ? 'text-red-600 dark:text-red-400' : ''}>до {p.nextActionDue}</span>
+                          <span className={late ? 'text-red-600 dark:text-red-400' : ''}>до {formatDate(p.nextActionDue!)}</span>
                         )}
                       </div>
                     </button>

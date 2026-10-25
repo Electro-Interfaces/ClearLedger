@@ -163,6 +163,10 @@ async def deliver(db: AsyncSession, now: datetime, bucket: Bucket) -> int:
         user = users.get(user_id)
         if user is None:
             continue
+        if notify.is_away(user, space_time.local_date(now, user.tz)):
+            # Человека нет на месте: повод остаётся несказанным и дождётся
+            # его возвращения — напоминать в отпуск бессмысленно и грубо.
+            continue
         slot = space_time.slot_for(now, user.tz, user.work_start, user.work_end)
         if slot is None:
             # Тишина, выходной или день ещё не дошёл до первого окна. Ничего не

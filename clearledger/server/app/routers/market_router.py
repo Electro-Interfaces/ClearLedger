@@ -18,6 +18,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, case, func, or_ as sa_or, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
+
+from app.services.market_quality import RATING_DIGITS, observed_rating, rating_expression
 
 from app.auth import assert_company_member, get_current_user
 from app.database import get_db
@@ -182,9 +185,11 @@ async def list_operators(
         "maxPowerKw": float(power) if power else None,
         "quality": round(float(quality), 1) if quality is not None else None,
         "success": round(float(success), 1) if success is not None else None,
-        "rating": round(float(rating), 2) if rating is not None else None,
+        "rating": round(float(rating), RATING_DIGITS) if rating is not None else None,
         "reviews": int(reviews or 0),
-    } for oid, sites, ports, alive, power, quality, success, rating, reviews in (
+        "citiesCount": int(cities or 0),
+        "avgPowerKw": round(float(avg_power), 1) if avg_power is not None else None,
+    } for oid, sites, ports, alive, power, quality, success, rating, reviews, cities, avg_power in (
         await db.execute(
             select(MarketSite.operator_id, func.count(),
                    func.sum(MarketSite.ports),
@@ -192,8 +197,10 @@ async def list_operators(
                    func.max(MarketSite.max_power_kw),
                    func.avg(MarketSite.connection_quality_24h),
                    func.avg(MarketSite.success_charge_pct),
-                   func.avg(MarketSite.rating),
-                   func.sum(MarketSite.reviews_count))
+                   func.avg(rating_expression(MarketSite.rating, MarketSite.reviews_count)),
+                   func.sum(MarketSite.reviews_count),
+                   func.count(func.distinct(func.nullif(func.lower(func.trim(MarketSite.city)), ""))),
+                   func.avg(MarketSite.max_power_kw))
             .where(MarketSite.company_id == cid, *обл,
                    MarketSite.operator_id.is_not(None),
                    MarketSite.site_class != "home",
@@ -346,14 +353,16 @@ async def operator_card(
     last_price = await _last_prices(db, cid)
     prices = [last_price[str(s.id)]["price"] for s in network if str(s.id) in last_price]
 
-    def _avg(values: list[float]) -> float | None:
+    def _avg(values: list[float | None], digits: int = 1) -> float | None:
         clean = [v for v in values if v is not None]
-        return round(sum(clean) / len(clean), 1) if clean else None
+        return round(sum(clean) / len(clean), digits) if clean else None
 
     return {
         "id": str(op.id), "name": op.name, "relation": op.relation,
         "notes": op.notes,
         **_operator_facts(op),
+        "citiesCount": len({s.city.strip().lower() for s in network if s.city and s.city.strip()}),
+        "avgPowerKw": _avg([float(s.max_power_kw) if s.max_power_kw is not None else None for s in network]),
         "totals": {
             "sites": len(network),
             "homeSockets": len(sites) - len(network),
@@ -367,9 +376,7 @@ async def operator_card(
                              if s.connection_quality_24h is not None]),
             "success": _avg([float(s.success_charge_pct) for s in network
                              if s.success_charge_pct is not None]),
-            "rating": (round(sum(float(s.rating) for s in network if s.rating is not None)
-                             / max(1, sum(1 for s in network if s.rating is not None)), 2)
-                       if any(s.rating is not None for s in network) else None),
+            "rating": _avg([observed_rating(s.rating, s.reviews_count) for s in network], digits=RATING_DIGITS),
             "reviews": sum(s.reviews_count or 0 for s in network),
         },
         "cities": sorted(({"name": k, "sites": v} for k, v in by_city.items()),
@@ -382,7 +389,7 @@ async def operator_card(
             "id": str(s.id), "name": s.name, "city": s.city,
             "ports": s.ports, "maxPowerKw": float(s.max_power_kw) if s.max_power_kw else None,
             "currentType": s.current_type, "status": s.status,
-            "rating": float(s.rating) if s.rating is not None else None,
+            "rating": observed_rating(s.rating, s.reviews_count),
             "quality": float(s.connection_quality_24h) if s.connection_quality_24h is not None else None,
             "lastSessionAt": s.last_session_at.isoformat() if s.last_session_at else None,
             "alive": bool(s.last_session_at and s.last_session_at >= alive_since),
@@ -474,8 +481,36 @@ async def list_sites(
                     MarketSite.longitude.between(west, east))
     total = int((await db.execute(
         select(func.count()).select_from(q.subquery()))).scalar() or 0)
+    # Берём из базы только те колонки, которые уходят в ответ. Главное здесь не
+    # аккуратность, а `raw`: снимок источника занимает 13 МБ из 20 МБ таблицы и в
+    # выдачу не попадает, а `select *` тащил его для каждой из 5 000 точек (карта
+    # просит именно столько) и сортировал вместе с ним. Замер на rushydro, пять
+    # прогонов после прогрева: 24.5 мс против 17.3 мс, а до индекса ниже — 79.7 мс.
+    # Память сортировки упала с 14 919 КБ до 7 102 КБ: при `work_mem` 32 МБ два
+    # одновременных запроса этой ручки уже уходили бы сортировать на диск.
+    #
+    # Если в ответ добавят новое поле, его надо добавить и здесь. Забыть не выйдет
+    # молча: в асинхронной сессии обращение к незагруженной колонке падает с
+    # MissingGreenlet, то есть ошибкой на первом же вызове, а не тихой подгрузкой.
     sites = (await db.execute(
-        q.order_by(MarketSite.name, MarketSite.id).offset(offset).limit(limit))).scalars().all()
+        q.options(load_only(
+            MarketSite.id, MarketSite.operator_id, MarketSite.owner_id,
+            MarketSite.owner_checked, MarketSite.duplicate_of_id, MarketSite.kind,
+            MarketSite.name, MarketSite.address, MarketSite.city, MarketSite.region,
+            MarketSite.latitude, MarketSite.longitude, MarketSite.ports,
+            MarketSite.max_power_kw, MarketSite.connectors, MarketSite.connectors_json,
+            MarketSite.connectors_total, MarketSite.current_type, MarketSite.vendor,
+            MarketSite.site_class, MarketSite.last_session_at, MarketSite.status,
+            MarketSite.opened_on, MarketSite.location_id, MarketSite.source,
+            MarketSite.source_rank, MarketSite.last_seen_at, MarketSite.verified_at,
+            MarketSite.notes, MarketSite.connection_quality_24h,
+            MarketSite.success_charge_pct, MarketSite.rating, MarketSite.reviews_count,
+            MarketSite.currency, MarketSite.is_alive, MarketSite.external_id,
+            MarketSite.first_seen_at, MarketSite.closed_confirmations,
+            MarketSite.photos, MarketSite.photo_count, MarketSite.photo_authors,
+        ))
+        .order_by(MarketSite.name, MarketSite.id).offset(offset).limit(limit))).scalars().all()
+
 
     # Последнее ценовое наблюдение на точку — одним запросом, а не N+1.
     last_price: dict[str, dict[str, Any]] = {}
@@ -541,7 +576,7 @@ async def list_sites(
                        if s.connection_quality_24h is not None else None),
         "successPct": (float(s.success_charge_pct)
                        if s.success_charge_pct is not None else None),
-        "rating": float(s.rating) if s.rating is not None else None,
+        "rating": observed_rating(s.rating, s.reviews_count),
         "reviews": s.reviews_count,
         "closedConfirmations": s.closed_confirmations,
         "isAlive": s.is_alive, "currency": s.currency,
@@ -645,7 +680,7 @@ async def sites_breakdown(
                if x.connection_quality_24h is not None]
     success = [float(x.success_charge_pct) for x in sites
                if x.success_charge_pct is not None]
-    ratings = [float(x.rating) for x in sites if x.rating is not None]
+    ratings = [r for x in sites if (r := observed_rating(x.rating, x.reviews_count)) is not None]
     alive = [x for x in sites if x.last_session_at and x.last_session_at >= alive_since]
     silent = [x for x in sites if x.last_session_at is None]
 
@@ -3627,7 +3662,7 @@ async def market_self_view(
             # Как нас видит клиент
             "quality": float(site.connection_quality_24h) if site.connection_quality_24h is not None else None,
             "successPct": float(site.success_charge_pct) if site.success_charge_pct is not None else None,
-            "rating": float(site.rating) if site.rating is not None else None,
+            "rating": observed_rating(site.rating, site.reviews_count),
             "reviews": site.reviews_count,
             "publicPricePerKwh": obs["price"] if obs else None,
             "lastSessionAt": site.last_session_at.isoformat() if site.last_session_at else None,
@@ -3637,7 +3672,7 @@ async def market_self_view(
             "ourRevenue": sale["revenue"] if sale else None,
         })
 
-    def _avg(values: list[float]) -> float | None:
+    def _avg(values: list[float | None]) -> float | None:
         clean = [v for v in values if v is not None]
         return round(sum(clean) / len(clean), 1) if clean else None
 
@@ -3660,7 +3695,7 @@ async def market_self_view(
         select(MarketOperator.name,
                func.avg(MarketSite.connection_quality_24h),
                func.avg(MarketSite.success_charge_pct),
-               func.avg(MarketSite.rating), func.count())
+               func.avg(rating_expression(MarketSite.rating, MarketSite.reviews_count)), func.count())
         .join(MarketSite, MarketSite.operator_id == MarketOperator.id)
         .where(MarketOperator.company_id == cid,
                MarketOperator.relation != "own",
@@ -3714,7 +3749,7 @@ async def market_self_view(
         },
         "peers": [{"name": name, "quality": round(float(q), 1) if q is not None else None,
                    "success": round(float(sc), 1) if sc is not None else None,
-                   "rating": round(float(rt), 2) if rt is not None else None,
+                   "rating": round(float(rt), RATING_DIGITS) if rt is not None else None,
                    "sites": int(cnt)}
                   for name, q, sc, rt, cnt in rivals],
         "note": ("сопоставление с реестром по расстоянию; расхождение «рынок молчит, "
@@ -4011,6 +4046,44 @@ async def our_map_points(
 # роуминге. Первое говорит, с кем на самом деле идёт разговор о технологии; второе —
 # может ли водитель зарядиться у сети чужим приложением.
 
+async def _network_metrics(db: AsyncSession, cid: uuid.UUID, scope: list[Any]) -> dict[str, dict]:
+    """Текущий срез: сетевые, незакрытые точки без признанных дублей."""
+    alive_since = datetime.now(timezone.utc) - timedelta(days=ALIVE_DAYS)
+    counts = {str(oid): {"sites": int(sites), "ports": int(ports or 0),
+                         "alive": int(alive or 0),
+                         "quality": round(float(q), 1) if q is not None else None,
+                         "success": round(float(sc), 1) if sc is not None else None,
+                         "silent": int(silent or 0),
+                         "citiesCount": int(cities or 0),
+                         "districts": int(districts) if districts else None,
+                         "avgPowerKw": round(float(power), 1) if power is not None else None,
+                         "observedAt": seen.isoformat() if seen else None}
+              for oid, sites, ports, alive, q, sc, silent, cities, districts, power, seen in (await db.execute(
+                  select(MarketSite.operator_id, func.count(),
+                         func.sum(MarketSite.ports),
+                         func.sum(case((MarketSite.last_session_at >= alive_since, 1), else_=0)),
+                         func.avg(MarketSite.connection_quality_24h),
+                         func.avg(MarketSite.success_charge_pct),
+                         func.sum(case(
+                             (and_(MarketSite.last_session_at.is_not(None),
+                                   MarketSite.last_session_at < datetime.now(timezone.utc)
+                                   - timedelta(days=180)), 1), else_=0)),
+                         func.count(func.distinct(func.nullif(func.lower(func.trim(MarketSite.city)), ""))),
+                         func.count(func.distinct(func.nullif(MarketSite.raw["federal_district_id"].as_string(), ""))),
+                         func.avg(MarketSite.max_power_kw), func.max(MarketSite.last_seen_at))
+                  .where(MarketSite.company_id == cid, *scope,
+                         MarketSite.operator_id.is_not(None),
+                         MarketSite.site_class == "network",
+                         MarketSite.status != "closed",
+                         # Запись, признанная той же станцией, в счёт не идёт: две
+                         # выгрузки дают одну ЭЗС под разными именами, и без этого
+                         # условия она увеличивает и рынок, и долю обеих компаний.
+                         MarketSite.duplicate_of_id.is_(None))
+                  .group_by(MarketSite.operator_id))).all()}
+
+    return counts
+
+
 @router.get("/landscape")
 async def market_landscape(
     company_id: str = Query(...),
@@ -4027,30 +4100,7 @@ async def market_landscape(
 
     # Считаем ТОЛЬКО сетевые точки: домашние розетки и независимые в доли не идут —
     # иначе «рынок» окажется наполовину частными розетками (§3.8).
-    counts = {str(oid): {"sites": int(sites), "ports": int(ports or 0),
-                         "alive": int(alive or 0),
-                         "quality": round(float(q), 1) if q is not None else None,
-                         "success": round(float(sc), 1) if sc is not None else None,
-                         "silent": int(silent or 0)}
-              for oid, sites, ports, alive, q, sc, silent in (await db.execute(
-                  select(MarketSite.operator_id, func.count(),
-                         func.sum(MarketSite.ports),
-                         func.sum(case((MarketSite.last_session_at >= alive_since, 1), else_=0)),
-                         func.avg(MarketSite.connection_quality_24h),
-                         func.avg(MarketSite.success_charge_pct),
-                         func.sum(case(
-                             (and_(MarketSite.last_session_at.is_not(None),
-                                   MarketSite.last_session_at < datetime.now(timezone.utc)
-                                   - timedelta(days=180)), 1), else_=0)))
-                  .where(MarketSite.company_id == cid, *обл,
-                         MarketSite.operator_id.is_not(None),
-                         MarketSite.site_class == "network",
-                         MarketSite.status != "closed",
-                         # Запись, признанная той же станцией, в счёт не идёт: две
-                         # выгрузки дают одну ЭЗС под разными именами, и без этого
-                         # условия она увеличивает и рынок, и долю обеих компаний.
-                         MarketSite.duplicate_of_id.is_(None))
-                  .group_by(MarketSite.operator_id))).all()}
+    counts = await _network_metrics(db, cid, обл)
 
     # Тот же счёт, но по ВЛАДЕЛЬЦУ: чей актив, а не под чьим именем точка в выгрузке.
     # Расходятся эти два счёта там, где сеть работает на чужой платформе или её
@@ -4083,27 +4133,13 @@ async def market_landscape(
         if oid:
             prices.setdefault(oid, []).append(obs["price"])
 
-    # Охват сети внутри области: «155 городов» — факт о стране, и рядом с 26
-    # точками в крае он сбивает с толку. Когда территория выбрана, города считаем
-    # по её точкам, а федеральные округа не считаем вовсе — в границах одного
-    # субъекта это тавтология.
-    города_области: dict[str, int] = {}
-    if обл:
-        города_области = {str(oid): int(n) for oid, n in (await db.execute(
-            select(MarketSite.operator_id, func.count(func.distinct(MarketSite.city)))
-            .where(MarketSite.company_id == cid, *обл,
-                   MarketSite.operator_id.is_not(None),
-                   MarketSite.site_class == "network",
-                   MarketSite.status != "closed",
-                   MarketSite.duplicate_of_id.is_(None))
-            .group_by(MarketSite.operator_id))).all()}
-
     rows = []
     for op in operators:
         c = counts.get(str(op.id), {})
         sites = c.get("sites", 0)
-        охват = ({"citiesCount": города_области.get(str(op.id), 0), "districts": None}
-                 if обл else {})
+        охват = {"citiesCount": c.get("citiesCount", 0),
+                 "districts": None if обл else c.get("districts"),
+                 "avgPowerKw": c.get("avgPowerKw"), "networkObservedAt": c.get("observedAt")}
         rows.append({
             "id": str(op.id), "name": op.name, "relation": op.relation,
             "isOurs": op.relation == "own",
@@ -4234,18 +4270,11 @@ async def market_landscape(
             "level3": sum(1 for r in networks if r.get("dataLevel") == 3),
             "unnamedSites": unnamed_sites,
         },
-        # Главная оговорка расклада: размеры сетей ЗАНИЖЕНЫ, и насколько —
-        # неизвестно. Часть публичных точек идёт без имени владельца, и какая-то
-        # их доля принадлежит компаниям из этого же списка. Поэтому доли здесь —
-        # внутренняя оценка (уровень 2), а не измерение рынка: во внешнем
-        # материале их нельзя подавать как точные.
-        "note": ("доли считаются по сетевым точкам: домашние розетки и независимые "
-                 "точки без оператора в расклад сил не входят. Размеры сетей "
-                 f"занижены: у {unnamed_sites} публичных точек владелец не указан, "
-                 "и часть из них принадлежит компаниям этого списка — насколько, "
-                 "неизвестно. Это внутренняя оценка: для внешних материалов "
-                 "говорить «от сотни до девятисот точек у крупнейших сетей», а не "
-                 "называть точное число"),
+        "note": ("Доли рассчитаны по незакрытым сетевым точкам с известным оператором, "
+                 "без признанных дублей. Это присутствие операторов, а не владение активами. "
+                 f"У {unnamed_sites} публичных точек оператор не указан. "
+                 "Количество точек, населённых пунктов и средняя мощность относятся "
+                 "к одной выборке реестра; это его охват, а не полная перепись рынка."),
     }
 
 
@@ -4443,6 +4472,8 @@ async def market_players(
     operators = {o.id: o for o in (await db.execute(select(MarketOperator).where(
         MarketOperator.company_id == cid))).scalars().all()}
 
+    current_networks = await _network_metrics(db, cid, [])
+
     players = []
     for r in rows:
         op = operators.get(r.operator_id) if r.operator_id else None
@@ -4454,6 +4485,9 @@ async def market_players(
             "classChecked": r.class_checked,
             "adjacent": (r.player_class or "") in ADJACENT_CLASSES,
             "ownStations": stations,
+            # Заявленное владение не заменяем эксплуатационным присутствием.
+            "networkSites": current_networks.get(str(op.id), {}).get("sites", 0) if op else None,
+            "networkObservedAt": current_networks.get(str(op.id), {}).get("observedAt") if op else None,
             "assetLight": r.asset_light,
             "operatorId": str(r.operator_id) if r.operator_id else None,
             "operatorName": op.name if op else r.matched_operator,
@@ -4496,13 +4530,13 @@ async def market_players(
             total += p["ownStations"] or 0
         return total
     quadrants = [
-        {"key": "full", "label": "свои станции и своё приложение",
-         "hint": "полный стек: владеют железом и говорят с водителем сами",
+        {"key": "full", "label": "заявлена своя инфраструктура",
+         "hint": "заявление источника без даты; владение требует проверки",
          "players": sorted(with_assets, key=lambda p: -(p["ownStations"] or 0))[:40],
          "count": len(with_assets),
          "networks": len({p["operatorName"] or p["app"] for p in with_assets}),
          "stations": unique_stations(with_assets)},
-        {"key": "light", "label": "приложение без своих станций",
+        {"key": "light", "label": "своя инфраструктура не подтверждена",
          "hint": "конкуренция за интерфейс: агрегаторы, процессинг, банки, автопроизводители",
          "players": sorted(light, key=lambda p: (p["class"], p["app"]))[:60],
          "count": len(light), "stations": 0},

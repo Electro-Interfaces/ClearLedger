@@ -38,7 +38,11 @@ export const STAGE_META: Record<SiteStage, { label: string; hint: string; cls: s
   construction: { label: 'Реализация', hint: 'присоединение ‖ оборудование ‖ монтаж', cls: 'border-teal-400/50 text-teal-600 dark:text-teal-300/80', dot: 'bg-teal-500' },
   commissioning: { label: 'Пусконаладка', hint: 'пусконаладка и приёмка', cls: 'border-cyan-400/50 text-cyan-600 dark:text-cyan-300/80', dot: 'bg-cyan-500' },
   live: { label: 'В эксплуатации', hint: 'объект работает в сети', cls: 'bg-emerald-600/80 text-white border-transparent', dot: 'bg-emerald-500' },
-  on_hold: { label: 'Приостановлен', hint: 'пауза с датой пересмотра', cls: 'border-zinc-500/60 text-zinc-500', dot: 'bg-zinc-400' },
+  // Одно состояние — одно слово. Было четыре: «Приостановлен» в плане работ,
+  // «На паузе» в короткой подписи, «Заморожен» в Ядре и выгрузках, «Не трогать»
+  // на кнопках отбора (проверка 25.10.2026). Берём подпись Ядра: она уже в
+  // Excel, PDF и журнале событий.
+  on_hold: { label: 'Заморожен', hint: 'пауза с датой пересмотра', cls: 'border-zinc-500/60 text-zinc-500', dot: 'bg-zinc-400' },
   archive: { label: 'Архив', hint: 'отклонён, с причиной', cls: 'border-zinc-600 text-zinc-500', dot: 'bg-zinc-500' },
 }
 
@@ -46,7 +50,7 @@ export const STAGE_META: Record<SiteStage, { label: string; hint: string; cls: s
 export const INTEGRATION_STAGE_LABEL: Partial<Record<SiteStage, string>> = {
   lead: 'Заявка', screening: 'Оценка партнёра', negotiation: 'Переговоры', dd: 'Техническое согласование',
   decision: 'Решение о пилоте', contracting: 'Пилотное соглашение', construction: 'Настройка и тесты',
-  commissioning: 'Договор', live: 'Работает', on_hold: 'На паузе', archive: 'Отклонена',
+  commissioning: 'Договор', live: 'Работает', on_hold: 'Заморожен', archive: 'Отклонена',
 }
 /** Название стадии с учётом вида проекта. */
 export const stageLabelOf = (kind: string | null | undefined, st: SiteStage): string =>
@@ -66,6 +70,11 @@ export interface SiteRow {
   ownerName?: string | null
   nextAction?: string | null
   nextActionDue?: string | null
+  /** Шаг строки как его видит карточка: ручной, связанная работа или ожидание.
+   *  `nextAction` остаётся ручным полем проекта и в строке его не подменяет. */
+  nextStep?: string | null
+  nextStepDue?: string | null
+  nextStepSource?: 'manual' | 'task' | 'doc' | 'wait' | 'link' | null
   lastTouchAt?: string | null
   stageSince: string | null
   prevStage: SiteStage | null
@@ -229,7 +238,9 @@ export interface SiteDetail extends SiteRow {
 
 export interface SiteEvent {
   id: string
+  /** Виды событий журнала проекта — те же коды, что пишет Ядро. */
   kind: 'stage' | 'touch' | 'note' | 'edit' | 'import' | 'gate'
+    | 'doc' | 'forecast' | 'result' | 'decision' | 'system'
   text: string | null
   fromStage: string | null
   toStage: string | null
@@ -300,6 +311,9 @@ export async function getSites(p: {
   /** Исключить вид работ: реестр стройки не показывает интеграции, у них свой раздел. */
   withoutKind?: string
   ownerId?: string; overdue?: boolean; risk?: string; node?: string
+  /** Сортировка считается на сервере: реестр постраничный, и порядок «по сроку»
+   *  в пределах загруженной сотни отвечает не на тот вопрос. */
+  sort?: string | null; direction?: 'asc' | 'desc'
   page?: number; pageSize?: number
 }): Promise<SitesList> {
   return get('/api/sites', {
@@ -309,6 +323,7 @@ export async function getSites(p: {
     node: p.node || undefined,
     kind: p.kind || undefined, place_kind: p.placeKind || undefined,
     without_kind: (!p.kind && p.withoutKind) || undefined,
+    sort: p.sort || undefined, direction: p.sort ? (p.direction ?? 'asc') : undefined,
     page: p.page ?? 1, page_size: p.pageSize ?? 300,
   })
 }
@@ -961,11 +976,16 @@ export async function getPortfolio(companyId: string): Promise<Portfolio> {
   return get('/api/sites/portfolio', { company_id: companyId })
 }
 
-export async function getTechConnections(companyId: string): Promise<{
+export async function getTechConnections(companyId: string, includeClosed = false): Promise<{
   total: number; overdue: number; costSum: number
+  /** Сколько заявок у отклонённых и замороженных проектов — их свод по умолчанию
+   *  не считает: иначе плитки отвечают про мёртвые площадки. */
+  closedTotal: number; includeClosed: boolean
   byStatus: { key: string; label: string; count: number }[]; items: TechConnection[]
 }> {
-  return get('/api/sites/tech-connections', { company_id: companyId })
+  return get('/api/sites/tech-connections', {
+    company_id: companyId, include_closed: includeClosed ? 1 : undefined,
+  })
 }
 
 export interface PhaseDurations {
@@ -1250,8 +1270,10 @@ export interface GridOperatorsReport {
 }
 
 /** Присоединения в разрезе сетевой организации: сроки, стоимость, отказы. */
-export async function getTechConnectionsByOperator(companyId: string): Promise<GridOperatorsReport> {
-  return get<GridOperatorsReport>('/api/sites/tech-connections/by-operator', { company_id: companyId })
+export async function getTechConnectionsByOperator(companyId: string, includeClosed = false): Promise<GridOperatorsReport> {
+  return get<GridOperatorsReport>('/api/sites/tech-connections/by-operator', {
+    company_id: companyId, include_closed: includeClosed ? 1 : undefined,
+  })
 }
 
 export async function getCostsReport(companyId: string): Promise<CostsReport> {

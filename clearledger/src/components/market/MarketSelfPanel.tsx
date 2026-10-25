@@ -128,7 +128,7 @@ export function MarketSelfPanel() {
             <span>сопоставлено с нашим реестром {nf.format(t.matchedToRegistry)}</span>
           </div>
           {t.silentButWorking > 0 && (
-            <p className="text-xs text-warning">
+            <p className="text-xs text-warning-foreground">
               {nf.format(t.silentButWorking)} станций рынок показывает молчащими, хотя
               по нашим данным на них заряжают. Клиент в приложении видит их мёртвыми и
               проезжает мимо — это потерянные сессии, а не ошибка отчёта.
@@ -234,7 +234,7 @@ export function MarketSelfPanel() {
                       {r.aliveByMarket ? (
                         <span className="text-muted-foreground">заряжают</span>
                       ) : (
-                        <span className={(r.ourSessions ?? 0) > 0 ? 'text-warning' : 'text-muted-foreground'}>
+                        <span className={(r.ourSessions ?? 0) > 0 ? 'text-warning-foreground' : 'text-muted-foreground'}>
                           {(r.ourSessions ?? 0) > 0 ? 'молчит, хотя работает' : 'молчит'}
                         </span>
                       )}
