@@ -282,7 +282,7 @@ function MarketPositionTable() {
           Только с соседями
         </button>
         <span className="ml-auto text-xs text-muted-foreground">
-          {rows.length} объектов · с соседями {withRivals} · дороже рынка {pricier}
+          {rows.length} объектов · с соседями {withRivals} · {comparable.length ? `дороже рынка ${pricier}` : 'нет свежего сравнения'}
         </span>
         <span data-export-ignore>
           <ExportButton title="Позиция"
