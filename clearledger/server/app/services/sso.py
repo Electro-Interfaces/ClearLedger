@@ -84,7 +84,8 @@ def new_jti() -> str:
 
 def sign_sso_token(*, user, company_id, companies: list[dict[str, Any]], aud: str,
                    roles: list[str] | None = None,
-                   ttl_seconds: int | None = None) -> str | None:
+                   ttl_seconds: int | None = None,
+                   session_expires_at: int | None = None, session_scope: str | None = None) -> str | None:
     """RS256 handoff-токен для приложения-аудитории `aud`. None, если SSO выключен.
 
     `roles` — роли человека В ПРИЛОЖЕНИИ `aud` в текущей компании (Я-10,
@@ -115,6 +116,11 @@ def sign_sso_token(*, user, company_id, companies: list[dict[str, Any]], aud: st
         "nbf": now - 10,
         "exp": now + (settings.sso_token_ttl_seconds if ttl_seconds is None else ttl_seconds),
     }
+    if aud == "support":
+        from app.auth import MAX_SESSION_DAYS
+        payload.update(tv=int(getattr(user, "token_version", 0) or 0),
+                       session_expires_at=int(session_expires_at or (now + MAX_SESSION_DAYS * 86400)),
+                       session_scope=session_scope or "")
     if roles is not None:
         payload["roles"] = roles                         # роли в приложении `aud`
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.sso_kid})

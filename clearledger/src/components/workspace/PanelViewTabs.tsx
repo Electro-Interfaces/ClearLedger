@@ -29,7 +29,7 @@ export function PanelViewTabs({
   return (
     <div data-zone="Вид раздела" className="flex min-w-0 items-center gap-2 py-2">
       {label ? (
-        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="shrink-0 text-xs font-medium text-muted-foreground">
           {label}
         </span>
       ) : null}

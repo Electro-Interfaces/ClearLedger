@@ -22,6 +22,15 @@ engine = create_async_engine(
     echo=False,
     pool_size=10,
     max_overflow=20,
+    # Сервер БД может уйти и вернуться — перезапуск контейнера, обрыв сети, срабатывание
+    # таймаута. Без pre_ping пул продолжает выдавать закрытые соединения, и приложение
+    # отвечает `asyncpg InterfaceError: connection is closed` на каждый запрос, пока они
+    # не вытеснятся: 25.10.2026 после перезапуска БД это дало 36 ошибок в минуту и
+    # лечилось только перезапуском бэкенда. Проверка — один дешёвый запрос при выдаче.
+    pool_pre_ping=True,
+    # Соединения живут не бесконечно: самое старое висело в пуле 18 часов. Через полчаса
+    # покоя его дешевле пересоздать, чем выяснять, кто разорвал его посередине.
+    pool_recycle=1800,
 )
 
 async_session_factory = async_sessionmaker(
@@ -1576,6 +1585,225 @@ MATRIX_MIGRATION_DDL = (
 )
 
 
+# Ограничения, заведённые как NOT VALID, проверить на существующих строках.
+# NOT VALID означает «проверяем только новые строки»: старые могут нарушать правило,
+# и планировщик на такое ограничение не опирается. На стенде rushydro все одиннадцать
+# висели непроверенными — восемь на пустых таблицах, три на data_entries (5565 строк,
+# ни одного нарушения), то есть проверка ничего не ломает, её просто не сделали.
+#
+# Каждое проверяется отдельно и ошибка не роняет старт: если в каком-то пространстве
+# данные правилу не отвечают, приложение поднимется, а в журнале останется
+# предупреждение с именем ограничения — это повод чистить данные, а не падать.
+VALIDATE_CONSTRAINTS_DDL = (
+    """
+    DO $$
+    DECLARE
+        r record;
+    BEGIN
+        FOR r IN SELECT * FROM (VALUES
+            ('data_entries', 'ck_data_entry_content_hash'),
+            ('data_entries', 'ck_data_entry_fact_origin'),
+            ('data_entries', 'ck_data_entry_revision_positive'),
+            ('export_packets', 'ck_export_packet_accounting_contract'),
+            ('export_packets', 'ck_export_packet_business_group'),
+            ('export_packets', 'ck_export_packet_content_hash'),
+            ('export_packets', 'ck_export_packet_fact_origin'),
+            ('export_packets', 'ck_export_packet_revision_positive'),
+            ('export_packets', 'fk_export_packet_accounting_group'),
+            ('store_cheques', 'ck_store_cheque_version'),
+            ('store_doc_files', 'ck_store_doc_file_sha256')
+        ) AS t(tab, con)
+        LOOP
+            IF EXISTS (
+                SELECT 1 FROM pg_constraint c
+                 WHERE c.conname = r.con
+                   AND c.conrelid = to_regclass(r.tab)
+                   AND NOT c.convalidated
+            ) THEN
+                BEGIN
+                    EXECUTE format('ALTER TABLE %I VALIDATE CONSTRAINT %I', r.tab, r.con);
+                    RAISE NOTICE 'ограничение %.% проверено', r.tab, r.con;
+                EXCEPTION WHEN others THEN
+                    RAISE WARNING 'ограничение %.% не прошло проверку, данные нарушают правило: %',
+                        r.tab, r.con, SQLERRM;
+                END;
+            END IF;
+        END LOOP;
+    END $$;
+    """,
+)
+
+
+# Деньги из double precision в numeric. Во float «1234.73» хранится как
+# 1234.7299999999999, и сумма сотни таких строк зависит от порядка слагаемых:
+# на стенде rushydro 252 платежа из 2852 уже лежали как 12303284.729999999.
+# Это и есть копеечные расхождения в сверке «Хозяйства» и «Закрытия периода»,
+# которые не воспроизводятся дважды.
+#
+# Масштаб взят по фактическим данным (максимальный платёж 12.3 млн ₽). Тариф за
+# кВт·ч — расчётный, ему шесть знаков, иначе обратный счёт «энергия × тариф»
+# не сходится с суммой.
+#
+# ALTER COLUMN TYPE перезаписывает таблицу целиком, поэтому проверяем текущий тип:
+# без этого каждый старт приложения переписывал бы все денежные таблицы заново.
+MONEY_NUMERIC_MIGRATION_DDL = (
+    """
+    DO $$
+    DECLARE
+        r record;
+    BEGIN
+        FOR r IN SELECT * FROM (VALUES
+            ('ops_payments', 'amount', 14, 2),
+            ('contracts', 'amount_limit', 14, 2),
+            ('station_contract_settlements', 'amount_gross', 14, 2),
+            ('station_contract_settlements', 'amount_net', 14, 2),
+            ('station_dispense_periods', 'amount_rub', 14, 2),
+            ('station_energy_periods', 'tariff_rub_kwh', 12, 6),
+            ('intake_items', 'amount', 14, 2),
+            ('intake_items', 'vat_amount', 14, 2),
+            ('accounting_docs', 'amount', 14, 2),
+            ('accounting_docs', 'vat_amount', 14, 2),
+            ('dedup_cards', 'price', 14, 2),
+            ('dedup_ns_bindings', 'retail_price', 14, 2)
+        ) AS t(tab, col, p, s)
+        LOOP
+            IF EXISTS (
+                SELECT 1 FROM pg_attribute a
+                 WHERE a.attrelid = to_regclass(r.tab)
+                   AND a.attname = r.col
+                   AND NOT a.attisdropped
+                   AND a.atttypid = 'double precision'::regtype
+            ) THEN
+                EXECUTE format(
+                    'ALTER TABLE %I ALTER COLUMN %I TYPE numeric(%s,%s) USING round(%I::numeric, %s)',
+                    r.tab, r.col, r.p, r.s, r.col, r.s);
+                RAISE NOTICE 'деньги: %.% переведён в numeric(%,%)', r.tab, r.col, r.p, r.s;
+            END IF;
+        END LOOP;
+    END $$;
+    """,
+)
+
+
+# Связи, которые объявлены в моделях, но до базы не доехали. create_all добавляет
+# ограничения и индексы только вместе с новой таблицей: если колонку завели позже
+# через ALTER, объявленные на ней ForeignKey и index=True остаются только в коде.
+# Нашла это сверка `alembic check` 25.10.2026 — на стенде rushydro обоих ключей и
+# обоих индексов не было, при чистых данных (ни одной висячей ссылки).
+MODEL_DRIFT_MIGRATION_DDL = (
+    # Индексы под связи, которых не было в базе.
+    "CREATE INDEX IF NOT EXISTS ix_task_work_items_doc_id ON task_work_items (doc_id)",
+    "CREATE INDEX IF NOT EXISTS ix_task_templates_doc_kind_id ON task_templates (doc_kind_id)",
+    # Девятнадцать связей, объявленных в моделях, но до базы не доехавших. Список снят
+    # сверкой `alembic check` и черновиком `alembic revision --autogenerate` на стенде
+    # rushydro 25.10.2026; висячих ссылок не было ни по одной из них.
+    #
+    # Создаём по одной и ошибку не роняем наверх: в другом пространстве данные могут
+    # правилу не отвечать, и тогда правильнее поднять приложение с предупреждением в
+    # журнале, чем не подняться вовсе.
+    """
+    DO $$
+    DECLARE
+        r record;
+    BEGIN
+        FOR r IN SELECT * FROM (VALUES
+            ('task_work_items', 'doc_id', 'doc_cards', 'id', 'CASCADE'),
+            ('task_templates', 'doc_kind_id', 'doc_kinds', 'id', 'SET NULL'),
+            ('chat_rooms', 'scope_object_id', 'service_locations', 'id', 'SET NULL'),
+            ('conf_sessions', 'conf_room_id', 'conf_rooms', 'id', 'SET NULL'),
+            ('contracts', 'organization_id', 'organizations', 'id', NULL),
+            ('contracts', 'counterparty_id', 'counterparties', 'id', NULL),
+            ('doc_cards', 'case_id', 'doc_cases', 'id', 'SET NULL'),
+            ('doc_kinds', 'default_case_id', 'doc_cases', 'id', 'SET NULL'),
+            ('doc_share_links', 'approval_id', 'doc_approvals', 'id', 'CASCADE'),
+            ('eco_approval_requests', 'task_id', 'tasks', 'id', 'CASCADE'),
+            ('edge_downlink', 'cancelled_by', 'users', 'id', 'SET NULL'),
+            ('ezs_sites', 'contract_id', 'contracts', 'id', 'SET NULL'),
+            ('ezs_sites', 'owner_user_id', 'users', 'id', 'SET NULL'),
+            ('ezs_sites', 'location_id', 'service_locations', 'id', 'SET NULL'),
+            ('ezs_sites', 'region_id', 'regions', 'id', 'SET NULL'),
+            ('gl_turnovers', 'kt_contract_id', 'contracts', 'id', NULL),
+            ('gl_turnovers', 'dt_contract_id', 'contracts', 'id', NULL),
+            ('gl_turnovers', 'dt_counterparty_id', 'counterparties', 'id', NULL),
+            ('gl_turnovers', 'kt_counterparty_id', 'counterparties', 'id', NULL)
+        ) AS t(tab, col, ref, refcol, ondel)
+        LOOP
+            IF to_regclass(r.tab) IS NOT NULL
+               AND to_regclass(r.ref) IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM pg_constraint
+                    WHERE conname = r.tab || '_' || r.col || '_fkey'
+                      AND conrelid = to_regclass(r.tab)
+               ) THEN
+                BEGIN
+                    EXECUTE format(
+                        'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (%I) REFERENCES %I(%I)%s',
+                        r.tab, r.tab || '_' || r.col || '_fkey', r.col, r.ref, r.refcol,
+                        CASE WHEN r.ondel IS NULL THEN '' ELSE ' ON DELETE ' || r.ondel END);
+                    RAISE NOTICE 'связь создана: %.% -> %', r.tab, r.col, r.ref;
+                EXCEPTION WHEN others THEN
+                    RAISE WARNING 'связь %.% -> % не создана: %', r.tab, r.col, r.ref, SQLERRM;
+                END;
+            END IF;
+        END LOOP;
+    END $$;
+    """,
+)
+
+
+
+# ИНН контрагента: отсутствие записывается одним способом — NULL.
+# До этого колонка была NOT NULL, и «ИНН неизвестен» приходилось кодировать подручными
+# значениями: на стендах нашлись пустая строка (277 карточек) и '0' (16). Беда не в
+# неаккуратности, а в том, что проверкой «заполнен» такие значения не отличить от
+# настоящего ИНН, и уникальный индекс на колонку с 277 пустыми строками не поставить.
+# У своих организаций (organizations) ИНН остаётся обязательным — там он всегда есть.
+COUNTERPARTY_INN_MIGRATION_DDL = (
+    """
+    DO $$ BEGIN
+        IF EXISTS (
+            SELECT 1 FROM pg_attribute
+             WHERE attrelid = to_regclass('counterparties') AND attname = 'inn'
+               AND attnotnull AND NOT attisdropped
+        ) THEN
+            ALTER TABLE counterparties ALTER COLUMN inn DROP NOT NULL;
+            RAISE NOTICE 'counterparties.inn: снято NOT NULL';
+        END IF;
+    END $$;
+    """,
+    # Заполнители к NULL. '0' и '000…' не бывают ИНН: он всегда 10 или 12 значащих цифр.
+    "UPDATE counterparties SET inn = NULL WHERE inn = '' OR inn ~ '^0+$'",
+    # КПП страдает тем же: '0' вместо «нет значения».
+    "UPDATE counterparties SET kpp = NULL WHERE kpp = '' OR kpp ~ '^0+$'",
+    # Защита от повторных карточек. Ключ — ИНН вместе с КПП, а не один ИНН: у юрлица с
+    # филиалами ИНН один, а КПП разные, и в бухгалтерии это РАЗНЫЕ контрагенты. На стендах
+    # так и оказалось: из 23 групп с общим ИНН в gig 17 различаются КПП (семь отделений УФК
+    # по Санкт-Петербургу, филиалы ЛОЭСК, подразделения Леноблводоканала) — уникальность
+    # по одному ИНН объявила бы их дублями и запретила бы заводить филиал.
+    # У предпринимателей и самозанятых КПП нет, поэтому coalesce — тогда ключ сводится к ИНН.
+    # Ошибка не роняет старт: где настоящие дубли есть, в журнале останется предупреждение.
+    """
+    DO $$ BEGIN
+        -- Прежний индекс по одному ИНН, если он успел появиться, снимаем: модель неверна.
+        IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'uq_counterparties_company_inn') THEN
+            DROP INDEX uq_counterparties_company_inn;
+            RAISE NOTICE 'counterparties: снят индекс по одному ИНН (филиалы различаются КПП)';
+        END IF;
+        IF to_regclass('counterparties') IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = 'uq_counterparties_inn_kpp') THEN
+            BEGIN
+                CREATE UNIQUE INDEX uq_counterparties_inn_kpp
+                    ON counterparties (company_id, inn, coalesce(kpp, '')) WHERE inn IS NOT NULL;
+                RAISE NOTICE 'counterparties: включена защита от дублей по паре ИНН и КПП';
+            EXCEPTION WHEN unique_violation THEN
+                RAISE WARNING 'counterparties: есть карточки с одинаковыми ИНН и КПП, защита не включена: %', SQLERRM;
+            END;
+        END IF;
+    END $$;
+    """,
+)
+
+
 ACCOUNTING_REVISION_MIGRATION_DDL = (
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS document_id UUID",
     "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS revision INTEGER",
@@ -2041,8 +2269,6 @@ async def create_all() -> None:
             # ищет свои строки, и они же нужны на уже развёрнутых стендах.
             "CREATE INDEX IF NOT EXISTS idx_intake_items_batch "
             "ON intake_items(company_id, batch_id)",
-            "CREATE INDEX IF NOT EXISTS idx_intake_items_fp "
-            "ON intake_items(company_id, fingerprint)",
             # Почтовый коннектор (docs/MAIL.md). Таблицы заводит create_all, но
             # КОЛОНКИ в уже существующую таблицу он не добавляет — на стенде,
             # поднятом до этой правки, опрос падал на `password_enc does not exist`.
@@ -2079,7 +2305,6 @@ async def create_all() -> None:
             "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS layer VARCHAR(10) NOT NULL DEFAULT 'raw'",
             "ALTER TABLE data_entries ADD COLUMN IF NOT EXISTS derived_from_entry_id UUID REFERENCES data_entries(id) ON DELETE SET NULL",
             "CREATE INDEX IF NOT EXISTS idx_data_entries_layer ON data_entries(company_id, layer)",
-            "CREATE INDEX IF NOT EXISTS idx_data_entries_derived_from ON data_entries(derived_from_entry_id)",
             # Backfill: проставляем layer по существующему status — 'verified'/'transferred' → clean.
             "UPDATE data_entries SET layer = 'clean' WHERE layer = 'raw' AND status IN ('verified','transferred')",
             # v1.1: ExportPacket — L3 слой (что мы выгружаем в 1С).
@@ -2418,7 +2643,6 @@ async def create_all() -> None:
             "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS source_customer_id VARCHAR(64)",
             # v2.7: материализованная связь сессии → объект-станция (конформная размерность)
             "ALTER TABLE charge_sessions ADD COLUMN IF NOT EXISTS location_id VARCHAR(40) REFERENCES service_locations(id) ON DELETE SET NULL",
-            "CREATE INDEX IF NOT EXISTS idx_charge_sessions_location ON charge_sessions(location_id)",
             # v2.8: скидка корп-клиента к рознице (каршеринг = 25%; применяется к матрице)
             "ALTER TABLE corporate_clients ADD COLUMN IF NOT EXISTS discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0",
             # Обогащение сессии картой (витрина АСУиМ): в сессии от карты есть
@@ -2650,15 +2874,29 @@ async def create_all() -> None:
             "REFERENCES regions(id) ON DELETE SET NULL",
             "CREATE INDEX IF NOT EXISTS idx_service_locations_region "
             "ON service_locations(company_id, region_id)",
-            # Уникальные federalSubject → regions
+            # Уникальные federalSubject → regions.
+            #
+            # Группируем и сверяем по НОРМАЛИЗОВАННОМУ имени, как это делает
+            # `uq_regions_company_name_ci` (btrim+lower). Раньше здесь стояло
+            # `GROUP BY ... name` и `ON CONFLICT (company_id, name)`: «Тест» и
+            # «тест» считались разными, индекс — одинаковыми, и миграция падала
+            # на UniqueViolation. 25.10.2026 так не стартовало Ядро РусГидро —
+            # пространство лежало, пока дубль не убрали руками.
             "INSERT INTO regions (id, company_id, name, federal_subject) "
-            "SELECT gen_random_uuid(), company_id, extra_metadata->>'federalSubject', "
-            "       extra_metadata->>'federalSubject' "
-            "FROM service_locations "
-            "WHERE extra_metadata->>'federalSubject' IS NOT NULL "
-            "  AND extra_metadata->>'federalSubject' <> '' "
-            "GROUP BY company_id, extra_metadata->>'federalSubject' "
-            "ON CONFLICT (company_id, name) DO NOTHING",
+            "SELECT gen_random_uuid(), company_id, имя, имя FROM ("
+            "  SELECT DISTINCT ON (company_id, btrim(lower(extra_metadata->>'federalSubject'))) "
+            "         company_id, extra_metadata->>'federalSubject' AS имя "
+            "  FROM service_locations "
+            "  WHERE extra_metadata->>'federalSubject' IS NOT NULL "
+            "    AND extra_metadata->>'federalSubject' <> '' "
+            "  ORDER BY company_id, btrim(lower(extra_metadata->>'federalSubject')), "
+            "           extra_metadata->>'federalSubject'"
+            ") AS источник "
+            "WHERE NOT EXISTS ("
+            "  SELECT 1 FROM regions r WHERE r.company_id = источник.company_id "
+            "    AND btrim(lower(r.name)) = btrim(lower(источник.имя))"
+            ") "
+            "ON CONFLICT DO NOTHING",
             # Проставить region_id точкам по совпадению названия региона
             "UPDATE service_locations sl SET region_id = r.id "
             "FROM regions r "
@@ -3559,6 +3797,18 @@ async def create_all() -> None:
         # v2.40: канонические ревизии L2 и ревизионный accounting-only outbox.
         # Legacy/fuel idem_key сохраняет прежнюю семантику отдельным predicate.
         for stmt in ACCOUNTING_REVISION_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # ИНН контрагента: одно соглашение об отсутствии и защита от дублей.
+        for stmt in COUNTERPARTY_INN_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # Деньги в numeric — после того, как таблицы и колонки заведены.
+        for stmt in MONEY_NUMERIC_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # Связи из моделей, не доехавшие до базы (нашла сверка схемы).
+        for stmt in MODEL_DRIFT_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
         # Миграции магазина идут только там, где схема `edge` наполнена: её
@@ -4919,8 +5169,6 @@ async def create_all() -> None:
             # ссылки на одного человека, и отзыв одной ничего бы не закрыл.
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_guests_event_email "
             "ON calendar_guests (event_id, lower(email))",
-            "CREATE INDEX IF NOT EXISTS ix_calendar_guests_token "
-            "ON calendar_guests (token_hash)",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_materials "
             "ON calendar_materials (event_id, target_ref)",
         ):
@@ -4930,8 +5178,6 @@ async def create_all() -> None:
         # шаг 3). Опрос — состояние встречи, а не отдельная сущность: иначе у
         # него завелись бы свои гости, свои ссылки и своё приглашение.
         for stmt in (
-            "CREATE INDEX IF NOT EXISTS ix_calendar_poll_options_event "
-            "ON calendar_poll_options (event_id)",
             # Один голос человека за вариант. Без этого повторное нажатие
             # копило бы голоса, и «за вторник шестеро» означало бы двоих.
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_calendar_poll_vote_user "
@@ -5006,10 +5252,12 @@ async def create_all() -> None:
             "DELETE FROM calendar_poll_votes v USING calendar_poll_votes d"
             " WHERE v.option_id = d.option_id AND v.guest_id = d.guest_id"
             "   AND v.guest_id IS NOT NULL AND v.id < d.id",
-            "CREATE UNIQUE INDEX IF NOT EXISTS calendar_poll_votes_user_uq"
-            " ON calendar_poll_votes (option_id, user_id) WHERE user_id IS NOT NULL",
-            "CREATE UNIQUE INDEX IF NOT EXISTS calendar_poll_votes_guest_uq"
-            " ON calendar_poll_votes (option_id, guest_id) WHERE guest_id IS NOT NULL",
+            # Индексы здесь НЕ создаём: ровно те же два частичных уникальных индекса
+            # (те же колонки, то же условие) заводит набор v2.80 выше под именами
+            # `uq_calendar_poll_vote_user` и `uq_calendar_poll_vote_guest`. `IF NOT
+            # EXISTS` проверяет имя, а не определение, поэтому второе объявление
+            # молча создавало ВТОРОЙ индекс: каждый голос обновлял оба. Чистка дублей
+            # голосов выше нужна и остаётся — она готовит данные для уникальности.
         ):
             await conn.execute(_sa.text(stmt))
 
@@ -5204,6 +5452,15 @@ async def create_all() -> None:
 
         # v2.88: «Телефония» — опознание звонящего узлом заказчика (Я-1…Я-3).
         for stmt in VOICE_CORE_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # Проверка ограничений — САМОЙ последней. Не раньше: наборы ниже пересоздают
+        # часть ограничений заново как NOT VALID (`ck_export_packet_accounting_contract`,
+        # `fk_export_packet_accounting_group` из `BUSINESS_SHIFT_MIGRATION_DDL`), и
+        # проверка, стоявшая в середине, их уже не заставала — после выпуска v1517
+        # одно ограничение осталось непроверенным, а новое пространство получало
+        # непроверенную связь с первого прохода. Новые наборы добавляются ВЫШЕ.
+        for stmt in VALIDATE_CONSTRAINTS_DDL:
             await conn.execute(_sa.text(stmt))
 
     await _ensure_active_group_readiness(engine)

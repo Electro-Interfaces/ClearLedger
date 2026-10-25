@@ -35,6 +35,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.auth import touch_key_used
 from app.models import Company, DataEntry, SpaceInboundKey
 
 router = APIRouter(prefix="/tl", tags=["Канал ОРП → бухгалтерия"])
@@ -80,7 +81,7 @@ async def канал_компании(
     company = await db.get(Company, ключ.company_id)
     if company is None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Ключ не привязан к пространству")
-    ключ.last_used_at = datetime.now(timezone.utc)
+    touch_key_used(ключ)
     return company
 
 

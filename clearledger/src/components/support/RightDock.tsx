@@ -83,7 +83,7 @@ const MAX_W = 760
 export function RightDock() {
   const {
     interactionSection: section, interactionMode: mode,
-    openInteraction, setInteractionMode, closeInteraction, unreadCounts,
+    openInteraction, registerDock, setInteractionMode, closeInteraction, unreadCounts,
   } = useSupportContext()
   const isMobile = useMaxWidth(1024)
   // Телефон (<768) — там внизу стоит панель пространства; планшет её не показывает.
@@ -137,6 +137,14 @@ export function RightDock() {
     .map((t) => (t.key === 'auditor' ? { ...t, label: appName('auditor', t.label) } : t))
 
   const dockOpen = !!section && mode === 'dock'
+
+  // Док есть на экране — значит в него можно открывать. Экраны без дока (рабочий
+  // стол пространства, «Приложения») получают окно: иначе просьба открыть чат
+  // меняла состояние, а показать его было некому.
+  useEffect(() => {
+    registerDock(true)
+    return () => registerDock(false)
+  }, [registerDock])
 
   // Инструмент таблицы живёт, пока открыта его область: закрыли док или открыли
   // в нём другое — панель инструмента гаснет вместе с подсветкой кнопки.

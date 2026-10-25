@@ -46,7 +46,7 @@ function PlayerLine({ p }: { p: MarketPlayer }) {
           <span className="text-muted-foreground"> · {p.operatorName}</span>
         )}
         {!p.classChecked && (
-          <span className="ml-1 text-muted-foreground">· класс не проверен</span>
+          <span className="ml-1 text-muted-foreground">· проверить класс</span>
         )}
       </span>
       <span className="shrink-0 tabular-nums text-muted-foreground">
@@ -128,6 +128,7 @@ export function MarketPlayersPanel() {
 
   return (
     <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
+      <p className="text-sm text-muted-foreground">Приложения и заявленные сети по внешним источникам. Число станций здесь не равно числу объектов нашего реестра. Непроверенные классы — гипотезы, а не подтверждённая бизнес-модель.</p>
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-1 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">

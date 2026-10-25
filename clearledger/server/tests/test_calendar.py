@@ -13,6 +13,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fastapi import HTTPException
+
 from app.models import CalendarAttendee, CalendarEvent, Company, User, UserCompany
 from app.routers.work_router import EventAction, EventIn, calendar_action, calendar_create
 
@@ -103,6 +105,47 @@ async def test_перенос_обнуляет_согласия(db: AsyncSession
     assert гость["response"] == "pending", "согласие на другое время не переносится"
     мой = next(a for a in после["attendees"] if a["user_id"] == str(я.id))
     assert мой["response"] == "accepted", "организатор в своей встрече не сомневается"
+
+
+async def test_отмена_с_участниками_требует_причину(db: AsyncSession):
+    """Причина — не украшение: зачёркнутую встречу уже не спросишь.
+
+    Правка отменённой встречи запрещена, поэтому пустая причина оставляет
+    участника с вопросом «почему» навсегда. Витрина гасит кнопку заранее,
+    но правило должно держаться и на запросе.
+    """
+    company, я, другой = await _пара(db)
+    ev = await _встреча(db, company, я, другой)
+    with pytest.raises(HTTPException) as ошибка:
+        await calendar_action(
+            ev["id"], EventAction(company_id=str(company.id), cancel=True),
+            db=db, current_user=я)
+    assert ошибка.value.status_code == 400
+    строка = await db.get(CalendarEvent, uuid.UUID(ev["id"]))
+    assert строка.status == "planned", "отказ не должен отменить встречу наполовину"
+
+    # Пробелы причиной не считаются — иначе правило обходится пробелом.
+    with pytest.raises(HTTPException):
+        await calendar_action(
+            ev["id"], EventAction(company_id=str(company.id), cancel=True,
+                                  cancel_reason="   "),
+            db=db, current_user=я)
+
+
+async def test_своя_встреча_отменяется_без_причины(db: AsyncSession):
+    """Встречу без других участников объяснять некому."""
+    company, я, _ = await _пара(db)
+    начало = datetime.now(timezone.utc) + timedelta(days=1)
+    ev = await calendar_create(
+        EventIn(company_id=str(company.id), title="Личный блок времени",
+                starts_at=начало, ends_at=начало + timedelta(hours=1),
+                attendee_ids=[]),
+        db=db, current_user=я)
+    после = await calendar_action(
+        ev["id"], EventAction(company_id=str(company.id), cancel=True),
+        db=db, current_user=я)
+    assert после["status"] == "cancelled"
+    assert после["cancel_reason"] is None
 
 
 async def test_отмена_не_удаляет(db: AsyncSession):

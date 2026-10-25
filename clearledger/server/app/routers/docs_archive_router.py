@@ -206,20 +206,58 @@ def _decode_archive_cursor(value: str) -> tuple[date | None, uuid.UUID]:
                             "Неверный курсор архивной очереди")
 
 
+# Отбор очереди считает СЕРВЕР. Раньше кнопки «Срок истёк», «Под запретом» и
+# соседние фильтровали только те строки, что успели подгрузиться курсором, и на
+# пустом экране писали «на загруженных страницах ничего нет» — человек делал
+# вывод, что документов нет вовсе, хотя они лежали на следующей странице.
+_QUEUE_FILTERS = {"all", "due", "hold", "legacy", "active"}
+# Состояния, из которых уничтожение невозможно (services/doc_archive.py).
+_NO_DESTRUCTION_STATES = ("legacy_review", "permanent", "primary_purged", "destroyed")
+_IN_PROGRESS_STATES = ("destruction_ready", "destruction_authorized", "primary_purged")
+
+
 @router.get("/archive/queue")
 async def archive_queue(
     company_id: str = Query(...),
     cursor: str | None = Query(None),
     limit: int = Query(100, ge=1, le=200),
+    queue: str = Query("all"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if queue not in _QUEUE_FILTERS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Неизвестный отбор архивной очереди")
     cid = await assert_company_product(company_id, current_user, db, "docs")
     conditions = [
         DocCard.company_id == cid,
         DocCard.status == "archived",
         await _archiveable_doc_clause(db, cid, current_user),
     ]
+    held_docs = select(DocLegalHold.doc_id).where(
+        DocLegalHold.company_id == cid,
+        DocLegalHold.released_at.is_(None),
+    )
+    if queue == "hold":
+        conditions.append(DocCard.id.in_(held_docs))
+    elif queue == "legacy":
+        conditions.append(DocCard.retention_state == "legacy_review")
+    elif queue == "active":
+        conditions.append(DocCard.retention_state.in_(_IN_PROGRESS_STATES))
+    elif queue == "due":
+        # «Можно уничтожать»: тот же разбор, что у destruction_blocker, —
+        # ни запрета, ни блокирующего состояния, и срок истёк к 1 января.
+        начало_года = date(datetime.now(_BUSINESS_TIMEZONE).year, 1, 1)
+        срок = func.greatest(
+            func.coalesce(DocCard.storage_until, DocCard.retention_extended_until),
+            func.coalesce(DocCard.retention_extended_until, DocCard.storage_until),
+        )
+        conditions.extend([
+            DocCard.id.not_in(held_docs),
+            DocCard.retention_state.not_in(_NO_DESTRUCTION_STATES),
+            срок.is_not(None),
+            срок < начало_года,
+        ])
     if cursor:
         cursor_until, cursor_id = _decode_archive_cursor(cursor)
         if cursor_until is None:
@@ -268,6 +306,7 @@ async def archive_queue(
         })
     return {
         "documents": result,
+        "queue": queue,
         "next_cursor": (_encode_archive_cursor(page[-1])
                         if has_more and page else None),
     }

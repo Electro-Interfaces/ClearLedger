@@ -529,6 +529,28 @@ KEY_SCOPES = {
 }
 
 
+# Как часто имеет смысл записывать «ключом пользовались».
+#
+# Отметка нужна с точностью до минуты — её показывают как «последнее обращение»
+# на экране подключений. А писалась она В ОДНУ СТРОКУ на каждый входящий запрос:
+# на gig это 204 971 обновление на восемь ключей. Пока транзакция запроса не
+# закрыта, строка ключа заблокирована, и все обращения по тому же ключу ждут её.
+# 25.10.2026 одна зависшая транзакция (`idle in transaction`, девять минут) так
+# остановила всё пространство: пятнадцать запросов стояли в очереди по четыре
+# минуты и отваливались по `statement_timeout`, в журнале 288 ошибок за четыре
+# минуты. Строка-счётчик на горячем пути — это точка сериализации всего обмена.
+#
+# Пишем не чаще раза в минуту: очередь исчезает, смысл отметки сохраняется.
+KEY_TOUCH_INTERVAL = timedelta(minutes=1)
+
+
+def touch_key_used(key) -> None:
+    """Отметить обращение по ключу, но не чаще раза в минуту."""
+    now = datetime.now(timezone.utc)
+    if key.last_used_at is None or now - key.last_used_at > KEY_TOUCH_INTERVAL:
+        key.last_used_at = now
+
+
 async def _named_key(raw: str, db: AsyncSession):
     import hashlib
 
@@ -564,7 +586,7 @@ def CompanyByKeyScope(scope: str):
         if company is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                                 detail="Невалидный API-ключ")
-        named.last_used_at = datetime.now(timezone.utc)
+        touch_key_used(named)
         return company, named
 
     return _dep
@@ -599,7 +621,7 @@ async def get_company_by_api_key(
     if named is not None:
         if named.station_id is not None and not request.url.path.startswith(STATION_KEY_PATHS):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Ключ станции не даёт доступа к этой ручке")
-        named.last_used_at = datetime.now(timezone.utc)
+        touch_key_used(named)
         company = await db.get(Company, named.company_id)
         if company is not None:
             return company

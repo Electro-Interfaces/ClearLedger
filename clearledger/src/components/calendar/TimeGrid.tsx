@@ -27,6 +27,10 @@ import { layoutDayEvents } from '@/lib/calendarLayout'
  *  на экран целиком, а именно его и смотрят. */
 const ЧАС_PX = 44
 const ЧАСЫ = Array.from({ length: 24 }, (_, i) => i)
+/** Уже этого блок перестаёт быть встречей и становится полоской: в него не
+ *  помещается даже «10:00» и первая буква названия. Неделя на телефоне делит
+ *  колонку в 89 px, и три одновременные встречи давали по 29 px. */
+const МИН_БЛОК_PX = 44
 
 export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, onAdd, onDay }: {
   days: Date[]
@@ -43,10 +47,27 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
   const прокрутка = useRef<HTMLDivElement>(null)
 
   // Открываемся на рабочем дне, а не на полуночи: иначе человек каждый раз
-  // прокручивает треть сетки, прежде чем увидеть хоть что-то.
+  // прокручивает треть сетки, прежде чем увидеть хоть что-то. Десять пикселей
+  // выше границы часа — чтобы подпись «08:00» (она поднята над линией) была
+  // видна целиком, а не срезана верхней полосой.
   useEffect(() => {
-    if (прокрутка.current) прокрутка.current.scrollTop = 8 * ЧАС_PX
+    if (прокрутка.current) прокрутка.current.scrollTop = 8 * ЧАС_PX - 10
   }, [])
+
+  // Ширина колонки дня: по ней решаем, сколько встреч одного часа можно
+  // показать рядом. Меряем саму колонку, а не контейнер прокрутки: неделя шире
+  // экрана и прокручивается внутри себя, и ширина контейнера о колонке не говорит.
+  const колонкаДня = useRef<HTMLDivElement>(null)
+  const [ширинаДня, setШиринаДня] = useState(0)
+  useEffect(() => {
+    const el = колонкаДня.current
+    if (!el) return
+    const update = () => setШиринаДня(el.getBoundingClientRect().width)
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [days.length])
   // Линия «сейчас» едет сама: неделя открыта часами, и застывшая линия врёт.
   const [сейчас, setСейчас] = useState(() => new Date())
   useEffect(() => {
@@ -138,8 +159,11 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
               </div>
             ))}
           </div>
-          {days.map((d) => (
-            <div key={d.toISOString()} className={cn('relative flex-1 border-l border-border',
+          {days.map((d, индекс) => {
+            const { видимые, свёрнутые } = раскладкаДня(вСетке, d, ширинаДня)
+            return (
+            <div key={d.toISOString()} ref={индекс === 0 ? колонкаДня : undefined}
+              className={cn('relative flex-1 border-l border-border',
               isToday(d) ? 'bg-primary/5' : d.getDay() % 6 === 0 && 'bg-muted/30')}>
               {isToday(d) && <div aria-hidden className="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-destructive"
                 style={{ top: (сейчас.getHours() * 60 + сейчас.getMinutes()) / 60 * ЧАС_PX }} />}
@@ -152,7 +176,25 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
                   }}
                   className="border-b border-border/40 hover:bg-accent/40" />
               ))}
-              {layoutDayEvents(вСетке, d)
+              {свёрнутые.map((группа) => (
+                /* Больше встреч, чем влезает в колонку этого дня: остальные —
+                   одной меткой «+N». Иначе они делят ширину до полосок в одну
+                   букву и из недели уже не понять, что это за встречи. */
+                <button key={`more-${группа.group}`} onClick={() => onDay?.(d)}
+                  aria-label={`Ещё ${группа.скрыто} ${встреч(группа.скрыто)} ${format(d, 'd MMMM', { locale: ru })}`}
+                  title="Показать день списком"
+                  style={{
+                    top: группа.startMinute / 60 * ЧАС_PX,
+                    height: Math.max(18, (группа.endMinute - группа.startMinute) / 60 * ЧАС_PX),
+                    left: `${((группа.предел - 1) / группа.предел) * 100}%`,
+                    width: `${(1 / группа.предел) * 100}%`,
+                  }}
+                  className="absolute overflow-hidden rounded border border-dashed border-border bg-muted/60
+                             px-1 py-0.5 text-left text-[12px] leading-tight text-muted-foreground hover:bg-accent">
+                  +{группа.скрыто}
+                </button>
+              ))}
+              {видимые
                 .map(({ event: e, column: колонка, columns: всего, startMinute, endMinute, continues }) => {
                   const н = new Date(e.starts_at)
                   const верх = startMinute / 60 * ЧАС_PX
@@ -186,11 +228,62 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
                   )
                 })}
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     </div>
   )
+}
+
+/**
+ * Что показать в колонке дня, когда встреч на один час больше, чем помещается.
+ *
+ * Раскладка делит ширину между пересекающимися встречами. На широком экране это
+ * и нужно, но колонка дня в неделе на телефоне — 89 px, и три одновременные
+ * встречи превращаются в полоски по 29 px: в них не помещается ни время, ни
+ * первая буква названия. Поэтому у цепочки пересечений есть предел колонок по
+ * фактической ширине: сколько влезает — показываем, остальные сворачиваем в
+ * «+N» на месте последней колонки. Ноль ширины (первый кадр до измерения) —
+ * предела нет, рисуем как раньше.
+ */
+function раскладкаДня(события: CalendarEvent[], день: Date, ширина: number) {
+  const блоки = layoutDayEvents(события, день)
+  const предел = ширина > 0 ? Math.max(1, Math.floor(ширина / МИН_БЛОК_PX)) : Number.POSITIVE_INFINITY
+  const видимые: typeof блоки = []
+  const скрытыеПоГруппам = new Map<number, typeof блоки>()
+  for (const блок of блоки) {
+    if (блок.columns <= предел || блок.column < предел - 1) {
+      видимые.push(блок)
+      continue
+    }
+    const группа = скрытыеПоГруппам.get(блок.group) ?? []
+    группа.push(блок)
+    скрытыеПоГруппам.set(блок.group, группа)
+  }
+  const свёрнутые = [...скрытыеПоГруппам.entries()].map(([group, блоки]) => ({
+    group,
+    скрыто: блоки.length,
+    предел: предел === Number.POSITIVE_INFINITY ? 1 : предел,
+    startMinute: Math.min(...блоки.map((b) => b.startMinute)),
+    endMinute: Math.max(...блоки.map((b) => b.endMinute)),
+  }))
+  // Видимые делят ширину по пределу, а не по числу встреч в цепочке: иначе
+  // место свёрнутых осталось бы пустым.
+  return {
+    видимые: видимые.map((b) => (b.columns > предел ? { ...b, columns: предел } : b)),
+    свёрнутые,
+  }
+}
+
+/** «1 встреча», «2 встречи», «5 встреч» — иначе метка читается как ошибка. */
+function встреч(n: number) {
+  const две = n % 100
+  if (две > 4 && две < 21) return 'встреч'
+  const одна = n % 10
+  if (одна === 1) return 'встреча'
+  if (одна > 1 && одна < 5) return 'встречи'
+  return 'встреч'
 }
 
 /** Встреча задевает день: командировка идёт неделю. */

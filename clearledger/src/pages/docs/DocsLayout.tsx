@@ -442,7 +442,11 @@ export function DocsLayout() {
                   v.key === active && !savedView && !openList
                     ? 'bg-primary/10 font-medium text-primary'
                     : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground')}>
-                <span className="flex-1 truncate">{v.label}</span>
+                {/* Имя раздела переносится, а не обрезается: «Документы и поручения»
+                    в рельсе показывалось как «Документы и поруч…», и отличить его от
+                    соседнего «Реестра поручений», не открывая оба, было нельзя —
+                    ровно то, ради чего разделы и переименовали (docs/TRACK.md §3). */}
+                <span className="min-w-0 flex-1 text-pretty">{v.label}</span>
                 {/* Два числа подряд сливаются: «1 3» человек читает как
                     тринадцать, пока не заметит, что первое красное. Цвет —
                     единственный носитель смысла только для того, кто его
@@ -559,7 +563,7 @@ export function DocsLayout() {
         {/* Настройка — про справочники: у них нет ни периода, ни объектов, и
             кнопка «Создать» на экране видов заводит документ, а не вид. */}
         {route !== '/docs/setup' && <DocsScopeBar personal={route === '/docs/work'} />}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div data-app-scroll className="min-h-0 flex-1 overflow-y-auto">
           <Outlet />
         </div>
       </div>

@@ -38,6 +38,7 @@ from app.services import email_service
 from app.services import notify
 from app.utils import resolve_company_id
 from app.schemas import (
+    ChangePasswordRequest,
     CompanyBrief,
     ForgotPasswordRequest,
     LoginRequest,
@@ -343,6 +344,44 @@ async def reset_password(
                         action="auth.password_reset")
     await db.flush()
     return {"ok": True}
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сменить свой пароль, зная текущий.
+
+    Раньше этого пути не было вовсе: человек, который просто хочет поменять
+    пароль, был обязан выйти и пройти восстановление через почту — то есть
+    получить доступ к ящику, чтобы сделать то, на что у него уже есть сеанс.
+
+    Смена гасит прежние входы тем же способом, что и сброс по письму
+    (`token_version`), но текущему окну сразу выдаётся новый токен: человек
+    меняет пароль у себя за столом и не должен после этого логиниться заново.
+    """
+    if current_user.mail_only or not current_user.password_hash:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "У этой учётной записи нет пароля")
+    if not verify_password(body.currentPassword, current_user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Текущий пароль не подходит")
+    if body.newPassword == body.currentPassword:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Новый пароль должен отличаться от текущего")
+    current_user.password_hash = hash_password(body.newPassword)
+    # Ссылка на восстановление, если её успели запросить, после смены не нужна.
+    current_user.reset_token_hash = None
+    current_user.reset_token_expires = None
+    current_user.failed_logins = 0
+    current_user.locked_until = None
+    current_user.token_version = (current_user.token_version or 0) + 1
+    if current_user.company_id is not None:
+        await log_audit(db, actor=current_user, company_id=current_user.company_id,
+                        action="auth.password_change")
+    await db.commit()
+    return {"ok": True, "access_token": token_for(current_user)}
 
 
 @router.post(

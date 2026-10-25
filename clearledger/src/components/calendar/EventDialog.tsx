@@ -408,6 +408,14 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     onError: (e: Error) => toast.error(e.message || 'Ответ не записался'),
   })
 
+  // Встречу с участниками отменяют только с причиной: она уже стоит в чужих
+  // календарях, и зачёркнутая строка без объяснения оставляет вопрос «почему»
+  // тому, кто спросить уже не может — правка отменённой встречи запрещена.
+  // Признак считается по составу самой встречи, а не по черновику формы:
+  // снятый в форме участник ещё не перестал её ждать.
+  const причинаОбязательна = (event?.attendees ?? [])
+    .some((a) => a.user_id !== event?.organizer_id)
+
   const отменить = useMutation({
     mutationFn: (reason: string) =>
       workService.eventAction(companyId, event!.id, { cancel: true, cancelReason: reason }),
@@ -938,9 +946,22 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
 </div>
         {cancelConfirm && мой && <section aria-label="Отмена встречи" className="space-y-2 rounded-md border border-destructive/40 p-3">
           <p className="text-sm font-medium">{event?.recurrence ? 'Отменить эту встречу и будущие встречи серии?' : 'Отменить встречу?'}</p>
-          <p className="text-sm text-muted-foreground">Участники получат сообщение и письмо об отмене, встреча уйдёт из их календарей. Личные напоминания о встрече будут сняты.</p>
-          <Input aria-label="Причина отмены" placeholder="Причина отмены — необязательно" value={cancelReason} onChange={e => setCancelReason(e.target.value)} className="text-base sm:text-sm" />
-          <div className="flex flex-wrap gap-2"><Button variant="destructive" disabled={отменить.isPending} onClick={() => отменить.mutate(cancelReason.trim())}>Подтвердить отмену</Button><Button variant="ghost" disabled={отменить.isPending} onClick={() => setCancelConfirm(false)}>Не отменять</Button></div>
+          <p className="text-sm text-muted-foreground">
+            Участники получат сообщение и письмо об отмене; до конца дня встреча останется у них
+            зачёркнутой с этой причиной, потом скроется. Личные напоминания будут сняты.
+          </p>
+          <Input aria-label="Причина отмены"
+            placeholder={причинаОбязательна ? 'Причина отмены — её увидят участники' : 'Причина отмены — необязательно'}
+            value={cancelReason} onChange={e => setCancelReason(e.target.value)}
+            className="text-base sm:text-sm" />
+          {/* Отказ, известный заранее, называется до нажатия, а не красной плашкой после. */}
+          {причинаОбязательна && !cancelReason.trim() && (
+            <p className="text-xs text-muted-foreground">
+              Встречу ждут другие: без причины отменить нельзя — иначе в чужом календаре она
+              пропадёт молча, и спросить будет не у кого.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2"><Button variant="destructive" disabled={отменить.isPending || (причинаОбязательна && !cancelReason.trim())} onClick={() => отменить.mutate(cancelReason.trim())}>Подтвердить отмену</Button><Button variant="ghost" disabled={отменить.isPending} onClick={() => setCancelConfirm(false)}>Не отменять</Button></div>
         </section>}
         <DialogFooter className="sticky -bottom-4 -mx-4 flex-row flex-wrap gap-2 border-t border-border bg-background px-4 py-3 sm:-bottom-6 sm:-mx-6 sm:px-6">
           {canRespond && предлагаю && (

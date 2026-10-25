@@ -475,7 +475,7 @@ async def list_sites(
     total = int((await db.execute(
         select(func.count()).select_from(q.subquery()))).scalar() or 0)
     sites = (await db.execute(
-        q.order_by(MarketSite.name).offset(offset).limit(limit))).scalars().all()
+        q.order_by(MarketSite.name, MarketSite.id).offset(offset).limit(limit))).scalars().all()
 
     # Последнее ценовое наблюдение на точку — одним запросом, а не N+1.
     last_price: dict[str, dict[str, Any]] = {}
@@ -734,13 +734,22 @@ async def patch_site(
 async def list_observations(
     company_id: str = Query(...),
     site_id: uuid.UUID | None = Query(None),
-    limit: int = Query(200, le=1000),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
     обл: list[Any] = Depends(область),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Лента наблюдений — «откуда мы это знаем». По точке или по всей компании."""
     cid = await _member(company_id, user, db)
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(422, "Начало периода позже конца")
     q = select(MarketObservation).where(MarketObservation.company_id == cid)
+    if date_from:
+        q = q.where(MarketObservation.observed_on >= date_from.isoformat())
+    if date_to:
+        q = q.where(MarketObservation.observed_on <= date_to.isoformat())
     if site_id:
         q = q.where(MarketObservation.site_id == site_id)
     if обл:
@@ -748,9 +757,10 @@ async def list_observations(
         # показываем то, чем эта область и подтверждается.
         q = q.where(MarketObservation.site_id.in_(
             select(MarketSite.id).where(MarketSite.company_id == cid, *обл)))
+    total = await db.scalar(select(func.count()).select_from(q.subquery())) or 0
     rows = (await db.execute(
         q.order_by(MarketObservation.observed_on.desc(),
-                   MarketObservation.created_at.desc()).limit(limit)
+                   MarketObservation.created_at.desc(), MarketObservation.id).offset(offset).limit(limit)
     )).scalars().all()
     names = dict((str(s.id), s.name) for s in (await db.execute(
         select(MarketSite).where(MarketSite.company_id == cid))).scalars().all())
@@ -764,7 +774,7 @@ async def list_observations(
         "powerKw": float(o.power_kw) if o.power_kw is not None else None,
         "channel": o.channel, "confidence": o.confidence, "sourceRef": o.source_ref,
         "snapshotUrl": o.snapshot_url, "author": o.author_name, "note": o.note,
-    } for o in rows], "total": len(rows)}
+    } for o in rows], "total": total, "returned": len(rows), "offset": offset, "limit": limit}
 
 
 @router.post("/observations", status_code=status.HTTP_201_CREATED)
@@ -1003,6 +1013,10 @@ async def market_position(
     company_id: str = Query(...),
     days: int = Query(30, ge=1, le=365, description="окно наших продаж"),
     radius_km: float = Query(DEFAULT_RADIUS_KM, ge=0.5, le=50),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    current_type: str | None = Query(None, pattern="^(AC|DC)$"),
+    min_power: float | None = Query(None, ge=0),
     regions: str | None = Query(None, description="регионы через запятую — контур"),
     cities: str | None = Query(None, description="города через запятую — контур"),
     обл: list[Any] = Depends(область),
@@ -1015,7 +1029,13 @@ async def market_position(
     конкурент» без нашей выручки не говорит, важно ли это.
     """
     cid = await _member(company_id, user, db)
-    since = (datetime.now(timezone.utc) - timedelta(days=days)).replace(tzinfo=None)
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(422, "Начало периода позже конца")
+    if date_to == date.max:
+        raise HTTPException(422, "Конец периода вне допустимого диапазона")
+    until = datetime.combine(date_to + timedelta(days=1), datetime.min.time()) if date_to else datetime.now(timezone.utc).replace(tzinfo=None)
+    since = datetime.combine(date_from, datetime.min.time()) if date_from else until - timedelta(days=days)
+    price_cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
 
     # ── наши объекты ──
     # Тестовые стенды заказчика («БЦ Гидропроект (Тест)» и подобные) в рыночный
@@ -1043,7 +1063,7 @@ async def market_position(
                    ChargeSession.client_amount, ChargeSession.amount)), 0),
                func.coalesce(func.sum(
                    case((ChargeSession.amount > 0, ChargeSession.energy_kwh), else_=0)), 0))
-        .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since,
+        .where(ChargeSession.company_id == cid, ChargeSession.started_at >= since, ChargeSession.started_at < until,
                ChargeSession.location_id.is_not(None))
         .group_by(ChargeSession.location_id)
     )).all()
@@ -1097,6 +1117,10 @@ async def market_position(
                     "maxPowerKw": float(m.max_power_kw) if m.max_power_kw else None,
                     "pricePerKwh": obs["price"] if obs else None,
                     "observedOn": obs["observedOn"] if obs else None,
+                    "priceBasis": obs["basis"] if obs else None,
+                    "priceVariants": obs["variants"] if obs else 0,
+                    "priceStale": bool(obs and obs["observedOn"] < price_cutoff),
+                    "currentType": m.current_type,
                     "lastSessionAt": last_session.isoformat() if last_session else None,
                     "alive": bool(last_session and last_session >= alive_since),
                 })
@@ -1107,7 +1131,19 @@ async def market_position(
         rivals = [n for n in neighbours
                   if n["kind"] == "ezs" and n["siteClass"] != "home"
                   and n["relation"] != "own"]
-        rival_prices = [n["pricePerKwh"] for n in rivals if n["pricePerKwh"] is not None]
+        rival_ids = {n["id"] for n in rivals}
+        for n in neighbours:
+            # Не смешивать клубные/временные варианты с обычной ценой;
+            # выбранные пользователем тип тока и мощность применяются к медиане.
+            n["includedInPrice"] = bool(
+                n["id"] in rival_ids and n["pricePerKwh"] is not None and not n["priceStale"]
+                and n["observedOn"] <= date.today().isoformat()
+                and n["priceVariants"] == 1
+                and n["priceBasis"] in ("реестр, круглосуточно", "публичный тариф")
+                and (not current_type or n["currentType"] == current_type)
+                and (min_power is None or (n["maxPowerKw"] is not None and n["maxPowerKw"] >= min_power)))
+        priced = [n for n in neighbours if n["includedInPrice"]]
+        rival_prices = [n["pricePerKwh"] for n in priced]
         market_price = _median(rival_prices)
         our_price = s["ourPricePerKwh"]
         rows.append({
@@ -1129,12 +1165,19 @@ async def market_position(
             # не с чем: выдуманный ноль здесь опаснее пропуска.
             "priceGapPct": round((our_price - market_price) / market_price * 100, 1)
             if our_price and market_price else None,
-            "neighbours": neighbours[:8],
+            "neighbours": neighbours,
+            "priceCoverage": len(priced),
+            "stalePrices": sum(1 for n in rivals if n["priceStale"]),
+            "marketObservedFrom": min((n["observedOn"] for n in priced), default=None),
+            "marketObservedTo": max((n["observedOn"] for n in priced), default=None),
         })
 
     # Наверх — там, где есть с чем сравнивать и где больше денег.
     rows.sort(key=lambda r: (r["marketPricePerKwh"] is None, -r["revenue"]))
-    return {"days": days, "radiusKm": radius_km, "objects": rows, "total": len(rows)}
+    return {"days": days, "radiusKm": radius_km, "objects": rows, "total": len(rows),
+            "salesFrom": since.date().isoformat(), "salesTo": (until - timedelta(microseconds=1)).date().isoformat(),
+            "priceMaxAgeDays": 30,
+            "comparisonNote": "Ориентир: медиана свежих круглосуточных публичных цен ₽/кВт·ч. Временные, клубные и неоднозначные варианты исключены. Наша цена — средняя по оплатам; перед решением сверяйте тип зарядки, мощность и условия."}
 
 
 # ── Источники, свежесть и покрытие ──────────────────────────────────────────

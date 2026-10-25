@@ -58,7 +58,10 @@ export function DateField({ id, value, onChange, disabled, className, ...rest }:
         disabled={disabled}
         inputMode="numeric"
         placeholder="дд.мм.гггг"
-        aria-label={rest['aria-label'] ?? 'Дата'}
+        // Своё имя поля — только когда подписи нет. С `id` у поля уже есть
+        // связанный <label>, и «Дата» молча перебивала его: начало и конец
+        // встречи звучали одинаково (проверка календаря 25.10.2026).
+        aria-label={rest['aria-label'] ?? (id ? undefined : 'Дата')}
         className="pr-10 text-base sm:text-sm"
         onChange={(e) => commit(e.target.value)}
         onBlur={() => { typing.current = false; setText(dateToText(value)) }}
@@ -127,7 +130,7 @@ export function TimeField({ id, value, onChange, disabled, className, ...rest }:
         disabled={disabled}
         inputMode="numeric"
         placeholder="чч:мм"
-        aria-label={rest['aria-label'] ?? 'Время'}
+        aria-label={rest['aria-label'] ?? (id ? undefined : 'Время')}
         className="pr-10 text-base tabular-nums sm:text-sm"
         onChange={(e) => commit(e.target.value)}
         onBlur={() => { typing.current = false; setText(value || '') }}
