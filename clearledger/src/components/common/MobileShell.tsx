@@ -5,6 +5,7 @@
  * молча, а выкаченные правки не доезжают до человека вовсе — он видит ту сборку,
  * что открыл когда-то, и справедливо считает, что ничего не изменилось.
  */
+import { useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2, ArrowDown, RefreshCw, Smartphone } from 'lucide-react'
@@ -136,6 +137,7 @@ function wasRecentlyDismissed(): boolean {
 }
 
 export function InstallApp() {
+  const { pathname } = useLocation()
   const bannerRef = useRef<HTMLDivElement>(null)
   const [promptAvailable, setPromptAvailable] = useState(hasPwaInstallPrompt)
   const [hidden, setHidden] = useState(wasRecentlyDismissed)
@@ -150,7 +152,7 @@ export function InstallApp() {
     })
   }, [])
 
-  const visible = !installed && !hidden
+  const visible = !pathname.startsWith('/marketing') && !installed && !hidden
   useEffect(() => {
     if (!visible || !bannerRef.current) return
     // Высота плашки и зазор под ней: по ним экраны отодвигают своё содержимое и
