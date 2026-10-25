@@ -44,8 +44,11 @@ interface SupportContextValue {
   interactionContext: string | null
   /** Хедер: открыть/закрыть в модалке (toggle). */
   toggleInteraction: (section: InteractionSection) => void
-  /** Правая область / контекст: открыть в доке (можно передать контекст). */
+  /** Правая область / контекст: открыть в доке (можно передать контекст).
+   *  Там, где дока на экране нет (рабочий стол, телефон), откроется окном. */
   openInteraction: (section: InteractionSection, context?: string | null) => void
+  /** Док сообщает, что он на экране есть. Зовёт только `RightDock`. */
+  registerDock: (available: boolean) => void
   /** Переключить подачу текущего раздела (окно ↔ док). */
   setInteractionMode: (mode: InteractionMode) => void
   closeInteraction: () => void
@@ -68,8 +71,16 @@ export function SupportProvider({ children }: { children: ReactNode }) {
         ? { section: null, mode: 'modal', context: null }
         : { section, mode: 'modal', context: null })
   }, [])
+  // Есть ли на текущем экране пристыкованная панель. Рабочий стол пространства и
+  // «Приложения» рисуют только окно, а на телефоне своей полосы у дока нет вовсе —
+  // и просьба открыть «в доке» там не показывала НИЧЕГО: состояние менялось, кнопка
+  // подсвечивалась, экран оставался прежним (проверка 25.10.2026: чат, «Трек» и
+  // «Календарь» нижней панели телефона). Ref, а не state: подача выбирается в момент
+  // вызова, и лишняя перерисовка контекста тут не нужна.
+  const dockAvailable = useRef(false)
+  const registerDock = useCallback((available: boolean) => { dockAvailable.current = available }, [])
   const openInteraction = useCallback((section: InteractionSection, context: string | null = null) => {
-    setState({ section, mode: 'dock', context })
+    setState({ section, mode: dockAvailable.current ? 'dock' : 'modal', context })
   }, [])
   const setInteractionMode = useCallback((mode: InteractionMode) => {
     setState((prev) => (prev.section ? { ...prev, mode } : prev))
@@ -175,7 +186,8 @@ export function SupportProvider({ children }: { children: ReactNode }) {
         interactionSection: state.section,
         interactionMode: state.mode,
         interactionContext: state.context ?? null,
-        toggleInteraction, openInteraction, setInteractionMode, closeInteraction, unreadCounts, tasksOverdue,
+        toggleInteraction, openInteraction, registerDock, setInteractionMode, closeInteraction,
+        unreadCounts, tasksOverdue,
       }}
     >
       {children}
