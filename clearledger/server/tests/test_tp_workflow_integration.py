@@ -34,7 +34,7 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
         cls.sessions = async_sessionmaker(cls.engine, expire_on_commit=False)
         names = ['ApprovalRequest', 'OutboxEvent', 'EventSubscription', 'AuditEvent', 'Company', 'User', 'UserCompany', 'Organization', 'Contract', 'EzsSite', 'EzsTechConnection',
                  'EzsSiteDoc', 'EzsSiteParticipant', 'EzsSiteEquipment', 'EzsSiteCost', 'EzsSiteEvent', 'SourceFile', 'TpOrganizationDocument', 'DocCard', 'DocKind',
-                 'DocRelation', 'DocAcquaint', 'DocVersion', 'DocEvent', 'DocAccessGrant', 'ChatMessage', 'ChatRoom', 'ChatParticipant']
+                 'DocSignatureEvidence', 'DocRelation', 'DocAcquaint', 'DocVersion', 'DocEvent', 'DocAccessGrant', 'ChatMessage', 'ChatRoom', 'ChatParticipant']
         tables = {getattr(m, n).__table__ for n in names}
         while True:
             parents = {fk.column.table for t in tables for fk in t.foreign_keys}
@@ -282,6 +282,7 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
         from app.services.ezs_tp_method import create_handover,handover_state
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'UPLOAD_DIR':folder}), patch('app.services.web_push.push_room_async'):
             for kind in ('contract','egrul','tu','tp_contract','tp_act','tp_avtu','tp_meter_act'): await self.doc(kind)
+            await self.doc('photo')
             async with self.sessions() as db:
                 for f in (await db.execute(select(m.SourceFile))).scalars():
                     p=Path(folder)/str(f.id);p.write_bytes(b'%PDF-1.4 test');f.storage_path=str(p)
@@ -295,6 +296,8 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
                 state=await handover_state(db,tc)
                 self.assertEqual(len(state['recipients']),1);self.assertFalse(state['done'])
                 self.assertEqual(len((await db.execute(select(m.DocCard))).scalars().all()),1)
+                card=(await db.execute(select(m.DocCard))).scalar_one()
+                self.assertNotIn('photo',card.attrs['archive']['files'])
             r=await self.client.post(self.path+'/acquaint',params=self.q)
             self.assertEqual(r.status_code,200,r.text)
             r=await self.client.post(self.path+'/acquaint',params=self.q)
@@ -302,6 +305,21 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
             async with self.sessions() as db:
                 tc=await db.get(m.EzsTechConnection,self.tc.id)
                 self.assertTrue((await handover_state(db,tc))['done'])
+
+    async def test_registered_document_files_are_in_packet_evidence(self):
+        await self.doc('tp_contract')
+        async with self.sessions() as db:
+            local=(await db.execute(select(m.EzsSiteDoc).where(m.EzsSiteDoc.kind=='tp_contract'))).scalar_one()
+            fid=local.file_id;await db.delete(local)
+            kind=m.DocKind(company_id=self.company.id,code='test_tp_contract',name='Договор ТП',gate_key='tp_contract')
+            db.add(kind);await db.flush()
+            card=m.DocCard(company_id=self.company.id,kind_id=kind.id,title='Договор',subject_ref=f'site:{self.site.id}',has_files=True)
+            db.add(card);await db.flush()
+            db.add(m.DocVersion(company_id=self.company.id,doc_id=card.id,file_id=fid,file_name='test.pdf',sha256='0'*64))
+            await db.flush()
+            tc=await db.get(m.EzsTechConnection,self.tc.id)
+            kinds,_,signatures=await tp.evidence(db,tc,tp.data_of(tc))
+            self.assertIn('tp_contract',kinds);self.assertEqual(signatures['tp_contract'],[str(fid)])
 
     async def test_supply_needs_document_not_only_date(self):
         self.w['supply_mode']='direct'; await self.save()

@@ -102,6 +102,10 @@ async def create_handover(db, tc):
     if set(people) != controllers or not people:
         raise HTTPException(400, 'Все контролирующие должны иметь доступ к «Треку» для ознакомления')
     site = await db.get(EzsSite, tc.site_id)
+    packet_kinds = set(tp.required_kinds(tc,w) + tp.supply_kinds(tc,w)) | {
+        'tu','tp_contract','tp_act','tp_avtu','tp_meter_act','power_contract',
+        'tp_design','tp_tests','tp_circuit','tp_existing_act','tp_indirect','tp_power_share'}
+    signatures = {k:v for k,v in signatures.items() if k in packet_kinds}
     ids = {uuid.UUID(f) for files in signatures.values() for f in files}
     sources = (await db.execute(select(SourceFile).where(SourceFile.company_id == tc.company_id,
                                                         SourceFile.id.in_(ids)))).scalars().all() if ids else []
@@ -113,7 +117,8 @@ async def create_handover(db, tc):
     if kind is None:
         kind = DocKind(company_id=tc.company_id, code='tp_completion', name='Комплект завершения ТП', family='internal')
         db.add(kind); await db.flush()
-    archive = (tc.workflow or {}).get('_archive') or {}
+    archive = dict((tc.workflow or {}).get('_archive') or {})
+    archive['files'] = signatures
     digest = hashlib.sha256(json.dumps(archive, sort_keys=True).encode()).hexdigest()
     source_ref = f'tp-package:{tc.id}:{digest}'
     card = DocCard(company_id=tc.company_id, kind_id=kind.id, kind_code=kind.code,

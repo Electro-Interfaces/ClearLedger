@@ -14,7 +14,7 @@ from typing import Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import select, or_, false
 from app.models import (EzsSite, EzsTechConnection, Organization, SourceFile,
                         TpOrganizationDocument, User, UserCompany)
 from app.services import ezs_tp_steps
@@ -219,6 +219,25 @@ async def evidence(db, tc, w):
     empty = {x.kind for x in local if not x.file_id} - {x.kind for x in local if x.file_id}
     kinds -= empty
     signatures = {k: sorted(str(x.file_id) for x in local if x.kind == k and x.file_id) for k in kinds}
+    # Файлы «Трека» участвуют в отпечатке и итоговом архиве наравне с загрузками проекта.
+    from app.models import DocCard, DocKind, DocRelation, DocVersion
+    site = await db.get(EzsSite, tc.site_id)
+    refs = [f"site:{tc.site_id}"] + ([f"object:{site.location_id}"] if site and site.location_id else [])
+    related = select(DocRelation.id).where(DocRelation.company_id == tc.company_id,
+        DocRelation.doc_id == DocCard.id, DocRelation.target_ref.in_(refs)).exists()
+    versions = (await db.execute(select(DocKind.gate_key, DocVersion.file_id)
+        .join(DocCard, DocCard.kind_id == DocKind.id).join(DocVersion, DocVersion.doc_id == DocCard.id)
+        .where(DocCard.company_id == tc.company_id, DocKind.company_id == tc.company_id,
+               DocVersion.company_id == tc.company_id, DocKind.gate_key.is_not(None),
+               DocCard.status.not_in(("cancelled", "archived")), DocVersion.is_current.is_(True),
+               DocVersion.tombstoned_at.is_(None),
+               or_(DocCard.subject_ref.in_(refs), related,
+                   DocCard.object_id == site.location_id if site and site.location_id else false())))).all()
+    for kind, fid in versions:
+        kinds.add(kind)
+        signatures.setdefault(kind, []).append(str(fid))
+    for kind in set(kinds) & set(DOC_LABELS):
+        if not signatures.get(kind): kinds.discard(kind)
     shared = []
     if w.organization_id:
         rows = (await db.execute(select(TpOrganizationDocument, SourceFile.file_name)
