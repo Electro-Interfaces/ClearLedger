@@ -29,6 +29,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from app.services.session_scope import station_scope_sql, station_locations_sql
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,7 +65,7 @@ def _scope(stations: list[str] | None, regions: list[str] | None) -> str:
     чего не видит поштучно."""
     s = acl_sql("location_id")
     if stations is not None:
-        s += " AND station_code = ANY(:scope_stations)"
+        s += " AND " + station_scope_sql(":scope_stations")
     if regions is not None:
         # Уникальные алиасы sl_sc/r_sc — некоторые запросы (region_extremes) уже
         # джойнят service_locations/regions под sl/r, конфликт имён недопустим.
@@ -78,7 +80,7 @@ def _scope_net(stations: list[str] | None, regions: list[str] | None) -> str:
     станции и по региону напрямую (region_id → regions.name)."""
     s = acl_sql("id")   # скоуп участника: здесь колонка объекта — сам id
     if stations is not None:
-        s += " AND code = ANY(:scope_stations)"
+        s += " AND id = ANY" + station_locations_sql(":scope_stations")
     if regions is not None:
         s += (" AND region_id IN (SELECT id FROM regions"
               " WHERE company_id = :company_id AND name = ANY(:scope_regions))")
@@ -92,8 +94,7 @@ def _scope_loc(stations: list[str] | None, regions: list[str] | None) -> str:
     if current_object_scope():
         conds.append(f"location_id = ANY(:{ACL_PARAM})")   # скоуп участника
     if stations is not None:
-        conds.append("location_id IN (SELECT id FROM service_locations"
-                     " WHERE company_id = :company_id AND code = ANY(:scope_stations))")
+        conds.append("location_id = ANY" + station_locations_sql(":scope_stations"))
     if regions is not None:
         conds.append("location_id IN (SELECT sl_sc.id FROM service_locations sl_sc"
                      " JOIN regions r_sc ON r_sc.id = sl_sc.region_id"

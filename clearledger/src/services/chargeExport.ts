@@ -53,18 +53,38 @@ async function snapshot(el: HTMLElement): Promise<string> {
     const color = getComputedStyle(parent).backgroundColor
     if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') { bg = color; break }
   }
-  const style = document.createElement('style')
-  style.textContent = '[data-export-ignore],.recharts-tooltip-wrapper{display:none !important} [data-export-expand]{max-height:none !important;overflow:visible !important}'
-  document.head.appendChild(style)
+  // Копия раскрывает прокрутку, не меняя положение рабочего экрана.
+  const host = document.createElement('div')
+  host.style.cssText = 'position:fixed;left:-100000px;top:0;pointer-events:none'
+  const clone = el.cloneNode(true) as HTMLElement
+  host.appendChild(clone)
+  document.body.appendChild(host)
+  host.style.width = `${Math.max(el.offsetWidth, el.scrollWidth, ...Array.from(el.querySelectorAll<HTMLElement>('[data-export-expand]')).map((node) => node.scrollWidth))}px`
+  clone.style.width = '100%'
+  for (const node of clone.querySelectorAll<HTMLElement>('[data-export-ignore],.recharts-tooltip-wrapper')) node.remove()
+  for (const node of [clone, ...clone.querySelectorAll<HTMLElement>('[data-export-expand]')]) {
+    node.style.maxHeight = 'none'
+    node.style.overflow = 'visible'
+  }
   try {
-    return await toPng(el, { pixelRatio: 2, backgroundColor: bg, cacheBust: true })
+    return await toPng(clone, { pixelRatio: 2, backgroundColor: bg, cacheBust: true })
   } finally {
-    document.head.removeChild(style)
+    host.remove()
   }
 }
 
 interface Kpi { label: string; value: string; hint: string }
 interface Tbl { name: string; columns: string[]; rows: (string | number | null)[][] }
+
+function exportMetadata(root: HTMLElement, title: string, subtitle?: string): string[][] {
+  const rows = [['Отчёт', title], ...(subtitle ? [['Общий контур', subtitle]] : []),
+    ['Сформировано', new Date().toLocaleString('ru-RU')]]
+  for (const node of [root, ...root.querySelectorAll<HTMLElement>('[data-export-meta]')]) {
+    const raw = node.getAttribute('data-export-meta')
+    if (raw) rows.push(...JSON.parse(raw) as string[][])
+  }
+  return rows
+}
 
 /** KPI-карточки помечены data-kpi; читаем label/value/hint из детей. */
 function readKpis(root: HTMLElement): Kpi[] {
@@ -111,12 +131,8 @@ export async function exportChargeExcel(el: HTMLElement, title: string, subtitle
   const used = new Set<string>()
 
   const params = wb.addWorksheet(safeSheet('Параметры', used))
-  params.addRow(['Отчёт', title]).font = { bold: true }
-  if (subtitle) params.addRow(['Общий контур', subtitle])
-  for (const node of [el, ...el.querySelectorAll<HTMLElement>('[data-export-meta]')]) {
-    const raw = node.getAttribute('data-export-meta')
-    if (raw) for (const row of JSON.parse(raw) as string[][]) params.addRow(row)
-  }
+  for (const row of exportMetadata(el, title, subtitle)) params.addRow(row)
+  params.getRow(1).font = { bold: true }
   params.columns = [{ width: 28 }, { width: 110 }]
   params.getColumn(2).alignment = { wrapText: true, vertical: 'top' }
 
@@ -232,66 +248,62 @@ export async function exportNewClientsXlsx(
 }
 
 export async function exportChargePdf(el: HTMLElement, title: string, subtitle?: string): Promise<void> {
-  const { jsPDF } = await import('jspdf')
+  if (el.matches('[data-export-state="unavailable"]') || el.querySelector('[data-export-state="unavailable"]')) throw new Error('Дождитесь загрузки данных отчёта')
+  const [{ jsPDF }, { default: autoTable }, fonts] = await Promise.all([
+    import('jspdf'), import('jspdf-autotable'), loadPdfFonts(),
+  ])
   const tables = readTables(el)
-  if (tables.length && !findCharts(el).length) {
-    const [{ default: autoTable }, fonts] = await Promise.all([import('jspdf-autotable'), loadPdfFonts()])
-    const doc = new jsPDF({ orientation: tables.some((table) => table.columns.length > 6) ? 'landscape' : 'portrait', unit: 'pt', format: 'a4' })
-    for (const [file, style] of [['Roboto-Regular.ttf', 'normal'], ['Roboto-Medium.ttf', 'bold']]) {
-      doc.addFileToVFS(file, fonts[file]); doc.addFont(file, 'Report', style)
-    }
-    doc.setFont('Report', 'bold'); doc.setFontSize(13)
-    doc.text(title, 24, 35)
-    let y = 48
-    if (subtitle) {
-      doc.setFont('Report', 'normal'); doc.setFontSize(9)
-      const lines = doc.splitTextToSize(subtitle, doc.internal.pageSize.getWidth() - 48)
-      doc.text(lines, 24, y); y += lines.length * 12 + 6
-    }
-    const kpis = readKpis(el)
-    const sections: Tbl[] = [...(kpis.length ? [{ name: 'Показатели', columns: ['Показатель', 'Значение', 'Примечание'], rows: kpis.map((k) => [k.label, k.value, k.hint]) }] : []), ...tables]
-    for (const table of sections) {
-      if (y > doc.internal.pageSize.getHeight() - 80) { doc.addPage(); y = 30 }
-      doc.setFont('Report', 'bold'); doc.setFontSize(10)
-      doc.text(`${table.name} · строк: ${table.rows.length}`, 24, y)
-      autoTable(doc, {
-        startY: y + 8, head: [table.columns],
-        body: table.rows.map((row) => row.map((value, col) => value == null || value === '' ? '—' : showCell(value, table.columns[col]))),
-        margin: { top: 24, bottom: 30, left: 24, right: 24 },
-        theme: 'grid', styles: { font: 'Report', fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
-        headStyles: { font: 'Report', fontStyle: 'bold', fillColor: [238, 240, 246], textColor: [25, 32, 45] },
-        columnStyles: Object.fromEntries(table.columns.flatMap((_, col) => table.rows.some((row) => typeof row[col] === 'number') ? [[col, { halign: 'right' as const }]] : [])),
-      })
-      y = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 20
-    }
-    const pages = doc.getNumberOfPages()
-    for (let page = 1; page <= pages; page++) {
-      doc.setPage(page); doc.setFont('Report', 'normal'); doc.setFontSize(8)
-      doc.text(`${page} / ${pages}`, doc.internal.pageSize.getWidth() - 24, doc.internal.pageSize.getHeight() - 14, { align: 'right' })
-    }
-    doc.save(`${fileBase(title)}.pdf`)
-    return
+  const charts = findCharts(el)
+  const wide = tables.some((table) => table.columns.length > 7)
+  const doc = new jsPDF({ orientation: wide ? 'landscape' : 'portrait', unit: 'pt', format: 'a4' })
+  for (const [file, style] of [['Roboto-Regular.ttf', 'normal'], ['Roboto-Medium.ttf', 'bold']]) {
+    doc.addFileToVFS(file, fonts[file]); doc.addFont(file, 'Report', style)
   }
-  const dataUrl = await snapshot(el)
-  const img = new Image()
-  await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error('img')); img.src = dataUrl })
-
-  // Ориентация — по форме контента: широкий → альбомная (иначе таблицы ужимаются).
-  const orientation = img.width > img.height * 1.15 ? 'landscape' : 'portrait'
-  const doc = new jsPDF({ orientation, unit: 'pt', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
   const margin = 24
-  const imgW = pageW - margin * 2
-  const imgH = imgW * (img.height / img.width)
-
-  let heightLeft = imgH
-  doc.addImage(dataUrl, 'PNG', margin, margin, imgW, imgH)
-  heightLeft -= (pageH - margin * 2)
-  while (heightLeft > 0) {
+  doc.setFont('Report', 'bold'); doc.setFontSize(13)
+  const heading = doc.splitTextToSize(title, pageW - margin * 2)
+  doc.text(heading, margin, 35)
+  autoTable(doc, {
+    startY: 40 + heading.length * 15,
+    body: exportMetadata(el, title, subtitle).slice(1),
+    margin: { top: margin, bottom: 30, left: margin, right: margin },
+    theme: 'plain', styles: { font: 'Report', fontSize: 9, cellPadding: 3, overflow: 'linebreak' },
+  })
+  let y = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 20
+  const kpis = readKpis(el)
+  const sections: Tbl[] = [...(kpis.length ? [{ name: 'Показатели', columns: ['Показатель', 'Значение', 'Примечание'], rows: kpis.map((k) => [k.label, k.value, k.hint]) }] : []), ...tables]
+  for (const table of sections) {
+    if (y > pageH - 80) { doc.addPage(); y = 30 }
+    doc.setFont('Report', 'bold'); doc.setFontSize(10)
+    doc.text(`${table.name} · строк: ${table.rows.length}`, margin, y)
+    autoTable(doc, {
+      startY: y + 8, head: [table.columns],
+      body: table.rows.map((row) => row.map((value, col) => value == null || value === '' ? '—' : showCell(value, table.columns[col]))),
+      margin: { top: margin, bottom: 30, left: margin, right: margin },
+      theme: 'grid', styles: { font: 'Report', fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
+      headStyles: { font: 'Report', fontStyle: 'bold', fillColor: [238, 240, 246], textColor: [25, 32, 45] },
+      columnStyles: Object.fromEntries(table.columns.flatMap((_, col) => table.rows.some((row) => typeof row[col] === 'number') ? [[col, { halign: 'right' as const }]] : [])),
+    })
+    y = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 20
+  }
+  // Отдельная страница на график: масштаб по всей ширине/высоте, без обрезки
+  // вложенных прокруток. Табличные данные уже содержат все строки выше.
+  for (const chart of charts) {
+    const png = await snapshot(chart)
+    const img = new Image()
+    await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = () => reject(new Error('Не удалось подготовить график')); img.src = png })
     doc.addPage()
-    doc.addImage(dataUrl, 'PNG', margin, margin - (imgH - heightLeft), imgW, imgH)
-    heightLeft -= (pageH - margin * 2)
+    doc.setFont('Report', 'bold'); doc.setFontSize(10)
+    doc.text(doc.splitTextToSize(chart.getAttribute('data-export-name') || title, pageW - margin * 2), margin, 35)
+    const scale = Math.min((pageW - margin * 2) / img.width, (pageH - 90) / img.height)
+    doc.addImage(png, 'PNG', margin, 55, img.width * scale, img.height * scale)
+  }
+  const pages = doc.getNumberOfPages()
+  for (let page = 1; page <= pages; page++) {
+    doc.setPage(page); doc.setFont('Report', 'normal'); doc.setFontSize(8)
+    doc.text(`${page} / ${pages}`, pageW - margin, pageH - 14, { align: 'right' })
   }
   doc.save(`${fileBase(title)}.pdf`)
 }

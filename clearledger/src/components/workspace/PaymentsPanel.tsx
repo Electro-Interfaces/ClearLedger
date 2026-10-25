@@ -9,6 +9,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { Loader2, ExternalLink } from 'lucide-react'
 import { Kpi } from './analytics/Kpi'
 import { PanelViewTabs } from './PanelViewTabs'
@@ -32,6 +33,13 @@ function Loading() {
 }
 function Empty({ text }: { text: string }) {
   return <div className="p-6 text-sm text-muted-foreground text-center">{text}</div>
+}
+
+function QueryError({ retry, busy }: { retry: () => unknown; busy: boolean }) {
+  return <div role="alert" className="flex flex-col items-center gap-3 p-6 text-sm">
+    <p>Не удалось загрузить данные. Повторите запрос.</p>
+    <Button variant="outline" onClick={() => void retry()} disabled={busy}>Повторить загрузку</Button>
+  </div>
 }
 
 const VIEWS = [
@@ -64,7 +72,7 @@ export function PaymentsPanel({ companyId, dateFrom, dateTo }: Props) {
   const stations = stationCodes.map(String)
   const scopeKey = `${stations.join(',')}|${regionIds.join(',')}`
 
-  const { data, isLoading } = useQuery<PaymentsSummary>({
+  const { data, isLoading, isError, refetch, isFetching } = useQuery<PaymentsSummary>({
     queryKey: ['charge-payments', companyId, dateFrom, dateTo, scopeKey],
     queryFn: () => getPaymentsSummary({ companyId, dateFrom, dateTo, stations, regions: regionIds }),
     enabled: !!companyId,
@@ -80,6 +88,7 @@ export function PaymentsPanel({ companyId, dateFrom, dateTo }: Props) {
   })
 
   if (isLoading) return <Loading />
+  if (isError) return <QueryError retry={refetch} busy={isFetching} />
   if (!data || !data.totals.count) return <Empty text="За период платежей нет" />
   const t = data.totals
 
@@ -158,7 +167,7 @@ export function PaymentsPanel({ companyId, dateFrom, dateTo }: Props) {
       {view === 'list' && (
         <div className="space-y-3">
           <PanelViewTabs tabs={SLICES} value={slice} onChange={setSlice} label="Разбор" />
-          {list.isLoading ? <Loading /> : !list.data?.length ? <Empty text="Платежей в этом разрезе нет" /> : (
+          {list.isLoading ? <Loading /> : list.isError ? <QueryError retry={list.refetch} busy={list.isFetching} /> : !list.data?.length ? <Empty text="Платежей в этом разрезе нет" /> : (
             <Card><CardContent className="p-0 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead><tr className="border-b bg-muted/40 text-muted-foreground">
@@ -231,6 +240,7 @@ function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
   })
 
   if (sum.isLoading) return <Loading />
+  if (sum.isError) return <QueryError retry={sum.refetch} busy={sum.isFetching} />
   if (!sum.data || !sum.data.totals.sessions) return <Empty text="За период сессий нет" />
   const t = sum.data.totals
   const active = sum.data.kinds.find((k) => k.key === kind)
@@ -295,7 +305,7 @@ function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
             tabs={[{ k: 'station', label: 'По станциям' }, { k: 'region', label: 'По регионам' }]}
             value={by} onChange={(k) => setBy(k as 'station' | 'region')} label={null} />
         </div>
-        {where.isLoading ? <Loading /> : !where.data?.length ? (
+        {where.isLoading ? <Loading /> : where.isError ? <QueryError retry={where.refetch} busy={where.isFetching} /> : !where.data?.length ? (
           <Empty text="Расхождений за период нет" />
         ) : (
           <Card><CardContent className="p-0 overflow-x-auto">
@@ -346,7 +356,7 @@ function Reconciliation({ companyId, dateFrom, dateTo }: Props) {
       {kind && (
         <div className="space-y-2">
           <div className="text-xs text-muted-foreground">{active?.label}: {active?.hint}</div>
-          {rows.isLoading ? <Loading /> : !rows.data?.length ? <Empty text="Строк нет" /> : (
+          {rows.isLoading ? <Loading /> : rows.isError ? <QueryError retry={rows.refetch} busy={rows.isFetching} /> : !rows.data?.length ? <Empty text="Строк нет" /> : (
             <Card><CardContent className="p-0 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead><tr className="border-b bg-muted/40 text-muted-foreground">

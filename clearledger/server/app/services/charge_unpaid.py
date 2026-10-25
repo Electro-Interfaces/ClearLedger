@@ -23,6 +23,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.session_scope import station_scope_sql
+from app.services.charge_identity import client_type_sql, session_source_sql
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,14 +45,14 @@ _SEG = """
 # Выручка сессии: у ЮЛ amount=0 (постоплата), фактическая сумма — client_amount.
 _REVENUE = "coalesce(NULLIF(client_amount, 0), amount)"
 
-_BASE = f"""
-WITH s AS (
-    SELECT id, session_ext_id, started_at, station_code, station_name, region,
+_BASE = "WITH _sales_source AS (" + session_source_sql() + ")," + f"""
+s AS (
+    SELECT id, session_ext_id, started_at, canonical_code AS station_code, canonical_name AS station_name, region,
            connector_type, user_id, client_name, energy_kwh, tariff, result,
            {_SEG} AS seg,
            {_REVENUE} AS revenue,
            energy_kwh > :charged_min AS has_energy
-      FROM charge_sessions
+      FROM _sales_source AS charge_sessions
      WHERE company_id = :company_id
        AND paid_at IS NULL
        AND NOT EXISTS (
@@ -66,11 +69,13 @@ WITH s AS (
 """
 
 
-def _scoped(sql: str, stations: list[str] | None, regions: list[str] | None = None) -> str:
+def _scoped(sql: str, stations: list[str] | None, regions: list[str] | None = None, user_type: str | None = None) -> str:
     # Скоуп участника (app/scope.py) — та же граница, что в списках объектов.
     flt = acl_sql("location_id")
     if stations is not None:
-        flt += " AND station_code = ANY(:stations)"
+        flt += " AND " + station_scope_sql()
+    if user_type:
+        flt += " AND (" + client_type_sql() + ") = :user_type"
     if regions is not None:
         # Регион — из справочника (Ф1.3): location_id → region_id → regions.name.
         flt += (" AND location_id IN (SELECT sl.id FROM service_locations sl"
@@ -93,6 +98,7 @@ async def unpaid_report(
     db: AsyncSession, company_id, date_from: str, date_to: str,
     stations: list[str] | None = None, top: int = 15,
     regions: list[str] | None = None,
+    user_type: str | None = None,
 ) -> dict[str, Any]:
     """Полный разбор неоплаченного отпуска: категории, станции, клиенты,
     динамика и поимённый реестр случаев розничного долга."""
@@ -104,8 +110,11 @@ async def unpaid_report(
     if regions is not None:
         p["regions"] = regions
 
+    if user_type:
+        p["user_type"] = user_type
+
     async def q(sql: str) -> list[Any]:
-        return list((await db.execute(text(_scoped(sql, stations, regions)), p)).mappings().all())
+        return list((await db.execute(text(_scoped(sql, stations, regions, user_type)), p)).mappings().all())
 
     cats = await q("""
         SELECT seg, has_energy,
@@ -226,6 +235,7 @@ async def unpaid_report(
 
 async def unpaid_station_detail(
     db: AsyncSession, company_id, date_from: str, date_to: str, station_code: str,
+    *, regions: list[str] | None = None, user_type: str | None = None,
 ) -> dict[str, Any]:
     """Детали одной станции: кто именно уехал не заплатив и какие ЮЛ ждут счёта.
 
@@ -233,11 +243,15 @@ async def unpaid_station_detail(
     делать дальше, а разбираются такие случаи поимённо."""
     p = {"company_id": str(company_id), **acl_params(),
          "date_from": _as_date(date_from), "date_to": _as_date(date_to),
-         "charged_min": CHARGED_MIN_KWH, "code": station_code}
+         "charged_min": CHARGED_MIN_KWH, "stations": [station_code]}
+    if regions is not None:
+        p["regions"] = regions
+    if user_type:
+        p["user_type"] = user_type
 
     async def q(sql: str) -> list[Any]:
         # Сужение задаём кодом станции, а не общим фильтром сети.
-        sql_full = _BASE.format(station_filter="AND station_code = :code") + sql
+        sql_full = _scoped(sql, [station_code], regions, user_type)
         return list((await db.execute(text(sql_full), p)).mappings().all())
 
     retail = [

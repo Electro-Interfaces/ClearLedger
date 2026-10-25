@@ -36,6 +36,8 @@ async def port_efficiency_report(
     stations: str | None = None,
     regions: str | None = None,
     top: int = Query(15, ge=1, le=100),
+    dim: str | None = None,
+    dim_val: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -49,7 +51,7 @@ async def port_efficiency_report(
     regs = [x.strip() for x in regions.split(",") if x.strip()] if regions else None
     return await port_efficiency(
         db, cid, _d(date_from, "date_from"), _d(date_to, "date_to"),
-        stations=codes, top=top, regions=regs)
+        stations=codes, top=top, regions=regs, user_type=dim_val if dim == "user_type" else None)
 
 
 @router.get("/overview/silent-stations")

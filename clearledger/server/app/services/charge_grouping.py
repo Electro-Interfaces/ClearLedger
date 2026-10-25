@@ -28,6 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ChargeSession, Region, ServiceLocation
 from app.services.analytics_cache import cached_report
 from app.services.charge_payment_state import effective_paid_at
+from app.services.charge_identity import client_type, port_identity, station_identity
+from app.services.session_scope import session_scope_conds
 
 S = ChargeSession
 L = ServiceLocation
@@ -172,12 +174,13 @@ _DELAY_LABELS = {
 GROUPS: dict[str, dict[str, Any]] = {
     # ── сеть ───────────────────────────────────────────────────────────
     "station": {"label": "Станция", "family": "сеть",
-                "expr": S.station_code,
-                "label_expr": func.coalesce(S.station_name, S.station_code)},
+                "expr": station_identity(S), "join": True,
+                "label_expr": func.concat(func.coalesce(L.name, S.station_name, "Станция"),
+                                          " (", func.coalesce(L.station_number, L.code, S.station_code), ")")},
     "region": {"label": "Регион", "family": "сеть", "expr": _REGION},
     "connector": {"label": "Коннектор", "family": "сеть", "expr": S.connector_type},
     # ── клиент ─────────────────────────────────────────────────────────
-    "user_type": {"label": "Тип клиента (ФЛ/ЮЛ)", "family": "клиент", "expr": S.user_type},
+    "user_type": {"label": "Тип клиента (ФЛ/ЮЛ)", "family": "клиент", "expr": client_type(S)},
     "client": {"label": "Клиент (ЮЛ)", "family": "клиент", "expr": S.client_name},
     # user_id у розницы — номер телефона, у корпората — идентификатор карты.
     "user": {"label": "Карта / телефон", "family": "клиент", "expr": S.user_id},
@@ -223,10 +226,9 @@ GROUPS: dict[str, dict[str, Any]] = {
     # Порт = станция + разъём. Сейчас видно, что сбоит станция, но не видно,
     # что сбоит конкретный разъём — а меняют и обслуживают именно разъём.
     "port": {"label": "Порт (станция + разъём)", "family": "оборудование",
-             "expr": func.concat(func.coalesce(S.station_code, "—"), "|",
-                                 func.coalesce(S.connector_no, "—")),
+             "expr": func.coalesce(port_identity(S), func.concat(station_identity(S), "|?")), "join": True,
              "label_expr": func.concat(
-                 func.coalesce(S.station_name, S.station_code), " · порт ",
+                 func.coalesce(L.name, S.station_name, S.station_code), " · порт ",
                  func.coalesce(S.connector_no, "—"))},
     # ── распределения (binning непрерывных величин) ────────────────────
     # Отвечают на вопрос «как устроена масса», а не «сколько всего».
@@ -302,7 +304,7 @@ def _apply_filters(stmt: Select, *, user_type: str | None, region: str | None,
                    search: str | None, regions: list[str] | None = None) -> Select:
     """Те же фильтры, что в списке реестра: иначе итоги не сойдутся со списком."""
     if user_type:
-        stmt = stmt.where(S.user_type == user_type)
+        stmt = stmt.where(client_type(S) == user_type)
     if regions:
         # Контур рабочей области: регионов может быть несколько, и это не то же
         # самое, что одиночный `region` панели. Без него выбор одного региона в
@@ -373,7 +375,7 @@ class ChargeGroupingService:
             func.coalesce(func.avg(S.duration_min), 0).label("avg_duration"),
             func.coalesce(func.sum(success), 0).label("success"),
             func.coalesce(func.sum(charged), 0).label("charged"),
-            func.count(func.distinct(S.station_code)).label("stations"),
+            func.count(func.distinct(station_identity(S))).label("stations"),
             func.count(func.distinct(S.user_id)).label("users"),
             func.min(S.started_at).label("first_at"),
             func.max(S.started_at).label("last_at"),
@@ -382,8 +384,7 @@ class ChargeGroupingService:
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
-        if station_codes:
-            stmt = stmt.where(S.station_code.in_(station_codes))
+        stmt = stmt.where(*session_scope_conds(company_id, station_codes))
         # Разрез по визитам без ключа бессмыслен: строки без visit_key — это
         # сессии без клиента, каждая сама себе визит, склеивать их не с чем.
         if group_by == "visit":
@@ -465,8 +466,7 @@ class ChargeGroupingService:
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
-        if station_codes:
-            tot_stmt = tot_stmt.where(S.station_code.in_(station_codes))
+        tot_stmt = tot_stmt.where(*session_scope_conds(company_id, station_codes))
         if group_by == "visit":
             tot_stmt = tot_stmt.where(S.visit_key.is_not(None))
         tot = (await self.db.execute(_apply_filters(
@@ -516,7 +516,7 @@ class ChargeGroupingService:
         effective_payment_at = effective_paid_at(S)
         stmt = _with_join(select(
             S.session_ext_id, S.started_at, S.station_code, S.station_name, S.region,
-            S.connector_type, S.user_type, S.client_name, S.user_id, S.charge_type,
+            S.connector_type, client_type(S).label("user_type"), S.client_name, S.user_id, S.charge_type,
             S.energy_kwh, S.duration_min, S.tariff,
             func.coalesce(S.client_amount, S.amount).label("revenue"), S.result,
             effective_payment_at.label("paid_at"),
@@ -525,8 +525,7 @@ class ChargeGroupingService:
             S.company_id == company_id, S.started_at.is_not(None),
             S.started_at >= lo, S.started_at <= hi,
         )
-        if station_codes:
-            stmt = stmt.where(S.station_code.in_(station_codes))
+        stmt = stmt.where(*session_scope_conds(company_id, station_codes))
         # Пустой ключ = группа «не заполнено»: сравнение с '' её не найдёт.
         expr = g["expr"]
         stmt = stmt.where(expr.is_(None) if key == "" else expr == key)

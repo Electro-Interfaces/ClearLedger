@@ -8,6 +8,7 @@ localStorage), а НЕ браузерным редиректом — при ре
 from __future__ import annotations
 
 import uuid
+import time
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -17,7 +18,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit import log_audit
-from app.auth import assert_company_member, get_current_user
+from app.auth import assert_company_member, get_current_user, current_token_claims, MAX_SESSION_DAYS
 from app.config import get_settings
 from app.database import get_db
 from app.deps import scope_company_id
@@ -253,9 +254,13 @@ async def _issue_app_token(
     roles = await app_roles(db, user, cid, app_code)
     ttl = (min(settings.sso_token_ttl_seconds, VOICE_TOKEN_TTL_SECONDS)
            if app_code == "voice" else settings.sso_token_ttl_seconds)
+    parent = current_token_claims() or {}
+    parent_expiry = (int(parent.get("exp") or time.time()) if parent.get("scp")
+                     else int(parent.get("at") or time.time()) + MAX_SESSION_DAYS * 86400)
     token = cast(str, sso.sign_sso_token(
         user=user, company_id=cid, companies=companies, aud=app_code,
-        roles=roles, ttl_seconds=ttl,
+        roles=roles, ttl_seconds=ttl, session_expires_at=parent_expiry,
+        session_scope=parent.get("scp"),
     ))
     return token, roles, ttl, cid
 
@@ -451,3 +456,39 @@ async def set_favorite_apps(company_id: str, body: FavoriteApps,
     personal.revision += 1
     await db.commit()
     return {"codes": list(body.codes)}
+
+
+# Приложение проверяет текущие права через именованный ключ, привязанный к компании.
+from app.auth import KEY_SCOPES
+from fastapi import Header, Response
+from app.services.app_identity import resolve_support_identity, sign_identity, support_directory
+KEY_SCOPES["support.identity"] = "Поддержка: текущие права участников пространства"
+
+
+class SupportIdentityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subject: uuid.UUID
+    nonce: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+@router.post("/support-identity")
+async def support_identity_endpoint(body: SupportIdentityRequest, response: Response,
+                                    x_cloud_api_key: str = Header(..., alias="X-Cloud-API-Key"),
+                                    db: AsyncSession = Depends(get_db)):
+    response.headers["Cache-Control"] = "private, no-store"
+    identity = await resolve_support_identity(db, x_cloud_api_key, body.subject)
+    return {"proof": sign_identity(identity, body.nonce)}
+
+
+class SupportDirectoryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    nonce: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+@router.post("/support-directory")
+async def support_directory_endpoint(body: SupportDirectoryRequest, response: Response,
+                                     x_cloud_api_key: str = Header(..., alias="X-Cloud-API-Key"),
+                                     db: AsyncSession = Depends(get_db)):
+    response.headers["Cache-Control"] = "private, no-store"
+    directory = await support_directory(db, x_cloud_api_key)
+    return {"proof": sign_identity(directory, body.nonce, "directory")}

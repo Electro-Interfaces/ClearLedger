@@ -1474,7 +1474,7 @@ function RetryAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; dat
   const q = useQuery({
     queryKey: ['charge-visits', companyId, dateFrom, dateTo, n.key],
     queryFn: () => getChargeVisits({
-      companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions, top: 15,
+      companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal, top: 15,
     }),
   })
   if (q.isLoading) return <Loading />
@@ -1655,9 +1655,10 @@ function RetryAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; dat
 function UnpaidStationDetailRow({ companyId, dateFrom, dateTo, code, colSpan }: {
   companyId: string; dateFrom: string; dateTo: string; code: string; colSpan: number
 }) {
+  const n = useNarrow()
   const q = useQuery({
-    queryKey: ['charge-unpaid-station', companyId, dateFrom, dateTo, code],
-    queryFn: () => getChargeUnpaidStation({ companyId, dateFrom, dateTo, code }),
+    queryKey: ['charge-unpaid-station', companyId, dateFrom, dateTo, code, n.key],
+    queryFn: () => getChargeUnpaidStation({ companyId, dateFrom, dateTo, code, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
   })
   return (
     <tr className="bg-muted/20">
@@ -1731,7 +1732,7 @@ function UnpaidAnalysis({ companyId, dateFrom, dateTo }: { companyId: string; da
   const [openStation, setOpenStation] = useState<string | null>(null)
   const q = useQuery({
     queryKey: ['charge-unpaid', companyId, dateFrom, dateTo, n.key],
-    queryFn: () => getChargeUnpaid({ companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions, top: 15 }),
+    queryFn: () => getChargeUnpaid({ companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal, top: 15 }),
   })
   if (q.isLoading) return <Loading />
   if (!q.data) return <Empty text="Нет данных за период" />
@@ -1994,7 +1995,7 @@ function PortEfficiency({ companyId, dateFrom, dateTo }: { companyId: string; da
   const n = useNarrow()
   const q = useQuery({
     queryKey: ['port-efficiency', companyId, dateFrom, dateTo, n.key],
-    queryFn: () => getPortEfficiency({ companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions }),
+    queryFn: () => getPortEfficiency({ companyId, dateFrom, dateTo, stations: n.stations, regions: n.regions, dim: n.dim, dimVal: n.dimVal }),
   })
   if (q.isLoading) return <Loading />
   if (!q.data || !q.data.totals.sessions) return <Empty text="Нет сессий с отпуском энергии за период" />
@@ -2752,7 +2753,7 @@ function SessionsView({ view, companyId, dateFrom, dateTo, subtitle, clientType,
     <ChargeClientCtx.Provider value={clientType}>
       <div className="flex items-center justify-end gap-2 border-b border-border px-4 py-2">
         <ClientTypeToggle value={clientType} onChange={setClientType} />
-        <ExportButton title={`Сессии ЭЗС · ${v.title}`} subtitle={subtitle} getEl={() => ref.current} />
+        <ExportButton title={`Сессии ЭЗС · ${v.title}`} subtitle={`${subtitle ?? ''} · Тип клиента: ${CLIENT_DIMVAL[clientType] ?? 'Все'}`} getEl={() => ref.current} />
       </div>
       {/* key={view} — ремаунт при смене пункта: локальное состояние вида (напр.
           выбранный разрез) не тянется в следующий. */}
@@ -2782,12 +2783,12 @@ function ReliabilitySection({ companyId, dateFrom, dateTo, subtitle, clientType,
   const ref = useRef<HTMLDivElement>(null)
   return (
     <ChargeClientCtx.Provider value={clientType}>
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4">
         <PanelViewTabs tabs={RELIABILITY_TABS} value={st.sub} onChange={(k) => patch({ sub: k })}
           ariaLabel="Виды пункта «Надёжность»" />
         <div className="flex items-center gap-2 shrink-0">
           <ClientTypeToggle value={clientType} onChange={setClientType} />
-          <ExportButton title={`Сессии ЭЗС · Надёжность · ${title}`} subtitle={subtitle} getEl={() => ref.current} />
+          <ExportButton title={`Сессии ЭЗС · Надёжность · ${title}`} subtitle={`${subtitle ?? ''} · Тип клиента: ${CLIENT_DIMVAL[clientType] ?? 'Все'}`} getEl={() => ref.current} />
         </div>
       </div>
       <div ref={ref} className="pt-3" key={st.sub}>

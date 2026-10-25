@@ -34,6 +34,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
+from app.services.session_scope import station_scope_sql
+from app.services.charge_identity import client_type_sql, session_source_sql
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -119,14 +122,14 @@ SELECT count(*)                                              AS visits,
 # Визит как единица отчёта. Станция/клиент/коннектор в визите одни и те же
 # (они входят в ключ склейки либо не меняются), поэтому агрегаты по ним берутся
 # как min/max — это не «случайное значение из группы», а единственное.
-_VISIT_CTE = """
-WITH v AS (
+_VISIT_CTE = "WITH _sales_source AS (" + session_source_sql() + ")," + """
+v AS (
     SELECT visit_key,
            min(started_at)                        AS first_at,
            max(visit_size)                        AS attempts,
            bool_or(visit_charged)                 AS charged,
-           min(station_code)                      AS station_code,
-           max(station_name)                      AS station_name,
+           min(canonical_code)                      AS station_code,
+           max(canonical_name)                      AS station_name,
            min(region)                            AS region,
            min(user_id)                           AS user_id,
            max(client_name)                       AS client_name,
@@ -142,7 +145,7 @@ WITH v AS (
            -- Сессии-попытки, не давшие энергии: чистые потери времени клиента
            -- и занятости коннектора.
            count(*) FILTER (WHERE energy_kwh <= :charged_min) AS wasted
-      FROM charge_sessions
+      FROM _sales_source AS charge_sessions
      WHERE company_id = :company_id
        AND visit_key IS NOT NULL
        -- Верхняя граница включительно: date_to — это «по такое-то число»,
@@ -166,14 +169,16 @@ def _as_date(v: str | date) -> date:
     return date.fromisoformat(str(v)[:10])
 
 
-def _scoped(sql: str, stations: list[str] | None, regions: list[str] | None = None) -> str:
+def _scoped(sql: str, stations: list[str] | None, regions: list[str] | None = None, user_type: str | None = None) -> str:
     """Подставить сужение по сети. Пустой список ≠ None: пустой означает «контур
     выбран, но станций в нём нет» — тогда отчёт обязан быть пустым, а не сетевым.
     Регион — из справочника (Ф1.3): через location_id → region_id → regions.name.
     Скоуп участника (app/scope.py) — та же граница, что в списках объектов."""
     flt = acl_sql("location_id")
     if stations is not None:
-        flt += " AND station_code = ANY(:stations)"
+        flt += " AND " + station_scope_sql()
+    if user_type:
+        flt += " AND (" + client_type_sql() + ") = :user_type"
     if regions is not None:
         flt += (" AND location_id IN (SELECT sl.id FROM service_locations sl"
                 " JOIN regions r ON r.id = sl.region_id"
@@ -185,6 +190,7 @@ async def visits_report(
     db: AsyncSession, company_id, date_from: str, date_to: str,
     stations: list[str] | None = None, top: int = 15,
     regions: list[str] | None = None,
+    user_type: str | None = None,
 ) -> dict[str, Any]:
     """Разбор составных визитов для таба «Повторные попытки».
 
@@ -201,8 +207,11 @@ async def visits_report(
     if regions is not None:
         p["regions"] = regions
 
+    if user_type:
+        p["user_type"] = user_type
+
     async def q(sql: str) -> list[Any]:
-        return list((await db.execute(text(_scoped(sql, stations, regions)), p)).mappings().all())
+        return list((await db.execute(text(_scoped(sql, stations, regions, user_type)), p)).mappings().all())
 
     totals = (await q("""
         SELECT count(*)                                          AS visits,

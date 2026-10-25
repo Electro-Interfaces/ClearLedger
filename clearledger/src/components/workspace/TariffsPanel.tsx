@@ -29,7 +29,7 @@ const nf2 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 })
 const money = (v: number) => nf0.format(Math.round(v || 0)) + ' ₽'
 const moneyK = (v: number) => (Math.abs(v) >= 10000 ? nf1.format(v / 1000) + ' тыс' : nf0.format(v)) + ' ₽'
 const rub = (v: number) => nf2.format(v)
-const gapCls = (v: number) => (v < -0.05 ? 'text-amber-600/90 dark:text-amber-400/90' : v > 0.05 ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-muted-foreground')
+const gapCls = (v: number) => (v < -0.05 ? 'text-warning' : v > 0.05 ? 'text-emerald-600/90 dark:text-emerald-400/90' : 'text-muted-foreground')
 
 function Loading() { return <div className="flex justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div> }
 function Empty({ text }: { text: string }) { return <div className="p-6 text-sm text-muted-foreground text-center">{text}</div> }
@@ -113,7 +113,10 @@ function PriceGrid({ companyId, dateFrom, dateTo }: TabProps) {
       </div>
       {isLoading ? <Loading /> : !data || data.cells.length === 0 ? <Empty text="Нет данных за период" /> : (
         <Card><CardContent className="p-0 overflow-x-auto">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs" data-export-name="Тарифная сетка" data-export-rows={JSON.stringify({
+            columns: [g.by === 'station' ? 'Станция' : 'Регион', ...data.connectors],
+            rows: data.rows.map((row) => [row, ...data.connectors.map((conn) => cell(row, conn)?.tariff ?? null)]),
+          })}>
             <thead><tr className="border-b bg-muted/40 text-muted-foreground">
               <th className="text-left p-2 font-medium sticky left-0 bg-muted/40">{g.by === 'station' ? 'Станция' : 'Регион'}</th>
               {data.connectors.map((c) => <th key={c} className="text-right p-2 font-medium whitespace-nowrap">{c}</th>)}
@@ -126,7 +129,7 @@ function PriceGrid({ companyId, dateFrom, dateTo }: TabProps) {
                     const c = cell(row, conn)
                     return (
                       <td key={conn} className="text-right p-2 tabular-nums" title={c ? `${c.sessions} сес · факт ${rub(c.realized)} ₽/кВтч${c.varies ? ` · диапазон ${rub(c.tariff_min)}–${rub(c.tariff_max)}` : ''}` : ''}>
-                        {c ? <span className={c.varies ? 'text-amber-300/90' : ''}>{rub(c.tariff)}{c.varies ? '~' : ''}</span> : <span className="text-muted-foreground/30">—</span>}
+                        {c ? <span className={c.varies ? 'text-warning' : ''}>{rub(c.tariff)}{c.varies ? '~' : ''}</span> : <span className="text-muted-foreground/30">—</span>}
                       </td>
                     )
                   })}
@@ -362,10 +365,10 @@ export function TariffsPanel({ companyId, dateFrom, dateTo }: TabProps) {
   const p: TabProps = { companyId, dateFrom, dateTo }
   const ref = useRef<HTMLDivElement>(null)
   const curLabel = TARIFF_TABS.find((x) => x.k === t.sub)?.label ?? 'Тарифы'
-  const scopeSub = useScopeSubtitle({ scopeApplied: false })  // панель не сужает по сети: API не принимает станции
+  const scopeSub = useScopeSubtitle({ scopeApplied: true })
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 border-b border-border px-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4">
         <PanelViewTabs tabs={TARIFF_TABS} value={t.sub} onChange={(k) => patch({ sub: k })} ariaLabel="Виды пункта «Тарифы»" />
         <ExportButton title={`Тарифы ЭЗС · ${curLabel}`} subtitle={scopeSub} getEl={() => ref.current} />
       </div>

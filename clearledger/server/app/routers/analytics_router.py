@@ -423,6 +423,8 @@ async def get_charge_visits(
     stations: str | None = None,
     regions: str | None = None,
     top: int = Query(15, ge=1, le=100),
+    dim: str | None = None,
+    dim_val: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -437,7 +439,7 @@ async def get_charge_visits(
 
     return await visits_report(
         db, f.company_id, date_from, date_to, stations=_csv(stations), top=top,
-        regions=_csv(regions))
+        regions=_csv(regions), user_type=dim_val if dim == "user_type" else None)
 
 
 @router.get("/charge-sessions/unpaid")
@@ -448,6 +450,8 @@ async def get_charge_unpaid(
     stations: str | None = None,
     regions: str | None = None,
     top: int = Query(15, ge=1, le=100),
+    dim: str | None = None,
+    dim_val: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -459,7 +463,7 @@ async def get_charge_unpaid(
 
     return await unpaid_report(
         db, f.company_id, date_from, date_to, stations=_csv(stations), top=top,
-        regions=_csv(regions))
+        regions=_csv(regions), user_type=dim_val if dim == "user_type" else None)
 
 
 @router.get("/charge-sessions/unpaid/station")
@@ -468,6 +472,9 @@ async def get_charge_unpaid_station(
     date_from: str,
     date_to: str,
     code: str,
+    dim: str | None = None,
+    dim_val: str | None = None,
+    regions: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -476,7 +483,7 @@ async def get_charge_unpaid_station(
     f = await _filter_from_query(company_id, date_from, date_to, None, db, current_user, "sales")
     from app.services.charge_unpaid import unpaid_station_detail
 
-    return await unpaid_station_detail(db, f.company_id, date_from, date_to, code)
+    return await unpaid_station_detail(db, f.company_id, date_from, date_to, code, regions=_csv(regions), user_type=dim_val if dim == "user_type" else None)
 
 
 @router.get("/charge-sessions/timeseries")
@@ -588,6 +595,8 @@ async def get_charge_sessions_compare(
     metric: str = Query("amount", pattern=_CS_METRIC_PATTERN),
     stations: str | None = None,
     regions: str | None = None,
+    dim: str | None = None,
+    dim_val: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
@@ -598,7 +607,7 @@ async def get_charge_sessions_compare(
     if periods:
         return await svc.charge_sessions_compare_multi(
             cid, _parse_periods(periods), group_by=group_by, metric=metric,
-            station_codes=_csv(stations), regions=_csv(regions),
+            station_codes=_csv(stations), regions=_csv(regions), dim_by=dim, dim_val=dim_val,
         )
     if not (a_from and a_to and b_from and b_to):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="нужны periods или a_from/a_to/b_from/b_to")
@@ -671,8 +680,9 @@ async def get_charge_long_trend(
         sess_scope += reg_sub
         scope_params["regions"] = scope_regions
     if scope_stations:
-        file_scope += " AND sl.code = ANY(:stations)"
-        sess_scope += " AND s.station_code = ANY(:stations)"
+        from app.services.session_scope import station_locations_sql, station_scope_sql
+        file_scope += " AND sl.id = ANY" + station_locations_sql(cid=":cid")
+        sess_scope += " AND " + station_scope_sql(cid=":cid", code_col="s.station_code", loc_col="s.location_id")
         scope_params["stations"] = scope_stations
 
     dim_file = {

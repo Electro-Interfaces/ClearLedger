@@ -30,6 +30,8 @@ const CalendarPage = lazy(() => import('./CalendarPage')
   .then((module) => ({ default: module.CalendarPage })))
 const TaskRows = lazy(() => import('@/components/docs/TaskRows')
   .then((module) => ({ default: module.TaskRows })))
+const TaskCard = lazy(() => import('@/components/tasks/TaskCard')
+  .then((module) => ({ default: module.TaskCard })))
 const ListsPage = lazy(() => import('./ListsPage')
   .then((module) => ({ default: module.ListsPage })))
 const MINE_PAGE_SIZE = 200
@@ -103,6 +105,21 @@ export function DocsWorkPage() {
   }
 
   if (!companyId) return null
+
+  // Оригинал поручения из обзора пространств: тот же TaskCard и те же права API.
+  const taskId = params.get('task')
+  if (taskId) {
+    const setTask = (id: string | null) => setParams((current) => {
+      const next = new URLSearchParams(current)
+      if (id) next.set('task', id)
+      else next.delete('task')
+      return next
+    }, { replace: true })
+    return <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Загрузка поручения…</div>}>
+      <TaskCard key={`${companyId}:${taskId}`} id={taskId} companyId={companyId}
+        onBack={() => setTask(null)} onOpenOther={setTask} onChanged={refresh} />
+    </Suspense>
+  }
 
   if (view === 'today') {
     return (

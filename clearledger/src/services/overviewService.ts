@@ -290,9 +290,10 @@ export interface PortEfficiencyResponse {
   bands: { band: number; label: string; sessions: number; port_hours: number; kwh: number }[]
 }
 export async function getPortEfficiency(p: {
-  companyId: string; dateFrom: string; dateTo: string; stations?: string[]; regions?: string[]
+  companyId: string; dateFrom: string; dateTo: string; stations?: string[]; regions?: string[]; dim?: string; dimVal?: string
 }): Promise<PortEfficiencyResponse> {
   return get<PortEfficiencyResponse>('/api/analytics/charge-sessions/port-efficiency', {
+    ...(p.dim && p.dimVal != null ? { dim: p.dim, dim_val: p.dimVal } : {}),
     company_id: p.companyId, date_from: p.dateFrom, date_to: p.dateTo,
     ...(p.stations?.length ? { stations: p.stations.join(',') } : {}),
     ...(p.regions?.length ? { regions: p.regions.join(',') } : {}),

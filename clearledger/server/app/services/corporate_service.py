@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ChargeSession, CorporateClient, Region, ServiceLocation
 from app.services.analytics_cache import cached_report
 from app.services.session_scope import session_scope_conds
+from app.services.charge_identity import station_identity
 from app.services.tz_offsets import shifted_started_at
 
 
@@ -218,7 +219,7 @@ class CorporateService:
                 func.coalesce(func.sum(S.client_amount), 0).label("corp"),
                 func.coalesce(func.sum(S.energy_kwh * S.tariff), 0).label("retail"),
                 func.count(func.distinct(S.user_id)).label("drivers"),
-                func.count(func.distinct(S.station_code)).label("stations"),
+                func.count(func.distinct(station_identity(S))).label("stations"),
             ).where(*m_scope).group_by(month).order_by(month))).all()
 
         months: list[dict[str, Any]] = []
@@ -281,8 +282,11 @@ class CorporateService:
         # ⚠ НЕ переприсваивать stations/regions — это параметры-фильтры контура,
         # которые ниже читает _metrics_by_client (иначе session_scope получит
         # список dict вместо кодов → DataError, карточка падает 500).
-        stations_bd = await top(S.station_code,
-                                label=func.coalesce(S.station_name, S.station_code))
+        stations_bd = await top(station_identity(S))
+        from app.services.analytics_service import AnalyticsService
+        station_labels = await AnalyticsService(self.db)._station_labels(company_id)
+        for row in stations_bd:
+            row["label"] = station_labels.get(row["label"], row["label"])
         regions_bd = await top(S.region, limit=6)
         connectors = await top(S.connector_type, limit=6)
         drivers = await top(S.user_id, limit=10)
@@ -384,10 +388,10 @@ class CorporateService:
         lines: list[dict[str, Any]] = data["clients"]
         top = [x for x in lines if x["corp_revenue"] > 0][:5]
         alerts: list[dict[str, str]] = []
-        inactive = [x for x in lines if (x["status"] or "").strip().lower() not in ("действующая", "")]
+        inactive = [x for x in lines if (x["status"] or "").strip().lower() not in ("действующая", "действующий", "active", "")]
         if inactive:
             alerts.append({"level": "warn",
-                           "message": f"Договор не «Действующая»: {len(inactive)} — {', '.join(x['name'] for x in inactive[:3])}"})
+                           "message": f"Неактивный договор: {len(inactive)} — {', '.join(x['name'] for x in inactive[:3])}"})
         deep = [x for x in lines if x["corp_revenue"] > 0 and x["discount_pct"] <= -20]
         if deep:
             alerts.append({"level": "warn",
