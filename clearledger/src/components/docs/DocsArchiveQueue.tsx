@@ -35,10 +35,12 @@ function displayDate(value: string | null): string {
 export function DocsArchiveQueue({ companyId }: { companyId: string }) {
   const [filter, setFilter] = useState<QueueFilter>('all')
   const queueQ = useInfiniteQuery({
-    queryKey: ['docs-archive-queue', companyId],
+    // Отбор — часть ключа: при смене кнопки список перезапрашивается с сервера,
+    // а не досеивается из уже загруженного.
+    queryKey: ['docs-archive-queue', companyId, filter],
     initialPageParam: '' as string,
     queryFn: ({ pageParam }) => docsService.getArchiveQueue(
-      companyId, pageParam || undefined,
+      companyId, pageParam || undefined, 100, filter,
     ),
     getNextPageParam: (page) => page.next_cursor ?? undefined,
     enabled: !!companyId,
@@ -47,15 +49,7 @@ export function DocsArchiveQueue({ companyId }: { companyId: string }) {
     () => queueQ.data?.pages.flatMap((page) => page.documents) ?? [],
     [queueQ.data],
   )
-  const visible = useMemo(() => rows.filter((row) => {
-    if (filter === 'due') return !row.blocker && !row.hold
-    if (filter === 'hold') return row.hold
-    if (filter === 'legacy') return row.retention_state === 'legacy_review'
-    if (filter === 'active') return [
-      'destruction_ready', 'destruction_authorized', 'primary_purged',
-    ].includes(row.retention_state)
-    return true
-  }), [filter, rows])
+  const visible = rows
 
   return (
     <div className="space-y-4 px-4 py-4">
@@ -124,7 +118,9 @@ export function DocsArchiveQueue({ companyId }: { companyId: string }) {
             ))}
             {visible.length === 0 && (
               <Card className="p-8 text-center text-sm text-muted-foreground xl:col-span-2">
-                На загруженных страницах подходящих документов нет.
+                {filter === 'all'
+                  ? 'В архивной очереди пока нет документов.'
+                  : 'Под этот отбор в очереди не попал ни один документ.'}
               </Card>
             )}
           </div>

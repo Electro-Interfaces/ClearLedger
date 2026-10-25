@@ -281,7 +281,16 @@ export function DocsRegistryPage() {
             </thead>
             <tbody>
               {docs.map((doc) => (
-                <tr key={doc.id} className="border-t border-border/60 transition-colors hover:bg-accent/40">
+                // Карточку открывает ВСЯ строка, а не только заголовок: человек
+                // целится в номер или дату — они стоят первыми и читаются как
+                // главное в реестре, — и прежде не попадал никуда. Кнопка на
+                // заголовке остаётся: ею открывают с клавиатуры.
+                <tr key={doc.id} className="cursor-pointer border-t border-border/60 transition-colors hover:bg-accent/40"
+                  onClick={(event) => {
+                    const цель = event.target as HTMLElement
+                    if (цель.closest('button, a, input, [role="checkbox"]')) return
+                    open(doc.id)
+                  }}>
                   <td className="px-3 py-2">
                     <Checkbox checked={selectedIds.has(doc.id)}
                       aria-label={`Выбрать документ ${doc.reg_number ?? doc.title}`}
