@@ -2672,7 +2672,8 @@ async def task_action(
         await notify.tell(
             db, cid, [u for _, u in mentioned],
             f"Вас упомянули в задаче №{t.number}: {t.title}",
-            f"{current_user.name or 'Коллега'} написал:\n\n{payload.note or ''}", t)
+            f"{current_user.name or 'Коллега'} написал:\n\n{payload.note or ''}", t,
+            kind="task_mention")
     if new_assignee is not None:
         await notify.tell(db, cid, [new_assignee], f"Вам поручена задача №{t.number}: {t.title}",
                           _errand_text(t, current_user, payload.note), t)
@@ -2719,7 +2720,7 @@ async def _notify_watchers(db: AsyncSession, cid: uuid.UUID, t: Task, actor: Use
         body = f"Передал: {actor.name or actor.email}"
     if payload.note:
         body = f"{body}\n\n{payload.note}"
-    await notify.tell(db, cid, targets, subject, body, t)
+    await notify.tell(db, cid, targets, subject, body, t, kind="task_status")
 
 
 def _errand_text(t: Task, author: User, note: str | None) -> str:
@@ -3997,7 +3998,7 @@ async def inbound_email(
         User.mail_only.is_(False)))).scalars().all()
     await notify.tell(
         db, t.company_id, people, f"Ответ по задаче №{t.number}: {t.title}",
-        f"{ev.actor_name} ответил письмом:\n\n{text}", t)
+        f"{ev.actor_name} ответил письмом:\n\n{text}", t, kind="task_reply")
     await db.commit()
     return {"ok": True, "eventId": str(ev.id)}
 

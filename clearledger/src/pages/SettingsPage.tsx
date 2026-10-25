@@ -17,6 +17,7 @@ import { useCompany } from '@/contexts/CompanyContext'
  *  на два экрана ниже — человек искал его сам. */
 const ЯКОРЯ: Record<string, string> = {
   notifications: 'profile-notifications',
+  email: 'profile-email',
   security: 'profile-security',
   contacts: 'profile-contacts',
   worktime: 'profile-worktime',

@@ -613,6 +613,8 @@ async def get_me(
         work_start=current_user.work_start.strftime("%H:%M"),
         work_end=current_user.work_end.strftime("%H:%M"),
         task_notify=sorted(notify.task_channels(current_user)),
+        email_notify=[k for k in notify.EMAIL_KINDS
+                      if k in notify.email_kinds(current_user)],
         position=членство[0].position if членство else None,
         party_type=членство[0].party_type if членство else None,
         party_org=орг,

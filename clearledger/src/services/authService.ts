@@ -42,6 +42,8 @@ export interface AuthUser {
   work_end?: string
   /** Куда присылать уведомления о поручениях: secretary | notices | email. */
   task_notify?: string[]
+  /** Виды писем, которые человек согласен получать (notify.EMAIL_KINDS). */
+  email_notify?: string[]
   /**
    * Место человека в пространстве — заполняет администратор.
    * party_type: internal — сотрудник организации пространства,

@@ -31,12 +31,14 @@ import { useSendMode, type SendMode } from '@/hooks/useSendMode'
 import * as chat from '@/services/chatService'
 import { changePassword, logoutAll } from '@/services/authService'
 import {
-  ОШИБКА_ДНЯ, подписьПояса, поясаПоСмещению,
+  ВИДЫ_ПИСЕМ, ОШИБКА_ДНЯ, подписьПояса, порядокВидовПисем, поясаПоСмещению,
   ошибкаПароля, ошибкаФото, рабочийДеньВерен,
 } from '@/lib/profileRules'
 
 type Draft = {
   name: string
+  /** Виды писем, которые человек согласен получать. */
+  emailKinds: string[]
   mobile: string
   office: string
   tz: string
@@ -275,6 +277,7 @@ export function PersonalSettings() {
     workStart: user?.work_start ?? '09:00',
     workEnd: user?.work_end ?? '18:00',
     notify: порядокКаналов(user?.task_notify ?? КАНАЛЫ_ПО_УМОЛЧАНИЮ),
+    emailKinds: порядокВидовПисем(user?.email_notify ?? ВИДЫ_ПИСЕМ.map((k) => k.id)),
     theme: themePref,
     level,
     send: sendMode,
@@ -284,15 +287,28 @@ export function PersonalSettings() {
   const [draft, setDraft] = useState<Draft>(исходный)
   const [preview, setPreview] = useState<string | null>(null)
 
-  // Профиль приезжает асинхронно: пока его нет, в поле имени пусто, и черновик
-  // нужно пересобрать, иначе человек сохранит пустое имя поверх своего.
+  // Профиль приезжает асинхронно, а черновик собирается при первом рендере —
+  // до его прихода в нём стоят умолчания. Пока человек ничего не трогал,
+  // пересобираем черновик на пришедшем профиле: иначе он видит чужие значения
+  // и сохраняет их поверх своих (раньше так терялось имя, теперь — ещё и
+  // пояс, телефоны и выбор писем).
+  const [тронут, setТронут] = useState(false)
   useEffect(() => {
-    setDraft((d) => (d.name === '' && user?.name ? { ...d, name: user.name } : d))
-  }, [user?.name])
+    // Только когда профиль есть: во время перезапроса контекст на миг отдаёт
+    // null, и пересборка по нему вернула бы в форму умолчания — ровно то, что
+    // этот эффект и должен предотвращать.
+    if (!тронут && user) setDraft(исходный())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [тронут, user?.id, user?.name, user?.phone_mobile, user?.phone_office, user?.tz,
+      user?.work_start, user?.work_end,
+      (user?.task_notify ?? []).join(), (user?.email_notify ?? []).join()])
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
 
-  const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }))
+  const set = <K extends keyof Draft>(k: K, v: Draft[K]) => {
+    setТронут(true)
+    setDraft((d) => ({ ...d, [k]: v }))
+  }
 
   const dirty = draft.name.trim() !== (user?.name ?? '')
     || draft.mobile.trim() !== (user?.phone_mobile ?? '')
@@ -301,6 +317,7 @@ export function PersonalSettings() {
     || draft.workStart !== (user?.work_start ?? '09:00')
     || draft.workEnd !== (user?.work_end ?? '18:00')
     || draft.notify.join() !== порядокКаналов(user?.task_notify ?? КАНАЛЫ_ПО_УМОЛЧАНИЮ).join()
+    || draft.emailKinds.join() !== порядокВидовПисем(user?.email_notify ?? ВИДЫ_ПИСЕМ.map((k) => k.id)).join()
     || draft.theme !== themePref || draft.level !== level || draft.send !== sendMode
     || !!draft.photo || draft.photoRemoved
 
@@ -308,6 +325,7 @@ export function PersonalSettings() {
     if (preview) URL.revokeObjectURL(preview)
     setPreview(null)
     setDraft(исходный())
+    setТронут(false)
   }
 
   function выбратьФайл(file: File | null) {
@@ -316,6 +334,7 @@ export function PersonalSettings() {
     if (бедаФото) { toast.error(бедаФото); return }
     if (preview) URL.revokeObjectURL(preview)
     setPreview(URL.createObjectURL(file))
+    setТронут(true)
     setDraft((d) => ({ ...d, photo: file, photoRemoved: false }))
   }
 
@@ -330,6 +349,7 @@ export function PersonalSettings() {
       const тело: {
         name?: string; avatarUrl?: string; phoneMobile?: string; phoneOffice?: string
         tz?: string; workStart?: string; workEnd?: string; taskNotify?: string[]
+        emailNotify?: string[]
       } = {}
       if (имя !== (user?.name ?? '')) тело.name = имя
       if (draft.mobile.trim() !== (user?.phone_mobile ?? '')) тело.phoneMobile = draft.mobile.trim()
@@ -339,6 +359,9 @@ export function PersonalSettings() {
       if (draft.workEnd !== (user?.work_end ?? '18:00')) тело.workEnd = draft.workEnd
       if (draft.notify.join() !== порядокКаналов(user?.task_notify ?? КАНАЛЫ_ПО_УМОЛЧАНИЮ).join()) {
         тело.taskNotify = draft.notify
+      }
+      if (draft.emailKinds.join() !== порядокВидовПисем(user?.email_notify ?? ВИДЫ_ПИСЕМ.map((k) => k.id)).join()) {
+        тело.emailNotify = draft.emailKinds
       }
       if (draft.photoRemoved) тело.avatarUrl = ''
       else if (draft.photo) тело.avatarUrl = (await chat.uploadAttachment(draft.photo, company.id)).fileUrl
@@ -352,6 +375,7 @@ export function PersonalSettings() {
       if (preview) URL.revokeObjectURL(preview)
       setPreview(null)
       setDraft((d) => ({ ...d, photo: null, photoRemoved: false }))
+      setТронут(false)
       toast.success('Настройки сохранены')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось сохранить')
@@ -361,6 +385,7 @@ export function PersonalSettings() {
   }
 
   const деньВерен = рабочийДеньВерен(draft.workStart, draft.workEnd)
+  const почтаВключена = draft.notify.includes('email')
   const фото = preview ?? (draft.photoRemoved ? null : user?.avatar_url ?? null)
 
   return (
@@ -407,7 +432,7 @@ export function PersonalSettings() {
               </Button>
               {фото && (
                 <Button type="button" variant="ghost" size="sm"
-                  onClick={() => { if (preview) URL.revokeObjectURL(preview); setPreview(null); setDraft((d) => ({ ...d, photo: null, photoRemoved: true })) }}>
+                  onClick={() => { if (preview) URL.revokeObjectURL(preview); setPreview(null); setТронут(true); setDraft((d) => ({ ...d, photo: null, photoRemoved: true })) }}>
                   <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                   Убрать
                 </Button>
@@ -544,6 +569,45 @@ export function PersonalSettings() {
           </div>
         </div>
 
+        {/* Что из этого уходит письмом. Канал «Почта» выше отвечает на вопрос
+            «писать ли вообще», а здесь человек выбирает, о чём именно: раньше
+            поток ответов по чужим задачам лечился только полным отключением
+            почты — вместе с «вам поручено». Сводка дня живёт здесь же: для
+            человека это такое же письмо в его ящик, а не отдельная подписка. */}
+        <div id="profile-email" className="scroll-mt-24 space-y-3 border-t pt-5">
+          <div>
+            <h3 className="text-sm font-medium">Что присылать на почту</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {почтаВключена
+                ? <>Письма уходят на {user?.email || 'вашу почту'}. Снимите всё — почта замолчит, уведомления останутся в чате.</>
+                : <>Канал «Почта» выключен выше — письма не уходят. Включите его, чтобы выбрать, о чём писать.</>}
+            </p>
+          </div>
+          <div className="space-y-2">
+            {ВИДЫ_ПИСЕМ.map((k) => {
+              const on = draft.emailKinds.includes(k.id)
+              return (
+                <label key={k.id}
+                  className={cn('flex items-start gap-2 text-sm',
+                    почтаВключена ? 'cursor-pointer' : 'cursor-default opacity-60')}>
+                  <Checkbox className="mt-0.5" checked={on} disabled={!почтаВключена}
+                    onCheckedChange={(v) => set('emailKinds', порядокВидовПисем(
+                      v === true ? [...draft.emailKinds, k.id] : draft.emailKinds.filter((x) => x !== k.id)))} />
+                  <span>
+                    {k.label}
+                    <span className="block text-xs text-muted-foreground">{k.hint}</span>
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+          {почтаВключена && draft.emailKinds.length === 0 && (
+            <p className="text-xs text-amber-600 dark:text-amber-500">
+              На почту не уйдёт ничего. Поручения вы по-прежнему увидите в выбранных чатах.
+            </p>
+          )}
+        </div>
+
         {/* Кто вправе вести мой календарь. Полномочие выдаёт ТОЛЬКО владелец —
             ни администратор, ни сам помощник: иначе «ведение календаря» стало бы
             способом получить доступ без ведома того, чей он. Это именно
@@ -648,11 +712,13 @@ export function PersonalSettings() {
             два экрана прокрутки. */}
         <div className={cn('flex items-center gap-2 border-t pt-4',
           dirty && 'sticky bottom-0 -mx-6 -mb-6 border-t bg-background/95 px-6 pb-4 backdrop-blur')}>
-          <Button type="button" onClick={сохранить} disabled={!dirty || saving || !деньВерен}>
+          <Button type="button" aria-label="Сохранить личные настройки"
+            onClick={сохранить} disabled={!dirty || saving || !деньВерен}>
             {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             Сохранить
           </Button>
-          <Button type="button" variant="ghost" onClick={отменить} disabled={!dirty || saving}>
+          <Button type="button" variant="ghost" aria-label="Отменить изменения личных настроек"
+            onClick={отменить} disabled={!dirty || saving}>
             Отменить
           </Button>
           {dirty && !saving && (
