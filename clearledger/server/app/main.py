@@ -6,7 +6,7 @@ FastAPI приложение с CORS, роутерами, startup seed.
 import asyncio
 import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
@@ -324,8 +324,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as e:  # noqa: BLE001 — сторож не критичен для API
         logger.warning(f"Сторож свежести выгрузки не запущен: {e}")
 
+    # Реестр документов тяжёлый: он не должен задерживать downlink станций.
+    from app.services.store_document_sync import run_forever as _document_sync
+    document_sync_task = asyncio.create_task(_document_sync())
+
     logger.info("TradeLedger Server запущен")
     yield
+    document_sync_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await document_sync_task
     if intake_task is not None:
         intake_task.cancel()
     if projection_task is not None:
