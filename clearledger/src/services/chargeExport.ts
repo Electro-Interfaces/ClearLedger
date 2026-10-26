@@ -48,19 +48,23 @@ function safeSheet(name: string, used: Set<string>): string {
 /** Снимок элемента. На время съёмки прячем управляющие элементы (кнопки, селекторы,
  * переключатели) — в отчёт идут только данные, графики и таблицы. */
 async function snapshot(el: HTMLElement): Promise<string> {
-  const bg = getComputedStyle(el).backgroundColor
+  let bg = 'rgb(255, 255, 255)'
+  for (let parent: HTMLElement | null = el; parent; parent = parent.parentElement) {
+    const color = getComputedStyle(parent).backgroundColor
+    if (color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') { bg = color; break }
+  }
   const style = document.createElement('style')
-  style.textContent = '[data-export-ignore]{display:none !important}'
+  style.textContent = '[data-export-ignore],.recharts-tooltip-wrapper{display:none !important} [data-export-expand]{max-height:none !important;overflow:visible !important}'
   document.head.appendChild(style)
   try {
-    return await toPng(el, { pixelRatio: 2, backgroundColor: bg && bg !== 'rgba(0, 0, 0, 0)' ? bg : undefined, cacheBust: true })
+    return await toPng(el, { pixelRatio: 2, backgroundColor: bg, cacheBust: true })
   } finally {
     document.head.removeChild(style)
   }
 }
 
 interface Kpi { label: string; value: string; hint: string }
-interface Tbl { name: string; columns: string[]; rows: (string | number)[][] }
+interface Tbl { name: string; columns: string[]; rows: (string | number | null)[][] }
 
 /** KPI-карточки помечены data-kpi; читаем label/value/hint из детей. */
 function readKpis(root: HTMLElement): Kpi[] {
@@ -83,26 +87,38 @@ function readTables(root: HTMLElement): Tbl[] {
     const raw = tbl.getAttribute('data-export-rows')
     if (raw) {
       try {
-        const parsed = JSON.parse(raw) as { columns: string[]; rows: (string | number)[][] }
+        const parsed = JSON.parse(raw) as { columns: string[]; rows: (string | number | null)[][] }
         if (Array.isArray(parsed.columns) && Array.isArray(parsed.rows)) return { name, columns: parsed.columns, rows: parsed.rows }
       } catch { /* fallback ниже */ }
     }
     const columns = Array.from(tbl.querySelectorAll('thead th')).map((th) => th.textContent?.trim() ?? '')
-    const rows = Array.from(tbl.querySelectorAll('tbody tr')).map((tr) =>
-      Array.from(tr.querySelectorAll('td')).map((td) => td.textContent?.trim() ?? ''))
+    const rows = Array.from(tbl.querySelectorAll<HTMLTableRowElement>('tbody tr')).map((tr) =>
+      Array.from(tr.cells).map((cell) => cell.textContent?.trim() ?? ''))
     return { name, columns, rows }
   }).filter((t) => t.rows.length > 0)
 }
 
 function findCharts(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>('.recharts-wrapper, [data-chart]'))
+  const charts = Array.from(root.querySelectorAll<HTMLElement>('[data-export-chart], .recharts-wrapper, [data-chart]'))
+  return charts.filter(chart => !charts.some(parent => parent !== chart && parent.contains(chart)))
 }
 
 export async function exportChargeExcel(el: HTMLElement, title: string, subtitle?: string): Promise<void> {
+  if (el.matches('[data-export-state="unavailable"]') || el.querySelector('[data-export-state="unavailable"]')) throw new Error('Дождитесь загрузки данных отчёта')
   const ExcelJS = (await import('exceljs')).default
   const wb = new ExcelJS.Workbook()
   wb.creator = 'TradeLedger'; wb.created = new Date()
   const used = new Set<string>()
+
+  const params = wb.addWorksheet(safeSheet('Параметры', used))
+  params.addRow(['Отчёт', title]).font = { bold: true }
+  if (subtitle) params.addRow(['Общий контур', subtitle])
+  for (const node of [el, ...el.querySelectorAll<HTMLElement>('[data-export-meta]')]) {
+    const raw = node.getAttribute('data-export-meta')
+    if (raw) for (const row of JSON.parse(raw) as string[][]) params.addRow(row)
+  }
+  params.columns = [{ width: 28 }, { width: 110 }]
+  params.getColumn(2).alignment = { wrapText: true, vertical: 'top' }
 
   const kpis = readKpis(el)
   if (kpis.length) {
@@ -174,13 +190,14 @@ export async function exportChargeExcel(el: HTMLElement, title: string, subtitle
     const ws = wb.addWorksheet(safeSheet('Графики', used))
     let rowCursor = 0
     for (const c of charts) {
-      try {
-        const imgId = wb.addImage({ base64: await snapshot(c), extension: 'png' })
+        const png = await snapshot(c)
+        const image = new Image()
+        await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('Не удалось подготовить график')); image.src = png })
+        const imgId = wb.addImage({ base64: png, extension: 'png' })
         const w = Math.min(920, c.offsetWidth || 640)
-        const h = (c.offsetHeight || 320) * (w / (c.offsetWidth || 640))
+        const h = image.height * w / image.width
         ws.addImage(imgId, { tl: { col: 0, row: rowCursor }, ext: { width: w, height: h } })
         rowCursor += Math.ceil(h / 18) + 2
-      } catch { /* пропуск */ }
     }
   }
 
@@ -239,7 +256,7 @@ export async function exportChargePdf(el: HTMLElement, title: string, subtitle?:
       doc.text(`${table.name} · строк: ${table.rows.length}`, 24, y)
       autoTable(doc, {
         startY: y + 8, head: [table.columns],
-        body: table.rows.map((row) => row.map((value, col) => value === '' ? '—' : showCell(value, table.columns[col]))),
+        body: table.rows.map((row) => row.map((value, col) => value == null || value === '' ? '—' : showCell(value, table.columns[col]))),
         margin: { top: 24, bottom: 30, left: 24, right: 24 },
         theme: 'grid', styles: { font: 'Report', fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
         headStyles: { font: 'Report', fontStyle: 'bold', fillColor: [238, 240, 246], textColor: [25, 32, 45] },

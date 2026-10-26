@@ -81,6 +81,8 @@ def calculate_hourly_occupancy(
         } | {"points": [dict(hour=h, occupied_minutes=0.0, available_minutes=available,
                            occupancy_pct=0.0, starts=0) for h in range(24)]}
     intervals = defaultdict(list)
+    uncertain_hours = defaultdict(set)
+    uncertain_starts = defaultdict(set)
     lo = datetime.combine(date_from, time.min)
     hi = datetime.combine(date_to + timedelta(days=1), time.min)
     quality = dict(missing_interval_sessions=0, missing_connector_sessions=0,
@@ -91,7 +93,9 @@ def calculate_hourly_occupancy(
         no = (row["connector_no"] or "").strip()
         key = physical_id(station_id, no) if station_id and no else None
         # Тип отбирает записи сессий; каталог содержит актуальный тип порта.
-        if (types and row["connector_type"] not in types) or (ids and key not in ids):
+        if (types and row["connector_type"] not in types) or (ids and key is not None and key not in ids):
+            continue
+        if ids and key is None and station_id not in selected_stations:
             continue
         station = station_map.get(station_id)
         offset = timedelta(hours=(station.get("msk_offset") or 0) if station and tz == "local" else 0)
@@ -112,6 +116,18 @@ def calculate_hourly_occupancy(
         if station is None:
             quality["unmapped_station_sessions"] += 1
             continue
+        if not no and (grouping == "connector" or ids):
+            # Место известно, физический порт — нет. Нельзя выдать нулевую
+            # занятость выбранного порта только потому, что запись не разнесена.
+            uncertain_key = (station_id, row["connector_type"])
+            if starts_in_period:
+                uncertain_starts[uncertain_key].add(start.hour)
+            if valid:
+                cursor, limit = max(start, lo), min(finish, hi)
+                while cursor < limit:
+                    uncertain_hours[uncertain_key].add(cursor.hour)
+                    cursor = min(limit, cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+            continue
         series_id = station_id if grouping == "station" else key
         if series_id not in series:
             continue
@@ -129,6 +145,22 @@ def calculate_hourly_occupancy(
         for point in item["points"]:
             point["occupancy_pct"] = round(100 * point["occupied_minutes"] / available, 6)
             point["occupied_minutes"] = round(point["occupied_minutes"], 6)
+        for (station_id, kind), hours in uncertain_hours.items():
+            if station_id != item["station_id"]:
+                continue
+            known_types = port_types.get(item["id"], {item.get("connector_type")}) - {None, ""}
+            if grouping == "connector" and kind and known_types and kind not in known_types:
+                continue
+            for hour in hours:
+                item["points"][hour]["occupancy_complete"] = False
+        for (station_id, kind), hours in uncertain_starts.items():
+            if station_id != item["station_id"]:
+                continue
+            known_types = port_types.get(item["id"], {item.get("connector_type")}) - {None, ""}
+            if grouping == "connector" and kind and known_types and kind not in known_types:
+                continue
+            for hour in hours:
+                item["points"][hour]["starts_complete"] = False
     return dict(group_by=grouping, tz=tz,
                 period={"from": date_from.isoformat(), "to": date_to.isoformat()},
                 hours=list(range(24)), series=list(series.values()), connectors=connectors,
@@ -238,7 +270,9 @@ async def hourly_occupancy(
     if connector_types:
         filtered.append(S.connector_type.in_(connector_types))
     if connector_ids:
-        filtered.append(func.concat(S.location_id, ":", number).in_(connector_ids))
+        possible_stations = {port["station_id"] for port in connectors if port["id"] in connector_ids}
+        filtered.append(or_(func.concat(S.location_id, ":", number).in_(connector_ids),
+                            and_(number.is_(None), S.location_id.in_(possible_stations))))
     last = (await db.execute(select(func.max(S.started_at)).select_from(joined).where(*filtered))).scalar_one()
     shift = func.coalesce(R.msk_offset, 0) * timedelta(hours=1) if tz == "local" else timedelta(0)
     start, finish = S.started_at + shift, S.finished_at + shift

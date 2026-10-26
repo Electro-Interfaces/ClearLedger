@@ -152,11 +152,34 @@ def test_known_type_without_physical_number_can_occupy_station():
     assert points(result)[10]["occupied_minutes"] == 30
     assert points(result)[10]["starts"] == 1
     assert result["quality"]["missing_connector_sessions"] == 1
+
     assert result["connector_types"] == ["CCS"]
     result = calculate_hourly_occupancy([station()], [], rows, DAY, DAY,
                                        group_by="connector", connector_types=["CCS"])
     assert result["series"] == []
     assert result["quality"]["missing_connector_sessions"] == 1
+
+
+def test_unknown_port_does_not_mean_idle_and_does_not_contaminate_other_stations_or_types():
+    rows = [session("2026-10-21T23:40", "2026-10-22T00:20", no=None)]
+    result = calc(rows, stations=[station(), station('b')], ports=[port(), port(no='2', kind='TYPE2'), port('b')],
+                  group_by='connector')
+    assert points(result, 'a:1')[0].get('occupancy_complete') is False
+    assert points(result, 'a:1')[0].get('starts_complete', True) is True
+    assert points(result, 'a:2')[0].get('occupancy_complete', True) is True
+    assert points(result, 'b:1')[0].get('occupancy_complete', True) is True
+    assert points(result, 'a:1')[1].get('occupancy_complete', True) is True
+
+
+def test_selecting_physical_port_keeps_uncertainty_about_unassigned_sessions():
+    rows = [session('2026-10-22T01:10', '2026-10-22T01:40', no=None)]
+    result = calc(rows, connector_ids=['a:1'], group_by='connector')
+    assert points(result)[1]['occupied_minutes'] == 0  # известная часть; не выдаётся как полный ноль
+    assert points(result)[1]['occupancy_complete'] is False
+    assert points(result)[1]['starts_complete'] is False
+    assert result['quality']['missing_connector_sessions'] == 1
+    station_result = calc(rows, connector_ids=['a:1'], group_by='station')
+    assert points(station_result)[1]['occupancy_complete'] is False
 
 
 @pytest.fixture
@@ -226,6 +249,9 @@ async def test_postgres_identity_intervals_filters_and_history(db, occupied_scop
     assert [s["id"] for s in selected["series"]] == [a.id + ":2"]
     assert points(selected)[0]["occupied_minutes"] == 30
     assert points(selected)[0]["starts"] == 1
+    assert selected["quality"]["missing_connector_sessions"] == 1
+    assert points(selected)[12]["occupancy_complete"] is False
+    assert points(selected)[12]["starts_complete"] is False
     assert selected["connectors"] == result["connectors"]
     zero = await hourly_occupancy(db, f, connector_types=["TYPE2"], group_by="connector")
     assert [s["id"] for s in zero["series"]] == [a.id + ":3"]

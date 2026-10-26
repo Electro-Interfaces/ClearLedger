@@ -21,6 +21,10 @@ export function ExportButton({ title, subtitle, getEl }: {
   const run = async (kind: 'xlsx' | 'pdf') => {
     const el = getEl()
     if (!el) return
+    if (el.matches('[data-export-state="unavailable"]') || el.querySelector('[data-export-state="unavailable"]')) {
+      toast.info('Дождитесь загрузки данных отчёта')
+      return
+    }
     setBusy(kind)
     try {
       if (kind === 'xlsx') await exportChargeExcel(el, title, subtitle)

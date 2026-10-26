@@ -7,6 +7,9 @@ export interface HourlyPoint {
   available_minutes: number
   occupancy_pct: number
   starts: number
+  /** false: есть сессии этой станции, которые невозможно отнести к порту. */
+  occupancy_complete?: boolean
+  starts_complete?: boolean
 }
 export interface PhysicalConnector {
   id: string
@@ -67,6 +70,8 @@ export async function getHourlyOccupancy(p: OccupancyScope & {
     || ![data.quality.missing_interval_sessions, data.quality.missing_connector_sessions, data.quality.unmapped_station_sessions].every(n => Number.isInteger(n) && n >= 0)
     || data.series.some(s => !Array.isArray(s.points) || !completeHours(s.points.map(p => p.hour))
       || s.points.some(p => ![p.occupied_minutes, p.available_minutes, p.occupancy_pct, p.starts].every(Number.isFinite)
+        || (p.occupancy_complete != null && typeof p.occupancy_complete !== 'boolean')
+        || (p.starts_complete != null && typeof p.starts_complete !== 'boolean')
         || p.occupancy_pct < 0 || p.occupancy_pct > 100 || p.starts < 0
         || p.available_minutes < 0 || p.occupied_minutes < 0 || p.occupied_minutes > p.available_minutes))) {
     throw new Error('Сервис вернул неполные или некорректные почасовые данные. Повторите запрос.')
