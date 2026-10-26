@@ -30,7 +30,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import * as workService from '@/services/workService'
 import { startEventMeeting } from '@/services/conferenceService'
 import type {
-  CalendarEvent, EventResponse, EventVisibility, Recurrence,
+  CalendarEvent, EventResponse, EventVisibility, Recurrence, StoredEventVisibility,
 } from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { cn } from '@/lib/utils'
@@ -60,15 +60,15 @@ const ОТВЕТ_СЛОВОМ: Record<EventResponse, string> = {
  *  редактор такого правила стоит дороже самой серии. */
 type КлючПовтора = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly'
 
-/** Круги встречи — тот же словарь, что у поручения: человеку незачем помнить
- *  два набора слов для одного вопроса. */
+const видимостьФормы = (value: StoredEventVisibility | null | undefined): EventVisibility =>
+  value === 'company' ? 'company' : 'private'
+
+/** Два понятных режима встречи: по приглашению или для всей компании. */
 const КРУГИ: { key: EventVisibility; label: string; hint: string }[] = [
-  { key: 'company', label: 'Вся компания',
-    hint: 'Встреча видна в общем календаре компании' },
-  { key: 'private', label: 'Только участники',
-    hint: 'Остальные видят лишь «занят» — ни темы, ни места' },
-  { key: 'personal', label: 'Только я',
-    hint: 'Личное время: не видит никто, включая администратора' },
+  { key: 'private', label: 'Закрытая',
+    hint: 'Видна организатору и приглашённым' },
+  { key: 'company', label: 'Открытая',
+    hint: 'Видна всем в календаре компании' },
 ]
 
 const когда = new Intl.DateTimeFormat('ru-RU', {
@@ -236,7 +236,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   // разговора пятерых — странное начало (МАГ, 15.10.2026). Событие компании
   // («весь день компании») — для всех, ради этого его и заводят.
   const [visibility, setVisibility] = useState<EventVisibility>(
-    () => event?.visibility ?? (companyDay ? 'company' : 'private'))
+    () => видимостьФормы(event?.visibility ?? (companyDay ? 'company' : 'private')))
 
   // Смена встречи в родителе (открыли другую) — перезаполняем поля.
   useEffect(() => {
@@ -250,7 +250,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     setAttendees(event.attendees.map((a) => a.user_id))
     setOptional(event.attendees.filter((a) => a.role === 'optional')
       .map((a) => a.user_id))
-    setVisibility(event.visibility ?? 'company')
+    setVisibility(видимостьФормы(event.visibility))
     setAllDay(event.all_day)
     setПовтор(ключПовтора(event.recurrence ?? null))
     setUntil(event.recurrence_until ?? '')
@@ -361,7 +361,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
           location: location.trim() || undefined,
           conferenceUrl: conference.trim() || undefined,
           attendeeIds: attendees,
-          optionalIds: visibility === 'personal' ? [] : optional,
+          optionalIds: optional,
           allDay,
           visibility,
           subjectRef: subjectRef || undefined,
@@ -778,8 +778,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
 
           <div className="space-y-2">
             <p className="text-sm font-medium">Кого зовём</p>
-            {мой && visibility === 'personal' ? <p className="text-sm text-muted-foreground">После сохранения останется только организатор. Приглашённые участники будут убраны.</p>
-              : мой ? <>
+            {мой ? <>
                 <Input aria-label="Найти участника" placeholder="Имя сотрудника" value={peopleSearch} onChange={e => setPeopleSearch(e.target.value)} className="text-base sm:text-sm" />
                 <p className="text-sm text-muted-foreground">Организатор участвует обязательно. Остальных можно позвать для сведения.</p>
                 {/* Организатора в списке не было вовсе (его добавляет сервер), и

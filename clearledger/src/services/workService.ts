@@ -411,8 +411,10 @@ export async function reminderAction(companyId: string, id: string, data: {
  * Календарь
  * ------------------------------------------------------------------------ */
 
-/** Круг видимости встречи — тот же словарь, что у поручения. */
-export type EventVisibility = 'company' | 'private' | 'personal'
+/** Два режима, которые можно выбрать при создании или изменении встречи. */
+export type EventVisibility = 'company' | 'private'
+/** Старые личные события остаются читаемыми, но новый интерфейс их не создаёт. */
+export type StoredEventVisibility = EventVisibility | 'personal'
 
 export type EventResponse = 'pending' | 'accepted' | 'declined' | 'tentative'
 
@@ -447,7 +449,7 @@ export interface CalendarEvent {
   tz: string
   location: string | null
   conference_url: string | null
-  visibility: 'company' | 'private' | 'personal'
+  visibility: StoredEventVisibility
   /** `cancelled` — встречу отменили; из календаря она не исчезает. */
   status: 'planned' | 'cancelled' | 'poll'
   /** Заполнено — это ГОЛОВА серии; у порождённых пусто. */
