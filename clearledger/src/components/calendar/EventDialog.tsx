@@ -460,6 +460,22 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     try { const url = new URL(conference.trim()); if (!['https:', 'http:'].includes(url.protocol)) formError = 'Укажите ссылку с https:// или http://.' }
     catch { formError = 'Укажите полную ссылку на видеовстречу, начиная с https://.' }
   }
+  /**
+   * Наложение видно сразу, а не после «Подобрать»: кто из состава (и сам
+   * организатор) уже занят в выбранный час. Та же проекция занятости, что у
+   * подбора, — только имена, ни названий, ни мест чужих встреч (docs/TRACK.md).
+   */
+  const накладкаQ = useQuery({
+    queryKey: ['calendar-busy', companyId, 'overlap', attendeesKey, startMs, endMs, event?.id],
+    queryFn: () => workService.calendarBusy(companyId, new Date(startMs).toISOString(),
+      new Date(endMs).toISOString(), attendees, event?.id),
+    enabled: !!companyId && мой && !allDay && !formError && attendees.length > 0
+      && event?.status !== 'poll' && endMs > Date.now(),
+    staleTime: 30_000,
+  })
+  const заняты = (накладкаQ.data?.people ?? []).filter((p) => p.busy.some((b) =>
+    new Date(b.starts_at).getTime() < endMs && new Date(b.ends_at).getTime() > startMs))
+    .map((p) => p.user_id === user?.id ? 'вы' : p.name)
   const changeStart = (value: string) => {
     const next = allDay && value ? value + 'T00:00' : value
     const delta = companyDateTimeToDate(next).getTime() - startMs
@@ -626,6 +642,12 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
         Время указано по Москве (часовой пояс компании).
       </p>}
       {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
+      {!formError && заняты.length > 0 && (
+        <p role="status" className="rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+          В это время {заняты.length === 1 && заняты[0] === 'вы' ? 'у вас уже есть встреча' : `заняты: ${заняты.join(', ')}`}.
+          {attendees.length > 1 && ' Свободное время подскажет «Подобрать».'}
+        </p>
+      )}
       {время_поехало && event!.attendees.length > 1 && (
         <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
           Время меняется — согласия участников сбросятся: «буду в 10» не значит «буду в 18».

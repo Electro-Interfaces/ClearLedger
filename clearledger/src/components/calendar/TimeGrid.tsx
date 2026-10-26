@@ -222,18 +222,25 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                   const н = new Date(e.starts_at)
                   const верх = startMinute / 60 * ЧАС_PX
                   const высота = Math.max(18, (endMinute - startMinute) / 60 * ЧАС_PX)
+                  // Ответ ещё не дан — пунктирная рамка: в сетке такие приглашения не
+                  // отличались от принятых, и их пропускали (QA 27.10.2026).
+                  const ждёт = e.my_response === 'pending' && e.status !== 'cancelled'
                   return (
                     <button key={e.id} onClick={() => onEvent(e)}
-                      aria-label={`${e.title}, ${format(d, 'd MMMM', { locale: ru })}${continues ? ', продолжение' : ''}`}
+                      aria-label={`${e.title}, ${format(d, 'd MMMM', { locale: ru })}${continues ? ', продолжение' : ''}${ждёт ? ', ждёт вашего ответа' : ''}`}
                       title={e.status === 'cancelled'
                         ? `Отменена${e.cancel_reason ? `: ${e.cancel_reason}` : ''}`
-                        : e.title}
+                        : ждёт ? `${e.title} — ждёт вашего ответа` : e.title}
                       style={{
                         top: верх, height: высота,
                         left: `${(колонка / всего) * 100}%`,
                         width: `${(1 / всего) * 100}%`,
                       }}
                       className={cn('absolute overflow-hidden rounded border px-1 py-0.5 text-left text-[12px] leading-tight',
+                        // Короткая встреча — время и тема одной строкой: переносом тема
+                        // уходила под обрез, и оставалось одно «12:00».
+                        высота < 34 && 'truncate whitespace-nowrap',
+                        ждёт && 'border-dashed',
                         e.status === 'cancelled'
                           ? 'border-border bg-muted/60 text-muted-foreground line-through'
                           : e.my_response === 'declined'

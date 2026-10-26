@@ -342,6 +342,8 @@ export function CalendarPage() {
     })
   const foreign = new Set(eventsQ.data?.foreign ?? [])
   const now = new Date()
+  const ждутОтвета = events.filter(e => e.my_response === 'pending' && e.status !== 'cancelled'
+    && new Date(e.ends_at) > now).sort((a, b) => a.starts_at.localeCompare(b.starts_at))
   const repeats = (слои.repeats ? recurQ.data?.recurrences ?? [] : [])
     .filter(r => r.mine && r.enabled
       && (!query || r.template.toLocaleLowerCase('ru').includes(query.toLocaleLowerCase('ru'))))
@@ -370,6 +372,8 @@ export function CalendarPage() {
   const chip = (event: CalendarEvent) => cn(
     'mb-0.5 block w-full truncate rounded-md px-1.5 py-1 text-left text-xs',
     foreign.has(event.id) ? 'border border-border bg-background hover:bg-accent' : 'bg-primary/15 hover:bg-primary/25',
+    // Не отвечено — пунктир, как в неделе: приглашение не должно выглядеть принятым.
+    event.my_response === 'pending' && event.status !== 'cancelled' && 'border border-dashed border-primary/50',
     (event.status === 'cancelled' || event.my_response === 'declined') && 'text-muted-foreground line-through')
   const busy = eventsQ.isFetching || tasksQ.isFetching || planQ.isFetching
   const errors = [
@@ -492,6 +496,24 @@ export function CalendarPage() {
           <span className="min-w-0 flex-1 truncate">Прошедшие отменённые</span>
         </label>
       </section>
+
+      {/* Приглашения без ответа — отдельным списком: организатор ждёт ответа, а в
+          сетке их легко принять за уже согласованные (QA 27.10.2026). */}
+      {ждутОтвета.length > 0 && (
+        <section aria-labelledby="calendar-pending-title" className="space-y-0.5">
+          <h3 id="calendar-pending-title" className="px-1 pb-1 text-xs font-medium text-muted-foreground">
+            Ждут вашего ответа · {ждутОтвета.length}
+          </h3>
+          {ждутОтвета.slice(0, 5).map(e => (
+            <button key={e.id} type="button" onClick={() => open(e)}
+              className="flex min-h-9 w-full items-baseline gap-2 rounded-md border border-dashed border-primary/40 px-2 py-1.5 text-left text-sm hover:bg-accent/60">
+              <span className="shrink-0 tabular-nums text-xs text-muted-foreground">{format(parseISO(companyDateKey(e.starts_at)), 'd MMM', { locale: ru })}, {companyTime(e.starts_at)}</span>
+              <span className="min-w-0 flex-1 truncate">{e.title}</span>
+            </button>
+          ))}
+          {ждутОтвета.length > 5 && <p className="px-1 text-xs text-muted-foreground">и ещё {ждутОтвета.length - 5} — в «Списке»</p>}
+        </section>
+      )}
 
       <div className="mt-auto flex items-center gap-1 border-t border-border pt-3">
         <FeedLink wide />
@@ -658,7 +680,7 @@ export function CalendarPage() {
       </section>
     })}
     {!eventsQ.isLoading && !tasksQ.isLoading && !errors.length && !events.length && !tasks.length && !repeats.length && !reminders.length && !Object.values(plan).some(Boolean) && <div className="py-8 text-center">
-      <p className="font-medium">{query ? 'В этом периоде ничего не найдено' : 'В ближайшие семь дней записей нет'}</p>
+      <p className="font-medium">{query ? 'В этом периоде ничего не найдено' : isCompanyToday(anchor) ? 'В ближайшие семь дней записей нет' : 'В эти семь дней записей нет'}</p>
       <p className="mt-2 text-sm text-muted-foreground">{query ? 'Измените запрос или выберите другой период.' : 'Назначьте встречу или выберите другую дату.'}</p>
       <Button className="mt-4" variant="outline" onClick={() => query ? setSearch('') : createAt(anchor)}>{query ? 'Сбросить поиск' : 'Назначить встречу'}</Button>
     </div>}
