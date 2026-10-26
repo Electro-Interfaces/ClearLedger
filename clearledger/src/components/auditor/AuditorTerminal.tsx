@@ -96,6 +96,10 @@ export function AuditorTerminal() {
   })
   const ourSkills = (methods ?? []).filter((m) => m.scope !== 'external')
   const skillPrefix = health?.engine === 'claude' ? '/' : '$'
+  // Движок нужен обработчику колеса внутри эффекта терминала — берём через ref,
+  // чтобы приход `health` не пересоздавал терминал и не рвал сеанс.
+  const engineRef = useRef(health?.engine)
+  engineRef.current = health?.engine
 
   // Зависим от того, ЕСТЬ ли компания, а не от того, какая именно: терминал должен
   // подняться, когда она загрузилась, и пережить переключение организации в шапке.
@@ -326,6 +330,20 @@ export function AuditorTerminal() {
       // мыши нельзя (пропадёт прокрутка), перехватывать колесо нельзя (то же самое).
       // Цена — выделение мышью занято приложением, и текст выделяют с Shift либо
       // забирают кнопкой «Копировать экран». Копирование и вставка — Ctrl+C / Ctrl+V.
+      //
+      // 🔴 Codex — наоборот. Колесо он не ловит: в альтернативном экране xterm превращал
+      // его в стрелки, и листалась история ВВЕДЁННЫХ КОМАНД, а не ответ (26.10.2026).
+      // Поэтому сервис запускает Codex с `--no-alt-screen` — вывод копится в истории
+      // tmux, — а колесо мы забираем себе и отдаём tmux (`type: 'scroll'`, copy-mode).
+      term.attachCustomWheelEventHandler((e) => {
+        if (engineRef.current !== 'codex') return true
+        if (ws.readyState === WebSocket.OPEN && e.deltaY !== 0) {
+          const lines = Math.min(20, Math.max(1, Math.round(Math.abs(e.deltaY) / 33)))
+          ws.send(JSON.stringify({ type: 'scroll', up: e.deltaY < 0, lines }))
+        }
+        e.preventDefault()
+        return false
+      })
 
       // Копирование и вставка. Из мастерской копируют постоянно — цифры, запросы, куски
       // ответа, — и без этого приходится переписывать руками.
