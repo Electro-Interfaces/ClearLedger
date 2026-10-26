@@ -15,7 +15,7 @@ import {
   GripVertical, PanelLeftClose, PanelLeftOpen, Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { useMaxWidth } from '@/hooks/use-mobile'
+import { useMaxWidth, useShortTouch } from '@/hooks/use-mobile'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
 import { workCounts } from '@/lib/workCounts'
@@ -178,6 +178,7 @@ export function DocsLayout() {
   const qc = useQueryClient()
   const narrow = useMaxWidth(1024)
   const tight = useMaxWidth(1439)
+  const short = useShortTouch()
   const [savedCollapse, setSavedCollapse] = useState<string | null>(
     () => localStorage.getItem(COLLAPSE_KEY))
   // Развёрнутый экран сворачивает колонку до полосы: пункты остаются под рукой.
@@ -402,9 +403,14 @@ export function DocsLayout() {
             </optgroup>}
           </select>
         </nav>
-        {route !== '/docs/setup' && <DocsScopeBar personal={route === '/docs/work'} />}
+        {/* Телефон в альбоме: у календаря свой плюс, а строка «Создать» отнимала
+            последние полсотни пикселей сетки (QA 27.10.2026). */}
+        {route !== '/docs/setup' && !(short && active === 'calendar') && <DocsScopeBar personal={route === '/docs/work'} />}
         <div data-track-scroll className="min-w-0 flex-1 overflow-y-auto"
-          style={{ paddingBottom: 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))' }}>
+          style={{ paddingBottom: short
+            // В альбоме нижней навигации нет (она до 768 px) — запас под неё не нужен.
+            ? 'calc(var(--pwa-install-height, 0px) + 0.5rem + env(safe-area-inset-bottom))'
+            : 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))' }}>
           <Outlet />
         </div>
       </div>

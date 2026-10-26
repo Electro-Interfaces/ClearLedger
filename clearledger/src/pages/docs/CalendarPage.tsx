@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -29,7 +29,7 @@ import * as workService from '@/services/workService'
 import type { CalendarEvent } from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { cn } from '@/lib/utils'
-import { PHONE_QUERY, useIsMobile } from '@/hooks/use-mobile'
+import { PHONE_QUERY, useIsMobile, useMaxWidth } from '@/hooks/use-mobile'
 import { eventDaySegment, recurrenceTimes } from '@/lib/calendarLayout'
 import { видимаВКалендаре } from '@/lib/calendarVisibility'
 import {
@@ -110,6 +110,7 @@ export function CalendarPage() {
   const [query, setQuery] = useState('')
   // Телефон: своя шапка в одну строку; поле поиска раскрывается по кнопке.
   const phone = useIsMobile()
+  const нижняяНавигация = useMaxWidth(767)
   const [searchOpen, setSearchOpen] = useState(false)
   // Левая колонка на узком окне (планшет) уходит за кнопку, на широком стоит всегда.
   const [колонкаОткрыта, setКолонкаОткрыта] = useState(false)
@@ -171,6 +172,12 @@ export function CalendarPage() {
   }, [dateKey, mode])
   const rangeFrom = companyDayStart(from)
   const rangeTo = companyDayStart(to)
+  // Месяц на телефоне открывается на текущей неделе: шесть строк не всегда
+  // помещаются, и сегодняшний день уходил под край (QA 27.10.2026).
+  const месяцRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (phone && mode === 'month') месяцRef.current?.querySelector('[data-today]')?.scrollIntoView({ block: 'nearest' })
+  }, [phone, mode, dateKey])
 
   const eventsQ = useQuery({
     queryKey: ['calendar', companyId, слои.mine, слои.company, rangeFrom.toISOString(), rangeTo.toISOString(), query],
@@ -660,7 +667,7 @@ export function CalendarPage() {
     : mode !== 'month' ? <div className="flex min-h-0 flex-1 overflow-x-auto">
       <TimeGrid days={days} events={events} tasks={tasks} foreign={foreign} repeats={repeats} draft={newAt ? draft : null}
         onEvent={open} onAdd={at => startMeeting(at)} onDay={day => openDay(day, mode === 'week' ? 'day' : 'agenda')} />
-    </div> : <div className="flex min-h-0 flex-1 flex-col overflow-auto rounded-xl border border-border bg-card">
+    </div> : <div ref={месяцRef} className="flex min-h-0 flex-1 flex-col overflow-auto rounded-xl border border-border bg-card">
       <div className="grid grid-cols-7 border-b border-border">{days.slice(0, 7).map(day => <div key={day.toISOString()} className={cn('px-2 py-2 text-sm font-medium', day.getDay() % 6 === 0 ? 'text-muted-foreground/80' : 'text-muted-foreground')}>{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
       {/* На телефоне в клетке только точки: высокие строки уводили текущую
           неделю под край экрана (QA 27.10.2026), шесть недель должны влезать. */}
@@ -687,11 +694,12 @@ export function CalendarPage() {
         ]
         const total = rows.length + dayReminders.length + planned
         const чужойМесяц = !isSameMonth(day, anchor)
-        return <div key={day.toISOString()} className={cn('group min-w-0 border-b border-r border-border p-1 [&:nth-child(7n)]:border-r-0',
+        return <div key={day.toISOString()} data-today={isCompanyToday(day) || undefined}
+          className={cn('group min-w-0 border-b border-r border-border [&:nth-child(7n)]:border-r-0', phone ? 'p-0.5' : 'p-1',
           чужойМесяц ? 'bg-muted/25' : day.getDay() % 6 === 0 && 'bg-muted/15')}>
           <div className="flex items-center justify-between">
             <button aria-label={`Открыть ${format(day, 'd MMMM', { locale: ru })}`} onClick={() => openDay(day)}
-              className={cn('grid size-8 place-items-center rounded-full text-sm tabular-nums hover:bg-accent',
+              className={cn('grid place-items-center rounded-full text-sm tabular-nums hover:bg-accent', phone ? 'size-7' : 'size-8',
                 isCompanyToday(day) ? 'bg-primary font-semibold text-primary-foreground hover:bg-primary/90'
                   : чужойМесяц ? 'text-muted-foreground' : 'font-medium')}>{format(day, 'd')}</button>
             {/* Плюс дня проступает при наведении и с клавиатуры: на каждой из 35
@@ -702,7 +710,7 @@ export function CalendarPage() {
             /* Телефон: в клетку шириной в палец название не влезает — «12:3…» хуже
                точки. Точки говорят, что день занят, нажатие открывает его списком. */
             ? total > 0 && <button onClick={() => openDay(day, 'agenda')} aria-label={`${format(day, 'd MMMM', { locale: ru })}: ${total} ${запись(total)}`}
-              className="flex min-h-8 w-full flex-wrap content-start items-center gap-1 px-0.5 py-1">
+              className="flex min-h-5 w-full flex-wrap content-start items-center gap-1 px-0.5 py-0.5">
               {meetings.slice(0, 3).map(e => <span key={e.id} className={cn('size-1.5 rounded-full', foreign.has(e.id) ? 'border border-foreground/60' : 'bg-primary')} />)}
               {due.slice(0, 3).map(t => <span key={t.id} className={cn('size-1.5 rounded-[1px]', t.overdue ? 'bg-destructive' : 'bg-foreground/50')} />)}
               {total > 3 && <span className="text-xs leading-none tabular-nums text-muted-foreground">{total}</span>}
@@ -762,7 +770,9 @@ export function CalendarPage() {
       <DropdownMenuTrigger asChild>
         <Button aria-label="Новое событие"
           className="fixed right-4 z-40 size-14 rounded-full p-0 shadow-lg"
-          style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom) + var(--pwa-install-height, 0px) + var(--pwa-install-gap, 0px))' }}>
+          // Нижняя навигация есть только до 768 px: в альбоме без неё плюс висел
+          // посреди экрана поверх кнопки вида (QA 27.10.2026).
+          style={{ bottom: `calc(${нижняяНавигация ? '4.5rem' : '1rem'} + env(safe-area-inset-bottom) + var(--pwa-install-height, 0px) + var(--pwa-install-gap, 0px))` }}>
           <Plus className="h-6 w-6" />
         </Button>
       </DropdownMenuTrigger>

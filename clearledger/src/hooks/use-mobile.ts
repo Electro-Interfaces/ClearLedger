@@ -38,6 +38,11 @@ export function useIsMobile() {
   return useMediaMatch(PHONE_QUERY)
 }
 
+/** Невысокий экран под палец — телефон в альбоме: каждая строка оболочки на счету. */
+export function useShortTouch() {
+  return useMediaMatch('(max-height: 500px) and (pointer: coarse)')
+}
+
 /**
  * Ширина вьюпорта ≤ maxPx. Для точечных порогов (напр. рабочий стол переходит на
  * компактную раскладку на планшетах ≤1024, где десктопные боковые меню съедают
