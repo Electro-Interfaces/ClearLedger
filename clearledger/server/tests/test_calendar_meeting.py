@@ -82,3 +82,12 @@ async def test_открытую_встречу_сотрудник_открыва
                                   db=db, current_user=чужой)
     assert вход['room'], 'сотрудника не пустили в открытую встречу'
     assert вход['moderator'] is False, 'посторонний вошёл ведущим до начала'
+
+    # Сессия этой встречи осталась бы идущей и попала бы в «Идут сейчас»
+    # соседних тестов конференций (база между тестами не откатывается).
+    from sqlalchemy import update
+    from app.models import ConfSession
+    await db.execute(update(ConfSession).where(
+        ConfSession.event_id == uuid.UUID(str(открытая['id'])))
+        .values(ended_at=datetime.now(timezone.utc)))
+    await db.flush()
