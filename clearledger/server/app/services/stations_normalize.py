@@ -29,6 +29,7 @@ import uuid as _uuid
 from typing import Any
 
 from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.station_passport import (
@@ -267,21 +268,41 @@ async def _bump(db: AsyncSession, log_id, done: int, total: int, created: int, u
 async def _make_region_resolver(db: AsyncSession, company_id):
     """Кэш регионов компании: canon-name → region_id (get-or-create)."""
     region_cache: dict[str, _uuid.UUID] = {}
+    # Ключ кэша — как в уникальном индексе `uq_regions_company_name_ci`: btrim+lower.
+    # По точному имени нельзя: `canon_region` возвращает НЕопознанный субъект как есть
+    # (`_REGION_CANON.get(first, s)`), поэтому «Тест» и «тест» из паспортов станций
+    # считались разными регионами. С регистронезависимой уникальностью это уже не
+    # «лишняя строка в справочнике», а UniqueViolation и упавшая загрузка витрины.
     for nm, rid in (await db.execute(
         select(Region.name, Region.id).where(Region.company_id == company_id))).all():
-        region_cache[nm] = rid
+        region_cache[(nm or "").strip().lower()] = rid
 
     async def _region_id(raw):
         canon = canon_region(raw)
         if not canon:
             return None
-        rid = region_cache.get(canon)
+        key = canon.strip().lower()
+        rid = region_cache.get(key)
         if rid is None:
-            reg = Region(company_id=company_id, name=canon, federal_subject=_s(raw, 200))
-            db.add(reg)
-            await db.flush()
-            rid = reg.id
-            region_cache[canon] = rid
+            try:
+                # begin_nested — это SAVEPOINT: при конфликте откатится ТОЛЬКО вставка
+                # региона. Полный `rollback()` здесь был бы хуже самой ошибки — он
+                # выбросил бы всю уже разобранную загрузку станций.
+                async with db.begin_nested():
+                    reg = Region(company_id=company_id, name=canon,
+                                 federal_subject=_s(raw, 200))
+                    db.add(reg)
+                    await db.flush()
+                rid = reg.id
+            except IntegrityError:
+                # Регион успела завести параллельная загрузка — берём её строку.
+                rid = (await db.execute(
+                    select(Region.id).where(
+                        Region.company_id == company_id,
+                        func.btrim(func.lower(Region.name)) == key))).scalar_one_or_none()
+                if rid is None:
+                    raise
+            region_cache[key] = rid
         return rid
 
     return _region_id

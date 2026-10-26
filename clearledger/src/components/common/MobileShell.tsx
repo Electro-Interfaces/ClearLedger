@@ -5,6 +5,7 @@
  * молча, а выкаченные правки не доезжают до человека вовсе — он видит ту сборку,
  * что открыл когда-то, и справедливо считает, что ничего не изменилось.
  */
+import { useLocation } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Loader2, ArrowDown, RefreshCw, Smartphone } from 'lucide-react'
@@ -136,6 +137,7 @@ function wasRecentlyDismissed(): boolean {
 }
 
 export function InstallApp() {
+  const { pathname } = useLocation()
   const bannerRef = useRef<HTMLDivElement>(null)
   const [promptAvailable, setPromptAvailable] = useState(hasPwaInstallPrompt)
   const [hidden, setHidden] = useState(wasRecentlyDismissed)
@@ -150,14 +152,25 @@ export function InstallApp() {
     })
   }, [])
 
-  const visible = !installed && !hidden
+  const visible = !pathname.startsWith('/marketing') && !installed && !hidden
   useEffect(() => {
     if (!visible || !bannerRef.current) return
-    const update = () => document.documentElement.style.setProperty('--pwa-install-height', `${bannerRef.current?.offsetHeight ?? 0}px`)
+    // Высота плашки и зазор под ней: по ним экраны отодвигают своё содержимое и
+    // плавающие кнопки. Зазор отдельной переменной, потому что «высота + 8 px»
+    // нужна кнопкам, а отступу содержимого — нет, и складывать их в одну
+    // величину значит выбирать за оба случая.
+    const update = () => {
+      document.documentElement.style.setProperty('--pwa-install-height', `${bannerRef.current?.offsetHeight ?? 0}px`)
+      document.documentElement.style.setProperty('--pwa-install-gap', '0.5rem')
+    }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(bannerRef.current)
-    return () => { observer.disconnect(); document.documentElement.style.removeProperty('--pwa-install-height') }
+    return () => {
+      observer.disconnect()
+      document.documentElement.style.removeProperty('--pwa-install-height')
+      document.documentElement.style.removeProperty('--pwa-install-gap')
+    }
   }, [visible])
   useEffect(() => {
     if (visible) document.documentElement.dataset.pwaInstall = howto ? 'expanded' : 'compact'

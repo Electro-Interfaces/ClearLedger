@@ -15,7 +15,7 @@ from pydantic import Field, ValidationError
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 
-from app.auth import _named_key, resolve_member_modules
+from app.auth import _named_key, resolve_member_modules, touch_key_used
 from app.models import App, CompanyApp, SpaceInboundKey, User, UserCompany
 from app.services import app_registry, sso
 from app.services.support_scope import support_company_id
@@ -138,7 +138,7 @@ async def exchange(db, raw):
     trust, cid, _base = await configuration(db, key.company_id)
     if str(key.id) != trust.introspectionKeyId:
         fail(403, "service_not_trusted")
-    key.last_used_at = datetime.now(timezone.utc)
+    touch_key_used(key)
     await db.commit()
     return service_token("support-context.introspect", key.company_id, cid, keyId=str(key.id))
 
@@ -190,7 +190,7 @@ async def prepare(db, raw_key, body):
     node = node_for(trust, call)
     if str(key.id) != node.prepareKeyId:
         fail(403, "node_key_mismatch")
-    key.last_used_at = datetime.now(timezone.utc)
+    touch_key_used(key)
     await db.commit()
     data = await json_http(base + SUPPORT_PREFIX + "/prepare",
                            service_token("support-context.prepare", core_cid, cid, call),

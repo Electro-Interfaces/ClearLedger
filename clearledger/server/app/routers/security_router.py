@@ -33,9 +33,16 @@ async def trap(request: Request):
     """Сюда nginx стека отдаёт пути сканеров (`/.env`, `wp-*`…) и инструменты взлома.
     Исходный путь — в X-Original-URI. Ответ — обычный 404: сканер не должен понять,
     что его заметили."""
-    original = (request.headers.get("x-original-uri") or request.url.path)[:200]
+    # nginx удаляет эти заголовки на обычном /api/. Только внутренний rewrite
+    # задаёт их заново: прямой вызов этого endpoint не должен создавать тревогу.
+    original = (request.headers.get("x-original-uri") or "").split("?", 1)[0][:200]
+    if not original:
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
     kind = "bad_ua" if request.headers.get("x-trap-reason") == "1" else "trap"
-    await guard.record(kind, request, path=original, block=True)
+    if kind == "trap":
+        await guard.record_trap(request, path=original)
+    else:
+        await guard.record(kind, request, path=original, block=True)
     return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
 

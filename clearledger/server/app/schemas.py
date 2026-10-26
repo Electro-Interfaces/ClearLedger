@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, BeforeValidator, EmailStr, Field, field_validator
 
 
 def _normalize_email(value: str) -> str:
@@ -73,6 +73,16 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     token: str
     password: Password
+
+
+class ChangePasswordRequest(BaseModel):
+    """Смена своего пароля изнутри сеанса — человек помнит текущий.
+
+    Текущий пароль без правил длины: он задан когда-то и проверяется сверкой
+    с хэшем, а не на соответствие сегодняшнему требованию.
+    """
+    currentPassword: str = Field(min_length=1, max_length=200)
+    newPassword: Password
 
 
 class RegisterRequest(BaseModel):
@@ -143,6 +153,15 @@ class MeResponse(BaseModel):
     work_end: str = "18:00"
     # Куда присылать уведомления о поручениях — выбирает сам человек.
     task_notify: list[str] = ["secretary", "email"]
+    # Какие именно письма он хочет получать (виды `notify.EMAIL_KINDS`).
+    email_notify: list[str] = []
+    # «Меня не будет с … по …» — ставит сам человек.
+    away_from: str | None = None
+    away_to: str | None = None
+    # Кто расписывается за него, пока его нет. Заводит администратор, здесь
+    # показывается, чтобы человек перед отпуском видел: замещение есть или нет.
+    substitute: str | None = None
+    substitute_period: str | None = None
     # Место человека в пространстве. Заполняет администратор, поэтому в личных
     # настройках показывается, но не правится: должность и принадлежность — это
     # сведения о месте, а не личное дело.
@@ -702,9 +721,22 @@ class _CpExtra(BaseModel):
     bankName: str | None = Field(None, max_length=255)
 
 
+def _пусто_как_нет(значение: str | None) -> str | None:
+    """Пустой ИНН или КПП — это отсутствие, то есть NULL.
+
+    Отсутствие записывается ОДНИМ способом (`COUNTERPARTY_INN_MIGRATION_DDL`), иначе
+    уникальный индекс `uq_counterparties_inn_kpp` считает пустую строку значением:
+    две карточки без ИНН конфликтуют между собой, хотя ни у одной его нет.
+    """
+    if значение is None:
+        return None
+    очищено = значение.strip()
+    return очищено or None
+
+
 class CounterpartyCreate(_CpExtra):
     company_id: str
-    inn: str = Field(max_length=20)
+    inn: str | None = Field(None, max_length=20)
     kpp: str | None = Field(None, max_length=20)
     name: CounterpartyName
     shortName: str | None = Field(None, max_length=255)
@@ -712,10 +744,14 @@ class CounterpartyCreate(_CpExtra):
     aliases: list[str] = Field(default_factory=list)
     lifecycleStatus: CounterpartyLifecycleEnum = "draft"
 
+    _пустые_реквизиты = field_validator('inn', 'kpp', mode='after')(_пусто_как_нет)
+
 
 class CounterpartyUpdate(_CpExtra):
     inn: str | None = Field(None, max_length=20)
     kpp: str | None = Field(None, max_length=20)
+
+    _пустые_реквизиты = field_validator('inn', 'kpp', mode='after')(_пусто_как_нет)
     name: CounterpartyName | None = None
     shortName: str | None = Field(None, max_length=255)
     type: CounterpartyTypeEnum | None = None
@@ -726,7 +762,9 @@ class CounterpartyUpdate(_CpExtra):
 class CounterpartyResponse(_CpExtra):
     id: str
     companyId: str
-    inn: str
+    # ИНН может отсутствовать — тогда это NULL, а не пустая строка: карточку
+    # заводят и по названию, пока реквизиты не пришли.
+    inn: str | None = None
     kpp: str | None = None
     name: str
     shortName: str | None = None

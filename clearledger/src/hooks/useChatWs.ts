@@ -41,6 +41,8 @@ export function useChatWs(
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onReconnectRef = useRef(onReconnect)
   const wasOpenRef = useRef(false)
+  /** Сколько раз подряд соединение закрылось, не поработав. */
+  const отказыПодряд = useRef(0)
   const [connected, setConnected] = useState(false)
 
   useEffect(() => {
@@ -72,6 +74,7 @@ export function useChatWs(
       wsRef.current = ws
       ws.onopen = () => {
         lastFrameAt = Date.now()
+        отказыПодряд.current = 0
         subsRef.current.clear()
         channelsRef.current.forEach(subscribe)
         setConnected(true)
@@ -85,11 +88,22 @@ export function useChatWs(
           if (event.type !== 'pong') onEventRef.current(event)
         } catch { /* невалидный кадр */ }
       }
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         if (wsRef.current === ws) wsRef.current = null
         subsRef.current.clear()
         setConnected(false)
-        if (!disposed) reconnectRef.current = setTimeout(connect, 3000)
+        if (disposed) return
+        // Отказ в апгрейде — не обрыв связи, и повторять его бессмысленно.
+        // Просроченный токен лежит в хранилище и выглядит годным, поэтому
+        // прежний безусловный повтор каждые три секунды давал на rushydro
+        // 15 тыс. отвергнутых соединений в сутки с одного браузера (25.10.2026).
+        // Считаем неудачи подряд: связь рвётся — отходим всё дальше, отвергают —
+        // останавливаемся и оставляем чат на опросе, как и было.
+        if (ev.code === 1008) return
+        отказыПодряд.current += 1
+        if (отказыПодряд.current > 5) return
+        const пауза = Math.min(3000 * 2 ** (отказыПодряд.current - 1), 60_000)
+        reconnectRef.current = setTimeout(connect, пауза)
       }
       ws.onerror = () => ws.close()
     }

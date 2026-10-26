@@ -1815,37 +1815,81 @@ async def test_document_sync_skips_when_registry_is_fresh(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_document_sync_never_breaks_the_exchange(monkeypatch):
-    """Сверка не имеет права уронить обмен: станция потеряла бы задания."""
+async def test_document_sync_does_not_rebuild_on_request_path(monkeypatch):
+    """Запрос станции не ждёт пересборки реестра — она уходит отдельной задачей.
+
+    26.10.2026 именно это ожидание останавливало обмен на gig: пересборка на
+    всю компанию (18 467 проекций) не укладывалась в 90 секунд, агент уходил по
+    таймауту, корутина отменялась, `rebuilt_at` не обновлялся — и следующий стук
+    начинал заново. Успешных `downlink` было около 5 % за сутки.
+    """
+    вызовы, запуски = [], []
 
     async def rebuild(*_args, **_kwargs):
-        raise RuntimeError("база недоступна")
+        вызовы.append("rebuild")
+        return {"records": 1}
 
     monkeypatch.setattr(store_document_sync, "rebuild_store_document_projection", rebuild)
-    session = SyncSession(None)
-    итог = await store_document_sync.сверить_документы(session, uuid.uuid4(), 208)
-    assert итог["rebuilt"] is False
-    assert "не собран" in итог["detail"]
-    assert session.rolled_back is True
+    monkeypatch.setattr(store_document_sync, "запустить_пересборку",
+                        lambda cid, st: запуски.append((cid, st)))
+    company_id = uuid.uuid4()
+    итог = await store_document_sync.сверить_документы(
+        SyncSession(None), company_id, 208)
+    assert вызовы == [], "пересборка на пути запроса станции недопустима"
+    assert запуски == [(company_id, 208)], "но она должна быть запущена отдельно"
+    assert "запущена отдельно" in итог["detail"]
 
 
 @pytest.mark.asyncio
-async def test_document_sync_queues_snapshot_after_rebuild(monkeypatch):
-    """Собрали реестр — сразу кладём станции свежий снимок заголовков."""
+async def test_document_sync_rebuild_takes_lock_once_per_company(monkeypatch):
+    """Пока пересборка идёт, стуки других станций её не дублируют и не ждут."""
+    собрано = []
+
+    class LockedSession:
+        """Сессия, у которой замок компании уже занят другой пересборкой."""
+
+        async def execute(self, statement, _parameters=None):
+            return ListResult([False])      # pg_try_advisory_lock → false
+
+        async def commit(self):
+            pass
+
+        async def rollback(self):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_exc):
+            return False
 
     async def rebuild(*_args, **_kwargs):
-        return {"records": 1313}
+        собрано.append("rebuild")
+        return {"records": 1}
+
+    monkeypatch.setattr(store_document_sync, "rebuild_store_document_projection", rebuild)
+    monkeypatch.setattr("app.database.async_session_factory", lambda: LockedSession())
+    await store_document_sync._пересобрать(uuid.uuid4(), 208)
+    assert собрано == [], "замок занят — вторая пересборка не нужна и не ждёт"
+
+
+@pytest.mark.asyncio
+async def test_document_sync_queues_snapshot_with_existing_registry(monkeypatch):
+    """Снимок заголовков station получает по тому реестру, что есть сейчас.
+
+    Отдать прошлый снимок на минуту раньше лучше, чем не отдать ничего: при
+    ожидании пересборки станция уходила по таймауту и не получала НИЧЕГО.
+    """
 
     async def queue(_db, _company_id, station_id):
         assert station_id == 208
         return SimpleNamespace(payload={"headers": [{"kind": "purchase"}] * 116}), True
 
-    monkeypatch.setattr(store_document_sync, "rebuild_store_document_projection", rebuild)
     monkeypatch.setattr(store_document_sync, "queue_onec_document_snapshot", queue)
+    monkeypatch.setattr(store_document_sync, "запустить_пересборку", lambda *_a: None)
     итог = await store_document_sync.сверить_документы(
         SyncSession(None), uuid.uuid4(), 208)
-    assert итог["rebuilt"] is True and итог["snapshot"] is True
-    assert итог["headers"] == 116
+    assert итог["snapshot"] is True and итог["headers"] == 116
 
 
 def test_exchange_with_station_triggers_document_sync():

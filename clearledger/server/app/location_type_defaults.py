@@ -50,6 +50,12 @@ BUILTIN_LOCATION_TYPES: list[dict] = [
             {"key": "connectorCount", "label": "Кол-во коннекторов", "type": "number"},
             {"key": "connectorTypes", "label": "Типы коннекторов (коды)", "type": "text"},
             {"key": "maxPowerKw", "label": "Макс. мощность", "type": "number", "unit": "кВт"},
+            # Выделенная мощность и параметры ТП отличаются от номинала оборудования.
+            {"key": "connectedPowerKwt", "label": "Присоединённая мощность по документам ТП", "type": "number", "unit": "кВт"},
+            {"key": "connectionVoltageKv", "label": "Напряжение присоединения", "type": "number", "unit": "кВ"},
+            {"key": "gridOperator", "label": "Сетевая организация", "type": "text"},
+            {"key": "energySupplier", "label": "Энергосбытовая организация", "type": "text"},
+            {"key": "tpCoordinates", "label": "Координаты точки присоединения", "type": "text"},
             {"key": "protocolOcpp", "label": "Протокол OCPP", "type": "select",
              "options": ["Нет", "OCPP 1.6", "OCPP 2.0.1"]},
             {"key": "stage", "label": "Стадия", "type": "text"},

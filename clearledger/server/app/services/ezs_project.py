@@ -88,6 +88,9 @@ DOC_KINDS = [
     {"key": "equipment_doc", "label": "Документы на оборудование"},
     {"key": "other", "label": "Прочее"},
 ]
+from app.services.ezs_tp_workflow import DOC_LABELS as TP_DOC_LABELS
+DOC_KINDS.extend({"key": k, "label": v} for k, v in TP_DOC_LABELS.items()
+                 if k not in {d["key"] for d in DOC_KINDS})
 DOC_LABELS = {d["key"]: d["label"] for d in DOC_KINDS}
 
 
@@ -198,6 +201,7 @@ def _tc_out(tc: EzsTechConnection) -> dict[str, Any]:
         "reliabilityCategory": tc.reliability_category, "loadKind": tc.load_kind,
         "existingPowerKwt": tc.existing_power_kwt, "energySupplier": tc.energy_supplier,
         "tpCoords": tc.tp_coords,
+        "workflowVersion": tc.workflow_version or 0,
         "method": tc.method, "methodLabel": ezs_tp_steps.METHOD_LABELS.get(tc.method or ""),
         "steps": ezs_tp_steps.steps_out(tc),
         "overdue": overdue,
@@ -224,10 +228,19 @@ async def tech_connection_application(db: AsyncSession, company_id, site: EzsSit
         EzsTechConnection.site_id == site.id))).scalars().first()
     if tc is None:
         return None
-    # ponytail: заявитель — первое юрлицо компании; выбор в проекте — когда юрлиц станет несколько.
-    org = (await db.execute(select(Organization).where(
-        Organization.company_id == company_id).order_by(Organization.created_at).limit(1))).scalars().first()
-    kit = ezs_tp_steps.kit_for(tc.method, await site_doc_kinds(db, site.id))
+    from app.services import ezs_tp_workflow
+    w = ezs_tp_workflow.data_of(tc)
+    org_query = select(Organization).where(Organization.company_id == company_id)
+    if tc.workflow is not None:
+        if not w.organization_id:
+            raise HTTPException(400, "Выберите заявителя в условиях присоединения")
+        org_query = org_query.where(Organization.id == w.organization_id)
+    org = (await db.execute(org_query.order_by(Organization.created_at).limit(1))).scalars().first()
+    if tc.workflow is not None:
+        state = await ezs_tp_workflow.read(db, tc)
+        kit = [dict(d, optional=False) for d in state["kit"]]
+    else:
+        kit = ezs_tp_steps.kit_for(tc.method, await site_doc_kinds(db, site.id))
     return ezs_tp_application.render(org, site, tc, kit)
 
 
@@ -263,13 +276,21 @@ def _gate_from_step(site: EzsSite, key: str, done: bool, user: User | None) -> d
 async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
                                  patch: dict[str, Any], user: User | None,
                                  may_waive: bool = False) -> dict[str, Any]:
+    await db.execute(select(EzsSite.id).where(EzsSite.id == site.id).with_for_update())
     tc = (await db.execute(select(EzsTechConnection).where(
         EzsTechConnection.company_id == company_id,
-        EzsTechConnection.site_id == site.id))).scalars().first()
+        EzsTechConnection.site_id == site.id).with_for_update())).scalars().first()
     created = tc is None
     if tc is None:
         tc = EzsTechConnection(company_id=company_id, site_id=site.id)
         db.add(tc)
+    if (tc.workflow or {}).get("archived") and any(k != "note" for k in patch):
+        raise HTTPException(409, "Сначала верните присоединение из архива")
+    from app.services.ezs_tp_method import assert_step_actor
+    for step_key, step_value in (patch.get("steps") or {}).items():
+        await assert_step_actor(db, tc, user, step_key)
+    for field, step_key in (("application_date", "applied"), ("contract_date", "contract"), ("done_date", "atp")):
+        if field in patch: await assert_step_actor(db, tc, user, step_key)
     changes: list[dict[str, Any]] = []
     for f, v in patch.items():
         if f not in TC_FIELDS:
@@ -312,6 +333,23 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
                 elif mark.get("waive_reason") == ezs_tp_steps.LANDLORD_WAIVE_REASON:
                     await set_gate_waiver(db, site, "5.1", False, "", user)
             tc.method = method
+    if tc.workflow is not None:
+        from app.services import ezs_tp_workflow
+        w = ezs_tp_workflow.data_of(tc)
+        if w.archived and any(k != "note" for k in patch):
+            raise HTTPException(409, "Сначала верните присоединение из архива")
+        state = await ezs_tp_workflow.read(db, tc)
+        marks = patch.get("steps") or {}
+        if (marks.get("docs_ready") or marks.get("applied")) and not state["ready"]:
+            raise HTTPException(400, "Сначала соберите и проверьте комплект документов и сведения заявки")
+        if marks.get("supply_applied") and not state.get("supplyReady"):
+            raise HTTPException(400, "Сначала соберите и проверьте комплект для договора со сбытом")
+        if marks.get("accepted") and any(not x.resolved and x.branch == "application" for x in w.remarks):
+            raise HTTPException(400, "Остались неснятые замечания к заявке")
+        if marks.get("checked") and any(not x.resolved and x.branch == "inspection" for x in w.remarks):
+            raise HTTPException(400, "Остались неснятые замечания приёмки")
+        if marks.get("works_done") and w.stages and any(not x.done for x in w.stages):
+            raise HTTPException(400, "Не все этапы ТУ выполнены")
     for key, value in (patch.get("steps") or {}).items():
         step = ezs_tp_steps.STEP_BY_KEY.get(key)
         if step is None:
@@ -350,6 +388,7 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
                                        old_display=TC_LABELS.get(tc.status or ""),
                                        new_display=TC_LABELS.get(status)))
             tc.status = status
+    tc.workflow_version = (tc.workflow_version or 0) + 1
     tc.updated_at = datetime.now(timezone.utc)
     # Пункт 5.6 гейта («фиксация сроков мероприятий ТУ») смотрит в графу площадки,
     # а срок задают здесь — месяцами заявителя или датой мероприятий. Без зеркала
@@ -365,6 +404,10 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
         if months:
             changes.append(make_change("tp_term_months", site.tp_term_months, months))
             site.tp_term_months = months
+    from app.services.ezs_tp_method import prefill
+    filled = await prefill(db, tc, site, apply=True)
+    if filled:
+        tc.workflow = dict(tc.workflow or {}, _prefill=filled)
     await db.flush()
     if changes:
         await log_event(
@@ -377,14 +420,31 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
     return _tc_out(tc)
 
 
-async def tech_connections_report(db: AsyncSession, company_id) -> dict[str, Any]:
-    """Реестр присоединений по проектам: статусы, сроки, просрочки, стоимость."""
+async def tech_connections_report(db: AsyncSession, company_id, *,
+                                  include_closed: bool = False) -> dict[str, Any]:
+    """Реестр присоединений по проектам: статусы, сроки, просрочки, стоимость.
+
+    Считаем работу, а не историю: отклонённые и замороженные проекты входят
+    только по явной просьбе (`include_closed`). Иначе плитки отвечали про
+    мёртвые площадки — 70 строк из 79 и почти вся «стоимость подключений».
+    """
+    from app.services.ezs_sites import STAGE_ORDER
+
+    conds = [EzsTechConnection.company_id == company_id]
+    if not include_closed:
+        conds.append(EzsSite.stage.in_(STAGE_ORDER))
     rows = (await db.execute(
         select(EzsTechConnection, EzsSite.project_no, EzsSite.title, EzsSite.region_norm,
                EzsSite.region, EzsSite.city, EzsSite.address, EzsSite.stage)
         .join(EzsSite, EzsSite.id == EzsTechConnection.site_id)
-        .where(EzsTechConnection.company_id == company_id)
+        .where(*conds)
         .order_by(EzsTechConnection.due_date.nulls_last()))).all()
+    # Сколько скрыто — чтобы переключатель на экране назывался числом, а не догадкой.
+    closed_total = int((await db.execute(
+        select(func.count()).select_from(EzsTechConnection)
+        .join(EzsSite, EzsSite.id == EzsTechConnection.site_id)
+        .where(EzsTechConnection.company_id == company_id,
+               EzsSite.stage.not_in(STAGE_ORDER)))).scalar_one() or 0)
     items = []
     by_status: dict[str, int] = {}
     overdue = 0
@@ -400,13 +460,15 @@ async def tech_connections_report(db: AsyncSession, company_id) -> dict[str, Any
         cost_sum += out["cost"] or 0
     return {
         "total": len(items), "overdue": overdue, "costSum": round(cost_sum, 2),
+        "closedTotal": closed_total, "includeClosed": include_closed,
         "byStatus": [{"key": s["key"], "label": s["label"], "count": by_status.get(s["key"], 0)}
                      for s in TC_STATUSES],
         "items": items,
     }
 
 
-async def tech_connections_by_operator(db: AsyncSession, company_id) -> dict[str, Any]:
+async def tech_connections_by_operator(db: AsyncSession, company_id, *,
+                                       include_closed: bool = False) -> dict[str, Any]:
     """Присоединения в разрезе сетевой организации.
 
     Сетевая — первый разрез этой части работы, а не подпись в карточке: процессы,
@@ -418,6 +480,8 @@ async def tech_connections_by_operator(db: AsyncSession, company_id) -> dict[str
     Отдельно — владелец подстанции и линии (графы осмотра AQ–AR): у собственных
     сетей «Общество» присоединение идёт иначе, чем через чужую организацию.
     """
+    from app.services.ezs_sites import STAGE_ORDER
+
     rows = (await db.execute(text("""
         select coalesce(nullif(trim(t.grid_operator), ''), '— не указана') as operator,
                t.grid_operator_counterparty_id as counterparty_id,
@@ -427,7 +491,9 @@ async def tech_connections_by_operator(db: AsyncSession, company_id) -> dict[str
                s.stage
         from ezs_tech_connections t join ezs_sites s on s.id = t.site_id
         where t.company_id = :cid
-    """), {"cid": company_id})).mappings().all()
+          and (:all_stages or s.stage = any(:live))
+    """), {"cid": company_id, "all_stages": include_closed,
+           "live": list(STAGE_ORDER)})).mappings().all()
 
     def days(a: str | None, b: str | None) -> int | None:
         if not a or not b:
@@ -2062,11 +2128,16 @@ async def export_accounting_xlsx(db: AsyncSession, company_id) -> bytes:
     }])
 
 
-async def export_tech_connections_xlsx(db: AsyncSession, company_id) -> bytes:
-    """Присоединения: заявки, ТУ, договоры, сроки и просрочки по сетевым."""
-    rep = await tech_connections_report(db, company_id)
+async def export_tech_connections_xlsx(db: AsyncSession, company_id, *,
+                                       include_closed: bool = False) -> bytes:
+    """Присоединения: заявки, ТУ, договоры, сроки и просрочки по сетевым.
+
+    Стадия проекта — отдельной графой: в файле без неё нельзя было отличить
+    заявку действующего проекта от заявки отклонённой площадки.
+    """
+    rep = await tech_connections_report(db, company_id, include_closed=include_closed)
     rows = [[
-        i["projectNo"], i["title"], i["region"], i["city"],
+        i["projectNo"], i["title"], i["stageLabel"], i["region"], i["city"],
         i["statusLabel"], i["gridOperator"], i["applicationNo"], i["applicationDate"],
         i["specsNo"], i["specsDate"], i["contractNo"], i["contractDate"],
         i["powerKwt"], i["cost"], i["dueDate"], i["doneDate"],
@@ -2074,12 +2145,12 @@ async def export_tech_connections_xlsx(db: AsyncSession, company_id) -> bytes:
     ] for i in rep["items"]]
     return build_xlsx([{
         "title": "Присоединение",
-        "headers": ["Проект", "Название", "Регион", "Город", "Статус", "Сетевая",
+        "headers": ["Проект", "Название", "Стадия проекта", "Регион", "Город", "Статус", "Сетевая",
                     "№ заявки", "Дата заявки", "№ ТУ", "Дата ТУ", "№ договора",
                     "Дата договора", "Мощность, кВт", "Стоимость, ₽",
                     "Срок мероприятий", "Исполнено", "Просрочено"],
         "rows": rows,
-        "widths": [16, 26, 22, 18, 18, 26, 18, 13, 18, 13, 18, 13, 14, 14, 16, 13, 12],
+        "widths": [16, 26, 18, 22, 18, 18, 26, 18, 13, 18, 13, 18, 13, 14, 14, 16, 13, 12],
     }])
 
 

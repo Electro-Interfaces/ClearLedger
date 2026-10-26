@@ -362,15 +362,6 @@ app = FastAPI(
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 @app.middleware("http")
 async def rate_limit_public(request, call_next):
     """Ограничение частоты на публичных ручках — до всякой работы с базой.
@@ -385,14 +376,16 @@ async def rate_limit_public(request, call_next):
     # взлома, ловушка — до всякой работы. Ловушка не своя ручка: её адрес nginx отдаёт
     # сюда только для путей сканеров вне API.
     path = request.url.path
+    from app import security_canaries
+    canary = security_canaries.kind_for(path)
     if path.startswith("/api/") and path != "/api/security/trap":
         if await guard.blocked(guard.client_ip(request)):
             return JSONResponse(status_code=403, content={"detail": "Доступ с этого адреса временно закрыт"})
         if guard.is_bad_ua(request.headers.get("user-agent")):
             await guard.record("bad_ua", request, block=True)
             return JSONResponse(status_code=403, content={"detail": "Forbidden"})
-        if guard.is_trap(path):
-            await guard.record("trap", request, block=True)
+        if guard.is_trap(path) and not canary:
+            await guard.record_trap(request)
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
     blocked, event = check(request)
@@ -403,6 +396,8 @@ async def rate_limit_public(request, call_next):
                                detail=str(event.get("scope") or ""))
         return blocked
     response = await call_next(request)
+    if canary and response.status_code == 404 and request.scope.get("route") is None:
+        security_canaries.observe(request, canary)
     if path.startswith("/api/"):
         episode = guard.note_response(request, response.status_code)
         if episode is not None:
@@ -428,6 +423,21 @@ async def _log_security_event(event: dict) -> None:
 
 
 @app.middleware("http")
+async def conditional_get(request, call_next):
+    """ETag на чтениях и 304, когда у клиента тот же ответ (`app/http_cache.py`).
+
+    Фактический порядок цепочки (проверено на собранном образе):
+    `organization_context` → этот → `rate_limit_public` → CORS → обработчик.
+    То есть лимит частоты и охрана остаются ВНУТРИ и обойти их условным запросом
+    нельзя: 304 отдаётся только после того, как обработчик уже отработал. Их
+    собственные ответы (429, 403) метку не получают — она ставится только на 200.
+    """
+    from app.http_cache import conditional_get as handler
+
+    return await handler(request, call_next)
+
+
+@app.middleware("http")
 async def organization_context(request, call_next):
     """Активная организация запроса — из заголовка `X-Organization-Id`.
 
@@ -449,6 +459,22 @@ async def organization_context(request, call_next):
             org = None      # мусор в заголовке — это «все», а не ошибка запроса
     set_request_organization(org)
     return await call_next(request)
+
+
+# CORS — последним, то есть САМЫМ ВНЕШНИМ слоем.
+#
+# Starlette применяет middleware в обратном порядке добавления. Когда CORS стоял
+# первым, охрана и лимит частоты отвечали 403/429 уже внутри него, и их ответ
+# уходил без `Access-Control-Allow-Origin`: браузер гасил его, а человек видел
+# «Failed to fetch» вместо «Слишком много попыток». На одном домене это незаметно,
+# но фронт не обязан жить на одном домене с API (проверка календаря 25.10.2026).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # Роутеры — все под /api
@@ -790,3 +816,12 @@ async def debug_state(current_user=Depends(get_current_user)):
         "version": APP_VERSION,
         "companies": sorted(per, key=lambda x: x["slug"]),
     }
+
+
+# Внешний ASGI-слой: контекст сохраняется и для отказов охраны, и для выгрузок.
+from app.security_context import SecurityContextMiddleware
+app.add_middleware(SecurityContextMiddleware)
+
+# Проверка выполняется до обслуживания запросов: приманка не может занять рабочую ручку.
+from app.security_canaries import validate_routes as validate_canary_routes
+validate_canary_routes(app.routes)

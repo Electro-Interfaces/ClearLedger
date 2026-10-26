@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.auth import touch_key_used
 from app.models import (
     DocApproval, DocCard, DocEvent, DocKind, DocVersion, SpaceInboundKey,
 )
@@ -69,7 +70,7 @@ async def partner_key(
     if key is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED,
                             "Ключ партнёра не опознан")
-    key.last_used_at = datetime.now(timezone.utc)
+    touch_key_used(key)
     return key
 
 

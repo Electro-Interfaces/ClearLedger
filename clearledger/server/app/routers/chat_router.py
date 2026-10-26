@@ -7,11 +7,13 @@ REST /api/chat/* + WebSocket /api/chat/ws?token=JWT.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import (
-    APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, Response, status,
+    APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect,
+    Response, status,
 )
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete as sa_delete, func, or_, select, text
@@ -688,7 +690,9 @@ class EditMessageBody(BaseModel):
 
 class FolderBody(BaseModel):
     name: str
-    roomIds: list[str] = Field(default_factory=list)
+    # None — состав не трогаем: переименование папки не должно её опустошать.
+    # Пустой список по-прежнему означает «убрать из папки все чаты».
+    roomIds: list[str] | None = None
 
 
 class ReorderBody(BaseModel):
@@ -905,8 +909,13 @@ async def create_room(
     # работает в пространстве по договору (контакт-центр), и переписка смены между
     # собой не касается заказчика. Создать он может только в своём контуре — ниже.
     creator_scope = await _chat_scope(current_user, cid, db)
-    if (not await _is_insider(current_user, cid) and not current_user.is_superadmin
-            and not creator_scope):
+    # «Свой» здесь — принадлежность в членстве, а не `users.company_id`: основную
+    # организацию пространства проставляют КАЖДОМУ при заведении и при приёме
+    # приглашения, поэтому по ней внешний участник выглядел сотрудником и заводил
+    # группы (проверка 25.10.2026). Признак партнёра ставят осознанно — он и решает.
+    party = (await _party_types(db, cid, {current_user.id})).get(current_user.id, "internal")
+    if ((party == "partner" or not await _is_insider(current_user, cid))
+            and not current_user.is_superadmin and not creator_scope):
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Создавать чаты в этом пространстве могут только его сотрудники")
     if body.type == "channel" and not await _is_space_admin(current_user, cid, db):
@@ -1025,13 +1034,41 @@ async def get_room(
     my_role = next((p.role for p in plist if p.userId == str(current_user.id)), None)
     can_write = _can_write(room, current_user, my_role,
                            await _is_company_admin(db, room.company_id, current_user))
+    # Непрочитанные, последнее сообщение, закреп и «без звука» — те же поля, что в
+    # списке: карточка отдавала по ним нули и пустоту, и любой, кто читает комнату
+    # этой ручкой (а не списком), видел неверные числа (проверка 25.10.2026).
+    me = (await db.execute(select(ChatParticipant.last_read_at, ChatParticipant.joined_at,
+                                  ChatParticipant.muted_until, ChatParticipant.pinned_at,
+                                  ChatParticipant.history_from)
+                           .where(ChatParticipant.room_id == rid,
+                                  ChatParticipant.user_id == current_user.id))).first()
+    last_read, joined_at, muted_until, pinned_at, history_from = me or (None, None, None, None, None)
+    видимые = [ChatMessage.room_id == rid, ChatMessage.deleted_at.is_(None)]
+    if history_from is not None:
+        видимые.append(ChatMessage.created_at >= history_from)
+    unread = 0
+    if me is not None:
+        порог = max(filter(None, (last_read or joined_at or datetime(1970, 1, 1, tzinfo=timezone.utc),
+                                  history_from)))
+        unread = (await db.execute(select(func.count()).select_from(ChatMessage).where(
+            *видимые, ChatMessage.user_id != current_user.id,
+            ChatMessage.created_at > порог))).scalar() or 0
+    last = (await db.execute(select(ChatMessage).where(*видимые)
+                             .order_by(ChatMessage.created_at.desc()).limit(1))).scalars().first()
     return RoomDetailOut(
         id=str(room.id), type=room.type, kind=room.kind, name=name,
         isArchived=room.is_archived, participantCount=len(plist), directPeerId=peer_id,
         directPeerParty=next((p.partyType for p in plist if p.userId == peer_id), None),
         createdBy=str(room.created_by) if room.created_by else None, participants=plist,
-        pinnedMessage=await _pinned_out(room, db, await _history_from(rid, current_user, db)),
+        pinnedMessage=await _pinned_out(room, db, history_from),
         canWrite=can_write,
+        unreadCount=unread,
+        lastMessage=(None if last is None else
+                     ((last.content if last.type == "text"
+                       else (last.file_name or f"[{last.type}]")) or "")[:200]),
+        lastMessageAt=(last.created_at.isoformat() if last else None),
+        mutedUntil=muted_until.isoformat() if muted_until else None,
+        isPinned=pinned_at is not None,
         avatarUrl=room.avatar_url,
         scopeProduct=room.scope_product,
         scopeObjectId=room.scope_object_id, scopeObjectName=obj_name,
@@ -1189,6 +1226,14 @@ async def send_message(
     if not _can_write(room, current_user, room_role,
                       await _is_company_admin(db, room.company_id, current_user)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "В «Объявления» пишут только администраторы")
+    # Надзор: суперадмин входит в любой разговор, чтобы разобрать инцидент
+    # (`_assert_participant`), но говорить в нём — другое право. Личную переписку
+    # двоих он не ведёт вовсе, а в чужой группе его реплика помечается, чтобы
+    # участники видели, что писал не их человек (решение МАГа 25.10.2026).
+    надзор = room_role is None
+    if надзор and room.type == "direct":
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "Это личная переписка двоих: читать её можно по надзору, писать — нет")
     mtype = body.type if body.type in ("text", "image", "video", "file") else "text"
     content = (body.content or "").strip()
     has_file = bool(body.fileUrl)
@@ -1236,6 +1281,10 @@ async def send_message(
         file_url=body.fileUrl or None, file_name=body.fileName or None,
         file_size=file_size, batch_id=batch_id,
         poster_url=body.posterUrl or None,
+        # Источник сообщения: «email» — пришло письмом, «supervision» — писал не
+        # участник разговора. Поле одно, потому что отвечает на один вопрос ленты:
+        # почему этот человек здесь говорит.
+        external_source="supervision" if надзор else None,
     )
     db.add(msg)
     room.updated_at = _now()
@@ -1449,7 +1498,9 @@ async def _set_archived(room_id: str, flag: bool, current_user: User, db: AsyncS
     except (ValueError, TypeError):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Невалидный ID")
     room = await _assert_participant(rid, current_user, db)
-    if room.kind in ("general", "news"):
+    # Все системные комнаты пространства, а не две из трёх: «Обновления платформы»
+    # так же заводит пространство, и архивация прятала их у всех участников.
+    if room.kind in {kind for kind, _name, _type in SYSTEM_ROOMS}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Системный чат нельзя архивировать")
     my = (await db.execute(select(ChatParticipant.role).where(
         ChatParticipant.room_id == rid, ChatParticipant.user_id == current_user.id))).scalar_one_or_none()
@@ -1525,7 +1576,8 @@ async def update_folder(folder_id: str, body: FolderBody,
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Папка не найдена")
     if body.name is not None and body.name.strip():
         f.name = body.name.strip()[:80]
-    f.room_ids = _uuid_list(body.roomIds)
+    if body.roomIds is not None:
+        f.room_ids = _uuid_list(body.roomIds)
     f.updated_at = _now()
     await db.commit()
     return _folder_out(f)
@@ -2390,6 +2442,11 @@ async def search_all_messages(
                # Скрытые обсуждения ищут только внутри карточки предмета.
                ChatRoom.scope_ticket_id.is_(None), ChatRoom.scope_task_id.is_(None),
                ChatMessage.deleted_at.is_(None),
+               # Позванному «с чистого листа» прошлое закрыто и в поиске: иначе он
+               # не видит прежних сообщений в ленте, но читает их целиком здесь —
+               # с текстом и автором (проверка 25.10.2026).
+               or_(ChatParticipant.history_from.is_(None),
+                   ChatMessage.created_at >= ChatParticipant.history_from),
                or_(ChatRoom.type == "direct", ChatRoom.scope_product == scope)
                if scope else text("true"),
                ChatMessage.content.ilike(f"%{q}%"))
@@ -2883,10 +2940,14 @@ async def push_vapid_key(db: AsyncSession = Depends(get_db),
 @router.post("/push/subscribe", status_code=status.HTTP_201_CREATED)
 async def push_subscribe(
     body: PushSubscribeBody,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Сохранить подписку браузера. Идемпотентно по endpoint: браузер один — строка одна."""
+    from app.services import user_agent as ua_service
+
+    ua = ua_service.short(request.headers.get("user-agent"))
     p256dh = (body.keys or {}).get("p256dh", "")
     auth = (body.keys or {}).get("auth", "")
     if not body.endpoint or not p256dh or not auth:
@@ -2896,9 +2957,12 @@ async def push_subscribe(
     if existing is not None:
         existing.user_id, existing.p256dh, existing.auth = current_user.id, p256dh, auth
         existing.show_preview = body.showPreview
+        if ua:
+            existing.user_agent = ua
     else:
         db.add(ChatPushSubscription(user_id=current_user.id, endpoint=body.endpoint,
-                                    p256dh=p256dh, auth=auth, show_preview=body.showPreview))
+                                    p256dh=p256dh, auth=auth, show_preview=body.showPreview,
+                                    user_agent=ua))
     await db.commit()
     return {"ok": True}
 
@@ -3043,6 +3107,12 @@ class MyProfileBody(BaseModel):
     workEnd: str | None = None     # «18:00»
     # Куда присылать уведомления о поручениях: secretary | notices | email.
     taskNotify: list[str] | None = None
+    # Какие письма человек хочет получать (notify.EMAIL_KINDS). Пустой список —
+    # осознанный выбор «ничего на почту», он сохраняется как есть.
+    emailNotify: list[str] | None = None
+    # «Меня не будет»: «2026-11-03» или "" — отметка снята.
+    awayFrom: str | None = None
+    awayTo: str | None = None
 
 
 @router.patch("/me")
@@ -3068,7 +3138,12 @@ async def update_me(
     for поле, значение in (("phone_mobile", body.phoneMobile),
                            ("phone_office", body.phoneOffice)):
         if значение is not None:
-            setattr(current_user, поле, значение.strip()[:40] or None)
+            # Приводим к единому виду здесь, а не на экране: телефон правят и из
+            # других мест, и три написания одного номера в соседних карточках
+            # люди видят раньше, чем мы.
+            from app.services.phone_e164 import pretty as _pretty
+
+            setattr(current_user, поле, (_pretty(значение) or "")[:40] or None)
     if body.tz is not None:
         # Неизвестное имя отбиваем здесь, а не молча заменяем умолчанием: там,
         # где человек настраивает своё время, тихая подмена — самый верный
@@ -3092,6 +3167,33 @@ async def update_me(
     if current_user.work_start >= current_user.work_end:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Рабочий день должен заканчиваться позже, чем начинается")
+    if body.awayFrom is not None or body.awayTo is not None:
+        from datetime import date as _date
+
+        def _день(значение: str | None, прежнее):
+            if значение is None:
+                return прежнее
+            значение = значение.strip()
+            if not значение:
+                return None
+            try:
+                return _date.fromisoformat(значение)
+            except ValueError:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "Дата в формате ГГГГ-ММ-ДД") from None
+
+        с = _день(body.awayFrom, current_user.away_from)
+        по = _день(body.awayTo, current_user.away_to)
+        if с is not None and по is not None and по < с:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Дата возвращения раньше даты ухода")
+        current_user.away_from, current_user.away_to = с, по
+    if body.emailNotify is not None:
+        from app.services import notify
+
+        # Порядок каталога, а не присланный: интерфейс сравнивает списки, и
+        # «те же виды в другом порядке» выглядели бы несохранённой правкой.
+        current_user.email_notify = [k for k in notify.EMAIL_KINDS if k in body.emailNotify]
     if body.taskNotify is not None:
         from app.services import notify
 
@@ -3104,6 +3206,7 @@ async def update_me(
         current_user.task_notify = каналы
     await db.commit()
     return {"ok": True, "name": current_user.name, "avatarUrl": current_user.avatar_url,
+            "phoneMobile": current_user.phone_mobile, "phoneOffice": current_user.phone_office,
             "tz": current_user.tz,
             "workStart": current_user.work_start.strftime("%H:%M"),
             "workEnd": current_user.work_end.strftime("%H:%M")}
@@ -3140,17 +3243,31 @@ async def presence(
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
 async def _ws_user(token: str) -> User | None:
-    """Аутентификация WS по JWT из query (WS не шлёт заголовки)."""
+    """Аутентификация WS по JWT из query (WS не шлёт заголовки).
+
+    Причина отказа пишется в журнал. Без неё отвергнутый апгрейд виден только как
+    403 в nginx: 25.10.2026 так разбирали 15 тыс. отказов в сутки с одного
+    браузера и причину нашли чтением кода, а не журнала. Токен в запись не
+    попадает — только почему он не принят.
+    """
     from app.auth import session_valid
+    журнал = logging.getLogger("clearledger.chat")
     try:
         payload = decode_token(token)
         uid = uuid.UUID(payload.get("sub"))
     except Exception:  # noqa: BLE001
+        журнал.info("WS чата отклонён: токен не разобран или просрочен")
         return None
     async with async_session_factory() as db:
         user = (await db.execute(select(User).where(User.id == uid))).scalar_one_or_none()
+    if user is None:
+        журнал.info("WS чата отклонён: пользователя %s больше нет", uid)
+        return None
     # Отозванный вход (смена пароля, «выйти со всех устройств») гасит и чат.
-    return user if user is not None and session_valid(payload, user) else None
+    if not session_valid(payload, user):
+        журнал.info("WS чата отклонён: сеанс %s отозван", uid)
+        return None
+    return user
 
 
 async def _ws_can_subscribe(user: User, channel: str, db: AsyncSession) -> bool:

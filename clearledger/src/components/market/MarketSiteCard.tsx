@@ -131,7 +131,7 @@ export function MarketSiteCard({ site, onBack }: { site: MarketSite; onBack: () 
                     <span className="text-muted-foreground"> · {site.price.basis}</span>
                   )}
                 </>
-              ) : <Знач v={null} />}
+              ) : <span className="text-muted-foreground">нет данных</span>}
             </Поле>
           </div>
         </CardContent>
@@ -142,7 +142,7 @@ export function MarketSiteCard({ site, onBack }: { site: MarketSite; onBack: () 
           <div className="text-xs font-semibold">Как станция работает</div>
           <div className="grid gap-x-6 gap-y-3 md:grid-cols-3 xl:grid-cols-4">
             <Поле label="последняя зарядка">
-              <span className={live.stale ? 'text-warning' : ''}>{live.text}</span>
+              <span className={live.stale ? 'text-warning-foreground' : ''}>{live.text}</span>
             </Поле>
             <Поле label="связь за сутки">
               <Знач v={site.quality24h} unit="%" digits={1} />
@@ -151,18 +151,18 @@ export function MarketSiteCard({ site, onBack }: { site: MarketSite; onBack: () 
               <Знач v={site.successPct} unit="%" digits={1} />
             </Поле>
             <Поле label="оценка">
-              {site.rating != null ? (
+              {site.rating != null && (site.reviews ?? 0) > 0 ? (
                 <>
                   <span className="tabular-nums">{nf1.format(site.rating)}</span>
                   <span className="text-muted-foreground">
                     {' '}по {nf.format(site.reviews ?? 0)} отзывам
                   </span>
                 </>
-              ) : <Знач v={null} />}
+              ) : <span className="text-muted-foreground">{site.reviews === 0 ? 'нет отзывов' : 'нет данных'}</span>}
             </Поле>
           </div>
           {(site.closedConfirmations ?? 0) > 0 && (
-            <p className="text-xs text-warning">
+            <p className="text-xs text-warning-foreground">
               Закрытие подтверждали {site.closedConfirmations} раз — станции может уже
               не быть на месте.
             </p>

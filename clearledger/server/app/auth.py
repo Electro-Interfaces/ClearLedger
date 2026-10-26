@@ -2,6 +2,8 @@
 JWT-аутентификация: создание токена, верификация, dependency.
 """
 
+import asyncio
+import logging
 import uuid
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
@@ -10,13 +12,15 @@ import jwt
 from fastapi import Depends, Header, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from passlib.context import CryptContext
-from sqlalchemy import select
+from sqlalchemy import select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import get_db
 from app.models import Company, User, UserCompany
 from app.utils import resolve_company_id
+
+logger = logging.getLogger("clearledger.auth")
 
 settings = get_settings()
 
@@ -529,6 +533,90 @@ KEY_SCOPES = {
 }
 
 
+# Как часто имеет смысл записывать «ключом пользовались».
+#
+# Отметка нужна с точностью до минуты — её показывают как «последнее обращение»
+# на экране подключений. А писалась она В ОДНУ СТРОКУ на каждый входящий запрос:
+# на gig это 204 971 обновление на восемь ключей. Пока транзакция запроса не
+# закрыта, строка ключа заблокирована, и все обращения по тому же ключу ждут её.
+# 25.10.2026 одна зависшая транзакция (`idle in transaction`, девять минут) так
+# остановила всё пространство: пятнадцать запросов стояли в очереди по четыре
+# минуты и отваливались по `statement_timeout`, в журнале 288 ошибок за четыре
+# минуты. Строка-счётчик на горячем пути — это точка сериализации всего обмена.
+#
+# Пишем не чаще раза в минуту — и ОТДЕЛЬНОЙ транзакцией.
+#
+# Сначала была сделана только частота, и этого не хватило. Вечером 25.10.2026 на gig
+# обмен со станциями встал совсем: за десять минут 27 ответов 499 («клиент ушёл, не
+# дождавшись») против одного 200, в базе 14 запросов в очереди, старший ждал 298
+# секунд. Замер показал, почему: записей стало 2.4 в минуту вместо каждого запроса,
+# но СРЕДНЕЕ ОЖИДАНИЕ на запись — 167 секунд. Отметка стояла атрибутом ORM, то есть
+# UPDATE уходил в транзакции запроса и держал строку до её конца; рядом жило
+# 29-секундное чтение пакетов станции (`edge_packets` 501 МБ, `edge_packet_revisions`
+# 481 МБ вместе с `payload`), и все станции ходят по ОДНОМУ ключу.
+#
+# Теперь отметка пишется своей короткой транзакцией: строка держится миллисекунды, и
+# длинные чтения её больше не блокируют. Сами чтения это не ускоряет — их чинят в
+# `store_router`, — но обмен работает, пока это делают.
+#
+# Семантика меняется в одну сторону, и в правильную: отметка останется, даже если
+# запрос потом откатится. Для «последнего обращения по ключу» это честнее, чем терять
+# факт обращения вместе с ошибкой обработки.
+KEY_TOUCH_INTERVAL = timedelta(minutes=1)
+
+
+def touch_key_used(key) -> None:
+    """Отметить обращение по ключу, но не чаще раза в минуту и вне транзакции запроса.
+
+    Запись идёт фоновой задачей в своей сессии. Ошибку глотаем намеренно: «последнее
+    обращение» — отметка для экрана подключений, из-за неё не должен падать запрос,
+    который уже обработан.
+    """
+    now = datetime.now(timezone.utc)
+    key_id = str(key.id)
+    # Когда писали последний раз — помним В ПАМЯТИ ПРОЦЕССА, а не в ORM-объекте.
+    #
+    # Сначала здесь стояло `key.last_used_at = now`, и это сводило правку на нет:
+    # объект принадлежит сессии ЗАПРОСА, SQLAlchemy отправляет такое присваивание при
+    # автофлаше, и UPDATE снова уходил в транзакции запроса. Проверка после выкатки
+    # v1591 это и показала: головной блокировщик (29-секундное чтение пакетов) держал
+    # RowExclusiveLock на `space_inbound_keys` и четырёх её индексах, в очереди стояли
+    # шесть запросов, станции отдавали 499. Запись шла дважды — фоновой задачей и
+    # внутри транзакции запроса, и вторая всё портила.
+    #
+    # Словарь не растёт: ключей у пространства единицы (на gig восемь).
+    posledniy = _last_touch.get(key_id) or key.last_used_at
+    if posledniy is not None and now - posledniy <= KEY_TOUCH_INTERVAL:
+        return
+    _last_touch[key_id] = now
+
+    async def _write() -> None:
+        from app.database import async_session_factory
+        from app.models import SpaceInboundKey
+
+        try:
+            async with async_session_factory() as session:
+                await session.execute(
+                    sa_update(SpaceInboundKey)
+                    .where(SpaceInboundKey.id == key_id)
+                    .values(last_used_at=now))
+                await session.commit()
+        except Exception:  # noqa: BLE001 — отметка не стоит отказа в обслуживании
+            logger.debug("Отметка обращения по ключу не записана", exc_info=True)
+
+    # Задачу держим в множестве: без ссылки сборщик мусора может убить её до записи.
+    task = asyncio.create_task(_write())
+    _touch_tasks.add(task)
+    task.add_done_callback(_touch_tasks.discard)
+
+
+_touch_tasks: set[asyncio.Task] = set()
+# Когда по ключу последний раз писали отметку. В памяти процесса: при нескольких
+# воркерах каждый ведёт свой счёт, и в худшем случае запись пройдёт по разу на
+# воркер за интервал — это всё равно единицы в минуту вместо каждого запроса.
+_last_touch: dict[str, datetime] = {}
+
+
 async def _named_key(raw: str, db: AsyncSession):
     import hashlib
 
@@ -564,7 +652,7 @@ def CompanyByKeyScope(scope: str):
         if company is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                                 detail="Невалидный API-ключ")
-        named.last_used_at = datetime.now(timezone.utc)
+        touch_key_used(named)
         return company, named
 
     return _dep
@@ -599,7 +687,7 @@ async def get_company_by_api_key(
     if named is not None:
         if named.station_id is not None and not request.url.path.startswith(STATION_KEY_PATHS):
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Ключ станции не даёт доступа к этой ручке")
-        named.last_used_at = datetime.now(timezone.utc)
+        touch_key_used(named)
         company = await db.get(Company, named.company_id)
         if company is not None:
             return company

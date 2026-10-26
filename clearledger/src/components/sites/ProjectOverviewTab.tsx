@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { formatDate } from '@/lib/formatDate'
 import { Input } from '@/components/ui/input'
 import { useSupportContext } from '@/contexts/SupportContext'
 import { listProcessTemplates } from '@/services/docsService'
@@ -43,7 +44,7 @@ export function ProjectOverviewTab({ site, companyId }: { site: SiteDetail; comp
         : data.next_work?.id && data.next_work.kind ? <div><Link className="font-medium text-primary" to={work.projectWorkHref({ id: data.next_work.id, kind: data.next_work.kind })}>{data.next_work.title}</Link>
           <p className="mt-1 text-sm text-muted-foreground">Срок работы: {data.next_work.due_at ? new Date(data.next_work.due_at).toLocaleDateString('ru') : 'не назначен'} · {data.next_work.status === 'done' || data.next_work.status === 'executed' ? 'Результат готов — определите следующий шаг' : 'В работе'}</p></div>
           : data.external_wait ? <div className="text-sm"><p>{data.external_wait.waiting_for}</p><p className="mt-1 text-muted-foreground">{data.external_wait.owner_name} · следующий контакт {data.external_wait.follow_up}</p></div>
-            : <p className="text-sm text-muted-foreground">{site.nextAction || 'Выберите работу ниже как следующий результат или укажите внешнее ожидание.'}{site.nextActionDue ? ` · ${site.nextActionDue}` : ''}</p>}
+            : <p className="text-sm text-muted-foreground">{site.nextAction || 'Выберите работу ниже как следующий результат или укажите внешнее ожидание.'}{site.nextActionDue ? ` · ${formatDate(site.nextActionDue)}` : ''}</p>}
       {(data.next_work || data.external_wait) && <Button className="mt-2" variant="ghost" size="sm" disabled={clear.isPending} onClick={() => clear.mutate()}>Снять следующий шаг</Button>}
       <p className="mt-3 text-sm">{data.work.waiting ? `Обязательных работ, удерживающих маршрут: ${data.work.waiting}` : 'В Треке нет незавершённых работ, удерживающих маршрут.'}</p>
       {site.gate?.blocking.length ? <div className="mt-1 text-sm"><p className="text-amber-700 dark:text-amber-300">Незакрытые требования этапа «{site.stageLabel}»: {site.gate.blocking.length}</p>

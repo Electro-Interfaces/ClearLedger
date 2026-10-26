@@ -22,6 +22,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import * as workService from '@/services/workService'
 import type { CalendarEvent } from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
+import { видимаВКалендаре } from '@/lib/calendarVisibility'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { eventDaySegment, recurrenceTimes } from '@/lib/calendarLayout'
@@ -72,9 +73,12 @@ export function CalendarPage() {
   const [showDue, setShowDue] = useState(() => {
     try { return localStorage.getItem('calendar-hide-due') !== '1' } catch { return true }
   })
-  // Отменённые по умолчанию скрыты: зачёркнутая встреча занимала клетку и
-  // мешала назначать новую на её время (РусГидро, 14.10.2026). Слот она и так
-  // не занимает — занятость считается только по запланированным.
+  // Скрываются ПРОШЕДШИЕ отменённые: именно они накапливались в сетке и мешали
+  // назначать новую встречу на то же время (РусГидро, 14.10.2026). Отменённая
+  // встреча, день которой ещё не прошёл, видна всегда и без этой галочки:
+  // пропав молча, она отправляет человека в пустую переговорную (docs/TRACK.md,
+  // «Календарь»). Слот она при этом не занимает — занятость считают только по
+  // запланированным.
   const [showCancelled, setShowCancelled] = useState(() => {
     try { return localStorage.getItem('calendar-show-cancelled') === '1' } catch { return false }
   })
@@ -235,8 +239,8 @@ export function CalendarPage() {
   }
   if (!companyId) return null
 
-  const events = (eventsQ.data?.events ?? []).filter(e => e.status !== 'cancelled'
-    || (showCancelled && new Date(e.ends_at) >= startOfDay(new Date())) || e.id === eventId)
+  const events = (eventsQ.data?.events ?? []).filter(e => видимаВКалендаре(e,
+    { сейчас: new Date(), показыватьПрошедшие: showCancelled, открытая: eventId }))
   const tasks = personal ? (tasksQ.data?.tasks ?? []).filter(t => !query || t.title.toLocaleLowerCase('ru').includes(query.toLocaleLowerCase('ru'))) : []
   const plan = personal && !query ? (planQ.data ?? {}) : {}
   const reminders = (personal ? remindersQ.data?.items ?? [] : [])
@@ -349,7 +353,7 @@ export function CalendarPage() {
           )}
           <DropdownMenuSeparator />
           <DropdownMenuCheckboxItem checked={showCancelled} onCheckedChange={value => переключитьОтменённые(!!value)}>
-            Отменённые встречи
+            Прошедшие отменённые
           </DropdownMenuCheckboxItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => update({ date: format(new Date(), 'yyyy-MM-dd') })}>
@@ -360,7 +364,10 @@ export function CalendarPage() {
     </header>
   )
 
-  return <div className="flex h-full min-h-0 min-w-0 flex-col gap-3 p-3 md:p-4">
+  // Нижний отступ на высоту плашки установки: иначе на столе она ложится на
+  // последнюю строку месяца, и записи этих дней не видно и не нажать.
+  return <div className="flex h-full min-h-0 min-w-0 flex-col gap-3 p-3 md:p-4"
+    style={{ paddingBottom: 'calc(0.75rem + var(--pwa-install-height, 0px) + var(--pwa-install-gap, 0px))' }}>
     {phone && (searchOpen || query) && (
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -412,7 +419,7 @@ export function CalendarPage() {
           <input type="checkbox" checked={showDue} onChange={e => { const value = e.target.checked; setShowDue(value); try { localStorage.setItem('calendar-hide-due', value ? '0' : '1') } catch { /* пусто */ } }} />Сроки
         </label>}
         <label className="flex min-h-10 items-center gap-2 text-sm">
-          <input type="checkbox" checked={showCancelled} onChange={e => переключитьОтменённые(e.target.checked)} />Отменённые
+          <input type="checkbox" checked={showCancelled} onChange={e => переключитьОтменённые(e.target.checked)} />Прошедшие отменённые
         </label>
       </div>
       {/* Подпись периода — только на десктопе: на телефоне период стоит заголовком
@@ -553,9 +560,12 @@ export function CalendarPage() {
        */
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
+          {/* Над плашкой «поставьте приложением», а не под ней: она стоит на той же
+              высоте, и нажатие по кнопке попадало в её «Позже» — человек считал,
+              что кнопка не работает (проверка календаря 25.10.2026). */}
           <Button aria-label="Новое событие"
             className="fixed right-4 z-40 size-14 rounded-full p-0 shadow-lg"
-            style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom))' }}>
+            style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom) + var(--pwa-install-height, 0px) + var(--pwa-install-gap, 0px))' }}>
             <Plus className="h-6 w-6" />
           </Button>
         </DropdownMenuTrigger>

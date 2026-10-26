@@ -53,7 +53,7 @@ const СТАДИЯ_ИМЯ: Record<string, string> = {
 /** Положение цветом и словом: цвет один не носитель состояния. */
 function Presence({ row }: { row: GrowthPresenceRow }) {
   const tone = row.presence === 'monopoly' || row.presence === 'strong' ? 'text-success'
-    : row.presence === 'absent' ? 'text-warning' : ''
+    : row.presence === 'absent' ? 'text-warning-foreground' : ''
   return (
     <span className={tone}>
       {row.presenceLabel}
@@ -255,7 +255,7 @@ export function MarketGrowthPanel() {
                       {st ? nf.format(st.projects) : <span className="text-muted-foreground">—</span>}
                     </div>
                     {st && st.withCity < st.projects && (
-                      <div className="text-xs text-warning">
+                      <div className="text-xs text-warning-foreground">
                         без города {nf.format(st.projects - st.withCity)}
                       </div>
                     )}
@@ -319,7 +319,7 @@ export function MarketGrowthPanel() {
                     </td>
                     <td className="p-2 text-right tabular-nums">
                       {c.marketKnown ? nf.format(c.marketSites)
-                        : <span className="text-warning">не наблюдали</span>}
+                        : <span className="text-warning-foreground">не наблюдали</span>}
                     </td>
                     <td className="p-2 text-right tabular-nums">
                       {c.marketKnown ? nf.format(c.marketAlive) : '—'}

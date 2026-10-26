@@ -72,7 +72,7 @@ function ScenarioCard({ row, onMeasure, measuring }: {
         {row.description && <p className="text-xs text-muted-foreground">{row.description}</p>}
         <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
           <span>объектов действия: <span className="tabular-nums">{row.scope.length}</span></span>
-          <span className={row.control.length === 0 ? 'text-warning' : ''}>
+          <span className={row.control.length === 0 ? 'text-warning-foreground' : ''}>
             контрольная группа: <span className="tabular-nums">{row.control.length}</span>
             {row.control.length === 0 && ' — без неё эффект не отличить от сезона'}
           </span>
@@ -248,7 +248,7 @@ export function MarketScenariosPanel() {
             </div>
 
             {parallel && (
-              <p className={`text-xs ${parallel.ok ? 'text-muted-foreground' : 'text-warning'}`}>
+              <p className={`text-xs ${parallel.ok ? 'text-muted-foreground' : 'text-warning-foreground'}`}>
                 {parallel.ok ? 'Проверка пройдена: ' : 'Внимание: '}{parallel.note}
                 {parallel.gapPct != null && ` (расхождение трендов до действия ${nf1.format(parallel.gapPct)} п.п.)`}
               </p>

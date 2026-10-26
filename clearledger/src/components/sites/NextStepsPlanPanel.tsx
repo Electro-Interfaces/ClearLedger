@@ -17,18 +17,19 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Loader2, CalendarClock, AlertTriangle } from 'lucide-react'
-import { getProjects, STAGE_META, type ProjectRow } from '@/services/sitesService'
+import { getProjects, STAGE_META } from '@/services/sitesService'
+import { inWork, planBuckets } from '@/lib/projectPlan'
+import { formatDate } from '@/lib/formatDate'
+import { plural } from '@/lib/textUtils'
 import { useAuth } from '@/contexts/AuthContext'
 import { useOpenProject } from './useOpenProject'
 
 const nf0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
-const dm = new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit' })
 
 const iso = (d: Date) => d.toISOString().slice(0, 10)
-const fmt = (s?: string | null) => (s ? dm.format(new Date(s)) : '—')
-
-/** Группы плана: порядок — от «горит» к «не назначено». */
-type Bucket = { key: string; label: string; hint: string; items: ProjectRow[]; alarm?: boolean }
+// Дата всегда с годом: без него срок 11.01.2027 в списке неотличим от января
+// текущего года, а такие проекты в плане есть (проверка 25.10.2026).
+const fmt = (s?: string | null) => (s ? formatDate(s) : '—')
 
 export function NextStepsPlanPanel({ companyId }: { companyId: string }) {
   const [search, setSearch] = useState('')
@@ -44,58 +45,21 @@ export function NextStepsPlanPanel({ companyId }: { companyId: string }) {
   const { user } = useAuth()
   const me = user?.name ?? null
 
-  const buckets = useMemo<Bucket[]>(() => {
-    const today = iso(new Date())
-    const weekEnd = iso(new Date(Date.now() + 7 * 86400_000))
+  const buckets = useMemo(() => {
+    const now = new Date()
+    const today = iso(now)
+    const weekEnd = iso(new Date(now.getTime() + 7 * 86400_000))
     const needle = search.trim().toLowerCase()
 
     const rows = (q.data ?? []).filter((p) => {
-      // Архив и закрытые в плане не участвуют: работать по ним нечего.
-      if (p.stage === 'archive' || p.closedOn) return false
+      if (!inWork(p)) return false
       if (mine && me && p.ownerName !== me) return false
       if (!needle) return true
       return [p.projectNo, p.title, p.nextAction, p.ownerName, p.site?.address, p.site?.region]
         .some((v) => (v ?? '').toLowerCase().includes(needle))
     })
 
-    const has = (p: ProjectRow) => !!(p.nextAction ?? '').trim()
-    const due = (p: ProjectRow) => p.nextActionDue ?? null
-
-    const pick = (fn: (p: ProjectRow) => boolean) =>
-      rows.filter(fn).sort((a, b) => (due(a) ?? '9999').localeCompare(due(b) ?? '9999'))
-
-    return [
-      {
-        key: 'overdue', label: 'Просрочено', alarm: true,
-        hint: 'Срок шага прошёл — либо делаем, либо переносим дату честно',
-        items: pick((p) => !!due(p) && due(p)! < today),
-      },
-      {
-        key: 'today', label: 'Сегодня',
-        hint: 'Сегодняшний срок',
-        items: pick((p) => due(p) === today),
-      },
-      {
-        key: 'week', label: 'Ближайшая неделя',
-        hint: 'Следующие семь дней',
-        items: pick((p) => !!due(p) && due(p)! > today && due(p)! <= weekEnd),
-      },
-      {
-        key: 'later', label: 'Дальше',
-        hint: 'Запланировано за горизонтом недели',
-        items: pick((p) => !!due(p) && due(p)! > weekEnd),
-      },
-      {
-        key: 'nodate', label: 'Шаг есть, срока нет',
-        hint: 'Работа названа, но не поставлена в план — по ней нельзя спросить',
-        items: pick((p) => has(p) && !due(p)),
-      },
-      {
-        key: 'nostep', label: 'Шаг не назначен',
-        hint: 'Проект в работе, а что делать дальше — не записано',
-        items: pick((p) => !has(p)),
-      },
-    ].filter((b) => b.items.length > 0)
+    return planBuckets(rows, today, weekEnd)
   }, [q.data, search, mine, me])
 
   if (q.isLoading) {
@@ -110,9 +74,10 @@ export function NextStepsPlanPanel({ companyId }: { companyId: string }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div data-zone="Ближайшие шаги по проектам">
           <p className="text-sm text-muted-foreground">
-            {nf0.format(total)} проектов в работе
+            {nf0.format(total)} {plural(total, 'проект', 'проекта', 'проектов')} в работе
             {overdue > 0 && <>, просрочено <span className="text-red-600 dark:text-red-400">{nf0.format(overdue)}</span></>}.
             Дата берётся из «Ближайшего результата» на вкладке «Обзор» карточки проекта.
+            Замороженные, отклонённые и проекты интеграции в план не входят.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">

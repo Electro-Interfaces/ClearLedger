@@ -210,7 +210,7 @@ export function MarketPressurePanel() {
                 <td className="p-2 text-right"><Num v={r.sessionsAfter} digits={0} /></td>
                 <td className="p-2 text-right">
                   {r.changePct == null ? <span className="text-muted-foreground">—</span> : (
-                    <span className={`tabular-nums ${r.changePct < -10 ? 'text-warning'
+                    <span className={`tabular-nums ${r.changePct < -10 ? 'text-warning-foreground'
                       : r.changePct > 10 ? 'text-success' : ''}`}>
                       {r.changePct > 0 ? '+' : ''}{nf1.format(r.changePct)} %
                       <span className="ml-1 font-normal text-muted-foreground">

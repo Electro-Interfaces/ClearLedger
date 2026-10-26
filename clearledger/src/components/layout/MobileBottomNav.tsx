@@ -18,7 +18,7 @@ import { pathAllowed, homePath, SPACE_PRODUCTS } from '@/config/spaceProducts'
 import { productModuleAllowed } from '@/config/productAccess'
 import { useWorkspaceSections } from '@/components/workspace/workspaceSections'
 import { PulseMobileNav } from '@/pulse/PulseMobileNav'
-import { useAppEnabled } from '@/hooks/useCompanyRegistry'
+import { usePulseMobileNav } from '@/pulse/usePulseMobileNav'
 
 interface BottomNavItem {
   label: string
@@ -50,8 +50,8 @@ export function MobileBottomNav({ onMenu }: {
    *  бургера в шапке больше нет (решение МАГа 06.09.2026). */
   onMenu?: () => void
 } = {}) {
-  const { company, companyId, companyModules, canApp, canModule } = useCompany()
-  const pulseOn = useAppEnabled(companyId, 'pulse')
+  const { company, companyModules, canApp, canModule } = useCompany()
+  const пультСнизу = usePulseMobileNav()
   const { pathname, search } = useLocation()
   // Разделы рабочей области: без фильтра lockedModes (он живёт в контексте самой
   // области), поэтому продукт отбирает свои режимы сам — по списку из реестра.
@@ -62,7 +62,7 @@ export function MobileBottomNav({ onMenu }: {
   // в чужом приложении. Прежде она показывалась только на «Пульсе» и в установленном
   // PWA, а в остальных местах её подменяли разделы текущего приложения — они и так
   // лежат в меню.
-  if (canApp('pulse') && pulseOn !== false) return <PulseMobileNav onMenu={onMenu} />
+  if (пультСнизу) return <PulseMobileNav onMenu={onMenu} />
 
   // Продукт определяем СТРОГО по его корню. `productForPath` для общих страниц Ядра
   // («Объекты», «Документы») отдаёт первый продукт по фолбэку — и полоса показывала
