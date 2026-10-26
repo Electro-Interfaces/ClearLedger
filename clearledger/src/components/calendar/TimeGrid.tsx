@@ -21,7 +21,7 @@ import { NotebookPen, Repeat, Video } from 'lucide-react'
 import type { CalendarEvent } from '@/services/workService'
 import type { SpaceTask } from '@/services/tasksService'
 import { cn } from '@/lib/utils'
-import { layoutDayEvents } from '@/lib/calendarLayout'
+import { eventDaySegment, layoutDayEvents } from '@/lib/calendarLayout'
 import { companyDayTime, companyMinutesNow, companyTime, isCompanyDay, isCompanyToday } from '@/lib/companyTime'
 
 /** Высота часа. Меньше — подписи не читаются, больше — рабочий день не влезает
@@ -33,7 +33,7 @@ const ЧАСЫ = Array.from({ length: 24 }, (_, i) => i)
  *  колонку в 89 px, и три одновременные встречи давали по 29 px. */
 const МИН_БЛОК_PX = 44
 
-export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, onAdd, onDay }: {
+export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, onEvent, onAdd, onDay }: {
   days: Date[]
   events: CalendarEvent[]
   tasks: SpaceTask[]
@@ -41,6 +41,8 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
   foreign?: Set<string>
   /** Повторяющиеся дела вперёд: расписание ещё не поставило их поручением. */
   repeats?: { id: string; title: string; at: Date }[]
+  /** Встреча, которую сейчас собирают в панели: видно, куда она встанет. */
+  draft?: { start: Date; end: Date; title: string } | null
   onEvent: (e: CalendarEvent) => void
   onAdd: (at: Date) => void
   onDay?: (day: Date) => void
@@ -70,7 +72,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
     return () => observer.disconnect()
   }, [days.length])
   // Линия «сейчас» едет сама: неделя открыта часами, и застывшая линия врёт.
-  const [, setСейчас] = useState(() => new Date())
+  const [сейчас, setСейчас] = useState(() => new Date())
   useEffect(() => {
     const timer = setInterval(() => setСейчас(new Date()), 60_000)
     return () => clearInterval(timer)
@@ -78,31 +80,37 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
 
   const вСетке = events.filter((e) => !e.all_day)
   const сверху = events.filter((e) => e.all_day)
+  // Пересчёт раз в минуту держит `сейчас`; минуты берутся по часам компании.
+  const минутаСейчас = companyMinutesNow()
+  const естьСегодня = days.some((d) => isCompanyToday(d))
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border" style={{ minWidth: days.length > 1 ? 672 : 0 }}>
-      {/* Шапка дней. В режиме одного дня её нет: дата уже стоит заголовком в шапке
-          календаря, и строка «ПН 7» под «7 сентября 2026» повторяла то же самое
-          (замечание МАГа 07.09.2026). */}
-      {days.length > 1 && <div className="flex overflow-y-hidden border-b border-border bg-muted/40 [scrollbar-gutter:stable]">
-        <div className="w-12 shrink-0" />
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card" style={{ minWidth: days.length > 1 ? 672 : 0 }}>
+      {/* Шапка дней: день недели и крупное число, как в настольных календарях —
+          число ищут глазами первым. Сегодня — залитый круг. В режиме одного дня
+          шапки нет: дата уже стоит в строке периода (замечание МАГа 07.09.2026). */}
+      {days.length > 1 && <div className="flex overflow-y-hidden border-b border-border [scrollbar-gutter:stable]">
+        <div className="w-14 shrink-0" />
         {days.map((d) => (
-          <div key={d.toISOString()}
-            className="min-w-0 flex-1 px-0.5 py-1.5 text-center text-[12px] font-medium uppercase">
-            <span className="text-muted-foreground">{format(d, 'EEEEEE', { locale: ru })}</span>
-            <span className={cn('ml-1.5 tabular-nums',
-              isCompanyToday(d) ? 'rounded bg-primary px-1 text-primary-foreground'
-                : 'text-foreground')}>
+          <button key={d.toISOString()} type="button" onClick={() => onDay?.(d)}
+            aria-label={`Открыть ${format(d, 'd MMMM', { locale: ru })}`}
+            className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left hover:bg-accent/50">
+            <span className={cn('text-xs font-medium',
+              isCompanyToday(d) ? 'text-primary' : d.getDay() % 6 === 0 ? 'text-muted-foreground/80' : 'text-muted-foreground')}>
+              {format(d, 'EEEEEE', { locale: ru })}
+            </span>
+            <span className={cn('grid size-8 place-items-center rounded-full text-lg font-semibold tabular-nums',
+              isCompanyToday(d) ? 'bg-primary text-primary-foreground' : 'text-foreground')}>
               {format(d, 'd')}
             </span>
-          </div>
+          </button>
         ))}
       </div>}
 
       {/* Всёдневная полоса: командировки и СРОКИ. Срок здесь точкой — у него нет
           длительности, и место ему не в сетке часов. */}
       <div className="flex overflow-y-hidden border-b border-border [scrollbar-gutter:stable]">
-        <div className="w-12 shrink-0 py-1 pr-1 text-right text-[12px] text-muted-foreground">
+        <div className="w-14 shrink-0 py-1 pr-2 text-right text-xs leading-tight text-muted-foreground">
           весь день
         </div>
         {days.map((d) => {
@@ -150,24 +158,40 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
       {/* Сетка часов */}
       <div ref={прокрутка} className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <div className="flex" style={{ height: 24 * ЧАС_PX }}>
-          <div className="w-12 shrink-0">
+          <div className="relative w-14 shrink-0">
             {ЧАСЫ.map((h) => (
               <div key={h} style={{ height: ЧАС_PX }}
-                className="relative border-b border-border/40">
-                <span className="absolute -top-1.5 right-1 text-[12px] tabular-nums text-muted-foreground">
+                className="relative">
+                <span className="absolute -top-2 right-2 text-xs tabular-nums text-muted-foreground">
                   {h === 0 ? '' : `${String(h).padStart(2, '0')}:00`}
                 </span>
               </div>
             ))}
+            {/* Метка «сейчас» — в колонке часов, на уровне линии: время читается
+                там же, где все остальные часы, а не догадкой по положению. */}
+            {естьСегодня && (
+              <span className="absolute right-1 z-20 -translate-y-1/2 rounded-full bg-primary px-1.5 py-0.5 text-xs font-medium tabular-nums text-primary-foreground"
+                style={{ top: минутаСейчас / 60 * ЧАС_PX }}>
+                {companyTime(сейчас)}
+              </span>
+            )}
           </div>
           {days.map((d, индекс) => {
             const { видимые, свёрнутые } = раскладкаДня(вСетке, d, ширинаДня)
+            const черновик = draft && eventDaySegment({ id: 'draft', starts_at: draft.start.toISOString(), ends_at: draft.end.toISOString() }, d)
             return (
             <div key={d.toISOString()} ref={индекс === 0 ? колонкаДня : undefined}
               className={cn('relative flex-1 border-l border-border',
-              isCompanyToday(d) ? 'bg-primary/5' : d.getDay() % 6 === 0 && 'bg-muted/30')}>
-              {isCompanyToday(d) && <div aria-hidden className="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-destructive"
-                style={{ top: companyMinutesNow() / 60 * ЧАС_PX }} />}
+              d.getDay() % 6 === 0 && 'bg-muted/30')}>
+              {isCompanyToday(d) && <div aria-hidden className="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-primary"
+                style={{ top: минутаСейчас / 60 * ЧАС_PX }} />}
+              {черновик && (
+                <div aria-hidden className="pointer-events-none absolute inset-x-1 z-10 overflow-hidden rounded-md border border-dashed border-primary bg-primary/10 px-1.5 py-0.5 text-xs leading-tight text-foreground"
+                  style={{ top: черновик.startMinute / 60 * ЧАС_PX, height: Math.max(18, (черновик.endMinute - черновик.startMinute) / 60 * ЧАС_PX) }}>
+                  <span className="tabular-nums text-muted-foreground">{companyTime(черновик.start)}–{черновик.endMinute === 1440 ? '24:00' : companyTime(черновик.end)}</span>{' '}
+                  {draft!.title.trim() || 'Новая встреча'}
+                </div>
+              )}
               {ЧАСЫ.map((h) => (
                 <div key={h} style={{ height: ЧАС_PX }}
                   onClick={() => {

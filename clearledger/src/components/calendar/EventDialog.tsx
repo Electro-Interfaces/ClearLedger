@@ -10,13 +10,19 @@
  * правит и отменяет, приглашённый отвечает. Поля показываются всем — скрывать
  * от участника время и место значит прятать от него смысл приглашения.
  */
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
+import type { LucideIcon } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
 import { addDays, parseISO } from 'date-fns'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useHref } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { EventReminder } from './EventReminder'
-import { Bell, BookmarkPlus, ChevronDown, Copy, ListPlus, Loader2, Repeat, Video, X } from 'lucide-react'
+import {
+  AlignLeft, Bell, BookmarkPlus, CalendarSearch, ChevronDown, Clock, Copy, Eye, LayoutTemplate,
+  ListPlus, Loader2, MapPin, Paperclip, Repeat, Users, Video, X,
+} from 'lucide-react'
 import { findSlots } from '@/lib/slots'
 import { GuestPanel } from '@/components/calendar/GuestPanel'
 import { PollPanel } from '@/components/calendar/PollPanel'
@@ -25,7 +31,6 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DateField, TimeField } from '@/components/ui/date-time-field'
-import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import * as workService from '@/services/workService'
@@ -87,8 +92,25 @@ function ключПовтора(r: Recurrence | null): КлючПовтора {
   return r.mode
 }
 
+/**
+ * Строка карточки: значок поля слева, само поле справа — как в настольных
+ * календарях. Значок заменяет подпись глазу, поэтому у группы есть имя для
+ * чтения с экрана, а у каждого поля — своё.
+ */
+function Строка({ icon: Icon, label, children, className, id }: {
+  icon: LucideIcon; label: string; children: ReactNode; className?: string; id?: string
+}) {
+  return (
+    <div role="group" aria-label={label} id={id}
+      className={cn('grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-3', className)}>
+      <Icon aria-hidden className="mt-3 h-4 w-4 text-muted-foreground" />
+      <div className="min-w-0 space-y-2">{children}</div>
+    </div>
+  )
+}
+
 export function EventDialog({ companyId, event: initialEvent, startAt, subjectRef, initialTitle,
-  companyDay, onClose, onChanged }: {
+  companyDay, panel: панельЗапрошена, onDraft, onClose, onChanged }: {
   companyId: string
   /** Существующая встреча — правим её; иначе собираем новую. */
   event: CalendarEvent | null
@@ -103,6 +125,12 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   /** Событие компании: дата на весь день для всех, без созыва — день компании,
    *  выездная проверка, отключение площадки. Та же встреча, другая заготовка. */
   companyDay?: boolean
+  /** Панелью справа поверх сетки, а не окном по центру: календарь остаётся
+   *  виден, и время встречи сверяют с соседними. Только на компьютере —
+   *  на телефоне для панели нет места, там прежнее окно. */
+  panel?: boolean
+  /** Новая встреча сообщает, куда она встанет: сетка рисует её черновиком. */
+  onDraft?: (draft: { start: Date; end: Date; title: string } | null) => void
   onClose: () => void
   onChanged: () => void
 }) {
@@ -460,552 +488,627 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const время_поехало = !новая && (
     local(event!.starts_at) !== starts || local(event!.ends_at) !== ends)
 
+  // Панель только на компьютере: на телефоне ей нет места рядом с сеткой.
+  const panel = !!панельЗапрошена && !phone
+  const полно = !phone || more
+  const панельRef = useRef<HTMLElement>(null)
+  const подборId = fieldId + '-find'
+  // Несколько дней — редкость: поле даты окончания показываем, когда оно нужно,
+  // а не всегда (как у настольных календарей: «26 окт. 17:00 — 17:30»).
+  const [доДругогоДня, setДоДругогоДня] = useState(false)
+  const разныеДни = !allDay && starts.slice(0, 10) !== ends.slice(0, 10)
+  const датаОкончания = allDay || разныеДни || доДругогоДня
+
+  // Черновик новой встречи — в сетку календаря, пока его собирают.
+  useEffect(() => {
+    if (!новая || !onDraft) return
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs && !allDay) {
+      onDraft({ start: new Date(startMs), end: new Date(endMs), title })
+    } else onDraft(null)
+  }, [новая, onDraft, startMs, endMs, title, allDay])
+  useEffect(() => () => onDraft?.(null), [onDraft])
+
+  const заголовок = новая ? (companyDay ? 'Событие компании' : 'Новая встреча') : мой ? 'Встреча' : title
+
+  const шаблоныБлок = новая && (шаблоны.data?.templates.length ?? 0) > 0 && полно && (
+    /* Заготовка — набор полей, который надоело набирать заново. Повторение здесь
+       тоже поле: «планёрка по понедельникам» заводится одним нажатием. */
+    <Строка icon={LayoutTemplate} label="Заготовки">
+      <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
+        {(шаблоны.data?.templates ?? []).map((t) => (
+          <Button key={t.id} type="button" size="xs" variant="outline"
+            onClick={() => {
+              setTitle(t.title)
+              setDescription(t.description ?? '')
+              setLocation(t.location ?? '')
+              setAttendees(t.attendee_ids)
+              setДлительность(t.duration_minutes)
+              setПовтор(ключПовтора(t.recurrence))
+              const н = companyDateTimeToDate(starts)
+              setEnds(local(new Date(н.getTime() + t.duration_minutes * 60_000)))
+            }}>
+            {t.name}
+          </Button>
+        ))}
+      </div>
+    </Строка>
+  )
+
+  /* 🔴 Дата и время — РАЗДЕЛЬНО и с ручным вводом (претензия МАГа 16.09.2026):
+     в каждом поле печатают ИЛИ выбирают — дату сеткой месяца, время списком. */
+  const времяТекстом = (() => {
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return ''
+    const с = new Date(startMs), по = new Date(endMs)
+    const день = new Intl.DateTimeFormat('ru-RU', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric', timeZone: COMPANY_TIME_ZONE })
+    const час = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: COMPANY_TIME_ZONE })
+    if (allDay) {
+      const последний = new Date(endMs - 1)
+      return companyDateKey(с) === companyDateKey(последний) ? `${день.format(с)}, весь день`
+        : `${день.format(с)} — ${день.format(последний)}`
+    }
+    return companyDateKey(с) === companyDateKey(по) ? `${день.format(с)}, ${час.format(с)} — ${час.format(по)}`
+      : `${день.format(с)}, ${час.format(с)} — ${день.format(по)}, ${час.format(по)}`
+  })()
+  /* Участник встречу не правит: поля ему не нужны, нужен ответ «когда, где,
+     о чём» текстом. Пустое у него не показывается — серая заготовка «Переговорная,
+     адрес» в закрытом поле читалась как недоделка. */
+  const времяБлок = !мой ? (
+    <Строка icon={Clock} label="Когда">
+      <p className="pt-2 text-sm first-letter:uppercase">{времяТекстом}</p>
+    </Строка>
+  ) : (
+    <Строка icon={Clock} label="Когда">
+      <div className="flex flex-wrap items-center gap-2">
+        <DateField id={fieldId + '-start'} className="w-40" disabled={!мой}
+          aria-label={allDay ? 'Первый день' : 'Дата начала'}
+          value={starts.slice(0, 10)}
+          onChange={(d) => changeStart(allDay ? d : d + 'T' + starts.slice(11, 16))} />
+        {!allDay && (
+          <TimeField className="w-24" disabled={!мой} aria-label="Время начала"
+            value={starts.slice(11, 16)}
+            onChange={(t) => changeStart(starts.slice(0, 10) + 'T' + t)} />
+        )}
+        <span aria-hidden className="text-muted-foreground">—</span>
+        {датаОкончания && (
+          <DateField id={fieldId + '-end'} className="w-40" disabled={!мой}
+            aria-label={allDay ? 'Последний день' : 'Дата окончания'}
+            value={allDay ? endDate : ends.slice(0, 10)}
+            onChange={(d) => {
+              if (!allDay) { setEnds(d + 'T' + ends.slice(11, 16)); return }
+              // «Весь день» хранит конец следующим днём: человек называет последний
+              // день встречи, а система держит границу интервала.
+              setEnds(`${calendarDayKey(addDays(parseISO(d), 1))}T00:00`)
+            }} />
+        )}
+        {!allDay && (
+          <TimeField className="w-24" disabled={!мой} aria-label="Время окончания"
+            value={ends.slice(11, 16)}
+            onChange={(t) => setEnds(ends.slice(0, 10) + 'T' + t)} />
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <label className="flex min-h-8 items-center gap-2 text-sm">
+          <Checkbox checked={allDay} disabled={!мой} onCheckedChange={(v) => toggleAllDay(v === true)} />
+          Весь день
+        </label>
+        {/* Длительность — самый быстрый способ задать конец: одно нажатие
+            против набора четырёх цифр. */}
+        {!allDay && мой && [30, 60, 90].map(minutes => (
+          <Button key={minutes} type="button" variant="outline" size="xs" disabled={!Number.isFinite(startMs)}
+            onClick={() => setEnds(local(new Date(startMs + minutes * 60_000)))}>{minutes} мин</Button>
+        ))}
+        {!allDay && мой && !датаОкончания && (
+          <button type="button" onClick={() => setДоДругогоДня(true)}
+            className="text-xs text-primary underline-offset-2 hover:underline">
+            До другого дня
+          </button>
+        )}
+      </div>
+      {полно && <p className="text-xs text-muted-foreground">
+        Время указано по Москве (часовой пояс компании).
+      </p>}
+      {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
+      {время_поехало && event!.attendees.length > 1 && (
+        <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+          Время меняется — согласия участников сбросятся: «буду в 10» не значит «буду в 18».
+        </p>
+      )}
+    </Строка>
+  )
+
+  /* Повторение задаётся на голове серии. Порождённая встреча его не показывает:
+     предлагать «повторять» тому, что уже есть повторение, значит завести серию
+     внутри серии. */
+  const повторБлок = полно && (мой && !event?.series_id ? (
+    <Строка icon={Repeat} label="Повторение">
+      <div className="flex flex-wrap items-center gap-2">
+        <select id={fieldId + '-repeat'} aria-label="Повторять" value={повтор}
+          onChange={(e) => setПовтор(e.target.value as КлючПовтора)}
+          className="h-9 rounded-md border border-input bg-card px-2.5 text-sm">
+          {ПОВТОРЫ.map((r) => (
+            <option key={r.key} value={r.key}>{r.label}</option>
+          ))}
+        </select>
+        {повтор !== 'none' && (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            до
+            <Input id={fieldId + '-until'} type="date" value={until} className="h-9 w-[160px]"
+              aria-label="Повторять до" onChange={(e) => setUntil(e.target.value)} />
+          </label>
+        )}
+      </div>
+      {повтор !== 'none' && !until && <p className="text-xs text-muted-foreground">Без даты — пока не выключите</p>}
+      {event?.recurrence && <p className="text-xs text-muted-foreground">Уже назначенные повторы редактируются отдельно. Изменение правила действует на новые повторения.</p>}
+    </Строка>
+  ) : event?.series_id ? (
+    <Строка icon={Repeat} label="Повторение">
+      <p className="pt-2 text-sm text-muted-foreground">Встреча из серии. Правки и отмена коснутся только её.</p>
+    </Строка>
+  ) : null)
+
+  const местоБлок = !мой ? (location.trim() ? (
+    <Строка icon={MapPin} label="Место"><p className="break-words pt-2 text-sm">{location}</p></Строка>
+  ) : null) : (
+    <Строка icon={MapPin} label="Место">
+      <Input id={fieldId + '-location'} aria-label="Место" className="text-base sm:text-sm" value={location}
+        onChange={(e) => setLocation(e.target.value)} disabled={!мой} placeholder="Переговорная, адрес" />
+    </Строка>
+  )
+
+  /* Видеовстреча — не «подробность»: на телефоне её тоже собирают сразу
+     (15.10.2026). Своя комната создаётся кнопкой, чужая ссылка — полем. */
+  const видеоБлок = !мой && !conference.trim() ? null : (
+    <Строка icon={Video} label="Видеовстреча">
+      {мой && !conference.trim() && !своя ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <Button type="button" variant="outline" size="sm" disabled={видеоИдёт} onClick={создатьВидео}>
+            {видеоИдёт ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Video className="mr-1.5 h-4 w-4" />}
+            Создать видеоконференцию
+          </Button>
+          <button type="button" className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+            onClick={() => setСвоя(true)}>или своя ссылка (Zoom, Teams)</button>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <Input id={fieldId + '-conference'} aria-label="Ссылка на видеовстречу" className="min-w-0 flex-1 text-base sm:text-sm" value={conference}
+            onChange={(e) => setConference(e.target.value)} disabled={!мой} placeholder="https://…" />
+          {conference.trim() && (
+            <Button type="button" variant="outline" size="icon" className="shrink-0"
+              title="Копировать ссылку" aria-label="Копировать ссылку на видеовстречу" onClick={копироватьВидео}>
+              <Copy className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+      )}
+    </Строка>
+  )
+
+  const описаниеБлок = полно && (!мой ? (description.trim() ? (
+    <Строка icon={AlignLeft} label="Описание"><p className="whitespace-pre-wrap break-words pt-2 text-sm">{description}</p></Строка>
+  ) : null) : (
+    <Строка icon={AlignLeft} label="Описание">
+      <Textarea id={fieldId + '-description'} aria-label="Описание" className="text-base sm:text-sm" value={description} rows={3} disabled={!мой}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Что обсуждаем, что принести" />
+    </Строка>
+  ))
+
+  /* Материалы — сразу под описанием: это та же повестка, только бумагами. */
+  const материалыБлок = полно && !новая && (
+    <Строка icon={Paperclip} label="Материалы">
+      <PapersPanel companyId={companyId} eventId={event!.id} readOnly={event!.status === 'cancelled'} />
+    </Строка>
+  )
+
+  /* За сколько напомнить — при сборе встречи (вопрос МАГа 07.09.2026). У
+     собранной встречи тем же занимается блок напоминания ниже. */
+  const напоминаниеБлок = новая && мой && полно ? (
+    <Строка icon={Bell} label="Напоминание">
+      <select aria-label="Напомнить" value={напомнитьЗа ?? ''}
+        onChange={(e) => setНапомнитьЗа(e.target.value === '' ? null : Number(e.target.value))}
+        className="h-9 rounded-md border border-input bg-card px-2.5 text-sm">
+        <option value="">Не напоминать</option>
+        <option value="0">В момент начала</option>
+        <option value="5">За 5 минут</option>
+        <option value="15">За 15 минут</option>
+        <option value="30">За 30 минут</option>
+        <option value="60">За час</option>
+        <option value="1440">За день</option>
+      </select>
+    </Строка>
+  ) : !новая && event!.status !== 'cancelled' && полно ? (
+    <Строка icon={Bell} label="Напоминание"><EventReminder companyId={companyId} event={event!} /></Строка>
+  ) : null
+
+  /* Опрос времени — про «когда», а не про «кто». */
+  const опросБлок = !новая && (мой || canRespond) && event!.status !== 'cancelled' && (
+    <PollPanel companyId={companyId} eventId={event!.id}
+      isOrganizer={мой} durationMinutes={длительность}
+      onChanged={() => void refreshEvent()} />
+  )
+
+  const подборБлок = мой && attendees.length > 0 && (
+    <div id={подборId} className="space-y-1.5 rounded-lg border border-border p-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium">Свободное время участников</span>
+        <select aria-label="Длительность" value={длительность}
+          onChange={(e) => setДлительность(Number(e.target.value))}
+          className="h-8 rounded-md border border-input bg-card px-1.5 text-xs">
+          {[30, 60, 90, 120].map((m) => (
+            <option key={m} value={m}>{m} мин</option>
+          ))}
+        </select>
+        <Button size="xs" variant="outline" disabled={busyQ.isFetching}
+          onClick={() => { setИщем(true); void busyQ.refetch() }}>
+          {busyQ.isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Подобрать'}
+        </Button>
+      </div>
+      {ищем && !busyQ.isFetching && (
+        busyQ.isError ? <p role="alert" className="text-sm text-destructive">Не удалось проверить занятость. Повторите подбор.</p>
+        : busyQ.data?.truncated ? <p role="alert" className="text-sm text-muted-foreground">Данных о занятости слишком много. Сократите состав: свободное время пока не подтверждено.</p>
+        : кандидаты.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Общего окна на две недели вперёд нет. Уберите кого-то из состава или соберите короче.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {кандидаты.slice(0, 12).map((c) => (
+              <button key={c.at} type="button"
+                onClick={() => {
+                  const н = new Date(c.at)
+                  setStarts(local(н))
+                  setEnds(local(new Date(н.getTime() + длительность * 60_000)))
+                  setИщем(false)
+                }}
+                title={c.busyOptional.length ? `Заняты: ${c.busyOptional.join(', ')}` : 'Все свободны'}
+                className={cn('rounded-md border px-2 py-1 text-xs hover:bg-accent',
+                  c.busyOptional.length
+                    ? 'border-amber-500/50 text-amber-700 dark:text-amber-400'
+                    : 'border-border')}>
+                {когда.format(new Date(c.at))}
+              </button>
+            ))}
+          </div>
+        )
+      )}
+    </div>
+  )
+
+  const кругБлок = полно && (!мой ? (
+    <Строка icon={Eye} label="Кто видит встречу">
+      <p className="pt-2 text-sm">{КРУГИ.find((к) => к.key === visibility)?.label}<span className="text-muted-foreground"> · {КРУГИ.find((к) => к.key === visibility)?.hint}</span></p>
+    </Строка>
+  ) : (
+    <Строка icon={Eye} label="Кто видит встречу">
+      <div className="flex flex-wrap gap-1.5 pt-1">
+        {КРУГИ.map((к) => (
+          <button key={к.key} type="button" disabled={!мой} aria-pressed={visibility === к.key}
+            onClick={() => setVisibility(к.key)}
+            title={к.hint}
+            className={cn('rounded-full border px-2.5 py-1 text-xs transition-colors',
+              visibility === к.key
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-border text-muted-foreground hover:bg-accent',
+              !мой && 'opacity-60')}>
+            {к.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">{КРУГИ.find((к) => к.key === visibility)?.hint}</p>
+    </Строка>
+  ))
+
+  const участникиБлок = полно && (
+    <Строка icon={Users} label="Участники">
+      {мой && visibility === 'personal' ? <p className="pt-2 text-sm text-muted-foreground">После сохранения останется только организатор. Приглашённые участники будут убраны.</p>
+        : мой ? <>
+          <Input aria-label="Найти участника" placeholder="Добавить участников" value={peopleSearch} onChange={e => setPeopleSearch(e.target.value)} className="text-base sm:text-sm" />
+          <p className="text-xs text-muted-foreground">Организатор участвует обязательно. Остальных можно позвать для сведения.</p>
+          {conference.trim() && (
+            <p className="text-xs text-muted-foreground">Ведущий видеоконференции — по умолчанию организатор. Чтобы передать роль, отметьте участника и поставьте у него «ведущий». Ведущего ждут, он впускает гостей; если через 5 минут после начала его нет, первый вошедший откроет комнату сам.</p>
+          )}
+          {conference.trim() && !hosts.some(id => id === организаторId || attendees.includes(id)) && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">Ведущий не выбран — им будет организатор.</p>
+          )}
+          {peopleQ.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить сотрудников. <button className="underline" onClick={() => void peopleQ.refetch()}>Повторить</button></p>}
+          <div className="max-h-56 overflow-y-auto rounded-lg border border-border px-2 lg:max-h-64">
+            {peopleQ.isLoading && <p role="status" className="py-2 text-sm">Загружаются сотрудники…</p>}
+            {!peopleQ.isLoading && !peopleQ.isError && !люди.length && <p className="py-2 text-sm text-muted-foreground">Сотрудники не найдены</p>}
+            {/* Организатор первой строкой, с именем: его добавляет сервер, и раньше
+                человек не видел ни себя, ни того, что он ведущий (МАГ, 15.10.2026). */}
+            <div className="flex min-h-11 items-center gap-2 border-b border-border/60 py-1">
+              <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-sm">
+                <input type="checkbox" checked disabled aria-label="Организатор участвует всегда" />
+                <span className="break-words">{организаторИмя}<span className="text-muted-foreground"> · организатор</span></span>
+              </label>
+              {conference.trim() && (
+                <label className="flex shrink-0 items-center gap-1 text-xs" title="Ведущий видеоконференции: его ждут, он впускает гостей">
+                  <input type="checkbox" checked={ведущий(организаторId)} onChange={e => отметитьВедущего(организаторId, e.target.checked)} />
+                  ведущий
+                </label>
+              )}
+            </div>
+            {люди.map(person => <div key={person.id} className="flex min-h-11 items-center gap-2 border-b border-border/60 py-1 last:border-0">
+              <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-sm">
+                <input type="checkbox" checked={attendees.includes(person.id)} onChange={e => {
+                  setAttendees(current => e.target.checked ? [...current, person.id] : current.filter(id => id !== person.id))
+                  if (!e.target.checked) setOptional(current => current.filter(id => id !== person.id))
+                  if (!e.target.checked) отметитьВедущего(person.id, false)
+                }} /><span className="break-words">{person.name}</span>
+              </label>
+              {attendees.includes(person.id) && <select aria-label={`Участие: ${person.name}`} value={optional.includes(person.id) ? 'optional' : 'required'}
+                onChange={e => setOptional(current => e.target.value === 'optional' ? [...current.filter(id => id !== person.id), person.id] : current.filter(id => id !== person.id))}
+                className="h-9 max-w-36 rounded-md border border-input bg-card px-2 text-base sm:text-sm">
+                <option value="required">Обязательно</option><option value="optional">Для сведения</option>
+              </select>}
+              {attendees.includes(person.id) && person.id !== организаторId && conference.trim() && (
+                <label className="flex shrink-0 items-center gap-1 text-xs" title="Ведущий видеоконференции: его ждут, он впускает гостей">
+                  <input type="checkbox" checked={ведущий(person.id)} onChange={e => отметитьВедущего(person.id, e.target.checked)} />
+                  ведущий
+                </label>
+              )}
+            </div>)}
+          </div>
+          {подборБлок}
+        </> : <div className="space-y-1 pt-2 text-sm text-muted-foreground">{event!.attendees.map(attendee => <p key={attendee.user_id}>{attendee.name || 'Участник'} · {ОТВЕТ_СЛОВОМ[attendee.response]}{attendee.role === 'optional' ? ' · для сведения' : ''}{event!.conference_url && ведущий(attendee.user_id) ? ' · ведущий' : ''}</p>)}</div>}
+      {!новая && мой && event!.attendees.length > 1 && (
+        <p className="text-xs text-muted-foreground">
+          {event!.attendees.map((a) => `${a.name || 'участник'} — ${ОТВЕТ_СЛОВОМ[a.response]}`).join(' · ')}
+        </p>
+      )}
+    </Строка>
+  )
+
+  const гостиБлок = !новая && мой && event!.status !== 'cancelled' && (
+    <GuestPanel companyId={companyId} eventId={event!.id} title={title} />
+  )
+
+  /* Организатор видит встречные предложения и принимает их одним нажатием.
+     Само предложение время не двигает: перенос остаётся его решением. */
+  const предложенияБлок = !новая && мой && предложения.length > 0 && (
+    <div className="space-y-1.5 rounded-lg border border-amber-500/40 bg-amber-500/[0.05] p-3">
+      <p className="text-xs font-medium text-amber-700 dark:text-amber-400">Предложили другое время</p>
+      {предложения.map((a) => (
+        <div key={a.user_id} className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="min-w-[8rem] flex-1">{a.name || 'участник'}</span>
+          <span className="tabular-nums">{когда.format(new Date(a.proposed_starts_at!))}</span>
+          {a.comment && <span className="text-muted-foreground">{a.comment}</span>}
+          <Button size="xs" variant="outline"
+            onClick={() => {
+              setStarts(local(a.proposed_starts_at!))
+              setEnds(local(a.proposed_ends_at!))
+              toast.info('Время подставлено — сохраните встречу, чтобы перенести')
+            }}>
+            Перенести на это
+          </Button>
+        </div>
+      ))}
+      <p className="text-xs text-muted-foreground">Перенос обнулит согласия: «буду в 10» не равно «буду в 18».</p>
+    </div>
+  )
+
+  /* По итогам встречи — поручение без исполнителя: на совещании решают ЧТО,
+     а кто — часто позже. Оно попадает в «Разбор», ссылка на встречу остаётся. */
+  const итогиБлок = !новая && event!.status !== 'cancelled' && (
+    <div className="space-y-1.5 border-t border-border pt-3">
+      <p className="text-xs font-medium text-muted-foreground">По итогам</p>
+      <div className="flex items-center gap-1.5">
+        <Input value={итог} onChange={(e) => setИтог(e.target.value)} aria-label="Что решили сделать"
+          placeholder="Что решили сделать…" className="h-9 text-sm"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && итог.trim() && !поручить.isPending) поручить.mutate()
+          }} />
+        <Button size="sm" variant="outline" className="shrink-0"
+          disabled={!итог.trim() || поручить.isPending}
+          onClick={() => поручить.mutate()}>
+          <ListPlus className="mr-1 h-3.5 w-3.5" />Поручение
+        </Button>
+      </div>
+    </div>
+  )
+
+  const ссылкиБлок = !новая && (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button variant="outline" size="sm" onClick={async () => {
+        try { await navigator.clipboard.writeText(new URL(eventHref, window.location.origin).href); toast.success('Ссылка на встречу скопирована') }
+        catch { toast.error('Не удалось скопировать ссылку. Проверьте разрешение браузера.') }
+      }}>Ссылка на карточку</Button>
+      {/* Своя комната — своя кнопка: сервер подписывает вход ведущим. Чужую
+          ссылку (Zoom, Teams) открываем как есть. */}
+      {event!.status !== 'cancelled' && (
+        event!.conference_url && !/\/ledger-[0-9a-f]+/i.test(event!.conference_url)
+          ? (/^https?:\/\//i.test(event!.conference_url) && <Button variant="outline" size="sm" asChild><a href={event!.conference_url} target="_blank" rel="noopener noreferrer"><Video className="mr-1.5 h-4 w-4" />Открыть видеовстречу</a></Button>)
+          : <Button variant="outline" size="sm" disabled={confBusy} onClick={войтиВВидеовстречу}>
+              <Video className="mr-1.5 h-4 w-4" />{event!.conference_url ? 'Войти в видеовстречу' : 'Начать видеовстречу'}
+            </Button>
+      )}
+      {subjectHref && <Button variant="ghost" size="sm" asChild><Link to={subjectHref} onClick={onClose}>Предмет встречи</Link></Button>}
+    </div>
+  )
+
+  const служебныеБлок = ((!новая && мой && event!.status !== 'cancelled') || (мой && title.trim())) && (
+    <div className="flex flex-wrap items-center gap-2">
+      {!новая && мой && event!.status !== 'cancelled' && (
+        <Button size="sm" variant="ghost" className="mr-auto text-destructive"
+          disabled={отменить.isPending} onClick={() => setCancelConfirm(true)}>
+          <X className="mr-1 h-3.5 w-3.5" />Отменить встречу
+        </Button>
+      )}
+      {мой && title.trim() && (
+        <Button size="sm" variant="ghost"
+          disabled={сохранитьЗаготовку.isPending || !!formError}
+          onClick={() => {
+            const имя = window.prompt('Название заготовки', title.trim().slice(0, 60))
+            if (имя?.trim()) сохранитьЗаготовку.mutate(имя.trim())
+          }}>
+          <BookmarkPlus className="mr-1 h-3.5 w-3.5" />В заготовки
+        </Button>
+      )}
+    </div>
+  )
+
+  const отменаБлок = cancelConfirm && мой && (
+    <section aria-label="Отмена встречи" className="space-y-2 rounded-lg border border-destructive/40 p-3">
+      <p className="text-sm font-medium">{event?.recurrence ? 'Отменить эту встречу и будущие встречи серии?' : 'Отменить встречу?'}</p>
+      <p className="text-sm text-muted-foreground">
+        Участники получат сообщение и письмо об отмене; до конца дня встреча останется у них
+        зачёркнутой с этой причиной, потом скроется. Личные напоминания будут сняты.
+      </p>
+      <Input aria-label="Причина отмены"
+        placeholder={причинаОбязательна ? 'Причина отмены — её увидят участники' : 'Причина отмены — необязательно'}
+        value={cancelReason} onChange={e => setCancelReason(e.target.value)}
+        className="text-base sm:text-sm" />
+      {/* Отказ, известный заранее, называется до нажатия, а не красной плашкой после. */}
+      {причинаОбязательна && !cancelReason.trim() && (
+        <p className="text-xs text-muted-foreground">
+          Встречу ждут другие: без причины отменить нельзя — иначе в чужом календаре она
+          пропадёт молча, и спросить будет не у кого.
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2"><Button variant="destructive" size="sm" disabled={отменить.isPending || (причинаОбязательна && !cancelReason.trim())} onClick={() => отменить.mutate(cancelReason.trim())}>Подтвердить отмену</Button><Button variant="ghost" size="sm" disabled={отменить.isPending} onClick={() => setCancelConfirm(false)}>Не отменять</Button></div>
+    </section>
+  )
+
+  const названиеБлок = мой ? (
+    <Input id={fieldId + '-title'} aria-label="Тема встречи" maxLength={300} autoFocus={новая}
+      value={title} onChange={(e) => setTitle(e.target.value)}
+      placeholder="Тема рабочей встречи"
+      className="h-11 font-headline text-lg font-semibold md:text-lg" />
+  ) : null
+
+  const отменённая = event?.status === 'cancelled' && (
+    <p className="rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive">
+      Встреча отменена{event.cancel_reason ? `: ${event.cancel_reason}` : ''}
+    </p>
+  )
+
+  const кнопки = <>
+    {canRespond && предлагаю && (
+      <div className="mr-auto flex w-full flex-wrap items-end gap-2">
+        <label className="space-y-1 text-xs text-muted-foreground">
+          Предлагаю с
+          <Input type="datetime-local" value={starts} className="w-[200px]"
+            onChange={(e) => setStarts(e.target.value)} />
+        </label>
+        <label className="space-y-1 text-xs text-muted-foreground">
+          по
+          <Input type="datetime-local" value={ends} className="w-[200px]"
+            onChange={(e) => setEnds(e.target.value)} />
+        </label>
+        <Button size="sm" disabled={предложить.isPending || !!formError}
+          onClick={() => предложить.mutate()}>Отправить</Button>
+        <Button size="sm" variant="ghost" onClick={() => setПредлагаю(false)}>Отмена</Button>
+      </div>
+    )}
+    {canRespond && !предлагаю && (
+      <div className="mr-auto flex flex-wrap items-center gap-1.5">
+        {ОТВЕТЫ.map((r) => (
+          <Button key={r.key} size="sm" disabled={ответить.isPending}
+            aria-pressed={event!.my_response === r.key}
+            variant={event!.my_response === r.key ? 'default' : 'outline'}
+            onClick={() => ответить.mutate(r.key)}>
+            {r.label}
+          </Button>
+        ))}
+        {/* Отказ без встречного предложения оставляет организатора гадать. */}
+        <Button size="sm" variant="ghost" onClick={() => setПредлагаю(true)}>Другое время</Button>
+      </div>
+    )}
+    {мой && (
+      <Button size="sm" disabled={!title.trim() || !!formError || сохранить.isPending || отменить.isPending}
+        onClick={() => сохранить.mutate()}>
+        {сохранить.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+        {новая ? 'Собрать' : 'Сохранить'}
+      </Button>
+    )}
+    {/* «Занятость участников» — у кнопки сохранения, как в настольных календарях:
+        время подбирают последним шагом, когда состав уже собран. */}
+    {мой && attendees.length > 0 && полно && visibility !== 'personal' && (
+      <Button size="sm" variant="outline" disabled={busyQ.isFetching} onClick={() => {
+        setИщем(true); void busyQ.refetch()
+        document.getElementById(подборId)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      }}>
+        <CalendarSearch className="mr-1.5 h-3.5 w-3.5" />Занятость участников
+      </Button>
+    )}
+    {!panel && <Button size="sm" variant="ghost" onClick={onClose}>Закрыть</Button>}
+  </>
+
+  const основное = [шаблоныБлок, времяБлок, повторБлок]
+  const подробности = [местоБлок, видеоБлок, описаниеБлок, материалыБлок, напоминаниеБлок]
+  const люди_ = [кругБлок, участникиБлок]
+  const после = [опросБлок, гостиБлок, предложенияБлок]
+  const ключи = (блоки: ReactNode[], префикс: string) => блоки.map((б, i) => б ? <div key={префикс + i}>{б}</div> : null)
+
+  const подвал = <>
+    {итогиБлок}
+    {ссылкиБлок}
+    {служебныеБлок}
+    {отменаБлок}
+  </>
+
+  if (panel) {
+    return (
+      <aside ref={панельRef} role="dialog" aria-label={заголовок}
+        onKeyDown={(e) => {
+          // Escape закрывает панель, но не когда его поймало всплывающее поле даты:
+          // оно отрисовано вне панели и закрывается само.
+          if (e.key === 'Escape' && панельRef.current?.contains(e.target as Node)) { e.stopPropagation(); onClose() }
+        }}
+        className="absolute bottom-2 right-2 top-2 z-30 flex w-[min(460px,calc(100%-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card"
+        style={{ boxShadow: 'var(--shadow-large)' }}>
+        <div className="flex items-start gap-2 px-4 pb-2 pt-4">
+          <div className="min-w-0 flex-1">
+            {названиеБлок ?? <h2 className="font-headline text-lg font-semibold leading-snug">{title}</h2>}
+          </div>
+          <Button variant="ghost" size="icon" className="size-9 shrink-0" aria-label="Закрыть" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4 pt-1">
+          {отменённая}
+          {ключи([...основное, ...люди_, ...подробности, ...после], 'p')}
+          {подвал}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3">{кнопки}</div>
+      </aside>
+    )
+  }
+
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
       <DialogContent className="max-h-[90dvh] w-[94vw] max-w-2xl overflow-y-auto p-4 sm:max-w-2xl sm:p-6 lg:max-w-5xl">
         <DialogHeader>
-          <DialogTitle>{новая ? (companyDay ? 'Событие компании' : 'Новая встреча') : мой ? 'Встреча' : title}</DialogTitle>
+          <DialogTitle>{заголовок}</DialogTitle>
         </DialogHeader>
+        {отменённая}
+        {названиеБлок}
 
-        {event?.status === 'cancelled' && (
-          <p className="rounded border border-destructive/40 bg-destructive/5 px-2.5 py-1.5 text-xs text-destructive">
-            Встреча отменена{event.cancel_reason ? `: ${event.cancel_reason}` : ''}
-          </p>
-        )}
-
-        {/* На широком экране карточка в две колонки: слева — что и когда, справа —
-            с чем и кто (материалы, круг, участники, опрос, гости). Одной колонкой
-            она уходила в три экрана прокрутки, и до участников не долистывали.
-            На телефоне порядок прежний — правая колонка встаёт под левую. */}
+        {/* На широком экране две колонки: слева что, когда и где, справа кто.
+            Одной колонкой карточка уходила в три экрана прокрутки, и до
+            участников не долистывали. На телефоне правая встаёт под левую. */}
         <div className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-8">
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor={fieldId + "-title"}>О чём</Label>
-            <Input id={fieldId + "-title"} maxLength={300} className="text-base sm:text-sm" value={title} onChange={(e) => setTitle(e.target.value)} disabled={!мой}
-              placeholder="Тема рабочей встречи" />
-          </div>
-
-          {/* 🔴 Дата и время — РАЗДЕЛЬНО и с ручным вводом.
-              Было одно поле `datetime-local`: на телефоне это нативные барабаны, где
-              значение только прокручивают. Человек, который знает ответ («семнадцатого,
-              в девять тридцать»), крутил к нему колесо — и не мог просто напечатать
-              цифры (претензия МАГа 16.09.2026). Теперь в каждом поле печатают ИЛИ
-              выбирают: дату — сеткой месяца, время — списком получаса. */}
-          {/* В колонке широкого экрана начало и конец стоят друг под другом: рядом
-              поле даты сжималось до «14.10.20». */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-            <div className="space-y-1.5">
-              <Label htmlFor={fieldId + "-start"}>Начало</Label>
-              <div className="flex gap-2">
-                <DateField id={fieldId + "-start"} className="min-w-0 flex-1" disabled={!мой}
-                  value={starts.slice(0, 10)}
-                  onChange={(d) => changeStart(allDay ? d : d + 'T' + starts.slice(11, 16))} />
-                {!allDay && (
-                  <TimeField className="w-28 shrink-0" disabled={!мой} aria-label="Время начала"
-                    value={starts.slice(11, 16)}
-                    onChange={(t) => changeStart(starts.slice(0, 10) + 'T' + t)} />
-                )}
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={fieldId + "-end"}>{allDay ? "Последний день" : "Конец"}</Label>
-              <div className="flex gap-2">
-                <DateField id={fieldId + "-end"} className="min-w-0 flex-1" disabled={!мой}
-                  value={allDay ? endDate : ends.slice(0, 10)}
-                  onChange={(d) => {
-                    if (!allDay) { setEnds(d + 'T' + ends.slice(11, 16)); return }
-                    // «Весь день» хранит конец следующим днём: человек называет последний
-                    // день встречи, а система держит границу интервала.
-                    setEnds(`${calendarDayKey(addDays(parseISO(d), 1))}T00:00`)
-                  }} />
-                {!allDay && (
-                  <TimeField className="w-28 shrink-0" disabled={!мой} aria-label="Время окончания"
-                    value={ends.slice(11, 16)}
-                    onChange={(t) => setEnds(ends.slice(0, 10) + 'T' + t)} />
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={allDay} disabled={!мой} onChange={e => toggleAllDay(e.target.checked)} />Весь день</label>
-            {/* Длительность раньше пряталась на телефоне под «ещё» — а это самый быстрый
-                способ задать конец: одно нажатие против набора четырёх цифр. */}
-            {!allDay && мой && [30, 60, 90].map(minutes => <Button key={minutes} variant="outline" size="sm" disabled={!Number.isFinite(startMs)} onClick={() => setEnds(local(new Date(startMs + minutes * 60_000)))}>{minutes} мин</Button>)}
-          </div>
-          {(!phone || more) && <p className="text-sm text-muted-foreground">Время указано по Москве (часовой пояс компании).</p>}
-          {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
-
-          {время_поехало && event!.attendees.length > 1 && (
-            <p className="rounded border border-amber-500/40 bg-amber-500/5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
-              Время меняется — согласия участников сбросятся: «буду в 10» не значит «буду в 18».
-            </p>
-          )}
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor={fieldId + "-location"}>Где</Label>
-              <Input id={fieldId + "-location"} className="text-base sm:text-sm" value={location} onChange={(e) => setLocation(e.target.value)}
-                disabled={!мой} placeholder="Переговорная, адрес" />
-            </div>
-            {/* Видеовстреча — не «подробность»: на телефоне её тоже собирают
-                сразу, а за «Подробнее» кнопку не находили (15.10.2026). */}
-            <div className="min-w-0 space-y-1.5">
-              <Label htmlFor={fieldId + "-conference"} className="flex items-center gap-1.5">
-                <Video className="h-3.5 w-3.5" />Ссылка на видеовстречу
-              </Label>
-              {мой && !conference.trim() && !своя ? (
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <Button type="button" variant="outline" className="w-full whitespace-normal" disabled={видеоИдёт} onClick={создатьВидео}>
-                    {видеоИдёт ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Video className="mr-2 h-4 w-4" />}
-                    Создать видеоконференцию
-                  </Button>
-                  <button type="button" className="text-xs text-muted-foreground underline-offset-2 hover:underline"
-                    onClick={() => setСвоя(true)}>или своя ссылка (Zoom, Teams)</button>
-                </div>
-              ) : (
-                <div className="flex gap-2">
-                  <Input id={fieldId + "-conference"} className="min-w-0 flex-1 text-base sm:text-sm" value={conference}
-                    onChange={(e) => setConference(e.target.value)} disabled={!мой} placeholder="https://…" />
-                  {conference.trim() && (
-                    <Button type="button" variant="outline" size="icon" className="shrink-0"
-                      title="Копировать ссылку" aria-label="Копировать ссылку на видеовстречу" onClick={копироватьВидео}>
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-
-          {/* Телефон открывает встречу в простом виде: о чём, когда, где — этого
-              хватает, чтобы записать или прочитать (решение МАГа 07.09.2026).
-              Заготовки, подбор времени, повторение, описание, участники и
-              напоминание живут за «Подробнее»: каждый день они не нужны, а
-              высоту занимали всю. На компьютере показываем всё сразу. */}
-          {phone && (
-            <Button type="button" variant="outline" size="sm" className="w-full"
-              aria-expanded={more} onClick={() => setMore(v => !v)}>
-              {more ? 'Свернуть подробности' : 'Подробнее'}
-              <ChevronDown className={cn('ml-1.5 h-4 w-4 transition-transform', more && 'rotate-180')} />
-            </Button>
-          )}
-          {(!phone || more) && <>
-          {/* Заготовка — просто набор полей, который надоело набирать заново.
-              Повторение здесь тоже поле: «планёрка по понедельникам» заводится
-              одним нажатием вместе со своей серией. */}
-          {новая && (шаблоны.data?.templates.length ?? 0) > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">Заготовка:</span>
-              {(шаблоны.data?.templates ?? []).map((t) => (
-                <Button key={t.id} type="button" size="sm" variant="outline"
-                  className="h-7 px-2 text-xs"
-                  onClick={() => {
-                    setTitle(t.title)
-                    setDescription(t.description ?? '')
-                    setLocation(t.location ?? '')
-                    setAttendees(t.attendee_ids)
-                    setДлительность(t.duration_minutes)
-                    setПовтор(ключПовтора(t.recurrence))
-                    const н = companyDateTimeToDate(starts)
-                    setEnds(local(new Date(н.getTime() + t.duration_minutes * 60_000)))
-                  }}>
-                  {t.name}
-                </Button>
-              ))}
-            </div>
-          )}
-
-          {/* За сколько напомнить — здесь же, при сборе встречи (вопрос МАГа 07.09.2026:
-              «почему нет напоминания с выбором, за сколько времени»). У созданной
-              встречи тем же занимается блок «Напомнить мне» ниже. */}
-          {новая && мой && (
-            <label className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="flex items-center gap-1.5"><Bell className="h-3.5 w-3.5" />Напомнить</span>
-              <select value={напомнитьЗа ?? ''}
-                onChange={(e) => setНапомнитьЗа(e.target.value === '' ? null : Number(e.target.value))}
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm">
-                <option value="">не напоминать</option>
-                <option value="0">в момент начала</option>
-                <option value="5">за 5 минут</option>
-                <option value="15">за 15 минут</option>
-                <option value="30">за 30 минут</option>
-                <option value="60">за час</option>
-                <option value="1440">за день</option>
-              </select>
-            </label>
-          )}
-
-          {мой && attendees.length > 0 && (
-            <div className="space-y-1.5 rounded-md border border-border p-2">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium">Найти время</span>
-                <select value={длительность}
-                  onChange={(e) => setДлительность(Number(e.target.value))}
-                  className="h-7 rounded border border-input bg-background px-1.5 text-xs">
-                  {[30, 60, 90, 120].map((m) => (
-                    <option key={m} value={m}>{m} мин</option>
-                  ))}
-                </select>
-                <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
-                  disabled={busyQ.isFetching}
-                  onClick={() => { setИщем(true); void busyQ.refetch() }}>
-                  {busyQ.isFetching
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    : 'Подобрать'}
-                </Button>
-              </div>
-              {ищем && !busyQ.isFetching && (
-                busyQ.isError ? <p role="alert" className="text-sm text-destructive">Не удалось проверить занятость. Повторите подбор.</p>
-                : busyQ.data?.truncated ? <p role="alert" className="text-sm text-muted-foreground">Данных о занятости слишком много. Сократите состав: свободное время пока не подтверждено.</p>
-                : кандидаты.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    Общего окна на две недели вперёд нет. Уберите кого-то из
-                    состава или соберите короче.
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {кандидаты.slice(0, 12).map((c) => (
-                      <button key={c.at} type="button"
-                        onClick={() => {
-                          const н = new Date(c.at)
-                          setStarts(local(н))
-                          setEnds(local(new Date(н.getTime() + длительность * 60_000)))
-                          setИщем(false)
-                        }}
-                        title={c.busyOptional.length
-                          ? `Заняты: ${c.busyOptional.join(', ')}`
-                          : 'Все свободны'}
-                        className={cn('rounded border px-2 py-0.5 text-xs hover:bg-accent',
-                          c.busyOptional.length
-                            ? 'border-amber-500/50 text-amber-700 dark:text-amber-400'
-                            : 'border-border')}>
-                        {когда.format(new Date(c.at))}
-                      </button>
-                    ))}
-                  </div>
-                )
-              )}
-            </div>
-          )}
-
-          {/* Повторение задаётся на голове серии. Порождённая встреча его не
-              показывает: у неё оно пусто, и предлагать «повторять» тому, что уже
-              есть повторение, значит завести серию внутри серии. */}
-          {мой && !event?.series_id && (
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor={fieldId + "-repeat"}>Повторять</Label>
-                <select id={fieldId + "-repeat"} value={повтор}
-                  onChange={(e) => setПовтор(e.target.value as КлючПовтора)}
-                  className="h-9 w-[200px] rounded-md border border-input bg-background px-3 text-sm">
-                  {ПОВТОРЫ.map((r) => (
-                    <option key={r.key} value={r.key}>{r.label}</option>
-                  ))}
-                </select>
-              </div>
-              {повтор !== 'none' && (
-                <div className="space-y-1.5">
-                  <Label htmlFor={fieldId + "-until"}>Повторять до</Label>
-                  <Input id={fieldId + "-until"} type="date" value={until} className="w-[170px]"
-                    onChange={(e) => setUntil(e.target.value)} />
-                  <p className="text-[12px] text-muted-foreground">
-                    Пусто — пока не выключите
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-          {event?.series_id && (
-            <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Repeat className="h-3.5 w-3.5" />
-              Встреча из серии. Правки и отмена коснутся только её.
-            </p>
-          )}
-          {event?.recurrence && <p className="text-sm text-muted-foreground">Уже назначенные повторы редактируются отдельно. Изменение правила действует на новые повторения.</p>}
-
-          <div className="space-y-1.5">
-            <Label htmlFor={fieldId + "-description"}>Описание</Label>
-            <Textarea id={fieldId + "-description"} className="text-base sm:text-sm" value={description} rows={3} disabled={!мой}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Что обсуждаем, что принести" />
-          </div>
-
-          {/* Материалы — сразу под описанием: это та же повестка, только
-              бумагами. Ниже, под списком людей и опросом времени, участник до
-              них не долистывал. Видит каждый, кто открыл карточку, а не только
-              организатор; право приложить проверяет сервер. */}
-          {!новая && (
-            <PapersPanel companyId={companyId} eventId={event!.id}
-              readOnly={event!.status === 'cancelled'} />
-          )}
-          </>}
-
-          {/* Опрос времени — в левой колонке: он про «когда», а не про «кто». */}
-        {!новая && (мой || canRespond) && event!.status !== 'cancelled' && (
-          <div>
-            <PollPanel companyId={companyId} eventId={event!.id}
-              isOrganizer={мой} durationMinutes={длительность}
-              onChanged={() => void refreshEvent()} />
-          </div>
-        )}
-        </div>
-
-        <div className="mt-3 space-y-3 lg:mt-0">
-          {(!phone || more) && <>
-          <div className="space-y-1.5">
-            <Label>Кто видит встречу</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {КРУГИ.map((к) => (
-                <button key={к.key} type="button" disabled={!мой} aria-pressed={visibility === к.key}
-                  onClick={() => setVisibility(к.key)}
-                  title={к.hint}
-                  className={cn('rounded-full border px-2.5 py-1 text-xs transition-colors',
-                    visibility === к.key
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border text-muted-foreground hover:bg-accent',
-                    !мой && 'opacity-60')}>
-                  {к.label}
-                </button>
-              ))}
-            </div>
-            <p className="text-[12px] text-muted-foreground">
-              {КРУГИ.find((к) => к.key === visibility)?.hint}
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Кого зовём</p>
-            {мой && visibility === 'personal' ? <p className="text-sm text-muted-foreground">После сохранения останется только организатор. Приглашённые участники будут убраны.</p>
-              : мой ? <>
-                <Input aria-label="Найти участника" placeholder="Имя сотрудника" value={peopleSearch} onChange={e => setPeopleSearch(e.target.value)} className="text-base sm:text-sm" />
-                <p className="text-sm text-muted-foreground">Организатор участвует обязательно. Остальных можно позвать для сведения.</p>
-                {/* Организатора в списке не было вовсе (его добавляет сервер), и
-                    человек не видел ни себя, ни того, что он ведущий (МАГ,
-                    15.10.2026). Теперь он первой строкой, с именем. */}
-                {conference.trim() && (
-                  <p className="text-xs text-muted-foreground">Ведущий видеоконференции — по умолчанию организатор. Чтобы передать роль, отметьте участника и поставьте у него «ведущий». Ведущего ждут, он впускает гостей; если через 5 минут после начала его нет, первый вошедший откроет комнату сам.</p>
-                )}
-                {conference.trim() && !hosts.some(id => id === организаторId || attendees.includes(id)) && (
-                  <p className="text-xs text-amber-700 dark:text-amber-400">Ведущий не выбран — им будет организатор.</p>
-                )}
-                {peopleQ.isError && <p role="alert" className="text-sm text-destructive">Не удалось загрузить сотрудников. <button className="underline" onClick={() => void peopleQ.refetch()}>Повторить</button></p>}
-                <div className="max-h-48 overflow-y-auto rounded-md border border-border px-2 lg:max-h-64">
-                  {peopleQ.isLoading && <p role="status" className="py-2 text-sm">Загружаются сотрудники…</p>}
-                  {!peopleQ.isLoading && !peopleQ.isError && !люди.length && <p className="py-2 text-sm text-muted-foreground">Сотрудники не найдены</p>}
-                  <div className="flex min-h-11 items-center gap-2 border-b border-border/60 py-1">
-                    <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-sm">
-                      <input type="checkbox" checked disabled aria-label="Организатор участвует всегда" />
-                      <span className="break-words">{организаторИмя}<span className="text-muted-foreground"> · организатор</span></span>
-                    </label>
-                    {conference.trim() && (
-                      <label className="flex shrink-0 items-center gap-1 text-xs" title="Ведущий видеоконференции: его ждут, он впускает гостей">
-                        <input type="checkbox" checked={ведущий(организаторId)} onChange={e => отметитьВедущего(организаторId, e.target.checked)} />
-                        ведущий
-                      </label>
-                    )}
-                  </div>
-                  {люди.map(person => <div key={person.id} className="flex min-h-11 items-center gap-2 border-b border-border/60 py-1 last:border-0">
-                    <label className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-sm">
-                      <input type="checkbox" checked={attendees.includes(person.id)} onChange={e => {
-                        setAttendees(current => e.target.checked ? [...current, person.id] : current.filter(id => id !== person.id))
-                        if (!e.target.checked) setOptional(current => current.filter(id => id !== person.id))
-                        if (!e.target.checked) отметитьВедущего(person.id, false)
-                      }} /><span className="break-words">{person.name}</span>
-                    </label>
-                    {attendees.includes(person.id) && <select aria-label={`Участие: ${person.name}`} value={optional.includes(person.id) ? 'optional' : 'required'}
-                      onChange={e => setOptional(current => e.target.value === 'optional' ? [...current.filter(id => id !== person.id), person.id] : current.filter(id => id !== person.id))}
-                      className="h-10 max-w-36 rounded-md border border-input bg-background px-2 text-base sm:text-sm">
-                      <option value="required">Обязательно</option><option value="optional">Для сведения</option>
-                    </select>}
-                    {attendees.includes(person.id) && person.id !== организаторId && conference.trim() && (
-                      <label className="flex shrink-0 items-center gap-1 text-xs" title="Ведущий видеоконференции: его ждут, он впускает гостей">
-                        <input type="checkbox" checked={ведущий(person.id)} onChange={e => отметитьВедущего(person.id, e.target.checked)} />
-                        ведущий
-                      </label>
-                    )}
-                  </div>)}
-                </div>
-              </> : <div className="space-y-1 text-sm text-muted-foreground">{event!.attendees.map(attendee => <p key={attendee.user_id}>{attendee.name || 'Участник'} · {ОТВЕТ_СЛОВОМ[attendee.response]}{attendee.role === 'optional' ? ' · для сведения' : ''}{event!.conference_url && ведущий(attendee.user_id) ? ' · ведущий' : ''}</p>)}</div>}
-          </div>
-
-          {!новая && мой && event!.attendees.length > 1 && (
-            <p className="text-xs text-muted-foreground">
-              {event!.attendees.map((a) => `${a.name || 'участник'} — ${ОТВЕТ_СЛОВОМ[a.response]}`)
-                .join(' · ')}
-            </p>
-          )}
-          </>}
-
-        {!новая && мой && event!.status !== 'cancelled' && (
-          <div className="mt-3">
-            <GuestPanel companyId={companyId} eventId={event!.id} title={title} />
-          </div>
-        )}
-
-        {/* Организатор видит встречные предложения и принимает их одним
-            нажатием. Само предложение время не двигало: перенос остаётся его
-            решением, иначе любой приглашённый переставлял бы чужие календари. */}
-        {!новая && мой && предложения.length > 0 && (
-          <div className="mt-3 space-y-1.5 rounded-md border border-amber-500/40 bg-amber-500/[0.05] p-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
-              Предложили другое время
-            </p>
-            {предложения.map((a) => (
-              <div key={a.user_id} className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="min-w-[8rem] flex-1">{a.name || 'участник'}</span>
-                <span className="tabular-nums">
-                  {когда.format(new Date(a.proposed_starts_at!))}
-                </span>
-                {a.comment && <span className="text-muted-foreground">{a.comment}</span>}
-                <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
-                  onClick={() => {
-                    setStarts(local(a.proposed_starts_at!))
-                    setEnds(local(a.proposed_ends_at!))
-                    toast.info('Время подставлено — сохраните встречу, чтобы перенести')
-                  }}>
-                  Перенести на это
-                </Button>
-              </div>
-            ))}
-            <p className="text-[12px] text-muted-foreground">
-              Перенос обнулит согласия: «буду в 10» не равно «буду в 18».
-            </p>
-          </div>
-        )}
-        </div>
-        </div>
-
-        {/* По итогам встречи — поручение. Исполнителя здесь не спрашиваем: на
-            совещании решают ЧТО, а кто — часто позже. Работа без исполнителя не
-            теряется, она попадает в «Разбор», где её берут, отдают или
-            закрывают с причиной. Ссылка на встречу остаётся в предмете
-            поручения: через месяц видно, где это решили. */}
-        {!новая && event!.status !== 'cancelled' && (
-          <div className="mt-3 space-y-1.5 border-t pt-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              По итогам
-            </p>
-            <div className="flex items-center gap-1.5">
-              <Input value={итог} onChange={(e) => setИтог(e.target.value)}
-                placeholder="Что решили сделать…" className="h-8 text-sm"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && итог.trim() && !поручить.isPending) поручить.mutate()
-                }} />
-              <Button size="sm" variant="outline" className="h-8 shrink-0 px-2 text-xs"
-                disabled={!итог.trim() || поручить.isPending}
-                onClick={() => поручить.mutate()}>
-                <ListPlus className="mr-1 h-3.5 w-3.5" />Поручение
+          <div className="space-y-4">
+            {ключи([...основное, ...подробности], 'l')}
+            {/* Телефон открывает встречу простой: о чём, когда, где (решение МАГа
+                07.09.2026). Остальное — за «Подробнее». */}
+            {phone && (
+              <Button type="button" variant="outline" size="sm" className="w-full"
+                aria-expanded={more} onClick={() => setMore(v => !v)}>
+                {more ? 'Свернуть подробности' : 'Подробнее'}
+                <ChevronDown className={cn('ml-1.5 h-4 w-4 transition-transform', more && 'rotate-180')} />
               </Button>
-            </div>
+            )}
+            {опросБлок}
           </div>
-        )}
+          <div className="mt-4 space-y-4 lg:mt-0">
+            {ключи([...люди_, гостиБлок, предложенияБлок], 'r')}
+          </div>
+        </div>
 
-        {!новая && <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-          <Button variant="outline" onClick={async () => {
-            try { await navigator.clipboard.writeText(new URL(eventHref, window.location.origin).href); toast.success('Ссылка на встречу скопирована') }
-            catch { toast.error('Не удалось скопировать ссылку. Проверьте разрешение браузера.') }
-          }}>Ссылка на карточку</Button>
-          {/* «Ссылка на встречу» копировала адрес карточки календаря, а не комнаты
-              (РусГидро, 14.10.2026). Ссылка на видеовстречу копируется значком в
-              своей строке, здесь — только адрес карточки. */}
-          {/* Своя комната — своя кнопка: сервер подписывает вход ведущим, иначе
-              Jitsi держит всех на «ждём организатора». Чужую ссылку (Zoom,
-              Teams) открываем как есть — ведущего там назначаем не мы. */}
-          {event!.status !== 'cancelled' && (
-            event!.conference_url && !/\/ledger-[0-9a-f]+/i.test(event!.conference_url)
-              ? (/^https?:\/\//i.test(event!.conference_url) && <Button variant="outline" asChild><a href={event!.conference_url} target="_blank" rel="noopener noreferrer"><Video className="mr-2 h-4 w-4" />Открыть видеовстречу</a></Button>)
-              : <Button variant="outline" disabled={confBusy} onClick={войтиВВидеовстречу}>
-                  <Video className="mr-2 h-4 w-4" />{event!.conference_url ? 'Войти в видеовстречу' : 'Начать видеовстречу'}
-                </Button>
-          )}
-          {subjectHref && <Button variant="ghost" asChild><Link to={subjectHref} onClick={onClose}>Предмет встречи</Link></Button>}
-        </div>}
-        {!новая && event!.status !== 'cancelled' && (!phone || more) && <EventReminder companyId={companyId} event={event!} />}
-<div className="flex flex-wrap items-center gap-2">
-          {!новая && мой && event!.status !== 'cancelled' && (
-            <Button size="sm" variant="ghost" className="mr-auto text-destructive"
-              disabled={отменить.isPending}
-              onClick={() => setCancelConfirm(true)}>
-              <X className="mr-1 h-3.5 w-3.5" />Отменить встречу
-            </Button>
-          )}
-          {мой && title.trim() && (
-            <Button size="sm" variant="ghost"
-              disabled={сохранитьЗаготовку.isPending || !!formError}
-              onClick={() => {
-                const имя = window.prompt('Название заготовки', title.trim().slice(0, 60))
-                if (имя?.trim()) сохранитьЗаготовку.mutate(имя.trim())
-              }}>
-              <BookmarkPlus className="mr-1 h-3.5 w-3.5" />В заготовки
-            </Button>
-          )}
-
-</div>
-        {cancelConfirm && мой && <section aria-label="Отмена встречи" className="space-y-2 rounded-md border border-destructive/40 p-3">
-          <p className="text-sm font-medium">{event?.recurrence ? 'Отменить эту встречу и будущие встречи серии?' : 'Отменить встречу?'}</p>
-          <p className="text-sm text-muted-foreground">
-            Участники получат сообщение и письмо об отмене; до конца дня встреча останется у них
-            зачёркнутой с этой причиной, потом скроется. Личные напоминания будут сняты.
-          </p>
-          <Input aria-label="Причина отмены"
-            placeholder={причинаОбязательна ? 'Причина отмены — её увидят участники' : 'Причина отмены — необязательно'}
-            value={cancelReason} onChange={e => setCancelReason(e.target.value)}
-            className="text-base sm:text-sm" />
-          {/* Отказ, известный заранее, называется до нажатия, а не красной плашкой после. */}
-          {причинаОбязательна && !cancelReason.trim() && (
-            <p className="text-xs text-muted-foreground">
-              Встречу ждут другие: без причины отменить нельзя — иначе в чужом календаре она
-              пропадёт молча, и спросить будет не у кого.
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2"><Button variant="destructive" disabled={отменить.isPending || (причинаОбязательна && !cancelReason.trim())} onClick={() => отменить.mutate(cancelReason.trim())}>Подтвердить отмену</Button><Button variant="ghost" disabled={отменить.isPending} onClick={() => setCancelConfirm(false)}>Не отменять</Button></div>
-        </section>}
+        <div className="space-y-3">{подвал}</div>
         <DialogFooter className="sticky -bottom-4 -mx-4 flex-row flex-wrap gap-2 border-t border-border bg-background px-4 py-3 sm:-bottom-6 sm:-mx-6 sm:px-6">
-          {canRespond && предлагаю && (
-            <div className="mr-auto flex w-full flex-wrap items-end gap-2">
-              <label className="space-y-1 text-xs text-muted-foreground">
-                Предлагаю с
-                <Input type="datetime-local" value={starts} className="w-[200px]"
-                  onChange={(e) => setStarts(e.target.value)} />
-              </label>
-              <label className="space-y-1 text-xs text-muted-foreground">
-                по
-                <Input type="datetime-local" value={ends} className="w-[200px]"
-                  onChange={(e) => setEnds(e.target.value)} />
-              </label>
-              <Button size="sm" disabled={предложить.isPending || !!formError}
-                onClick={() => предложить.mutate()}>Отправить</Button>
-              <Button size="sm" variant="ghost"
-                onClick={() => setПредлагаю(false)}>Отмена</Button>
-            </div>
-          )}
-          {canRespond && !предлагаю && (
-            <div className="mr-auto flex flex-wrap items-center gap-1.5">
-              {ОТВЕТЫ.map((r) => (
-                <Button key={r.key} size="sm" disabled={ответить.isPending}
-                  aria-pressed={event!.my_response === r.key}
-                  variant={event!.my_response === r.key ? 'default' : 'outline'}
-                  onClick={() => ответить.mutate(r.key)}>
-                  {r.label}
-                </Button>
-              ))}
-              {/* Отказ без встречного предложения оставляет организатора гадать,
-                  когда человеку удобно, и переписка уходит в чат. */}
-              <Button size="sm" variant="ghost" onClick={() => setПредлагаю(true)}>
-                Другое время
-              </Button>
-            </div>
-          )}
-          <Button size="sm" variant="ghost" onClick={onClose}>Закрыть</Button>
-          {мой && (
-            <Button size="sm" disabled={!title.trim() || !!formError || сохранить.isPending || отменить.isPending}
-              onClick={() => сохранить.mutate()}>
-              {сохранить.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              {новая ? 'Собрать' : 'Сохранить'}
-            </Button>
-          )}
+          {кнопки}
         </DialogFooter>
       </DialogContent>
     </Dialog>
