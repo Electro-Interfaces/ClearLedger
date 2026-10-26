@@ -11,6 +11,7 @@
  * при этом остаётся закрытой, и отбор делает сервер, а не этот экран.
  */
 import { useState } from 'react'
+import { addDays, parseISO } from 'date-fns'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarPlus, Video } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -18,6 +19,7 @@ import { EventDialog } from '@/components/calendar/EventDialog'
 import * as workService from '@/services/workService'
 import type { CalendarEvent } from '@/services/workService'
 import { cn } from '@/lib/utils'
+import { companyDateKey, companyDayStart, companyDateTime, companyTime } from '@/lib/companyTime'
 
 /** Окно поиска обсуждений: полгода назад и год вперёд. Не «все за всё время» —
  *  выборка без границ на живом пространстве однажды вытащит тысячу строк ради
@@ -39,9 +41,11 @@ export function SubjectMeetings({ companyId, subjectRef, title, canPlan = true }
   const [открыта, setОткрыта] = useState<CalendarEvent | null>(null)
 
   const [от, до] = (() => {
-    const н = new Date(); н.setDate(н.getDate() - НАЗАД_ДНЕЙ)
-    const к = new Date(); к.setDate(к.getDate() + ВПЕРЁД_ДНЕЙ)
-    return [н.toISOString(), к.toISOString()]
+    const today = parseISO(companyDateKey(new Date()))
+    return [
+      companyDayStart(addDays(today, -НАЗАД_ДНЕЙ)).toISOString(),
+      companyDayStart(addDays(today, ВПЕРЁД_ДНЕЙ)).toISOString(),
+    ]
   })()
 
   const q = useQuery({
@@ -88,7 +92,7 @@ export function SubjectMeetings({ companyId, subjectRef, title, canPlan = true }
                 <button onClick={() => setОткрыта(e)}
                   className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left text-xs hover:bg-muted/60">
                   <span className="shrink-0 tabular-nums text-muted-foreground">
-                    {дата.format(new Date(e.starts_at))}
+                    {companyDateTime(e.starts_at, { weekday: 'short', day: 'numeric', month: 'short' })} {companyTime(e.starts_at)}
                   </span>
                   <span className={cn('min-w-0 flex-1 truncate',
                     отменена ? 'text-muted-foreground line-through' : 'text-foreground')}>
@@ -116,6 +120,5 @@ export function SubjectMeetings({ companyId, subjectRef, title, canPlan = true }
   )
 }
 
-const дата = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' })
 
 export default SubjectMeetings
