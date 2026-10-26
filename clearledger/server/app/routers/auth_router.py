@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi.security import HTTPAuthorizationCredentials
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +38,7 @@ from app.services import email_service
 from app.services import notify
 from app.utils import resolve_company_id
 from app.schemas import (
+    ChangePasswordRequest,
     CompanyBrief,
     ForgotPasswordRequest,
     LoginRequest,
@@ -190,8 +191,17 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     ip = _client_ip(request)
     if user.company_id is not None:
         new_place = await _is_new_place(db, user, ip)
+        from app.services import user_agent as ua_service
+
+        отметка = ip or "-"
+        ua_строка = ua_service.short(request.headers.get("user-agent"), 200)
+        if ua_строка:
+            # Формат «IP · UA»: разбор нового места читает первую часть до пробела,
+            # поэтому IP обязан остаться первым.
+            отметка = f"{отметка} · {ua_строка}"
         await log_audit(db, actor=user, company_id=user.company_id,
-                        action="auth.login_new_ip" if new_place else "auth.login", target=ip)
+                        action="auth.login_new_ip" if new_place else "auth.login",
+                        target=отметка)
         if new_place:
             await _notify_new_login(db, user, ip, request.headers.get("user-agent") or "")
     await db.commit()
@@ -343,6 +353,136 @@ async def reset_password(
                         action="auth.password_reset")
     await db.flush()
     return {"ok": True}
+
+
+# ===== Безопасность учётной записи: что видно самому человеку =====
+
+# Что показываем в профиле. Берём из общего журнала, но только свои события и
+# только про вход и пароль: профиль — не аудит пространства.
+ВХОДЫ_ДЛЯ_ЧЕЛОВЕКА: dict[str, str] = {
+    "auth.login": "Вход",
+    "auth.login_new_ip": "Вход с нового адреса",
+    "auth.login_failed": "Неудачная попытка входа",
+    "auth.password_change": "Пароль изменён",
+    "auth.password_reset": "Пароль восстановлен по письму",
+    "auth.logout_all": "Выход на всех устройствах",
+    "auth.sessions_reset": "Сеансы сброшены администратором",
+}
+
+
+@router.get("/security/logins")
+async def my_logins(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(20, ge=1, le=50),
+):
+    """Последние события входа этой учётной записи.
+
+    Человек должен иметь возможность сам увидеть, что в его учётку заходили, —
+    раньше единственной реакцией на подозрение было «выйти на всех устройствах»
+    вслепую, без ответа на вопрос «а было ли что-то вообще».
+    """
+    from app.models import AuditEvent
+    from app.services import user_agent as ua_service
+
+    rows = (await db.execute(
+        select(AuditEvent.action, AuditEvent.details, AuditEvent.timestamp)
+        .where(AuditEvent.user_id == str(current_user.id),
+               AuditEvent.action.in_(tuple(ВХОДЫ_ДЛЯ_ЧЕЛОВЕКА)))
+        .order_by(AuditEvent.timestamp.desc())
+        .limit(limit)
+    )).all()
+    события = []
+    for action, details, ts in rows:
+        # Формат details для входа — «IP · UA» (см. login), у остальных событий
+        # его может не быть вовсе.
+        ip, _, хвост = (details or "").partition(" · ")
+        события.append({
+            "action": action,
+            "label": ВХОДЫ_ДЛЯ_ЧЕЛОВЕКА.get(action, action),
+            "at": ts.isoformat() if ts else None,
+            "ip": ip or None,
+            "device": ua_service.describe(хвост) if хвост else None,
+            "newPlace": action == "auth.login_new_ip",
+            "failed": action == "auth.login_failed",
+        })
+    return {"logins": события}
+
+
+@router.get("/security/devices")
+async def my_devices(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Устройства, подписанные на уведомления этой учётной записи."""
+    from app.models import ChatPushSubscription
+    from app.services import user_agent as ua_service
+
+    rows = (await db.execute(
+        select(ChatPushSubscription)
+        .where(ChatPushSubscription.user_id == current_user.id)
+        .order_by(ChatPushSubscription.created_at.desc())
+    )).scalars().all()
+    return {"devices": [{
+        "id": str(d.id),
+        "device": ua_service.describe(d.user_agent),
+        "showPreview": d.show_preview,
+        "since": d.created_at.isoformat() if d.created_at else None,
+    } for d in rows]}
+
+
+@router.delete("/security/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_device(
+    device_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отвязать устройство от уведомлений. Только своё: чужая подписка не ищется."""
+    from app.models import ChatPushSubscription
+    from sqlalchemy import delete as sa_delete
+
+    await db.execute(sa_delete(ChatPushSubscription).where(
+        ChatPushSubscription.id == device_id,
+        ChatPushSubscription.user_id == current_user.id))
+    await db.commit()
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Сменить свой пароль, зная текущий.
+
+    Раньше этого пути не было вовсе: человек, который просто хочет поменять
+    пароль, был обязан выйти и пройти восстановление через почту — то есть
+    получить доступ к ящику, чтобы сделать то, на что у него уже есть сеанс.
+
+    Смена гасит прежние входы тем же способом, что и сброс по письму
+    (`token_version`), но текущему окну сразу выдаётся новый токен: человек
+    меняет пароль у себя за столом и не должен после этого логиниться заново.
+    """
+    if current_user.mail_only or not current_user.password_hash:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "У этой учётной записи нет пароля")
+    if not verify_password(body.currentPassword, current_user.password_hash):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Текущий пароль не подходит")
+    if body.newPassword == body.currentPassword:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Новый пароль должен отличаться от текущего")
+    current_user.password_hash = hash_password(body.newPassword)
+    # Ссылка на восстановление, если её успели запросить, после смены не нужна.
+    current_user.reset_token_hash = None
+    current_user.reset_token_expires = None
+    current_user.failed_logins = 0
+    current_user.locked_until = None
+    current_user.token_version = (current_user.token_version or 0) + 1
+    if current_user.company_id is not None:
+        await log_audit(db, actor=current_user, company_id=current_user.company_id,
+                        action="auth.password_change")
+    await db.commit()
+    return {"ok": True, "access_token": token_for(current_user)}
 
 
 @router.post(
@@ -560,6 +700,30 @@ async def get_me(
         орг = (await db.execute(select(Counterparty.name).where(
             Counterparty.id == членство[0].organization_id))).scalar_one_or_none()
 
+    # Кто расписывается за человека, пока его нет. Показываем в профиле только
+    # для чтения: замещение — это полномочие, его заводит администратор, и
+    # человек перед отпуском должен видеть, есть оно или нет.
+    замещение = None
+    if current_user.company_id is not None:
+        from app.models import UserSubstitution
+
+        сегодня = datetime.now(timezone.utc).date()
+        строка = (await db.execute(
+            select(UserSubstitution, User.name, User.email)
+            .join(User, User.id == UserSubstitution.deputy_id)
+            .where(UserSubstitution.company_id == current_user.company_id,
+                   UserSubstitution.user_id == current_user.id,
+                   UserSubstitution.is_active.is_(True),
+                   UserSubstitution.ends_on >= сегодня)
+            .order_by(UserSubstitution.starts_on)
+        )).first()
+        if строка is not None:
+            sub, имя, почта = строка
+            замещение = (
+                имя or почта,
+                f"{sub.starts_on.strftime('%d.%m.%Y')} — {sub.ends_on.strftime('%d.%m.%Y')}",
+            )
+
     return MeResponse(
         id=str(current_user.id),
         email=current_user.email,
@@ -574,6 +738,12 @@ async def get_me(
         work_start=current_user.work_start.strftime("%H:%M"),
         work_end=current_user.work_end.strftime("%H:%M"),
         task_notify=sorted(notify.task_channels(current_user)),
+        email_notify=[k for k in notify.EMAIL_KINDS
+                      if k in notify.email_kinds(current_user)],
+        away_from=current_user.away_from.isoformat() if current_user.away_from else None,
+        away_to=current_user.away_to.isoformat() if current_user.away_to else None,
+        substitute=замещение[0] if замещение else None,
+        substitute_period=замещение[1] if замещение else None,
         position=членство[0].position if членство else None,
         party_type=членство[0].party_type if членство else None,
         party_org=орг,

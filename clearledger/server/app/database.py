@@ -1983,6 +1983,25 @@ async def create_all() -> None:
         # чтобы обновление не объявляло их новыми входящими.
         for statement in TASK_ASSIGNMENT_MIGRATION_DDL:
             await conn.execute(text(statement))
+        # v2.x: «меня не будет с … по …» — личная отметка отсутствия.
+        for _col in ("away_from", "away_to"):
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {_col} DATE"
+                )
+            )
+        # v2.x: чем подписались на уведомления — для списка устройств в профиле.
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE chat_push_subscriptions ADD COLUMN IF NOT EXISTS user_agent VARCHAR(300)"
+            )
+        )
+        # v2.x: выбор видов писем в личных настройках (NULL — получать всё).
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notify JSONB"
+            )
+        )
         # v0.6: cloud_api_key для Companies (внешний доступ TSupport)
         await conn.execute(
             __import__("sqlalchemy").text(

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -11,8 +12,46 @@ import { Loader2, CheckCircle2, XCircle, Wifi } from 'lucide-react'
 import { PersonalSettings } from '@/components/settings/PersonalSettings'
 import { useCompany } from '@/contexts/CompanyContext'
 
+/** Куда ведут пункты меню профиля: `?tab=` → блок личных настроек.
+ *  Пункт «Уведомления» раньше открывал начало страницы, а нужный блок лежал
+ *  на два экрана ниже — человек искал его сам. */
+const ЯКОРЯ: Record<string, string> = {
+  notifications: 'profile-notifications',
+  email: 'profile-email',
+  away: 'profile-away',
+  security: 'profile-security',
+  contacts: 'profile-contacts',
+  worktime: 'profile-worktime',
+  appearance: 'profile-appearance',
+}
+
+/** Довести до блока и подсветить его, чтобы глаз нашёл цель перехода. */
+function useScrollToTab() {
+  const [params] = useSearchParams()
+  const tab = params.get('tab') ?? ''
+  useEffect(() => {
+    const id = ЯКОРЯ[tab]
+    if (!id) return
+    // Профиль приезжает с сервера: до его прихода блока на странице ещё нет.
+    let попытки = 0
+    const таймер = window.setInterval(() => {
+      const el = document.getElementById(id)
+      if (el) {
+        window.clearInterval(таймер)
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        el.classList.add('ring-2', 'ring-primary', 'ring-offset-4', 'rounded-lg')
+        window.setTimeout(() => el.classList.remove('ring-2', 'ring-primary', 'ring-offset-4', 'rounded-lg'), 2200)
+      } else if (++попытки > 20) {
+        window.clearInterval(таймер)
+      }
+    }, 150)
+    return () => window.clearInterval(таймер)
+  }, [tab])
+}
+
 export function SettingsPage() {
   const { company } = useCompany()
+  useScrollToTab()
   const isEnergy = company.profileId === 'energy'
   const [settings, setSettings] = useState<AppSettings>(getSettings)
   const [testing, setTesting] = useState(false)
@@ -61,8 +100,10 @@ export function SettingsPage() {
     setSettings((prev) => ({ ...prev, stations }))
   }
 
+  // Узкая колонка оставалась узкой и на широком мониторе: карточка личных
+  // настроек раскладывается в две колонки начиная с xl, и ей нужно место.
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-2xl xl:max-w-6xl">
       <h1 className="text-2xl font-bold">Настройки</h1>
 
       {/* Личное — первым: человек пришёл сюда за своими настройками, а не за

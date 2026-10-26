@@ -42,6 +42,14 @@ export interface AuthUser {
   work_end?: string
   /** Куда присылать уведомления о поручениях: secretary | notices | email. */
   task_notify?: string[]
+  /** Виды писем, которые человек согласен получать (notify.EMAIL_KINDS). */
+  email_notify?: string[]
+  /** «Меня не будет с … по …» — ставит сам человек. */
+  away_from?: string | null
+  away_to?: string | null
+  /** Кто расписывается за него, пока его нет (заводит администратор). */
+  substitute?: string | null
+  substitute_period?: string | null
   /**
    * Место человека в пространстве — заполняет администратор.
    * party_type: internal — сотрудник организации пространства,
@@ -134,6 +142,42 @@ export const OTP_REQUIRED = 'Введите код из приложения-а�
 export async function logoutAll(): Promise<void> {
   try { await api.post('/api/auth/logout-all') } finally { api.clearToken() }
 }
+
+/** Сменить свой пароль, зная текущий.
+ *  Сервер гасит прежние входы и сразу выдаёт токен этому окну — подменяем его,
+ *  иначе человек выпадет на форму входа ровно в момент смены. */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const r = await api.post<{ ok: boolean; access_token: string }>(
+    '/api/auth/change-password', { currentPassword, newPassword })
+  if (r.access_token) api.setToken(r.access_token)
+}
+
+export interface LoginEvent {
+  action: string
+  label: string
+  at: string | null
+  ip: string | null
+  device: string | null
+  newPlace: boolean
+  failed: boolean
+}
+
+export interface PushDevice {
+  id: string
+  device: string
+  showPreview: boolean
+  since: string | null
+}
+
+/** Последние входы в учётную запись — свои, из журнала пространства. */
+export const myLogins = () => api.get<{ logins: LoginEvent[] }>('/api/auth/security/logins')
+
+/** Устройства, которым разрешены уведомления. */
+export const myDevices = () => api.get<{ devices: PushDevice[] }>('/api/auth/security/devices')
+
+/** Отвязать устройство от уведомлений. */
+export const revokeDevice = (id: string) =>
+  api.del<void>(`/api/auth/security/devices/${encodeURIComponent(id)}`)
 
 /** Запросить восстановление пароля — письмо со ссылкой на email. */
 export async function forgotPassword(email: string): Promise<void> {

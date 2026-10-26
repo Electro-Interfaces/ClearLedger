@@ -11,7 +11,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import (
-    APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, Response, status,
+    APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect,
+    Response, status,
 )
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, delete as sa_delete, func, or_, select, text
@@ -2938,10 +2939,14 @@ async def push_vapid_key(db: AsyncSession = Depends(get_db),
 @router.post("/push/subscribe", status_code=status.HTTP_201_CREATED)
 async def push_subscribe(
     body: PushSubscribeBody,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Сохранить подписку браузера. Идемпотентно по endpoint: браузер один — строка одна."""
+    from app.services import user_agent as ua_service
+
+    ua = ua_service.short(request.headers.get("user-agent"))
     p256dh = (body.keys or {}).get("p256dh", "")
     auth = (body.keys or {}).get("auth", "")
     if not body.endpoint or not p256dh or not auth:
@@ -2951,9 +2956,12 @@ async def push_subscribe(
     if existing is not None:
         existing.user_id, existing.p256dh, existing.auth = current_user.id, p256dh, auth
         existing.show_preview = body.showPreview
+        if ua:
+            existing.user_agent = ua
     else:
         db.add(ChatPushSubscription(user_id=current_user.id, endpoint=body.endpoint,
-                                    p256dh=p256dh, auth=auth, show_preview=body.showPreview))
+                                    p256dh=p256dh, auth=auth, show_preview=body.showPreview,
+                                    user_agent=ua))
     await db.commit()
     return {"ok": True}
 
@@ -3098,6 +3106,12 @@ class MyProfileBody(BaseModel):
     workEnd: str | None = None     # «18:00»
     # Куда присылать уведомления о поручениях: secretary | notices | email.
     taskNotify: list[str] | None = None
+    # Какие письма человек хочет получать (notify.EMAIL_KINDS). Пустой список —
+    # осознанный выбор «ничего на почту», он сохраняется как есть.
+    emailNotify: list[str] | None = None
+    # «Меня не будет»: «2026-11-03» или "" — отметка снята.
+    awayFrom: str | None = None
+    awayTo: str | None = None
 
 
 @router.patch("/me")
@@ -3123,7 +3137,12 @@ async def update_me(
     for поле, значение in (("phone_mobile", body.phoneMobile),
                            ("phone_office", body.phoneOffice)):
         if значение is not None:
-            setattr(current_user, поле, значение.strip()[:40] or None)
+            # Приводим к единому виду здесь, а не на экране: телефон правят и из
+            # других мест, и три написания одного номера в соседних карточках
+            # люди видят раньше, чем мы.
+            from app.services.phone_e164 import pretty as _pretty
+
+            setattr(current_user, поле, (_pretty(значение) or "")[:40] or None)
     if body.tz is not None:
         # Неизвестное имя отбиваем здесь, а не молча заменяем умолчанием: там,
         # где человек настраивает своё время, тихая подмена — самый верный
@@ -3147,6 +3166,33 @@ async def update_me(
     if current_user.work_start >= current_user.work_end:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Рабочий день должен заканчиваться позже, чем начинается")
+    if body.awayFrom is not None or body.awayTo is not None:
+        from datetime import date as _date
+
+        def _день(значение: str | None, прежнее):
+            if значение is None:
+                return прежнее
+            значение = значение.strip()
+            if not значение:
+                return None
+            try:
+                return _date.fromisoformat(значение)
+            except ValueError:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "Дата в формате ГГГГ-ММ-ДД") from None
+
+        с = _день(body.awayFrom, current_user.away_from)
+        по = _день(body.awayTo, current_user.away_to)
+        if с is not None and по is not None and по < с:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Дата возвращения раньше даты ухода")
+        current_user.away_from, current_user.away_to = с, по
+    if body.emailNotify is not None:
+        from app.services import notify
+
+        # Порядок каталога, а не присланный: интерфейс сравнивает списки, и
+        # «те же виды в другом порядке» выглядели бы несохранённой правкой.
+        current_user.email_notify = [k for k in notify.EMAIL_KINDS if k in body.emailNotify]
     if body.taskNotify is not None:
         from app.services import notify
 
@@ -3159,6 +3205,7 @@ async def update_me(
         current_user.task_notify = каналы
     await db.commit()
     return {"ok": True, "name": current_user.name, "avatarUrl": current_user.avatar_url,
+            "phoneMobile": current_user.phone_mobile, "phoneOffice": current_user.phone_office,
             "tz": current_user.tz,
             "workStart": current_user.work_start.strftime("%H:%M"),
             "workEnd": current_user.work_end.strftime("%H:%M")}

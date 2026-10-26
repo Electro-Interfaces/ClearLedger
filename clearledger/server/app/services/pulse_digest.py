@@ -87,8 +87,17 @@ async def _recipients(db, cid: str) -> list[str]:
                # партнёров, и у перенесённых людей заказчика она не заполнена.
                func.coalesce(UserCompany.party_type, "internal") == "internal")
     )).all()
+    from app.services import notify
+
     out: list[str] = []
     for member, user in rows:
+        # Человек мог отказаться от ежедневной сводки в своих настройках —
+        # доступ к «Пульсу» у него при этом остаётся, письма больше нет.
+        if not user.email or not notify.wants_email(user, "digest"):
+            continue
+        # В отпуске сводка не нужна: вернётся — увидит экран целиком.
+        if notify.is_away(user):
+            continue
         mods = await resolve_member_modules(member, db)
         if mods is None or "pulse" in mods or any(str(m).startswith("pulse:") for m in mods):
             out.append(user.email)

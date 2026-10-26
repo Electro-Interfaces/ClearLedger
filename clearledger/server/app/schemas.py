@@ -75,6 +75,16 @@ class ResetPasswordRequest(BaseModel):
     password: Password
 
 
+class ChangePasswordRequest(BaseModel):
+    """Смена своего пароля изнутри сеанса — человек помнит текущий.
+
+    Текущий пароль без правил длины: он задан когда-то и проверяется сверкой
+    с хэшем, а не на соответствие сегодняшнему требованию.
+    """
+    currentPassword: str = Field(min_length=1, max_length=200)
+    newPassword: Password
+
+
 class RegisterRequest(BaseModel):
     email: NormEmail
     password: Password
@@ -143,6 +153,15 @@ class MeResponse(BaseModel):
     work_end: str = "18:00"
     # Куда присылать уведомления о поручениях — выбирает сам человек.
     task_notify: list[str] = ["secretary", "email"]
+    # Какие именно письма он хочет получать (виды `notify.EMAIL_KINDS`).
+    email_notify: list[str] = []
+    # «Меня не будет с … по …» — ставит сам человек.
+    away_from: str | None = None
+    away_to: str | None = None
+    # Кто расписывается за него, пока его нет. Заводит администратор, здесь
+    # показывается, чтобы человек перед отпуском видел: замещение есть или нет.
+    substitute: str | None = None
+    substitute_period: str | None = None
     # Место человека в пространстве. Заполняет администратор, поэтому в личных
     # настройках показывается, но не правится: должность и принадлежность — это
     # сведения о месте, а не личное дело.
