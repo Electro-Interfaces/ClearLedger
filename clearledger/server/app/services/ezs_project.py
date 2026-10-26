@@ -1145,7 +1145,7 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
     Блоки, для которых данных нет, возвращают `empty` с подсказкой, чем их
     наполнить: экран из нулей хуже честного «нечего показывать».
     """
-    today = date.today().isoformat()
+    today = date.today()
     d30 = (date.today() - timedelta(days=30)).isoformat()
     d90 = (date.today() - timedelta(days=90)).isoformat()
 
@@ -1207,7 +1207,8 @@ async def portfolio_overview(db: AsyncSession, company_id) -> dict[str, Any]:
                    exists (
                        select 1 from ezs_site_equipment eq where eq.site_id = a.id
                          and eq.due_date is not null and eq.supplied_date is null
-                         and eq.status in ('planned','ordered') and eq.due_date < :today
+                         and eq.status in ('planned','ordered')
+                         and eq.due_date < to_char(CAST(:today AS date), 'YYYY-MM-DD')
                    ) as eq_overdue
             from active a
             left join event_stats es on es.site_id = a.id
