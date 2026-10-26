@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import re
 import uuid as _uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -141,6 +142,22 @@ async def article(db: AsyncSession, company_id, article_id) -> dict[str, Any] | 
     return out
 
 
+# Разметка в выдаче поиска: человек видит «## Как войти» и «**Профиль**» вместо
+# текста. Подсветка совпадения приходит из `ts_headline` отдельными метками
+# `<<…>>`, поэтому чистим только markdown и её не трогаем.
+# Строки в сниппете склеены пробелом, поэтому «##» ловим не только в начале
+# строки: иначе в выдаче остаётся «… в списке профилей ## Как войти На экране».
+# Маркеры списка не трогаем: в русском тексте дефис с пробелами работает как
+# тире («Левая рельса - разделы»), и чистка превращала фразу в кашу.
+_MD_МУСОР = re.compile(r"(?:(?<=\s)|^)#{1,6}\s+|\*\*|`")
+
+
+def _чистый_сниппет(raw: str | None) -> str:
+    if not raw:
+        return ""
+    return re.sub(r"\s{2,}", " ", _MD_МУСОР.sub(" ", raw)).strip()
+
+
 async def search(db: AsyncSession, company_id, query: str, limit: int = 20) -> dict[str, Any]:
     """Поиск по знанию: заголовок весомее тела, сниппет с подсветкой.
 
@@ -179,7 +196,7 @@ async def search(db: AsyncSession, company_id, query: str, limit: int = 20) -> d
         "query": q,
         "items": [{"id": str(r["id"]), "title": r["title"], "kind": r["kind"],
                    "kindLabel": KIND_LABELS.get(r["kind"], r["kind"]),
-                   "docNumber": r["doc_number"], "snippet": r["snippet"],
+                   "docNumber": r["doc_number"], "snippet": _чистый_сниппет(r["snippet"]),
                    "scope": "company" if r["own"] else "platform"} for r in rows],
     }
 
