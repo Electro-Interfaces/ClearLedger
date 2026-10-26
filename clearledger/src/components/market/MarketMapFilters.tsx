@@ -8,6 +8,9 @@
  */
 import { useState } from 'react'
 import { ChevronDown, ChevronUp, Layers } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { SITE_KIND_LABEL, type MarketOperator } from '@/services/marketService'
 
@@ -24,16 +27,16 @@ export interface MarketFilters {
   showHome: boolean
   showAttractors: boolean
   kind: string
-  operatorId: string
+  operatorIds: string[]
   currentType: string
   minPower: string
   alive: string
 }
 
 export interface OurFilters {
-  status: string
+  status: string[]
   speedClass: string
-  brand: string
+  brand: string[]
   minPower: string
   load: string
   errors: string
@@ -43,11 +46,11 @@ export interface OurFilters {
 export const EMPTY_MARKET_FILTERS: MarketFilters = {
   showOurs: true, showRivals: true, showIndependent: true,
   showOursOnMarket: false, showHome: false, showAttractors: true,
-  kind: 'all', operatorId: 'all', currentType: 'all', minPower: 'all', alive: 'all',
+  kind: 'all', operatorIds: [], currentType: 'all', minPower: 'all', alive: 'all',
 }
 
 export const EMPTY_OUR_FILTERS: OurFilters = {
-  status: 'all', speedClass: 'all', brand: 'all', minPower: 'all',
+  status: [], speedClass: 'all', brand: [], minPower: 'all',
   load: 'all', errors: 'all', colorBy: 'status',
 }
 
@@ -57,6 +60,86 @@ const STATUS_LABEL: Record<string, string> = {
   not_working: 'не работает',
   disabled: 'отключена',
   decommissioned: 'выведена',
+}
+
+/** Фильтр со списком галочек: выбор нескольких значений не закрывает список. */
+function MultiCheckboxFilter({ label, options, selected, onChange, width }: {
+  label: string
+  options: { value: string; label: string }[]
+  selected: string[]
+  onChange: (next: string[]) => void
+  width: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const selectedLabels = options.filter((option) => selected.includes(option.value))
+    .map((option) => option.label)
+  const visibleOptions = options.filter((option) =>
+    option.label.toLocaleLowerCase('ru').includes(search.trim().toLocaleLowerCase('ru')))
+
+  const toggle = (value: string, checked: boolean) => {
+    onChange(checked
+      ? [...selected, value]
+      : selected.filter((item) => item !== value))
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" aria-expanded={open} title={selectedLabels.join(', ') || label}
+          className={`flex h-7 ${width} min-w-0 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-left text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring`}>
+          <span className="min-w-0 flex-1 truncate">
+            {selectedLabels.length ? selectedLabels.join(', ') : label}
+          </span>
+          {selected.length > 0 && (
+            <span className="shrink-0 rounded bg-secondary px-1 text-[10px] tabular-nums text-secondary-foreground">
+              {selected.length}
+            </span>
+          )}
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[280px] p-0">
+        <div className="border-b border-border/60 p-2">
+          <Input autoFocus value={search} onChange={(event) => setSearch(event.target.value)}
+            placeholder={`Поиск: ${label.toLocaleLowerCase('ru')}`} className="h-8 text-xs" />
+          {selectedLabels.length > 0 && (
+            <p className="mt-1.5 truncate text-xs text-muted-foreground"
+              title={selectedLabels.join(', ')}>
+              Выбрано: {selectedLabels.join(', ')}
+            </p>
+          )}
+        </div>
+        <div role="group" aria-label={label} className="max-h-56 overflow-y-auto p-1">
+          {visibleOptions.length > 0 ? visibleOptions.map((option) => {
+            const checked = selected.includes(option.value)
+            return (
+              <label key={option.value}
+                className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent">
+                <Checkbox checked={checked}
+                  onCheckedChange={(value) => toggle(option.value, value === true)} />
+                <span className="min-w-0 flex-1 truncate">{option.label}</span>
+              </label>
+            )
+          }) : (
+            <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+              Ничего не найдено
+            </p>
+          )}
+        </div>
+        <div className="flex items-center justify-between border-t border-border/60 px-2 py-1">
+          <span className="text-xs text-muted-foreground">
+            {selected.length ? `Выбрано: ${selected.length}` : 'Показаны все значения'}
+          </span>
+          <button type="button" disabled={selected.length === 0}
+            onClick={() => onChange([])}
+            className="rounded px-2 py-1 text-xs text-primary hover:bg-accent disabled:cursor-not-allowed disabled:text-muted-foreground disabled:hover:bg-transparent">
+            Сбросить
+          </button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 /** Флажок слоя: имя рядом с цветом — цвет один состояние не называет. */
@@ -109,9 +192,9 @@ export function MarketMapFilters({
   // точки и не понимал почему.
   const [открыт, setОткрыт] = useState(false)
   const применено = [
-    filters.kind !== 'all', filters.operatorId !== 'all', filters.currentType !== 'all',
+    filters.kind !== 'all', filters.operatorIds.length > 0, filters.currentType !== 'all',
     filters.minPower !== 'all', filters.alive !== 'all',
-    our.status !== 'all', our.speedClass !== 'all', our.brand !== 'all',
+    our.status.length > 0, our.speedClass !== 'all', our.brand.length > 0,
     our.load !== 'all', our.errors !== 'all',
   ].filter(Boolean).length
 
@@ -188,15 +271,11 @@ export function MarketMapFilters({
                 ))}
               </SelectContent>
             </Select>
-            <Select value={filters.operatorId} onValueChange={(v) => set({ operatorId: v })}>
-              <SelectTrigger className="h-7 w-[160px] text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Любая сеть</SelectItem>
-                {operators.filter((o) => o.sites > 0).slice(0, 40).map((o) => (
-                  <SelectItem key={o.id} value={o.id}>{o.name} · {o.sites}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiCheckboxFilter label="Любая сеть"
+              options={operators.filter((o) => o.sites > 0)
+                .map((o) => ({ value: o.id, label: `${o.name} · ${o.sites}` }))}
+              selected={filters.operatorIds}
+              onChange={(operatorIds) => set({ operatorIds })} width="w-[190px]" />
             <Select value={filters.currentType} onValueChange={(v) => set({ currentType: v })}>
               <SelectTrigger className="h-7 w-[110px] text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -231,15 +310,10 @@ export function MarketMapFilters({
             Наши станции — по тому, как они работают
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
-            <Select value={our.status} onValueChange={(v) => setOur({ status: v })}>
-              <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Любое состояние</SelectItem>
-                {statuses.map((st) => (
-                  <SelectItem key={st} value={st}>{STATUS_LABEL[st] ?? st}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiCheckboxFilter label="Любое состояние"
+              options={statuses.map((st) => ({ value: st, label: STATUS_LABEL[st] ?? st }))}
+              selected={our.status} onChange={(status) => setOur({ status })}
+              width="w-[170px]" />
             <Select value={our.speedClass} onValueChange={(v) => setOur({ speedClass: v })}>
               <SelectTrigger className="h-7 w-[130px] text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -248,15 +322,10 @@ export function MarketMapFilters({
                 <SelectItem value="slow">Медленные</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={our.brand} onValueChange={(v) => setOur({ brand: v })}>
-              <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Любой производитель</SelectItem>
-                {brands.slice(0, 40).map((b) => (
-                  <SelectItem key={b} value={b}>{b}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <MultiCheckboxFilter label="Любой производитель"
+              options={brands.map((brand) => ({ value: brand, label: brand }))}
+              selected={our.brand} onChange={(brand) => setOur({ brand })}
+              width="w-[180px]" />
             <Select value={our.load} onValueChange={(v) => setOur({ load: v })}>
               <SelectTrigger className="h-7 w-[170px] text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>

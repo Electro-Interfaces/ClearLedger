@@ -193,14 +193,15 @@ function ageLabel(iso: string | null | undefined): { text: string; stale: boolea
 
 function useMarketData(filters: MarketFilters, bbox?: string) {
   const { companyId } = useCompany()
+  const operatorIds = [...filters.operatorIds].sort()
   const sites = useQuery({
     // Точки грузятся по ВИДИМОЙ ОБЛАСТИ и отобранные на сервере: всей страной их
     // девять тысяч, и одна страница выдачи их не вмещает (ревизия 12.09.2026, К10).
     queryKey: ['market-sites', companyId, bbox ?? 'all', filters.kind,
-               filters.operatorId, filters.currentType, filters.minPower, filters.alive],
+               operatorIds.join(','), filters.currentType, filters.minPower, filters.alive],
     queryFn: () => listMarketSites(companyId, {
       ...(filters.kind === 'all' ? {} : { kind: filters.kind }),
-      ...(filters.operatorId === 'all' ? {} : { operator_id: filters.operatorId }),
+      ...(operatorIds.length ? { operator_ids: operatorIds.join(',') } : {}),
       ...(filters.currentType === 'all' ? {} : { current_type: filters.currentType }),
       ...(filters.minPower === 'all' ? {} : { min_power: Number(filters.minPower) }),
       ...(filters.alive === 'all' ? {} : { alive: filters.alive }),
@@ -372,9 +373,9 @@ function MarketMap() {
   const ourPoints = useMemo(() => {
     if (!filters.showOurs) return []
     return (ours.data?.points ?? []).filter((p) => {
-      if (our.status !== 'all' && p.status !== our.status) return false
+      if (our.status.length > 0 && !our.status.includes(p.status)) return false
       if (our.speedClass !== 'all' && p.speedClass !== our.speedClass) return false
-      if (our.brand !== 'all' && p.brand !== our.brand) return false
+      if (our.brand.length > 0 && !our.brand.includes(p.brand ?? '')) return false
       if (our.load !== 'all') {
         const v = p.sessionsPerPortDay
         if (v == null) return false

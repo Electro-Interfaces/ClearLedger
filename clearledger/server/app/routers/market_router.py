@@ -418,6 +418,7 @@ async def list_sites(
     site_class: str | None = Query(None, description="network|independent|home"),
     current_type: str | None = Query(None, description="DC|AC|LV"),
     operator_id: str | None = Query(None),
+    operator_ids: str | None = Query(None, description="ID операторов через запятую"),
     min_power: float | None = Query(None, ge=0),
     alive: bool | None = Query(None, description="заряжали за 90 дней"),
     search: str | None = Query(None, description="имя, город или адрес"),
@@ -457,6 +458,10 @@ async def list_sites(
         q = q.where(MarketSite.current_type == current_type)
     if operator_id:
         q = q.where(MarketSite.operator_id == operator_id)
+    if operator_ids:
+        ids = [value.strip() for value in operator_ids.split(",") if value.strip()]
+        if ids:
+            q = q.where(MarketSite.operator_id.in_(ids))
     if min_power is not None:
         q = q.where(MarketSite.max_power_kw >= min_power)
     if alive is not None:
