@@ -5,8 +5,9 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import * as workService from '@/services/workService'
 import type { CalendarEvent } from '@/services/workService'
+import { COMPANY_TIME_ZONE } from '@/lib/companyTime'
 
-const dateTime = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+const dateTime = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: COMPANY_TIME_ZONE })
 
 export function EventReminder({ companyId, event }: { companyId: string; event: CalendarEvent }) {
   const qc = useQueryClient()

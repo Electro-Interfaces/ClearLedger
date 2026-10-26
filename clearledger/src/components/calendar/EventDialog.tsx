@@ -11,6 +11,7 @@
  * от участника время и место значит прятать от него смысл приглашения.
  */
 import { useEffect, useId, useMemo, useState } from 'react'
+import { addDays, parseISO } from 'date-fns'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useHref } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
@@ -35,15 +36,10 @@ import type {
 import * as tasksService from '@/services/tasksService'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/use-mobile'
+import { calendarDayKey, companyDateKey, companyDateTimeInput, companyDateTimeToDate, companyDateTimeToISO, companyDayStart, COMPANY_TIME_ZONE } from '@/lib/companyTime'
 
-/** Date → значение datetime-local в местном поясе браузера. */
-const local = (d: Date) =>
-  new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
-const началоДня = (d: Date | null) => {
-  const day = new Date(d ?? new Date())
-  day.setHours(0, 0, 0, 0)
-  return day
-}
+const local = companyDateTimeInput
+const началоДня = (d: Date | null) => companyDateTimeToDate(`${companyDateKey(d ?? new Date())}T00:00`)
 
 const ОТВЕТЫ: { key: Exclude<EventResponse, 'pending'>; label: string }[] = [
   { key: 'accepted', label: 'Буду' },
@@ -74,6 +70,7 @@ const КРУГИ: { key: EventVisibility; label: string; hint: string }[] = [
 const когда = new Intl.DateTimeFormat('ru-RU', {
   weekday: 'short', day: 'numeric', month: 'short',
   hour: '2-digit', minute: '2-digit',
+  timeZone: COMPANY_TIME_ZONE,
 })
 
 const ПОВТОРЫ: { key: КлючПовтора; label: string; rule: Recurrence | null }[] = [
@@ -164,10 +161,10 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const [title, setTitle] = useState(event?.title ?? initialTitle ?? '')
   const [description, setDescription] = useState(event?.description ?? '')
   const [starts, setStarts] = useState(() => local(
-    event ? new Date(event.starts_at) : companyDay ? началоДня(startAt) : (startAt ?? new Date())))
+    event ? event.starts_at : companyDay ? началоДня(startAt) : (startAt ?? new Date())))
   const [ends, setEnds] = useState(() => local(
-    event ? new Date(event.ends_at)
-      : companyDay ? new Date(началоДня(startAt).getTime() + 24 * 60 * 60_000)
+    event ? event.ends_at
+      : companyDay ? companyDayStart(addDays(parseISO(companyDateKey(началоДня(startAt))), 1))
         : new Date((startAt ?? new Date()).getTime() + 60 * 60_000)))
   const [location, setLocation] = useState(event?.location ?? '')
   const [conference, setConference] = useState(event?.conference_url ?? '')
@@ -190,8 +187,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     if (!event) return
     setTitle(event.title)
     setDescription(event.description ?? '')
-    setStarts(local(new Date(event.starts_at)))
-    setEnds(local(new Date(event.ends_at)))
+    setStarts(local(event.starts_at))
+    setEnds(local(event.ends_at))
     setLocation(event.location ?? '')
     setConference(event.conference_url ?? '')
     setAttendees(event.attendees.map((a) => a.user_id))
@@ -214,7 +211,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
       name: имя, title: title.trim(),
       description: description.trim() || undefined,
       durationMinutes: Math.max(5, Math.round(
-        (new Date(ends).getTime() - new Date(starts).getTime()) / 60_000)),
+        (companyDateTimeToDate(ends).getTime() - companyDateTimeToDate(starts).getTime()) / 60_000)),
       location: location.trim() || undefined,
       attendeeIds: attendees,
       recurrence: ПОВТОРЫ.find((r) => r.key === повтор)?.rule ?? null,
@@ -227,8 +224,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const предложения = (event?.attendees ?? []).filter((a) => a.proposed_starts_at)
   const предложить = useMutation({
     mutationFn: () => workService.eventAction(companyId, event!.id, {
-      proposeStartsAt: new Date(starts).toISOString(),
-      proposeEndsAt: new Date(ends).toISOString(),
+      proposeStartsAt: companyDateTimeToISO(starts),
+      proposeEndsAt: companyDateTimeToISO(ends),
     }),
     onSuccess: () => {
       setПредлагаю(false)
@@ -246,10 +243,9 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   // по сетке, и тащить месяц занятости ради этого незачем.
   const searchDate = starts.slice(0, 10)
   const [окноОт, окноДо] = useMemo(() => {
-    const requested = new Date(searchDate + 'T00:00')
+    const requested = companyDateTimeToDate(searchDate + 'T00:00')
     const from = new Date(Math.max(Number.isFinite(requested.getTime()) ? requested.getTime() : 0, Date.now()))
-    const to = new Date(from)
-    to.setDate(to.getDate() + 14)
+    const to = companyDayStart(addDays(parseISO(companyDateKey(from)), 14))
     return [from.toISOString(), to.toISOString()]
   }, [searchDate])
   const attendeesKey = attendees.slice().sort().join(',')
@@ -299,11 +295,12 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
 
   const сохранить = useMutation({
     mutationFn: async () => {
-      const начало = new Date(starts).toISOString()
-      const конец = new Date(ends).toISOString()
+      const начало = companyDateTimeToISO(starts)
+      const конец = companyDateTimeToISO(ends)
       if (новая) {
         const created = await workService.createEvent(companyId, {
           title: title.trim(), startsAt: начало, endsAt: конец,
+          tz: COMPANY_TIME_ZONE,
           description: description.trim() || undefined,
           location: location.trim() || undefined,
           conferenceUrl: conference.trim() || undefined,
@@ -329,6 +326,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
       }
       return workService.eventAction(companyId, event!.id, {
         title: title.trim(), startsAt: начало, endsAt: конец,
+        tz: COMPANY_TIME_ZONE,
         description: description.trim(), location: location.trim(),
         conferenceUrl: conference.trim(), attendeeIds: attendees,
         optionalIds: optional, visibility, allDay,
@@ -361,8 +359,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
 
   const люди = (peopleQ.data?.people ?? []).filter(person => person.id !== (event?.organizer_id ?? user?.id)
     && (!peopleSearch.trim() || person.name.toLocaleLowerCase('ru').includes(peopleSearch.trim().toLocaleLowerCase('ru'))))
-  const startMs = new Date(starts).getTime()
-  const endMs = new Date(ends).getTime()
+  const startMs = companyDateTimeToDate(starts).getTime()
+  const endMs = companyDateTimeToDate(ends).getTime()
   let formError = !Number.isFinite(startMs) || !Number.isFinite(endMs) ? 'Укажите начало и конец встречи.'
     : endMs <= startMs ? 'Конец встречи должен быть позже начала.'
       : повтор !== 'none' && until && until < starts.slice(0, 10) ? 'Повторение не может закончиться раньше первой встречи.' : ''
@@ -372,30 +370,31 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   }
   const changeStart = (value: string) => {
     const next = allDay && value ? value + 'T00:00' : value
-    const delta = new Date(next).getTime() - startMs
+    const delta = companyDateTimeToDate(next).getTime() - startMs
     setStarts(next)
     if (Number.isFinite(delta) && Number.isFinite(endMs)) setEnds(local(new Date(endMs + delta)))
   }
   const toggleAllDay = (checked: boolean) => {
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return
-    const start = new Date(startMs)
-    const end = new Date(endMs)
     setAllDay(checked)
     if (checked) {
-      start.setHours(0, 0, 0, 0)
-      const endsAtMidnight = end.getHours() === 0 && end.getMinutes() === 0
-      end.setHours(0, 0, 0, 0)
-      if (!endsAtMidnight) end.setDate(end.getDate() + 1)
+      const startDate = starts.slice(0, 10)
+      const endDate = ends.slice(0, 10)
+      const endsAtMidnight = ends.slice(11, 16) === '00:00'
+      const lastDay = endsAtMidnight ? parseISO(endDate) : addDays(parseISO(endDate), 1)
+      setStarts(`${startDate}T00:00`)
+      setEnds(`${calendarDayKey(lastDay)}T00:00`)
     } else {
-      start.setHours(10, 0, 0, 0)
-      end.setTime(start.getTime() + 60 * 60_000)
+      const start = companyDateTimeToDate(`${starts.slice(0, 10)}T10:00`)
+      setStarts(`${starts.slice(0, 10)}T10:00`)
+      setEnds(local(new Date(start.getTime() + 60 * 60_000)))
     }
-    setStarts(local(start)); setEnds(local(end))
   }
-  const endDate = Number.isFinite(endMs) ? (() => { const date = new Date(endMs); date.setDate(date.getDate() - 1); return local(date).slice(0, 10) })() : ''
+  const endDate = Number.isFinite(endMs) ? (ends.slice(11, 16) === '00:00'
+    ? calendarDayKey(addDays(parseISO(ends.slice(0, 10)), -1)) : ends.slice(0, 10)) : ''
   const subjectHref = event?.subject_ref ? workService.refHref(event.subject_ref) : null
   const время_поехало = !новая && (
-    local(new Date(event!.starts_at)) !== starts || local(new Date(event!.ends_at)) !== ends)
+    local(event!.starts_at) !== starts || local(event!.ends_at) !== ends)
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
@@ -453,7 +452,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
                     if (!allDay) { setEnds(d + 'T' + ends.slice(11, 16)); return }
                     // «Весь день» хранит конец следующим днём: человек называет последний
                     // день встречи, а система держит границу интервала.
-                    const end = new Date(d + 'T00:00'); end.setDate(end.getDate() + 1); setEnds(local(end))
+                    setEnds(`${calendarDayKey(addDays(parseISO(d), 1))}T00:00`)
                   }} />
                 {!allDay && (
                   <TimeField className="w-28 shrink-0" disabled={!мой} aria-label="Время окончания"
@@ -470,7 +469,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
                 способ задать конец: одно нажатие против набора четырёх цифр. */}
             {!allDay && мой && [30, 60, 90].map(minutes => <Button key={minutes} variant="outline" size="sm" disabled={!Number.isFinite(startMs)} onClick={() => setEnds(local(new Date(startMs + minutes * 60_000)))}>{minutes} мин</Button>)}
           </div>
-          {(!phone || more) && <p className="text-sm text-muted-foreground">Время показано в часовом поясе устройства: {Intl.DateTimeFormat().resolvedOptions().timeZone}.</p>}
+          {(!phone || more) && <p className="text-sm text-muted-foreground">Время указано по Москве (часовой пояс компании).</p>}
           {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
 
           {время_поехало && event!.attendees.length > 1 && (
@@ -524,7 +523,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
                     setAttendees(t.attendee_ids)
                     setДлительность(t.duration_minutes)
                     setПовтор(ключПовтора(t.recurrence))
-                    const н = new Date(starts)
+                    const н = companyDateTimeToDate(starts)
                     setEnds(local(new Date(н.getTime() + t.duration_minutes * 60_000)))
                   }}>
                   {t.name}
@@ -749,8 +748,8 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
                 {a.comment && <span className="text-muted-foreground">{a.comment}</span>}
                 <Button size="sm" variant="outline" className="h-7 px-2 text-xs"
                   onClick={() => {
-                    setStarts(local(new Date(a.proposed_starts_at!)))
-                    setEnds(local(new Date(a.proposed_ends_at!)))
+                    setStarts(local(a.proposed_starts_at!))
+                    setEnds(local(a.proposed_ends_at!))
                     toast.info('Время подставлено — сохраните встречу, чтобы перенести')
                   }}>
                   Перенести на это

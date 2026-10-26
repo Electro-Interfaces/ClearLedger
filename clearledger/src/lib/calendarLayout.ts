@@ -1,17 +1,21 @@
+import { companyDayStart, companyDayTime, companyTime } from './companyTime'
+
 type TimedEvent = { id: string; starts_at: string; ends_at: string }
 
 export function eventDaySegment(event: TimedEvent, day: Date) {
-  const from = new Date(day)
-  from.setHours(0, 0, 0, 0)
-  const to = new Date(from)
-  to.setDate(to.getDate() + 1)
+  const from = companyDayStart(day)
+  const nextDay = new Date(day)
+  nextDay.setDate(nextDay.getDate() + 1)
+  const to = companyDayStart(nextDay)
   const start = new Date(Math.max(new Date(event.starts_at).getTime(), from.getTime()))
   const end = new Date(Math.min(new Date(event.ends_at).getTime(), to.getTime()))
   if (!(start < end)) return null
+  const [startHour, startMinute] = companyTime(start).split(':').map(Number)
+  const [endHour, endMinute] = companyTime(end).split(':').map(Number)
   return {
     start, end,
-    startMinute: start.getHours() * 60 + start.getMinutes(),
-    endMinute: end.getTime() === to.getTime() ? 1440 : end.getHours() * 60 + end.getMinutes(),
+    startMinute: startHour * 60 + startMinute,
+    endMinute: end.getTime() === to.getTime() ? 1440 : endHour * 60 + endMinute,
     continues: new Date(event.starts_at) < from,
   }
 }
@@ -60,9 +64,7 @@ export function recurrenceTimes(
       || (rule.mode === 'weekly' && (day.getDay() + 6) % 7 === rule.weekday)
       || (rule.mode === 'monthly' && day.getDate() === rule.day))
     .map(day => {
-      const at = new Date(day)
-      at.setHours(hour || 0, minute || 0, 0, 0)
-      return at
+      return companyDayTime(day, hour || 0, minute || 0)
     })
     .filter(at => at > after)
 }

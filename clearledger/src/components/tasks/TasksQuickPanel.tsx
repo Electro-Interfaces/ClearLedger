@@ -49,6 +49,7 @@ import { useIsMobile } from '@/hooks/use-mobile'
 import { useSectionOpen } from '@/hooks/useSectionOpen'
 import { SearchPicker } from '@/components/tasks/SearchPicker'
 import { workCounts } from '@/lib/workCounts'
+import { calendarDayKey, companyDayStart, companyTime, companyTodayDate } from '@/lib/companyTime'
 
 /** Срок словами: «сегодня» / «завтра» / «просрочена на 3 дн» — точная дата тут лишняя. */
 function dueText(due: string | null, overdue: boolean): string | null {
@@ -731,8 +732,10 @@ function TaskLines({ rows, loading, view, companyId, onOpen, onChanged }: {
 function DayAside({ companyId, onOpen, width }: {
   companyId: string; onOpen: (href: string) => void; width: number
 }) {
-  const from = new Date(); from.setHours(0, 0, 0, 0)
-  const to = new Date(); to.setHours(23, 59, 59, 999)
+  const today = companyTodayDate()
+  const from = companyDayStart(today)
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
+  const to = companyDayStart(tomorrow)
 
   const remindersQ = useQuery({
     queryKey: ['reminders', companyId, 'pending'],
@@ -741,7 +744,7 @@ function DayAside({ companyId, onOpen, width }: {
     staleTime: 60 * 1000,
   })
   const eventsQ = useQuery({
-    queryKey: ['events', companyId, from.toISOString().slice(0, 10)],
+    queryKey: ['events', companyId, calendarDayKey(today)],
     queryFn: () => workService.listEvents(companyId, from.toISOString(), to.toISOString()),
     enabled: !!companyId,
     staleTime: 60 * 1000,
@@ -800,7 +803,7 @@ function DayAside({ companyId, onOpen, width }: {
               <li key={e.id} className="rounded-md border px-2 py-1.5">
                 <p className="truncate text-sm text-foreground">{e.title}</p>
                 <p className="text-xs text-muted-foreground">
-                  {e.all_day ? 'весь день' : `${hhmm(e.starts_at)} — ${hhmm(e.ends_at)}`}
+                  {e.all_day ? 'весь день' : `${companyTime(e.starts_at)} — ${companyTime(e.ends_at)}`}
                 </p>
               </li>
             ))}

@@ -15,13 +15,14 @@
  * заняло бы сутки высотой и вытеснило всё остальное.
  */
 import { useEffect, useRef, useState } from 'react'
-import { format, isSameDay, isToday } from 'date-fns'
+import { format } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { NotebookPen, Repeat, Video } from 'lucide-react'
 import type { CalendarEvent } from '@/services/workService'
 import type { SpaceTask } from '@/services/tasksService'
 import { cn } from '@/lib/utils'
 import { layoutDayEvents } from '@/lib/calendarLayout'
+import { companyDayTime, companyMinutesNow, companyTime, isCompanyDay, isCompanyToday } from '@/lib/companyTime'
 
 /** Высота часа. Меньше — подписи не читаются, больше — рабочий день не влезает
  *  на экран целиком, а именно его и смотрят. */
@@ -48,7 +49,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
     if (прокрутка.current) прокрутка.current.scrollTop = 8 * ЧАС_PX
   }, [])
   // Линия «сейчас» едет сама: неделя открыта часами, и застывшая линия врёт.
-  const [сейчас, setСейчас] = useState(() => new Date())
+  const [, setСейчас] = useState(() => new Date())
   useEffect(() => {
     const timer = setInterval(() => setСейчас(new Date()), 60_000)
     return () => clearInterval(timer)
@@ -69,7 +70,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
             className="min-w-0 flex-1 px-0.5 py-1.5 text-center text-[12px] font-medium uppercase">
             <span className="text-muted-foreground">{format(d, 'EEEEEE', { locale: ru })}</span>
             <span className={cn('ml-1.5 tabular-nums',
-              isToday(d) ? 'rounded bg-primary px-1 text-primary-foreground'
+              isCompanyToday(d) ? 'rounded bg-primary px-1 text-primary-foreground'
                 : 'text-foreground')}>
               {format(d, 'd')}
             </span>
@@ -85,10 +86,10 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
         </div>
         {days.map((d) => {
           const дневные = сверху.filter((e) => пересекаетДень(e, d))
-          const сроки = tasks.filter((t) => t.due_at && isSameDay(new Date(t.due_at), d))
+          const сроки = tasks.filter((t) => t.due_at && isCompanyDay(t.due_at, d))
           const записи = сроки.filter((t) => t.visibility === 'personal')
           const рабочие = сроки.filter((t) => t.visibility !== 'personal')
-          const повторы = repeats.filter((r) => isSameDay(r.at, d))
+          const повторы = repeats.filter((r) => isCompanyDay(r.at, d))
           return (
             <div key={d.toISOString()}
               className="min-h-[1.75rem] flex-1 space-y-0.5 border-l border-border p-0.5">
@@ -110,7 +111,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
                 </button>
               )}
               {повторы.map((r) => (
-                <span key={r.id} title={`Повторяющееся дело: поставится в ${format(r.at, 'HH:mm')}`}
+                <span key={r.id} title={`Повторяющееся дело: поставится в ${companyTime(r.at)}`}
                   className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground">
                   <Repeat className="h-3 w-3 shrink-0" /><span className="truncate">{r.title}</span>
                 </span>
@@ -140,15 +141,13 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
           </div>
           {days.map((d) => (
             <div key={d.toISOString()} className={cn('relative flex-1 border-l border-border',
-              isToday(d) ? 'bg-primary/5' : d.getDay() % 6 === 0 && 'bg-muted/30')}>
-              {isToday(d) && <div aria-hidden className="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-destructive"
-                style={{ top: (сейчас.getHours() * 60 + сейчас.getMinutes()) / 60 * ЧАС_PX }} />}
+              isCompanyToday(d) ? 'bg-primary/5' : d.getDay() % 6 === 0 && 'bg-muted/30')}>
+              {isCompanyToday(d) && <div aria-hidden className="pointer-events-none absolute inset-x-0 z-10 border-t-2 border-destructive"
+                style={{ top: companyMinutesNow() / 60 * ЧАС_PX }} />}
               {ЧАСЫ.map((h) => (
                 <div key={h} style={{ height: ЧАС_PX }}
                   onClick={() => {
-                    const at = new Date(d)
-                    at.setHours(h, 0, 0, 0)
-                    onAdd(at)
+                    onAdd(companyDayTime(d, h))
                   }}
                   className="border-b border-border/40 hover:bg-accent/40" />
               ))}
@@ -176,7 +175,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
                             : foreign?.has(e.id) ? 'border-border bg-background text-foreground hover:bg-accent'
                             : 'border-primary/40 bg-primary/15 text-foreground hover:bg-primary/25')}>
                       <span className="tabular-nums text-muted-foreground">
-                        {continues ? 'Продолжение' : format(н, 'HH:mm')}
+                        {continues ? 'Продолжение' : companyTime(н)}
                       </span>{' '}
                       {e.title}
                       {e.conference_url && e.status !== 'cancelled' && (
@@ -195,8 +194,9 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], onEvent, 
 
 /** Встреча задевает день: командировка идёт неделю. */
 function пересекаетДень(e: CalendarEvent, day: Date): boolean {
-  const с = new Date(day); с.setHours(0, 0, 0, 0)
-  const по = new Date(с); по.setDate(по.getDate() + 1)
+  const с = companyDayTime(day, 0)
+  const nextDay = new Date(day); nextDay.setDate(nextDay.getDate() + 1)
+  const по = companyDayTime(nextDay, 0)
   return new Date(e.starts_at) < по && new Date(e.ends_at) > с
 }
 
