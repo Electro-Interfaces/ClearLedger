@@ -373,7 +373,7 @@ function MarketMap() {
   const ourPoints = useMemo(() => {
     if (!filters.showOurs) return []
     return (ours.data?.points ?? []).filter((p) => {
-      if (our.status.length > 0 && !our.status.includes(p.status)) return false
+      if (our.status.length > 0 && (p.status == null || !our.status.includes(p.status))) return false
       if (our.speedClass !== 'all' && p.speedClass !== our.speedClass) return false
       if (our.brand.length > 0 && !our.brand.includes(p.brand ?? '')) return false
       if (our.load !== 'all') {
