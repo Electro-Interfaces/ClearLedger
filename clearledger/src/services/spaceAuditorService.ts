@@ -81,6 +81,8 @@ export interface AuditorHealth {
   workshop_all?: boolean
   /** Поднят ли распознаватель речи в стеке (профиль `asr`). */
   dictation?: boolean
+  /** Движок стека: от него зависит, как вызвать навык в мастерской (`$имя` / `/имя`). */
+  engine?: 'claude' | 'codex'
   authProblem?: string
 }
 

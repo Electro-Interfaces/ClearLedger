@@ -1,7 +1,8 @@
 /**
  * Мастерская — настоящий Claude Code в терминале, а не наша прослойка поверх него.
  *
- * Здесь намеренно НЕТ своей логики: ни выбора навыков, ни разбора ответа, ни находок.
+ * Здесь намеренно НЕТ своей логики: ни разбора ответа, ни находок. Кнопка «Навык…» лишь
+ * печатает вызов (`$имя`) в приглашение, как диктовка, — сам вызов делает CLI.
  * Всё, что умеет CLI — сессии, `/clear`, `/login`, горячие клавиши, новые версии, — идёт
  * как есть. Прослойка отставала бы от CLI и молча меняла его поведение; на этом мы уже
  * обожглись, когда мастерская из панели была потоком текста без tty.
@@ -87,6 +88,14 @@ export function AuditorTerminal() {
   const { data: health } = useQuery({
     queryKey: ['auditor-health'], queryFn: auditor.getHealth, staleTime: 60_000, retry: false,
   })
+  // Навыки пространства (`/work/.claude/skills`) — тот же список, что в «Методах».
+  // Кнопка только ПЕЧАТАЕТ вызов в приглашение, как диктовка: CLI остаётся как есть.
+  const { data: methods } = useQuery({
+    queryKey: ['auditor-methods', companyId], queryFn: () => auditor.getMethods(companyId),
+    enabled: !!companyId, staleTime: 60_000, retry: false,
+  })
+  const ourSkills = (methods ?? []).filter((m) => m.scope !== 'external')
+  const skillPrefix = health?.engine === 'claude' ? '/' : '$'
 
   // Зависим от того, ЕСТЬ ли компания, а не от того, какая именно: терминал должен
   // подняться, когда она загрузилась, и пережить переключение организации в шапке.
@@ -436,6 +445,15 @@ export function AuditorTerminal() {
           <span className="ml-2">
             <DictateButton title="Продиктовать команду" onText={typeIntoTerminal} />
           </span>
+        )}
+        {state === 'open' && ourSkills.length > 0 && (
+          <select value="" aria-label="Вызвать навык"
+            title="Вставить вызов навыка в строку ввода — Enter нажмёте сами"
+            onChange={(e) => { if (e.target.value) typeIntoTerminal(`${skillPrefix}${e.target.value} `) }}
+            className="h-6 max-w-44 shrink-0 rounded-md border border-border/60 bg-background px-1 text-xs text-foreground hover:bg-accent">
+            <option value="">Навык…</option>
+            {ourSkills.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
         )}
         {/* 🔴 Про мышь человек должен прочитать ВСЕГДА, а не только там, где поднят
             распознаватель речи и экран шире 1280.
