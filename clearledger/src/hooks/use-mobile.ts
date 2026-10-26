@@ -27,8 +27,15 @@ function useMediaMatch(query: string) {
   return matches
 }
 
+/**
+ * Телефон — узкий экран ИЛИ невысокий под палец: повёрнутый телефон шире 768 px,
+ * и по одной ширине получал раскладку компьютера, где шапки съедали весь экран
+ * (QA календаря 27.10.2026). Планшет и ноутбук выше 500 px не задеваются.
+ */
+export const PHONE_QUERY = `(max-width: ${MOBILE_BREAKPOINT - 1}px), (max-height: 500px) and (pointer: coarse)`
+
 export function useIsMobile() {
-  return useMediaMatch(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+  return useMediaMatch(PHONE_QUERY)
 }
 
 /**

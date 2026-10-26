@@ -177,17 +177,22 @@ export function DocsLayout() {
   const { company, isCompanyAdmin } = useCompany()
   const qc = useQueryClient()
   const narrow = useMaxWidth(1024)
-  const [collapsedOwn, setCollapsed] = useState(
-    () => localStorage.getItem(COLLAPSE_KEY) === '1')
+  const tight = useMaxWidth(1439)
+  const [savedCollapse, setSavedCollapse] = useState<string | null>(
+    () => localStorage.getItem(COLLAPSE_KEY))
   // Развёрнутый экран сворачивает колонку до полосы: пункты остаются под рукой.
   const [expanded, setExpanded] = useExpandedWorkspace()
-  const collapsed = collapsedOwn || expanded
 
   const route = docsRouteOf(pathname)
   const views = (DOCS_VIEWS[route] ?? []).filter(
     (view) => (route !== '/docs/overview' || !['discipline', 'calendar'].includes(view.key) || isCompanyAdmin)
       && !view.hidden)
   const active = useDocsView(route)
+  // У календаря своя колонка (мини-месяц, календари): на ноутбуке до 1440 px две
+  // колонки слева сжимали месяц до «Инте…» (QA 27.10.2026). Пока человек сам не
+  // выбрал, меню раздела там свёрнуто; его выбор дальше главнее.
+  const collapsedOwn = savedCollapse === '1' || (savedCollapse === null && active === 'calendar' && tight)
+  const collapsed = collapsedOwn || expanded
 
   // Сохранённые отборы общей ленты — продолжение пунктов, а не отдельный экран:
   // «Входящие за квартал» и «Разработка TF» это такие же вопросы к работе, как
@@ -334,10 +339,12 @@ export function DocsLayout() {
     }, { replace: true })
   }, [active, params, route, setParams, isCompanyAdmin])
 
-  const toggle = () => expanded ? setExpanded(false) : setCollapsed((c) => {
-    localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
-    return !c
-  })
+  const toggle = () => {
+    if (expanded) { setExpanded(false); return }
+    const next = collapsedOwn ? '0' : '1'
+    try { localStorage.setItem(COLLAPSE_KEY, next) } catch { /* хранилище недоступно */ }
+    setSavedCollapse(next)
+  }
 
   // Пункт пишется в адрес — на экран можно дать ссылку. Открытую карточку
   // (`?doc=`) при смене пункта закрываем: иначе она висит поверх другого списка.

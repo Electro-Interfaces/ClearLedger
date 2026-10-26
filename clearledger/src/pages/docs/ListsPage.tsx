@@ -69,7 +69,15 @@ export function ListsPage({ mode = 'lists' }: { mode?: ListsMode }) {
   const [новая, setНовая] = useState('')
   // Пришли по плюсу из меню — поле открыто сразу: искать на экране ещё одну
   // кнопку с тем же смыслом человек не должен.
-  const [заводим, setЗаводим] = useState(() => params.get('new') === '1')
+  const просятНовую = params.get('new') === '1'
+  const [заводим, setЗаводим] = useState(просятНовую)
+  // Экран /docs/work не пересоздаётся при смене query: плюс из меню, нажатый уже
+  // на подборках, должен открыть поле и здесь.
+  const [былоНовую, setБылоНовую] = useState(просятНовую)
+  if (просятНовую !== былоНовую) {
+    setБылоНовую(просятНовую)
+    if (просятНовую) setЗаводим(true)
+  }
   const [переименование, setПереименование] = useState('')
   const [правим, setПравим] = useState<string | null>(null)
   const [имя, setИмя] = useState('')

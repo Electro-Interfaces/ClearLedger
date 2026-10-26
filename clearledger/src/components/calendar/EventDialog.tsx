@@ -498,6 +498,24 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const [доДругогоДня, setДоДругогоДня] = useState(false)
   const разныеДни = !allDay && starts.slice(0, 10) !== ends.slice(0, 10)
   const датаОкончания = allDay || разныеДни || доДругогоДня
+  // День окончания человек выбрал сам (поле даты, «До другого дня», встреча уже
+  // на несколько дней) — время окончания его не трогает.
+  const [датаКонцаВручную, setДатаКонцаВручную] = useState(() => !новая && разныеДни)
+  /**
+   * Время окончания ложится на день начала, если так конец позже начала; иначе —
+   * на следующий, но только для встречи через полночь не длиннее 12 часов.
+   * Раньше время писалось в дату, которую сам сдвинул перенос начала: «23:00» →
+   * конец 00:00 завтра, затем «23:30» давало встречу на 24,5 часа без
+   * предупреждения (QA 27.10.2026).
+   */
+  const changeEndTime = (t: string) => {
+    if (датаКонцаВручную || доДругогоДня) { setEnds(ends.slice(0, 10) + 'T' + t); return }
+    const деньНачала = starts.slice(0, 10)
+    const тотЖе = `${деньНачала}T${t}`
+    const назавтра = `${calendarDayKey(addDays(parseISO(деньНачала), 1))}T${t}`
+    const черезПолночь = companyDateTimeToDate(назавтра).getTime() - startMs
+    setEnds(companyDateTimeToDate(тотЖе).getTime() > startMs || !(черезПолночь <= 12 * 3_600_000) ? тотЖе : назавтра)
+  }
 
   // Черновик новой встречи — в сетку календаря, пока его собирают.
   useEffect(() => {
@@ -574,7 +592,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
             aria-label={allDay ? 'Последний день' : 'Дата окончания'}
             value={allDay ? endDate : ends.slice(0, 10)}
             onChange={(d) => {
-              if (!allDay) { setEnds(d + 'T' + ends.slice(11, 16)); return }
+              if (!allDay) { setДатаКонцаВручную(true); setEnds(d + 'T' + ends.slice(11, 16)); return }
               // «Весь день» хранит конец следующим днём: человек называет последний
               // день встречи, а система держит границу интервала.
               setEnds(`${calendarDayKey(addDays(parseISO(d), 1))}T00:00`)
@@ -583,7 +601,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
         {!allDay && (
           <TimeField className="w-24" disabled={!мой} aria-label="Время окончания"
             value={ends.slice(11, 16)}
-            onChange={(t) => setEnds(ends.slice(0, 10) + 'T' + t)} />
+            onChange={changeEndTime} />
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -951,8 +969,9 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     <section aria-label="Отмена встречи" className="space-y-2 rounded-lg border border-destructive/40 p-3">
       <p className="text-sm font-medium">{event?.recurrence ? 'Отменить эту встречу и будущие встречи серии?' : 'Отменить встречу?'}</p>
       <p className="text-sm text-muted-foreground">
-        Участники получат сообщение и письмо об отмене; до конца дня встреча останется у них
-        зачёркнутой с этой причиной, потом скроется. Личные напоминания будут сняты.
+        {причинаОбязательна
+          ? 'Участники получат сообщение и письмо об отмене; до конца дня встреча останется у них зачёркнутой с этой причиной, потом скроется. Личные напоминания будут сняты.'
+          : 'Приглашённых нет — писем никто не получит. До конца дня встреча останется в календаре зачёркнутой, потом скроется; напоминания будут сняты.'}
       </p>
       <Input aria-label="Причина отмены"
         placeholder={причинаОбязательна ? 'Причина отмены — её увидят участники' : 'Причина отмены — необязательно'}
@@ -1023,7 +1042,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     )}
     {/* «Занятость участников» — у кнопки сохранения, как в настольных календарях:
         время подбирают последним шагом, когда состав уже собран. */}
-    {мой && attendees.length > 0 && полно && visibility !== 'personal' && (
+    {мой && attendees.some((id) => id !== организаторId) && полно && visibility !== 'personal' && (
       <Button size="sm" variant="outline" disabled={busyQ.isFetching} onClick={() => {
         setИщем(true); void busyQ.refetch()
         document.getElementById(подборId)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })

@@ -46,7 +46,10 @@ export function KeepAliveOutlet() {
 
   const pinnedKeys = tabs.map((tab) => tab.key)
   const keepKey = pinnedKeys.join('|')
-  const explorer = /(?:^|\/)files\/?$/.test(pathname)
+  // Экраны, которые сами держат своё состояние в query (вид, дата, открытая
+  // карточка): смена query обновляет живой экран, а не пересоздаёт его. Иначе
+  // календарь терял поиск и пролистанный мини-месяц на каждом «›» (QA 27.10.2026).
+  const explorer = /(?:^|\/)(?:files|docs\/work)\/?$/.test(pathname)
   const [slot, setSlot] = useState(() => ({ path: pathname, url: activeKey, key: activeKey }))
   let liveKey = slot.key
   if (slot.url !== activeKey || slot.path !== pathname

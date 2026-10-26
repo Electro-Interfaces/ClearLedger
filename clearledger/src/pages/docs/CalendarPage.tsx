@@ -5,7 +5,8 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   addDays, addMonths, addWeeks, addYears, eachDayOfInterval, endOfMonth, endOfWeek, format,
-  isSameDay, isSameMonth, isValid, parseISO, startOfDay, startOfMonth, startOfWeek, startOfYear,
+  getDaysInMonth, isSameDay, isSameMonth, isValid, parseISO, setDate, startOfDay, startOfMonth,
+  startOfWeek, startOfYear,
 } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import {
@@ -28,7 +29,7 @@ import * as workService from '@/services/workService'
 import type { CalendarEvent } from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { cn } from '@/lib/utils'
-import { useIsMobile } from '@/hooks/use-mobile'
+import { PHONE_QUERY, useIsMobile } from '@/hooks/use-mobile'
 import { eventDaySegment, recurrenceTimes } from '@/lib/calendarLayout'
 import { видимаВКалендаре } from '@/lib/calendarVisibility'
 import {
@@ -88,13 +89,21 @@ export function CalendarPage() {
   const qc = useQueryClient()
   const { user } = useAuth()
   const [params, setParams] = useSearchParams()
-  const [defaultMode] = useState<Mode>(() => window.matchMedia('(max-width: 767px)').matches ? 'agenda' : 'month')
+  const [defaultMode] = useState<Mode>(() => window.matchMedia(PHONE_QUERY).matches ? 'agenda' : 'month')
   const requestedMode = params.get('calendarMode')
   const mode = requestedMode && Object.hasOwn(MODES, requestedMode) ? requestedMode as Mode : defaultMode
   const requestedDate = params.get('date') ?? ''
   const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) && isValid(parseISO(requestedDate))
     ? startOfDay(parseISO(requestedDate)) : companyTodayDate()
-  const [слои, setСлои] = useState<Слои>(() => начальныеСлои(params.get('calendarScope')))
+  const scopeParam = params.get('calendarScope')
+  const [слои, setСлои] = useState<Слои>(() => начальныеСлои(scopeParam))
+  // Экран не пересоздаётся при смене адреса: ссылка со старым параметром,
+  // открытая поверх уже открытого календаря, должна переключить слои и здесь.
+  const [былScope, setБылScope] = useState(scopeParam)
+  if (scopeParam !== былScope) {
+    setБылScope(scopeParam)
+    if (scopeParam) setСлои(начальныеСлои(scopeParam))
+  }
   const personal = слои.mine
   const eventId = params.get('event')
   const [search, setSearch] = useState('')
@@ -113,6 +122,7 @@ export function CalendarPage() {
   const [companyDay, setCompanyDay] = useState(false)
   /** Встреча, которую собирают в панели: сетка рисует её на месте. */
   const [draft, setDraft] = useState<{ start: Date; end: Date; title: string } | null>(null)
+  const [желаемыйДень, setЖелаемыйДень] = useState<{ from: string; day: number } | null>(null)
   // Скрываются ПРОШЕДШИЕ отменённые: именно они накапливались в сетке и мешали
   // назначать новую встречу на то же время (РусГидро, 14.10.2026). Отменённая
   // встреча, день которой ещё не прошёл, видна всегда и без этой галочки:
@@ -298,8 +308,17 @@ export function CalendarPage() {
     startMeeting(at, forCompany)
   }
   const move = (step: number) => {
-    const at = mode === 'month' ? addMonths(anchor, step) : mode === 'year' ? addYears(anchor, step)
-      : mode === 'day' ? addDays(anchor, step) : addWeeks(anchor, step)
+    if (mode === 'month' || mode === 'year') {
+      // Число месяца помним, пока листают: 31 января → 28 февраля → снова 31 января,
+      // а не 28-е (QA 27.10.2026). Любой другой переход даты сбрасывает память.
+      const день = желаемыйДень?.from === dateKey ? желаемыйДень.day : anchor.getDate()
+      const месяц = mode === 'month' ? addMonths(startOfMonth(anchor), step) : addYears(startOfMonth(anchor), step)
+      const key = format(setDate(месяц, Math.min(день, getDaysInMonth(месяц))), 'yyyy-MM-dd')
+      setЖелаемыйДень({ from: key, day: день })
+      update({ date: key })
+      return
+    }
+    const at = mode === 'day' ? addDays(anchor, step) : addWeeks(anchor, step)
     update({ date: format(at, 'yyyy-MM-dd') })
   }
   if (!companyId) return null
@@ -384,7 +403,7 @@ export function CalendarPage() {
         onClick={() => move(-1)}><ChevronLeft className="h-5 w-5" /></Button>
 
       <label className="relative min-w-0 flex-1">
-        <span className="block truncate text-center text-base font-semibold capitalize">{caption}</span>
+        <span className="block truncate text-center text-base font-semibold first-letter:uppercase">{caption}</span>
         <input type="date" aria-label="Перейти к дате" value={dateKey}
           onChange={e => { if (e.target.value) update({ date: e.target.value }) }}
           className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
@@ -594,7 +613,7 @@ export function CalendarPage() {
         {/* Заголовок дня — разделитель списка. Плюс у каждого дня убран с телефона
             (замечание МАГа 07.09.2026): три одинаковые кнопки читались как винегрет. */}
         <div className="mb-1 flex items-center gap-2 border-b border-border pb-1">
-          <button className={cn('min-h-10 flex-1 text-left text-sm font-semibold capitalize hover:underline', isCompanyToday(day) && 'text-primary')} onClick={() => openDay(day)}>{format(day, 'EEEE, d MMMM', { locale: ru })}</button>
+          <button className={cn('min-h-10 flex-1 text-left text-sm font-semibold first-letter:uppercase hover:underline', isCompanyToday(day) && 'text-primary')} onClick={() => openDay(day)}>{format(day, 'EEEE, d MMMM', { locale: ru })}</button>
           {!phone && <Button variant="ghost" size="icon" aria-label={`Добавить встречу ${format(day, 'd MMMM', { locale: ru })}`} onClick={() => createAt(day)}><Plus className="h-4 w-4" /></Button>}
         </div>
         {meetings.map(event => <button key={event.id} onClick={() => open(event)} className="flex min-h-14 w-full items-start gap-3 border-b border-border/60 px-1 py-3 text-left hover:bg-accent">
@@ -643,7 +662,9 @@ export function CalendarPage() {
         onEvent={open} onAdd={at => startMeeting(at)} onDay={day => openDay(day, mode === 'week' ? 'day' : 'agenda')} />
     </div> : <div className="flex min-h-0 flex-1 flex-col overflow-auto rounded-xl border border-border bg-card">
       <div className="grid grid-cols-7 border-b border-border">{days.slice(0, 7).map(day => <div key={day.toISOString()} className={cn('px-2 py-2 text-sm font-medium', day.getDay() % 6 === 0 ? 'text-muted-foreground/80' : 'text-muted-foreground')}>{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
-      <div className="grid flex-1 grid-cols-7 [grid-auto-rows:minmax(5.5rem,1fr)]">{days.map(day => {
+      {/* На телефоне в клетке только точки: высокие строки уводили текущую
+          неделю под край экрана (QA 27.10.2026), шесть недель должны влезать. */}
+      <div className={cn('grid flex-1 grid-cols-7', phone ? '[grid-auto-rows:minmax(3rem,1fr)]' : '[grid-auto-rows:minmax(5.5rem,1fr)]')}>{days.map(day => {
         const meetings = events.filter(e => eventDaySegment(e, day))
         const due = tasks.filter(t => t.due_at && isCompanyDay(t.due_at, day))
         const planned = plan[format(day, 'yyyy-MM-dd')] ?? 0
