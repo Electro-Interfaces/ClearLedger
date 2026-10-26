@@ -257,7 +257,7 @@ export const listMarketSites = (
   companyId: string,
   params?: {
     kind?: string; city?: string; bbox?: string; limit?: number; offset?: number
-    site_class?: string; current_type?: string; operator_id?: string
+    site_class?: string; current_type?: string; operator_id?: string; operator_ids?: string
     min_power?: number; alive?: string; search?: string
   },
 ) => get<{ sites: MarketSite[]; total: number; returned: number; offset: number; limit: number }>(
