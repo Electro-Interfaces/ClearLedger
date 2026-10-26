@@ -233,7 +233,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
         }
       }} />}
 
-      {!specialized && s.kind !== 'integration' && <TechConnectionStatus view={s.techConnection?.methodView} fallback={s.techConnection?.statusLabel} onOpen={() => onTab('tp')} />}
+      {!specialized && s.kind !== 'integration' && <TechConnectionStatus view={workspace.data?.tech_connection} onOpen={() => onTab('tp')} />}
 
       {/* Вкладки. Точка отмечает те, где на этой стадии есть незакрытая работа:
           девять одинаковых кнопок не подсказывают, с какой начинать.
