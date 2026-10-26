@@ -20,8 +20,8 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  addDays, eachDayOfInterval, format, isBefore, isSameDay, isSameMonth, isToday,
-  isWeekend, startOfDay, startOfWeek,
+  addDays, eachDayOfInterval, format, isBefore, isSameDay, isSameMonth,
+  isWeekend, startOfWeek,
 } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { CalendarDays, Loader2, MapPin, UserCheck, UserPlus, Video } from 'lucide-react'
@@ -33,6 +33,7 @@ import { PlacedList } from '@/components/docs/PlacedList'
 import * as workService from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { cn } from '@/lib/utils'
+import { companyDayStart, companyDayTime, companyTime, companyTodayDate, isCompanyDay, isCompanyToday } from '@/lib/companyTime'
 
 /** Пять недель от понедельника текущей: горизонт, на который реально переносят,
  *  а дальше срок ставят в карточке, обдумав. Недели остаются неделями. */
@@ -54,23 +55,23 @@ export function CalendarDock() {
   const я = user?.id ?? ''
   const qc = useQueryClient()
   const companyId = company?.id ?? ''
-  const [день, setДень] = useState(() => startOfDay(new Date()))
+  const [день, setДень] = useState(() => companyTodayDate())
   const [наведён, setНаведён] = useState<string | null>(null)
 
   // Сетка начинается с понедельника ТЕКУЩЕЙ недели: календарь, у которого первая
   // строка начинается со среды, перестаёт читаться как календарь.
-  const начало = useMemo(() => startOfWeek(startOfDay(new Date()), { weekStartsOn: 1 }), [])
+  const начало = useMemo(() => startOfWeek(companyTodayDate(), { weekStartsOn: 1 }), [])
   const дни = useMemo(() => eachDayOfInterval({
     start: начало, end: addDays(начало, НЕДЕЛИ * 7 - 1),
   }), [начало])
-  const сегодня = useMemo(() => startOfDay(new Date()), [])
+  const сегодня = useMemo(() => companyTodayDate(), [])
 
   const события = useQuery({
     // Границы окна — часть ключа: вкладка, оставленная открытой через полночь,
     // иначе продолжает показывать вчерашнюю сетку.
     queryKey: ['calendar', companyId, 'dock', workService.todayKey(дни[0])],
     queryFn: () => workService.listEvents(companyId,
-      дни[0].toISOString(), addDays(дни[0], НЕДЕЛИ * 7).toISOString()),
+      companyDayStart(дни[0]).toISOString(), companyDayStart(addDays(дни[0], НЕДЕЛИ * 7)).toISOString()),
     enabled: !!companyId,
   })
   const частые = useQuery({
@@ -109,8 +110,7 @@ export function CalendarDock() {
   const [черновик, setЧерновик] = useState('')
   const записать = useMutation({
     mutationFn: () => {
-      const d = new Date(день)
-      d.setHours(18, 0, 0, 0)
+      const d = companyDayTime(день, 18)
       return tasksService.createTask({
         companyId, title: черновик.trim(),
         // Исполнитель ЯВНЫЙ: задача без исполнителя ничья и в «Моей очереди»
@@ -131,8 +131,7 @@ export function CalendarDock() {
     mutationFn: ({ id, on }: { id: string; on: Date }) => {
       // Конец рабочего дня, а не полночь: «до 3 сентября» человек понимает как
       // «в течение третьего», и полночь делает срок вчерашним.
-      const d = new Date(on)
-      d.setHours(18, 0, 0, 0)
+      const d = companyDayTime(on, 18)
       return tasksService.taskAction(id, { companyId, dueAt: d.toISOString() })
     },
     onSuccess: (_r, v) => {
@@ -156,7 +155,7 @@ export function CalendarDock() {
   if (!companyId) return null
 
   const встречиДня = (d: Date) => (события.data?.events ?? [])
-    .filter((e) => isSameDay(new Date(e.starts_at), d) && e.status !== 'cancelled')
+    .filter((e) => isCompanyDay(e.starts_at, d) && e.status !== 'cancelled')
 
   /** Общий разбор броска: документам срок в доке не двигаем — у него своя
    *  регистрация и своё согласование, и менять его мимо карточки нельзя. */
@@ -215,7 +214,7 @@ export function CalendarDock() {
                   наведён === ключ && 'ring-2 ring-primary',
                   прошёл ? 'text-muted-foreground/35'
                     : выбран ? 'bg-primary text-primary-foreground'
-                      : isToday(d) ? 'bg-primary/15 font-semibold text-primary'
+                      : isCompanyToday(d) ? 'bg-primary/15 font-semibold text-primary'
                         : isWeekend(d) ? 'text-muted-foreground hover:bg-accent'
                           : 'text-foreground hover:bg-accent')}>
                 <span className="tabular-nums leading-none">{format(d, 'd')}</span>
@@ -317,7 +316,7 @@ export function CalendarDock() {
               {встречиДня(день).map((e) => (
                 <div key={e.id} className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0">
                   <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                    {format(new Date(e.starts_at), 'HH:mm')}
+                    {companyTime(e.starts_at)}
                   </span>
                   <span className="flex-1 truncate text-sm">{e.title}</span>
                   {e.conference_url && <Video className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
