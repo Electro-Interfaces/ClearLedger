@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 /**
@@ -7,7 +8,7 @@ import { cn } from '@/lib/utils'
  * их селектами. Активная подсвечена рамкой, повторное нажатие снимает отбор.
  */
 export function Tile({ icon: Icon, label, value, hint, tone, onClick, active, disabled }: {
-  icon: LucideIcon; label: string; value: string; hint?: string; tone?: string
+  icon: LucideIcon; label: string; value: string; hint?: ReactNode; tone?: string
   onClick?: () => void; active?: boolean; disabled?: boolean
 }) {
   const inner = (

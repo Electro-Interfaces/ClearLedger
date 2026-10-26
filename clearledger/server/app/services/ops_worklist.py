@@ -377,6 +377,10 @@ async def ops_worklist(
         "dataGaps": sorted(пробелы.values(), key=lambda r: -(r.get("sessions90d") or 0)),
         "threshold": порог,
         "totals": {
+            # Полный объём станций после применения области учёта. Рабочий
+            # список ниже содержит только объекты с поводом для работ, поэтому
+            # пользователю важно отличать его размер от выбранного контура.
+            "scopeStations": int((состояние.get("totals") or {}).get("stations") or 0),
             "rows": len(список),
             "silent": sum(1 for s in список if any(r["kind"] == "silent" for r in s["reasons"])),
             "failing": sum(1 for s in список if any(r["kind"] == "failing" for r in s["reasons"])),

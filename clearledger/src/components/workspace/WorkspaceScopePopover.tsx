@@ -21,6 +21,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useFilters } from '@/contexts/FilterContext'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useLocations } from '@/hooks/useLocations'
+import { cn } from '@/lib/utils'
 import { getChargeDimensions } from '@/services/analyticsService'
 import { getStoreStations } from '@/services/storeService'
 import { locationStationCodes } from '@/services/locationService'
@@ -150,7 +151,7 @@ export function WorkspaceScopeControl({ onAdvanced }: {
     const q = stationQuery.trim().toLowerCase()
     return [...(dimensions?.stations ?? [])]
       .filter((s) => draftRegions.length === 0 || regionSet.has(s.region ?? ''))
-      .filter((s) => !q || `${s.name} ${s.code}`.toLowerCase().includes(q))
+      .filter((s) => !q || `${s.name} ${s.code} ${s.city ?? ''} ${s.address ?? ''}`.toLowerCase().includes(q))
       .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
   }, [dimensions?.stations, draftRegions.length, regionSet, stationQuery])
 
@@ -330,13 +331,36 @@ export function WorkspaceScopeControl({ onAdvanced }: {
                   {isEnergy ? (
                     energyStations.length === 0 ? (
                       <p className="px-2 py-8 text-center text-xs text-muted-foreground">{dimensions ? 'Станции не найдены' : 'Загрузка…'}</p>
-                    ) : energyStations.map((station) => (
-                      <label key={station.code} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-sm hover:bg-muted/70">
-                        <Checkbox checked={stationCodeSet.has(station.code)} onCheckedChange={() => toggleDraftStation(station.code)} />
-                        <span className="min-w-0 flex-1 truncate">{station.name}</span>
-                        <span className="w-16 shrink-0 text-right text-xs font-medium tabular-nums text-muted-foreground">№{station.code}</span>
-                      </label>
-                    ))
+                    ) : energyStations.map((station) => {
+                      const details = [station.city, station.address]
+                        .map((value) => value?.trim())
+                        .filter((value): value is string => Boolean(value))
+                        .filter((value, index, values) => values.indexOf(value) === index)
+                        .join(' · ')
+                      const selected = stationCodeSet.has(station.code)
+                      return (
+                        <label
+                          key={station.code}
+                          className={cn(
+                            'flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-sm transition-colors',
+                            selected
+                              ? 'bg-primary/10 ring-1 ring-inset ring-primary/30 hover:bg-primary/15'
+                              : 'hover:bg-muted/70',
+                          )}
+                        >
+                          <Checkbox checked={selected} onCheckedChange={() => toggleDraftStation(station.code)} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{station.name}</span>
+                            {details && (
+                              <span className="block truncate text-xs leading-tight text-muted-foreground" title={details}>
+                                {details}
+                              </span>
+                            )}
+                          </span>
+                          <span className="w-16 shrink-0 text-right text-xs font-medium tabular-nums text-muted-foreground">№{station.code}</span>
+                        </label>
+                      )
+                    })
                   ) : (
                     filteredLocations.length === 0 ? (
                       <p className="px-2 py-8 text-center text-xs text-muted-foreground">Точки не найдены</p>
