@@ -10033,6 +10033,19 @@ class StorePricePlan(Base):
     )
 
 
+class StoreDocumentProjectionState(Base):
+    """Успешная полная сборка компании, в том числе без изменений строк.
+
+    Новую таблицу на существующей установке создаёт Base.metadata.create_all.
+    """
+    __tablename__ = "store_document_projection_states"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    last_successful_rebuild_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False)
+
+
 class StoreDocumentProjection(Base):
     """Пересобираемая поисковая шапка документа сопутки/общепита."""
     __tablename__ = "store_document_projections"

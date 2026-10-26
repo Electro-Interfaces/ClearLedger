@@ -27,12 +27,17 @@ async def queue_document_status(
     """Положить станции снимок бух-статусов её edge-документов. Возвращает число
     документов в снимке.
 
-    Идемпотентно: несёт полный снимок (не «изменилось X»), прежнее невыданное
-    задание того же вида снимаем — станции нужна последняя картина, а не история.
+    Несёт полный снимок. Одинаковое состояние сохраняет последнее задание,
+    включая его повторную доставку до ACK; новое состояние заменяет невыданное.
     """
     from ..models import EdgeDownlink
     from ..models import StoreDocMeta as M
     from ..models import StoreDocumentProjection as P
+
+    # Сериализуем и фоновые, и ручные постановки статусов одной станции.
+    await session.execute(text(
+        "SELECT pg_advisory_xact_lock(hashtextextended(:scope_key, 0))"
+    ), {"scope_key": f"document-status:{company_id}:{station_id}"})
 
     # Бух-надстройка (Этап C) едет тем же снимком, что и статус (Этап B): один
     # слой «как в бухгалтерии» = статус готовности + реквизиты, дописанные
@@ -45,7 +50,7 @@ async def queue_document_status(
             P.accounting_status, P.requires_attention, P.rebuilt_at,
             M.reg_number, M.registered_at, M.responsible_from, M.responsible_to,
             M.note, M.status.label("meta_status"),
-        )
+        ).order_by(P.document_id, P.id)
         .select_from(P)
         .outerjoin(M, (M.record_id == P.id) & (M.company_id == P.company_id))
         .where(
@@ -79,6 +84,22 @@ async def queue_document_status(
         "note": r.note,
         "meta_status": r.meta_status,
     } for r in строки]
+
+    previous = (await session.execute(select(EdgeDownlink).where(
+        EdgeDownlink.company_id == company_id,
+        EdgeDownlink.station_id == station_id,
+        EdgeDownlink.kind == "document_status",
+        EdgeDownlink.cancelled_at.is_(None),
+    ).order_by(EdgeDownlink.created_at.desc(), EdgeDownlink.id.desc()).limit(1)
+    )).scalar_one_or_none()
+
+    def content(rows):
+        # Время изменения шапки само по себе не меняет бухгалтерский статус.
+        return sorted(({k: v for k, v in row.items() if k != "at"} for row in rows),
+                      key=lambda row: row["uuid"])
+
+    if previous is not None and content((previous.payload or {}).get("items") or []) == content(items):
+        return len(items)
 
     await session.execute(text("""
         DELETE FROM edge_downlink

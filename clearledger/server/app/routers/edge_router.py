@@ -37,7 +37,6 @@ from app.models import (
 )
 
 log = logging.getLogger(__name__)
-from app.services.store_document_sync import сверить_документы
 from app.services import (edge_nsi, edge_projection, edge_service, edge_stock,
                           edge_transfers, recipe_versions, store_receipts as receipt_rules)
 from app.services import store_receipt_accounting
@@ -995,17 +994,9 @@ async def downlink(
         raise HTTPException(400, "Не определён код АЗС")
     station_id = сверить_станцию(станция_ключа_, int(header))
 
-    # Идентификатор забираем ДО сверки: внутри неё есть commit, после которого
-    # объект company истекает, и следующее обращение к `company.id` уходит в
-    # ленивую подгрузку уже вне живой сессии — запрос падает с 500, а станция
-    # остаётся без заданий молча: в её логе только «мастер ответил 500».
     company_id = company.id
 
-    # Станция на связи — это и есть момент сверки: реестр документов освежается
-    # и свежий снимок заголовков ложится в эту же очередь заданий. Иначе центр
-    # и станция расходятся молча, пока человек не нажмёт кнопку.
-    await сверить_документы(db, company_id, station_id)
-
+    # Фоновая сверка работает своей сессией. Здесь читаем готовую очередь.
     rows = (await db.execute(
         select(EdgeDownlink)
         .where(EdgeDownlink.company_id == company_id,
@@ -1273,7 +1264,7 @@ async def receive_packet(
                 )
                 raise
             raise HTTPException(status.HTTP_409_CONFLICT, "Пакет уже принят ранее")
-        revision = (await db.execute(select(EdgePacketRevision).where(
+        revision = (await db.execute(select(EdgePacketRevision.id).where(
             EdgePacketRevision.company_id == company_id,
             EdgePacketRevision.packet_uuid == str(packet_uuid),
             EdgePacketRevision.content_hash == raw_content_hash,
