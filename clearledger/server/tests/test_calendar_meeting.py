@@ -90,4 +90,4 @@ async def test_открытую_встречу_сотрудник_открыва
     await db.execute(update(ConfSession).where(
         ConfSession.event_id == uuid.UUID(str(открытая['id'])))
         .values(ended_at=datetime.now(timezone.utc)))
-    await db.flush()
+    await db.commit()  # вход сам коммитит — flush откатился бы
