@@ -116,6 +116,13 @@ def steps_out(tc: Any, today: date | None = None) -> list[dict[str, Any]]:
         done = step_date(tc, s)
         base = _iso(step_date(tc, STEP_BY_KEY[s["after"]])) if s.get("after") else None
         planned = (base + timedelta(days=s["norm"])).isoformat() if base else None
+        responsibilities = (getattr(tc, "workflow", None) or {}).get("responsibilities", {})
+        assignment = responsibilities.get(s["key"], responsibilities.get("default", {})) or {}
+        explicit = _iso(assignment.get("due"))
+        if explicit:
+            planned = explicit.isoformat()
+        elif not planned and s["key"] == "works_done":
+            planned = getattr(tc, "due_date", None) or None
         out.append({
             "key": s["key"], "no": s["no"], "label": s["label"], "hint": s.get("hint"),
             "branch": s.get("branch", "main"), "date": done, "plannedDate": planned,

@@ -4,7 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
   addDays, addMonths, addWeeks, eachDayOfInterval, endOfMonth, endOfWeek, format,
-  isSameDay, isSameMonth, isToday, isValid, parseISO, startOfDay, startOfMonth, startOfWeek,
+  isSameMonth, isValid, parseISO, startOfDay, startOfMonth, startOfWeek,
 } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { Bell, Building2, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, ListChecks, Loader2, Plus, RefreshCw, Repeat, Rss, Search, Video } from 'lucide-react'
@@ -26,6 +26,7 @@ import { видимаВКалендаре } from '@/lib/calendarVisibility'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { eventDaySegment, recurrenceTimes } from '@/lib/calendarLayout'
+import { calendarDayKey, companyDateTimeToDate, companyDayStart, companyDayTime, companyTime, companyTodayDate, isCompanyDay, isCompanyToday, COMPANY_TIME_ZONE } from '@/lib/companyTime'
 import { EventDialog } from '@/components/calendar/EventDialog'
 import { TimeGrid } from '@/components/calendar/TimeGrid'
 
@@ -48,7 +49,7 @@ export function CalendarPage() {
   const mode = requestedMode && Object.hasOwn(MODES, requestedMode) ? requestedMode as Mode : defaultMode
   const requestedDate = params.get('date') ?? ''
   const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) && isValid(parseISO(requestedDate))
-    ? startOfDay(parseISO(requestedDate)) : startOfDay(new Date())
+    ? startOfDay(parseISO(requestedDate)) : companyTodayDate()
   /**
    * Три вопроса к календарю. «Вместе» — своё и общий календарь компании в одной
    * сетке, как слои в Outlook: иначе человек планирует неделю, не видя дня
@@ -108,12 +109,14 @@ export function CalendarPage() {
       : addDays(from, mode === 'day' ? 1 : 7)
     return { from, to, days: eachDayOfInterval({ start: from, end: addDays(to, -1) }) }
   }, [dateKey, mode])
+  const rangeFrom = companyDayStart(from)
+  const rangeTo = companyDayStart(to)
 
   const eventsQ = useQuery({
-    queryKey: ['calendar', companyId, scope, from.toISOString(), to.toISOString(), query],
+    queryKey: ['calendar', companyId, scope, rangeFrom.toISOString(), rangeTo.toISOString(), query],
     queryFn: async () => {
       const load = (s: 'mine' | 'company') => workService.listEvents(
-        companyId, from.toISOString(), to.toISOString(), { scope: s, q: query || undefined })
+        companyId, rangeFrom.toISOString(), rangeTo.toISOString(), { scope: s, q: query || undefined })
       if (scope !== 'all') return { ...(await load(scope)), foreign: [] as string[] }
       const [mine, company] = await Promise.all([load('mine'), load('company')])
       const own = new Set(mine.events.map(e => e.id))
@@ -126,12 +129,12 @@ export function CalendarPage() {
     enabled: !!companyId, staleTime: 30_000, refetchOnWindowFocus: true,
   })
   const tasksQ = useQuery({
-    queryKey: ['calendar-tasks', companyId, from.toISOString(), to.toISOString()],
-    queryFn: () => tasksService.listTasks(companyId, 'my_due', { dueFrom: from.toISOString(), dueTo: to.toISOString(), limit: 200 }),
+    queryKey: ['calendar-tasks', companyId, rangeFrom.toISOString(), rangeTo.toISOString()],
+    queryFn: () => tasksService.listTasks(companyId, 'my_due', { dueFrom: rangeFrom.toISOString(), dueTo: rangeTo.toISOString(), limit: 200 }),
     enabled: !!companyId && personal, refetchOnWindowFocus: true,
   })
   const planQ = useQuery({
-    queryKey: ['calendar-plan', companyId, from.toISOString(), to.toISOString()],
+    queryKey: ['calendar-plan', companyId, calendarDayKey(from), calendarDayKey(addDays(to, -1))],
     queryFn: () => workService.planDays(companyId, workService.todayKey(from), workService.todayKey(addDays(to, -1))),
     enabled: !!companyId && personal, refetchOnWindowFocus: true,
   })
@@ -171,7 +174,7 @@ export function CalendarPage() {
   const записатьДело = useMutation({
     mutationFn: async () => {
       const d = deed!
-      const at = new Date(`${d.date}T${d.allDay ? '18:00' : (d.time || '18:00')}`)
+      const at = companyDateTimeToDate(`${d.date}T${d.allDay ? '18:00' : (d.time || '18:00')}`)
       if (d.repeat !== 'none') {
         // Повторяющееся дело — это шаблон плюс расписание: дальше «Трек» ставит
         // задачу сам, в назначенное время и по своему часовому поясу.
@@ -182,7 +185,7 @@ export function CalendarPage() {
         const время = d.allDay ? '09:00' : (d.time || '09:00')
         const rule: Record<string, unknown> = {
           mode: d.repeat, at: время,
-          tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          tz: COMPANY_TIME_ZONE,
         }
         if (d.repeat === 'weekly') rule.weekday = (at.getDay() + 6) % 7   // пн = 0
         if (d.repeat === 'monthly') rule.day = at.getDate()
@@ -214,7 +217,7 @@ export function CalendarPage() {
       void qc.invalidateQueries({ queryKey: ['calendar-reminders', companyId] })
       void qc.invalidateQueries({ queryKey: ['task-recurrences', companyId] })
       toast.success(d.repeat === 'none'
-        ? `Записано на ${format(new Date(d.date), 'd MMMM', { locale: ru })}`
+        ? `Записано на ${format(parseISO(d.date), 'd MMMM', { locale: ru })}`
         : `Дело будет ставиться ${REPEAT_WORD[d.repeat]} — расписание в «Треке»`)
     },
     onError: (e: Error) => toast.error(e.message || 'Не записалось'),
@@ -226,11 +229,9 @@ export function CalendarPage() {
   const openDay = (day: Date, nextMode: Mode = 'day') => update({ date: format(day, 'yyyy-MM-dd'), calendarMode: nextMode })
   const createAt = (day: Date, forCompany = false) => {
     setCompanyDay(forCompany)
-    const at = new Date(day)
-    at.setHours(10, 0, 0, 0)
-    if (isToday(at) && at < new Date()) {
-      at.setTime(Math.ceil(Date.now() / 1_800_000) * 1_800_000)
-    }
+    let at = companyDayTime(day, 10)
+    const now = new Date()
+    if (isCompanyDay(now, day) && at < now) at = new Date(Math.ceil(now.getTime() / 1_800_000) * 1_800_000)
     setNewAt(at)
   }
   const move = (step: number) => {
@@ -246,7 +247,7 @@ export function CalendarPage() {
   const reminders = (personal ? remindersQ.data?.items ?? [] : [])
     .filter(r => {
       const at = new Date(r.remind_at)
-      return at >= from && at < to
+      return at >= rangeFrom && at < rangeTo
         && (!query || (r.note ?? '').toLocaleLowerCase('ru').includes(query.toLocaleLowerCase('ru')))
     })
   const foreign = new Set(eventsQ.data?.foreign ?? [])
@@ -356,7 +357,7 @@ export function CalendarPage() {
             Прошедшие отменённые
           </DropdownMenuCheckboxItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => update({ date: format(new Date(), 'yyyy-MM-dd') })}>
+          <DropdownMenuItem onSelect={() => update({ date: format(companyTodayDate(), 'yyyy-MM-dd') })}>
             Сегодня
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -393,7 +394,7 @@ export function CalendarPage() {
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1">
           <Button size="icon" variant="outline" className="w-9 md:w-10" aria-label="Предыдущий период" onClick={() => move(-1)}><ChevronLeft className="h-4 w-4" /></Button>
-          <Button variant="outline" className="px-2 md:px-4" onClick={() => update({ date: format(new Date(), 'yyyy-MM-dd') })}>Сегодня</Button>
+          <Button variant="outline" className="px-2 md:px-4" onClick={() => update({ date: format(companyTodayDate(), 'yyyy-MM-dd') })}>Сегодня</Button>
           <Button size="icon" variant="outline" className="w-9 md:w-10" aria-label="Следующий период" onClick={() => move(1)}><ChevronRight className="h-4 w-4" /></Button>
         </div>
         <Input type="date" aria-label="Перейти к дате" className="w-32 text-base md:w-40 md:text-sm" value={dateKey}
@@ -443,10 +444,10 @@ export function CalendarPage() {
     {mode === 'agenda' ? <div className="min-h-0 flex-1 overflow-y-auto" aria-label="Расписание">
       {days.map(day => {
         const meetings = events.filter(e => eventDaySegment(e, day))
-        const due = tasks.filter(t => t.due_at && isSameDay(new Date(t.due_at), day))
+        const due = tasks.filter(t => t.due_at && isCompanyDay(t.due_at, day))
         const planned = plan[format(day, 'yyyy-MM-dd')] ?? 0
-        const dayReminders = reminders.filter(r => isSameDay(new Date(r.remind_at), day))
-        const dayRepeats = repeats.filter(r => isSameDay(r.at, day))
+        const dayReminders = reminders.filter(r => isCompanyDay(r.remind_at, day))
+        const dayRepeats = repeats.filter(r => isCompanyDay(r.at, day))
         if (!meetings.length && !due.length && !planned && !dayReminders.length && !dayRepeats.length) return null
         return <section key={day.toISOString()} className="mb-5" aria-label={format(day, 'd MMMM', { locale: ru })}>
           {/* Заголовок дня — разделитель списка, а не строка с кнопкой. Плюс у
@@ -454,11 +455,11 @@ export function CalendarPage() {
               стоит «＋», и три одинаковые кнопки на экране читались как винегрет.
               Встречу на нужный день ставят из шапки или нажатием на сам день. */}
           <div className="mb-1 flex items-center gap-2 border-b border-border pb-1">
-            <button className={cn('min-h-10 flex-1 text-left text-sm font-semibold capitalize hover:underline', isToday(day) && 'text-primary')} onClick={() => openDay(day)}>{format(day, 'EEEE, d MMMM', { locale: ru })}</button>
+            <button className={cn('min-h-10 flex-1 text-left text-sm font-semibold capitalize hover:underline', isCompanyToday(day) && 'text-primary')} onClick={() => openDay(day)}>{format(day, 'EEEE, d MMMM', { locale: ru })}</button>
             {!phone && <Button variant="ghost" size="icon" aria-label={`Добавить встречу ${format(day, 'd MMMM', { locale: ru })}`} onClick={() => createAt(day)}><Plus className="h-4 w-4" /></Button>}
           </div>
           {meetings.map(event => <button key={event.id} onClick={() => open(event)} className="flex min-h-14 w-full items-start gap-3 border-b border-border/60 px-1 py-3 text-left hover:bg-accent">
-            <span className="w-16 shrink-0 text-sm tabular-nums text-muted-foreground">{event.all_day ? 'Весь день' : <>{format(eventDaySegment(event, day)!.start, 'HH:mm')}<span className="block">{eventDaySegment(event, day)!.endMinute === 1440 ? '24:00' : format(eventDaySegment(event, day)!.end, 'HH:mm')}</span></>}</span>
+            <span className="w-16 shrink-0 text-sm tabular-nums text-muted-foreground">{event.all_day ? 'Весь день' : <>{companyTime(eventDaySegment(event, day)!.start)}<span className="block">{eventDaySegment(event, day)!.endMinute === 1440 ? '24:00' : companyTime(eventDaySegment(event, day)!.end)}</span></>}</span>
             <span className="min-w-0 flex-1">
               <span className={cn('block break-words text-sm font-medium', (event.status === 'cancelled' || event.my_response === 'declined') && 'text-muted-foreground line-through')}>{event.title}</span>
               <span className="mt-1 block break-words text-sm text-muted-foreground">{event.status === 'cancelled' ? `Отменена${event.cancel_reason ? ': ' + event.cancel_reason : ''}` : event.my_response === 'pending' ? 'Ждёт вашего ответа' : event.my_response === 'declined' ? 'Вы отказались' : event.location || (event.conference_url ? 'Видеовстреча' : eventDaySegment(event, day)?.continues ? 'Продолжение встречи' : foreign.has(event.id) ? 'Календарь компании' : '')}</span>
@@ -471,7 +472,7 @@ export function CalendarPage() {
           {dayReminders.map(r => {
             const href = workService.refHref(r.target_ref)
             const row = <>
-              <span className="w-16 shrink-0 text-sm tabular-nums text-muted-foreground">{format(new Date(r.remind_at), 'HH:mm')}</span>
+              <span className="w-16 shrink-0 text-sm tabular-nums text-muted-foreground">{companyTime(r.remind_at)}</span>
               <span className="flex min-w-0 flex-1 items-center gap-2">
                 <Bell className={cn('h-4 w-4 shrink-0', r.fired_at ? 'text-primary' : 'text-muted-foreground')} />
                 <span className="min-w-0 break-words">{r.note || 'Напоминание'}</span>
@@ -486,7 +487,7 @@ export function CalendarPage() {
             <span className="min-w-0 break-words">{task.title}</span>
           </Link>)}
           {dayRepeats.map(r => <div key={r.id} title="Повторяющееся дело: «Трек» поставит его в это время" className="flex min-h-12 items-center gap-3 border-b border-border/60 px-1 py-2 text-sm text-muted-foreground">
-            <span className="w-16 shrink-0 tabular-nums">{format(r.at, 'HH:mm')}</span>
+            <span className="w-16 shrink-0 tabular-nums">{companyTime(r.at)}</span>
             <span className="flex min-w-0 flex-1 items-center gap-2"><Repeat className="h-4 w-4 shrink-0" /><span className="min-w-0 break-words">{r.title}</span></span>
           </div>)}
           {planned > 0 && <p className="flex min-h-10 items-center text-sm text-muted-foreground">Намечено на день: {planned}</p>}
@@ -503,21 +504,21 @@ export function CalendarPage() {
       <div className="grid grid-cols-7 border-b border-border bg-muted/40">{days.slice(0, 7).map(day => <div key={day.toISOString()} className="py-2 text-center text-xs text-muted-foreground">{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
       <div className="grid flex-1 grid-cols-7 [grid-auto-rows:minmax(5.5rem,1fr)]">{days.map(day => {
         const meetings = events.filter(e => eventDaySegment(e, day))
-        const due = tasks.filter(t => t.due_at && isSameDay(new Date(t.due_at), day))
+        const due = tasks.filter(t => t.due_at && isCompanyDay(t.due_at, day))
         const planned = plan[format(day, 'yyyy-MM-dd')] ?? 0
-        const dayRepeats = repeats.filter(r => isSameDay(r.at, day))
-        const dayReminders = reminders.filter(r => isSameDay(new Date(r.remind_at), day))
+        const dayRepeats = repeats.filter(r => isCompanyDay(r.at, day))
+        const dayReminders = reminders.filter(r => isCompanyDay(r.remind_at, day))
         /* Строки дня названиями, а не счётчиком «2 срока»: в месяце смотрят, ЧТО
            стоит на числе, и ради этого не должны открывать день. */
         const rows = [
           ...meetings.map(event => <button key={event.id} onClick={() => open(event)} title={event.title} className={chip(event)}>
-            {!event.all_day && <span className="mr-1 tabular-nums">{format(new Date(event.starts_at), 'HH:mm')}</span>}{event.title}
+            {!event.all_day && <span className="mr-1 tabular-nums">{companyTime(event.starts_at)}</span>}{event.title}
           </button>),
           ...due.map(task => <Link key={task.id} to={workService.refHref('task:' + task.id)!} title={task.title}
             className={cn('mb-0.5 flex items-center gap-1 rounded px-1 py-1 text-xs hover:bg-accent', task.overdue && 'text-destructive')}>
             <ListChecks className="h-3 w-3 shrink-0" /><span className="truncate">{task.title}</span>
           </Link>),
-          ...dayRepeats.map(r => <span key={r.id} title={`Повторяющееся дело: поставится в ${format(r.at, 'HH:mm')}`}
+          ...dayRepeats.map(r => <span key={r.id} title={`Повторяющееся дело: поставится в ${companyTime(r.at)}`}
             className="mb-0.5 flex items-center gap-1 px-1 py-1 text-xs text-muted-foreground">
             <Repeat className="h-3 w-3 shrink-0" /><span className="truncate">{r.title}</span>
           </span>),
@@ -525,7 +526,7 @@ export function CalendarPage() {
         const total = rows.length + dayReminders.length + planned
         return <div key={day.toISOString()} className={cn('min-w-0 border-b border-r border-border p-1', !isSameMonth(day, anchor) ? 'bg-muted/30' : day.getDay() % 6 === 0 && 'bg-muted/15')}>
           <div className="flex items-center justify-between">
-            <button aria-label={`Открыть ${format(day, 'd MMMM', { locale: ru })}`} onClick={() => openDay(day)} className={cn('min-h-8 min-w-7 rounded text-sm hover:bg-accent', isToday(day) && 'bg-primary font-semibold text-primary-foreground')}>{format(day, 'd')}</button>
+            <button aria-label={`Открыть ${format(day, 'd MMMM', { locale: ru })}`} onClick={() => openDay(day)} className={cn('min-h-8 min-w-7 rounded text-sm hover:bg-accent', isCompanyToday(day) && 'bg-primary font-semibold text-primary-foreground')}>{format(day, 'd')}</button>
             <button className="hidden h-8 w-8 items-center justify-center rounded hover:bg-accent md:flex" aria-label={`Добавить встречу ${format(day, 'd MMMM', { locale: ru })}`} onClick={() => createAt(day)}><Plus className="h-3.5 w-3.5" /></button>
           </div>
           {phone

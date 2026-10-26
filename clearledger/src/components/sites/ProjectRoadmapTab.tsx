@@ -1,3 +1,4 @@
+import { TechConnectionSummary } from './TechConnectionSummary'
 /**
  * «Схема» — путь проекта, сгруппированный по четырём этапам.
  *
@@ -43,6 +44,7 @@ export function ProjectRoadmapTab({ site, companyId, onStage }: { site: SiteDeta
   const q = useQuery({
     queryKey: ['site-roadmap', companyId, site.id],
     queryFn: () => getProjectRoadmap(companyId, site.id),
+    refetchInterval: 30000,
   })
   // Ход по маршруту — та же выборка, что кормит кнопки на вкладке «Работа».
   // Схема обязана рисоваться по тем же данным, иначе она станет вторым мнением
@@ -75,6 +77,7 @@ export function ProjectRoadmapTab({ site, companyId, onStage }: { site: SiteDeta
 
   return (
     <div className="space-y-3">
+      {d.techConnection && <TechConnectionSummary view={d.techConnection} siteId={site.id} />}
       {/* Полоса прогресса / статус остановки */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex-1 min-w-[200px]">

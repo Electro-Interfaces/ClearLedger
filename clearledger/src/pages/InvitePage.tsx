@@ -20,6 +20,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { get, post } from '@/services/apiClient'
 import * as workService from '@/services/workService'
 import { cn } from '@/lib/utils'
+import { companyDateTimeInput, companyDateTimeToISO, COMPANY_TIME_ZONE } from '@/lib/companyTime'
 
 interface Приглашение {
   title: string
@@ -53,12 +54,10 @@ const ОТВЕТЫ = [
 const когда = new Intl.DateTimeFormat('ru-RU', {
   weekday: 'long', day: 'numeric', month: 'long',
   hour: '2-digit', minute: '2-digit',
+  timeZone: COMPANY_TIME_ZONE,
 })
 
-/** Местное значение для `datetime-local`: через `toISOString` оно уехало бы на
- *  величину часового пояса. */
-const localInput = (d: Date) =>
-  new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+const localInput = companyDateTimeInput
 
 export function InvitePage() {
   const { token = '' } = useParams()
@@ -86,8 +85,8 @@ export function InvitePage() {
 
   const предложить = useMutation({
     mutationFn: () => post(`/api/invite/${token}/propose`, {
-      starts_at: new Date(с).toISOString(),
-      ends_at: new Date(по).toISOString(),
+      starts_at: companyDateTimeToISO(с),
+      ends_at: companyDateTimeToISO(по),
       comment: comment || undefined,
     }),
     onSuccess: () => {
@@ -157,7 +156,7 @@ export function InvitePage() {
           <span className="first-letter:uppercase">
             {и.all_day ? когда.format(начало).replace(/,.*$/, '') : когда.format(начало)}
             {!и.all_day && ` — ${new Intl.DateTimeFormat('ru-RU', {
-              hour: '2-digit', minute: '2-digit',
+              hour: '2-digit', minute: '2-digit', timeZone: COMPANY_TIME_ZONE,
             }).format(конец)}`}
           </span>
         </div>

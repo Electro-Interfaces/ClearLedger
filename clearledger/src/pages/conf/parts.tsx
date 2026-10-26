@@ -249,7 +249,7 @@ export function TalkRow({ meeting, companyId, onChanged, rest = [], expanded = f
               className="text-primary underline-offset-2 hover:underline">
               {expanded ? 'свернуть серию'
                 : `и ещё ${rest.length} до ${new Date(rest[rest.length - 1].starts_at)
-                  .toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}`}
+                  .toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', timeZone: 'Europe/Moscow' })}`}
             </button>
           </>
         )}

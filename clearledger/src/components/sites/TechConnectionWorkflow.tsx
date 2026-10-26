@@ -23,6 +23,7 @@ type Workflow = {
   reviewed_kinds: string[]; review_note: string; additional_requirements: string[]; archived: boolean
 }
 type State = {
+  autoStartNew: boolean; autoStartedNew: boolean
   profile: { totalKw: number | null; voltageKv: number | null; band: string; applicationForm: string; sourceUrl: string }
   prefill: { field: string; value: unknown; source: string }[]
   process: { items?: Record<string, { id: string; state: string; stage: { name: string }; performer?: { name: string } | null }>; at?: string; error?: string }
@@ -100,6 +101,10 @@ export function TechConnectionWorkflow({ companyId, siteId, tc, onDone, blocked 
   if (query.isError) return <div role="alert" className="rounded-lg border p-3 text-sm">Не удалось загрузить условия ТП. <Button variant="outline" onClick={() => void query.refetch()}>Повторить</Button></div>
   if (!query.data || !data) return <div className="h-24 animate-pulse rounded-lg bg-muted" aria-label="Загружаются условия ТП" />
   const state = query.data
+  const hasAutomaticRoute = ['direct', 'indirect'].includes(tc.method ?? '') || ['direct', 'via_grid'].includes(data.supply_mode)
+  const noRouteHelp = !tc.method
+    ? 'Сначала выберите способ подключения выше. Система запустит применимый маршрут после заполнения условий и назначения участников.'
+    : 'При оплате электроэнергии арендодателю или по уже заключённому договору отдельный процесс ТП не запускается.'
   const responsibility = (key: string, patch: Responsibility) => change({ responsibilities: { ...data.responsibilities, [key]: { ...data.responsibilities[key], ...patch } } })
   const remark = (id: string, patch: Partial<Remark>) => change({ remarks: data.remarks.map(x => x.id === id ? { ...x, ...patch } : x) })
   const stage = (id: string, patch: Partial<Stage>) => change({ stages: data.stages.map(x => x.id === id ? { ...x, ...patch } : x) })
@@ -116,8 +121,16 @@ export function TechConnectionWorkflow({ companyId, siteId, tc, onDone, blocked 
     </div>
     {draft && <p role="status" className="text-sm text-muted-foreground">Есть несохранённые изменения. Сохраните их перед загрузкой документов; комплект ниже соответствует сохранённым условиям.</p>}
     <div className="flex flex-col gap-2 border-b pb-3">
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={data.process_enabled} onChange={e => change({ process_enabled: e.target.checked })} />Вести работу по методике энергетика</label>
-      <p className="text-sm text-muted-foreground">После сохранения служба процессов передаёт работу назначенным участникам по фактам карточки. Проверка выполняется регламентом; отправку заявлений в сетевую отмечает исполнитель.</p>
+      {state.autoStartNew ? <p role="status" className="text-sm text-muted-foreground">
+        {hasAutomaticRoute
+          ? 'Система запустит маршрут автоматически после сохранения заявителя и назначения поставщика данных, исполнителя и контролирующего.'
+          : noRouteHelp}
+      </p> : state.autoStartedNew
+        ? <p role="status" className="text-sm text-muted-foreground">Передача работы запущена автоматически. Состояние обновляется по регламенту, заявку в сетевую отправляет исполнитель.</p>
+        : <>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={data.process_enabled} onChange={e => change({ process_enabled: e.target.checked })} />Запустить автоматическую передачу работы</label>
+          <p className="text-sm text-muted-foreground">На старых карточках процесс не запускается сам, чтобы не передавать уже ведущиеся заявки без проверки. После сохранения служба процессов передаст работу назначенным участникам; отправку заявлений в сетевую отмечает исполнитель.</p>
+        </>}
       {state.process.error && <p role="alert" className="text-sm text-destructive">Передача работы ожидает исправления: {state.process.error}</p>}
       {Object.entries(state.process.items || {}).map(([key, item]) => <div key={key} className="text-sm"><strong>{key === 'tp_supply' ? 'Договор со сбытом' : 'Техприсоединение'}:</strong> {item.stage?.name || 'Запуск'} · {item.performer?.name || (item.state === 'done' ? 'завершено' : 'назначение в очереди')}</div>)}
       {state.process.at && <p className="text-xs text-muted-foreground">Состояние на {new Date(state.process.at).toLocaleString('ru-RU')}</p>}

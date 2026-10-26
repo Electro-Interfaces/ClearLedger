@@ -18,6 +18,8 @@ import { H, DAY, ruDate, hm, dur } from './ganttTime'
 export type GanttState = 'done' | 'current' | 'stopped' | 'future' | 'track'
 export interface GanttMark { key: string; at: number; title: string; cls?: string }
 export interface GanttRow {
+  source?: 'tp'
+  deadlineOverdue?: boolean
   key: string
   label: string
   /** Строка под названием: даты, длительность, пункты. */
@@ -52,7 +54,7 @@ const SCALES: { k: Scale; label: string; step?: number; px?: number; max?: numbe
   { k: 'month', label: 'Месяцы', step: 30 * DAY, px: 90 },
 ]
 
-type Filter = 'all' | 'blocking' | 'overdue' | 'open' | 'reconfirm' | 'waived'
+type Filter = 'all' | 'blocking' | 'overdue' | 'open' | 'reconfirm' | 'waived' | 'tp_overdue'
 // Первый чип считает стадии, остальные — пункты чек-листа. Без этого в ряду
 // стояли «Все 9» и «Не выполнено 28», и число «не выполнено» выглядело больше,
 // чем «всего» (проверка 25.10.2026).
@@ -98,16 +100,18 @@ export function GanttChart({ groups, legend, now }: { groups: GanttGroup[]; lege
     const lane = el.scrollWidth - 240
     el.scrollLeft = scale === 'fit' ? 0 : Math.max(0, 240 + lane * nowFrac.current - el.clientWidth * 0.7)
   }, [scale])
-  const stageRows = groups.flatMap((g) => g.rows).filter((r) => r.state !== 'track')
-  const count = (f: Filter) => f === 'all' ? stageRows.length
+  const stageRows = groups.flatMap((g) => g.rows).filter((r) => r.state !== 'track' && r.source !== 'tp')
+  const tpRows = groups.flatMap((g) => g.rows).filter((r) => r.source === 'tp')
+  const filters = tpRows.length ? [...FILTERS, { k: 'tp_overdue' as const, label: 'ТП: просрочено', hint: 'Просроченные шаги, этапы ТУ и ответы на замечания' }] : FILTERS
+  const count = (f: Filter) => f === 'tp_overdue' ? tpRows.filter((r) => r.deadlineOverdue).length : f === 'all' ? stageRows.length
     : f === 'overdue' ? stageRows.filter(overdue).length
       : stageRows.reduce((a, r) => a + (r.children ?? []).filter((c) => itemMatch(c, f, r)).length, 0)
   const hasNorm = stageRows.some((r) => r.normMs != null)
-  const shownChildren = (r: GanttRow) => filter === 'all' || filter === 'overdue'
+  const shownChildren = (r: GanttRow) => filter === 'tp_overdue' ? [] : filter === 'all' || filter === 'overdue'
     ? (open.has(r.key) ? (r.children ?? []).filter((c) => allItems || c.required) : [])
     : (r.children ?? []).filter((c) => itemMatch(c, filter, r))
-  const shownRows = (rows: GanttRow[]) => filter === 'all' ? rows
-    : filter === 'overdue' ? rows.filter(overdue)
+  const shownRows = (rows: GanttRow[]) => filter === 'tp_overdue' ? rows.filter((r) => r.source === 'tp' && r.deadlineOverdue) : filter === 'all' ? rows
+    : filter === 'overdue' ? rows.filter((r) => r.source !== 'tp' && overdue(r))
       : rows.filter((r) => (r.children ?? []).some((c) => itemMatch(c, filter, r)))
   const parents = groups.flatMap((g) => g.rows).filter((r) => r.children?.length)
   const rows = groups.flatMap((g) => g.rows.flatMap((r) => [r, ...(r.children ?? [])]))
@@ -165,8 +169,12 @@ export function GanttChart({ groups, legend, now }: { groups: GanttGroup[]; lege
   const SUB_BAR: Partial<Record<GanttState, string>> = { done: 'bg-emerald-500/80', current: 'bg-primary/70', stopped: 'bg-amber-500/80' }
   const renderRow = (r: GanttRow, sub = false) => (
     // Вся строка — и название, и полоса — открывает работу стадии.
-    <div key={r.key} onClick={r.onOpen} title={r.onOpen ? (sub ? 'Открыть место, где пункт закрывается' : 'Открыть работу стадии') : undefined}
-      className={`grid grid-cols-[240px_1fr] border-b last:border-b-0 hover:bg-muted/40 ${r.onOpen ? 'cursor-pointer' : ''} ${sub ? 'bg-muted/10' : ''}`}>
+    <div key={r.key} onClick={r.onOpen}
+      role={r.source === 'tp' && r.onOpen ? 'button' : undefined} tabIndex={r.source === 'tp' && r.onOpen ? 0 : undefined}
+      aria-label={r.source === 'tp' && r.onOpen ? `Открыть присоединение: ${r.label}` : undefined}
+      onKeyDown={r.source === 'tp' && r.onOpen ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); r.onOpen?.() } } : undefined}
+      title={r.onOpen ? (r.source === 'tp' ? 'Открыть присоединение' : sub ? 'Открыть место, где пункт закрывается' : 'Открыть работу стадии') : undefined}
+      className={`grid grid-cols-[240px_1fr] border-b last:border-b-0 hover:bg-muted/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${r.onOpen ? 'cursor-pointer' : ''} ${sub ? 'bg-muted/10' : ''}`}>
       <div className={`sticky left-0 z-10 flex items-start gap-1 border-r bg-card text-left ${sub ? 'py-1 pl-7 pr-2' : 'px-3 py-2'}`}>
         {!sub && (r.children?.length && (filter === 'all' || filter === 'overdue')
           ? <button type="button" aria-label={open.has(r.key) ? 'Свернуть подэтапы' : 'Раскрыть подэтапы'} aria-expanded={open.has(r.key)}
@@ -180,6 +188,7 @@ export function GanttChart({ groups, legend, now }: { groups: GanttGroup[]; lege
             {sub && r.required && <span className="mr-1 text-primary" title="Критичный: держит переход">●</span>}{r.label}
           </div>
           <div className={`text-[11px] text-muted-foreground ${sub ? 'truncate' : ''}`} title={sub ? r.sub : undefined}>{r.sub}
+            {!sub && r.source === 'tp' && r.deadlineOverdue && <span className="ml-1 text-destructive">срок прошёл</span>}
             {!sub && overdue(r) && <span className="ml-1 rounded bg-red-500/15 px-1 text-red-600 dark:text-red-400">сверх норматива на {dur(spent(r) - r.normMs!)}</span>}
             {sub && r.blocking && <span className="ml-1 rounded bg-amber-500/15 px-1 text-amber-700 dark:text-amber-400">держит переход</span>}
           </div>
@@ -234,7 +243,7 @@ export function GanttChart({ groups, legend, now }: { groups: GanttGroup[]; lege
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-1.5 text-xs" role="group" aria-label="Отбор на диаграмме">
-        {FILTERS.filter((f) => f.k !== 'overdue' || hasNorm).map((f) => {
+        {filters.filter((f) => f.k !== 'overdue' || hasNorm).map((f) => {
           const n = count(f.k)
           return <button key={f.k} type="button" title={f.hint} aria-pressed={filter === f.k} onClick={() => setFilter(f.k)}
             disabled={f.k !== 'all' && n === 0}

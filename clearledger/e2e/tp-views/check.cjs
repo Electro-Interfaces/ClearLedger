@@ -1,0 +1,22 @@
+const {chromium,expect}=require('@playwright/test');const fs=require('fs');
+(async()=>{const out=process.env.TP_VIEWS_ARTIFACTS;fs.mkdirSync(out,{recursive:true});const b=await chromium.launch({headless:true});try{
+ const p=await b.newPage({viewport:{width:1440,height:1000}});p.setDefaultTimeout(20000);const errors=[];p.on('pageerror',e=>errors.push(String(e)));
+ await p.goto('http://127.0.0.1:15449/e2e/tp-views/fixture.html',{waitUntil:'domcontentloaded'});
+ await expect(p.getByText('Этапы выполнения ТУ',{exact:true})).toBeVisible();await expect(p.getByText('Замечания по ТП и сбыту',{exact:true})).toBeVisible();
+ await expect(p.getByText('Получение договора и ТУ',{exact:true})).toBeVisible();
+ await p.getByRole('button',{name:'Открыть присоединение: Получение договора и ТУ',exact:true}).scrollIntoViewIfNeeded();
+ await p.screenshot({path:out+'/gantt-desktop.png'});
+ await p.evaluate(()=>document.documentElement.classList.add('dark'));await p.screenshot({path:out+'/gantt-dark.png'});await p.evaluate(()=>document.documentElement.classList.remove('dark'));
+ const late=p.getByRole('button',{name:/ТП: просрочено/});await late.click();await expect(p.getByRole('button',{name:'Открыть присоединение: Кабель до ЭЗС',exact:true})).toBeVisible();
+ await p.screenshot({path:out+'/gantt-overdue.png'});
+ await p.getByRole('button',{name:'Открыть присоединение: Кабель до ЭЗС',exact:true}).focus();await p.keyboard.press('Enter');
+ await expect(p.getByRole('heading',{name:'Условия и контроль техприсоединения',exact:true})).toBeVisible();
+ await p.getByRole('button',{name:'Сводка ТП',exact:true}).click();await expect(p.getByText('Техприсоединение:',{exact:false})).toBeVisible();
+ await p.screenshot({path:out+'/summary-desktop.png'});
+ await p.setViewportSize({width:390,height:844});await p.screenshot({path:out+'/summary-mobile.png'});await p.evaluate(()=>document.documentElement.classList.add('dark'));await p.screenshot({path:out+'/summary-mobile-dark.png'});await p.evaluate(()=>document.documentElement.classList.remove('dark'));
+ if(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2))throw Error('Сводка выходит за мобильную ширину');
+ await p.getByRole('button',{name:'Гант',exact:true}).click();await p.screenshot({path:out+'/gantt-mobile.png'});
+ if(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2))throw Error('Гант расширил страницу вместо внутренней прокрутки');
+ if(errors.length)throw Error(errors.join('\n'));
+ fs.writeFileSync(out+'/browser.json',JSON.stringify({status:'PASS',api:'real local PostgreSQL and routes',checks:['main and supply groups','TU stages','remarks','overdue filter','keyboard opens TP','summary','desktop/mobile','light/dark','console'],pageErrors:errors},null,2));
+}finally{await b.close()}})().catch(e=>{console.error(String(e));process.exit(1)});

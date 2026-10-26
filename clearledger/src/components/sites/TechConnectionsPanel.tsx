@@ -64,7 +64,7 @@ function GridOperators({ companyId, includeClosed }: { companyId: string; includ
                 <th className="text-right px-3 py-1.5 font-medium">Заявок</th>
                 <th className="text-right px-3 py-1.5 font-medium">В работе</th>
                 <th className="text-right px-3 py-1.5 font-medium">Исполнено</th>
-                <th className="text-right px-3 py-1.5 font-medium" title="Просрочен срок мероприятий">Просрочено</th>
+                <th className="text-right px-3 py-1.5 font-medium" title="Просрочен срок ТП или работы по методике">Просрочено</th>
                 <th className="text-right px-3 py-1.5 font-medium" title="Медиана дней от заявки до ТУ">До ТУ, дн</th>
                 <th className="text-right px-3 py-1.5 font-medium" title="Медиана дней от заявки до исполнения">До факта, дн</th>
                 <th className="text-right px-3 py-1.5 font-medium">₽ / кВт</th>
@@ -156,7 +156,7 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
               hint={includeClosed ? 'вместе с отклонёнными и замороженными' : 'по проектам в работе'} />
             <KpiCard label="Исполнено" value={nf0.format(d.byStatus.find((s) => s.key === 'done')?.count ?? 0)} />
             <KpiCard label="Просрочено" value={nf0.format(d.overdue)}
-              accent={d.overdue ? 'warning' : undefined} hint="срок мероприятий прошёл" />
+              accent={d.overdue ? 'warning' : undefined} hint="срок ТП, шага, этапа ТУ или ответа на замечание прошёл" />
             <KpiCard label="Стоимость подключений" value={`${nf0.format(d.costSum)} ₽`} hint="по заполненным" />
           </div>
 
@@ -195,6 +195,7 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
                     <th className="text-left p-2 font-medium">Объект</th>
                     <th className="text-left p-2 font-medium">Сетевая</th>
                     <th className="text-left p-2 font-medium">Статус ТП</th>
+                    <th className="text-left p-2 font-medium">Работа и исполнитель</th>
                     <th className="text-left p-2 font-medium">Заявка</th>
                     <th className="text-left p-2 font-medium">ТУ</th>
                     <th className="text-right p-2 font-medium">кВт</th>
@@ -217,6 +218,15 @@ export function TechConnectionsPanel({ companyId }: { companyId: string }) {
                       </td>
                       <td className="p-2 max-w-[160px] truncate text-muted-foreground">{t.gridOperator ?? '—'}</td>
                       <td className="p-2 whitespace-nowrap">{t.statusLabel}</td>
+                      <td className="p-2 min-w-[220px] max-w-[350px] text-xs">
+                        {t.methodView?.branches.map((branch) => <div key={branch.key} className="mb-1">
+                          <span className="font-medium">{branch.label}: </span>{branch.stage.name || (t.methodView?.enabled ? 'ожидается сверка' : 'по датам карточки')}
+                          {branch.performer?.name && <span className="block text-muted-foreground">{branch.performer.name}</span>}
+                          {branch.due && <span className={branch.overdue ? 'text-destructive' : 'text-muted-foreground'}>Срок {formatDate(branch.due)}</span>}
+                        </div>)}
+                        {!!t.methodView?.deadlines.length && <span className="text-destructive">Просрочено по методике: {t.methodView.deadlines.length}</span>}
+                        {!t.methodView?.branches.length && <span className="text-muted-foreground">Способ не выбран</span>}
+                      </td>
                       <td className="p-2 whitespace-nowrap text-muted-foreground">
                         {t.applicationNo ?? '—'}{t.applicationDate ? ` · ${formatDate(t.applicationDate)}` : ''}
                       </td>

@@ -13,9 +13,11 @@ import { useDocsApp } from '@/hooks/useDocsApp'
 import { useOpenApp } from '@/hooks/useOpenApp'
 import { getRooms, isMuted } from '@/services/chatService'
 import { getMeetingsConfig } from '@/services/conferenceService'
-import { listEvents, myWork, myWorkHref, todayKey, type CalendarEvent } from '@/services/workService'
+import { listEvents, myWork, myWorkHref, type CalendarEvent } from '@/services/workService'
 import { listSsoApps, type SsoApp } from '@/services/ssoService'
 import { getPulseDay, type PulseKpi } from './pulseService'
+import { addDays } from 'date-fns'
+import { companyDateTime, companyDayStart, companyTodayDate } from '@/lib/companyTime'
 import { KpiTile } from './parts'
 import { HOME_SECTIONS, getHomeSettings, saveHomeSettings, type HomeConfig, type HomeSection, type HomeSettings } from './pulseHomeService'
 import { availablePulseViews } from './PulseLayout'
@@ -165,14 +167,15 @@ function MeetingsBlock() {
   const { companyId } = useCompany()
   const qc = useQueryClient()
   const [selected, setSelected] = useState<CalendarEvent | null>(null)
-  const from = todayKey()
-  const toDate = new Date(); toDate.setDate(toDate.getDate() + 7)
-  const query = useQuery({ queryKey: ['pulse-my-meetings', companyId, from], queryFn: () => listEvents(companyId, from, todayKey(toDate), { scope: 'mine' }), ...liveQuery })
+  const today = companyTodayDate()
+  const from = companyDayStart(today).toISOString()
+  const to = companyDayStart(addDays(today, 7)).toISOString()
+  const query = useQuery({ queryKey: ['pulse-my-meetings', companyId, from], queryFn: () => listEvents(companyId, from, to, { scope: 'mine' }), ...liveQuery })
   const events = (query.data?.events ?? []).filter((event) => event.status === 'planned' && event.my_response !== 'declined' && Date.parse(event.ends_at) > Date.now())
     .sort((a, b) => a.starts_at.localeCompare(b.starts_at))
   return <Block title="Встречи на 7 дней" query={query} action={<Button variant="link" className="min-h-11" asChild><Link to="/docs/work?view=calendar">Календарь</Link></Button>}>
     {events.slice(0, 4).map((event) => <button type="button" key={event.id} onClick={() => setSelected(event)} className={rowClass}>
-      <span className="min-w-0"><span className="block break-words text-sm font-medium">{event.title}</span><span className="text-xs text-muted-foreground">{new Date(event.starts_at).toLocaleString('ru-RU', { day: 'numeric', month: 'short', ...(event.all_day ? {} : { hour: '2-digit', minute: '2-digit' }) })}{event.all_day ? ' · весь день' : ''}{event.conference_url ? ' · онлайн' : ''}</span></span><CalendarDays className="size-4 shrink-0" />
+      <span className="min-w-0"><span className="block break-words text-sm font-medium">{event.title}</span><span className="text-xs text-muted-foreground">{companyDateTime(event.starts_at, { day: 'numeric', month: 'short', ...(event.all_day ? {} : { hour: '2-digit', minute: '2-digit' }) })}{event.all_day ? ' · весь день' : ''}{event.conference_url ? ' · онлайн' : ''}</span></span><CalendarDays className="size-4 shrink-0" />
     </button>)}
     {query.data && !events.length && <Empty>В ближайшие 7 дней встреч не запланировано.</Empty>}
     {selected && <EventDialog companyId={companyId} event={selected} startAt={null} onClose={() => setSelected(null)} onChanged={() => {
