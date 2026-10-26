@@ -654,6 +654,8 @@ export interface OpsWorklist extends OpsSnapshot {
   dataLagHours: number | null
   threshold: number
   totals: {
+    /** Все станции после области учёта; строки очереди содержат только поводы для работ. */
+    scopeStations?: number
     rows: number; silent: number; failing: number; breached: number | null
     notTaken: number | null; lossPerMonth: number; lossNotTaken: number | null; clientsLost: number
     /** Профилактика: поверка счётчика, просроченное ТО, нарушения осмотра. */

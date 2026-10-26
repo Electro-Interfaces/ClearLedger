@@ -176,7 +176,7 @@ function строкаТаблицы(r: WorklistRow, workKnown: boolean): Cell[] 
 export function OpsWorklistPanel() {
   const scope = useMonitorScope()
   const { companyId } = useCompany()
-  const { regionIds, period } = useFilters()
+  const { regionIds, stationCodes, period } = useFilters()
   const экран = useRef<HTMLDivElement>(null)
   const [поиск, setПоиск] = useState('')
   const [причина, setПричина] = useState('all')
@@ -412,8 +412,13 @@ export function OpsWorklistPanel() {
           <div className={TILE_ROW}>
             {/* Плитки — это и есть фильтры списка: нажатие показывает ровно те
                 строки, про которые число. */}
-            <Плитка icon={ClipboardCheck} label="Станций в списке" value={nf.format(t.rows)}
-              hint={`без зарядок ${nf.format(t.silent)} · отказывают ${nf.format(t.failing)}`}
+            <Плитка icon={ClipboardCheck} label="Станций в списке работ" value={nf.format(t.rows)}
+              hint={stationCodes.length ? <>
+                <span className="block">{t.scopeStations != null
+                  ? `в области учёта ${nf.format(t.scopeStations)} · отмечено ${nf.format(stationCodes.length)}${t.scopeStations > t.rows ? ` · без повода для работ ${nf.format(t.scopeStations - t.rows)}` : ''}`
+                  : `выбрано ${nf.format(stationCodes.length)}`}</span>
+                <span className="block">без зарядок {nf.format(t.silent)} · отказывают {nf.format(t.failing)}</span>
+              </> : `без зарядок ${nf.format(t.silent)} · отказывают ${nf.format(t.failing)}`}
               active={!неВзятые && причина === 'all'}
               onClick={() => { setНеВзятые(false); setПричина('all') }} />
             {/* Разрыв между «видно» и «делается» — главное число экрана. */}
