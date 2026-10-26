@@ -1578,7 +1578,12 @@ async def calendar_meeting(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                             "Видеоконференции не настроены")
     cid = await _assert_work(company_id, current_user, db)
-    ev = await _event_participant(db, cid, event_id, current_user)
+    # Открытая встреча (круг «вся компания») доступна любому сотруднику — как и
+    # вход из «Конференций» (`conf_router.meeting_join`). Иначе календарь
+    # компании показывал встречу с кнопкой «Войти», а сервер отвечал «Это не
+    # ваша встреча» (26.10.2026). Закрытая — по-прежнему только участникам.
+    ev = await _event_participant(db, cid, event_id, current_user,
+                                  allow_open_company=True)
     if ev.status == "cancelled":
         raise HTTPException(status.HTTP_409_CONFLICT, "Встреча отменена")
     # Один вход с «Конференциями»: тот же выбор ведущего, та же отметка прихода.
@@ -2635,14 +2640,20 @@ async def poll_pick(
 
 
 async def _event_participant(db: AsyncSession, cid: uuid.UUID, event_id: str,
-                             user: User):
-    """Встреча, к которой человек имеет отношение: организатор или приглашённый."""
+                             user: User, *, allow_open_company: bool = False):
+    """Встреча, к которой человек имеет отношение: организатор или приглашённый.
+
+    `allow_open_company` — только для входа во встречу: открытую встречу компании
+    видят и посещают все сотрудники. Правка, ответ, файл и опрос остаются за
+    участниками."""
     from app.models import CalendarAttendee, CalendarEvent
 
     ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
     if ev is None or ev.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
     if ev.organizer_id == user.id:
+        return ev
+    if allow_open_company and ev.visibility == "company":
         return ev
     есть = (await db.execute(select(CalendarAttendee.id).where(
         CalendarAttendee.event_id == ev.id,
