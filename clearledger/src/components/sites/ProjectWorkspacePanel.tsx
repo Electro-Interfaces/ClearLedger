@@ -1,3 +1,4 @@
+import { TechConnectionStatus } from './TechConnectionSummary'
 /**
  * «Проект» — полноэкранная работа с одним проектом.
  *
@@ -231,6 +232,8 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
           toast.error(e instanceof Error ? e.message : 'Не удалось записать шаг')
         }
       }} />}
+
+      {!specialized && s.kind !== 'integration' && <TechConnectionStatus view={s.techConnection?.methodView} fallback={s.techConnection?.statusLabel} onOpen={() => onTab('tp')} />}
 
       {/* Вкладки. Точка отмечает те, где на этой стадии есть незакрытая работа:
           девять одинаковых кнопок не подсказывают, с какой начинать.

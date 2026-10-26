@@ -259,6 +259,8 @@ async def list_projects(db: AsyncSession, company_id, *, site_id=None, location_
         kinds = [k.strip() for k in kind.split(",") if k.strip()]
         q = q.where(EzsProject.kind.in_(kinds))
     rows = (await db.execute(q.order_by(EzsProject.created_at.desc()))).all()
+    from app.services.ezs_sites import next_steps
+    shared_next = await next_steps(db, company_id, user, list({s.id:s for _,s,_,_ in rows}.values())) if user is not None else {}
     out = []
     for p, s, loc, owner in rows:
         row = _out(p, site=s, location=loc, owner=owner)
@@ -266,6 +268,9 @@ async def list_projects(db: AsyncSession, company_id, *, site_id=None, location_
         nearest = await _nearest_result(db, company_id, user, s) if user is not None else None
         if nearest:
             row["nextAction"], row["nextActionDue"] = nearest
+        elif not row["nextAction"] and not p.closed_on and shared_next.get(str(s.id)):
+            item=shared_next[str(s.id)]
+            row["nextAction"], row["nextActionDue"] = item["text"],item.get("due")
         out.append(row)
     return out
 

@@ -1,3 +1,4 @@
+import type { TechConnectionView } from './techConnectionView'
 /**
  * Клиент API «Банк ЗУ» (/api/sites/*) — площадки под установку ЭЗС.
  *
@@ -779,6 +780,8 @@ export interface TpStep {
   date: string | null; plannedDate: string | null; normDays: number | null; overdue: boolean
 }
 export interface TechConnection {
+  methodView?: TechConnectionView
+  projection?: TechConnectionView
   workflowVersion?: number
   method?: string | null; methodLabel?: string | null; steps?: TpStep[]
   /** Комплект документов к заявке для выбранного способа: что уже приложено к проекту. */
@@ -1045,6 +1048,7 @@ export async function getAwaitingAccounting(companyId: string): Promise<Awaiting
 
 /** Схема реализации: путь проекта одной лентой (стадии + параллельные треки). */
 export interface ProjectRoadmap {
+  techConnection?: TechConnectionView | null
   stage: SiteStage
   stageLabel: string
   phase: string | null

@@ -1,3 +1,4 @@
+import { TechConnectionSummary } from './TechConnectionSummary'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -38,13 +39,18 @@ export function ProjectOverviewTab({ site, companyId }: { site: SiteDetail; comp
           onClick={() => downloadSiteDoc(companyId, site.id, d.id, d.fileName ?? d.title ?? undefined).catch((e) => toast.error(e instanceof Error ? e.message : 'Не удалось открыть файл'))}>{d.title || d.fileName || 'файл'}</button></li>)}
         {docs.data.length > 5 && <li className="text-muted-foreground">и ещё {docs.data.length - 5} — на вкладке «Документы»</li>}</ul>}
     </div>
+    {data.tech_connection && <TechConnectionSummary view={data.tech_connection} siteId={site.id} />}
     {(data.target_date || data.budget != null) && <p className="text-sm text-muted-foreground">Срок проекта: {data.target_date || 'не задан'} · Бюджет: {data.budget?.toLocaleString('ru') ?? 'не задан'} ₽</p>}
     <section className="border-y py-4"><h3 className="mb-2 font-medium">Ближайший результат</h3>
       {data.next_work?.unavailable ? <p className="text-sm">Связанная работа недоступна. Обратитесь к её ответственному.</p>
         : data.next_work?.id && data.next_work.kind ? <div><Link className="font-medium text-primary" to={work.projectWorkHref({ id: data.next_work.id, kind: data.next_work.kind })}>{data.next_work.title}</Link>
           <p className="mt-1 text-sm text-muted-foreground">Срок работы: {data.next_work.due_at ? new Date(data.next_work.due_at).toLocaleDateString('ru') : 'не назначен'} · {data.next_work.status === 'done' || data.next_work.status === 'executed' ? 'Результат готов — определите следующий шаг' : 'В работе'}</p></div>
           : data.external_wait ? <div className="text-sm"><p>{data.external_wait.waiting_for}</p><p className="mt-1 text-muted-foreground">{data.external_wait.owner_name} · следующий контакт {data.external_wait.follow_up}</p></div>
-            : <p className="text-sm text-muted-foreground">{site.nextAction || 'Выберите работу ниже как следующий результат или укажите внешнее ожидание.'}{site.nextActionDue ? ` · ${formatDate(site.nextActionDue)}` : ''}</p>}
+            : <div className="text-sm text-muted-foreground"><p>{data.next_step?.text || site.nextAction || 'Выберите работу ниже как следующий результат или укажите внешнее ожидание.'}</p>
+              {(data.next_step?.due || site.nextActionDue) && <p className="mt-1">Срок {formatDate(data.next_step?.due || site.nextActionDue!)}</p>}
+              {data.next_step?.performer?.name && <p className="mt-1">Исполнитель: {data.next_step.performer.name}</p>}
+              {data.next_step?.source === 'tech_connection' && <Link className="mt-1 inline-block text-primary underline" to={`/projects?mode=projects&sub=pr_project&project=${site.id}&ptab=tp`}>Открыть работу по присоединению</Link>}
+            </div>}
       {(data.next_work || data.external_wait) && <Button className="mt-2" variant="ghost" size="sm" disabled={clear.isPending} onClick={() => clear.mutate()}>Снять следующий шаг</Button>}
       <p className="mt-3 text-sm">{data.work.waiting ? `Обязательных работ, удерживающих маршрут: ${data.work.waiting}` : 'В Треке нет незавершённых работ, удерживающих маршрут.'}</p>
       {site.gate?.blocking.length ? <div className="mt-1 text-sm"><p className="text-amber-700 dark:text-amber-300">Незакрытые требования этапа «{site.stageLabel}»: {site.gate.blocking.length}</p>

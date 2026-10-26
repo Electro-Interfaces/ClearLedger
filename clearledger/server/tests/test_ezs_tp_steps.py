@@ -100,3 +100,13 @@ def test_step_marks_manual_checklist_item_and_keeps_human_tick():
     assert _gate_from_step(site, "5.2", False, None) is None and site.gates["construction"]["5.2"]["done"]
     assert _gate_from_step(site, "5.3", True, None) is None
     assert _gate_from_step(SimpleNamespace(kind="integration", gates={}), "5.1", True, None) is None
+
+
+def test_explicit_workflow_deadline_replaces_reference_in_all_step_views():
+    tc = _tc(steps={'accepted': {'date': '2030-01-01'}},
+             workflow={'responsibilities': {'contract': {'due': '2030-01-05'}}},
+             due_date='2030-02-10')
+    out = {s['key']: s for s in steps_out(tc, date(2030, 1, 10))}
+    assert out['contract']['plannedDate'] == '2030-01-05'
+    assert out['contract']['overdue'] is True
+    assert out['works_done']['plannedDate'] == '2030-02-10'
