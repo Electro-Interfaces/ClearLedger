@@ -135,6 +135,28 @@ def data_of(tc):
     return Workflow.model_validate({k: v for k, v in (tc.workflow or {}).items() if not k.startswith("_")})
 
 
+def auto_start_new_connection(tc, w: Workflow) -> bool:
+    """Новая ручная карточка запускает процесс после подготовки условий.
+
+    Импортированные и существовавшие до запуска карточки не получают маркер
+    `_auto_start_new`; их включает человек после проверки исходных данных.
+    """
+    workflow = dict(tc.workflow or {})
+    if not workflow.get("_auto_start_new"):
+        return False
+    has_route = tc.method in ("direct", "indirect") or w.supply_mode in ("direct", "via_grid")
+    default = w.responsibilities.get("default", Responsibility())
+    assigned = bool(w.organization_id and default.provider and default.executor and default.controller)
+    if not tc.method or not has_route or not assigned:
+        return False
+    w.process_enabled = True
+    workflow.pop("_auto_start_new", None)
+    workflow["_auto_started_new"] = True
+    workflow["process_enabled"] = True
+    tc.workflow = workflow
+    return True
+
+
 def required_kinds(tc, w):
     kinds = []
     if tc.method in ("direct", "indirect"):
@@ -272,6 +294,8 @@ async def read(db, tc):
     from app.services.ezs_tp_method import capacity_profile, handover_state
     return dict(profile=capacity_profile(tc), process=(tc.workflow or {}).get("_process", {}),
                 handover=await handover_state(db, tc),
+                autoStartNew=bool((tc.workflow or {}).get("_auto_start_new")),
+                autoStartedNew=bool((tc.workflow or {}).get("_auto_started_new") and w.process_enabled),
                 version=tc.workflow_version or 0, data=public_data, evidenceToken=evidence_token(signatures),
                 scenarios=SCENARIOS, documentKinds=DOC_LABELS,
                 kit=[dict(kind=k, label=DOC_LABELS.get(k, k), present=k in kinds,
@@ -325,6 +349,7 @@ async def save(db, tc, payload, user):
         raise HTTPException(409, "Присоединение изменено другим пользователем. Обновите данные и повторите правку")
     w = payload.data
     await validate_refs(db, tc, w)
+    auto_start_new_connection(tc, w)
     if w.process_enabled:
         default = w.responsibilities.get("default", Responsibility())
         if not tc.method or not w.organization_id or not all((default.provider, default.executor, default.controller)):

@@ -181,6 +181,58 @@ class TpIntegration(unittest.IsolatedAsyncioTestCase):
             tc=await db.get(m.EzsTechConnection,self.tc.id)
             self.assertIsNone(tc.workflow); self.assertEqual(tc.workflow_version,0)
 
+    async def test_existing_connection_stays_manual_until_explicit_start(self):
+        r = await self.save()
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertFalse(r.json()["data"]["process_enabled"])
+        self.assertFalse(r.json()["autoStartNew"])
+        self.assertFalse(r.json()["autoStartedNew"])
+
+    async def test_new_connection_starts_after_required_people_are_saved(self):
+        async with self.sessions() as db:
+            tc = await db.get(m.EzsTechConnection, self.tc.id)
+            await db.delete(tc)
+            await db.commit()
+        created = await self.client.put(self.path, params=self.q, json={"method": "direct"})
+        self.assertEqual(created.status_code, 200, created.text)
+        state = await self.client.get(self.path + "/workflow", params=self.q)
+        self.assertTrue(state.json()["autoStartNew"])
+        self.assertFalse(state.json()["data"]["process_enabled"])
+
+        incomplete = copy.deepcopy(self.w)
+        incomplete["responsibilities"]["default"]["controller"] = None
+        pending = await self.client.put(self.path + "/workflow", params=self.q, json={
+            "version": state.json()["version"],
+            "evidence_token": state.json()["evidenceToken"],
+            "data": incomplete,
+        })
+        self.assertEqual(pending.status_code, 200, pending.text)
+        self.assertTrue(pending.json()["autoStartNew"])
+        self.assertFalse(pending.json()["data"]["process_enabled"])
+
+        launched = await self.save(self.w, version=pending.json()["version"])
+        self.assertEqual(launched.status_code, 200, launched.text)
+        self.assertFalse(launched.json()["autoStartNew"])
+        self.assertTrue(launched.json()["autoStartedNew"])
+        self.assertTrue(launched.json()["data"]["process_enabled"])
+
+    async def test_new_landlord_connection_does_not_start_a_network_process(self):
+        async with self.sessions() as db:
+            tc = await db.get(m.EzsTechConnection, self.tc.id)
+            await db.delete(tc)
+            await db.commit()
+        created = await self.client.put(self.path, params=self.q, json={"method": "landlord"})
+        self.assertEqual(created.status_code, 200, created.text)
+        state = await self.client.get(self.path + "/workflow", params=self.q)
+        r = await self.client.put(self.path + "/workflow", params=self.q, json={
+            "version": state.json()["version"],
+            "evidence_token": state.json()["evidenceToken"],
+            "data": self.w,
+        })
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["autoStartNew"])
+        self.assertFalse(r.json()["data"]["process_enabled"])
+
     async def test_real_chat_notification_and_archive(self):
         await self.doc('contract'); await self.doc('egrul')
         self.w['reviewed_kinds'] = ['contract', 'egrul', 'tp_layout']

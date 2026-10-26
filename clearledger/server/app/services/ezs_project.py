@@ -289,7 +289,8 @@ async def upsert_tech_connection(db: AsyncSession, company_id, site: EzsSite,
         EzsTechConnection.site_id == site.id).with_for_update())).scalars().first()
     created = tc is None
     if tc is None:
-        tc = EzsTechConnection(company_id=company_id, site_id=site.id)
+        tc = EzsTechConnection(company_id=company_id, site_id=site.id,
+                               workflow={"_auto_start_new": True})
         db.add(tc)
     if (tc.workflow or {}).get("archived") and any(k != "note" for k in patch):
         raise HTTPException(409, "Сначала верните присоединение из архива")
