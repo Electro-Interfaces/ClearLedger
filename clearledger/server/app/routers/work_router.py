@@ -1578,7 +1578,10 @@ async def calendar_meeting(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                             "Видеоконференции не настроены")
     cid = await _assert_work(company_id, current_user, db)
-    ev = await _event_participant(db, cid, event_id, current_user)
+    # Открытая встреча доступна любому сотруднику компании. Закрытая требует
+    # приглашения; остальные операции с событием остаются только для участников.
+    ev = await _event_participant(db, cid, event_id, current_user,
+                                  allow_open_company=True)
     if ev.status == "cancelled":
         raise HTTPException(status.HTTP_409_CONFLICT, "Встреча отменена")
     # Один вход с «Конференциями»: тот же выбор ведущего, та же отметка прихода.
@@ -2635,14 +2638,16 @@ async def poll_pick(
 
 
 async def _event_participant(db: AsyncSession, cid: uuid.UUID, event_id: str,
-                             user: User):
-    """Встреча, к которой человек имеет отношение: организатор или приглашённый."""
+                             user: User, *, allow_open_company: bool = False):
+    """Проверить доступ участника; для входа разрешить открытую встречу компании."""
     from app.models import CalendarAttendee, CalendarEvent
 
     ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
     if ev is None or ev.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
     if ev.organizer_id == user.id:
+        return ev
+    if allow_open_company and ev.visibility == "company":
         return ev
     есть = (await db.execute(select(CalendarAttendee.id).where(
         CalendarAttendee.event_id == ev.id,

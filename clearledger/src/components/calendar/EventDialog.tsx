@@ -68,7 +68,7 @@ const КРУГИ: { key: EventVisibility; label: string; hint: string }[] = [
   { key: 'private', label: 'Закрытая',
     hint: 'Видна организатору и приглашённым' },
   { key: 'company', label: 'Открытая',
-    hint: 'Видна всем в календаре компании' },
+    hint: 'Видна и доступна всем сотрудникам; приглашение получат отмеченные участники' },
 ]
 
 const когда = new Intl.DateTimeFormat('ru-RU', {
