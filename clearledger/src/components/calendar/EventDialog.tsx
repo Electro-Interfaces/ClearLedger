@@ -565,14 +565,29 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
                     onClick={() => setСвоя(true)}>или своя ссылка (Zoom, Teams)</button>
                 </div>
               ) : (
-                <div className="flex gap-2">
-                  <Input id={fieldId + "-conference"} className="min-w-0 flex-1 text-base sm:text-sm" value={conference}
-                    onChange={(e) => setConference(e.target.value)} disabled={!мой} placeholder="https://…" />
-                  {conference.trim() && (
-                    <Button type="button" variant="outline" size="icon" className="shrink-0"
-                      title="Копировать ссылку" aria-label="Копировать ссылку на видеовстречу" onClick={копироватьВидео}>
-                      <Copy className="h-4 w-4" />
-                    </Button>
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <Input id={fieldId + "-conference"} className="min-w-0 flex-1 text-base sm:text-sm" value={conference}
+                      onChange={(e) => setConference(e.target.value)} disabled={!мой} placeholder="https://…" />
+                    {conference.trim() && (
+                      <Button type="button" variant="outline" size="icon" className="shrink-0"
+                        title="Копировать ссылку" aria-label="Копировать ссылку на видеовстречу" onClick={копироватьВидео}>
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  {!новая && event!.status !== 'cancelled' && conference.trim() && (
+                    /\/ledger-[0-9a-f]+/i.test(conference.trim())
+                      ? <Button type="button" variant="outline" className="w-full" disabled={confBusy}
+                          onClick={войтиВВидеовстречу}>
+                          {confBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Video className="mr-2 h-4 w-4" />}
+                          {confBusy ? 'Подключаемся…' : 'Войти в видеовстречу'}
+                        </Button>
+                      : (/^https?:\/\//i.test(conference.trim()) && <Button type="button" variant="outline" className="w-full" asChild>
+                          <a href={conference.trim()} target="_blank" rel="noopener noreferrer">
+                            <Video className="mr-2 h-4 w-4" />Открыть видеовстречу
+                          </a>
+                        </Button>)
                   )}
                 </div>
               )}
@@ -913,12 +928,10 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
           {/* Своя комната — своя кнопка: сервер подписывает вход ведущим, иначе
               Jitsi держит всех на «ждём организатора». Чужую ссылку (Zoom,
               Teams) открываем как есть — ведущего там назначаем не мы. */}
-          {event!.status !== 'cancelled' && (
-            event!.conference_url && !/\/ledger-[0-9a-f]+/i.test(event!.conference_url)
-              ? (/^https?:\/\//i.test(event!.conference_url) && <Button variant="outline" asChild><a href={event!.conference_url} target="_blank" rel="noopener noreferrer"><Video className="mr-2 h-4 w-4" />Открыть видеовстречу</a></Button>)
-              : <Button variant="outline" disabled={confBusy} onClick={войтиВВидеовстречу}>
-                  <Video className="mr-2 h-4 w-4" />{event!.conference_url ? 'Войти в видеовстречу' : 'Начать видеовстречу'}
-                </Button>
+          {event!.status !== 'cancelled' && !event!.conference_url && (
+            <Button variant="outline" disabled={confBusy} onClick={войтиВВидеовстречу}>
+              <Video className="mr-2 h-4 w-4" />Начать видеовстречу
+            </Button>
           )}
           {subjectHref && <Button variant="ghost" asChild><Link to={subjectHref} onClick={onClose}>Предмет встречи</Link></Button>}
         </div>}
