@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # Длина строки по стандарту — 75 октетов; всё, что длиннее, складывается
 # продолжением. Календари, которым это безразлично, встречаются, но Outlook к
@@ -51,13 +51,31 @@ def _stamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def _when(starts_at: datetime, ends_at: datetime, all_day: bool, tz: str | None) -> list[str]:
+    """`DTSTART`/`DTEND`. Событие на весь день — датами (`VALUE=DATE`), а не
+    моментами: иначе VK, Outlook и Google кладут его встречей «00:00–00:00» по
+    часам получателя, а у живущего в другом поясе оно съезжает на соседний день.
+    Конец по стандарту исключительный: день ПОСЛЕ последнего (QA 27.10.2026)."""
+    if not all_day:
+        return [f"DTSTART:{_stamp(starts_at)}", f"DTEND:{_stamp(ends_at)}"]
+    from app.services import space_time
+
+    пояс = space_time.zone(tz)
+    первый = space_time.as_utc(starts_at).astimezone(пояс)
+    конец = space_time.as_utc(ends_at).astimezone(пояс)
+    после = конец.date() if конец.time() == datetime.min.time() else конец.date() + timedelta(days=1)
+    после = max(после, первый.date() + timedelta(days=1))
+    return [f"DTSTART;VALUE=DATE:{первый:%Y%m%d}", f"DTEND;VALUE=DATE:{после:%Y%m%d}"]
+
+
 def event_ics(*, uid: str, title: str, starts_at: datetime, ends_at: datetime,
               description: str | None = None, location: str | None = None,
               url: str | None = None, organizer_email: str | None = None,
               organizer_name: str | None = None,
               attendees: list[tuple[str, str | None]] | None = None,
               invite: bool = False,
-              cancelled: bool = False, sequence: int = 0) -> str:
+              cancelled: bool = False, sequence: int = 0,
+              all_day: bool = False, tz: str | None = None) -> str:
     """Одна встреча файлом.
 
     `SEQUENCE` и `STATUS:CANCELLED` — то, чем отмена доезжает до чужого
@@ -80,8 +98,7 @@ def event_ics(*, uid: str, title: str, starts_at: datetime, ends_at: datetime,
         "BEGIN:VEVENT",
         f"UID:{uid}",
         f"DTSTAMP:{_stamp(datetime.now(timezone.utc))}",
-        f"DTSTART:{_stamp(starts_at)}",
-        f"DTEND:{_stamp(ends_at)}",
+        *_when(starts_at, ends_at, all_day, tz),
         f"SEQUENCE:{sequence}",
         f"SUMMARY:{_escape(title)}",
         f"STATUS:{'CANCELLED' if cancelled else 'CONFIRMED'}",
@@ -131,8 +148,7 @@ def calendar_ics(events: list[dict], *, name: str = "Трек") -> str:
             "BEGIN:VEVENT",
             f"UID:{e['uid']}",
             f"DTSTAMP:{_stamp(datetime.now(timezone.utc))}",
-            f"DTSTART:{_stamp(e['starts_at'])}",
-            f"DTEND:{_stamp(e['ends_at'])}",
+            *_when(e["starts_at"], e["ends_at"], e.get("all_day", False), e.get("tz")),
             f"SUMMARY:{_escape(e['title'])}",
             f"STATUS:{'CANCELLED' if e.get('cancelled') else 'CONFIRMED'}",
         ]

@@ -1443,11 +1443,17 @@ async def calendar_feed(token: str, db: AsyncSession = Depends(get_db)):
         .order_by(CalendarEvent.starts_at))).scalars().all()
 
     база = settings.app_public_url.rstrip("/")
+    from app.services.meeting_notice import uid_встречи
+
     файл = ics_service.calendar_ics([{
-        "uid": f"{e.id}@trek",
+        # UID — как в письме-приглашении: подписанный на ленту и получивший
+        # письмо видел бы у себя одну встречу дважды.
+        "uid": uid_встречи(e),
         "title": e.title,
         "starts_at": e.starts_at,
         "ends_at": e.ends_at,
+        "all_day": e.all_day,
+        "tz": e.tz,
         "description": e.description,
         "location": e.location,
         "url": f"{база}/docs/work?view=calendar&event={e.id}",
@@ -1503,6 +1509,7 @@ async def calendar_ics(
     значит «не занят» для того, кто зовёт его туда.
     """
     from app.services import ics
+    from app.services.meeting_notice import uid_встречи
 
     cid = await _assert_work(company_id, current_user, db)
     # Право участника, а не просто членство в компании. Соседняя карточка
@@ -1512,8 +1519,9 @@ async def calendar_ics(
     ev = await _event_participant(db, cid, event_id, current_user)
     organizer = await db.get(User, ev.organizer_id)
     текст = ics.event_ics(
-        uid=f"{ev.id}@trek.elsyplus", title=ev.title,
+        uid=uid_встречи(ev), title=ev.title,
         starts_at=ev.starts_at, ends_at=ev.ends_at,
+        all_day=ev.all_day, tz=ev.tz,
         description=ev.description, location=ev.location,
         url=ev.conference_url,
         organizer_email=organizer.email if organizer else None,
@@ -2077,11 +2085,12 @@ async def _письмо_гостю(db: AsyncSession, ev, guest, token: str,
     ссылка = f"{settings.app_public_url.rstrip('/')}/meeting/{token}"
     отменена = ev.status == "cancelled"
     когда = space_time.as_utc(ev.starts_at).astimezone(space_time.zone(ev.tz))
-    подпись = когда.strftime("%d.%m.%Y в %H:%M")
+    подпись = когда.strftime("%d.%m.%Y, весь день" if ev.all_day else "%d.%m.%Y в %H:%M")
 
     файл = ics.event_ics(
         uid=f"{ev.id}@trek", title=ev.title,
         starts_at=ev.starts_at, ends_at=ev.ends_at,
+        all_day=ev.all_day, tz=ev.tz,
         description=ev.description, location=ev.location, url=ссылка,
         organizer_email=organizer.email, organizer_name=organizer.name,
         attendees=[(guest.email, guest.name)],

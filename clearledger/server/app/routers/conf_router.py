@@ -486,16 +486,23 @@ async def _пригласить(db: AsyncSession, ev: CalendarEvent, кого: l
     Ошибки доставки глотаем: конференция уже заведена, и лежащий почтовый сервер
     не должен её отменять.
     """
-    from app.services import email_service, ics, meeting_notice, space_time
+    from app.services import email_service, ics, meeting_notice, notify, space_time
 
     когда = space_time.as_utc(ev.starts_at).astimezone(space_time.zone(ev.tz))
     подпись = когда.strftime("%d.%m.%Y в %H:%M")
-    файл = ics.event_ics(uid=f"{ev.id}@conf.elsyplus", title=ev.title,
-                         starts_at=ev.starts_at, ends_at=ev.ends_at,
-                         description=ev.description, location="Конференция",
-                         url=гостевая,
-                         organizer_email=организатор.email,
-                         organizer_name=организатор.name)
+
+    def файл(человек: User) -> str:
+        # Приглашение (`METHOD:REQUEST`) с получателем в составе: письмо уходит
+        # с `method=REQUEST`, и PUBLISH внутри расходился с ним — по RFC 6047
+        # такое письмо клиент вправе не принять за приглашение (QA 27.10.2026).
+        return ics.event_ics(uid=f"{ev.id}@conf.elsyplus", title=ev.title,
+                             starts_at=ev.starts_at, ends_at=ev.ends_at,
+                             description=ev.description, location="Конференция",
+                             url=гостевая,
+                             organizer_email=организатор.email,
+                             organizer_name=организатор.name,
+                             attendees=[(человек.email, человек.name)], invite=True,
+                             sequence=meeting_notice._sequence())
     письмом = чатом = 0
     for человек in кого:
         if человек.id == организатор.id:
@@ -503,14 +510,15 @@ async def _пригласить(db: AsyncSession, ev: CalendarEvent, кого: l
         текст = (f"{организатор.name} зовёт на конференцию «{ev.title}»\n"
                  f"Когда: {подпись}\nСсылка: {гостевая}")
         try:
-            if почтой and человек.email and await email_service.send_meeting_invite(
+            if (почтой and человек.email and notify.wants_email(человек, "meeting")
+                    and await email_service.send_meeting_invite(
                     человек.email,
                     subject=f"Конференция: {ev.title} — {подпись}",
                     text=текст,
                     html=(f"<p>{организатор.name} зовёт на конференцию "
                           f"<b>{ev.title}</b>.</p><p>Когда: {подпись}</p>"
                           f'<p><a href="{гостевая}">Присоединиться</a></p>'),
-                    ics=файл):
+                    ics=файл(человек))):
                 письмом += 1
         except Exception:
             pass

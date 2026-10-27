@@ -680,11 +680,14 @@ export function PersonalSettings() {
           <div className="space-y-2">
             {ВИДЫ_ПИСЕМ.map((k) => {
               const on = draft.emailKinds.includes(k.id)
+              // Письма о встречах идут участникам встречи, а не по каналу
+              // поручений: выключенная «Почта» выше их не останавливает.
+              const можно = почтаВключена || k.id === 'meeting'
               return (
                 <label key={k.id}
                   className={cn('flex items-start gap-2 text-sm',
-                    почтаВключена ? 'cursor-pointer' : 'cursor-default opacity-60')}>
-                  <Checkbox className="mt-0.5" checked={on} disabled={!почтаВключена}
+                    можно ? 'cursor-pointer' : 'cursor-default opacity-60')}>
+                  <Checkbox className="mt-0.5" checked={on} disabled={!можно}
                     onCheckedChange={(v) => set('emailKinds', порядокВидовПисем(
                       v === true ? [...draft.emailKinds, k.id] : draft.emailKinds.filter((x) => x !== k.id)))} />
                   <span>

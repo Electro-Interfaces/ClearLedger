@@ -83,7 +83,8 @@ def _когда(ev: CalendarEvent, starts_at: datetime | None = None) -> str:
     from app.services import space_time
 
     момент = space_time.as_utc(starts_at or ev.starts_at).astimezone(space_time.zone(ev.tz))
-    return момент.strftime("%d.%m.%Y в %H:%M")
+    # «в 00:00» у события на весь день читалось как полночная встреча.
+    return момент.strftime("%d.%m.%Y, весь день" if ev.all_day else "%d.%m.%Y в %H:%M")
 
 
 async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, повод: str,
@@ -97,7 +98,7 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
     они получают только отмену и перенос. Тот, кто действует, извещение себе
     не получает: он и так знает.
     """
-    from app.services import email_service, ics
+    from app.services import email_service, ics, notify
 
     отмена = повод == "cancel"
     когда = _когда(ev)
@@ -132,7 +133,14 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
     гости = [] if повод == "invite" else (await db.execute(select(CalendarGuest).where(
         CalendarGuest.event_id == ev.id))).scalars().all()
 
-    свои = [(ч.email, ч.name) for ч in люди if ч.email]
+    # Письмо с календарным файлом — по выбору человека в личных настройках
+    # («Встречи — в мой почтовый календарь»): кто живёт в календаре пространства,
+    # может его выключить; чат-извещение остаётся в любом случае.
+    свои = [(ч.email, ч.name) for ч in люди if ч.email and notify.wants_email(ч, "meeting")]
+    # Организатор в файле — хозяин встречи, а не помощник, который её правит:
+    # ответы из VK и Outlook уходят на адрес ORGANIZER.
+    хозяин = (await db.get(User, ev.organizer_id)) if ev.organizer_id else None
+    хозяин = хозяин or кто
     чужие = [(г.email, г.name) for г in гости]
     номер = _sequence()
 
@@ -140,8 +148,9 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
         return ics.event_ics(
             uid=uid, title=ev.title, starts_at=ev.starts_at, ends_at=ev.ends_at,
             description=ev.description, location=ev.location, url=ev.conference_url,
-            organizer_email=кто.email, organizer_name=кто.name,
-            attendees=кому, invite=not отмена, cancelled=отмена, sequence=номер)
+            organizer_email=хозяин.email, organizer_name=хозяин.name,
+            attendees=кому, invite=not отмена, cancelled=отмена, sequence=номер,
+            all_day=ev.all_day, tz=ev.tz)
 
     # Гостю приглашение всегда уходило с `@trek` (`_письмо_гостю`), людям
     # пространства на конференцию — с `@conf.elsyplus`: каждому — свой UID.

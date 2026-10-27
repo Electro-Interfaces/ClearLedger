@@ -65,7 +65,7 @@ test('фото: тип и предел размера', () => {
 test('виды писем совпадают с серверным каталогом и не повторяются', () => {
   // Порядок и состав — как в notify.EMAIL_KINDS: по ним сравнивается черновик.
   assert.deepEqual(ВИДЫ_ПИСЕМ.map((k) => k.id),
-    ['task_assigned', 'task_mention', 'task_reply', 'task_status', 'digest'])
+    ['task_assigned', 'task_mention', 'task_reply', 'task_status', 'digest', 'meeting'])
   assert.equal(new Set(ВИДЫ_ПИСЕМ.map((k) => k.id)).size, ВИДЫ_ПИСЕМ.length)
   for (const k of ВИДЫ_ПИСЕМ) {
     assert.ok(k.label.length > 3 && k.hint.length > 3, k.id)
