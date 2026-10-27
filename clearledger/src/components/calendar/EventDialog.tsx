@@ -530,7 +530,11 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   useEffect(() => {
     if (!panel) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented && (e.target === document.body || e.target === document.documentElement)) закрыть.current()
+      // Фокус вне панели (страница или кнопка «Новое событие», куда его вернуло
+      // меню), но не в другом окне, меню или всплывающем поле: те закрываются сами.
+      const цель = e.target as Element | null
+      if (e.key === 'Escape' && !e.defaultPrevented && !панельRef.current?.contains(цель)
+        && !цель?.closest?.('[role="dialog"],[role="menu"],[role="listbox"],[data-radix-popper-content-wrapper]')) закрыть.current()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
