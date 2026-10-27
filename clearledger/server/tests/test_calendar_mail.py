@@ -15,7 +15,6 @@ from sqlalchemy import select
 from app.models import Company, User, UserCompany
 from app.services.ics import calendar_ics, event_ics
 
-pytestmark = pytest.mark.asyncio(loop_scope='session')
 
 # 27.10.2026 по Москве: полночь — 21:00 UTC накануне.
 ПОЛНОЧЬ = datetime(2026, 10, 26, 21, 0, tzinfo=timezone.utc)
@@ -60,6 +59,7 @@ async def _люди(db):
     return company, хозяин, зван
 
 
+@pytest.mark.asyncio(loop_scope='session')
 async def test_письмо_с_календарём_и_выключатель(db, monkeypatch):
     from app.routers.work_router import EventAction, EventIn, calendar_action, calendar_create
     from app.services import email_service
