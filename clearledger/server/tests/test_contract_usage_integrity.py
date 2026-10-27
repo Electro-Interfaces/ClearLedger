@@ -18,8 +18,11 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 async def make_contract(db):
     company = (await db.execute(select(Company).where(Company.slug == "gig"))).scalar_one()
-    party = Counterparty(company_id=company.id, name="Тест связей", inn="")
-    organization = Organization(company_id=company.id, name="Тест юрлица", inn="", prefix="Т")
+    # ИНН свой на каждый прогон: пустой ИНН уникален в паре с компанией, и
+    # остаток прошлого прогона в общей тестовой базе ронял все тесты файла.
+    inn = str(uuid.uuid4().int)[:12]
+    party = Counterparty(company_id=company.id, name="Тест связей", inn=inn)
+    organization = Organization(company_id=company.id, name="Тест юрлица", inn=inn, prefix="Т")
     db.add_all([party, organization])
     await db.flush()
     contract = Contract(company_id=company.id, counterparty_id=party.id,
