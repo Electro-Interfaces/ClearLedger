@@ -136,5 +136,8 @@ def test_ссылка_на_видео_в_месте_и_описании():
     свой = event_ics(uid='e@trek', title='Разбор', starts_at=ПОЛНОЧЬ, ends_at=ПОЛНОЧЬ + timedelta(hours=1),
                      location='Переговорная 3', description='Повестка', join_url='https://meet.example/ledger-1')
     assert 'LOCATION:Переговорная 3' in свой, 'своё место затёрто ссылкой'
+    заглушка = event_ics(uid='e@trek', title='Разбор', starts_at=ПОЛНОЧЬ, ends_at=ПОЛНОЧЬ + timedelta(hours=1),
+                         location='Конференция', join_url='https://meet.example/ledger-1')
+    assert 'LOCATION:https://meet.example/ledger-1' in заглушка, 'заглушка «Конференция» осталась вместо ссылки'
     развёрнут = свой.replace('\r\n ', '')
     assert r'DESCRIPTION:Повестка\n\nВидеовстреча: https://meet.example/ledger-1' in развёрнут

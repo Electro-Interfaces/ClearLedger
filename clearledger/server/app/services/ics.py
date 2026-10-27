@@ -64,7 +64,11 @@ def _with_join(description: str | None, location: str | None,
         return description, location
     if join_url not in (description or ""):
         description = f"{description}\n\nВидеовстреча: {join_url}" if description else f"Видеовстреча: {join_url}"
-    return description, location or join_url
+    # «Конференция» — заглушка, которую пишет созыв из «Конференций»: место
+    # ничего не говорит, ссылка в нём нажимается.
+    if not location or location.strip() == "Конференция":
+        location = join_url
+    return description, location
 
 
 def _when(starts_at: datetime, ends_at: datetime, all_day: bool, tz: str | None) -> list[str]:
