@@ -125,3 +125,16 @@ async def test_продление_это_изменение_и_отозванн�
     тема = next(p['subject'] for to, p in письма if to == зван.email)
     assert тема.startswith('Изменено:') and ' – ' in тема and 'весь день' in тема, тема
     assert not [1 for to, _ in письма if to == 'otozvan@example.test'], 'отозванному гостю ушло письмо'
+
+
+def test_ссылка_на_видео_в_месте_и_описании():
+    # Поле URL почтовые календари не показывают: ссылка должна быть в «Месте» и в описании.
+    текст = event_ics(uid='e@trek', title='Разбор', starts_at=ПОЛНОЧЬ, ends_at=ПОЛНОЧЬ + timedelta(hours=1),
+                      url='https://meet.example/ledger-1', join_url='https://meet.example/ledger-1')
+    assert 'LOCATION:https://meet.example/ledger-1' in текст
+    assert 'DESCRIPTION:Видеовстреча: https://meet.example/ledger-1' in текст
+    свой = event_ics(uid='e@trek', title='Разбор', starts_at=ПОЛНОЧЬ, ends_at=ПОЛНОЧЬ + timedelta(hours=1),
+                     location='Переговорная 3', description='Повестка', join_url='https://meet.example/ledger-1')
+    assert 'LOCATION:Переговорная 3' in свой, 'своё место затёрто ссылкой'
+    развёрнут = свой.replace('\r\n ', '')
+    assert r'DESCRIPTION:Повестка\n\nВидеовстреча: https://meet.example/ledger-1' in развёрнут

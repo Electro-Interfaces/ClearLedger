@@ -51,6 +51,22 @@ def _stamp(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def _with_join(description: str | None, location: str | None,
+               join_url: str | None) -> tuple[str | None, str | None]:
+    """Ссылка на видеовстречу — в «Место» и в описание.
+
+    Поле `URL` календари почти не показывают: в Outlook, VK и Gmail встреча
+    приходила с «Местом: Конференция» и без ссылки, и в нужный час войти было
+    не с чего (QA 27.10.2026). Ссылку в «Месте» они делают нажимаемой, в
+    описании её видят все остальные.
+    """
+    if not join_url:
+        return description, location
+    if join_url not in (description or ""):
+        description = f"{description}\n\nВидеовстреча: {join_url}" if description else f"Видеовстреча: {join_url}"
+    return description, location or join_url
+
+
 def _when(starts_at: datetime, ends_at: datetime, all_day: bool, tz: str | None) -> list[str]:
     """`DTSTART`/`DTEND`. Событие на весь день — датами (`VALUE=DATE`), а не
     моментами: иначе VK, Outlook и Google кладут его встречей «00:00–00:00» по
@@ -75,7 +91,8 @@ def event_ics(*, uid: str, title: str, starts_at: datetime, ends_at: datetime,
               attendees: list[tuple[str, str | None]] | None = None,
               invite: bool = False,
               cancelled: bool = False, sequence: int = 0,
-              all_day: bool = False, tz: str | None = None) -> str:
+              all_day: bool = False, tz: str | None = None,
+              join_url: str | None = None) -> str:
     """Одна встреча файлом.
 
     `SEQUENCE` и `STATUS:CANCELLED` — то, чем отмена доезжает до чужого
@@ -103,6 +120,7 @@ def event_ics(*, uid: str, title: str, starts_at: datetime, ends_at: datetime,
         f"SUMMARY:{_escape(title)}",
         f"STATUS:{'CANCELLED' if cancelled else 'CONFIRMED'}",
     ]
+    description, location = _with_join(description, location, join_url)
     if description:
         строки.append(f"DESCRIPTION:{_escape(description)}")
     if location:
@@ -152,10 +170,11 @@ def calendar_ics(events: list[dict], *, name: str = "Трек") -> str:
             f"SUMMARY:{_escape(e['title'])}",
             f"STATUS:{'CANCELLED' if e.get('cancelled') else 'CONFIRMED'}",
         ]
-        if e.get("description"):
-            строки.append(f"DESCRIPTION:{_escape(e['description'])}")
-        if e.get("location"):
-            строки.append(f"LOCATION:{_escape(e['location'])}")
+        описание, место = _with_join(e.get("description"), e.get("location"), e.get("join_url"))
+        if описание:
+            строки.append(f"DESCRIPTION:{_escape(описание)}")
+        if место:
+            строки.append(f"LOCATION:{_escape(место)}")
         if e.get("url"):
             строки.append(f"URL:{_escape(e['url'])}")
         строки.append("END:VEVENT")

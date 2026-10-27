@@ -239,10 +239,13 @@ async def invite_ics(token: str, db: AsyncSession = Depends(get_db)):
     guest, ev = await _guest_or_404(db, token)
     organizer = await db.get(User, ev.organizer_id)
     текст = ics.event_ics(
-        uid=f"{ev.id}@trek.elsyplus",
+        # UID — как в письме гостю (`_письмо_гостю`): файл со страницы приглашения
+        # и письмо иначе давали у гостя две одинаковые встречи (QA 27.10.2026).
+        uid=f"{ev.id}@trek",
         title=ev.title, starts_at=ev.starts_at, ends_at=ev.ends_at,
+        all_day=ev.all_day, tz=ev.tz,
         description=ev.description, location=ev.location,
-        url=ev.conference_url,
+        url=ev.conference_url, join_url=ev.conference_url,
         organizer_email=organizer.email if organizer else None,
         organizer_name=organizer.name if organizer else None,
         cancelled=ev.status == "cancelled",

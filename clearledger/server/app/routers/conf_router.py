@@ -497,8 +497,7 @@ async def _пригласить(db: AsyncSession, ev: CalendarEvent, кого: l
         # такое письмо клиент вправе не принять за приглашение (QA 27.10.2026).
         return ics.event_ics(uid=f"{ev.id}@conf.elsyplus", title=ev.title,
                              starts_at=ev.starts_at, ends_at=ev.ends_at,
-                             description=ev.description, location="Конференция",
-                             url=гостевая,
+                             description=ev.description, url=гостевая, join_url=гостевая,
                              organizer_email=организатор.email,
                              organizer_name=организатор.name,
                              attendees=[(человек.email, человек.name)], invite=True,

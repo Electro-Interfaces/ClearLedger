@@ -177,7 +177,7 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
             description=ev.description, location=ev.location, url=ev.conference_url,
             organizer_email=хозяин.email, organizer_name=хозяин.name,
             attendees=кому, invite=not отмена, cancelled=отмена, sequence=номер,
-            all_day=ev.all_day, tz=ev.tz)
+            all_day=ev.all_day, tz=ev.tz, join_url=ev.conference_url)
 
     # Гостю приглашение всегда уходило с `@trek` (`_письмо_гостю`), людям
     # пространства на конференцию — с `@conf.elsyplus`: каждому — свой UID.
