@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input'
 import { useCompany } from '@/contexts/CompanyContext'
 import { useAuth } from '@/contexts/AuthContext'
 import * as workService from '@/services/workService'
+import { respond as respondToInvite } from '@/services/confService'
 import type { CalendarEvent } from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { cn } from '@/lib/utils'
@@ -207,6 +208,18 @@ export function CalendarPage() {
       companyDayStart(addDays(сегодня, 31)).toISOString(), { scope: 'mine' }),
     enabled: !!companyId, staleTime: 60_000, refetchOnWindowFocus: true,
   })
+  // Ответ на серию — на все её встречи без ответа разом, как в «Конференциях»:
+  // на планёрку по четвергам ходят или не ходят, а не через раз.
+  const ответить = useMutation({
+    mutationFn: ({ ids, что }: { ids: string[]; что: 'accepted' | 'declined' }) =>
+      Promise.all(ids.map((id) => respondToInvite(companyId, id, что))),
+    onSuccess: (_, { ids, что }) => {
+      toast.success(что === 'accepted' ? 'Ответили: буду' : 'Ответили: не смогу',
+        ids.length > 1 ? { description: `На все встречи серии: ${ids.length}` } : undefined)
+      void qc.invalidateQueries({ queryKey: ['calendar'] })
+    },
+    onError: () => toast.error('Не удалось ответить — попробуйте ещё раз'),
+  })
   const событияГотовы = eventsQ.isSuccess
   useEffect(() => {
     if (mode === 'month' && событияГотовы) месяцRef.current?.querySelector('[data-today]')?.scrollIntoView({ block: 'nearest' })
@@ -355,6 +368,13 @@ export function CalendarPage() {
   const now = new Date()
   const ждутОтвета = (pendingQ.data?.events ?? []).filter(e => e.my_response === 'pending' && e.status !== 'cancelled'
     && new Date(e.ends_at) > now).sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+  // Серия — одной строкой: еженедельная планёрка давала десять строк одного и
+  // того же (QA 27.10.2026). Встречи серии ссылаются на голову `series_id`.
+  const ждутСерии = [...ждутОтвета.reduce((группы, e) => {
+    const ключ = e.series_id ?? e.id
+    группы.set(ключ, [...(группы.get(ключ) ?? []), e])
+    return группы
+  }, new Map<string, CalendarEvent[]>()).values()]
   const repeats = (слои.repeats ? recurQ.data?.recurrences ?? [] : [])
     .filter(r => r.mine && r.enabled
       && (!query || r.template.toLocaleLowerCase('ru').includes(query.toLocaleLowerCase('ru'))))
@@ -510,19 +530,32 @@ export function CalendarPage() {
 
       {/* Приглашения без ответа — отдельным списком: организатор ждёт ответа, а в
           сетке их легко принять за уже согласованные (QA 27.10.2026). */}
-      {ждутОтвета.length > 0 && (
-        <section aria-labelledby="calendar-pending-title" className="space-y-0.5">
-          <h3 id="calendar-pending-title" className="px-1 pb-1 text-xs font-medium text-muted-foreground">
-            Ждут вашего ответа · {ждутОтвета.length}
+      {ждутСерии.length > 0 && (
+        <section aria-labelledby="calendar-pending-title" className="space-y-1">
+          <h3 id="calendar-pending-title" className="px-1 pb-0.5 text-xs font-medium text-muted-foreground">
+            Ждут вашего ответа · {ждутСерии.length}
           </h3>
-          {ждутОтвета.slice(0, 5).map(e => (
-            <button key={e.id} type="button" onClick={() => open(e)}
-              className="flex min-h-9 w-full items-baseline gap-2 rounded-md border border-dashed border-primary/40 px-2 py-1.5 text-left text-sm hover:bg-accent/60">
-              <span className="shrink-0 tabular-nums text-xs text-muted-foreground">{format(parseISO(companyDateKey(e.starts_at)), 'd MMM', { locale: ru })}, {companyTime(e.starts_at)}</span>
-              <span className="min-w-0 flex-1 truncate">{e.title}</span>
-            </button>
-          ))}
-          {ждутОтвета.length > 5 && <p className="px-1 text-xs text-muted-foreground">и ещё {ждутОтвета.length - 5} — в «Списке»</p>}
+          {ждутСерии.slice(0, 5).map(серия => {
+            const e = серия[0]
+            const ids = серия.map((в) => в.id)
+            return (
+              <div key={e.id} className="rounded-md border border-dashed border-primary/40 px-2 py-1.5">
+                <button type="button" onClick={() => open(e)}
+                  className="flex w-full items-baseline gap-2 text-left text-sm hover:underline">
+                  <span className="shrink-0 tabular-nums text-xs text-muted-foreground">{format(parseISO(companyDateKey(e.starts_at)), 'd MMM', { locale: ru })}, {companyTime(e.starts_at)}</span>
+                  <span className="min-w-0 flex-1 truncate">{e.title}</span>
+                </button>
+                <div className="mt-1 flex items-center gap-1">
+                  {серия.length > 1 && <span className="mr-auto text-xs text-muted-foreground">серия · {серия.length} {встреч(серия.length)}</span>}
+                  <Button size="xs" variant="outline" className={серия.length > 1 ? '' : 'ml-auto'} disabled={ответить.isPending}
+                    onClick={() => ответить.mutate({ ids, что: 'accepted' })}>Буду</Button>
+                  <Button size="xs" variant="ghost" disabled={ответить.isPending}
+                    onClick={() => ответить.mutate({ ids, что: 'declined' })}>Не смогу</Button>
+                </div>
+              </div>
+            )
+          })}
+          {ждутСерии.length > 5 && <p className="px-1 text-xs text-muted-foreground">и ещё {ждутСерии.length - 5}</p>}
         </section>
       )}
 
@@ -1034,6 +1067,16 @@ const запись = (n: number) => {
   if (одна === 1) return 'запись'
   if (одна > 1 && одна < 5) return 'записи'
   return 'записей'
+}
+
+/** «1 встреча», «3 встречи», «10 встреч». */
+const встреч = (n: number) => {
+  const две = n % 100
+  if (две > 4 && две < 21) return 'встреч'
+  const одна = n % 10
+  if (одна === 1) return 'встреча'
+  if (одна > 1 && одна < 5) return 'встречи'
+  return 'встреч'
 }
 
 export default CalendarPage
