@@ -172,12 +172,10 @@ export function CalendarPage() {
   }, [dateKey, mode])
   const rangeFrom = companyDayStart(from)
   const rangeTo = companyDayStart(to)
-  // Месяц на телефоне открывается на текущей неделе: шесть строк не всегда
-  // помещаются, и сегодняшний день уходил под край (QA 27.10.2026).
+  // Месяц открывается на текущей неделе: строки растут по самой заполненной
+  // клетке, и на ноутбуке 1440×900 сегодняшняя неделя уходила под край сетки
+  // (QA 27.10.2026). Прокручиваем, когда события уже пришли и высоты известны.
   const месяцRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (phone && mode === 'month') месяцRef.current?.querySelector('[data-today]')?.scrollIntoView({ block: 'nearest' })
-  }, [phone, mode, dateKey])
 
   const eventsQ = useQuery({
     queryKey: ['calendar', companyId, слои.mine, слои.company, rangeFrom.toISOString(), rangeTo.toISOString(), query],
@@ -209,6 +207,10 @@ export function CalendarPage() {
       companyDayStart(addDays(сегодня, 31)).toISOString(), { scope: 'mine' }),
     enabled: !!companyId, staleTime: 60_000, refetchOnWindowFocus: true,
   })
+  const событияГотовы = eventsQ.isSuccess
+  useEffect(() => {
+    if (mode === 'month' && событияГотовы) месяцRef.current?.querySelector('[data-today]')?.scrollIntoView({ block: 'nearest' })
+  }, [mode, dateKey, событияГотовы])
   const tasksQ = useQuery({
     queryKey: ['calendar-tasks', companyId, rangeFrom.toISOString(), rangeTo.toISOString()],
     queryFn: () => tasksService.listTasks(companyId, 'my_due', { dueFrom: rangeFrom.toISOString(), dueTo: rangeTo.toISOString(), limit: 200 }),
@@ -699,7 +701,7 @@ export function CalendarPage() {
       <TimeGrid days={days} events={events} tasks={tasks} foreign={foreign} repeats={repeats} draft={newAt ? draft : null}
         onEvent={open} onAdd={at => startMeeting(at)} onDay={day => openDay(day, mode === 'week' ? 'day' : 'agenda')} />
     </div> : <div ref={месяцRef} className="flex min-h-0 flex-1 flex-col overflow-auto rounded-xl border border-border bg-card">
-      <div className="grid grid-cols-7 border-b border-border">{days.slice(0, 7).map(day => <div key={day.toISOString()} className={cn('px-2 py-2 text-sm font-medium', day.getDay() % 6 === 0 ? 'text-muted-foreground/80' : 'text-muted-foreground')}>{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
+      <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-border bg-card">{days.slice(0, 7).map(day => <div key={day.toISOString()} className={cn('px-2 py-2 text-sm font-medium', day.getDay() % 6 === 0 ? 'text-muted-foreground/80' : 'text-muted-foreground')}>{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
       {/* На телефоне в клетке только точки: высокие строки уводили текущую
           неделю под край экрана (QA 27.10.2026), шесть недель должны влезать. */}
       <div className={cn('grid flex-1 grid-cols-7', phone ? 'min-h-0 [grid-auto-rows:minmax(3rem,1fr)]' : '[grid-auto-rows:minmax(5.5rem,1fr)]')}>{days.map(day => {
