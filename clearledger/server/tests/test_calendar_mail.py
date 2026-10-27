@@ -95,3 +95,33 @@ async def test_письмо_с_календарём_и_выключатель(db
                                                 ends_at=новый + timedelta(days=1)),
                           db=db, current_user=хозяин)
     assert not [1 for to, _ in письма if to == зван.email], 'письмо ушло вопреки настройке'
+
+
+@pytest.mark.asyncio(loop_scope='session')
+async def test_продление_это_изменение_и_отозванному_гостю_не_пишем(db, monkeypatch):
+    from app.models import CalendarGuest
+    from app.routers.work_router import EventAction, EventIn, calendar_action, calendar_create
+    from app.services import email_service
+
+    письма = []
+
+    async def не_слать(to, **поля):
+        письма.append((to, поля))
+        return True
+    monkeypatch.setattr(email_service, 'send_meeting_invite', не_слать)
+    company, хозяин, зван = await _люди(db)
+    день = (datetime.now(timezone.utc) + timedelta(days=5)).replace(hour=21, minute=0, second=0, microsecond=0)
+    ev = await calendar_create(EventIn(
+        company_id=str(company.id), title='Выставка', starts_at=день,
+        ends_at=день + timedelta(days=1), all_day=True, attendee_ids=[str(зван.id)]),
+        db=db, current_user=хозяин)
+    db.add(CalendarGuest(event_id=uuid.UUID(ev['id']), email='otozvan@example.test', token_hash='x' * 64,
+                         token_prefix='x' * 8, expires_at=день, revoked_at=datetime.now(timezone.utc)))
+    await db.flush()
+    письма.clear()
+    await calendar_action(ev['id'], EventAction(company_id=str(company.id), starts_at=день,
+                                                ends_at=день + timedelta(days=3)),
+                          db=db, current_user=хозяин)
+    тема = next(p['subject'] for to, p in письма if to == зван.email)
+    assert тема.startswith('Изменено:') and ' – ' in тема and 'весь день' in тема, тема
+    assert not [1 for to, _ in письма if to == 'otozvan@example.test'], 'отозванному гостю ушло письмо'

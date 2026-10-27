@@ -145,6 +145,7 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const [allDay, setAllDay] = useState(event?.all_day ?? !!companyDay)
   const [peopleSearch, setPeopleSearch] = useState('')
   const [cancelConfirm, setCancelConfirm] = useState(false)
+  const [запасКонца, setЗапасКонца] = useState<string | null>(null)
   // Телефон открывает встречу простой: тема, время, место. Остальное — за
   // «Подробнее» (решение МАГа 07.09.2026).
   const phone = useIsMobile()
@@ -439,8 +440,15 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   // тому, кто спросить уже не может — правка отменённой встречи запрещена.
   // Признак считается по составу самой встречи, а не по черновику формы:
   // снятый в форме участник ещё не перестал её ждать.
+  // Внешние гости тоже получают письмо об отмене — тот же запрос, что у панели
+  // гостей, общий кэш (QA 27.10.2026: при госте писалось «писем никто не получит»).
+  const гостиQ = useQuery({
+    queryKey: ['event-guests', companyId, event?.id],
+    queryFn: () => workService.eventGuests(companyId, event!.id),
+    enabled: !!event?.id && cancelConfirm,
+  })
   const причинаОбязательна = (event?.attendees ?? [])
-    .some((a) => a.user_id !== event?.organizer_id)
+    .some((a) => a.user_id !== event?.organizer_id) || (гостиQ.data?.guests ?? []).length > 0
 
   const отменить = useMutation({
     mutationFn: (reason: string) =>
@@ -493,8 +501,11 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
       const endsAtMidnight = ends.slice(11, 16) === '00:00'
       const lastDay = endsAtMidnight ? parseISO(endDate) : addDays(parseISO(endDate), 1)
       setStarts(`${startDate}T00:00`)
-      setEnds(`${calendarDayKey(lastDay)}T00:00`)
+      // Снял и тут же вернул «Весь день» — многодневное событие не сжимается
+      // до одного дня (QA 27.10.2026).
+      setEnds(запасКонца && запасКонца > `${startDate}T00:00` ? запасКонца : `${calendarDayKey(lastDay)}T00:00`)
     } else {
+      setЗапасКонца(ends)
       const start = companyDateTimeToDate(`${starts.slice(0, 10)}T10:00`)
       setStarts(`${starts.slice(0, 10)}T10:00`)
       setEnds(local(new Date(start.getTime() + 60 * 60_000)))

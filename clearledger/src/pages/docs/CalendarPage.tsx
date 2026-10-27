@@ -986,8 +986,13 @@ function FeedLink({ wide = false }: { wide?: boolean }) {
       <PopoverContent align="end" className="w-96 max-w-[calc(100vw-2rem)] space-y-2">
         <p className="text-xs font-medium">Ваш календарь во внешнем клиенте</p>
         <p className="text-xs text-muted-foreground">
-          Вставьте адрес в Google Календарь, Apple Календарь или Outlook как
-          подписку по ссылке. Встречи будут видны только для чтения.
+          Вставьте адрес как подписку по ссылке (iCal) в Яндекс Календарь,
+          Google, Apple или Outlook. Встречи будут видны только для чтения.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Подписку умеют не все: почтовые календари, например VK, надёжнее получают
+          встречи письмом. Это пункт <Link to="/settings?tab=email" className="underline">«Встречи — в мой почтовый календарь»</Link> в
+          настройках: приглашение, перенос и отмена приходят с календарным файлом.
         </p>
         {q.isLoading && <p className="text-xs text-muted-foreground">Собираю адрес…</p>}
         {q.isError && <p role="alert" className="text-sm">Не удалось получить адрес. <button className="underline" onClick={() => void q.refetch()}>Повторить</button></p>}

@@ -190,11 +190,14 @@ function Segments<T extends string>({ value, onChange, options, label }: {
  * и отдельным подтверждением, и смешивать его с черновиком телефонов нельзя.
  */
 function PasswordBlock() {
+  const { user } = useAuth()
   const [текущий, setТекущий] = useState('')
   const [новый, setНовый] = useState('')
   const [повтор, setПовтор] = useState('')
   const [занят, setЗанят] = useState(false)
-  const тронуто = !!(текущий || новый || повтор)
+  // Текущий пароль подставляет менеджер паролей браузера сам: ошибка «новый
+  // короче 10 символов» горела бы у каждого, кто ничего не вводил (QA 27.10.2026).
+  const тронуто = !!(новый || повтор)
   const ошибка = тронуто ? ошибкаПароля(текущий, новый, повтор) : null
 
   async function сменить() {
@@ -222,6 +225,10 @@ function PasswordBlock() {
 
   return (
     <div className="space-y-3">
+      {/* Логин рядом с паролем — для менеджера паролей: без него браузер
+          принимал за логин ближайшее текстовое поле («Городской») и вписывал
+          туда почту, форма становилась «изменённой» и не сохранялась. */}
+      <input type="email" autoComplete="username" value={user?.email ?? ''} readOnly hidden aria-hidden="true" tabIndex={-1} />
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">
           <Label htmlFor="pers-pass-cur" className="text-xs font-normal text-muted-foreground">
@@ -448,7 +455,7 @@ export function PersonalSettings() {
           <div className="min-w-0 flex-1 space-y-2">
             <div className="space-y-1.5">
               <Label htmlFor="pers-name">Имя</Label>
-              <Input id="pers-name" value={draft.name} maxLength={255}
+              <Input id="pers-name" value={draft.name} maxLength={255} autoComplete="name"
                 onChange={(e) => set('name', e.target.value)}
                 placeholder="Фамилия Имя Отчество" />
               <p className="text-xs text-muted-foreground">
@@ -495,7 +502,7 @@ export function PersonalSettings() {
               <Label htmlFor="pers-mob" className="text-xs font-normal text-muted-foreground">
                 Мобильный
               </Label>
-              <Input id="pers-mob" value={draft.mobile} maxLength={40} inputMode="tel"
+              <Input id="pers-mob" value={draft.mobile} maxLength={40} inputMode="tel" autoComplete="mobile tel"
                 aria-invalid={телефонНеРаспознан(draft.mobile)}
                 onChange={(e) => set('mobile', e.target.value)} placeholder="+7 900 000-00-00" />
               {телефонНеРаспознан(draft.mobile) && <p className="text-[11px] text-amber-600 dark:text-amber-500">{ПОДСКАЗКА_НОМЕРА}</p>}
@@ -504,7 +511,7 @@ export function PersonalSettings() {
               <Label htmlFor="pers-off" className="text-xs font-normal text-muted-foreground">
                 Городской
               </Label>
-              <Input id="pers-off" value={draft.office} maxLength={40} inputMode="tel"
+              <Input id="pers-off" value={draft.office} maxLength={40} inputMode="tel" autoComplete="work tel"
                 aria-invalid={телефонНеРаспознан(draft.office)}
                 onChange={(e) => set('office', e.target.value)} placeholder="+7 812 000-00-00, доб. 123" />
               {телефонНеРаспознан(draft.office) && <p className="text-[11px] text-amber-600 dark:text-amber-500">{ПОДСКАЗКА_НОМЕРА}</p>}
