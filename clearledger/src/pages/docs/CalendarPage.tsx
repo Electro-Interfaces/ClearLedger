@@ -200,6 +200,15 @@ export function CalendarPage() {
     },
     enabled: !!companyId && (слои.mine || слои.company), staleTime: 30_000, refetchOnWindowFocus: true,
   })
+  // Приглашения без ответа — на месяц вперёд, а не в открытом периоде: в виде
+  // «День» иначе видно одно сегодняшнее, а поиск прятал бы остальные (QA 27.10.2026).
+  const сегодня = companyTodayDate()
+  const pendingQ = useQuery({
+    queryKey: ['calendar', companyId, 'pending', calendarDayKey(сегодня)],
+    queryFn: () => workService.listEvents(companyId, companyDayStart(сегодня).toISOString(),
+      companyDayStart(addDays(сегодня, 31)).toISOString(), { scope: 'mine' }),
+    enabled: !!companyId, staleTime: 60_000, refetchOnWindowFocus: true,
+  })
   const tasksQ = useQuery({
     queryKey: ['calendar-tasks', companyId, rangeFrom.toISOString(), rangeTo.toISOString()],
     queryFn: () => tasksService.listTasks(companyId, 'my_due', { dueFrom: rangeFrom.toISOString(), dueTo: rangeTo.toISOString(), limit: 200 }),
@@ -342,7 +351,7 @@ export function CalendarPage() {
     })
   const foreign = new Set(eventsQ.data?.foreign ?? [])
   const now = new Date()
-  const ждутОтвета = events.filter(e => e.my_response === 'pending' && e.status !== 'cancelled'
+  const ждутОтвета = (pendingQ.data?.events ?? []).filter(e => e.my_response === 'pending' && e.status !== 'cancelled'
     && new Date(e.ends_at) > now).sort((a, b) => a.starts_at.localeCompare(b.starts_at))
   const repeats = (слои.repeats ? recurQ.data?.recurrences ?? [] : [])
     .filter(r => r.mine && r.enabled

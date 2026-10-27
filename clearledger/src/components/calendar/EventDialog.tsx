@@ -469,7 +469,9 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
     queryKey: ['calendar-busy', companyId, 'overlap', attendeesKey, startMs, endMs, event?.id],
     queryFn: () => workService.calendarBusy(companyId, new Date(startMs).toISOString(),
       new Date(endMs).toISOString(), attendees, event?.id),
-    enabled: !!companyId && мой && !allDay && !formError && attendees.length > 0
+    // Без приглашённых сервер проверяет одного организатора: встреча поверх
+    // своей же — самый частый случай наложения (QA 27.10.2026).
+    enabled: !!companyId && мой && !allDay && !formError
       && event?.status !== 'poll' && endMs > Date.now(),
     staleTime: 30_000,
   })
