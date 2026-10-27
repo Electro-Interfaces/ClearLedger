@@ -702,7 +702,7 @@ export function CalendarPage() {
       <div className="grid grid-cols-7 border-b border-border">{days.slice(0, 7).map(day => <div key={day.toISOString()} className={cn('px-2 py-2 text-sm font-medium', day.getDay() % 6 === 0 ? 'text-muted-foreground/80' : 'text-muted-foreground')}>{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
       {/* На телефоне в клетке только точки: высокие строки уводили текущую
           неделю под край экрана (QA 27.10.2026), шесть недель должны влезать. */}
-      <div className={cn('grid flex-1 grid-cols-7', phone ? '[grid-auto-rows:minmax(3rem,1fr)]' : '[grid-auto-rows:minmax(5.5rem,1fr)]')}>{days.map(day => {
+      <div className={cn('grid flex-1 grid-cols-7', phone ? 'min-h-0 [grid-auto-rows:minmax(3rem,1fr)]' : '[grid-auto-rows:minmax(5.5rem,1fr)]')}>{days.map(day => {
         const meetings = events.filter(e => eventDaySegment(e, day))
         const due = tasks.filter(t => t.due_at && isCompanyDay(t.due_at, day))
         const planned = plan[format(day, 'yyyy-MM-dd')] ?? 0
@@ -726,7 +726,7 @@ export function CalendarPage() {
         const total = rows.length + dayReminders.length + planned
         const чужойМесяц = !isSameMonth(day, anchor)
         return <div key={day.toISOString()} data-today={isCompanyToday(day) || undefined}
-          className={cn('group min-w-0 border-b border-r border-border [&:nth-child(7n)]:border-r-0', phone ? 'p-0.5' : 'p-1',
+          className={cn('group min-w-0 border-b border-r border-border [&:nth-child(7n)]:border-r-0', phone ? 'overflow-hidden p-0.5' : 'p-1',
           чужойМесяц ? 'bg-muted/25' : day.getDay() % 6 === 0 && 'bg-muted/15')}>
           <div className="flex items-center justify-between">
             <button aria-label={`Открыть ${format(day, 'd MMMM', { locale: ru })}`} onClick={() => openDay(day)}
