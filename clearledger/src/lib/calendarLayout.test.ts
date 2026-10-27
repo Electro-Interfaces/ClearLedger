@@ -2,6 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { eventDaySegment, layoutDayEvents } from './calendarLayout.ts'
 
+// Даты ниже заданы по местным часам, а раскладка считает по поясу компании
+// (Москва): на машине в UTC тесты падали, хотя код верен (QA 27.10.2026).
+process.env.TZ = 'Europe/Moscow'
+
 const day = new Date(2026, 8, 7)
 function event(id: string, start: number, end: number) {
   const at = (hour: number) => new Date(2026, 8, 7, hour).toISOString()

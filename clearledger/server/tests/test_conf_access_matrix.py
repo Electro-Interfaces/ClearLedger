@@ -116,3 +116,28 @@ async def test_кто_ведущий(db, jitsi_key):
     assert первый['moderator'] is True, 'через 5 минут без ведущего первый вошедший не получил пропуск'
     assert второй['moderator'] is False, 'второй вошедший тоже стал ведущим'
     assert первый['session_id'] == второй['session_id'], 'вход из календаря и из «Конференций» завели разные сессии'
+
+
+async def test_завершить_только_хозяин_и_встреча_сокращается(db, jitsi_key):
+    """«Завершить» — организатору; чужой из компании прямым запросом не гасит.
+    После завершения конец встречи в календаре — фактический."""
+    from app.models import CalendarEvent
+    from app.routers import conf_router as C, work_router as W
+
+    company = await db.scalar(select(Company).limit(1))
+    org = await db.scalar(select(User).where(User.email == 'admin@clearledger.ru'))
+    await db.merge(UserCompany(company_id=company.id, user_id=org.id, role='admin'))
+    out = User(email=f'end-{uuid.uuid4()}@example.test', name='Чужой', password_hash='!t', company_id=company.id)
+    db.add(out); await db.flush()
+    db.add(UserCompany(company_id=company.id, user_id=out.id, role='user')); await db.flush()
+    cid = str(company.id)
+    шло = datetime.now(timezone.utc) - timedelta(minutes=10)
+    ev = await W.calendar_create(W.EventIn(company_id=cid, title='Открытая', starts_at=шло, ends_at=шло + timedelta(hours=1),
+                                           visibility='company', video=True), db=db, current_user=org)
+    вход = await C.meeting_join(ev['id'], company_id=cid, db=db, current_user=out)
+    чужой = await _call(C.session_end, вход['session_id'], company_id=cid, db=db, current_user=out)
+    assert чужой[0] == 403, 'чужой сотрудник закрыл открытую конференцию'
+    итог = await C.session_end(вход['session_id'], company_id=cid, db=db, current_user=org)
+    строка = await db.get(CalendarEvent, uuid.UUID(ev['id']))
+    await db.refresh(строка)
+    assert abs((строка.ends_at - итог['ended_at']).total_seconds()) < 1, 'конец встречи не сократился до фактического'

@@ -50,7 +50,7 @@ from app.models import (
 from sqlalchemy import true as _sa_true
 
 from app.config import settings
-from app.services import (calendar_series, oversight, placement, space_time, work_query,
+from app.services import (calendar_series, jitsi, oversight, placement, space_time, work_query,
                           work_state)
 
 log = logging.getLogger(__name__)
@@ -1454,7 +1454,7 @@ async def calendar_feed(token: str, db: AsyncSession = Depends(get_db)):
         "ends_at": e.ends_at,
         "all_day": e.all_day,
         "tz": e.tz,
-        "join_url": e.conference_url,
+        "join_url": jitsi.with_subject(e.conference_url, e.title),
         "description": e.description,
         "location": e.location,
         "url": f"{база}/docs/work?view=calendar&event={e.id}",
@@ -1522,7 +1522,7 @@ async def calendar_ics(
     текст = ics.event_ics(
         uid=uid_встречи(ev), title=ev.title,
         starts_at=ev.starts_at, ends_at=ev.ends_at,
-        all_day=ev.all_day, tz=ev.tz, join_url=ev.conference_url,
+        all_day=ev.all_day, tz=ev.tz, join_url=jitsi.with_subject(ev.conference_url, ev.title),
         description=ev.description, location=ev.location,
         url=ev.conference_url,
         organizer_email=organizer.email if organizer else None,
@@ -2091,7 +2091,7 @@ async def _письмо_гостю(db: AsyncSession, ev, guest, token: str,
     файл = ics.event_ics(
         uid=f"{ev.id}@trek", title=ev.title,
         starts_at=ev.starts_at, ends_at=ev.ends_at,
-        all_day=ev.all_day, tz=ev.tz, join_url=ev.conference_url,
+        all_day=ev.all_day, tz=ev.tz, join_url=jitsi.with_subject(ev.conference_url, ev.title),
         description=ev.description, location=ev.location, url=ссылка,
         organizer_email=organizer.email, organizer_name=organizer.name,
         attendees=[(guest.email, guest.name)],

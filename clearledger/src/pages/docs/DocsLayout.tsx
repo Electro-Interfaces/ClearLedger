@@ -370,8 +370,8 @@ export function DocsLayout() {
     return (
       <div className="flex h-full min-h-0 flex-col">
         <nav data-zone="Пункты раздела" aria-label="Пункты раздела Трека"
-          className="shrink-0 border-b border-border bg-card p-2">
-          <select aria-label="Раздел Трека" className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-base"
+          className={cn('shrink-0 border-b border-border bg-card', short ? 'px-2 py-1' : 'p-2')}>
+          <select aria-label="Раздел Трека" className={cn('w-full rounded-md border border-input bg-background px-3 text-base', short ? 'min-h-9' : 'min-h-11')}
             value={savedView ? `saved:${savedView}` : openList ? `list:${openList}` : active}
             onChange={(event) => {
               const value = event.target.value

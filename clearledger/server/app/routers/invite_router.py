@@ -33,7 +33,7 @@ from app.database import get_db
 from app.models import (
     CalendarEvent, CalendarGuest, CalendarMaterial, User,
 )
-from app.services import ics
+from app.services import ics, jitsi
 
 router = APIRouter(prefix="/invite", tags=["Приглашение"])
 
@@ -75,7 +75,7 @@ def _out(guest: CalendarGuest, ev: CalendarEvent, organizer: User | None,
         "location": ev.location,
         # Ссылка на видеовстречу гостевая, не модераторская: рассылать
         # модераторскую значит отдать права ведущего всем, кого позвали.
-        "conference_url": ev.conference_url,
+        "conference_url": jitsi.with_subject(ev.conference_url, ev.title),
         "cancelled": ev.status == "cancelled",
         "cancel_reason": ev.cancel_reason,
         "organizer": organizer.name if organizer else None,
@@ -245,7 +245,7 @@ async def invite_ics(token: str, db: AsyncSession = Depends(get_db)):
         title=ev.title, starts_at=ev.starts_at, ends_at=ev.ends_at,
         all_day=ev.all_day, tz=ev.tz,
         description=ev.description, location=ev.location,
-        url=ev.conference_url, join_url=ev.conference_url,
+        url=ev.conference_url, join_url=jitsi.with_subject(ev.conference_url, ev.title),
         organizer_email=organizer.email if organizer else None,
         organizer_name=organizer.name if organizer else None,
         cancelled=ev.status == "cancelled",

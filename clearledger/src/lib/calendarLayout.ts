@@ -1,4 +1,4 @@
-import { companyDayStart, companyDayTime, companyTime } from './companyTime'
+import { companyDayStart, companyDayTime, companyTime } from './companyTime.ts'
 
 type TimedEvent = { id: string; starts_at: string; ends_at: string }
 

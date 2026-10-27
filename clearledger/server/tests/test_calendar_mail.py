@@ -141,3 +141,15 @@ def test_ссылка_на_видео_в_месте_и_описании():
     assert 'LOCATION:https://meet.example/ledger-1' in заглушка, 'заглушка «Конференция» осталась вместо ссылки'
     развёрнут = свой.replace('\r\n ', '')
     assert r'DESCRIPTION:Повестка\n\nВидеовстреча: https://meet.example/ledger-1' in развёрнут
+
+
+def test_тема_в_гостевой_ссылке():
+    from app.config import get_settings
+    from app.services.jitsi import with_subject
+
+    дом = get_settings().jitsi_domain
+    ссылка = f'https://{дом}/ledger-abc'
+    assert with_subject(ссылка, 'Разбор смены').startswith(ссылка + '#config.subject=')
+    assert with_subject('https://zoom.us/j/1', 'Разбор') == 'https://zoom.us/j/1', 'чужую ссылку испортили'
+    assert with_subject(ссылка + '#x', 'Разбор') == ссылка + '#x'
+    assert with_subject(None, 'Разбор') is None and with_subject(ссылка, '  ') == ссылка

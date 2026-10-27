@@ -521,6 +521,20 @@ export function EventDialog({ companyId, event: initialEvent, startAt, subjectRe
   const panel = !!панельЗапрошена && !phone
   const полно = !phone || more
   const панельRef = useRef<HTMLElement>(null)
+  // Escape без фокуса в панели: сразу после открытия из меню и после выбора окна
+  // в «Подобрать» фокус оставался на странице, и клавиша ничего не делала
+  // (QA 27.10.2026). Фокус во всплывающем поле даты — не наш случай, его
+  // закрывает само поле.
+  const закрыть = useRef(onClose)
+  useEffect(() => { закрыть.current = onClose })
+  useEffect(() => {
+    if (!panel) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented && (e.target === document.body || e.target === document.documentElement)) закрыть.current()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [panel])
   const подборId = fieldId + '-find'
   // Несколько дней — редкость: поле даты окончания показываем, когда оно нужно,
   // а не всегда (как у настольных календарей: «26 окт. 17:00 — 17:30»).

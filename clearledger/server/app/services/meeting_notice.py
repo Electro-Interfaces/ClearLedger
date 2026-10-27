@@ -116,7 +116,7 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
     они получают только отмену и перенос. Тот, кто действует, извещение себе
     не получает: он и так знает.
     """
-    from app.services import email_service, ics, notify, space_time
+    from app.services import email_service, ics, jitsi, notify, space_time
 
     отмена = повод == "cancel"
     когда = _когда(ev)
@@ -177,7 +177,7 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
             description=ev.description, location=ev.location, url=ev.conference_url,
             organizer_email=хозяин.email, organizer_name=хозяин.name,
             attendees=кому, invite=not отмена, cancelled=отмена, sequence=номер,
-            all_day=ev.all_day, tz=ev.tz, join_url=ev.conference_url)
+            all_day=ev.all_day, tz=ev.tz, join_url=jitsi.with_subject(ev.conference_url, ev.title))
 
     # Гостю приглашение всегда уходило с `@trek` (`_письмо_гостю`), людям
     # пространства на конференцию — с `@conf.elsyplus`: каждому — свой UID.
