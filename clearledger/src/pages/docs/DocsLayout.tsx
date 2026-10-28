@@ -403,14 +403,15 @@ export function DocsLayout() {
             </optgroup>}
           </select>
         </nav>
-        {/* Телефон в альбоме: у календаря свой плюс, а строка «Создать» отнимала
-            последние полсотни пикселей сетки (QA 27.10.2026). */}
-        {route !== '/docs/setup' && !(short && active === 'calendar') && <DocsScopeBar personal={route === '/docs/work'} />}
+        {/* Телефон: у календаря свой плюс, а строка «Создать» отнимала у сетки
+            полсотни пикселей — в альбоме последние (QA 27.10), в портрете вместе с
+            плашкой установки (QA 28.10.2026). */}
+        {route !== '/docs/setup' && active !== 'calendar' && <DocsScopeBar personal={route === '/docs/work'} />}
         <div data-track-scroll className="min-w-0 flex-1 overflow-y-auto"
           style={{ paddingBottom: active === 'calendar'
-            // Календарь сам держит запас под плашку установки и сжимается под экран;
-            // второй запас здесь съедал всю сетку, пока плашка видна (QA 28.10.2026).
-            ? 'env(safe-area-inset-bottom)'
+            // Календарь сжимается под экран и запасы под плашку и свой плюс держит
+            // сам; второй запас здесь съедал всю сетку, пока плашка видна (QA 28.10.2026).
+            ? undefined
             : short
             // В альбоме нижней навигации нет (она до 768 px) — запас под неё не нужен.
             ? 'calc(var(--pwa-install-height, 0px) + 0.5rem + env(safe-area-inset-bottom))'
