@@ -21,7 +21,7 @@
  * Разрез включён только у профиля `energy` (сеть ЭЗС). У топливного профиля (ГИГ) состав
  * другой — там «Учёт» остаётся единым продуктом со всеми разделами, как раньше.
  */
-import { Building2, Calculator, Map, Network, Stethoscope, type LucideIcon } from 'lucide-react'
+import { Building2, Map, Network, Stethoscope, type LucideIcon } from 'lucide-react'
 import type { CoreMode } from '@/contexts/WorkspaceContext'
 import { navByPath, oneCItems, type NavItemDef } from './navigation'
 
@@ -120,6 +120,21 @@ export const SPACE_PRODUCTS: SpaceProduct[] = [
     modes: ['accounting', 'acc_period', 'acc_store', 'acc_food', 'acc_recon', 'acc_docs',
             'acc_results', 'financial', 'tax', 'export'],
     paths: ['/organization'],
+  },
+  {
+    // Бухгалтерия — отдельно от «Финансов» (реестр Ядра, `eco_apps.accounting`): там
+    // витрина и выгрузка, здесь сам учёт и его связь с нашими карточками. Первый срез
+    // отвечает на один вопрос менеджера: что бухгалтерия знает об этом контрагенте,
+    // договоре и объекте, что знаем мы и что нужно разобрать.
+    //
+    // Сведения приезжают выгруженными отчётами и лежат строками-источниками
+    // (`DataEntry`, слой raw) — рабочими карточками пространства они не становятся.
+    // Прямого чтения 1С в этом слое нет: сменится транспорт, модель сопряжения останется.
+    //
+    // Разделы: «Разбор» (обе стороны и очередь), «Объекты» (чем обоснована площадка),
+    // «Источники» (из каких файлов и партий собраны сведения).
+    code: 'accounting', route: '/accounting', label: 'Бухгалтерия',
+    modes: ['acct_review', 'acct_objects', 'acct_sources'], paths: [],
   },
   {
     // ── Компания без объектов (профиль `office`) ──────────────────────────────
@@ -232,7 +247,10 @@ export const PRODUCT_READINESS: Record<string, Readiness> = {
   books: 'ready', revenue: 'ready', econ: 'ready',
   corp: 'draft', shop: 'draft', marketing: 'partial',
   support: 'ready', finance: 'draft',
-  accounting: 'draft', diag: 'draft',
+  // «Бухгалтерия» (28.10.2026): рабочее место появилось — разбор выгрузки, объекты и
+  // журнал источников на принятых данных. Загрузка новых отчётов, решения менеджера и
+  // чтение 1С — следующие волны, поэтому «в развитии», а не «рабочий продукт».
+  accounting: 'partial', diag: 'draft',
   // «Сеть передачи данных» — мост на живой хаб ElsyPlus Link (03.09.2026): узлы,
   // VPN и удалённый доступ работают там, заставка «в подключении» больше не нужна.
   netlink: 'ready',
@@ -318,12 +336,6 @@ export const PRODUCT_SETUP_NOTE: Record<string, {
     title: 'Сеть передачи данных — в подключении',
     description: 'Связь объектов: узлы и каналы, VPN, удалённый доступ к оборудованию, '
       + 'обновления на местах. Подключается отдельно.',
-  },
-  accounting: {
-    icon: Calculator,
-    title: 'Бухгалтерия — в подключении',
-    description: 'Первичка, проводки и обмен с 1С. Сейчас счётная сторона видна '
-      + 'в «Финансах»: договоры, контрагенты и выгрузка.',
   },
 }
 
