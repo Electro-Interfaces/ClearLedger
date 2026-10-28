@@ -216,7 +216,12 @@ async def test_record_card_shows_both_sides(auth_client, space):
     assert card["source_side"]["posted"] is None
     assert len(card["links"]) == 2
     link = card["links"][0]
-    assert link["checked_fields"] == ["counterparty_id", "date", "number", "type_code"]
+    # «Сверены поля» — только то, что сошлось со значением выгрузки. Снимок полей
+    # карточки лежит отдельно и сверкой не называется: он про устаревание.
+    assert link["checked_fields"] == ["date", "number"]
+    assert link["snapshot_fields"] == ["counterparty_id", "date", "number", "type_code"]
+    assert {f["field"]: f["equal"] for f in link["compared_fields"]} == {
+        "number": True, "date": True}
     assert link["card"]["exists"] is True
     assert link["inn_kpp_checked"] is False
     assert link["original_document_checked"] is False

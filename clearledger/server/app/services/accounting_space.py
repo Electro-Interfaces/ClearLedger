@@ -19,6 +19,17 @@
 Статус сопряжения берётся ТОЛЬКО из `_accountingReconciliationStatus`. По префиксу
 `source_id` (`acct-unmatched:`) его определять нельзя: префикс исторический и стоит
 у всех записей партии, включая позднее сопряжённые.
+
+Отметка для карточек и списков (`contract_summary`, `aggregate_summary`,
+`entity_summaries`) — продолжение той же механики, без второго способа счёта.
+Контракт ручек и правила — `docs/ACCOUNTING_SPACE_STATUS_API.md`. Два правила,
+которые нельзя потерять при доработке:
+
+  доказательством сверки считается ТОЛЬКО значение, пришедшее из выгрузки
+  (номер и дата). Снимок наших же полей (`target_values`) отвечает за устаревание;
+
+  зелёная отметка договора не переносится на контрагента и площадку: у них своя
+  область и агрегат по договорам, а `matched_checked` для них недостижим.
 """
 from __future__ import annotations
 
@@ -39,11 +50,39 @@ from app.models import (
     DataEntry,
     ServiceLocation,
 )
+from app.scope import org_filter, scope_location_conds
 
 # Ключ, по которому запись опознаётся как строка бухгалтерского источника.
 STATUS_KEY = "_accountingReconciliationStatus"
 # Поля карточки договора, которые сверялись при применении (и входят в хеш).
 CHECKED_FIELDS = ("number", "date", "counterparty_id", "type_code")
+# Независимая ПОВТОРНАЯ сверка — согласованный envelope (28.10.2026):
+#
+#   metadata["_accountingRecheck"] = {schema_version, run_id, checked_at,
+#       source_as_of, source_sha256, source_rows, overall, source{file,sheet,rows},
+#       per_link: [{contract_id, relation, compared_fields[{field,label,source,card,
+#           result,basis,source_evidence}], current_hash, unknowns[], open_questions[]}]}
+#
+# Ключ один и стабильный, дату прогона читаем из `checked_at`: читатель не должен
+# знать, какого числа он прошёл, иначе каждый следующий требует правки кода.
+# История прогонов живёт отдельно (`_accountingRecheckHistory`) и здесь не
+# интерпретируется; прежние `_accountingReconciliations` остаются как есть.
+RECHECK_KEY = "_accountingRecheck"
+# Отношения, при которых строка описывает ДРУГОЙ документ: дополнения и соглашения.
+# Все остальные — включая конфликтные (`number_conflict`, `date_conflict`,
+# `joint_party`, `number_missing`, `same_contract_payee_label`, `multiple_cards`) —
+# относятся к ТОМУ ЖЕ договору, и его номер с датой сравнивать можно и нужно.
+# Перечисляется именно это исключение: белый список молча превращал новые
+# конфликтные отношения в «связанный документ» и терял живое сравнение.
+OTHER_DOCUMENT_RELATIONS = ("amendment", "amendment_of", "annex", "annex_of",
+                            "supplement", "supplement_of", "agreement_of")
+# Отношение, которое само означает неоднозначную привязку.
+AMBIGUOUS_RELATIONS = ("multiple_cards",)
+# Открытый вопрос снимает отметку совпадения только когда он про саму привязку:
+# противоречие стороны и неоднозначность связывания. Подсказка о виде или роли
+# договора дефектом не является и зелёного не снимает (калибровка 28.10.2026).
+BLOCKING_QUESTION_MARKERS = ("contradict", "ambig", "multiple_cards",
+                             "party_conflict", "party_mismatch", "wrong_party")
 
 LINK_STATUS_LABEL = {
     "matched": "Сопряжено",
@@ -75,8 +114,35 @@ def compact(value: Any) -> str:
 
     Мелкая разница в записи номера не делает договор другим (решение по сверке
     28.10.2026), поэтому расхождением считается только несовпадение значимых знаков.
+
+    ⚠ Номер из одних разделителей («-», «б/н») сворачивается в пустую строку, и
+    два таких номера нельзя считать совпавшими: сравнивать было нечего. Проверять
+    результат на непустоту обязан вызывающий (см. `_compare`).
     """
     return re.sub(r"[^0-9a-zа-я]", "", str(value or "").casefold().replace("ё", "е"))
+
+
+def _recheck_run(meta: dict[str, Any]) -> dict[str, Any]:
+    """Конверт независимой повторной сверки из `metadata` строки источника.
+
+    Ключ ровно один — `_accountingRecheck`. Ключей с датой в имени читатель не
+    знает: дата прогона берётся из `checked_at` внутри конверта, иначе каждый
+    следующий круг требовал бы правки кода.
+    """
+    raw = (meta or {}).get(RECHECK_KEY)
+    run = raw if isinstance(raw, dict) else _loads(raw)
+    return run if isinstance(run, dict) else {}
+
+
+def _as_iso_date(value: Any) -> str:
+    """«15.08.2024» и «2024-08-15» — одна дата: выгрузка пишет и так, и так."""
+    text = str(value or "").strip()
+    m = re.match(r"^(\d{2})[.\-/](\d{2})[.\-/](\d{4})$", text)
+    return f"{m[3]}-{m[2]}-{m[1]}" if m else text
+
+
+def _digits(value: Any) -> str:
+    return re.sub(r"\D", "", str(value or ""))
 
 
 def _loads(raw: Any) -> Any:
@@ -114,6 +180,38 @@ class Link:
     # Что при сверке НЕ проверяли: сопряжение и проверка реквизитов — разные признаки.
     inn_kpp_checked: bool
     original_document_checked: bool
+    # Текущие значения карточки, которые можно сравнивать с источником (шире
+    # состава хеша: там только четыре поля устаревания).
+    card_values: dict[str, Any] = field(default_factory=dict)
+    # Запись независимой ПОВТОРНОЙ сверки по этой связи (`per_link`) и то, можно
+    # ли вообще принимать её свидетельство (совпала ли редакция файла).
+    recheck: dict[str, Any] = field(default_factory=dict)
+    recheck_applicable: bool = True
+    recheck_reject_reason: str = ""
+    recheck_source: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def same_document(self) -> bool:
+        """Описывает ли строка источника сам этот договор, а не другой документ.
+
+        Исключение — только дополнения и соглашения. Конфликтные отношения
+        (`number_conflict`, `date_conflict`, `joint_party`, `multiple_cards`…)
+        относятся к тому же договору: их номер и дату сравнивать обязательно.
+        """
+        return self.relation not in OTHER_DOCUMENT_RELATIONS
+
+    @property
+    def ambiguous(self) -> bool:
+        """Неоднозначная привязка: отметку совпадения ставить нельзя."""
+        if self.relation in AMBIGUOUS_RELATIONS:
+            return True
+        return any(_blocking_question(q) for q in self.open_questions)
+
+    @property
+    def open_questions(self) -> list[dict[str, Any]]:
+        if not self.recheck_applicable:
+            return []
+        return [q for q in (self.recheck.get("open_questions") or []) if isinstance(q, dict)]
 
 
 @dataclass
@@ -141,17 +239,23 @@ class Record:
     links: list[Link] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
     created_at: Any = None
+    # Прогон независимой повторной сверки: `verified_at`, `overall`, `proven`,
+    # `not_proven`. Время этого прогона — НЕ `snapshot_at` прежнего применения.
+    recheck: dict[str, Any] = field(default_factory=dict)
+    # Были ли у строки связи, снятые по недоступному юрлицу: строка целиком
+    # относится к чужому разрезу и в ответ не попадает.
+    org_hidden: bool = False
 
     @property
     def verification(self) -> str:
         """Проверка строки: худшее из её связей; устаревшая важнее частичной."""
         if not self.links:
             return "not_checked"
-        if any(l.stale for l in self.links):
+        states = [_link_verification(l) for l in self.links]
+        if "stale" in states:
             return "stale"
-        order = ("differences", "not_checked", "partial", "verified")
-        for state in order:
-            if any(l.verification == state for l in self.links):
+        for state in VERIFICATION_ORDER:
+            if state in states:
                 return state
         return "not_checked"
 
@@ -178,7 +282,20 @@ class Slice:
     space_locations_total: int
 
 
+def _blocking_question(question: dict[str, Any]) -> bool:
+    """Снимает ли открытый вопрос прогона отметку совпадения.
+
+    Блокируют доказанное противоречие стороны и неоднозначность связывания.
+    Подсказка о виде или роли договора — нет: у РусГидро аренда площадки и
+    получение электроэнергии часто заведены двумя карточками с одним номером и
+    датой, и «карточка другой роли» конфликтом не является.
+    """
+    code = str((question or {}).get("code") or "").casefold()
+    return any(marker in code for marker in BLOCKING_QUESTION_MARKERS)
+
+
 def _contract_values(c: Contract) -> dict[str, Any]:
+    """Состав хеша устаревания. Менять нельзя: он совпадает с применённой сверкой."""
     return {
         "number": c.number,
         "date": c.date,
@@ -187,21 +304,159 @@ def _contract_values(c: Contract) -> dict[str, Any]:
     }
 
 
-def _link_differences(source_number: str, source_date: str,
-                      current: dict[str, Any]) -> list[dict[str, Any]]:
-    """Расхождения источника и карточки по сверявшимся реквизитам.
+def _card_values(c: Contract, cp: Counterparty | None) -> dict[str, Any]:
+    """Всё, что у карточки можно сравнить с источником, а не только состав хеша."""
+    return {
+        **_contract_values(c),
+        "type": c.type,
+        "title": c.title or "",
+        "counterparty_name": cp.name if cp else "",
+        "counterparty_inn": (cp.inn if cp else "") or "",
+        "counterparty_kpp": (cp.kpp if cp else "") or "",
+    }
 
-    Пустое значение источника — не расхождение, а отсутствие сведений: в выгрузке
-    дата встречается не всегда, и «неизвестно» нельзя показывать как конфликт.
+
+FIELD_LABEL = {
+    "number": "Номер",
+    "date": "Дата",
+    "counterparty_name": "Сторона договора",
+    "counterparty_inn": "ИНН стороны",
+    "counterparty_kpp": "КПП стороны",
+    "type_code": "Вид договора",
+    "type": "Вид договора",
+}
+
+
+def _compare(field_name: str, source: Any, card: Any) -> tuple[str, str]:
+    """Сравнить значение источника с ТЕКУЩИМ значением карточки.
+
+    Возвращает (`match` | `difference` | `unknown`, основание). Недостаток
+    сведений и неразобранное значение — это `unknown`, а НЕ расхождение:
+    «неизвестно» нельзя показывать менеджеру как конфликт.
+
+    Сравнивает сервер сам, по своим правилам. Сохранённому результату прогона
+    здесь не доверяют: он мог считаться по другой редакции карточки.
     """
-    out: list[dict[str, Any]] = []
-    if source_number and compact(source_number) != compact(current.get("number")):
-        out.append({"field": "number", "label": "Номер",
-                    "source": source_number, "space": current.get("number") or ""})
-    if source_date and source_date != (current.get("date") or ""):
-        out.append({"field": "date", "label": "Дата",
-                    "source": source_date, "space": current.get("date") or ""})
+    if field_name == "number":
+        a, b = compact(source), compact(card)
+        if not a:
+            return "unknown", "номер источника без значимых знаков — сравнивать нечего"
+        if not b:
+            return "unknown", "в карточке номера нет"
+        return ("match" if a == b else "difference"), "значимые знаки номера"
+    if field_name == "date":
+        a, b = _as_iso_date(source), _as_iso_date(card)
+        if not a:
+            return "unknown", "в выгрузке даты нет"
+        if not b:
+            return "unknown", "в карточке даты нет"
+        return ("match" if a == b else "difference"), "точное значение даты"
+    if field_name in ("counterparty_inn", "counterparty_kpp"):
+        a, b = _digits(source), _digits(card)
+        if not a or not b:
+            return "unknown", "реквизит известен не с обеих сторон"
+        return ("match" if a == b else "difference"), "точные цифры реквизита"
+    if field_name in ("counterparty_name", "party", "counterparty"):
+        # Совместимость названий сервер не пересчитывает и доказательством
+        # идентичности стороны не считает: ИНН в выгрузке нет.
+        return "unknown", ("совместимость названий — не юридическая проверка стороны, "
+                           "ИНН и КПП выгрузка не содержит")
+    if field_name in ("type_code", "type"):
+        return "unknown", ("вид договора выгрузка не подтверждает: одна площадка "
+                           "заводится двумя карточками — аренда и электроэнергия")
+    return "unknown", "это поле сервер не сравнивает"
+
+
+def _comparison(link: Link, field_name: str, source: Any, *, origin: str,
+                claimed: str | None = None, basis: str = "", label: str = "",
+                evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+    card = link.card_values.get(field_name, "")
+    if not link.exists:
+        result, why = "unknown", "карточка недоступна — сверить нечем"
+    elif field_name in ("number", "date") and not link.same_document:
+        result, why = "unknown", "другой документ: это не реквизит паспорта договора"
+    else:
+        result, why = _compare(field_name, source, card)
+    return {
+        "field": field_name,
+        "label": label or FIELD_LABEL.get(field_name, field_name),
+        "source": "" if source is None else str(source),
+        "space": "" if card is None else str(card),
+        # `equal` остаётся для совместимости с интерфейсом: true/false/null.
+        "equal": True if result == "match" else (False if result == "difference" else None),
+        "result": result,
+        "basis": why,
+        # Откуда взялось значение источника: строка выгрузки или конверт прогона.
+        "origin": origin,
+        # Что записал об этом поле сам прогон. Показывается, но на отметку не влияет.
+        "claimed": claimed,
+        "claimed_basis": basis or None,
+        "evidence": evidence or None,
+    }
+
+
+def comparisons(link: Link) -> list[dict[str, Any]]:
+    """Все сравнения связи: что сошлось с источником, что разошлось, что неизвестно.
+
+    Доказательство всегда пересчитывается здесь. Из прогона берутся ЗНАЧЕНИЯ
+    стороны источника, а не его вердикт: иначе достаточно записать `match`, чтобы
+    отметка стала зелёной. Прогон, выполненный по другой редакции файла, в
+    доказательства не допускается вовсе.
+    """
+    out = [_comparison(link, name, src, origin="row")
+           for name, src in (("number", link.source_number), ("date", link.source_date))]
+    by_field = {item["field"]: item for item in out}
+    if not link.recheck_applicable:
+        return out
+    for raw in (link.recheck.get("compared_fields") or []):
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("field") or "")
+        if not name:
+            continue
+        claimed = str(raw.get("result") or "") or None
+        basis = str(raw.get("basis") or "")
+        evidence = raw.get("source_evidence") or link.recheck_source or None
+        known = by_field.get(name)
+        if known is not None and compact(known["source"]) == compact(raw.get("source")):
+            # То же значение, что в строке: свидетельство прогона переносим на
+            # существующее сравнение, вторую запись о том же не плодим.
+            known["claimed"] = claimed
+            known["claimed_basis"] = basis or None
+            known["evidence"] = evidence
+            continue
+        item = _comparison(link, name, raw.get("source"), origin="recheck",
+                           claimed=claimed, basis=basis, evidence=evidence,
+                           label=str(raw.get("label") or ""))
+        out.append(item)
+        by_field.setdefault(name, item)
     return out
+
+
+def _link_differences(link: Link) -> list[dict[str, Any]]:
+    """Расхождения связи — только поля, которые сервер сравнил сам и они разошлись."""
+    return [{"field": c["field"], "label": c["label"],
+             "source": c["source"], "space": c["space"], "basis": c["basis"]}
+            for c in comparisons(link) if c["result"] == "difference"]
+
+
+def contract_acl(organization_id: str | None = None) -> list:
+    """Условия доступа к договору: активное юрлицо запроса плюс выбор в интерфейсе.
+
+    Юрлицо приходит двумя путями, и учитывать надо ОБА. `org_filter` — закреплённая
+    за участником организация и заголовок `X-Organization-Id` (ставятся в
+    `assert_company_member` и middleware), параметр ручки — текущий выбор на экране.
+    Пока здесь стоял только параметр, аутсорсер, закреплённый за одним ООО, видел
+    сопряжения второго юрлица того же владельца, просто не передав параметр.
+
+    Скоуп объектов участника сюда не входит: договор — не объект, и площадки у него
+    бывают разные. Он держится на автоматическом сужении `ServiceLocation`
+    (`scope.install_orm_scope`), поэтому площадки вне скоупа в срез не попадают.
+    """
+    conds = [org_filter(Contract.organization_id)]
+    if organization_id and _is_uuid(organization_id):
+        conds.append(Contract.organization_id == uuid.UUID(organization_id))
+    return conds
 
 
 async def load_slice(db: AsyncSession, company_id: uuid.UUID,
@@ -248,7 +503,20 @@ async def load_slice(db: AsyncSession, company_id: uuid.UUID,
             candidates=str(m.get("Кандидаты в пространстве") or ""),
             meta=m,
             created_at=e.created_at,
+            recheck=_recheck_run(m),
         )
+        # Прогон, выполненный по другой редакции файла, свидетельством не является:
+        # его значения источника взяты не из той выгрузки, что лежит в строке.
+        envelope_sha = str(rec.recheck.get("source_sha256") or "")
+        applicable, reject = True, ""
+        if envelope_sha and rec.source_sha256 and envelope_sha != rec.source_sha256:
+            applicable, reject = False, ("повторная сверка выполнена по другой редакции "
+                                         "файла источника")
+        envelope_source = rec.recheck.get("source") if isinstance(
+            rec.recheck.get("source"), dict) else {}
+        by_contract_recheck = {str(x.get("contract_id") or x.get("entity_id") or ""): x
+                               for x in (rec.recheck.get("per_link") or [])
+                               if isinstance(x, dict)}
         for raw in _loads(m.get("_accountingReconciliations")):
             if not isinstance(raw, dict):
                 continue
@@ -275,19 +543,29 @@ async def load_slice(db: AsyncSession, company_id: uuid.UUID,
                 exists=False,
                 inn_kpp_checked=bool(raw.get("inn_kpp_checked")),
                 original_document_checked=bool(raw.get("original_document_checked")),
+                recheck=by_contract_recheck.get(entity_id) or {},
+                recheck_applicable=applicable,
+                recheck_reject_reason=reject,
+                recheck_source=envelope_source,
             ))
         records.append(rec)
 
     contracts: dict[str, Contract] = {}
+    in_company: set[str] = set()
     if contract_ids:
         valid = [uuid.UUID(x) for x in contract_ids if _is_uuid(x)]
         if valid:
             stmt = select(Contract).where(Contract.company_id == company_id,
-                                          Contract.id.in_(valid))
-            if organization_id and _is_uuid(organization_id):
-                stmt = stmt.where(Contract.organization_id == uuid.UUID(organization_id))
+                                          Contract.id.in_(valid),
+                                          *contract_acl(organization_id))
             for c in (await db.execute(stmt)).scalars().all():
                 contracts[str(c.id)] = c
+            # Отдельно — только ID, без содержимого: по ним отличается «карточки
+            # нет вообще» (целостность, это показываем) от «карточка чужого
+            # юрлица» (скрываем целиком — вместе с названиями из её строк).
+            in_company = {str(x) for x in (await db.execute(
+                select(Contract.id).where(Contract.company_id == company_id,
+                                          Contract.id.in_(valid)))).scalars().all()}
 
     cp_ids = {str(c.counterparty_id) for c in contracts.values()}
     counterparties: dict[str, Counterparty] = {}
@@ -301,39 +579,67 @@ async def load_slice(db: AsyncSession, company_id: uuid.UUID,
 
     # Текущее состояние карточки против проверенного: расхождения и устаревшая проверка.
     for rec in records:
+        visible: list[Link] = []
         for link in rec.links:
             c = contracts.get(link.entity_id)
             if c is None:
+                # Карточка есть в компании, но не в доступном юрлице — связь
+                # вместе с её сведениями из ответа убирается.
+                if link.entity_id in in_company:
+                    rec.org_hidden = True
+                    continue
+                visible.append(link)
                 continue
+            visible.append(link)
             link.exists = True
             link.current_values = _contract_values(c)
+            link.card_values = _card_values(c, counterparties.get(str(c.counterparty_id)))
             link.current_hash = digest(link.current_values)
-            link.stale = bool(link.checked_hash) and link.checked_hash != link.current_hash
-            link.differences = _link_differences(link.source_number, link.source_date,
-                                                 link.current_values)
+            # База устаревания — самый свежий известный хеш: если повторная сверка
+            # уже учла правку, устаревшей проверку второй раз не объявляем. Прогон
+            # по другой редакции файла базой быть не может.
+            baseline = link.checked_hash
+            if link.recheck_applicable and link.recheck.get("current_hash"):
+                baseline = str(link.recheck["current_hash"])
+            link.stale = bool(baseline) and baseline != link.current_hash
+            link.differences = _link_differences(link)
+        rec.links = visible
+    # Строка, у которой все связи оказались чужого юрлица, относится к чужому
+    # разрезу целиком: её контрагент и основание в ответ не попадают.
+    records = [r for r in records if r.links or not r.org_hidden]
 
     contract_locations: dict[str, list[str]] = {}
     for contract_id, location_id in (await db.execute(
         select(ContractLocation.contract_id, ContractLocation.location_id)
-        .where(ContractLocation.company_id == company_id)
+        .where(ContractLocation.company_id == company_id,
+               # Привязки к объектам вне скоупа участника не показываются даже
+               # счётчиком: пустая строка площадки — тоже сведение о ней.
+               *scope_location_conds(ContractLocation.location_id))
     )).all():
         contract_locations.setdefault(str(contract_id), []).append(str(location_id))
 
     loc_ids = {loc for ids in contract_locations.values() for loc in ids}
     locations: dict[str, ServiceLocation] = {}
     if loc_ids:
+        # Скоуп объектов участника — условием запроса, а не только автоматическим
+        # сужением ORM: ACL должен держаться и там, где событие сессии не поставлено.
         for loc in (await db.execute(select(ServiceLocation).where(
                 ServiceLocation.company_id == company_id,
-                ServiceLocation.id.in_(loc_ids)))).scalars().all():
+                ServiceLocation.id.in_(loc_ids),
+                *scope_location_conds(ServiceLocation.id)))).scalars().all():
             locations[str(loc.id)] = loc
 
+    # Итоги пространства — в том же разрезе, что и сам срез: иначе плитка
+    # «договоров в пространстве» считает чужое юрлицо и чужие объекты.
     totals = (await db.execute(select(
         select(func.count()).select_from(Contract)
-        .where(Contract.company_id == company_id).scalar_subquery(),
+        .where(Contract.company_id == company_id,
+               *contract_acl(organization_id)).scalar_subquery(),
         select(func.count()).select_from(Counterparty)
         .where(Counterparty.company_id == company_id).scalar_subquery(),
         select(func.count()).select_from(ServiceLocation)
-        .where(ServiceLocation.company_id == company_id).scalar_subquery(),
+        .where(ServiceLocation.company_id == company_id,
+               *scope_location_conds(ServiceLocation.id)).scalar_subquery(),
     ))).one()
 
     return Slice(
@@ -407,6 +713,9 @@ def record_row(rec: Record, slice_: Slice) -> dict[str, Any]:
         "links_count": len(rec.links),
         "differences_count": sum(len(l.differences) for l in rec.links),
         "stale_count": sum(1 for l in rec.links if l.stale),
+        # Когда прошла независимая повторная сверка этой строки и чем кончилась.
+        "rechecked_at": str(rec.recheck.get("checked_at") or "") or None,
+        "recheck_overall": str(rec.recheck.get("overall") or "") or None,
         "location_ids": rec.location_ids,
         "cards": cards,
         "card_labels": [
@@ -437,19 +746,35 @@ def record_card(rec: Record, slice_: Slice) -> dict[str, Any]:
         "posted": None,
         "original_document": None,
     }
+    # Независимая повторная сверка строки: своё время, свой вердикт и кандидаты,
+    # которые она нашла в реестре для несопряжённой строки.
+    row["recheck"] = {
+        "run_id": str(rec.recheck.get("run_id") or ""),
+        "checked_at": str(rec.recheck.get("checked_at") or "") or None,
+        "overall": str(rec.recheck.get("overall") or "") or None,
+        "candidates_in_registry": rec.recheck.get("candidates_in_registry"),
+        "public_note": str(rec.meta.get("Повторная сверка") or ""),
+    } if rec.recheck else None
     row["links"] = [{
         "entity_type": l.entity_type,
         "entity_id": l.entity_id,
         "relation": l.relation,
         "status": l.status,
         "status_label": LINK_STATUS_LABEL.get(l.status, l.status),
-        "verification": "stale" if l.stale else l.verification,
+        "verification": _link_verification(l),
         "verification_label": VERIFICATION_LABEL.get(
-            "stale" if l.stale else l.verification, l.verification),
+            _link_verification(l), l.verification),
         "stale": l.stale,
         "subject_status": l.subject_status,
         "snapshot_at": l.snapshot_at,
-        "checked_fields": sorted(k for k in l.checked_values) if l.checked_values else [],
+        # Сверено с источником — только то, что сошлось с его собственным значением.
+        # Снимок полей карточки лежит рядом и сверкой не называется.
+        "checked_fields": sorted({c["field"] for c in comparisons(l)
+                                  if c["result"] == "match"}),
+        "compared_fields": comparisons(l),
+        "snapshot_fields": sorted(l.checked_values),
+        "unchecked_fields": _unchecked_fields([l]),
+        "recheck": _recheck_block([l], rec.recheck),
         "checked_values": l.checked_values,
         "current_values": l.current_values,
         "checked_hash": l.checked_hash,
@@ -556,7 +881,7 @@ def objects_report(slice_: Slice) -> list[dict[str, Any]]:
                 "source": [{
                     "record_id": r.id, "status": r.status,
                     "status_label": LINK_STATUS_LABEL.get(r.status, r.status),
-                    "verification": "stale" if l.stale else l.verification,
+                    "verification": _link_verification(l),
                     "counterparty": r.counterparty_name,
                     "contract_label": r.contract_label,
                     "file": r.source_file, "rows": r.source_rows,
@@ -593,16 +918,24 @@ def entity_links(slice_: Slice, entity_type: str, entity_id: str) -> list[dict[s
         for l in r.links:
             if l.entity_type != entity_type or l.entity_id != entity_id:
                 continue
+            compared = comparisons(l)
+            state = _link_verification(l)
             out.append({
                 "record_id": r.id,
                 "status": l.status,
                 "status_label": LINK_STATUS_LABEL.get(l.status, l.status),
-                "verification": "stale" if l.stale else l.verification,
-                "verification_label": VERIFICATION_LABEL.get(
-                    "stale" if l.stale else l.verification, l.verification),
+                "verification": state,
+                "verification_label": VERIFICATION_LABEL.get(state, state),
                 "stale": l.stale,
                 "relation": l.relation,
-                "checked_fields": sorted(l.checked_values) if l.checked_values else [],
+                # Та же честность, что в карточке строки: «сверены поля» — это
+                # поля источника, сошедшиеся с карточкой, а не снимок карточки.
+                "checked_fields": sorted({c["field"] for c in compared
+                                          if c["result"] == "match"}),
+                "compared_fields": compared,
+                "snapshot_fields": sorted(l.checked_values),
+                "unchecked_fields": _unchecked_fields([l]),
+                "recheck": _recheck_block([l], r.recheck),
                 "differences": l.differences,
                 "source": {
                     "counterparty": r.counterparty_name,
@@ -612,4 +945,489 @@ def entity_links(slice_: Slice, entity_type: str, entity_id: str) -> list[dict[s
                     "as_of": r.source_as_of,
                 },
             })
+    return out
+
+
+# ── Сводка сопряжения для карточек и списков ─────────────────────────────────
+#
+# Тот же срез, но свёрнутый до одной отметки у карточки: списки договоров,
+# контрагентов и площадок показывают доказанную сверку и необходимость уточнения
+# прямо в строке, не заставляя человека открывать «Бухгалтерию». Механизм ОДИН на
+# все виды карточек: второй отметки, которая считается иначе, здесь быть не должно.
+
+ENTITY_TYPES = ("contract", "counterparty", "location")
+
+ENTITY_STATE_LABEL = {
+    "matched_checked": "Совпадает по сверенным реквизитам",
+    "contracts_checked": "Договоры сверены, карточка не сверялась",
+    "differences": "Расхождения с бухгалтерией",
+    "stale": "Устарело, нужна повторная сверка",
+    "needs_check": "Требует сверки",
+    "no_source": "Нет данных для сравнения",
+}
+ENTITY_STATE_NOTE = {
+    "matched_checked": ("Сверены только реквизиты из состава сверки — это не полная "
+                        "проверка договора: ИНН и КПП, оригинал документа и проведение "
+                        "в 1С не проверялись."),
+    "contracts_checked": ("Сверка относится к договорам этой карточки, а не к самой "
+                          "карточке: её реквизиты с бухгалтерией не сверялись."),
+    "differences": "Значение выгрузки не совпало с карточкой — нужно уточнение.",
+    "stale": ("Карточку правили после сверки: сверенные значения изменились, "
+              "проверку нужно повторить."),
+    "needs_check": "Сопряжение есть, но сверка реквизитов не подтверждена.",
+    "no_source": ("Строк выгрузки на эту карточку не легло. Выгрузка охватывает свой "
+                  "период: отсутствие строки не означает, что договора нет в учёте 1С."),
+}
+# Худшее состояние показывается первым: менеджеру важнее то, что требует работы.
+STATE_ORDER = ("differences", "stale", "needs_check", "matched_checked",
+               "contracts_checked", "no_source")
+# То же для оси проверки — у неё свой словарь значений (`VERIFICATION_LABEL`).
+VERIFICATION_ORDER = ("differences", "not_checked", "partial", "verified")
+
+# Чего сверка НЕ касалась НИ В ОДНОМ случае. Перечисляется всегда и явно:
+# «сопряжено» не значит «проверено целиком», и список непроверенного — часть
+# ответа, а не примечание. К этому перечню добавляются поля, которые не подтвердил
+# именно этот источник (см. `_unchecked_fields`).
+UNCHECKED_ALWAYS = [
+    {"field": "inn_kpp", "label": "ИНН и КПП", "reason": "в выгрузке не сопоставлялись"},
+    {"field": "original_document", "label": "Оригинал документа",
+     "reason": "первичные документы не предоставлены"},
+    {"field": "posted_in_1c", "label": "Проведение в 1С",
+     "reason": "признака проведения выгрузка не содержит"},
+    {"field": "signing", "label": "Подписание",
+     "reason": "сведений о подписании в выгрузке нет"},
+    {"field": "amounts", "label": "Суммы и расчёты",
+     "reason": "денежных величин в принятых данных нет"},
+]
+UNCHECKED_LABEL = {
+    "number": ("Номер", "в выгрузке номера нет — сравнивать было нечего"),
+    "date": ("Дата", "в выгрузке даты нет — сравнивать было нечего"),
+    "counterparty_id": ("Идентичность стороны",
+                        "источник дал только название; ИНН и КПП не сверялись"),
+    "type_code": ("Вид договора",
+                  "вид в выгрузке не подтверждён — значение снято с карточки"),
+}
+SCOPE_LABEL = {
+    "self": "Сверка самой карточки",
+    "contracts_of_counterparty": "Сводка по договорам контрагента",
+    "contracts_of_location": "Сводка по договорам площадки",
+}
+DISCLAIMER = ("Нет строки источника — значит нет сведений для сравнения в пределах "
+              "периметра выгрузки, а не отсутствие договора в бухгалтерии.")
+
+
+def _unchecked_fields(links: list[Link]) -> list[dict[str, Any]]:
+    """Что осталось непроверенным у ИМЕННО ЭТОЙ карточки.
+
+    Постоянного перечня мало: если источник не дал номера или даты, их тоже никто
+    не сверял, а идентичность стороны и вид договора выгрузка не подтверждала
+    никогда — они лежат в снимке карточки, а не в сведениях источника.
+    """
+    out: list[dict[str, Any]] = []
+    matched: set[str] = set()
+    for l in links:
+        matched |= {c["field"] for c in comparisons(l) if c["result"] == "match"}
+    for name in ("number", "date", "counterparty_id", "type_code"):
+        if name in matched:
+            continue
+        # Идентичность стороны остаётся непроверенной, пока не сошлись её
+        # реквизиты: совместимость названий юридической проверкой не является.
+        if name == "counterparty_id" and "counterparty_inn" in matched:
+            continue
+        label, reason = UNCHECKED_LABEL[name]
+        out.append({"field": name, "label": label, "reason": reason})
+    always = [x for x in UNCHECKED_ALWAYS
+              if not (x["field"] == "inn_kpp" and "counterparty_inn" in matched)]
+    # Чего не смог разобрать сам прогон — его собственный перечень.
+    for l in links:
+        if not l.recheck_applicable:
+            continue
+        for unknown in (l.recheck.get("unknowns") or []):
+            if not isinstance(unknown, dict):
+                continue
+            name = str(unknown.get("field") or "")
+            if not name or name in matched or any(x["field"] == name for x in out):
+                continue
+            out.append({"field": name,
+                        "label": str(unknown.get("label") or FIELD_LABEL.get(name, name)),
+                        "reason": str(unknown.get("reason") or "прогон не смог сравнить")})
+    return out + always
+
+
+def _link_proven(link: Link) -> bool:
+    """Есть ли у связи хотя бы одно поле источника, сошедшееся с текущей карточкой."""
+    return link.exists and any(c["result"] == "match" for c in comparisons(link))
+
+
+def _link_differs(link: Link) -> bool:
+    """Расходится ли связь сейчас.
+
+    Для доступной карточки решает ЖИВОЕ сравнение, а не прежний вердикт:
+    исправленный номер расхождением быть перестаёт (и уходит в устаревание),
+    испорченный — становится. Прежний вердикт остаётся единственным источником
+    только там, где сравнить нечем: карточка недоступна.
+    """
+    if link.exists:
+        return bool(link.differences)
+    return link.verification == "differences"
+
+
+def _link_verification(link: Link) -> str:
+    """Ось проверки одной связи с поправкой на живое сравнение.
+
+    Прежний вердикт «расхождение» снимается, когда расхождения больше нет, но
+    проверенной связь от этого не становится: остаётся то, что реально доказано.
+    """
+    if link.stale:
+        return "stale"
+    if link.exists:
+        if link.differences:
+            return "differences"
+        if link.verification == "differences":
+            return "partial" if _link_proven(link) else "not_checked"
+    return link.verification
+
+
+def _links_state(links: list[Link]) -> str:
+    """Состояние карточки по её связям. Хуже — важнее."""
+    if not links:
+        return "no_source"
+    if any(_link_differs(l) for l in links):
+        return "differences"
+    if any(l.stale for l in links):
+        return "stale"
+    # Карточка недоступна (удалена) — подтвердить сверку нечем.
+    if any(not l.exists for l in links):
+        return "needs_check"
+    if any(_link_verification(l) == "not_checked"
+           or l.status in ("candidate", "unmatched") for l in links):
+        return "needs_check"
+    # Неоднозначная привязка и доказанное противоречие стороны зелёного не дают.
+    # Подсказка о виде договора — даёт: одна площадка законно заведена двумя
+    # карточками (аренда и получение электроэнергии) с одним номером и датой.
+    if any(l.ambiguous for l in links):
+        return "needs_check"
+    if not all(_link_proven(l) for l in links):
+        return "needs_check"
+    return "matched_checked"
+
+
+def _links_of(slice_: Slice, entity_type: str, entity_id: str) -> list[tuple[Record, Link]]:
+    return [(r, l) for r in slice_.records for l in r.links
+            if l.entity_type == entity_type and l.entity_id == entity_id]
+
+
+def _verification_block(links: list[Link], run: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Ось проверки: состояние, что сверено с источником, что только снято, что нет."""
+    snapshot: list[str] = []
+    for l in links:
+        for key in l.checked_values:
+            if key not in snapshot:
+                snapshot.append(key)
+    compared: list[dict[str, Any]] = []
+    for l in links:
+        compared.extend(comparisons(l))
+    # Состояние — худшее из связей, с той же поправкой на живое сравнение, что и
+    # в самих связях: иначе сводка противоречила бы своему списку расхождений.
+    states = [_link_verification(l) for l in links]
+    status = "stale" if "stale" in states else next(
+        (s for s in VERIFICATION_ORDER if s in states), "not_checked")
+    return {
+        "status": status,
+        "label": VERIFICATION_LABEL.get(status, VERIFICATION_LABEL["not_checked"]),
+        "compared_fields": compared,
+        # Сверено с источником — только то, что сошлось с его собственным значением.
+        "checked_fields": sorted({f["field"] for f in compared if f["result"] == "match"}),
+        "snapshot_fields": sorted(snapshot),
+        "snapshot_basis": ("снимок карточки на момент сверки — основание устаревания, "
+                           "а не сверка с источником"),
+        "unchecked_fields": _unchecked_fields(links),
+        "recheck": _recheck_block(links, run),
+    }
+
+
+def _recheck_block(links: list[Link], run: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Независимая повторная сверка: её вопросы и то, принято ли её свидетельство.
+
+    Вердикт прогона здесь показывается, но отметку не ставит: состояние считается
+    пересчётом (`comparisons`). Непринятый прогон (другая редакция файла) честно
+    говорит об этом вместо того, чтобы молча исчезнуть.
+    """
+    per_link = [l for l in links if l.recheck]
+    if not per_link and not run:
+        return None
+    questions: list[dict[str, Any]] = []
+    for l in per_link:
+        for q in l.open_questions:
+            item = {"code": str(q.get("code") or ""),
+                    "label": str(q.get("label") or ""),
+                    "reason": str(q.get("reason") or ""),
+                    "blocking": _blocking_question(q)}
+            if item not in questions:
+                questions.append(item)
+    rejected = [l.recheck_reject_reason for l in per_link
+                if not l.recheck_applicable and l.recheck_reject_reason]
+    return {
+        "schema_version": (run or {}).get("schema_version"),
+        "run_id": str((run or {}).get("run_id") or ""),
+        "checked_at": str((run or {}).get("checked_at") or "") or None,
+        "overall": str((run or {}).get("overall") or "") or None,
+        "applicable": not rejected,
+        "not_applicable_reason": rejected[0] if rejected else None,
+        "open_questions": questions,
+        "blocking_questions": [q for q in questions if q["blocking"]],
+        # Что записал о полях сам прогон — для прозрачности, не для отметки.
+        "claims": [{"field": f, "result": r} for f, r in
+                   sorted({(c["field"], c["claimed"]) for l in per_link
+                           for c in comparisons(l) if c["claimed"]})],
+        "candidates_in_registry": (run or {}).get("candidates_in_registry"),
+    }
+
+
+def _freshness_block(links: list[Link], *, hashes: bool = True,
+                     rechecked_at: str | None = None) -> dict[str, Any]:
+    """Ось свежести: считается пересчётом хеша сверенных значений из текущей карточки."""
+    stale = [l for l in links if l.stale]
+    snapshots = sorted({l.snapshot_at for l in links if l.snapshot_at})
+    return {
+        "stale": bool(stale),
+        "stale_records": len(stale),
+        # Время ПРЕЖНЕГО применения, как его записало оно само; своего времени
+        # проверки сервер не выдумывает — он её не выполнял.
+        "checked_at": snapshots[-1] if snapshots else None,
+        "checked_at_basis": "snapshot_at применённой сверки" if snapshots else None,
+        # Время НЕЗАВИСИМОЙ повторной сверки — отдельным полем: это другое
+        # событие, и подменять им дату прежнего применения нельзя.
+        "rechecked_at": rechecked_at,
+        "baseline": ("повторная сверка"
+                     if any(l.recheck_applicable and l.recheck.get("current_hash")
+                            for l in links)
+                     else "прежнее применение" if snapshots else None),
+        "checked_hash": next((l.checked_hash for l in links if l.checked_hash), "") if hashes else "",
+        "current_hash": next((l.current_hash for l in links if l.current_hash), "") if hashes else "",
+    }
+
+
+def _source_block(pairs: list[tuple[Record, Link]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for r, _ in pairs:
+        item = {"record_id": r.id, "file": r.source_file, "sheet": r.source_sheet,
+                "rows": r.source_rows, "period": r.source_period,
+                "as_of": r.source_as_of, "batch_id": r.batch_id,
+                "counterparty": r.counterparty_name, "contract": r.contract_label,
+                "status": r.status}
+        if item not in out:
+            out.append(item)
+    return out
+
+
+def _state_payload(entity_type: str, entity_id: str, state: str, scope: str,
+                   pairs: list[tuple[Record, Link]], *, exists: bool,
+                   aggregate: dict[str, Any] | None) -> dict[str, Any]:
+    links = [l for _, l in pairs]
+    # Самый свежий конверт повторной сверки среди строк карточки: его время и
+    # вопросы показываются отдельно от прежнего применения.
+    runs = sorted((r.recheck for r, _ in pairs if r.recheck),
+                  key=lambda x: str(x.get("checked_at") or ""))
+    run = runs[-1] if runs else None
+    by_status: dict[str, int] = {}
+    for l in links:
+        by_status[l.status] = by_status.get(l.status, 0) + 1
+    differences: list[dict[str, Any]] = []
+    for l in links:
+        for d in l.differences:
+            if d not in differences:
+                differences.append(d)
+    return {
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "exists": exists,
+        "scope": scope,
+        "scope_label": SCOPE_LABEL[scope],
+        "state": state,
+        "state_label": ENTITY_STATE_LABEL[state],
+        "state_note": ENTITY_STATE_NOTE[state],
+        # Карточка целиком не сверялась НИКОГДА: сверка охватывает только состав
+        # полей выше. Отметка договора не переносится на контрагента и площадку.
+        "entity_verified": False,
+        "matching": {
+            "by_status": by_status,
+            "labels": {k: LINK_STATUS_LABEL.get(k, k) for k in by_status},
+        },
+        "verification": _verification_block(links, run),
+        # Хеши сверенных значений относятся к одной карточке: в сводке по договорам
+        # общего хеша нет, и выдавать чей-то один как «хеш контрагента» нельзя.
+        "freshness": _freshness_block(
+            links, hashes=scope == "self",
+            rechecked_at=str((run or {}).get("checked_at") or "") or None),
+        "differences": differences,
+        "sources": _source_block(pairs),
+        "records": len({r.id for r, _ in pairs}),
+        "aggregate": aggregate,
+        "disclaimer": DISCLAIMER,
+    }
+
+
+def contract_summary(slice_: Slice, contract_id: str, *, exists: bool = True) -> dict[str, Any]:
+    """Отметка договора: три оси и состав сверенного — для его строки и карточки."""
+    pairs = _links_of(slice_, "contract", contract_id)
+    state = _links_state([l for _, l in pairs])
+    if not exists:
+        # Чужая, удалённая или недоступная карточка отвечает так же, как карточка
+        # без сведений: отличать их наружу нельзя — это подсказка о чужих данных.
+        state, pairs = "no_source", []
+    return _state_payload("contract", contract_id, state, "self", pairs,
+                          exists=exists, aggregate=None)
+
+
+def aggregate_summary(slice_: Slice, entity_type: str, entity_id: str,
+                      contract_ids: list[str], *, exists: bool = True) -> dict[str, Any]:
+    """Отметка контрагента или площадки — ТОЛЬКО сводка по их договорам.
+
+    Зелёная отметка договора на контрагента и площадку не переносится: у них своя
+    область (`scope`), и состояние «договоры сверены» ставится лишь когда сверены
+    ВСЕ доступные договоры. Один договор без сведений превращает сводку в
+    «требует сверки», а не в «сверено».
+    """
+    scope = ("contracts_of_counterparty" if entity_type == "counterparty"
+             else "contracts_of_location")
+    rows: list[dict[str, Any]] = []
+    pairs: list[tuple[Record, Link]] = []
+    by_state: dict[str, int] = {}
+    for cid in contract_ids:
+        cpairs = _links_of(slice_, "contract", cid)
+        cstate = _links_state([l for _, l in cpairs])
+        pairs.extend(cpairs)
+        by_state[cstate] = by_state.get(cstate, 0) + 1
+        card = slice_.contracts.get(cid)
+        rows.append({
+            "id": cid,
+            "number": card.number if card else "",
+            "date": card.date if card else "",
+            "type_code": card.type_code if card else "",
+            "state": cstate,
+            "state_label": ENTITY_STATE_LABEL[cstate],
+            "records": len({r.id for r, _ in cpairs}),
+        })
+    states = [r["state"] for r in rows]
+    if not states:
+        state = "no_source"
+    elif "differences" in states:
+        state = "differences"
+    elif "stale" in states:
+        state = "stale"
+    elif all(s == "matched_checked" for s in states):
+        state = "contracts_checked"
+    elif all(s == "no_source" for s in states):
+        state = "no_source"
+    else:
+        state = "needs_check"
+    if not exists:
+        state, pairs, rows, by_state = "no_source", [], [], {}
+    with_source = sum(1 for r in rows if r["records"])
+    aggregate = {
+        "contracts_total": len(rows),
+        "with_source": with_source,
+        "without_source": len(rows) - with_source,
+        "by_state": by_state,
+        "contracts": sorted(rows, key=lambda r: (STATE_ORDER.index(r["state"]),
+                                                 r["number"], r["date"])),
+    }
+    payload = _state_payload(entity_type, entity_id, state, scope, pairs,
+                             exists=exists, aggregate=aggregate)
+    return payload
+
+
+async def load_entity_contracts(
+    db: AsyncSession, company_id: uuid.UUID, entity_type: str, entity_ids: list[str],
+    organization_id: str | None = None,
+) -> tuple[dict[str, list[str]], dict[str, Contract]]:
+    """Договоры запрошенных карточек — двумя запросами на весь batch, не по карточке.
+
+    Отметку в списке нужно получить для сотни строк сразу, и запрос на строку
+    (`N+1`) превратил бы открытие списка в сотню обходов. Здесь на любой размер
+    партии ровно два запроса: существование карточек и их договоры.
+
+    Площадка проверяется выборкой `ServiceLocation` — её автоматически сужает
+    скоуп объектов участника (`scope.install_orm_scope`), поэтому чужая площадка
+    отвечает так же, как несуществующая.
+    """
+    found: dict[str, list[str]] = {}
+    cards: dict[str, Contract] = {}
+    if not entity_ids:
+        return found, cards
+    acl = contract_acl(organization_id)
+
+    if entity_type == "location":
+        live = (await db.execute(select(ServiceLocation.id).where(
+            ServiceLocation.company_id == company_id,
+            ServiceLocation.id.in_(entity_ids),
+            *scope_location_conds(ServiceLocation.id)))).scalars().all()
+        found = {str(x): [] for x in live}
+        if found:
+            rows = (await db.execute(
+                select(ContractLocation.location_id, Contract)
+                .join(Contract, Contract.id == ContractLocation.contract_id)
+                .where(ContractLocation.company_id == company_id,
+                       ContractLocation.location_id.in_(list(found)),
+                       Contract.company_id == company_id, *acl)
+            )).all()
+            for loc_id, contract in rows:
+                cards[str(contract.id)] = contract
+                bucket = found.setdefault(str(loc_id), [])
+                if str(contract.id) not in bucket:
+                    bucket.append(str(contract.id))
+        return found, cards
+
+    valid = [uuid.UUID(x) for x in entity_ids if _is_uuid(x)]
+    if not valid:
+        return found, cards
+
+    if entity_type == "counterparty":
+        live = (await db.execute(select(Counterparty.id).where(
+            Counterparty.company_id == company_id,
+            Counterparty.id.in_(valid)))).scalars().all()
+        found = {str(x): [] for x in live}
+        if found:
+            for contract in (await db.execute(select(Contract).where(
+                    Contract.company_id == company_id,
+                    Contract.counterparty_id.in_([uuid.UUID(x) for x in found]),
+                    *acl))).scalars().all():
+                cards[str(contract.id)] = contract
+                found.setdefault(str(contract.counterparty_id), []).append(str(contract.id))
+        return found, cards
+
+    for contract in (await db.execute(select(Contract).where(
+            Contract.company_id == company_id, Contract.id.in_(valid),
+            *acl))).scalars().all():
+        cards[str(contract.id)] = contract
+        found[str(contract.id)] = [str(contract.id)]
+    return found, cards
+
+
+async def entity_summaries(
+    db: AsyncSession, slice_: Slice, company_id: uuid.UUID,
+    entity_type: str, entity_ids: list[str], organization_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Сводки сопряжения на весь список карточек: ответ есть у КАЖДОГО запрошенного id.
+
+    Отсутствующий ключ в ответе список прочитал бы как «ещё грузится», и строка
+    осталась бы без отметки. Поэтому недоступная или неизвестная карточка получает
+    то же «нет данных для сравнения», что и карточка без строк выгрузки: разницу
+    наружу не выдаём.
+    """
+    found, cards = await load_entity_contracts(db, company_id, entity_type,
+                                               entity_ids, organization_id)
+    # Договоры карточек докладываются в срез: `contract_brief` и номера в сводке
+    # берутся из него же, вторым проходом по базе ходить не за чем.
+    for cid, contract in cards.items():
+        slice_.contracts.setdefault(cid, contract)
+    out: list[dict[str, Any]] = []
+    for entity_id in entity_ids:
+        exists = entity_id in found
+        if entity_type == "contract":
+            out.append(contract_summary(slice_, entity_id, exists=exists))
+        else:
+            out.append(aggregate_summary(slice_, entity_type, entity_id,
+                                         found.get(entity_id, []), exists=exists))
     return out
