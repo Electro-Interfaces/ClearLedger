@@ -298,6 +298,10 @@ async def _run_sts_stations(db, channel, src, ingest_fn, kind: str,
         stations = [s for s in stations
                     if int(s.get("code") or s.get("station") or 0) in wanted]
     by_station: list[dict[str, Any]] = []
+    # rollback после сбоя станции истекает ORM-атрибуты: `channel.company_id` у
+    # следующей станции превращался в lazy load → MissingGreenlet, и одна станция
+    # роняла весь остаток обхода (gig, 16.09–25.10.2026). Берём значение заранее.
+    company_id = channel.company_id
     for idx, st in enumerate(stations):
         code = int(st.get("code") or st.get("station") or 0)
         if not code:
@@ -316,7 +320,7 @@ async def _run_sts_stations(db, channel, src, ingest_fn, kind: str,
             # savepoint: сбой одной станции откатывается локально и НЕ отравляет
             # общую сессию (иначе PendingRollbackError валит все следующие станции)
             async with db.begin_nested():
-                r = await ingest_fn(body, channel.company_id, db)
+                r = await ingest_fn(body, company_id, db)
             by_station.append({"station": code, **r})
             # Прогресс в лог + поэтапный commit: данные станции сохраняются СРАЗУ,
             # а UI-поллинг видит растущее «загружено N» (иначе минуты висит 0 и
