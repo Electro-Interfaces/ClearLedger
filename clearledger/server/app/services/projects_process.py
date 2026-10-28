@@ -633,3 +633,15 @@ async def apply_step(db: AsyncSession, company_id, site: EzsSite, link_id: str,
     site.pending_link_id = None
     site.pending_at = None
     return state
+
+
+async def sync_subject_process(db, company_id, definition, subject_type, subject_id, *, title, context, participants):
+    """Общий фасад для самостоятельного процесса предмета, без копии движка."""
+    return await _call(db, company_id, "POST", f"{FACADE}/instances", json={
+        "definition": definition, "subject": {"type": subject_type, "id": str(subject_id)},
+        "title": title, "context": context, "participants": participants,
+    })
+
+
+async def read_subject_process(db, company_id, process_id):
+    return await _call(db, company_id, "GET", f"{FACADE}/instances/{process_id}")

@@ -224,7 +224,7 @@ export function MarketDuplicatesPanel() {
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-muted-foreground">
                 <span className="text-sm font-medium text-foreground">{п.city ?? 'город не указан'}</span>
                 <span>расстояние {п.distanceM} м</span>
-                {п.obvious && <span className="text-warning">адрес совпадает</span>}
+                {п.obvious && <span className="text-warning-foreground">адрес совпадает</span>}
               </div>
               <div className="grid gap-2 md:grid-cols-2">
                 {[п.a, п.b].map((с, i) => (

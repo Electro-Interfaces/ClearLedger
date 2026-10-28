@@ -1,3 +1,4 @@
+import { TechConnectionStatus } from './TechConnectionSummary'
 /**
  * «Проект» — полноэкранная работа с одним проектом.
  *
@@ -19,6 +20,7 @@ import { Loader2, ArrowLeft, MapPin, User as UserIcon, CalendarClock } from 'luc
 import {
   getSite, patchSite, STAGE_META, PHASE_META, FUNNEL_STAGES, type SiteDetail, stageLabelOf } from '@/services/sitesService'
 import { toast } from 'sonner'
+import { formatDate } from '@/lib/formatDate'
 import { PROJECT_TABS, ProjectTabContent, type ProjectTabKey } from './ProjectTabs'
 import { ProjectPhaseStrip, INTEGRATION_PHASES } from './ProjectPhaseStrip'
 import { ProjectsListPanel } from './ProjectsListPanel'
@@ -155,10 +157,14 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
         <Button variant="ghost" size="sm" className="h-8 px-2 text-sm" onClick={onBack}>
           <ArrowLeft className="h-3.5 w-3.5 mr-1" />К списку
         </Button>
-        <div className="min-w-0 flex-1">
+        {/* На телефоне шапка занимает всю ширину, а название переносится по
+            словам: при `flex-1` рядом с кнопками блок сжимался в половину
+            экрана, и «Татарстан Республика ЭЗС № 707…» обрезалось до «Тат…»
+            (проверка 25.10.2026). */}
+        <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-sm text-muted-foreground">{s.projectNo ?? '—'}</span>
-            <h2 className="text-base font-semibold truncate">
+            <h2 className="text-base font-semibold break-words sm:truncate">
               {s.title || s.fullAddress || s.address || [s.region, s.city].filter(Boolean).join(', ') || 'Проект'}
             </h2>
             <span className={`text-xs rounded border px-1.5 py-0.5 ${STAGE_META[s.stage]?.cls ?? ''}`}
@@ -179,7 +185,7 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
             </span>
             <span className={`inline-flex items-center gap-1 ${late ? 'text-red-600 dark:text-red-400' : ''}`}>
               <CalendarClock className="h-3 w-3" />
-              {nextLabel ? `${nextLabel}${nextDate ? ` · до ${nextDate}` : ''}` : workspace.isPending ? 'Загрузка следующего шага…' : workspace.isError ? 'Не удалось получить следующий шаг' : 'следующий шаг не задан'}
+              {nextLabel ? `${nextLabel}${nextDate ? ` · до ${formatDate(nextDate)}` : ''}` : workspace.isPending ? 'Загрузка следующего шага…' : workspace.isError ? 'Не удалось получить следующий шаг' : 'следующий шаг не задан'}
             </span>
             {!specialized && s.gate && (() => {
               // Зелёный «гейт 2/8» читается как «всё собрано». С послаблением
@@ -226,6 +232,8 @@ function ProjectWorkspace({ companyId, id, tab, onTab, onBack }: {
           toast.error(e instanceof Error ? e.message : 'Не удалось записать шаг')
         }
       }} />}
+
+      {!specialized && s.kind !== 'integration' && <TechConnectionStatus view={workspace.data?.tech_connection ?? undefined} onOpen={() => onTab('tp')} />}
 
       {/* Вкладки. Точка отмечает те, где на этой стадии есть незакрытая работа:
           девять одинаковых кнопок не подсказывают, с какой начинать.

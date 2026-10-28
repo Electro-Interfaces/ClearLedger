@@ -11,7 +11,7 @@
  * записана», текущая — от даты начала учёта с пометкой. Даты параллельных треков
  * (ТП, договор, ввод) и поступления заявки — ромбы: это реальные даты.
  */
-import { useState } from 'react'
+import { tpGanttRows } from './tpGanttRows'
 import { useQuery } from '@tanstack/react-query'
 import { getProjectRoadmap, getSiteEvents, type SiteDetail } from '@/services/sitesService'
 import { GanttChart, type GanttGroup, type GanttRow, type GanttState } from './GanttChart'
@@ -32,9 +32,9 @@ export function StationGantt({ site, companyId, onStage, onItem }: {
   /** Нажатие на пункт: вкладка, где он закрывается, и его номер. */
   onItem?: (target: string, key?: string) => void
 }) {
-  const road = useQuery({ queryKey: ['site-roadmap', companyId, site.id], queryFn: () => getProjectRoadmap(companyId, site.id) })
-  const ev = useQuery({ queryKey: ['site-events', companyId, site.id, 'stage'], queryFn: () => getSiteEvents(companyId, site.id, 'stage') })
-  const [now] = useState(() => Date.now())
+  const road = useQuery({ queryKey: ['site-roadmap', companyId, site.id], queryFn: () => getProjectRoadmap(companyId, site.id), refetchInterval: 30000 })
+  const ev = useQuery({ queryKey: ['site-events', companyId, site.id, 'stage'], queryFn: () => getSiteEvents(companyId, site.id, 'stage'), refetchInterval: 30000 })
+  const now = road.dataUpdatedAt || Date.now()
   if (!road.data || ev.isLoading) return <p className="text-sm text-muted-foreground">{road.isError ? `Не загрузилось: ${road.error.message}` : 'Загрузка…'}</p>
 
   const d = road.data
@@ -81,7 +81,7 @@ export function StationGantt({ site, companyId, onStage, onItem }: {
         children: itemRows(s.key, s.items, state, list[0]?.start ?? null, now, (r) => r, onItem ? (it) => onItem(it.target ?? 'work', it.key) : onStage && (() => onStage(s.key))),
       }
     })
-    const tracks: GanttRow[] = d.tracks.filter((t) => t.phase === ph.key && t.state !== 'empty').map((t) => {
+    const tracks: GanttRow[] = d.tracks.filter((t) => t.phase === ph.key && t.state !== 'empty' && !(t.key === 'tp' && d.techConnection?.steps.some((s) => s.branch === 'main'))).map((t) => {
       const at = parse(t.date)
       return {
         key: `track:${t.key}`, label: `∥ ${t.label}`, state: 'track' as const, segments: [],
@@ -92,7 +92,9 @@ export function StationGantt({ site, companyId, onStage, onItem }: {
     return { key: ph.key, label: ph.label, rows: [...stages, ...tracks] }
   }).filter((g) => g.rows.length > 0)
 
-  return <GanttChart now={now} groups={groups} legend={<>
+  const connectionGroups = tpGanttRows(d.techConnection, now, () => onItem?.('tp'))
+  return <GanttChart now={now} groups={[...groups, ...connectionGroups]} legend={<>
+    ТП и сбыт показаны отдельно по последней сверке: отрезки процесса строятся по его истории, ромбы с пометками «План» и «Факт» отражают сроки и подтверждённые даты. Нажатие открывает «Присоединение».
     Слева — факт по истории смен стадии (зелёная — пройдена, синяя — текущая, жёлтая — остановлена); у проектов, заведённых до 31.07.2026, история смен не велась — там «дата не записана», а текущая стадия считается с начала учёта.
     ∥ — параллельные треки этапа (право, ТП, оборудование, договор, ввод): ромб — их дата (зелёный — выполнено, красный — просрочено), голубой ромб — поступление заявки.
     Справа — что впереди, по порядку стадий; ширина условная. Нажатие на строку стадии открывает «Работу», на пункт — вкладку, где он закрывается.{!tracked && !untracked && ' Истории смен стадии у проекта нет.'}

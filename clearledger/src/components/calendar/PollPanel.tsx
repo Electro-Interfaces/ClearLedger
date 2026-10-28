@@ -21,6 +21,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import * as workService from '@/services/workService'
 import { cn } from '@/lib/utils'
+import { addDays, parseISO } from 'date-fns'
+import { companyDateKey, companyDateTimeInput, companyDateTimeToISO, companyDayTime, COMPANY_TIME_ZONE } from '@/lib/companyTime'
 
 const ГОЛОСА = [
   { key: 'yes', label: 'Подходит' },
@@ -31,10 +33,10 @@ const ГОЛОСА = [
 const когда = new Intl.DateTimeFormat('ru-RU', {
   weekday: 'short', day: 'numeric', month: 'short',
   hour: '2-digit', minute: '2-digit',
+  timeZone: COMPANY_TIME_ZONE,
 })
 
-const localInput = (d: Date) =>
-  new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+const localInput = companyDateTimeInput
 
 export function PollPanel({ companyId, eventId, isOrganizer, durationMinutes = 60,
   onChanged }: {
@@ -60,10 +62,10 @@ export function PollPanel({ companyId, eventId, isOrganizer, durationMinutes = 6
   const открыть = useMutation({
     mutationFn: () => workService.openPoll(companyId, eventId,
       черновик.filter(Boolean).map((с) => {
-        const н = new Date(с)
+        const н = companyDateTimeToISO(с)
         return {
-          starts_at: н.toISOString(),
-          ends_at: new Date(н.getTime() + durationMinutes * 60_000).toISOString(),
+          starts_at: н,
+          ends_at: new Date(new Date(н).getTime() + durationMinutes * 60_000).toISOString(),
         }
       })),
     onSuccess: () => { setЧерновик([]); toast.success('Опрос открыт'); обновить() },
@@ -149,10 +151,8 @@ export function PollPanel({ companyId, eventId, isOrganizer, durationMinutes = 6
             <Button size="sm" variant="ghost" className="h-8 px-2 text-xs"
               disabled={черновик.length >= 8}
               onClick={() => setЧерновик((v) => {
-                const база = new Date()
-                база.setDate(база.getDate() + v.length + 1)
-                база.setHours(10, 0, 0, 0)
-                return [...v, localInput(база)]
+                const day = parseISO(companyDateKey(new Date()))
+                return [...v, localInput(companyDayTime(addDays(day, v.length + 1), 10))]
               })}>
               <Plus className="mr-1 h-3.5 w-3.5" />Вариант
             </Button>

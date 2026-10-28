@@ -139,6 +139,16 @@ class User(Base):
     # в любом сочетании. Выбирает сам человек в личных настройках; NULL —
     # умолчание `notify.TASK_CHANNELS_DEFAULT`.
     task_notify: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Какие письма человек хочет получать на свою почту: подмножество
+    # `notify.EMAIL_KINDS`. NULL — всё, как было до появления настройки:
+    # молчаливое отключение писем обновлением было бы хуже лишнего письма.
+    email_notify: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # «Меня не будет с … по …»: отпуск, больничный, командировка. Ставит сам
+    # человек. Регламентные напоминания и сводка дня в эти дни не приходят —
+    # поводы вернутся, когда он выйдет. Право подписи это не передаёт: за этим
+    # стоит замещение (`user_substitutions`), и его заводит администратор.
+    away_from: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    away_to: Mapped[date_type | None] = mapped_column(Date, nullable=True)
     # Версия входа: кладётся в JWT и сверяется на каждом запросе. Смена пароля, «выйти
     # со всех устройств» и сброс сессий админом поднимают её — выданные токены гаснут.
     token_version: Mapped[int] = mapped_column(
@@ -7312,6 +7322,8 @@ class EzsTechConnection(Base):
     # Способ присоединения и даты шагов хода — см. services/ezs_tp_steps.py.
     method: Mapped[str | None] = mapped_column(String(16), nullable=True)
     steps: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    workflow: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    workflow_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     # Сведения заявки на ТП (п. 12.1 Правил), которых не было в графах банка ЗУ.
     reliability_category: Mapped[str | None] = mapped_column(String(8), nullable=True)
     load_kind: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -7989,6 +8001,9 @@ class ChatPushSubscription(Base):
     # человека: рабочий ноутбук и личный телефон — разные обстоятельства.
     show_preview: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True,
                                                server_default=text("true"))
+    # Чем подписались: «Chrome · Windows». Нужен, чтобы человек в своём профиле
+    # узнал устройство и мог отвязать чужое, не гадая по строке endpoint.
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -14121,3 +14136,15 @@ def _task_assignment_changed(mapper, connection, task):
         task.assignment_revision = uuid.uuid4()
         task.assignment_by_id = getattr(task, "_assignment_actor_id", None)
         task.__dict__.pop("_assignment_actor_id", None)
+
+
+class TpOrganizationDocument(Base):
+    """Общий файл юрлица для ТП; проект ссылается на него без копирования."""
+    __tablename__ = "tp_organization_documents"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    file_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("source_files.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    valid_until: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

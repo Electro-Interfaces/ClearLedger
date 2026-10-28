@@ -420,7 +420,7 @@ function MarketMap() {
           Объекты нашего реестра с координатами: {ourPoints.length} · точек рынка в кадре: {market.length}
           {sites.isFetching && ' · обновляем…'}
           {cut && (
-            <span className="text-warning">
+            <span className="text-warning-foreground">
               {' · '}в кадре {sites.data?.total}, показано {sites.data?.returned} —
               приблизьте карту
             </span>
@@ -660,7 +660,7 @@ function MarketSites() {
             : `${rows.length.toLocaleString('ru-RU')} из ${всего.toLocaleString('ru-RU')}`}
           {запрос && ` по запросу «${запрос}»`}
         </span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2 max-md:ml-0 max-md:w-full max-md:justify-start [&_button]:whitespace-nowrap">
           {вид === 'list' ? <MarketExportButton title="Точки рынка" total={всего} loaded={rows}
             getAll={() => allMarketSites(companyId, { ...(kind === 'all' ? {} : { kind }), ...(запрос ? { search: запрос } : {}) })}
             subtitle={`Внешний реестр${запрос ? ` · поиск: ${запрос}` : ''}`}
@@ -815,7 +815,7 @@ function MarketSites() {
                     </div>
                     <div>
                       <div className="text-xs text-muted-foreground">зарядок не видели ни разу</div>
-                      <div className="font-headline text-lg tabular-nums text-warning">
+                      <div className="font-headline text-lg tabular-nums text-warning-foreground">
                         {nfm.format(разрез.data.quality.neverSeenCharging)}
                       </div>
                     </div>
@@ -971,7 +971,7 @@ function MarketSites() {
                       {s.price?.value ? `${s.price.value} ₽` : '—'}
                       {s.price?.basis && <div className="text-xs text-muted-foreground">{s.price.basis}</div>}
                     </td>
-                    <td className={`p-2 ${age.stale ? 'text-warning' : 'text-muted-foreground'}`}>{age.text}</td>
+                    <td className={`p-2 ${age.stale ? 'text-warning-foreground' : 'text-muted-foreground'}`}>{age.text}</td>
                   </tr>
                 )
               })}

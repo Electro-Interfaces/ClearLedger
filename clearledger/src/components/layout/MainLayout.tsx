@@ -12,7 +12,7 @@ import { MobileShell } from '@/components/common/MobileShell'
 import { AppsPanelProvider, AppsPanelSurface } from './AppsPanel'
 import InteractionHost from '@/components/support/InteractionHost'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useMaxWidth } from '@/hooks/use-mobile'
+import { useMaxWidth, useShortTouch } from '@/hooks/use-mobile'
 import { useExpandedWorkspace } from '@/hooks/useExpandedWorkspace'
 import { isWorkspacePath } from '@/config/tabRegistry'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -106,6 +106,8 @@ export function MainLayout() {
   // рабочий стол, разрезы «Сверка данных», нормализация и хранилище «Документы».
   // На десктопе overflow решает per-tab KeepAliveOutlet; здесь — только для мобильной ветки.
   const isWorkspace = isWorkspacePath(location.pathname)
+  // Телефон в альбоме: 293 px высоты, шапка в 5rem съедала треть экрана (QA 27.10.2026).
+  const short = useShortTouch()
 
   return (
     <ActiveModeProvider>
@@ -114,7 +116,7 @@ export function MainLayout() {
       open={sidebarOpen}
       onOpenChange={setSidebarOpen}
       className="flex flex-col h-dvh max-h-dvh overflow-hidden"
-      style={{ '--header-height': '5rem' } as React.CSSProperties}
+      style={{ '--header-height': short ? '3.5rem' : '5rem' } as React.CSSProperties}
     >
       <a href="#workspace-area"
         className="fixed left-3 top-3 z-[100] -translate-y-20 rounded-md bg-background px-3 py-2 text-sm font-medium shadow-lg transition-transform focus:translate-y-0 focus:outline-none focus:ring-2 focus:ring-ring">

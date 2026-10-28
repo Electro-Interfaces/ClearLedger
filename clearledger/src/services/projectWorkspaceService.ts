@@ -1,3 +1,4 @@
+import type { TechConnectionView } from './techConnectionView'
 import { openContextChat, resolveWorkContext, retryWorkResult } from './workContextService'
 import { get, post, put } from './apiClient'
 import type { SiteTrackItem } from './sitesService'
@@ -15,6 +16,8 @@ export interface ProjectScenario {
   evidence: Record<string, { ref: string; by: string; at: string; revision: number | null }>
 }
 export interface ProjectOverview {
+  next_step?: { text: string; due: string | null; source: string; performer?: { name: string } | null } | null
+  tech_connection?: TechConnectionView | null
   demo?: { key: string; room_id: string; guide: { stage: string; title: string; kind: 'task' | 'doc'; id: string; requirement: string }[] } | null
   work: { items: SiteTrackItem[]; total: number; waiting: number }
   pending_results?: { items: SiteTrackItem[]; total: number }

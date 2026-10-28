@@ -98,6 +98,16 @@ def sign_token(room: str, display_name: str, *, moderator: bool = True, hours: i
     return jwt.encode(payload, key, algorithm="RS256", headers={"kid": settings.jitsi_kid})
 
 
+def with_subject(url: str | None, subject: str | None) -> str | None:
+    """Гостевая ссылка с темой: гость до прихода ведущего видел на входе номер
+    комнаты «Ledger A 66 C…» (QA 27.10.2026). Фрагмент `#config.subject` комнату
+    не меняет — сохранённая ссылка встречи остаётся голой, по ней её узнают
+    календарь и журнал. Чужие ссылки (Zoom, Teams) не трогаем."""
+    if not url or not subject or not subject.strip() or "#" in url             or f"//{settings.jitsi_domain}/" not in url:
+        return url
+    return url + "#config.subject=" + quote(json.dumps(subject.strip()[:120], ensure_ascii=False))
+
+
 def meeting_urls(room: str, display_name: str, hours: int = 4,
                  moderator: bool = True, subject: str | None = None) -> dict:
     """Ссылка входа (с токеном) + гостевая (без токена) на ту же комнату.

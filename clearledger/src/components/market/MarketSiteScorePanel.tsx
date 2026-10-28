@@ -347,7 +347,7 @@ export function MarketSiteScorePanel() {
           {/* Результат помечен условиями, при которых получен: изменил радиус —
               видно, что на экране ещё прежний ответ. */}
           {устарел && (
-            <p className="text-xs text-warning">
+            <p className="text-xs text-warning-foreground">
               Условия изменились — на экране расчёт для прежних: {показан!.условия.radius} км,
               {' '}{МЕСТА.find((m) => m.v === показан!.условия.place)?.label}. Нажмите
               «Пересчитать».
@@ -731,7 +731,7 @@ export function MarketSiteScorePanel() {
                         принимают по диапазону, а не по одной цифре.
                       </p>
                       {f.zeroDemand > 0 && (
-                        <p className="mb-2 text-xs text-warning">
+                        <p className="mb-2 text-xs text-warning-foreground">
                           {f.zeroDemand} похожих объектов не заряжают вовсе. С их учётом
                           медиана — {nf.format(f.sessionsAllMedian ?? 0)} сессий: столько
                           даёт место такого типа в среднем по сети, а не в удачном случае.

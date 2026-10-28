@@ -36,7 +36,7 @@ def test_application_shows_gaps_and_escapes():
     org = SimpleNamespace(full_name="АО «Тест»", name="Тест", ogrn="1", inn="2", kpp="3", legal_address="а",
                           postal_address=None, director_name="Иванов", director_position=None, phone="1", email=None)
     tc.energy_supplier = "Сбыт"
-    assert "Не заполнено" not in render(org, site, tc, [])
+    assert "срок проектирования" in render(org, site, tc, [])
 
 
 def test_kit_follows_method_and_docs():
@@ -49,14 +49,14 @@ def test_kit_follows_method_and_docs():
 
 
 def test_method_selects_steps():
-    assert steps_for(None) == [] and steps_for("landlord") == []
+    assert all(s["branch"] == "supply" for method in (None, "landlord") for s in steps_for(method))
     assert "indirect_agreement" not in [s["key"] for s in steps_for("direct")]
     assert steps_for("indirect")[0]["key"] == "indirect_agreement"
 
 
 def test_deadline_counts_from_previous_step():
     tc = _tc(application_date="2026-10-01")
-    accepted = next(s for s in steps_out(tc, date(2026, 10, 10)) if s["key"] == "accepted")
+    accepted = next(s for s in steps_out(tc, date(2026, 10, 10)) if s["key"] == "documents_review")
     assert accepted["plannedDate"] == "2026-10-04" and accepted["overdue"]
     tc.steps = {"accepted": {"date": "2026-10-03"}}
     out = {s["key"]: s for s in steps_out(tc, date(2026, 10, 10))}
@@ -100,3 +100,13 @@ def test_step_marks_manual_checklist_item_and_keeps_human_tick():
     assert _gate_from_step(site, "5.2", False, None) is None and site.gates["construction"]["5.2"]["done"]
     assert _gate_from_step(site, "5.3", True, None) is None
     assert _gate_from_step(SimpleNamespace(kind="integration", gates={}), "5.1", True, None) is None
+
+
+def test_explicit_workflow_deadline_replaces_reference_in_all_step_views():
+    tc = _tc(steps={'accepted': {'date': '2030-01-01'}},
+             workflow={'responsibilities': {'contract': {'due': '2030-01-05'}}},
+             due_date='2030-02-10')
+    out = {s['key']: s for s in steps_out(tc, date(2030, 1, 10))}
+    assert out['contract']['plannedDate'] == '2030-01-05'
+    assert out['contract']['overdue'] is True
+    assert out['works_done']['plannedDate'] == '2030-02-10'

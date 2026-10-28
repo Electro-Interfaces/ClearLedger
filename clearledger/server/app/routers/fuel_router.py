@@ -54,6 +54,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.exc import IntegrityError
 
 from app.auth import assert_company_member, get_current_user
 from urllib.parse import urlparse
@@ -655,23 +656,7 @@ async def ingest_fuel_shifts(
     При ручном /fuel/normalize их нет — записи остаются без трассы, как раньше.
     """
 
-    # Получить или создать станцию
-    result = await db.execute(
-        select(FuelStation).where(
-            FuelStation.company_id == company_id,
-            FuelStation.code == body.station_code,
-        )
-    )
-    station = result.scalar_one_or_none()
-    if not station:
-        station = FuelStation(
-            company_id=company_id,
-            code=body.station_code,
-            name=f"АЗС №{body.station_code}",
-            sts_system_code=body.system_code,
-        )
-        db.add(station)
-        await db.flush()
+    station = await _get_or_create_station(db, company_id, body.station_code, body.system_code)
 
     # Загрузить смены из STS
     if body.shift_number:
@@ -1073,20 +1058,7 @@ async def ingest_fuel_deliveries(
     совпадает с нативным ключом .cfe TL|ТТН|система|станция|номер_ТТН[|код_топлива],
     что выравнивает cutover (без задвоения приёма на живой бухгалтерии).
     """
-    # станция (get-or-create)
-    station = (await db.execute(
-        select(FuelStation).where(
-            FuelStation.company_id == company_id,
-            FuelStation.code == body.station_code,
-        )
-    )).scalar_one_or_none()
-    if not station:
-        station = FuelStation(
-            company_id=company_id, code=body.station_code,
-            name=f"АЗС №{body.station_code}", sts_system_code=body.system_code,
-        )
-        db.add(station)
-        await db.flush()
+    station = await _get_or_create_station(db, company_id, body.station_code, body.system_code)
 
     # смены периода — приём STS отдаётся в разрезе смен, перебираем их
     shifts = await sts_get_shifts(
@@ -1260,6 +1232,26 @@ async def ingest_fuel_deliveries(
 # ═══════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════
+
+async def _get_or_create_station(db: AsyncSession, company_id, code: int,
+                                 system_code: int | None) -> FuelStation:
+    """Станция по коду; новая — в savepoint. Каналы смен и ТТН стартуют одновременно:
+    проигравший гонку получает нарушение uq_fuel_stations_company_code и читает
+    карточку победителя, а не заводит вторую (дубль 235, 15.09.2026)."""
+    q = select(FuelStation).where(FuelStation.company_id == company_id, FuelStation.code == code)
+    station = (await db.execute(q)).scalar_one_or_none()
+    if station:
+        return station
+    try:
+        async with db.begin_nested():
+            station = FuelStation(company_id=company_id, code=code,
+                                  name=f"АЗС №{code}", sts_system_code=system_code)
+            db.add(station)
+            await db.flush()
+        return station
+    except IntegrityError:
+        return (await db.execute(q)).scalar_one()
+
 
 def _shift_out(s: FuelShift, station: FuelStation | None = None,
                has_corrections: bool = False) -> ShiftOut:

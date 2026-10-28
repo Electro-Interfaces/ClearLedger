@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,10 +40,14 @@ def uid_встречи(ev: CalendarEvent) -> str:
 def _sequence() -> int:
     """Номер версии встречи для календаря получателя: только растёт.
 
-    Минуты от эпохи: хранить счётчик правок ради одного числа незачем, а
-    следующая правка всегда получает номер больше предыдущей.
+    Секунды от эпохи: хранить счётчик правок ради одного числа незачем. Были
+    минуты — перенос и отмена в одну минуту уходили с одним номером, и Outlook
+    вправе такое обновление пропустить (QA 27.10.2026). Секунды больше прежних
+    минут, так что уже разосланные приглашения новыми номерами перекрываются.
+    # ponytail: две правки в одну секунду получат один номер; нужен счётчик в
+    # строке встречи, если это начнёт встречаться.
     """
-    return int(datetime.now(timezone.utc).timestamp() // 60)
+    return int(datetime.now(timezone.utc).timestamp())
 
 
 async def в_личку(db: AsyncSession, company_id, от: User, кому: User,
@@ -82,8 +86,23 @@ async def в_личку(db: AsyncSession, company_id, от: User, кому: User
 def _когда(ev: CalendarEvent, starts_at: datetime | None = None) -> str:
     from app.services import space_time
 
-    момент = space_time.as_utc(starts_at or ev.starts_at).astimezone(space_time.zone(ev.tz))
-    return момент.strftime("%d.%m.%Y в %H:%M")
+    пояс = space_time.zone(ev.tz)
+    момент = space_time.as_utc(starts_at or ev.starts_at).astimezone(пояс)
+    if not ev.all_day:
+        return момент.strftime("%d.%m.%Y в %H:%M")
+    # «в 00:00» у события на весь день читалось как полночная встреча; у
+    # многодневного виден весь диапазон — иначе продление не отличить от переноса.
+    if starts_at is None:
+        последний = (space_time.as_utc(ev.ends_at).astimezone(пояс) - timedelta(seconds=1)).date()
+        if последний > момент.date():
+            return f"{момент:%d.%m.%Y} – {последний:%d.%m.%Y}, весь день"
+    return момент.strftime("%d.%m.%Y, весь день")
+
+
+def space_time_equal(a: datetime, b: datetime) -> bool:
+    from app.services import space_time
+
+    return space_time.as_utc(a) == space_time.as_utc(b)
 
 
 async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, повод: str,
@@ -97,7 +116,7 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
     они получают только отмену и перенос. Тот, кто действует, извещение себе
     не получает: он и так знает.
     """
-    from app.services import email_service, ics
+    from app.services import email_service, ics, jitsi, notify, space_time
 
     отмена = повод == "cancel"
     когда = _когда(ev)
@@ -118,6 +137,14 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
         тема = f"Отменено: {ev.title} — {когда}"
         строка = (f"Встреча «{ev.title}» {когда} отменена"
                   + (f": {ev.cancel_reason}" if ev.cancel_reason else "") + ".")
+    elif было is not None and space_time_equal(было, ev.starts_at):
+        # Начало прежнее — поменялся конец или длительность: «перенесена с 30.10
+        # на 30.10» ничего не объясняет.
+        тема = f"Изменено: {ev.title} — {когда}"
+        конец = space_time.as_utc(ev.ends_at).astimezone(space_time.zone(ev.tz))
+        срок = когда if ev.all_day else f"{когда}–{конец:%H:%M}"
+        строка = (f"Встреча «{ev.title}» изменена: теперь {срок}."
+                  + (f"\nСсылка: {ev.conference_url}" if ev.conference_url else ""))
     else:
         тема = f"Перенесено: {ev.title} — {когда}"
         строка = (f"Встреча «{ev.title}» перенесена"
@@ -129,10 +156,18 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
         CalendarAttendee.event_id == ev.id, User.id != кто.id))).scalars().all()
     люди = [ч for ч in люди if (только is None or ч.id in только)
             and not (кроме and ч.id in кроме)]
+    # Отозванному гостю ни переноса, ни отмены: приглашение у него уже снято.
     гости = [] if повод == "invite" else (await db.execute(select(CalendarGuest).where(
-        CalendarGuest.event_id == ev.id))).scalars().all()
+        CalendarGuest.event_id == ev.id, CalendarGuest.revoked_at.is_(None)))).scalars().all()
 
-    свои = [(ч.email, ч.name) for ч in люди if ч.email]
+    # Письмо с календарным файлом — по выбору человека в личных настройках
+    # («Встречи — в мой почтовый календарь»): кто живёт в календаре пространства,
+    # может его выключить; чат-извещение остаётся в любом случае.
+    свои = [(ч.email, ч.name) for ч in люди if ч.email and notify.wants_email(ч, "meeting")]
+    # Организатор в файле — хозяин встречи, а не помощник, который её правит:
+    # ответы из VK и Outlook уходят на адрес ORGANIZER.
+    хозяин = (await db.get(User, ev.organizer_id)) if ev.organizer_id else None
+    хозяин = хозяин or кто
     чужие = [(г.email, г.name) for г in гости]
     номер = _sequence()
 
@@ -140,8 +175,9 @@ async def известить(db: AsyncSession, ev: CalendarEvent, кто: User, 
         return ics.event_ics(
             uid=uid, title=ev.title, starts_at=ev.starts_at, ends_at=ev.ends_at,
             description=ev.description, location=ev.location, url=ev.conference_url,
-            organizer_email=кто.email, organizer_name=кто.name,
-            attendees=кому, invite=not отмена, cancelled=отмена, sequence=номер)
+            organizer_email=хозяин.email, organizer_name=хозяин.name,
+            attendees=кому, invite=not отмена, cancelled=отмена, sequence=номер,
+            all_day=ev.all_day, tz=ev.tz, join_url=jitsi.with_subject(ev.conference_url, ev.title))
 
     # Гостю приглашение всегда уходило с `@trek` (`_письмо_гостю`), людям
     # пространства на конференцию — с `@conf.elsyplus`: каждому — свой UID.

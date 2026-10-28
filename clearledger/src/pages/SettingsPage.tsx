@@ -17,6 +17,8 @@ import { useCompany } from '@/contexts/CompanyContext'
  *  на два экрана ниже — человек искал его сам. */
 const ЯКОРЯ: Record<string, string> = {
   notifications: 'profile-notifications',
+  email: 'profile-email',
+  away: 'profile-away',
   security: 'profile-security',
   contacts: 'profile-contacts',
   worktime: 'profile-worktime',
@@ -98,8 +100,10 @@ export function SettingsPage() {
     setSettings((prev) => ({ ...prev, stations }))
   }
 
+  // Узкая колонка оставалась узкой и на широком мониторе: карточка личных
+  // настроек раскладывается в две колонки начиная с xl, и ей нужно место.
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-2xl xl:max-w-6xl">
       <h1 className="text-2xl font-bold">Настройки</h1>
 
       {/* Личное — первым: человек пришёл сюда за своими настройками, а не за

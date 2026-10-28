@@ -24,6 +24,7 @@ import { SearchPicker } from '@/components/tasks/SearchPicker'
 import * as workService from '@/services/workService'
 import * as docsService from '@/services/docsService'
 import { cn } from '@/lib/utils'
+import { companyDateTime } from '@/lib/companyTime'
 
 const ОТВЕТ_СЛОВОМ: Record<string, string> = {
   pending: 'не ответил', accepted: 'будет',
@@ -127,7 +128,7 @@ export function GuestPanel({ companyId, eventId, title }: {
               </span>
               {g.proposed_starts_at && (
                 <span className="text-amber-600 dark:text-amber-400">
-                  предложил {new Date(g.proposed_starts_at).toLocaleString('ru-RU', {
+                  предложил {companyDateTime(g.proposed_starts_at, {
                     day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
                   })}
                 </span>

@@ -82,18 +82,26 @@ async def list_sites(
     node: str | None = Query(None, description="узел маршрута: ezs_contract_approval и т. п."),
     kind: str | None = Query(None), place_kind: str | None = Query(None),
     without_kind: str | None = Query(None, description="исключить вид работ: реестр стройки без интеграций"),
+    sort: Literal["projectNo", "title", "decision", "kind", "placeKind", "phase",
+                  "stage", "owner", "nextAction", "due"] | None = Query(None),
+    direction: Literal["asc", "desc"] = Query("asc"),
     page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=2000),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Список площадок с фильтрами. `risk` раскрывает цифры обзора портфеля
     (без ответственного, без шага, просрочки ТП и поставок, застрявшие);
-    `node` отбирает по узлу маршрута — «у кого сейчас работа»."""
+    `node` отбирает по узлу маршрута — «у кого сейчас работа».
+
+    `sort`/`direction` упорядочивают весь отбор, а не загруженную страницу:
+    реестр постраничный, и сортировка на клиенте отвечала «что горит» по
+    случайной сотне строк."""
     cid = await assert_company_member(company_id, user, db)
     return await ezs_sites.list_sites(db, cid, stage=stage, region=region, search=search,
                                       owner_id=owner_id, overdue=overdue, risk=risk,
                                       node=node, kind=kind, place_kind=place_kind,
                                       without_kind=without_kind,
-                                      page=page, page_size=page_size)
+                                      sort=sort, direction=direction,
+                                      page=page, page_size=page_size, user=user)
 
 
 @router.get("/meta/suggestions")
@@ -474,11 +482,16 @@ async def changes_overview(
 @router.get("/tech-connections")
 async def tech_connections(
     company_id: str = Query(...),
+    include_closed: bool = Query(False, description="вместе с отклонёнными и замороженными проектами"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
-    """Реестр техприсоединений по всем проектам: статусы, сроки, просрочки."""
+    """Реестр техприсоединений по проектам в работе: статусы, сроки, просрочки.
+
+    Отклонённые и замороженные проекты по умолчанию не считаются: их заявки
+    давали 70 строк из 79 и 3,6 млн ₽ в плитке «стоимость подключений», то есть
+    свод отвечал про мёртвые площадки (проверка 25.10.2026)."""
     cid = await assert_company_member(company_id, user, db)
-    return await ezs_project.tech_connections_report(db, cid)
+    return await ezs_project.tech_connections_report(db, cid, include_closed=include_closed)
 
 
 @router.get("/phase-durations")
@@ -517,6 +530,7 @@ async def export_report(
     node: str | None = Query(None), kind: str | None = Query(None),
     place_kind: str | None = Query(None), without_kind: str | None = Query(None),
     history_days: int = Query(90, ge=1, le=3650, description="портфель: глубина листа «История», дней"),
+    include_closed: bool = Query(False, description="присоединение: вместе с отклонёнными и замороженными"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Выгрузка экрана в xlsx: воронка, приоритеты, бюджет, учёт, ТП, оборудование."""
@@ -537,6 +551,8 @@ async def export_report(
         data = await fn(db, cid, site_ids=[it["id"] for it in listed["items"]], user=user, history_days=history_days)
     elif report == "portfolio":
         data = await fn(db, cid, user=user, history_days=history_days)
+    elif report == "tech-connections":
+        data = await fn(db, cid, include_closed=include_closed)
     else:
         data = await fn(db, cid)
     # След выгрузки реестров проектов (аудит 07.10.2026).
@@ -562,6 +578,7 @@ async def equipment_report(
 @router.get("/tech-connections/by-operator")
 async def tech_connections_by_operator(
     company_id: str = Query(...),
+    include_closed: bool = Query(False, description="вместе с отклонёнными и замороженными проектами"),
     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Присоединения по сетевым организациям: сроки, стоимость, отказы.
@@ -570,7 +587,7 @@ async def tech_connections_by_operator(
     без ответа «у кого» — бесполезная средняя по больнице.
     """
     cid = await assert_company_member(company_id, user, db)
-    return await ezs_project.tech_connections_by_operator(db, cid)
+    return await ezs_project.tech_connections_by_operator(db, cid, include_closed=include_closed)
 
 
 @router.get("/costs/report")
@@ -1075,6 +1092,155 @@ async def project_roadmap(
     return await ezs_project.project_roadmap(db, cid, site)
 
 
+async def _tp_record(db, cid, site_id, *, lock=False):
+    from app.models import EzsTechConnection
+    site = await _owned(db, cid, site_id)
+    from app.scope import in_scope
+    if not in_scope(site.location_id): raise HTTPException(404, "Проект недоступен")
+    if lock:
+        await db.execute(select(EzsSite.id).where(EzsSite.id == site_id).with_for_update())
+    query = select(EzsTechConnection).where(EzsTechConnection.company_id == cid,
+                                           EzsTechConnection.site_id == site_id)
+    if lock: query = query.with_for_update()
+    tc = (await db.execute(query)).scalars().first()
+    if not tc: raise HTTPException(404, "Сначала сохраните способ присоединения")
+    return tc
+
+
+from app.services.ezs_tp_workflow import SaveWorkflow
+
+
+@router.get("/{site_id}/tech-connection/workflow")
+async def get_tp_workflow(site_id: uuid.UUID, company_id: str = Query(...),
+                          user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services import ezs_tp_workflow as tp
+    from app.models import Organization, Contract
+    cid = await assert_company_member(company_id, user, db)
+    tc = await _tp_record(db, cid, site_id)
+    out = await tp.read(db, tc)
+    from app.services.ezs_tp_method import prefill
+    out["handover"]["canAcknowledge"] = any(x["id"] == str(user.id) and x["status"] == "pending" for x in out["handover"]["recipients"])
+    out["prefill"] = await prefill(db, tc, await _owned(db, cid, site_id))
+    out["people"] = await ezs_site_work.company_members(db, cid)
+    out["organizations"] = [dict(id=str(x.id), name=x.name) for x in
+        (await db.execute(select(Organization).where(Organization.company_id == cid))).scalars()]
+    contract_query = select(Contract).where(Contract.company_id == cid, Contract.type == "energy")
+    if out["data"]["organization_id"]:
+        contract_query = contract_query.where(Contract.organization_id == uuid.UUID(out["data"]["organization_id"]))
+    out["contracts"] = [dict(id=str(x.id), name=x.number) for x in (await db.execute(contract_query)).scalars()]
+    return out
+
+
+@router.put("/{site_id}/tech-connection/workflow")
+async def save_tp_workflow(site_id: uuid.UUID, payload: SaveWorkflow, company_id: str = Query(...),
+                           user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services import ezs_tp_workflow as tp
+    cid = await assert_company_member(company_id, user, db)
+    tc = await _tp_record(db, cid, site_id, lock=True)
+    result = await tp.save(db, tc, payload, user)
+    await db.commit()
+    return result
+
+
+@router.post("/{site_id}/tech-connection/prefill")
+async def prefill_tp(site_id: uuid.UUID, company_id: str = Query(...),
+                     user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services.ezs_tp_method import prefill
+    from app.services import ezs_tp_workflow as tp
+    cid = await assert_company_member(company_id, user, db)
+    tc = await _tp_record(db, cid, site_id, lock=True)
+    if (tc.workflow or {}).get("archived"): raise HTTPException(409, "Сначала верните ТП в работу")
+    site = await _owned(db, cid, site_id)
+    changed = await prefill(db, tc, site, apply=True)
+    if changed:
+        tc.workflow_version = (tc.workflow_version or 0) + 1
+        tc.workflow = dict(tc.workflow or {}, _prefill=changed)
+        await ezs_site_work.log_event(db, site, "edit", user=user,
+             text="Подставлены исходные данные ТП: " + ", ".join(x["source"] for x in changed))
+    await db.commit()
+    return {"applied": changed}
+
+
+@router.post("/{site_id}/tech-connection/acquaint")
+async def acquaint_tp(site_id: uuid.UUID, company_id: str = Query(...),
+                       user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from app.services.ezs_tp_method import handover_state
+    from app.routers.docs_router import mark_acquainted, AcquaintReadIn
+    cid = await assert_company_member(company_id, user, db)
+    tc = await _tp_record(db, cid, site_id)
+    state = await handover_state(db, tc)
+    if not state["exists"]: raise HTTPException(409, "Итоговый комплект ещё не передан")
+    # Штатный обработчик проверяет личную отметку, доступ и точный снимок файлов.
+    return await mark_acquainted(state["docId"], AcquaintReadIn(company_id=company_id), db, user)
+
+
+@router.post("/{site_id}/tech-connection/shared-documents", status_code=201)
+async def upload_tp_shared_document(site_id: uuid.UUID, organization_id: uuid.UUID,
+                                    kind: str, valid_until: date | None = None,
+                                    company_id: str = Query(...), file: UploadFile = File(...),
+                                    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    import hashlib
+    import os
+    from pathlib import Path
+    from app.models import Organization, SourceFile, TpOrganizationDocument, UserCompany
+    from app.services.ezs_tp_workflow import SHARED_KINDS
+    cid = await assert_company_member(company_id, user, db)
+    await _owned(db, cid, site_id)
+    member = await db.get(UserCompany, (user.id, cid))
+    if not user.is_superadmin and (not member or member.role != "admin"):
+        raise HTTPException(403, "Общие документы юрлица обновляет администратор компании")
+    org = await db.get(Organization, organization_id)
+    if not org or org.company_id != cid: raise HTTPException(404, "Заявитель не найден")
+    if kind not in SHARED_KINDS: raise HTTPException(400, "Этот вид документа относится к отдельному проекту")
+    content = await file.read(20 * 1024 * 1024 + 1)
+    if not content or len(content) > 20 * 1024 * 1024:
+        raise HTTPException(400, "Загрузите непустой PDF размером до 20 МБ")
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(400, "Общий документ должен быть PDF")
+    fid = uuid.uuid4()
+    folder = Path(os.environ.get("UPLOAD_DIR", "/app/uploads"))
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{fid}.pdf"
+    path.write_bytes(content)
+    try:
+        db.add(SourceFile(id=fid, company_id=cid, file_name=file.filename or "document.pdf",
+                          mime_type="application/pdf", purpose="attachment", size=len(content), storage_path=str(path),
+                          fingerprint=hashlib.sha256(content).hexdigest()))
+        await db.flush()
+        doc = TpOrganizationDocument(company_id=cid, organization_id=organization_id,
+                                     file_id=fid, kind=kind,
+                                     valid_until=valid_until.isoformat() if valid_until else None)
+        db.add(doc)
+        await db.flush()
+        await ezs_site_work.log_event(db, await _owned(db, cid, site_id), "doc", user=user,
+            text=f"Добавлена общая версия документа заявителя: {kind}")
+        await db.commit()
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    return {"id": str(doc.id)}
+
+
+@router.get("/{site_id}/tech-connection/shared-documents/{doc_id}/file")
+async def download_tp_shared_document(site_id: uuid.UUID, doc_id: uuid.UUID,
+                                      company_id: str = Query(...), user: User = Depends(get_current_user),
+                                      db: AsyncSession = Depends(get_db)):
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    from app.models import TpOrganizationDocument, SourceFile
+    from app.services.ezs_tp_workflow import data_of
+    cid = await assert_company_member(company_id, user, db)
+    tc = await _tp_record(db, cid, site_id)
+    doc = await db.get(TpOrganizationDocument, doc_id)
+    if not doc or doc.company_id != cid or doc.organization_id != data_of(tc).organization_id:
+        raise HTTPException(404, "Документ не относится к выбранному заявителю")
+    source = await db.get(SourceFile, doc.file_id)
+    if not source or source.company_id != cid or not Path(source.storage_path).is_file():
+        raise HTTPException(404, "Файл недоступен")
+    return FileResponse(source.storage_path, filename=source.file_name, media_type="application/pdf",
+                        headers={"Cache-Control": "private, no-store"})
+
+
 @router.get("/{site_id}/tech-connection/application")
 async def tech_connection_application(
     site_id: uuid.UUID, company_id: str = Query(...),
@@ -1084,7 +1250,10 @@ async def tech_connection_application(
     from fastapi.responses import HTMLResponse
     cid = await assert_company_member(company_id, user, db)
     site = await _owned(db, cid, site_id)
-    page = await ezs_project.tech_connection_application(db, cid, site)
+    try:
+        page = await ezs_project.tech_connection_application(db, cid, site)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if page is None:
         raise HTTPException(404, "Присоединение не заведено")
     return HTMLResponse(page, headers={"Cache-Control": "private, no-store"})

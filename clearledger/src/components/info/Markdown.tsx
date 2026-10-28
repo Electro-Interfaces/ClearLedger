@@ -121,7 +121,12 @@ export function Markdown({ content }: { content: string }) {
       const cls = level === 1 ? 'text-base font-semibold mt-4 mb-1'
         : level === 2 ? 'text-sm font-semibold mt-3 mb-1'
         : 'text-xs font-semibold mt-2 mb-0.5'
-      blocks.push(<div key={key} className={cls}>{inline(h[2], key)}</div>)
+      // Настоящий заголовок, а не жирный div: по ним строится оглавление
+      // страницы у скринридера, и статья на десять разделов без них читается
+      // сплошным полотном. Название самой статьи — h2, поэтому её разделы
+      // начинаются с h3.
+      const Tag = `h${Math.min(level + 1, 6)}` as 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
+      blocks.push(<Tag key={key} className={cls}>{inline(h[2], key)}</Tag>)
       return
     }
     // Иллюстрация отдельной строкой: скриншот экрана с выносками — обычный приём

@@ -2211,6 +2211,25 @@ async def create_all() -> None:
         # чтобы обновление не объявляло их новыми входящими.
         for statement in TASK_ASSIGNMENT_MIGRATION_DDL:
             await conn.execute(text(statement))
+        # v2.x: «меня не будет с … по …» — личная отметка отсутствия.
+        for _col in ("away_from", "away_to"):
+            await conn.execute(
+                __import__("sqlalchemy").text(
+                    f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {_col} DATE"
+                )
+            )
+        # v2.x: чем подписались на уведомления — для списка устройств в профиле.
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE chat_push_subscriptions ADD COLUMN IF NOT EXISTS user_agent VARCHAR(300)"
+            )
+        )
+        # v2.x: выбор видов писем в личных настройках (NULL — получать всё).
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_notify JSONB"
+            )
+        )
         # v0.6: cloud_api_key для Companies (внешний доступ TSupport)
         await conn.execute(
             __import__("sqlalchemy").text(
@@ -3017,6 +3036,11 @@ async def create_all() -> None:
             # карточки CPO из проверки исключены (они и так вне индексов резолва).
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_service_locations_code "
             "ON service_locations (company_id, code) WHERE is_test = false",
+            # Станция топлива одна на код в компании. 15.09.2026 два канала (смены и
+            # ТТН) стартовали одновременно и завели станцию 235 дважды; с 16.09 обход
+            # станций падал на ней шесть недель (gig, исправлено 28.10).
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_fuel_stations_company_code "
+            "ON fuel_stations (company_id, code)",
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_service_locations_serial "
             "ON service_locations (company_id, lower(serial_number)) "
             "WHERE is_test = false AND serial_number IS NOT NULL AND serial_number <> ''",
@@ -3354,6 +3378,8 @@ async def create_all() -> None:
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS applicant_term_months DOUBLE PRECISION",
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS method VARCHAR(16)",
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS steps JSONB",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS workflow JSONB",
+            "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS workflow_version INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS reliability_category VARCHAR(8)",
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS load_kind VARCHAR(120)",
             "ALTER TABLE ezs_tech_connections ADD COLUMN IF NOT EXISTS existing_power_kwt DOUBLE PRECISION",
@@ -5331,6 +5357,13 @@ async def create_all() -> None:
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS reviews_count INTEGER",
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS closed_confirmations "
             "INTEGER NOT NULL DEFAULT 0",
+            # Страничная выдача точек рынка идёт с ORDER BY name, и без этого индекса
+            # каждый запрос карты читал таблицу целиком и сортировал 9 118 строк:
+            # 14 919 КБ памяти сортировки при `work_mem` 32 МБ, то есть два
+            # одновременных запроса уже сортировали бы на диске. С индексом сортировка
+            # исчезает (Index Scan), замер на rushydro: 79.7 мс → 23 мс.
+            "CREATE INDEX IF NOT EXISTS ix_market_sites_company_name "
+            "ON market_sites (company_id, name)",
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
             "ALTER TABLE market_sites ADD COLUMN IF NOT EXISTS connectors_total INTEGER",
             "ALTER TABLE IF EXISTS market_site_snapshots "

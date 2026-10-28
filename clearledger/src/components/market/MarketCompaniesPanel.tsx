@@ -176,7 +176,7 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
                 веса, и по ним нельзя решать одинаково. */}
             {card.dataLevel != null && (
               <span className={card.dataLevel === 1 ? 'text-success'
-                : card.dataLevel === 3 ? 'text-warning' : 'text-muted-foreground'}>
+                : card.dataLevel === 3 ? 'text-warning-foreground' : 'text-muted-foreground'}>
                 {УРОВЕНЬ[card.dataLevel]}
               </span>
             )}
@@ -253,7 +253,7 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
                     {card.legalName}
                   </span>
                   {card.legalConfidence && (
-                    <span className={card.legalTrusted ? 'text-success' : 'text-warning'}>
+                    <span className={card.legalTrusted ? 'text-success' : 'text-warning-foreground'}>
                       {' '}· {card.legalConfidence}
                     </span>
                   )}
@@ -270,7 +270,7 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
               ) : <span className="text-muted-foreground">нет данных</span>}
               {card.legalStatus && (
                 <span className={card.legalStatus === 'действует'
-                  ? 'text-success' : 'text-warning'}> · {card.legalStatus}</span>
+                  ? 'text-success' : 'text-warning-foreground'}> · {card.legalStatus}</span>
               )}
             </div>
             <div>
@@ -303,7 +303,7 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
           </div>
 
           {!card.legalTrusted && (card.inn || card.legalName) && (
-            <p className="text-xs text-warning">
+            <p className="text-xs text-warning-foreground">
               Реквизиты не подтверждены — ссылаться на них в документах и письмах
               нельзя. Бренд и юрлицо часто не совпадают, а однофамильцы в ЕГРЮЛ
               встречаются постоянно: это версия для проверки, а не реквизиты

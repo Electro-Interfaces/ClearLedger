@@ -6,6 +6,7 @@
  * что она принадлежит ему, — а она общая.
  */
 import { downloadBlob, get, post, upload } from './apiClient'
+import { COMPANY_TIME_ZONE } from '@/lib/companyTime'
 
 /** Колонка общей оси состояния. Порядок — порядок движения работы. */
 export type WorkState = 'new' | 'in_work' | 'approval' | 'external' | 'done'
@@ -532,7 +533,7 @@ export async function createEvent(companyId: string, data: {
     location: data.location || undefined,
     conference_url: data.conferenceUrl || undefined,
     all_day: data.allDay ?? false,
-    tz: data.tz || Intl.DateTimeFormat().resolvedOptions().timeZone || undefined,
+    tz: data.tz || COMPANY_TIME_ZONE,
     attendee_ids: data.attendeeIds ?? [],
     optional_ids: data.optionalIds ?? [],
     visibility: data.visibility || undefined,

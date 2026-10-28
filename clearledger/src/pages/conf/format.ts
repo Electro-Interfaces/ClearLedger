@@ -6,14 +6,16 @@
  */
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
+import { companyDateKey, COMPANY_TIME_ZONE } from '@/lib/companyTime'
 
 /** «10 сентября, 14:30». Год печатается, только когда он не текущий. */
 export function когда(iso: string) {
   const d = new Date(iso)
   return d.toLocaleString('ru-RU', {
     day: 'numeric', month: 'long',
-    year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric',
+    year: companyDateKey(d).slice(0, 4) === companyDateKey(new Date()).slice(0, 4) ? undefined : 'numeric',
     hour: '2-digit', minute: '2-digit',
+    timeZone: COMPANY_TIME_ZONE,
   })
 }
 

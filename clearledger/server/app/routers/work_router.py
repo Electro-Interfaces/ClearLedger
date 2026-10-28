@@ -50,7 +50,7 @@ from app.models import (
 from sqlalchemy import true as _sa_true
 
 from app.config import settings
-from app.services import (calendar_series, oversight, placement, space_time, work_query,
+from app.services import (calendar_series, jitsi, oversight, placement, space_time, work_query,
                           work_state)
 
 log = logging.getLogger(__name__)
@@ -1443,11 +1443,18 @@ async def calendar_feed(token: str, db: AsyncSession = Depends(get_db)):
         .order_by(CalendarEvent.starts_at))).scalars().all()
 
     база = settings.app_public_url.rstrip("/")
+    from app.services.meeting_notice import uid_встречи
+
     файл = ics_service.calendar_ics([{
-        "uid": f"{e.id}@trek",
+        # UID — как в письме-приглашении: подписанный на ленту и получивший
+        # письмо видел бы у себя одну встречу дважды.
+        "uid": uid_встречи(e),
         "title": e.title,
         "starts_at": e.starts_at,
         "ends_at": e.ends_at,
+        "all_day": e.all_day,
+        "tz": e.tz,
+        "join_url": jitsi.with_subject(e.conference_url, e.title),
         "description": e.description,
         "location": e.location,
         "url": f"{база}/docs/work?view=calendar&event={e.id}",
@@ -1503,6 +1510,7 @@ async def calendar_ics(
     значит «не занят» для того, кто зовёт его туда.
     """
     from app.services import ics
+    from app.services.meeting_notice import uid_встречи
 
     cid = await _assert_work(company_id, current_user, db)
     # Право участника, а не просто членство в компании. Соседняя карточка
@@ -1512,8 +1520,9 @@ async def calendar_ics(
     ev = await _event_participant(db, cid, event_id, current_user)
     organizer = await db.get(User, ev.organizer_id)
     текст = ics.event_ics(
-        uid=f"{ev.id}@trek.elsyplus", title=ev.title,
+        uid=uid_встречи(ev), title=ev.title,
         starts_at=ev.starts_at, ends_at=ev.ends_at,
+        all_day=ev.all_day, tz=ev.tz, join_url=jitsi.with_subject(ev.conference_url, ev.title),
         description=ev.description, location=ev.location,
         url=ev.conference_url,
         organizer_email=organizer.email if organizer else None,
@@ -1578,7 +1587,12 @@ async def calendar_meeting(
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                             "Видеоконференции не настроены")
     cid = await _assert_work(company_id, current_user, db)
-    ev = await _event_participant(db, cid, event_id, current_user)
+    # Открытая встреча (круг «вся компания») доступна любому сотруднику — как и
+    # вход из «Конференций» (`conf_router.meeting_join`). Иначе календарь
+    # компании показывал встречу с кнопкой «Войти», а сервер отвечал «Это не
+    # ваша встреча» (26.10.2026). Закрытая — по-прежнему только участникам.
+    ev = await _event_participant(db, cid, event_id, current_user,
+                                  allow_open_company=True)
     if ev.status == "cancelled":
         raise HTTPException(status.HTTP_409_CONFLICT, "Встреча отменена")
     # Один вход с «Конференциями»: тот же выбор ведущего, та же отметка прихода.
@@ -2072,11 +2086,12 @@ async def _письмо_гостю(db: AsyncSession, ev, guest, token: str,
     ссылка = f"{settings.app_public_url.rstrip('/')}/meeting/{token}"
     отменена = ev.status == "cancelled"
     когда = space_time.as_utc(ev.starts_at).astimezone(space_time.zone(ev.tz))
-    подпись = когда.strftime("%d.%m.%Y в %H:%M")
+    подпись = когда.strftime("%d.%m.%Y, весь день" if ev.all_day else "%d.%m.%Y в %H:%M")
 
     файл = ics.event_ics(
         uid=f"{ev.id}@trek", title=ev.title,
         starts_at=ev.starts_at, ends_at=ev.ends_at,
+        all_day=ev.all_day, tz=ev.tz, join_url=jitsi.with_subject(ev.conference_url, ev.title),
         description=ev.description, location=ev.location, url=ссылка,
         organizer_email=organizer.email, organizer_name=organizer.name,
         attendees=[(guest.email, guest.name)],
@@ -2635,14 +2650,20 @@ async def poll_pick(
 
 
 async def _event_participant(db: AsyncSession, cid: uuid.UUID, event_id: str,
-                             user: User):
-    """Встреча, к которой человек имеет отношение: организатор или приглашённый."""
+                             user: User, *, allow_open_company: bool = False):
+    """Встреча, к которой человек имеет отношение: организатор или приглашённый.
+
+    `allow_open_company` — только для входа во встречу: открытую встречу компании
+    видят и посещают все сотрудники. Правка, ответ, файл и опрос остаются за
+    участниками."""
     from app.models import CalendarAttendee, CalendarEvent
 
     ev = await db.get(CalendarEvent, _uuid_or_400(event_id, "event_id"))
     if ev is None or ev.company_id != cid:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Встреча не найдена")
     if ev.organizer_id == user.id:
+        return ev
+    if allow_open_company and ev.visibility == "company":
         return ev
     есть = (await db.execute(select(CalendarAttendee.id).where(
         CalendarAttendee.event_id == ev.id,

@@ -62,7 +62,7 @@ function Share({ row }: { row: MarketTerritory }) {
   const strong = row.sharePct >= 50
   const weak = row.sharePct < 20
   return (
-    <span className={`tabular-nums ${strong ? 'text-success' : weak ? 'text-warning' : ''}`}>
+    <span className={`tabular-nums ${strong ? 'text-success' : weak ? 'text-warning-foreground' : ''}`}>
       {nf1.format(row.sharePct)} %
     </span>
   )

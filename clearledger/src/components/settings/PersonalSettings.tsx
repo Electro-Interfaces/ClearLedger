@@ -19,7 +19,7 @@ import * as workService from '@/services/workService'
 import * as tasksService from '@/services/tasksService'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
@@ -31,12 +31,20 @@ import { useSendMode, type SendMode } from '@/hooks/useSendMode'
 import * as chat from '@/services/chatService'
 import { changePassword, logoutAll } from '@/services/authService'
 import {
-  ОШИБКА_ДНЯ, подписьПояса, поясаПоСмещению,
-  ошибкаПароля, ошибкаФото, рабочийДеньВерен,
+  ВИДЫ_ПИСЕМ, ОШИБКА_ДНЯ, подписьПояса, порядокВидовПисем, поясаПоСмещению,
+  ошибкаОтсутствия, ошибкаПароля, ошибкаФото, периодСловами,
+  рабочийДеньВерен, телефонНеРаспознан,
 } from '@/lib/profileRules'
+import { AvatarCropper } from './AvatarCropper'
+import { SecurityHistory } from './SecurityHistory'
 
 type Draft = {
   name: string
+  /** Виды писем, которые человек согласен получать. */
+  emailKinds: string[]
+  /** «Меня не будет с … по …», ISO-даты или пусто. */
+  awayFrom: string
+  awayTo: string
   mobile: string
   office: string
   tz: string
@@ -58,6 +66,7 @@ const КАНАЛЫ: { id: string; label: string; hint: string }[] = [
   { id: 'email', label: 'Почта', hint: 'Письмом на адрес, которым вы входите.' },
 ]
 const КАНАЛЫ_ПО_УМОЛЧАНИЮ = ['secretary', 'email']
+const ПОДСКАЗКА_НОМЕРА = 'Похоже на неполный номер: по нему не дозвонятся из карточки и не найдут поиском.'
 const порядокКаналов = (list: string[]) => КАНАЛЫ.map((k) => k.id).filter((id) => list.includes(id))
 
 /** Кем человек приходится этому пространству. Заполняет администратор. */
@@ -181,11 +190,14 @@ function Segments<T extends string>({ value, onChange, options, label }: {
  * и отдельным подтверждением, и смешивать его с черновиком телефонов нельзя.
  */
 function PasswordBlock() {
+  const { user } = useAuth()
   const [текущий, setТекущий] = useState('')
   const [новый, setНовый] = useState('')
   const [повтор, setПовтор] = useState('')
   const [занят, setЗанят] = useState(false)
-  const тронуто = !!(текущий || новый || повтор)
+  // Текущий пароль подставляет менеджер паролей браузера сам: ошибка «новый
+  // короче 10 символов» горела бы у каждого, кто ничего не вводил (QA 27.10.2026).
+  const тронуто = !!(новый || повтор)
   const ошибка = тронуто ? ошибкаПароля(текущий, новый, повтор) : null
 
   async function сменить() {
@@ -213,6 +225,10 @@ function PasswordBlock() {
 
   return (
     <div className="space-y-3">
+      {/* Логин рядом с паролем — для менеджера паролей: без него браузер
+          принимал за логин ближайшее текстовое поле («Городской») и вписывал
+          туда почту, форма становилась «изменённой» и не сохранялась. */}
+      <input type="email" autoComplete="username" value={user?.email ?? ''} readOnly hidden aria-hidden="true" tabIndex={-1} />
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">
           <Label htmlFor="pers-pass-cur" className="text-xs font-normal text-muted-foreground">
@@ -275,6 +291,9 @@ export function PersonalSettings() {
     workStart: user?.work_start ?? '09:00',
     workEnd: user?.work_end ?? '18:00',
     notify: порядокКаналов(user?.task_notify ?? КАНАЛЫ_ПО_УМОЛЧАНИЮ),
+    emailKinds: порядокВидовПисем(user?.email_notify ?? ВИДЫ_ПИСЕМ.map((k) => k.id)),
+    awayFrom: user?.away_from ?? '',
+    awayTo: user?.away_to ?? '',
     theme: themePref,
     level,
     send: sendMode,
@@ -283,16 +302,32 @@ export function PersonalSettings() {
   })
   const [draft, setDraft] = useState<Draft>(исходный)
   const [preview, setPreview] = useState<string | null>(null)
+  // Выбранный файл сначала попадает в рамку кадрирования и только потом —
+  // в черновик: круглый аватар обрезал снимки по центру вслепую.
+  const [кадрируем, setКадрируем] = useState<File | null>(null)
 
-  // Профиль приезжает асинхронно: пока его нет, в поле имени пусто, и черновик
-  // нужно пересобрать, иначе человек сохранит пустое имя поверх своего.
+  // Профиль приезжает асинхронно, а черновик собирается при первом рендере —
+  // до его прихода в нём стоят умолчания. Пока человек ничего не трогал,
+  // пересобираем черновик на пришедшем профиле: иначе он видит чужие значения
+  // и сохраняет их поверх своих (раньше так терялось имя, теперь — ещё и
+  // пояс, телефоны и выбор писем).
+  const [тронут, setТронут] = useState(false)
   useEffect(() => {
-    setDraft((d) => (d.name === '' && user?.name ? { ...d, name: user.name } : d))
-  }, [user?.name])
+    // Только когда профиль есть: во время перезапроса контекст на миг отдаёт
+    // null, и пересборка по нему вернула бы в форму умолчания — ровно то, что
+    // этот эффект и должен предотвращать.
+    if (!тронут && user) setDraft(исходный())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [тронут, user?.id, user?.name, user?.phone_mobile, user?.phone_office, user?.tz,
+      user?.work_start, user?.work_end,
+      (user?.task_notify ?? []).join(), (user?.email_notify ?? []).join()])
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
 
-  const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }))
+  const set = <K extends keyof Draft>(k: K, v: Draft[K]) => {
+    setТронут(true)
+    setDraft((d) => ({ ...d, [k]: v }))
+  }
 
   const dirty = draft.name.trim() !== (user?.name ?? '')
     || draft.mobile.trim() !== (user?.phone_mobile ?? '')
@@ -301,6 +336,8 @@ export function PersonalSettings() {
     || draft.workStart !== (user?.work_start ?? '09:00')
     || draft.workEnd !== (user?.work_end ?? '18:00')
     || draft.notify.join() !== порядокКаналов(user?.task_notify ?? КАНАЛЫ_ПО_УМОЛЧАНИЮ).join()
+    || draft.emailKinds.join() !== порядокВидовПисем(user?.email_notify ?? ВИДЫ_ПИСЕМ.map((k) => k.id)).join()
+    || draft.awayFrom !== (user?.away_from ?? '') || draft.awayTo !== (user?.away_to ?? '')
     || draft.theme !== themePref || draft.level !== level || draft.send !== sendMode
     || !!draft.photo || draft.photoRemoved
 
@@ -308,21 +345,31 @@ export function PersonalSettings() {
     if (preview) URL.revokeObjectURL(preview)
     setPreview(null)
     setDraft(исходный())
+    setТронут(false)
   }
 
   function выбратьФайл(file: File | null) {
     if (!file) return
     const бедаФото = ошибкаФото(file)
     if (бедаФото) { toast.error(бедаФото); return }
+    setКадрируем(file)
+  }
+
+  /** Готовый квадрат из рамки кадрирования — в черновик, как раньше файл. */
+  function принятьКадр(file: File) {
     if (preview) URL.revokeObjectURL(preview)
     setPreview(URL.createObjectURL(file))
+    setТронут(true)
     setDraft((d) => ({ ...d, photo: file, photoRemoved: false }))
+    setКадрируем(null)
   }
 
   async function сохранить() {
     const имя = draft.name.trim()
     if (имя.length < 2) { toast.error('Имя слишком короткое'); return }
     if (!рабочийДеньВерен(draft.workStart, draft.workEnd)) { toast.error(ОШИБКА_ДНЯ); return }
+    const бедаОтсутствия = ошибкаОтсутствия(draft.awayFrom, draft.awayTo)
+    if (бедаОтсутствия) { toast.error(бедаОтсутствия); return }
     setSaving(true)
     try {
       // Сначала серверное — если оно не пройдёт, локальные настройки не должны
@@ -330,6 +377,7 @@ export function PersonalSettings() {
       const тело: {
         name?: string; avatarUrl?: string; phoneMobile?: string; phoneOffice?: string
         tz?: string; workStart?: string; workEnd?: string; taskNotify?: string[]
+        emailNotify?: string[]; awayFrom?: string; awayTo?: string
       } = {}
       if (имя !== (user?.name ?? '')) тело.name = имя
       if (draft.mobile.trim() !== (user?.phone_mobile ?? '')) тело.phoneMobile = draft.mobile.trim()
@@ -340,6 +388,11 @@ export function PersonalSettings() {
       if (draft.notify.join() !== порядокКаналов(user?.task_notify ?? КАНАЛЫ_ПО_УМОЛЧАНИЮ).join()) {
         тело.taskNotify = draft.notify
       }
+      if (draft.emailKinds.join() !== порядокВидовПисем(user?.email_notify ?? ВИДЫ_ПИСЕМ.map((k) => k.id)).join()) {
+        тело.emailNotify = draft.emailKinds
+      }
+      if (draft.awayFrom !== (user?.away_from ?? '')) тело.awayFrom = draft.awayFrom
+      if (draft.awayTo !== (user?.away_to ?? '')) тело.awayTo = draft.awayTo
       if (draft.photoRemoved) тело.avatarUrl = ''
       else if (draft.photo) тело.avatarUrl = (await chat.uploadAttachment(draft.photo, company.id)).fileUrl
       if (Object.keys(тело).length) {
@@ -352,6 +405,7 @@ export function PersonalSettings() {
       if (preview) URL.revokeObjectURL(preview)
       setPreview(null)
       setDraft((d) => ({ ...d, photo: null, photoRemoved: false }))
+      setТронут(false)
       toast.success('Настройки сохранены')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Не удалось сохранить')
@@ -361,15 +415,18 @@ export function PersonalSettings() {
   }
 
   const деньВерен = рабочийДеньВерен(draft.workStart, draft.workEnd)
+  const бедаОтсутствия = ошибкаОтсутствия(draft.awayFrom, draft.awayTo)
+  const отсутствиеЗадано = !!(draft.awayFrom || draft.awayTo)
+  const почтаВключена = draft.notify.includes('email')
   const фото = preview ?? (draft.photoRemoved ? null : user?.avatar_url ?? null)
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <h2 data-slot="card-title" className="flex items-center gap-2 font-semibold leading-none">
           <User className="h-5 w-5" />
           Личные настройки
-        </CardTitle>
+        </h2>
         <CardDescription>
           Ваш профиль и то, как ведёт себя интерфейс лично у вас. Имя, фото, связь,
           рабочее время и уведомления действуют во всех приложениях пространства и на
@@ -379,8 +436,13 @@ export function PersonalSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* На широком экране карточка занимала узкую колонку, а справа пустовала
+            половина экрана: девять блоков тянулись одной простынёй на три
+            прокрутки. Колонки включаются только с xl — на ноутбуке и телефоне
+            порядок остаётся прежним, одностолбцовым. */}
+        <div className="xl:columns-2 xl:gap-10 [&>div]:xl:mb-6">
         {/* Фото и имя */}
-        <div className="flex items-start gap-4">
+        <div className="mb-6 break-inside-avoid flex items-start gap-4 xl:mb-0">
           <input ref={fileRef} type="file" accept="image/*" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0] ?? null; e.target.value = ''; выбратьФайл(f) }} />
           <button type="button" onClick={() => fileRef.current?.click()}
@@ -393,7 +455,7 @@ export function PersonalSettings() {
           <div className="min-w-0 flex-1 space-y-2">
             <div className="space-y-1.5">
               <Label htmlFor="pers-name">Имя</Label>
-              <Input id="pers-name" value={draft.name} maxLength={255}
+              <Input id="pers-name" value={draft.name} maxLength={255} autoComplete="name"
                 onChange={(e) => set('name', e.target.value)}
                 placeholder="Фамилия Имя Отчество" />
               <p className="text-xs text-muted-foreground">
@@ -407,7 +469,7 @@ export function PersonalSettings() {
               </Button>
               {фото && (
                 <Button type="button" variant="ghost" size="sm"
-                  onClick={() => { if (preview) URL.revokeObjectURL(preview); setPreview(null); setDraft((d) => ({ ...d, photo: null, photoRemoved: true })) }}>
+                  onClick={() => { if (preview) URL.revokeObjectURL(preview); setPreview(null); setТронут(true); setDraft((d) => ({ ...d, photo: null, photoRemoved: true })) }}>
                   <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                   Убрать
                 </Button>
@@ -417,12 +479,13 @@ export function PersonalSettings() {
         </div>
 
         {/* Связь — как с человеком связаться помимо пространства */}
-        <div id="profile-contacts" className="scroll-mt-24 space-y-3 border-t pt-5">
+        <div id="profile-contacts" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
           <div>
-            <Label>Связь</Label>
+            <h3 className="text-sm font-medium">Связь</h3>
             <p className="text-xs text-muted-foreground">
               Эти сведения видят участники пространства, когда нужно с вами связаться
-              напрямую. Заполняете вы сами.
+              напрямую. Заполняете вы сами; номер сохраняется в едином виде — так по
+              нему находят и звонят из карточек.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -439,22 +502,26 @@ export function PersonalSettings() {
               <Label htmlFor="pers-mob" className="text-xs font-normal text-muted-foreground">
                 Мобильный
               </Label>
-              <Input id="pers-mob" value={draft.mobile} maxLength={40} inputMode="tel"
+              <Input id="pers-mob" value={draft.mobile} maxLength={40} inputMode="tel" autoComplete="mobile tel"
+                aria-invalid={телефонНеРаспознан(draft.mobile)}
                 onChange={(e) => set('mobile', e.target.value)} placeholder="+7 900 000-00-00" />
+              {телефонНеРаспознан(draft.mobile) && <p className="text-[11px] text-amber-600 dark:text-amber-500">{ПОДСКАЗКА_НОМЕРА}</p>}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="pers-off" className="text-xs font-normal text-muted-foreground">
                 Городской
               </Label>
-              <Input id="pers-off" value={draft.office} maxLength={40} inputMode="tel"
+              <Input id="pers-off" value={draft.office} maxLength={40} inputMode="tel" autoComplete="work tel"
+                aria-invalid={телефонНеРаспознан(draft.office)}
                 onChange={(e) => set('office', e.target.value)} placeholder="+7 812 000-00-00, доб. 123" />
+              {телефонНеРаспознан(draft.office) && <p className="text-[11px] text-amber-600 dark:text-amber-500">{ПОДСКАЗКА_НОМЕРА}</p>}
             </div>
           </div>
         </div>
 
         {/* Доступ к учётной записи. Стоит сразу за почтой: почта — это логин,
             и пароль человек ищет рядом с ним, а не в конце страницы. */}
-        <div id="profile-security" className="scroll-mt-24 space-y-3 border-t pt-5">
+        <div id="profile-security" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
           <div>
             <h3 className="text-sm font-medium">Безопасность</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -463,13 +530,14 @@ export function PersonalSettings() {
             </p>
           </div>
           <PasswordBlock />
+          <SecurityHistory />
         </div>
 
         {/* Когда человека можно трогать. Настройка не косметическая: по ней
             планировщик решает, доставить регламентное сейчас или сдвинуть на
             утро. Пространство растянуто от Владивостока до Москвы, и «за сутки
             до срока» не бывает срочнее сна. */}
-        <div id="profile-worktime" className="scroll-mt-24 space-y-3 border-t pt-5">
+        <div id="profile-worktime" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
           <div>
             <h3 className="text-sm font-medium">Рабочее время</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -514,9 +582,67 @@ export function PersonalSettings() {
           {!деньВерен && <p className="text-xs text-destructive">{ОШИБКА_ДНЯ}</p>}
         </div>
 
+        {/* Отсутствие — личная отметка: человек сам знает, когда его нет.
+            Замещение рядом показано, но не правится: оно даёт право
+            расписываться за него, и его заводит администратор по приказу. */}
+        <div id="profile-away" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
+          <div>
+            <h3 className="text-sm font-medium">Меня не будет</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Отпуск, больничный, командировка. В эти дни не приходят регламентные
+              напоминания и сводка дня — поводы дождутся вашего возвращения. Поручения
+              и ответы по задачам приходят по-прежнему: они не должны потеряться.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="pers-away-from" className="text-xs font-normal text-muted-foreground">
+                С какого дня
+              </Label>
+              <Input id="pers-away-from" type="date" value={draft.awayFrom}
+                onChange={(e) => set('awayFrom', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pers-away-to" className="text-xs font-normal text-muted-foreground">
+                По какой включительно
+              </Label>
+              <Input id="pers-away-to" type="date" value={draft.awayTo}
+                aria-invalid={!!бедаОтсутствия}
+                onChange={(e) => set('awayTo', e.target.value)} />
+            </div>
+          </div>
+          {бедаОтсутствия && <p className="text-xs text-destructive">{бедаОтсутствия}</p>}
+          {отсутствиеЗадано && !бедаОтсутствия && (
+            <p className="text-xs text-muted-foreground">
+              Вас не будет {периодСловами(draft.awayFrom, draft.awayTo)}.{' '}
+              <button type="button" className="underline underline-offset-2"
+                onClick={() => { set('awayFrom', ''); set('awayTo', '') }}>
+                Отметку снять
+              </button>
+            </p>
+          )}
+          <div className="rounded-lg bg-muted/50 p-3 text-xs">
+            {user?.substitute ? (
+              <>
+                <span className="font-medium">Вас замещает: {user.substitute}</span>
+                {user.substitute_period && <span className="text-muted-foreground"> · {user.substitute_period}</span>}
+                <p className="mt-0.5 text-muted-foreground">
+                  Заместитель расписывается от своего имени; в листе согласования видно обоих.
+                </p>
+              </>
+            ) : (
+              <p className="text-muted-foreground">
+                Замещение не заведено. Если на время вашего отсутствия кто-то должен
+                согласовывать документы за вас, попросите администратора пространства —
+                это полномочие, его не ставят себе сами.
+              </p>
+            )}
+          </div>
+        </div>
+
         {/* Канал поручений выбирает сам человек: кто-то живёт в чате, кто-то в почте.
             Снять все галочки нельзя — поручение тогда не дошло бы никуда. */}
-        <div id="profile-notifications" className="scroll-mt-24 space-y-3 border-t pt-5">
+        <div id="profile-notifications" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
           <div>
             <h3 className="text-sm font-medium">Уведомления о поручениях</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -544,12 +670,54 @@ export function PersonalSettings() {
           </div>
         </div>
 
+        {/* Что из этого уходит письмом. Канал «Почта» выше отвечает на вопрос
+            «писать ли вообще», а здесь человек выбирает, о чём именно: раньше
+            поток ответов по чужим задачам лечился только полным отключением
+            почты — вместе с «вам поручено». Сводка дня живёт здесь же: для
+            человека это такое же письмо в его ящик, а не отдельная подписка. */}
+        <div id="profile-email" className="mb-6 break-inside-avoid scroll-mt-24 space-y-3 border-t pt-5 xl:mb-0">
+          <div>
+            <h3 className="text-sm font-medium">Что присылать на почту</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {почтаВключена
+                ? <>Письма уходят на {user?.email || 'вашу почту'}. Снимите всё — почта замолчит, уведомления останутся в чате.</>
+                : <>Канал «Почта» выключен выше — письма не уходят. Включите его, чтобы выбрать, о чём писать.</>}
+            </p>
+          </div>
+          <div className="space-y-2">
+            {ВИДЫ_ПИСЕМ.map((k) => {
+              const on = draft.emailKinds.includes(k.id)
+              // Письма о встречах идут участникам встречи, а не по каналу
+              // поручений: выключенная «Почта» выше их не останавливает.
+              const можно = почтаВключена || k.id === 'meeting'
+              return (
+                <label key={k.id}
+                  className={cn('flex items-start gap-2 text-sm',
+                    можно ? 'cursor-pointer' : 'cursor-default opacity-60')}>
+                  <Checkbox className="mt-0.5" checked={on} disabled={!можно}
+                    onCheckedChange={(v) => set('emailKinds', порядокВидовПисем(
+                      v === true ? [...draft.emailKinds, k.id] : draft.emailKinds.filter((x) => x !== k.id)))} />
+                  <span>
+                    {k.label}
+                    <span className="block text-xs text-muted-foreground">{k.hint}</span>
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+          {почтаВключена && draft.emailKinds.length === 0 && (
+            <p className="text-xs text-amber-600 dark:text-amber-500">
+              На почту не уйдёт ничего. Поручения вы по-прежнему увидите в выбранных чатах.
+            </p>
+          )}
+        </div>
+
         {/* Кто вправе вести мой календарь. Полномочие выдаёт ТОЛЬКО владелец —
             ни администратор, ни сам помощник: иначе «ведение календаря» стало бы
             способом получить доступ без ведома того, чей он. Это именно
             полномочие, а не доступ к учётной записи: помощник действует от
             своего имени, и в журнале видно обоих. */}
-        <div className="space-y-3 border-t pt-5">
+        <div className="mb-6 break-inside-avoid space-y-3 border-t pt-5 xl:mb-0">
           <div>
             <h3 className="text-sm font-medium">Кто ведёт мой календарь</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -563,9 +731,9 @@ export function PersonalSettings() {
         </div>
 
         {/* Место в пространстве — сведения администратора, не личное дело */}
-        <div className="space-y-3 border-t pt-5">
+        <div className="mb-6 break-inside-avoid space-y-3 border-t pt-5 xl:mb-0">
           <div>
-            <Label>Место в пространстве</Label>
+            <h3 className="text-sm font-medium">Место в пространстве</h3>
             <p className="text-xs text-muted-foreground">
               Кем вы здесь являетесь и что вам открыто. Эти сведения ведёт
               администратор пространства — если что-то указано неверно, обратитесь к нему.
@@ -605,7 +773,7 @@ export function PersonalSettings() {
         </div>
 
         {/* Оформление */}
-        <div id="profile-appearance" className="scroll-mt-24 space-y-2 border-t pt-5">
+        <div id="profile-appearance" className="mb-6 break-inside-avoid scroll-mt-24 space-y-2 border-t pt-5 xl:mb-0">
           <div>
             <h3 className="text-sm font-medium">Настройки этого устройства</h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -643,16 +811,20 @@ export function PersonalSettings() {
           </p>
         </div>
 
+        </div>
+
         {/* Фиксация. Пока есть несохранённое — строка держится у нижнего края
             окна: иначе человек правит телефон вверху, а кнопка ждёт его через
             два экрана прокрутки. */}
         <div className={cn('flex items-center gap-2 border-t pt-4',
           dirty && 'sticky bottom-0 -mx-6 -mb-6 border-t bg-background/95 px-6 pb-4 backdrop-blur')}>
-          <Button type="button" onClick={сохранить} disabled={!dirty || saving || !деньВерен}>
+          <Button type="button" aria-label="Сохранить личные настройки"
+            onClick={сохранить} disabled={!dirty || saving || !деньВерен}>
             {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             Сохранить
           </Button>
-          <Button type="button" variant="ghost" onClick={отменить} disabled={!dirty || saving}>
+          <Button type="button" variant="ghost" aria-label="Отменить изменения личных настроек"
+            onClick={отменить} disabled={!dirty || saving}>
             Отменить
           </Button>
           {dirty && !saving && (
@@ -662,6 +834,7 @@ export function PersonalSettings() {
           )}
         </div>
       </CardContent>
+      <AvatarCropper file={кадрируем} onCancel={() => setКадрируем(null)} onReady={принятьКадр} />
     </Card>
   )
 }

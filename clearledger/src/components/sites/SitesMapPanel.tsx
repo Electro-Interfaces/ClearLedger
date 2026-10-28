@@ -20,6 +20,7 @@ import {
 } from '@/services/sitesService'
 import { SiteCardDialog } from './SiteCardDialog'
 import { locationValues } from '@/types/location'
+import { plural } from '@/lib/textUtils'
 import { groupPointsByCoordinates } from '@/lib/mapPointGroups'
 import { MapStationList } from '@/components/map/MapStationList'
 import { isTestStation } from '@/components/locations/fleet/locationFleetService'
@@ -103,13 +104,13 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
         </button>
         <button type="button" onClick={() => setShowHold((v) => !v)} disabled={stage !== ''}
           title={stage ? 'Снимите отбор по стадии — замороженных в воронке нет'
-            : 'Проекты, поставленные на паузу со статусом «Не трогать»'}
+            : 'Замороженные проекты, у которых есть координаты: на карте видно только то, что можно нанести'}
           className={`px-2.5 py-1 text-sm rounded-md border transition-colors disabled:opacity-40 ${showHold && !stage ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
-          Не трогать{счётЗакрытых.hold ? ` (${счётЗакрытых.hold})` : ''}
+          Заморожены{счётЗакрытых.hold ? ` (${счётЗакрытых.hold})` : ''}
         </button>
         <button type="button" onClick={() => setShowRejected((v) => !v)} disabled={stage !== ''}
           title={stage ? 'Снимите отбор по стадии — отклонённых в воронке нет'
-            : 'Места, которые рассмотрели и отклонили: чтобы не заводить их заново'}
+            : 'Отклонённые места с координатами: чтобы не заводить их заново. В реестре их больше — там считаются и места без координат'}
           className={`px-2.5 py-1 text-sm rounded-md border transition-colors disabled:opacity-40 ${showRejected && !stage ? 'bg-primary text-primary-foreground border-transparent' : 'border-border text-muted-foreground hover:text-foreground'}`}>
           Отклонённые{счётЗакрытых.archive ? ` (${счётЗакрытых.archive})` : ''}
         </button>
@@ -124,7 +125,7 @@ export function SitesMapPanel({ companyId }: { companyId: string }) {
           ))}
         </div>
         <span className="text-xs text-muted-foreground ml-auto">
-          {pts.isLoading ? '…' : `${points.length} проектов с координатами`}
+          {pts.isLoading ? '…' : `${points.length} ${plural(points.length, 'проект', 'проекта', 'проектов')} с координатами`}
           {closed.length > 0 ? ` + ${closed.length} закрытых` : ''}
         </span>
       </div>

@@ -38,15 +38,17 @@ import { PlacedList } from '@/components/docs/PlacedList'
 import { MyWorkPage } from './MyWorkPage'
 import { dtT } from '@/components/tasks/taskWords'
 import { cn } from '@/lib/utils'
+import { companyDateKey, companyDayStart, companyTodayDate, COMPANY_TIME_ZONE } from '@/lib/companyTime'
 
 const время = new Intl.DateTimeFormat('ru-RU', {
   hour: '2-digit', minute: '2-digit',
+  timeZone: COMPANY_TIME_ZONE,
 })
 
 /** Как сегодня называется вслух: «понедельник, 25 августа». */
-const сегодня = () => new Date().toLocaleDateString('ru-RU', {
-  weekday: 'long', day: 'numeric', month: 'long',
-})
+const сегодня = () => new Intl.DateTimeFormat('ru-RU', {
+  weekday: 'long', day: 'numeric', month: 'long', timeZone: COMPANY_TIME_ZONE,
+}).format(new Date())
 
 export function TodayPage() {
   const { company } = useCompany()
@@ -103,9 +105,9 @@ export function TodayPage() {
 function DayLoad({ companyId }: { companyId: string }) {
   const { user } = useAuth()
   const [от, до] = (() => {
-    const н = new Date(); н.setHours(0, 0, 0, 0)
+    const н = companyTodayDate()
     const к = new Date(н); к.setDate(к.getDate() + 1)
-    return [н.toISOString(), к.toISOString()]
+    return [companyDayStart(н).toISOString(), companyDayStart(к).toISOString()]
   })()
   // Тот же ключ, что у списка встреч ниже: запрос уйдёт один.
   const события = useQuery({
@@ -113,7 +115,7 @@ function DayLoad({ companyId }: { companyId: string }) {
     queryFn: () => workService.listEvents(companyId, от, до),
     enabled: !!companyId,
   })
-  const день = workService.todayKey()
+  const день = companyDateKey(new Date())
   const план = useQuery({
     queryKey: ['calendar-plan', companyId, день, день],
     queryFn: () => workService.planDays(companyId, день, день),
@@ -144,9 +146,9 @@ function DayLoad({ companyId }: { companyId: string }) {
 function Meetings({ companyId }: { companyId: string }) {
   const navigate = useNavigate()
   const [от, до] = (() => {
-    const н = new Date(); н.setHours(0, 0, 0, 0)
+    const н = companyTodayDate()
     const к = new Date(н); к.setDate(к.getDate() + 1)
-    return [н.toISOString(), к.toISOString()]
+    return [companyDayStart(н).toISOString(), companyDayStart(к).toISOString()]
   })()
 
   const q = useQuery({
@@ -229,7 +231,7 @@ function CarryOver({ companyId }: { companyId: string }) {
     mutationFn: async () => {
       for (const item of rows) {
         await workService.place(companyId, workService.targetRef(item),
-                                { takenFor: workService.todayKey() })
+                                { takenFor: companyDateKey(new Date()) })
       }
     },
     onSuccess: () => {

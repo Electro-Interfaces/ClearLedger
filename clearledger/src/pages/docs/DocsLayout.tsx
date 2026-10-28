@@ -15,7 +15,7 @@ import {
   GripVertical, PanelLeftClose, PanelLeftOpen, Plus,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { useMaxWidth } from '@/hooks/use-mobile'
+import { useMaxWidth, useShortTouch } from '@/hooks/use-mobile'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
 import { workCounts } from '@/lib/workCounts'
@@ -177,17 +177,23 @@ export function DocsLayout() {
   const { company, isCompanyAdmin } = useCompany()
   const qc = useQueryClient()
   const narrow = useMaxWidth(1024)
-  const [collapsedOwn, setCollapsed] = useState(
-    () => localStorage.getItem(COLLAPSE_KEY) === '1')
+  const tight = useMaxWidth(1439)
+  const short = useShortTouch()
+  const [savedCollapse, setSavedCollapse] = useState<string | null>(
+    () => localStorage.getItem(COLLAPSE_KEY))
   // Развёрнутый экран сворачивает колонку до полосы: пункты остаются под рукой.
   const [expanded, setExpanded] = useExpandedWorkspace()
-  const collapsed = collapsedOwn || expanded
 
   const route = docsRouteOf(pathname)
   const views = (DOCS_VIEWS[route] ?? []).filter(
     (view) => (route !== '/docs/overview' || !['discipline', 'calendar'].includes(view.key) || isCompanyAdmin)
       && !view.hidden)
   const active = useDocsView(route)
+  // У календаря своя колонка (мини-месяц, календари): на ноутбуке до 1440 px две
+  // колонки слева сжимали месяц до «Инте…» (QA 27.10.2026). Пока человек сам не
+  // выбрал, меню раздела там свёрнуто; его выбор дальше главнее.
+  const collapsedOwn = savedCollapse === '1' || (savedCollapse === null && active === 'calendar' && tight)
+  const collapsed = collapsedOwn || expanded
 
   // Сохранённые отборы общей ленты — продолжение пунктов, а не отдельный экран:
   // «Входящие за квартал» и «Разработка TF» это такие же вопросы к работе, как
@@ -334,10 +340,12 @@ export function DocsLayout() {
     }, { replace: true })
   }, [active, params, route, setParams, isCompanyAdmin])
 
-  const toggle = () => expanded ? setExpanded(false) : setCollapsed((c) => {
-    localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1')
-    return !c
-  })
+  const toggle = () => {
+    if (expanded) { setExpanded(false); return }
+    const next = collapsedOwn ? '0' : '1'
+    try { localStorage.setItem(COLLAPSE_KEY, next) } catch { /* хранилище недоступно */ }
+    setSavedCollapse(next)
+  }
 
   // Пункт пишется в адрес — на экран можно дать ссылку. Открытую карточку
   // (`?doc=`) при смене пункта закрываем: иначе она висит поверх другого списка.
@@ -362,8 +370,8 @@ export function DocsLayout() {
     return (
       <div className="flex h-full min-h-0 flex-col">
         <nav data-zone="Пункты раздела" aria-label="Пункты раздела Трека"
-          className="shrink-0 border-b border-border bg-card p-2">
-          <select aria-label="Раздел Трека" className="min-h-11 w-full rounded-md border border-input bg-background px-3 text-base"
+          className={cn('shrink-0 border-b border-border bg-card', short ? 'px-2 py-1' : 'p-2')}>
+          <select aria-label="Раздел Трека" className={cn('w-full rounded-md border border-input bg-background px-3 text-base', short ? 'min-h-9' : 'min-h-11')}
             value={savedView ? `saved:${savedView}` : openList ? `list:${openList}` : active}
             onChange={(event) => {
               const value = event.target.value
@@ -395,9 +403,19 @@ export function DocsLayout() {
             </optgroup>}
           </select>
         </nav>
-        {route !== '/docs/setup' && <DocsScopeBar personal={route === '/docs/work'} />}
+        {/* Телефон: у календаря свой плюс, а строка «Создать» отнимала у сетки
+            полсотни пикселей — в альбоме последние (QA 27.10), в портрете вместе с
+            плашкой установки (QA 28.10.2026). */}
+        {route !== '/docs/setup' && active !== 'calendar' && <DocsScopeBar personal={route === '/docs/work'} />}
         <div data-track-scroll className="min-w-0 flex-1 overflow-y-auto"
-          style={{ paddingBottom: 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))' }}>
+          style={{ paddingBottom: active === 'calendar'
+            // Календарь сжимается под экран и запасы под плашку и свой плюс держит
+            // сам; второй запас здесь съедал всю сетку, пока плашка видна (QA 28.10.2026).
+            ? undefined
+            : short
+            // В альбоме нижней навигации нет (она до 768 px) — запас под неё не нужен.
+            ? 'calc(var(--pwa-install-height, 0px) + 0.5rem + env(safe-area-inset-bottom))'
+            : 'calc(var(--pwa-install-height, 0px) + 6rem + env(safe-area-inset-bottom))' }}>
           <Outlet />
         </div>
       </div>

@@ -146,6 +146,19 @@ export function WorkspaceTabBar() {
               </div>
             )
           })}
+          {/* Текущий экран, пока не закреплён: без него в ленте горел только
+              «Рабочий стол», и человек на «Конференциях» читал, что он на столе
+              (QA 27.10.2026). Пунктир — «открыт, но не закреплён». */}
+          {current && !currentPinned && (() => {
+            const Icon = resolveTab(current.pathname, company.profileId)?.icon
+            return (
+              <span aria-current="page"
+                className="flex h-8 max-w-60 shrink-0 items-center gap-1.5 rounded-lg border border-dashed border-border bg-background px-2.5 text-xs font-medium text-foreground">
+                {Icon ? <Icon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
+                <span className="truncate">{current.title}</span>
+              </span>
+            )
+          })()}
         </div>
         <ScrollBar orientation="horizontal" className="h-1.5" />
       </ScrollArea>
