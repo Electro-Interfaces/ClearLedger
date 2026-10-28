@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCompany } from '@/contexts/CompanyContext'
+import { MARK_KEYS } from '@/lib/accountingMark'
 import * as ref from '@/services/referenceService'
 import type { Counterparty, Organization, Nomenclature, ContractScopeType } from '@/types'
 
@@ -21,6 +22,11 @@ const keys = {
 
 function invalidateAll(qc: ReturnType<typeof useQueryClient>, companyId: string) {
   qc.invalidateQueries({ queryKey: ['references', companyId] })
+  // Отметки сверки устаревают от правки карточки: сервер считает устаревание по
+  // хешу сверенных значений. Сбрасываем здесь, в общей точке всех мутаций
+  // справочников, — иначе человек правит сверенное поле и минуту видит прежнее
+  // «совпадает», пока не истечёт staleTime.
+  for (const k of MARK_KEYS) qc.invalidateQueries({ queryKey: [k] })
 }
 
 // ============================================================

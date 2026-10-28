@@ -26,6 +26,7 @@ import { ExportButton } from './analytics/ExportButton'
 import { exportRows } from './analytics/exportRows'
 import { useCompany } from '@/contexts/CompanyContext'
 import { cn } from '@/lib/utils'
+import { MATCHING_LABEL, VERIFICATION_LABEL, полеRU } from '@/components/reference/AccountingMark'
 import {
   getAccountingRecord, getAccountingSummary, getAllAccountingRecords,
   type AccountingLink, type AccountingRecord, type LinkStatus, type VerificationStatus,
@@ -50,19 +51,21 @@ const КЛЮЧ_ФИЛЬТРОВ = 'report-kit.v1:filters-open:acct-review'
 /** Отборы плиток: статус сопряжения или состояние проверки — разные оси. */
 type Отбор = 'all' | LinkStatus | 'differences' | 'stale'
 const ПОДПИСЬ: Record<Отбор, string> = {
-  all: 'Все строки источника', matched: 'Сопряжено', related: 'Связанные документы',
-  unmatched: 'Не сопряжено', candidate: 'Нужна проверка',
+  all: 'Все строки источника', ...MATCHING_LABEL,
   differences: 'Есть расхождения', stale: 'Нужна повторная сверка',
 }
 const СТАТУСЫ: LinkStatus[] = ['matched', 'related', 'unmatched', 'candidate']
 const ПРОВЕРКИ: VerificationStatus[] = ['verified', 'partial', 'differences', 'not_checked', 'stale']
-const ПРОВЕРКА_ПОДПИСЬ: Record<VerificationStatus, string> = {
-  verified: 'Реквизиты сверены', partial: 'Часть реквизитов сверена',
-  differences: 'Есть расхождения', not_checked: 'Не проверено', stale: 'Нужна повторная сверка',
-}
+// Словарь подписей общий с отметкой в карточках и списках: расходиться им нельзя.
+const ПРОВЕРКА_ПОДПИСЬ = VERIFICATION_LABEL
+
+/** Подписи осей — из общего словаря; текст сервера остаётся запасным. */
+const сопр = (r: { status: LinkStatus; status_label: string }) => MATCHING_LABEL[r.status] ?? r.status_label
+const пров = (r: { verification: VerificationStatus; verification_label: string }) =>
+  VERIFICATION_LABEL[r.verification] ?? r.verification_label
 
 function строка(r: AccountingRecord): Cell[] {
-  return [r.counterparty_name, r.contract_label, r.kind, r.status_label, r.verification_label,
+  return [r.counterparty_name, r.contract_label, r.kind, сопр(r), пров(r),
     r.card_labels.join('; '), r.differences_count, r.location_ids.length, r.source_rows,
     r.reason, r.source_as_of ? дата(r.source_as_of) : '', r.station_hint, r.candidates,
     r.source_period, r.source_file, r.source_sheet, r.batch_id,
@@ -226,11 +229,11 @@ export function AccountingReviewPanel() {
           if (!r) return undefined
           if (c === С.сопряжение) return <span className={cn('whitespace-normal',
             r.status === 'unmatched' && 'text-amber-600 dark:text-amber-400',
-            r.status === 'candidate' && 'font-medium')}>{r.status_label}</span>
+            r.status === 'candidate' && 'font-medium')}>{сопр(r)}</span>
           if (c === С.проверка) return <span className={cn('whitespace-normal text-xs',
             r.verification === 'differences' && 'font-semibold text-destructive',
             r.verification === 'stale' && 'font-medium text-amber-600 dark:text-amber-400',
-          )}>{r.verification_label}</span>
+          )}>{пров(r)}</span>
           if (c === С.карточки) return <span className="block whitespace-normal break-words text-xs">
             {r.card_labels.length ? r.card_labels.join('; ') : '—'}</span>
           if (c === С.основание) return <span className="block whitespace-normal break-words text-xs">{r.reason || '—'}</span>
@@ -314,11 +317,11 @@ function Связь({ link }: { link: AccountingLink }) {
   return <div className="rounded-md border border-border/50 bg-muted/20 p-2.5">
     <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
       {c.exists ? <>№ {c.number || '—'} от {c.date || '—'}</> : <span className="text-destructive">карточка не найдена</span>}
-      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-normal text-primary">{link.status_label}</span>
+      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-normal text-primary">{сопр(link)}</span>
       <span className={cn('rounded-full px-2 py-0.5 text-xs font-normal',
         link.verification === 'differences' ? 'bg-destructive/10 text-destructive'
           : link.stale ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400'
-            : 'bg-muted text-muted-foreground')}>{link.verification_label}</span>
+            : 'bg-muted text-muted-foreground')}>{пров(link)}</span>
     </div>
     <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
       <Строчка label="Вид" value={c.type || c.type_code} />
@@ -327,11 +330,28 @@ function Связь({ link }: { link: AccountingLink }) {
         c.counterparty_kpp && 'КПП ' + c.counterparty_kpp].filter(Boolean).join(' · ')} />
       <Строчка label="Площадки" value={(c.locations ?? []).map((l) => l.code || l.id).join(', ')} />
       <Строчка label="Тип связи" value={link.relation === 'same_contract' ? 'тот же договор' : link.relation} />
-      <Строчка label="Сверены поля" value={link.checked_fields.length ? link.checked_fields.join(', ') : ''} />
-      <Строчка label="ИНН / КПП сверялись" value={link.inn_kpp_checked ? 'да' : 'нет'} />
-      <Строчка label="Сверка по оригиналу" value={link.original_document_checked ? 'да' : 'не проводилась'} />
       <Строчка label="Предмет" value={link.subject_status} />
     </dl>
+    {/* Доказательства сверки, а не снимок наших полей: снимок отвечает за
+        устаревание, но сам по себе ничего не подтверждает. Сырые имена полей
+        человеку не показываем — только русские подписи сервера. */}
+    <div className="mt-1.5 text-xs">
+      <span className="text-muted-foreground">Сверено с выгрузкой: </span>
+      {(link.compared_fields ?? []).length
+        ? <ul className="mt-0.5 flex flex-col gap-0.5">
+            {link.compared_fields.map((f) => <li key={f.field}
+              className={f.equal === false ? 'text-destructive' : undefined}>
+              {полеRU(f)} — {f.equal === true ? 'совпадает'
+                : f.equal === false ? 'расходится: в бухгалтерии «' + (f.source || '—') + '», здесь «' + (f.space || '—') + '»'
+                  : 'сравнивать нечего' + (f.basis ? ': ' + f.basis : '')}
+            </li>)}
+          </ul>
+        : <span>ничего — реквизиты не сверялись</span>}
+    </div>
+    {!!(link.unchecked_fields ?? []).length && <div className="mt-1 text-xs">
+      <span className="text-muted-foreground">Не сверялись: </span>
+      {link.unchecked_fields.map((f) => полеRU(f) + (f.reason ? ' (' + f.reason + ')' : '')).join('; ')}
+    </div>}
     {link.stale && <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
       Карточка менялась после сверки — проверку нужно повторить
       (хеш сверенных значений {link.checked_hash.slice(0, 8)}… → {link.current_hash.slice(0, 8)}…).
@@ -363,7 +383,7 @@ function RecordDrill({ kind, record, companyId, links, onClose }: {
       l.card.number ?? '', l.card.date ?? '', l.card.type ?? l.card.type_code ?? '',
       l.card.counterparty_name ?? '', l.card.counterparty_inn ?? '',
       (l.card.locations ?? []).map((x) => x.code || x.id).join(', '),
-      l.status_label, l.verification_label,
+      сопр(l), пров(l),
       l.differences.map((d) => d.label + ': ' + d.source + ' / ' + (d.space || '—')).join('; '),
     ])
     return <RelatedReport open={!!kind} title="Сопряжённые карточки пространства"
@@ -374,8 +394,8 @@ function RecordDrill({ kind, record, companyId, links, onClose }: {
   const head = ['Договор или основание', 'Предмет / тип', 'Сопряжение', 'Проверка',
     'Карточки', 'Строки источника', 'Файл']
   const items = q.data?.items.filter((r) => r.counterparty_name === record?.counterparty_name) ?? []
-  const rows: Cell[][] = items.map((r) => [r.contract_label, r.kind, r.status_label,
-    r.verification_label, r.card_labels.join('; '), r.source_rows, r.source_file])
+  const rows: Cell[][] = items.map((r) => [r.contract_label, r.kind, сопр(r),
+    пров(r), r.card_labels.join('; '), r.source_rows, r.source_file])
   return <RelatedReport open={kind === 'counterparty'} title="Другие строки этого контрагента"
     subtitle={record?.counterparty_name} head={head} rows={rows}
     loading={q.isLoading} error={q.isError} onClose={onClose} />
