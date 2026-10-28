@@ -25,10 +25,11 @@
  */
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Loader2, Newspaper, RefreshCw } from 'lucide-react'
+import { ExternalLink, Loader2, Newspaper, RefreshCw, SlidersHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -305,6 +306,7 @@ export function MarketNewsPanel() {
   const ops = (операторы.data?.operators ?? []).map((o) => ({ id: o.id, name: o.name }))
   const byTopic = лента.data?.byTopic ?? {}
   const результат = обход.data
+  const отборов = [тема !== 'all', оператор !== 'all', !!поиск.trim()].filter(Boolean).length
   const список = источники.data?.sources ?? []
   // Поля словаря показывают действующий отбор: свой, если он задан, иначе встроенный.
   // Пока человек их не трогал, сохранять нечего — кнопка недоступна.
@@ -337,7 +339,54 @@ export function MarketNewsPanel() {
               ))}
             </span>
           )}
-          <span className="ml-auto" data-export-ignore>
+          <span className="ml-auto flex flex-wrap items-center gap-2" data-export-ignore>
+            {подача !== 'admin' && (
+              <>
+                {/* Поля отбора занимали полосу над лентой и отодвигали новости за
+                    край экрана: в свёрнутом виде кнопка называет число действующих
+                    отборов, развёрнутый вид — те же поля одной строкой. */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button size="sm" variant={отборов ? 'default' : 'outline'} className="h-7 text-xs">
+                      <SlidersHorizontal className="mr-1.5 size-3.5" aria-hidden />
+                      Отбор{отборов ? ` · ${отборов}` : ''}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-[320px] space-y-2">
+                    <Input value={поиск} onChange={(e) => setПоиск(e.target.value)}
+                      placeholder="Поиск по заголовку" className="h-8 text-xs" />
+                    <Select value={оператор} onValueChange={setОператор}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Любой оператор</SelectItem>
+                        {ops.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Select value={срок} onValueChange={setСрок}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="7">за неделю</SelectItem>
+                        <SelectItem value="14">за две недели</SelectItem>
+                        <SelectItem value="30">за месяц</SelectItem>
+                        <SelectItem value="90">за три месяца</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {отборов > 0 && (
+                      <Button size="sm" variant="ghost" className="h-7 w-full text-xs"
+                        onClick={() => { setПоиск(''); setОператор('all'); setТема('all') }}>
+                        Сбросить отбор
+                      </Button>
+                    )}
+                  </PopoverContent>
+                </Popover>
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={обход.isPending}
+                  onClick={() => обход.mutate(undefined)}>
+                  {обход.isPending
+                    ? <><Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden />Обходим…</>
+                    : <><RefreshCw className="mr-1.5 size-3.5" aria-hidden />Обновить</>}
+                </Button>
+              </>
+            )}
             <PanelViewTabs tabs={ВИДЫ} value={подача} onChange={setПодача} />
           </span>
           <span data-export-ignore>
@@ -357,47 +406,18 @@ export function MarketNewsPanel() {
         </CardContent>
       </Card>
 
-      {подача !== 'admin' && (
-        <Card>
-          <CardContent className="flex flex-wrap items-center gap-2 p-3">
-            <Input value={поиск} onChange={(e) => setПоиск(e.target.value)}
-              placeholder="Поиск по заголовку" className="h-8 w-[260px] text-xs" />
-            <Select value={оператор} onValueChange={setОператор}>
-              <SelectTrigger className="h-8 w-[240px] text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Любой оператор</SelectItem>
-                {ops.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={срок} onValueChange={setСрок}>
-              <SelectTrigger className="h-8 w-[170px] text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">за неделю</SelectItem>
-                <SelectItem value="14">за две недели</SelectItem>
-                <SelectItem value="30">за месяц</SelectItem>
-                <SelectItem value="90">за три месяца</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button size="sm" variant="outline" disabled={обход.isPending}
-              onClick={() => обход.mutate(undefined)}>
-              {обход.isPending
-                ? <><Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden />Обходим источники…</>
-                : <><RefreshCw className="mr-1.5 size-3.5" aria-hidden />Обновить из источников</>}
-            </Button>
-            {результат && (
-              <span className="text-xs text-muted-foreground">
-                {результат.note
-                  ?? `принесено ${результат.added}`
-                    + (результат.sources.some((s) => s.error)
-                      ? `, с ошибкой источников: ${результат.sources.filter((s) => s.error).length}`
-                      : '')
-                    + (результат.pending
-                      ? `, осталось обойти ${результат.pending} — нажмите ещё раз`
-                      : '')}
-              </span>
-            )}
-          </CardContent>
-        </Card>
+
+      {результат && подача !== 'admin' && (
+        <p className="-mt-1 px-1 text-xs text-muted-foreground">
+          {результат.note
+            ?? `принесено ${результат.added}`
+              + (результат.sources.some((s) => s.error)
+                ? `, с ошибкой источников: ${результат.sources.filter((s) => s.error).length}`
+                : '')
+              + (результат.pending
+                ? `, в эту порцию не вошло ${результат.pending} — нажмите ещё раз`
+                : '')}
+        </p>
       )}
 
       {подача === 'admin' ? (
@@ -451,7 +471,7 @@ export function MarketNewsPanel() {
               {результат && (
                 <p className="text-xs text-muted-foreground">
                   принесено {результат.added}
-                  {результат.pending ? `, осталось обойти ${результат.pending}` : ''}
+                  {результат.pending ? `, в эту порцию не вошло ${результат.pending}` : ''}
                 </p>
               )}
             </CardContent>

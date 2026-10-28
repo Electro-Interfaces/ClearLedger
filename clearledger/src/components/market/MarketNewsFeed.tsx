@@ -84,8 +84,8 @@ function Cover({ n, className, icon }: { n: MarketNewsItem; className?: string; 
 export function NewsHero({ n }: { n: MarketNewsItem }) {
   return (
     <a href={n.url} target="_blank" rel="noopener noreferrer"
-      className="group relative flex h-[240px] items-end overflow-hidden rounded-xl border
-                 border-border sm:h-[300px] lg:h-[340px]
+      className="group relative flex min-h-[240px] items-end overflow-hidden rounded-xl border
+                 border-border sm:min-h-[300px] lg:min-h-[340px]
                  focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
       <Cover n={n} className="absolute inset-0 size-full" icon="size-20" />
       <span className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/5" />
@@ -95,12 +95,12 @@ export function NewsHero({ n }: { n: MarketNewsItem }) {
           <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-white/80">
             {рубрика(n)}
           </span>
-          <span className="font-headline block text-xl font-bold leading-tight text-white
+          <span className="font-headline line-clamp-3 text-xl font-bold leading-tight text-white
                            sm:text-3xl lg:text-4xl">
             {n.title}
           </span>
           {n.snippet && (
-            <span className="mt-3 line-clamp-2 block max-w-xl text-sm leading-relaxed text-white/80">
+            <span className="mt-3 line-clamp-2 max-w-xl text-sm leading-relaxed text-white/80">
               {n.snippet}
             </span>
           )}
@@ -134,7 +134,7 @@ export function NewsRow({ n }: { n: MarketNewsItem }) {
         <span className="block text-xs font-semibold uppercase tracking-wide text-primary">
           {рубрика(n)}
         </span>
-        <span className="mt-0.5 block text-sm font-semibold leading-snug transition-colors
+        <span className="mt-0.5 line-clamp-3 text-sm font-semibold leading-snug transition-colors
                          group-hover:text-primary">
           {n.title}
         </span>
@@ -161,12 +161,12 @@ export function NewsCard({ n }: { n: MarketNewsItem }) {
         <span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-primary">
           {рубрика(n)}
         </span>
-        <span className="font-headline block text-base font-semibold leading-snug transition-colors
-                         group-hover:text-primary">
+        <span className="font-headline line-clamp-3 text-base font-semibold leading-snug
+                         transition-colors group-hover:text-primary">
           {n.title}
         </span>
         {n.snippet && (
-          <span className="mt-2 line-clamp-3 block text-sm leading-relaxed text-muted-foreground">
+          <span className="mt-2 line-clamp-3 text-sm leading-relaxed text-muted-foreground">
             {n.snippet}
           </span>
         )}
@@ -192,7 +192,7 @@ export function NewsBrief({ n }: { n: MarketNewsItem }) {
       <span className="block text-xs font-semibold uppercase tracking-wide text-primary">
         {рубрика(n)}
       </span>
-      <span className="mt-0.5 block text-sm font-semibold leading-snug transition-colors
+      <span className="mt-0.5 line-clamp-3 text-sm font-semibold leading-snug transition-colors
                        group-hover:text-primary">
         {n.title}
       </span>

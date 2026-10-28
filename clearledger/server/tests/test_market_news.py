@@ -254,3 +254,59 @@ def test_поисковая_лента_с_обложками_и_широкий_�
     assert "bing.com/news/search" in search_url("зарядные станции")
     assert "format=RSS" in search_url("зарядные станции")
     assert "news.google.com" in search_url("зарядные станции", "search_wide")
+
+
+def test_адрес_поисковика_не_считается_публикацией():
+    """Ссылка, оставшаяся на поисковике, ведёт на редирект, а не на материал.
+
+    На живых данных 28.10.2026 такие записи дали ноль обложек из тридцати шести,
+    прямые ссылки — тринадцать из четырнадцати.
+    """
+    from app.services.market_news import SEARCH_HOSTS
+    assert SEARCH_HOSTS.search("https://news.google.com/rss/articles/CBMiABC?oc=5")
+    assert SEARCH_HOSTS.search("http://www.bing.com/news/apiclick.aspx?ref=FexRss")
+    assert SEARCH_HOSTS.search("https://consent.google.com/ml?continue=x")
+    assert not SEARCH_HOSTS.search("https://www.tadviser.ru/index.php/Продукты")
+
+
+def test_зарядка_геймпада_не_новость_рынка():
+    """«Зарядная станция» бывает и для консоли — слово то же, рынок другой.
+
+    28.10.2026 в живую ленту приехала док-станция 8BitDo: словарь пропустил её
+    по слову «зарядн».
+    """
+    from app.services.market_news import relevant
+    assert not relevant("Зарядная станция Ultimate Charging Dock от 8BitDo для геймпадов", False)
+    assert not relevant("Лучшая зарядная станция для телефона и наушников", False)
+    assert relevant("В Северске открыли две электрозарядные станции", False)
+    assert relevant("Зарядные станции PUNKT E включены в белые списки электромобилей", False)
+
+
+def test_двойное_экранирование_раскрывается_до_текста():
+    """В карточке должны быть кавычки, а не «&#34;».
+
+    Лента «Российской газеты» 28.10.2026 экранирует описание дважды, и один
+    проход декодирования оставлял сущности прямо в тексте новости.
+    """
+    from app.services.market_news import parse_feed
+    xml = ("""<rss><channel><item><title>Заряд</title>"""
+           """<link>https://rg.ru/a</link>"""
+           """<description>Владельцы &amp;#34;электричек&amp;#34; могут &amp;amp; дальше</description>"""
+           """</item></channel></rss>""")
+    it = parse_feed(xml)[0]
+    assert '"электричек"' in it["snippet"]
+    assert "&#34;" not in it["snippet"] and "&amp;" not in it["snippet"]
+
+
+def test_регион_подставляется_только_со_словом_уровня():
+    """Справочник пространства держит и мусор — «Большой», «Казань», «12».
+
+    Без слова-указателя «Большой» ловился в любом тексте и подписывал новость
+    чужим регионом (замечание МАГа 28.10.2026).
+    """
+    from app.services.market_news import suggest_links
+    регионы = ["Большой", "Казань", "12", "Амурская", "Московская"]
+    текст = "Белорусы могут заряжать электрички в РФ через большой сервис приложений"
+    assert "region" not in suggest_links(текст, [], [], регионы)
+    assert suggest_links("В Амурской области открыли станцию", [], [], регионы)["region"] == "Амурская"
+    assert suggest_links("Станция в Московской области", [], [], регионы)["region"] == "Московская"

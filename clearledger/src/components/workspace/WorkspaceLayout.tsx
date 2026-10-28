@@ -50,6 +50,10 @@ const REVENUE_MODES: CoreMode[] = ['rev_sales', 'rev_buyers', 'rev_catalog', 're
 const EconomyPanel = lazy(() => import('./OfficeEconomy').then((m) => ({ default: m.EconomyPanel })))
 const ECONOMY_MODES: CoreMode[] = ['econ_result', 'econ_costs', 'econ_taxes', 'econ_help']
 const BooksPanel = lazy(() => import('./OfficePanels').then((m) => ({ default: m.BooksPanel })))
+// «Бухгалтерия» пространства (energy): три раздела — разбор выгрузки, объекты, источники.
+const AccountingReviewPanel = lazy(() => import('./AccountingReviewPanel').then((m) => ({ default: m.AccountingReviewPanel })))
+const AccountingObjectsPanel = lazy(() => import('./AccountingSpacePanels').then((m) => ({ default: m.AccountingObjectsPanel })))
+const AccountingSourcesPanel = lazy(() => import('./AccountingSpacePanels').then((m) => ({ default: m.AccountingSourcesPanel })))
 const PerimeterPanel = lazy(() => import('./OfficePerimeter').then((m) => ({ default: m.PerimeterPanel })))
 
 /**
@@ -178,6 +182,10 @@ function ModePanel() {
       {ACCOUNTING_MODES.includes(coreMode) && <AccountingPanel />}
       {coreMode === 'tax' && <TaxPanel />}
       {coreMode === 'export' && <ExportLayerPanel />}
+      {/* «Бухгалтерия» пространства: сторона бухгалтерии и сторона пространства рядом. */}
+      {coreMode === 'acct_review' && <AccountingReviewPanel />}
+      {coreMode === 'acct_objects' && <AccountingObjectsPanel />}
+      {coreMode === 'acct_sources' && <AccountingSourcesPanel />}
       {/* Компания без объектов: четыре раздела «Реализации» — панель одна, различается
           вопросом к тем же документам бухгалтерии. */}
       {REVENUE_MODES.includes(coreMode) && <RevenuePanel />}

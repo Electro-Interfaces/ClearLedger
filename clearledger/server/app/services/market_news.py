@@ -105,7 +105,11 @@ DEFAULT_EXCLUDE = ("зарядное устройство для телефон"
                    # улицы» и «Топ-10 лучших зарядных станций»: это магазинный обзор
                    # бытовых устройств, а не событие рынка.
                    "рейтинг лучших", "топ-10", "топ 10", "как выбрать", "своими руками",
-                   "лучшие зарядные устройства", "обзор зарядных устройств")
+                   "лучшие зарядные устройства", "обзор зарядных устройств",
+                   # «Зарядная станция» бывает и для геймпада: 28.10.2026 в ленту
+                   # приехала док-станция 8BitDo — слово то же, рынок другой.
+                   "8bitdo", "геймпад", "консол", "док-станц", "докстанц", "наушник",
+                   "ноутбук", "пылесос", "для телефона", "для смартфона")
 
 
 def proxy() -> str | None:
@@ -181,6 +185,22 @@ def site_query(site_url: str | None, name: str | None = None) -> str | None:
     return f'"{name.strip()}" зарядная станция' if name and name.strip() else None
 
 
+def _plain(raw: str) -> str:
+    """Человеческий текст из ленты: без тегов, лишних пробелов и сущностей.
+
+    Декодируем, пока меняется: часть лент экранирует текст дважды, и один проход
+    оставляет в карточке «&#34;электричек&#34;» вместо кавычек (видно на живой
+    ленте «Российской газеты» 28.10.2026).
+    """
+    t = re.sub(r"<[^>]+>", " ", raw or "")
+    for _ in range(3):
+        d = unescape(t)
+        if d == t:
+            break
+        t = d
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def _text(el: ET.Element | None) -> str:
     return re.sub(r"\s+", " ", "".join(el.itertext()).strip()) if el is not None else ""
 
@@ -229,7 +249,7 @@ def parse_feed(xml_text: str) -> list[dict[str, Any]]:
         snippet = _text(n.find("description")) or _text(n.find(f"{atom}summary"))
         if snippet.startswith("<a href") or snippet.lstrip().startswith("<"):
             snippet = re.sub(r"<[^>]+>", " ", snippet)
-        snippet = unescape(re.sub(r"\s+", " ", snippet)).strip()
+        snippet = _plain(snippet)
         # Поисковые ленты кладут в описание тот же заголовок со ссылкой: как лид это
         # пустая строка, занимающая место в карточке.
         if snippet and title_key(snippet).startswith(title_key(clean_title(title, src or None))[:60]):
@@ -312,9 +332,14 @@ def suggest_links(text: str, operators: list[MarketOperator],
                 break
     for r in regions:
         rl = (r or "").lower().replace("ё", "е")
-        # «Московская область» → ищем «московск»: в новостях пишут «в Московской области».
         stem = re.sub(r"\s+(область|край|республика|округ|автономн\w*)\s*$", "", rl).strip()
-        if len(stem) >= 5 and stem[:-2] in t:
+        if len(stem) < 5:
+            continue
+        # Рядом должно стоять слово уровня: справочник пространства держит и мусор
+        # («Большой», «Казань», «12»), а без указателя «Большой» ловился в любом
+        # тексте и подписывал новость чужим регионом (замечание МАГа 28.10.2026).
+        корень = re.escape(stem[:-2] if stem[-2:] in ("ая", "ий", "ой", "ый") else stem)
+        if re.search(rf"\b{корень}\w{{0,4}}\s+(?:област|кра[йяею]|республик|округ|ао\b)", t):
             found["region"] = r
             break
     return found
@@ -356,6 +381,9 @@ async def fetch_feed(url: str, client: httpx.AsyncClient,
     return parse_feed(r.text)
 
 
+# Адреса, за которыми стоит поисковик, а не издание: читать там нечего.
+SEARCH_HOSTS = re.compile(r"(news\.google\.com|bing\.com/news/apiclick|consent\.google\.com)", re.I)
+
 VIDEO_HOSTS = ("youtube.com", "youtu.be", "rutube.ru", "vk.com/video", "vkvideo.ru",
                "dzen.ru/video", "m24.ru/videos", "smotrim.ru")
 
@@ -366,7 +394,7 @@ def _meta(html: str, prop: str) -> str | None:
                     rf'<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']{prop}["\']'):
         m = re.search(pattern, html, re.I)
         if m and m.group(1).strip():
-            return unescape(m.group(1).strip())
+            return _plain(m.group(1))
     return None
 
 
@@ -525,6 +553,13 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
                     async with gate:
                         return await enrich(it, client, proxied)
                 кандидаты = list(await asyncio.gather(*(обогатить(i) for i in кандидаты)))
+                # Материал, у которого адрес так и остался на поисковике, в ленту не
+                # берём: его ссылка ведёт на редирект или страницу согласия, а не на
+                # публикацию. На живых данных 28.10.2026 такие записи дали ноль
+                # обложек из тридцати шести, тогда как прямые ссылки — тринадцать
+                # обложек из четырнадцати.
+                кандидаты = [i for i in кандидаты
+                             if not SEARCH_HOSTS.search(i.get("url") or "")]
 
             fresh = 0
             for it in кандидаты:
@@ -535,7 +570,12 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
                 db.add(MarketNews(
                     company_id=cid, source_id=src.id,
                     title=it["title"][:500], url=it["url"][:900], url_key=key,
-                    snippet=it.get("snippet"), source_name=it.get("sourceName"),
+                    snippet=it.get("snippet"),
+                    # Имя издания — из ленты, из og:site_name или, на худой конец,
+                    # из домена: прочерк в карточке не говорит читателю ничего.
+                    source_name=(it.get("sourceName")
+                                 or (urlparse(it["url"]).hostname or "").removeprefix("www.")
+                                 or None),
                     image_url=(it.get("image") or None),
                     published_at=when, retrieved_at=now,
                     channel="search" if src.kind.startswith("search") else src.kind,

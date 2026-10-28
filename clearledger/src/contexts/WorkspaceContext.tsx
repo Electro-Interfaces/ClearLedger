@@ -32,6 +32,10 @@ import { useSearchParams } from 'react-router-dom'
 // выручки компании не показывал ни один (13.08.2026).
 // `books_*` — разделы «Бухгалтерии» того же профиля: эталон учёта от сводки к первичке.
 export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_sessions' | 'sales_commerce' | 'sales_goods' | 'sales_help' | 'operations' | 'ops_equipment' | 'ops_economy' | 'projects' | 'projects_analytics' | 'projects_integration' | 'store' | 'store_receipt' | 'store_documents' | 'store_catering' | 'store_stock' | 'store_cash' | 'store_catalog' | 'store_marking' | 'store_network' | 'store_1c' | 'store_reports' | 'store_help' | 'corporate' | 'marketing' | 'marketing_area' | 'marketing_price' | 'marketing_decision' | 'financial' | 'accounting' | 'acc_period' | 'acc_store' | 'acc_food' | 'acc_recon' | 'acc_docs' | 'acc_results' | 'tax' | 'export' | 'rev_sales' | 'rev_buyers' | 'rev_catalog' | 'rev_papers' | 'rev_money' | 'rev_stock' | 'rev_help' | 'econ_result' | 'econ_costs' | 'econ_taxes' | 'econ_help' | 'books_ledger' | 'books_primary' | 'books_offbal' | 'per_picture' | 'per_official' | 'per_records' | 'per_cash' | 'per_people' | 'per_setup' | 'per_help'
+  // «Бухгалтерия» пространства (energy): сопряжение выгрузок бухгалтерии с карточками.
+  // Префикс `acct_`, а не `acc_`: те разделы принадлежат «Финансам» топливного профиля
+  // и живут своими панелями — одно имя на два рабочих места развело бы маршруты и права.
+  | 'acct_review' | 'acct_objects' | 'acct_sources'
   // «Данные» компании без объектов: источник один — бухгалтерия клиента, и разделы
   // идут от неё, а не от каналов приёма файлов.
   | 'data_sources' | 'data_model' | 'data_quality'
@@ -39,6 +43,7 @@ export type CoreMode = 'normalize' | 'reconcile' | 'management' | 'sales_session
   | 'connect'
 
 const VALID_MODES: CoreMode[] = ['normalize', 'reconcile', 'management', 'sales_sessions', 'sales_commerce', 'sales_goods', 'sales_help', 'operations', 'ops_equipment', 'ops_economy', 'projects', 'projects_analytics', 'projects_integration', 'store', 'store_receipt', 'store_documents', 'store_catering', 'store_stock', 'store_cash', 'store_catalog', 'store_marking', 'store_network', 'store_1c', 'store_reports', 'store_help', 'corporate', 'marketing', 'marketing_area', 'marketing_price', 'marketing_decision', 'financial', 'accounting', 'acc_period', 'acc_store', 'acc_food', 'acc_recon', 'acc_docs', 'acc_results', 'tax', 'export', 'data_sources', 'data_model', 'data_quality', 'connect',
+  'acct_review', 'acct_objects', 'acct_sources',
   'rev_sales', 'rev_buyers', 'rev_catalog', 'rev_papers', 'rev_money', 'rev_stock',
   'rev_help', 'econ_result', 'econ_costs', 'econ_taxes', 'econ_help',
   'books_ledger', 'books_primary', 'books_offbal',

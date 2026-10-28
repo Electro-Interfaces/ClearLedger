@@ -240,3 +240,46 @@ async def test_обход_берёт_порцию_и_говорит_об_ост�
 
 def не_пересекаются(a: set[str], b: set[str]) -> bool:
     return not (a & b)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_колонка_доезжает_на_таблицу_созданную_раньше(db):
+    """`create_all` не добавляет колонки в готовую таблицу — это делает миграция.
+
+    28.10.2026 источники завелись утренней выкаткой, а рубрика у них появилась
+    вечерней: на стенде таблица уже существовала, колонки `default_topic` в ней
+    не было, и обход падал с `UndefinedColumnError` при живом коде и зелёных
+    тестах. Тест повторяет именно эту последовательность: старая таблица →
+    миграция → колонка на месте.
+    """
+    from sqlalchemy import text
+    from app.database import MARKET_NEWS_MIGRATION_DDL
+
+    await db.execute(text("DROP TABLE IF EXISTS qa_news_sources_old"))
+    await db.execute(text(
+        "CREATE TABLE qa_news_sources_old (id uuid PRIMARY KEY, kind VARCHAR(10))"))
+    # Миграция написана по именам рабочих таблиц; на копии проверяем её форму:
+    # ADD COLUMN IF NOT EXISTS и расширение типа обязаны быть идемпотентны.
+    for stmt in MARKET_NEWS_MIGRATION_DDL:
+        проба = (stmt.replace("market_news_sources", "qa_news_sources_old")
+                     .replace("market_news ", "qa_news_sources_old "))
+        await db.execute(text(проба))
+        await db.execute(text(проба))  # повтор: миграция гоняется при каждом старте
+    колонки = {r[0] for r in (await db.execute(text(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'qa_news_sources_old'"))).all()}
+    длина = (await db.execute(text(
+        "SELECT character_maximum_length FROM information_schema.columns "
+        "WHERE table_name = 'qa_news_sources_old' AND column_name = 'kind'"))).scalar()
+    await db.execute(text("DROP TABLE qa_news_sources_old"))
+    await db.commit()
+
+    assert "default_topic" in колонки, "рубрика источника не доезжает на старую таблицу"
+    assert длина == 12, "вид источника `search_wide` не влезает в прежний VARCHAR(10)"
+
+
+def test_миграция_новостей_перечислена_в_старте():
+    """Набор DDL бесполезен, пока его никто не выполняет при старте приложения."""
+    from pathlib import Path
+    текст = Path("app/database.py").read_text(encoding="utf-8")
+    assert "for stmt in MARKET_NEWS_MIGRATION_DDL:" in текст
