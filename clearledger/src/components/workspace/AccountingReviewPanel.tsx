@@ -260,7 +260,7 @@ export function AccountingReviewPanel() {
             hint="вся выгрузка по тому же названию" onClick={() => setРазбор('counterparty')} />
         </div>
       </div>} />
-    <Расшифровка kind={карточка ? разбор : null} record={выбранная} companyId={companyId}
+    <RecordDrill kind={карточка ? разбор : null} record={выбранная} companyId={companyId}
       links={qКарточка.data?.links ?? []} onClose={() => setРазбор(null)} />
   </div>
 }
@@ -345,7 +345,7 @@ function Связь({ link }: { link: AccountingLink }) {
 }
 
 /** Расшифровка значений строки окном поверх карточки. */
-function Расшифровка({ kind, record, companyId, links, onClose }: {
+function RecordDrill({ kind, record, companyId, links, onClose }: {
   kind: 'cards' | 'counterparty' | null
   record: AccountingRecord | null
   companyId: string
