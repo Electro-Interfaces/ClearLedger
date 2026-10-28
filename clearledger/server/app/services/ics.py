@@ -6,8 +6,8 @@
 
 Делаем ровно `VEVENT`, и делаем его руками: библиотека ради полутора десятков
 строк потянула бы свою модель времени и свои представления о часовых поясах, а
-у нас они уже есть (`space_time`). Полного iMIP тут нет — `METHOD:REQUEST` с
-разбором ответов это отдельная работа; здесь честная выгрузка встречи.
+у нас они уже есть (`space_time`). Ответы на приглашения (`METHOD:REPLY`)
+разбирает `calendar_replies`; здесь — сама встреча.
 """
 from __future__ import annotations
 
@@ -131,6 +131,14 @@ def event_ics(*, uid: str, title: str, starts_at: datetime, ends_at: datetime,
         строки.append(f"LOCATION:{_escape(location)}")
     if url:
         строки.append(f"URL:{_escape(url)}")
+    # Приглашение и отмена — с адресом ящика ответов: «Принять» в почтовой
+    # программе уходит на адрес организатора, а оттуда его забирает пространство
+    # (calendar_replies). Имя остаётся хозяина встречи — его человек и видит.
+    if invite or cancelled:
+        from app.config import settings
+        if settings.calendar_reply_mailbox:
+            organizer_name = organizer_name or organizer_email
+            organizer_email = settings.calendar_reply_mailbox
     if organizer_email:
         имя = _escape(organizer_name or organizer_email)
         строки.append(f"ORGANIZER;CN={имя}:mailto:{organizer_email}")

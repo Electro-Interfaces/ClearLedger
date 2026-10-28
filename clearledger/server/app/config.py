@@ -161,6 +161,15 @@ class Settings(BaseSettings):
     # Пусто = почтовых участников в чатах нет, письма из комнат не уходят.
     chat_mail_inbox: str = ""
 
+    # Ящик ответов на приглашения (app/services/calendar_replies.py). Его адрес
+    # стоит организатором в приглашениях, и «Принять» из VK, Outlook, Яндекса
+    # приходит сюда, а не в почту хозяина встречи. Пусто = организатор — хозяин
+    # встречи, ответы из почты пространство не видит (как было до 28.10.2026).
+    calendar_reply_mailbox: str = ""
+    calendar_reply_password: str = ""
+    calendar_reply_imap_host: str = "mail.dataworker.ru"
+    calendar_reply_imap_port: int = 993
+
     # Публичный URL пространства для ссылок в письмах. Пространство живёт в корне
     # своего домена: внутреннее имя репозитория в адресах заказчика не появляется.
     app_public_url: str = "https://ledger.dataworker.ru"
