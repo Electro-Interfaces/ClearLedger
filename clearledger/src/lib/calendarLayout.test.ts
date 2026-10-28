@@ -71,3 +71,14 @@ test('Короткие встречи не ложатся друг на друг
   // Без поправки на высоту все три в одной колонке — так было на снимке 28.10.
   assert.deepEqual(layoutDayEvents([short('a', 4), short('b', 9)], day).map(row => row.column), [0, 0])
 })
+
+test('Перетаскивание: шаг 15 минут, длительность сохраняется, сутки не покидает', async () => {
+  const { dragTimes } = await import('./calendarLayout.ts')
+  assert.deepEqual(dragTimes('move', 600, 660, 37), { start: 630, end: 690 }, '10:00 +37 мин → 10:30')
+  assert.deepEqual(dragTimes('move', 544, 545, 0), { start: 540, end: 555 }, 'встреча на минуту встаёт на 09:00 и шаг длиной')
+  assert.deepEqual(dragTimes('move', 1380, 1440, 120), { start: 1380, end: 1440 }, 'за полночь не уезжает')
+  assert.deepEqual(dragTimes('end', 600, 660, 44), { start: 600, end: 705 }, 'конец 11:00 + 44 → 11:45')
+  assert.deepEqual(dragTimes('end', 600, 660, -300), { start: 600, end: 615 }, 'короче шага не бывает')
+  assert.deepEqual(dragTimes('start', 600, 660, -61), { start: 540, end: 660 }, 'начало раньше на час')
+  assert.deepEqual(dragTimes('start', 600, 660, 120), { start: 645, end: 660 })
+})
