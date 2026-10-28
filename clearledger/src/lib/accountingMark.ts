@@ -117,6 +117,13 @@ const ИСХОД: Record<string, string> = {
   match: 'совпадает', difference: 'расходится', unknown: 'сравнивать нечего',
 }
 
+const RECHECK_LABEL: Record<string, string> = {
+  confirmed_fields: 'проверенные реквизиты совпали',
+  needs_clarification: 'нужны уточнения',
+  candidate_found: 'найдены похожие карточки, связь нужно проверить',
+  no_links: 'строка пока не связана с договором',
+}
+
 /** Свидетельство повторной сверки, если оно вообще принято. */
 export function recheckLine(r: AccountingRecheck | null | undefined): string | null {
   if (!r) return null
@@ -126,7 +133,7 @@ export function recheckLine(r: AccountingRecheck | null | undefined): string | n
   }
   const блок = (r.open_questions ?? []).filter((q) => q.blocking)
   return 'Повторная сверка' + (r.checked_at ? ' ' + дата(r.checked_at) : '')
-    + (r.overall ? ': ' + r.overall : '')
+    + (r.overall ? ': ' + (RECHECK_LABEL[r.overall] ?? r.overall) : '')
     + (блок.length ? '. Нерешённое: ' + блок.map((q) => q.label).join('; ') : '')
 }
 

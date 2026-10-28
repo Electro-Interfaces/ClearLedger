@@ -148,7 +148,7 @@ test('непринятая повторная сверка — не отсутс
   assert.match(нет!, /Отсутствием сверки это не является/)
   // Принятый прогон называет дату и только блокирующие вопросы.
   const да = recheckLine({
-    schema_version: 1, run_id: 'r2', checked_at: '2026-10-27', overall: 'подтверждено',
+    schema_version: 1, run_id: 'r2', checked_at: '2026-10-27', overall: 'confirmed_fields',
     applicable: true, not_applicable_reason: '',
     open_questions: [
       { code: 'party', label: 'противоречие стороны', reason: '', blocking: true },
@@ -157,7 +157,7 @@ test('непринятая повторная сверка — не отсутс
     blocking_questions: ['party'], claims: [], candidates_in_registry: 1,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any)
-  assert.match(да!, /Повторная сверка 27\.10\.2026: подтверждено/)
+  assert.match(да!, /Повторная сверка 27\.10\.2026: проверенные реквизиты совпали/)
   assert.match(да!, /Нерешённое: противоречие стороны/)
   assert.doesNotMatch(да!, /сверено только по названию/)
 })

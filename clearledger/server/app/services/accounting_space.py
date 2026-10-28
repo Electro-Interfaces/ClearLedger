@@ -415,7 +415,8 @@ def comparisons(link: Link) -> list[dict[str, Any]]:
     """
     out = [_comparison(link, name, src, origin="row")
            for name, src in (("number", link.source_number), ("date", link.source_date))]
-    by_field = {item["field"]: item for item in out}
+    positions = {item["field"]: index for index, item in enumerate(out)}
+    rechecked_fields: set[str] = set()
     if not link.recheck_applicable:
         return out
     for raw in (link.recheck.get("compared_fields") or []):
@@ -427,19 +428,24 @@ def comparisons(link: Link) -> list[dict[str, Any]]:
         claimed = str(raw.get("result") or "") or None
         basis = str(raw.get("basis") or "")
         evidence = raw.get("source_evidence") or link.recheck_source or None
-        known = by_field.get(name)
-        if known is not None and compact(known["source"]) == compact(raw.get("source")):
-            # То же значение, что в строке: свидетельство прогона переносим на
-            # существующее сравнение, вторую запись о том же не плодим.
-            known["claimed"] = claimed
-            known["claimed_basis"] = basis or None
-            known["evidence"] = evidence
-            continue
         item = _comparison(link, name, raw.get("source"), origin="recheck",
                            claimed=claimed, basis=basis, evidence=evidence,
                            label=str(raw.get("label") or ""))
-        out.append(item)
-        by_field.setdefault(name, item)
+        if name in positions and name not in rechecked_fields:
+            # Повторная сверка разбирает исходную ячейку заново. Её значение
+            # заменяет прежний разбор ТОГО ЖЕ поля, а не становится вторым
+            # источником: в легаси номере мог остаться текст «Договор аренды».
+            # Старое представление сохраняем для трассы, не как расхождение.
+            previous = out[positions[name]]
+            if previous["source"] != item["source"]:
+                item["legacy_source"] = previous["source"]
+            out[positions[name]] = item
+        else:
+            # Если сам конверт дал несколько значений поля, сохраняем их все:
+            # последнее значение не должно молча спрятать противоречие.
+            positions.setdefault(name, len(out))
+            out.append(item)
+        rechecked_fields.add(name)
     return out
 
 
@@ -1034,17 +1040,21 @@ def _unchecked_fields(links: list[Link]) -> list[dict[str, Any]]:
     никогда — они лежат в снимке карточки, а не в сведениях источника.
     """
     out: list[dict[str, Any]] = []
-    matched: set[str] = set()
-    for l in links:
-        matched |= {c["field"] for c in comparisons(l) if c["result"] == "match"}
+    fields = [c for link in links for c in comparisons(link)]
+    matched = {c["field"] for c in fields if c["result"] == "match"}
+    compared = {c["field"] for c in fields if c["result"] != "unknown"}
     for name in ("number", "date", "counterparty_id", "type_code"):
-        if name in matched:
+        if name in compared:
             continue
         # Идентичность стороны остаётся непроверенной, пока не сошлись её
         # реквизиты: совместимость названий юридической проверкой не является.
         if name == "counterparty_id" and "counterparty_inn" in matched:
             continue
         label, reason = UNCHECKED_LABEL[name]
+        if name in ("number", "date"):
+            reasons = list(dict.fromkeys(c["basis"] for c in fields
+                if c["field"] == name and c["result"] == "unknown"))
+            reason = "; ".join(reasons) or reason
         out.append({"field": name, "label": label, "reason": reason})
     always = [x for x in UNCHECKED_ALWAYS
               if not (x["field"] == "inn_kpp" and "counterparty_inn" in matched)]
@@ -1056,7 +1066,7 @@ def _unchecked_fields(links: list[Link]) -> list[dict[str, Any]]:
             if not isinstance(unknown, dict):
                 continue
             name = str(unknown.get("field") or "")
-            if not name or name in matched or any(x["field"] == name for x in out):
+            if not name or name in compared or any(x["field"] == name for x in out):
                 continue
             out.append({"field": name,
                         "label": str(unknown.get("label") or FIELD_LABEL.get(name, name)),
@@ -1093,6 +1103,11 @@ def _link_verification(link: Link) -> str:
     if link.exists:
         if link.differences:
             return "differences"
+        if link.recheck_applicable and link.recheck and _link_proven(link):
+            # Новый разбор мог подтвердить реквизиты ОСНОВНОГО договора из
+            # соглашения. Его прежнее «не проверено» относится к прошлому
+            # кругу; теперь доказан узкий состав полей, не весь документ.
+            return "partial"
         if link.verification == "differences":
             return "partial" if _link_proven(link) else "not_checked"
     return link.verification

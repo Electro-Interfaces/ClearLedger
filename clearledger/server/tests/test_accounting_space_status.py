@@ -696,11 +696,14 @@ async def test_конверт_дополнения_сравнивает_осно
     await db.commit()
     s = (await _summary(auth_client, cid, "contract", space["c"]["rel"].id)).json()
     by_origin = {(c["origin"], c["field"]): c for c in s["verification"]["compared_fields"]}
-    # Своё значение строки осталось несравнимым...
-    assert by_origin[("row", "number")]["result"] == "unknown"
-    assert "другой документ" in by_origin[("row", "number")]["basis"]
-    # ...а номер основного договора из конверта сошёлся.
+    # Новый разбор заменяет старое представление поля, сохраняя его для трассы.
+    assert ("row", "number") not in by_origin
+    assert ("row", "date") not in by_origin
+    assert by_origin[("recheck", "number")]["legacy_source"] == "Соглашение № 1"
     assert by_origin[("recheck", "number")]["result"] == "match"
+    assert by_origin[("recheck", "date")]["result"] == "match"
+    assert s["matching"]["by_status"] == {"related": 1}
+    assert s["entity_verified"] is False
     assert s["verification"]["checked_fields"] == ["date", "number"]
 
 
@@ -826,3 +829,64 @@ async def test_связанный_документ_требует_сверки(a
     assert s["matching"]["by_status"] == {"related": 1}
     assert s["matching"]["labels"]["related"] == "Связанный документ"
     assert s["verification"]["status"] == "not_checked"
+
+
+async def test_повторный_разбор_заменяет_легаси_заголовок_номера(auth_client, db, space):
+    """Название вида документа в старом поле не создаёт второй конфликтующий источник."""
+    entry = space["entries"]["rech"]
+    meta = dict(entry.meta)
+    links = json.loads(meta["_accountingReconciliations"])
+    links[0]["source_number"] = "Договор аренды № " + space["c"]["rech"].number
+    meta["_accountingReconciliations"] = json.dumps(links, ensure_ascii=False)
+    entry.meta = meta
+    await db.commit()
+    summary = (await _summary(auth_client, space["company_id"], "contract", space["c"]["rech"].id)).json()
+    assert summary["state"] == "matched_checked"
+    assert summary["differences"] == []
+    fields = [f for f in summary["verification"]["compared_fields"] if f["field"] == "number"]
+    assert len(fields) == 1 and fields[0]["source"] == space["c"]["rech"].number
+    assert fields[0]["result"] == "match" and fields[0]["origin"] == "recheck"
+    assert fields[0]["legacy_source"].startswith("Договор аренды")
+
+
+async def test_соглашение_может_подтвердить_реквизиты_основного_договора(auth_client, db, space):
+    """Источник остаётся соглашением, узкое сравнение паспорта получает новый результат."""
+    entry = space["entries"]["rel"]
+    meta = dict(entry.meta)
+    envelope = _recheck_envelope(space["c"]["rel"], space["parties"]["Связанный ООО"])
+    envelope["per_link"][0]["relation"] = "annex_of"
+    meta["_accountingRecheck"] = json.dumps(envelope, ensure_ascii=False)
+    entry.meta = meta
+    await db.commit()
+    summary = (await _summary(auth_client, space["company_id"], "contract", space["c"]["rel"].id)).json()
+    assert summary["state"] == "matched_checked"
+    assert summary["matching"]["by_status"] == {"related": 1}
+    assert summary["verification"]["status"] == "partial"
+    assert summary["verification"]["checked_fields"] == ["date", "number"]
+    assert summary["entity_verified"] is False and summary["differences"] == []
+
+
+async def test_неясный_повторный_разбор_не_подменяется_старой_догадкой(auth_client, db, space):
+    """Недостаток сведений нового разбора не превращается в совпадение легаси значения."""
+    entry = space["entries"]["rech"]
+    meta = dict(entry.meta)
+    envelope = _recheck_envelope(space["c"]["rech"], space["parties"]["Повторная ООО"])
+    link = envelope["per_link"][0]
+    for field in link["compared_fields"]:
+        if field["field"] in ("number", "date"):
+            field.update(source="", result="unknown")
+    link["open_questions"] = [{"code": "source_ambiguous", "label": "Неясный разбор", "reason": "Нужен оригинал"}]
+    meta["_accountingRecheck"] = json.dumps(envelope, ensure_ascii=False)
+    entry.meta = meta
+    await db.commit()
+    summary = (await _summary(auth_client, space["company_id"], "contract", space["c"]["rech"].id)).json()
+    assert summary["state"] == "needs_check"
+    assert summary["verification"]["checked_fields"] == []
+    assert summary["differences"] == []
+
+
+async def test_расхождение_не_названо_отсутствием_значения_источника(auth_client, space):
+    summary = (await _summary(auth_client, space["company_id"], "contract", space["c"]["diff"].id)).json()
+    differing = {f["field"] for f in summary["differences"]}
+    assert differing
+    assert not differing.intersection(f["field"] for f in summary["verification"]["unchecked_fields"])
