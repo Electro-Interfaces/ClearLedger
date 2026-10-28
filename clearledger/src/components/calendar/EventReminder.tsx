@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bell } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import * as workService from '@/services/workService'
@@ -35,21 +34,20 @@ export function EventReminder({ companyId, event }: { companyId: string; event: 
     onError: (error: Error) => toast.error(error.message || 'Не удалось снять напоминание'),
   })
   const future = new Date(event.starts_at).getTime() - minutes * 60_000 > Date.now()
-  return <section aria-label="Личное напоминание" className="space-y-2 border-t border-border pt-3">
-    <p className="flex items-center gap-2 text-sm font-medium"><Bell className="h-4 w-4" />Напомнить мне</p>
+  return <section aria-label="Личное напоминание" className="space-y-1.5"
+    title="Напоминание только для вас, на указанную дату и время. При переносе встречи его можно изменить здесь.">
     {query.isError ? <div role="alert" className="text-sm">Не удалось проверить ваши напоминания. <Button variant="ghost" size="sm" onClick={() => void query.refetch()}>Повторить</Button></div> : <>
       <div className="flex flex-wrap items-center gap-2">
-        <select aria-label="Когда напомнить о встрече" value={minutes} onChange={e => setMinutes(Number(e.target.value))} className="h-10 rounded-md border border-input bg-background px-3 text-base sm:text-sm">
+        <select aria-label="Когда напомнить о встрече" value={minutes} onChange={e => setMinutes(Number(e.target.value))} className="h-9 rounded-md border border-input bg-background px-2.5 text-base sm:text-sm">
           {[5, 15, 30, 60, 1440].map(value => <option key={value} value={value}>{value === 1440 ? 'За день' : `За ${value} мин`}</option>)}
         </select>
-        <Button variant="outline" disabled={!future || query.isFetching || save.isPending || remove.isPending} onClick={() => save.mutate()}>{reminders.some(row => !row.fired_at) ? 'Изменить напоминание' : 'Поставить напоминание'}</Button>
+        <Button variant="outline" size="sm" disabled={!future || query.isFetching || save.isPending || remove.isPending} onClick={() => save.mutate()}>{reminders.some(row => !row.fired_at) ? 'Изменить напоминание' : 'Поставить напоминание'}</Button>
       </div>
-      {!future && <p className="text-sm text-muted-foreground">Это время уже прошло. Выберите более позднее напоминание.</p>}
+      {!future && <p className="text-xs text-muted-foreground">Это время уже прошло — выберите позже.</p>}
       {reminders.map(row => <div key={row.id} className="flex flex-wrap items-center gap-2 text-sm">
         <span className="flex-1">{dateTime.format(new Date(row.remind_at))}{row.fired_at ? ' · уже сработало' : ''}</span>
         <Button variant="ghost" size="sm" disabled={remove.isPending || save.isPending} onClick={() => remove.mutate(row.id)}>Снять</Button>
       </div>)}
-      <p className="text-sm text-muted-foreground">Напоминание только для вас, на указанную дату и время. При переносе встречи его можно изменить здесь.</p>
     </>}
   </section>
 }
