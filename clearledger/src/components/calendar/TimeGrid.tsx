@@ -15,13 +15,16 @@
  * заняло бы сутки высотой и вытеснило всё остальное.
  */
 import { useEffect, useRef, useState } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import { format } from 'date-fns'
 import { ru } from 'date-fns/locale'
-import { NotebookPen, Repeat, Video } from 'lucide-react'
+import { NotebookPen, Plus, Repeat, Video } from 'lucide-react'
 import type { CalendarEvent } from '@/services/workService'
 import type { SpaceTask } from '@/services/tasksService'
 import { cn } from '@/lib/utils'
-import { eventDaySegment, layoutDayEvents } from '@/lib/calendarLayout'
+import { tagTone } from '@/lib/tagTones'
+import type { PersonalTag } from '@/services/tagsService'
+import { dragTimes, eventDaySegment, layoutDayEvents } from '@/lib/calendarLayout'
 import { companyDayTime, companyMinutesNow, companyTime, isCompanyDay, isCompanyToday } from '@/lib/companyTime'
 
 /** Высота часа. Меньше — подписи не читаются, больше — рабочий день не влезает
@@ -32,8 +35,16 @@ const ЧАСЫ = Array.from({ length: 24 }, (_, i) => i)
  *  помещается даже «10:00» и первая буква названия. Неделя на телефоне делит
  *  колонку в 89 px, и три одновременные встречи давали по 29 px. */
 const МИН_БЛОК_PX = 44
+/** Ниже этой высоты блок не рисуется: в него не влезает строка «09:04 Тема».
+ *  Раскладка считает короткую встречу такой же длины, иначе завершённые за
+ *  минуту конференции ложились текстом друг на друга (QA 28.10.2026). */
+const МИН_ВЫСОТА_PX = 18
+const МИН_МИНУТ = МИН_ВЫСОТА_PX / ЧАС_PX * 60
+/** Полоса у верхнего и нижнего края плашки: потянул за неё — меняешь начало или конец. */
+const КРАЙ_PX = 6
+const часы = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 
-export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, onEvent, onAdd, onDay }: {
+export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, onEvent, onAdd, onAddAllDay, onDay, onMove, canMove, tagsOf }: {
   days: Date[]
   events: CalendarEvent[]
   tasks: SpaceTask[]
@@ -45,8 +56,18 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
   draft?: { start: Date; end: Date; title: string } | null
   onEvent: (e: CalendarEvent) => void
   onAdd: (at: Date) => void
+  /** Клик по пустому месту ряда «весь день» — встреча на весь этот день. */
+  onAddAllDay?: (day: Date) => void
   onDay?: (day: Date) => void
+  /** Встречу перетащили мышью: новое начало и конец. */
+  onMove?: (e: CalendarEvent, start: Date, end: Date) => void
+  /** Можно ли её тянуть: свою, не отменённую. */
+  canMove?: (e: CalendarEvent) => boolean
+  /** Мои теги встречи: первый красит плашку, имена — в подпись и подсказку. */
+  tagsOf?: (e: CalendarEvent) => PersonalTag[]
 }) {
+  const цвет = (e: CalendarEvent) => { const т = tagsOf?.(e)[0]; return т ? tagTone(т.color).plate : null }
+  const тегиСловами = (e: CalendarEvent) => { const т = tagsOf?.(e) ?? []; return т.length ? `, мои теги: ${т.map((x) => x.name).join(', ')}` : '' }
   const прокрутка = useRef<HTMLDivElement>(null)
 
   // Открываемся на рабочем дне, а не на полуночи: иначе человек каждый раз
@@ -78,8 +99,104 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
     return () => clearInterval(timer)
   }, [])
 
-  const вСетке = events.filter((e) => !e.all_day)
-  const сверху = events.filter((e) => e.all_day)
+  // Перенос мышью: тянут плашку — меняется время (в неделе и день), тянут за
+  // край — начало или конец. Только мышь: на телефоне палец листает сетку, там
+  // время меняют в карточке встречи. Клик без движения открывает встречу, как
+  // раньше; Escape во время переноса возвращает всё на место.
+  type Тяга = { e: CalendarEvent; день: number; start: number; end: number }
+  const [тяга, setТяга] = useState<Тяга | null>(null)
+  const безКлика = useRef(false)
+  const начатьТягу = (ev: ReactPointerEvent<HTMLButtonElement>, e: CalendarEvent,
+    день: number, start: number, end: number) => {
+    if (!onMove || ev.pointerType !== 'mouse' || ev.button !== 0) return
+    const r = ev.currentTarget.getBoundingClientRect()
+    const mode = ev.clientY - r.top <= КРАЙ_PX ? 'start' : r.bottom - ev.clientY <= КРАЙ_PX ? 'end' : 'move'
+    const x0 = ev.clientX
+    const y0 = ev.clientY
+    let итог: Тяга | null = null
+    const ход = (m: PointerEvent) => {
+      if (!итог && Math.hypot(m.clientX - x0, m.clientY - y0) < 4) return
+      const сдвигДней = mode === 'move' && days.length > 1 && ширинаДня > 0
+        ? Math.round((m.clientX - x0) / ширинаДня) : 0
+      итог = { e, день: Math.min(Math.max(день + сдвигДней, 0), days.length - 1),
+        ...dragTimes(mode, start, end, (m.clientY - y0) / ЧАС_PX * 60) }
+      setТяга(итог)
+      document.body.style.cursor = mode === 'move' ? 'grabbing' : 'ns-resize'
+      document.body.style.userSelect = 'none'
+    }
+    const закончить = (отмена: boolean) => {
+      window.removeEventListener('pointermove', ход)
+      window.removeEventListener('pointerup', отпустить)
+      window.removeEventListener('keydown', клавиша)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      setТяга(null)
+      const t: Тяга | null = итог
+      if (!t) return
+      // После переноса браузер ещё пришлёт клик по плашке — он не должен открыть встречу.
+      безКлика.current = true
+      setTimeout(() => { безКлика.current = false }, 0)
+      if (отмена || (t.день === день && t.start === start && t.end === end)) return
+      const полночь = companyDayTime(days[t.день], 0).getTime()
+      onMove(e, new Date(полночь + t.start * 60_000), new Date(полночь + t.end * 60_000))
+    }
+    const отпустить = () => закончить(false)
+    const клавиша = (k: KeyboardEvent) => { if (k.key === 'Escape') закончить(true) }
+    window.addEventListener('pointermove', ход)
+    window.addEventListener('pointerup', отпустить)
+    window.addEventListener('keydown', клавиша)
+  }
+
+  // Встреча на весь день — только по дням: в «Неделе» её тянут влево-вправо,
+  // подсвечены дни, куда она встанет (МАГ, 28.10.2026).
+  const [тягаДня, setТягаДня] = useState<{ e: CalendarEvent; сдвиг: number } | null>(null)
+  const начатьТягуДня = (ev: ReactPointerEvent<HTMLButtonElement>, e: CalendarEvent) => {
+    if (!onMove || ev.pointerType !== 'mouse' || ev.button !== 0 || days.length < 2 || ширинаДня <= 0) return
+    const x0 = ev.clientX
+    let сдвиг: number | null = null
+    const ход = (m: PointerEvent) => {
+      if (сдвиг === null && Math.abs(m.clientX - x0) < 4) return
+      сдвиг = Math.round((m.clientX - x0) / ширинаДня)
+      setТягаДня({ e, сдвиг })
+      document.body.style.cursor = 'grabbing'
+      document.body.style.userSelect = 'none'
+    }
+    const закончить = (отмена: boolean) => {
+      window.removeEventListener('pointermove', ход)
+      window.removeEventListener('pointerup', отпустить)
+      window.removeEventListener('keydown', клавиша)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      setТягаДня(null)
+      const s: number | null = сдвиг
+      if (s === null) return
+      безКлика.current = true
+      setTimeout(() => { безКлика.current = false }, 0)
+      if (отмена || s === 0) return
+      onMove(e, new Date(new Date(e.starts_at).getTime() + s * 86_400_000),
+        new Date(new Date(e.ends_at).getTime() + s * 86_400_000))
+    }
+    const отпустить = () => закончить(false)
+    const клавиша = (k: KeyboardEvent) => { if (k.key === 'Escape') закончить(true) }
+    window.addEventListener('pointermove', ход)
+    window.addEventListener('pointerup', отпустить)
+    window.addEventListener('keydown', клавиша)
+  }
+  const цельДня = (d: Date) => !!тягаДня && пересекаетДень({
+    ...тягаДня.e,
+    starts_at: new Date(new Date(тягаДня.e.starts_at).getTime() + тягаДня.сдвиг * 86_400_000).toISOString(),
+    ends_at: new Date(new Date(тягаДня.e.ends_at).getTime() + тягаДня.сдвиг * 86_400_000).toISOString(),
+  }, d)
+  // «+» у подписи ряда: в «Дне» — этот день, в «Неделе» — сегодня, если оно в неделе.
+  const деньПлюса = days.find((d) => isCompanyToday(d)) ?? days[0]
+
+  // Встреча от суток и длиннее — наверху, как всёдневная (так делают Google и
+  // Outlook): блоком через всю колонку она закрывала день, и клик по «пустому»
+  // месту открывал её вместо новой встречи (МАГ, 28.10.2026).
+  const сутки = (e: CalendarEvent) =>
+    new Date(e.ends_at).getTime() - new Date(e.starts_at).getTime() >= 86_400_000
+  const вСетке = events.filter((e) => !e.all_day && !сутки(e))
+  const сверху = events.filter((e) => e.all_day || сутки(e))
   // Пересчёт раз в минуту держит `сейчас`; минуты берутся по часам компании.
   const минутаСейчас = companyMinutesNow()
   const естьСегодня = days.some((d) => isCompanyToday(d))
@@ -96,7 +213,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
             aria-label={`Открыть ${format(d, 'd MMMM', { locale: ru })}`}
             className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left hover:bg-accent/50">
             <span className={cn('text-xs font-medium',
-              isCompanyToday(d) ? 'text-primary' : d.getDay() % 6 === 0 ? 'text-muted-foreground/80' : 'text-muted-foreground')}>
+              isCompanyToday(d) ? 'text-primary' : 'text-muted-foreground')}>
               {format(d, 'EEEEEE', { locale: ru })}
             </span>
             <span className={cn('grid size-8 place-items-center rounded-full text-lg font-semibold tabular-nums',
@@ -112,8 +229,16 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
           записи на день вытесняли с телефона всю сетку часов; в альбоме ряд ещё ниже
           (QA 28.10.2026). */}
       <div className="flex max-h-24 shrink-0 overflow-y-auto [@media(max-height:500px)]:max-h-10 border-b border-border [scrollbar-gutter:stable]">
-        <div className="w-14 shrink-0 py-1 pr-2 text-right text-xs leading-tight text-muted-foreground">
-          весь день
+        <div className="flex w-14 shrink-0 flex-col items-end gap-1 py-1 pr-1.5 text-right text-xs leading-tight text-muted-foreground">
+          <span>весь день</span>
+          {onAddAllDay && (
+            <button type="button" onClick={() => onAddAllDay(деньПлюса)}
+              aria-label={`Встреча на весь день, ${format(деньПлюса, 'd MMMM', { locale: ru })}`}
+              title="Встреча или событие на весь день"
+              className="grid size-6 place-items-center rounded-md border border-border bg-card text-foreground hover:bg-accent">
+              <Plus aria-hidden className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
         {days.map((d) => {
           const дневные = сверху.filter((e) => пересекаетДень(e, d))
@@ -123,14 +248,24 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
           const повторы = repeats.filter((r) => isCompanyDay(r.at, d))
           return (
             <div key={d.toISOString()}
-              className="min-h-[1.75rem] flex-1 space-y-0.5 border-l border-border p-0.5">
+              // Пустое место ряда — встреча на весь день, как клик по часу в сетке.
+              onClick={(ev) => { if (ev.target === ev.currentTarget) onAddAllDay?.(d) }}
+              title={onAddAllDay ? 'Нажмите на свободное место — встреча на весь день' : undefined}
+              className={cn('min-h-[1.75rem] min-w-0 flex-1 space-y-0.5 border-l border-border p-0.5',
+                onAddAllDay && 'cursor-pointer hover:bg-accent/40',
+                цельДня(d) && 'bg-primary/10 ring-2 ring-inset ring-primary/60')}>
               {дневные.map((e) => (
-                <button key={e.id} onClick={() => onEvent(e)}
+                <button key={e.id} onClick={() => { if (!безКлика.current) onEvent(e) }}
+                  onPointerDown={canMove?.(e) ? (ev) => начатьТягуДня(ev, e) : undefined}
+                  title={canMove?.(e) && days.length > 1 ? `${e.title} · тяните мышью на другой день` : e.title}
                   className={cn('block w-full truncate rounded px-1 text-[12px]',
+                    тягаДня?.e.id === e.id && 'opacity-40',
                     e.status === 'cancelled'
                       ? 'text-muted-foreground line-through'
+                      : цвет(e) ? cn('border text-foreground', цвет(e))
                       : foreign?.has(e.id) ? 'border border-border bg-background text-foreground hover:bg-accent'
-                        : 'bg-primary/15 text-foreground hover:bg-primary/25')}>
+                        : 'bg-primary/15 text-foreground hover:bg-primary/25')}
+                  aria-label={`${e.title}${тегиСловами(e)}`}>
                   {e.title}
                 </button>
               ))}
@@ -148,7 +283,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                 </span>
               ))}
               {записи.length > 0 && (
-                <span className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground/70">
+                <span className="flex items-center gap-1 px-1 text-[12px] text-muted-foreground">
                   <NotebookPen className="h-3 w-3 shrink-0" />{записи.length}
                 </span>
               )}
@@ -179,7 +314,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
             )}
           </div>
           {days.map((d, индекс) => {
-            const { видимые, свёрнутые } = раскладкаДня(вСетке, d, ширинаДня)
+            const { видимые, свёрнутые, отменённые } = раскладкаДня(вСетке, d, ширинаДня)
             const черновик = draft && eventDaySegment({ id: 'draft', starts_at: draft.start.toISOString(), ends_at: draft.end.toISOString() }, d)
             return (
             <div key={d.toISOString()} ref={индекс === 0 ? колонкаДня : undefined}
@@ -194,12 +329,30 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                   {draft!.title.trim() || 'Новая встреча'}
                 </div>
               )}
+              {тяга && тяга.день === индекс && (
+                /* Куда встанет перетаскиваемая встреча — со временем, которое получится. */
+                <div aria-hidden className="pointer-events-none absolute inset-x-1 z-20 overflow-hidden rounded-md border border-primary bg-primary/20 px-1.5 py-0.5 text-xs leading-tight text-foreground"
+                  style={{ top: тяга.start / 60 * ЧАС_PX, height: Math.max(МИН_ВЫСОТА_PX, (тяга.end - тяга.start) / 60 * ЧАС_PX), boxShadow: 'var(--shadow-medium)' }}>
+                  <span className="font-medium tabular-nums">{часы(тяга.start)}–{часы(тяга.end)}</span>{' '}{тяга.e.title}
+                </div>
+              )}
               {ЧАСЫ.map((h) => (
                 <div key={h} style={{ height: ЧАС_PX }}
                   onClick={() => {
                     onAdd(companyDayTime(d, h))
                   }}
                   className="border-b border-border/40 hover:bg-accent/40" />
+              ))}
+              {отменённые.map((о) => (
+                /* Отменённые поверх живых — меткой у правого края: встречи видны в «Списке» дня. */
+                <button key={`cancelled-${о.start}`} onClick={() => onDay?.(d)}
+                  aria-label={`Отменено: ${о.titles.length} — ${о.titles.join(', ')}`}
+                  title={`Отменены: ${о.titles.join('; ')}. Показать день списком`}
+                  style={{ top: о.start / 60 * ЧАС_PX }}
+                  className="absolute right-0.5 z-20 rounded border border-dashed border-border bg-card px-1 text-[12px]
+                             leading-[16px] text-muted-foreground hover:bg-accent">
+                  +{о.titles.length} отменено
+                </button>
               ))}
               {свёрнутые.map((группа) => (
                 /* Больше встреч, чем влезает в колонку этого дня: остальные —
@@ -214,39 +367,48 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                     left: `${((группа.предел - 1) / группа.предел) * 100}%`,
                     width: `${(1 / группа.предел) * 100}%`,
                   }}
-                  className="absolute overflow-hidden rounded border border-dashed border-border bg-muted/60
+                  className="absolute overflow-hidden rounded border border-dashed border-border bg-card
                              px-1 py-0.5 text-left text-[12px] leading-tight text-muted-foreground hover:bg-accent">
                   +{группа.скрыто}
                 </button>
               ))}
               {видимые
-                .map(({ event: e, column: колонка, columns: всего, startMinute, endMinute, continues }) => {
+                .map(({ event: e, column: колонка, columns: всего, span: занято, startMinute, endMinute, continues }) => {
                   const н = new Date(e.starts_at)
                   const верх = startMinute / 60 * ЧАС_PX
-                  const высота = Math.max(18, (endMinute - startMinute) / 60 * ЧАС_PX)
+                  const высота = Math.max(МИН_ВЫСОТА_PX, (endMinute - startMinute) / 60 * ЧАС_PX)
                   // Ответ ещё не дан — пунктирная рамка: в сетке такие приглашения не
                   // отличались от принятых, и их пропускали (QA 27.10.2026).
                   const ждёт = e.my_response === 'pending' && e.status !== 'cancelled'
+                  // Тянуть можно встречу целиком в этом дне: переходящую через
+                  // полночь переносят в карточке.
+                  const можно = !!onMove && !!canMove?.(e) && !continues
+                    && (new Date(e.ends_at).getTime() - н.getTime()) / 60_000 <= endMinute - startMinute + 1
                   return (
-                    <button key={e.id} onClick={() => onEvent(e)}
-                      aria-label={`${e.title}, ${format(d, 'd MMMM', { locale: ru })}${continues ? ', продолжение' : ''}${ждёт ? ', ждёт вашего ответа' : ''}`}
+                    <button key={e.id} onClick={() => { if (!безКлика.current) onEvent(e) }}
+                      onPointerDown={можно ? (ev) => начатьТягу(ev, e, индекс, startMinute, endMinute) : undefined}
+                      aria-label={`${e.title}, ${format(d, 'd MMMM', { locale: ru })}${continues ? ', продолжение' : ''}${ждёт ? ', ждёт вашего ответа' : ''}${тегиСловами(e)}`}
                       title={e.status === 'cancelled'
                         ? `Отменена${e.cancel_reason ? `: ${e.cancel_reason}` : ''}`
-                        : ждёт ? `${e.title} — ждёт вашего ответа` : e.title}
+                        : ждёт ? `${e.title} — ждёт вашего ответа`
+                          : можно ? `${e.title} · тяните мышью — перенести, за край — изменить длительность`
+                            : onMove && !e.is_organizer ? `${e.title} · перенести может только организатор` : e.title}
                       style={{
                         top: верх, height: высота,
                         left: `${(колонка / всего) * 100}%`,
-                        width: `${(1 / всего) * 100}%`,
+                        width: `${(Math.min(занято, всего - колонка) / всего) * 100}%`,
                       }}
                       className={cn('absolute overflow-hidden rounded border px-1 py-0.5 text-left text-[12px] leading-tight',
                         // Короткая встреча — время и тема одной строкой: переносом тема
                         // уходила под обрез, и оставалось одно «12:00».
                         высота < 34 && 'truncate whitespace-nowrap',
                         ждёт && 'border-dashed',
+                        тяга?.e.id === e.id && 'opacity-40',
                         e.status === 'cancelled'
-                          ? 'border-border bg-muted/60 text-muted-foreground line-through'
+                          ? 'border-border bg-card text-muted-foreground line-through'
                           : e.my_response === 'declined'
-                            ? 'border-border bg-muted/40 text-muted-foreground line-through'
+                            ? 'border-border bg-card text-muted-foreground line-through'
+                            : цвет(e) ? cn('text-foreground', цвет(e))
                             : foreign?.has(e.id) ? 'border-border bg-background text-foreground hover:bg-accent'
                             : 'border-primary/40 bg-primary/15 text-foreground hover:bg-primary/25')}>
                       <span className="tabular-nums text-muted-foreground">
@@ -256,6 +418,10 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
                       {e.conference_url && e.status !== 'cancelled' && (
                         <Video className="ml-1 inline h-3 w-3" />
                       )}
+                      {можно && <>
+                        <span aria-hidden className="absolute inset-x-0 top-0 h-1.5 cursor-ns-resize" />
+                        <span aria-hidden className="absolute inset-x-0 bottom-0 h-1.5 cursor-ns-resize" />
+                      </>}
                     </button>
                   )
                 })}
@@ -280,13 +446,37 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
  * предела нет, рисуем как раньше.
  */
 function раскладкаДня(события: CalendarEvent[], день: Date, ширина: number) {
-  const блоки = layoutDayEvents(события, день)
+  // Отменённая и отклонённая встреча ширину у живой не отнимает: зачёркнутые
+  // тестовые конференции сжимали «Интеграцию» до трети колонки (МАГ, 28.10.2026).
+  // Сначала раскладываются живые; отменённые, которым рядом с живыми места нет,
+  // становятся меткой «+N отменено» у края, остальные рисуются как обычно.
+  const неживая = (e: CalendarEvent) => e.status === 'cancelled' || e.my_response === 'declined'
+  const живыеБлоки = layoutDayEvents(события.filter((e) => !неживая(e)), день, МИН_МИНУТ)
+  const отрезок = (e: CalendarEvent) => {
+    const s = eventDaySegment(e, день)
+    return s ? [s.startMinute, Math.max(s.endMinute, s.startMinute + МИН_МИНУТ)] as const : null
+  }
+  const мешает = (e: CalendarEvent) => {
+    const o = отрезок(e)
+    return !!o && живыеБлоки.some((b) => o[0] < Math.max(b.endMinute, b.startMinute + МИН_МИНУТ) && b.startMinute < o[1])
+  }
+  const подЖивыми = события.filter((e) => неживая(e) && мешает(e))
+  const блоки = [...живыеБлоки, ...layoutDayEvents(события.filter((e) => неживая(e) && !мешает(e)), день, МИН_МИНУТ)
+    .map((b) => ({ ...b, group: b.group + 100_000 }))]
+  const отменённые: { start: number; end: number; titles: string[] }[] = []
+  for (const e of подЖивыми.sort((a, b) => a.starts_at.localeCompare(b.starts_at))) {
+    const o = отрезок(e)!
+    const last = отменённые[отменённые.length - 1]
+    if (last && o[0] < last.end) { last.end = Math.max(last.end, o[1]); last.titles.push(e.title) }
+    else отменённые.push({ start: o[0], end: o[1], titles: [e.title] })
+  }
   const предел = ширина > 0 ? Math.max(1, Math.floor(ширина / МИН_БЛОК_PX)) : Number.POSITIVE_INFINITY
   const видимые: typeof блоки = []
   const скрытыеПоГруппам = new Map<number, typeof блоки>()
   for (const блок of блоки) {
     if (блок.columns <= предел || блок.column < предел - 1) {
-      видимые.push(блок)
+      // Свёрнутую колонку «+N» растянутый блок не накрывает.
+      видимые.push(блок.columns > предел ? { ...блок, span: Math.min(блок.span, предел - 1 - блок.column) } : блок)
       continue
     }
     const группа = скрытыеПоГруппам.get(блок.group) ?? []
@@ -305,6 +495,7 @@ function раскладкаДня(события: CalendarEvent[], день: Dat
   return {
     видимые: видимые.map((b) => (b.columns > предел ? { ...b, columns: предел } : b)),
     свёрнутые,
+    отменённые,
   }
 }
 

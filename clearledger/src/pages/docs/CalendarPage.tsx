@@ -16,6 +16,10 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -38,6 +42,10 @@ import {
   companyTodayDate, isCompanyDay, isCompanyToday, COMPANY_TIME_ZONE,
 } from '@/lib/companyTime'
 import { EventDialog } from '@/components/calendar/EventDialog'
+import { TagChips, TagPicker } from '@/components/tags/PersonalTags'
+import * as tagsService from '@/services/tagsService'
+import { usePersonalTags } from '@/hooks/usePersonalTags'
+import { tagTone } from '@/lib/tagTones'
 import { TimeGrid } from '@/components/calendar/TimeGrid'
 
 /** Порядок видов — от короткого периода к длинному, «Список» отдельно в конце:
@@ -90,6 +98,17 @@ export function CalendarPage() {
   const qc = useQueryClient()
   const { user } = useAuth()
   const [params, setParams] = useSearchParams()
+  // Мои теги: красят встречи и отбирают их. Отбор пуст — видно всё; выбор
+  // запоминается, как слои календаря (МАГ, 28.10.2026).
+  const { tags: моиТеги, tagsOf: тегиПредмета } = usePersonalTags(companyId)
+  const [тегОтбор, setТегОтбор] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('calendar-tag-filter') ?? '[]') as string[] } catch { return [] }
+  })
+  const отобратьТег = (id: string | null, on = true) => setТегОтбор(было => {
+    const стало = id === null ? [] : on ? [...было, id] : было.filter(x => x !== id)
+    try { localStorage.setItem('calendar-tag-filter', JSON.stringify(стало)) } catch { /* пусто */ }
+    return стало
+  })
   const [defaultMode] = useState<Mode>(() => window.matchMedia(PHONE_QUERY).matches ? 'agenda' : 'month')
   const requestedMode = params.get('calendarMode')
   const mode = requestedMode && Object.hasOwn(MODES, requestedMode) ? requestedMode as Mode : defaultMode
@@ -118,10 +137,15 @@ export function CalendarPage() {
   /** Черновик дела: что, когда, на весь день или к часу, напоминание, повторение. */
   const [deed, setDeed] = useState<{
     title: string; date: string; time: string; allDay: boolean
-    remindBefore: number | null; repeat: DeedRepeat
+    remindBefore: number | null; repeat: DeedRepeat; tags: string[]
   } | null>(null)
   const [newAt, setNewAt] = useState<Date | null>(null)
   const [companyDay, setCompanyDay] = useState(false)
+  const [newAllDay, setNewAllDay] = useState(false)
+  // Перенос мышью: пока сервер отвечает, встреча стоит на новом месте; встречу
+  // с участниками сначала подтверждают — им уйдёт уведомление и ответы сбросятся.
+  const [сдвиг, setСдвиг] = useState<Record<string, { starts_at: string; ends_at: string }>>({})
+  const [спроситьПеренос, setСпроситьПеренос] = useState<{ e: CalendarEvent; start: Date; end: Date; кому: number } | null>(null)
   /** Встреча, которую собирают в панели: сетка рисует её на месте. */
   const [draft, setDraft] = useState<{ start: Date; end: Date; title: string } | null>(null)
   const [желаемыйДень, setЖелаемыйДень] = useState<{ from: string; day: number } | null>(null)
@@ -134,6 +158,22 @@ export function CalendarPage() {
   const [showCancelled, setShowCancelled] = useState(() => {
     try { return localStorage.getItem('calendar-show-cancelled') === '1' } catch { return false }
   })
+  // Список календарей свёрнут по умолчанию: слои меняют редко, а место в
+  // колонке нужнее блоку «Ждут вашего ответа» (МАГ, 28.10.2026). Выбор запоминается.
+  const [слоиСвёрнуты, setСлоиСвёрнуты] = useState(() => {
+    try { return localStorage.getItem('calendar-layers-collapsed') !== '0' } catch { return true }
+  })
+  const [тегиСвёрнуты, setТегиСвёрнуты] = useState(() => {
+    try { return localStorage.getItem('calendar-tags-collapsed') === '1' } catch { return false }
+  })
+  const свернутьТеги = (value: boolean) => {
+    setТегиСвёрнуты(value)
+    try { localStorage.setItem('calendar-tags-collapsed', value ? '1' : '0') } catch { /* пусто */ }
+  }
+  const свернутьСлои = (value: boolean) => {
+    setСлоиСвёрнуты(value)
+    try { localStorage.setItem('calendar-layers-collapsed', value ? '1' : '0') } catch { /* пусто */ }
+  }
   const переключитьОтменённые = (value: boolean) => {
     setShowCancelled(value)
     try { localStorage.setItem('calendar-show-cancelled', value ? '1' : '0') } catch { /* пусто */ }
@@ -294,6 +334,11 @@ export function CalendarPage() {
         assigneeId: user?.id || undefined,
         dueAt: at.toISOString(),
       })
+      if (d.tags.length) {
+        await tagsService.assignTags(companyId, `task:${task.id}`, d.tags)
+          .catch(() => toast.error('Дело записано, а теги не поставились'))
+        void qc.invalidateQueries({ queryKey: ['personal-tags', companyId] })
+      }
       if (!d.allDay && d.remindBefore !== null) {
         // «За сколько до» — то же, что у встречи: срок один, а сказать о нём можно
         // заранее (вопрос МАГа 07.09.2026).
@@ -326,8 +371,9 @@ export function CalendarPage() {
   const openDay = (day: Date, nextMode: Mode = 'day') => update({ date: format(day, 'yyyy-MM-dd'), calendarMode: nextMode })
   /** Новая встреча на это время. Одна панель за раз: открытая встреча или дело
    *  уступают место новой, иначе две панели легли бы друг на друга. */
-  const startMeeting = (at: Date, forCompany = false) => {
+  const startMeeting = (at: Date, forCompany = false, allDay = false) => {
     setCompanyDay(forCompany)
+    setNewAllDay(allDay)
     setDeed(null)
     if (eventId) update({ event: null })
     setNewAt(at)
@@ -354,8 +400,65 @@ export function CalendarPage() {
   }
   if (!companyId) return null
 
+  const тегиВстречи = (e: CalendarEvent) => тегиПредмета(`event:${e.id}`)
+  // Удалённый тег из отбора не держит календарь пустым.
+  const отборТегов = тегОтбор.filter(id => моиТеги.some(t => t.id === id))
   const events = (eventsQ.data?.events ?? []).filter(e => видимаВКалендаре(e,
     { сейчас: new Date(), показыватьПрошедшие: showCancelled, открытая: eventId }))
+    .filter(e => !отборТегов.length || тегиВстречи(e).some(t => отборТегов.includes(t.id)) || e.id === eventId)
+  const наСетке = events.map(e => сдвиг[e.id] ? { ...e, ...сдвиг[e.id] } : e)
+  const когдаСтанет = (start: Date, end: Date, весьДень = false) => {
+    const день = (d: Date) => format(parseISO(companyDateKey(d)), 'EEEEEE, d MMMM', { locale: ru })
+    if (!весьДень) return `${день(start)}, ${companyTime(start)}–${companyTime(end)}`
+    // Конец всёдневной — полночь следующего дня: последний день на сутки раньше.
+    const последний = new Date(end.getTime() - 1)
+    return companyDateKey(последний) === companyDateKey(start) ? `${день(start)}, весь день` : `${день(start)} — ${день(последний)}`
+  }
+  const выполнитьПеренос = async (e: CalendarEvent, start: Date, end: Date, можноОтменить: boolean) => {
+    setСдвиг(s => ({ ...s, [e.id]: { starts_at: start.toISOString(), ends_at: end.toISOString() } }))
+    try {
+      await workService.eventAction(companyId, e.id, { startsAt: start.toISOString(), endsAt: end.toISOString() })
+      toast.success(`«${e.title}» — ${когдаСтанет(start, end, e.all_day)}`, можноОтменить ? {
+        action: { label: 'Отменить', onClick: () => { void выполнитьПеренос(e, new Date(e.starts_at), new Date(e.ends_at), false) } },
+      } : undefined)
+    } catch (err) {
+      toast.error((err as Error).message || 'Не удалось перенести встречу')
+    } finally {
+      await Promise.all(['calendar', 'events', 'calendar-event', 'calendar-summary', 'calendar-busy', 'work-mine']
+        .map(key => qc.invalidateQueries({ queryKey: [key, companyId] })))
+      setСдвиг(s => { const n = { ...s }; delete n[e.id]; return n })
+    }
+  }
+  const перенести = async (e: CalendarEvent, start: Date, end: Date) => {
+    const свои = e.attendees.filter(a => a.user_id !== e.organizer_id).length
+    let гости = 0
+    // Не узнали, есть ли гости, — лучше спросить лишний раз, чем молча разослать письма.
+    try { гости = (await workService.eventGuests(companyId, e.id)).guests.length } catch { гости = 1 }
+    if (свои + гости > 0) setСпроситьПеренос({ e, start, end, кому: свои + гости })
+    else void выполнитьПеренос(e, start, end, true)
+  }
+  const подтверждениеПереноса = (
+    <AlertDialog open={!!спроситьПеренос} onOpenChange={open => { if (!open) setСпроситьПеренос(null) }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Перенести встречу?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {спроситьПеренос && <>«{спроситьПеренос.e.title}» — {когдаСтанет(спроситьПеренос.start, спроситьПеренос.end, спроситьПеренос.e.all_day)}.
+              Уведомление о переносе получат участники ({спроситьПеренос.кому}); их ответы сбросятся,
+              подтвердить участие нужно будет заново.</>}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Оставить как было</AlertDialogCancel>
+          <AlertDialogAction onClick={() => {
+            const п = спроситьПеренос
+            setСпроситьПеренос(null)
+            if (п) void выполнитьПеренос(п.e, п.start, п.end, false)
+          }}>Перенести</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
   const tasks = слои.due ? (tasksQ.data?.tasks ?? []).filter(t => !query || t.title.toLocaleLowerCase('ru').includes(query.toLocaleLowerCase('ru'))) : []
   const plan = personal && !query && mode !== 'year' ? (planQ.data ?? {}) : {}
   const reminders = (слои.reminders ? remindersQ.data?.items ?? [] : [])
@@ -384,7 +487,7 @@ export function CalendarPage() {
     if (eventId) update({ event: null })
     setDeed({
       title: '', date: format(anchor, 'yyyy-MM-dd'), time: '18:00', allDay: false,
-      remindBefore: 0, repeat: 'none',
+      remindBefore: 0, repeat: 'none', tags: [],
     })
   }
   /** Что можно записать в календарь. Одно меню на телефон и на стол: раньше со
@@ -402,7 +505,8 @@ export function CalendarPage() {
   </>
   const chip = (event: CalendarEvent) => cn(
     'mb-0.5 block w-full truncate rounded-md px-1.5 py-1 text-left text-xs',
-    foreign.has(event.id) ? 'border border-border bg-background hover:bg-accent' : 'bg-primary/15 hover:bg-primary/25',
+    тегиВстречи(event)[0] ? cn('border', tagTone(тегиВстречи(event)[0].color).plate)
+      : foreign.has(event.id) ? 'border border-border bg-background hover:bg-accent' : 'bg-primary/15 hover:bg-primary/25',
     // Не отвечено — пунктир, как в неделе: приглашение не должно выглядеть принятым.
     event.my_response === 'pending' && event.status !== 'cancelled' && 'border border-dashed border-primary/50',
     (event.status === 'cancelled' || event.my_response === 'declined') && 'text-muted-foreground line-through')
@@ -514,7 +618,18 @@ export function CalendarPage() {
       <MiniMonth value={anchor} mode={mode} onPick={day => { update({ date: format(day, 'yyyy-MM-dd') }); setКолонкаОткрыта(false) }} />
 
       <section aria-labelledby="calendar-layers-title" className="space-y-0.5">
-        <h3 id="calendar-layers-title" className="px-1 pb-1 text-xs font-medium text-muted-foreground">Календари</h3>
+        <h3 id="calendar-layers-title">
+          <button type="button" aria-expanded={!слоиСвёрнуты} aria-controls="calendar-layers-list"
+            onClick={() => свернутьСлои(!слоиСвёрнуты)}
+            className="flex min-h-8 w-full items-center gap-1.5 rounded-md px-1 text-left text-xs font-medium text-muted-foreground hover:bg-accent/60">
+            <ChevronDown aria-hidden className={cn('h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none', слоиСвёрнуты && '-rotate-90')} />
+            <span className="flex-1">Календари</span>
+            {/* Свёрнутый список говорит, что включено: иначе выключенный слой
+                прятался бы вместе со списком. */}
+            {слоиСвёрнуты && <span className="tabular-nums">включено {СЛОИ_ПОДПИСИ.filter(({ key }) => слои[key]).length + (showCancelled ? 1 : 0)} из {СЛОИ_ПОДПИСИ.length + 1}</span>}
+          </button>
+        </h3>
+        <div id="calendar-layers-list" hidden={слоиСвёрнуты} className="space-y-0.5">
         {СЛОИ_ПОДПИСИ.map(({ key, label, mark }) => (
           <label key={key} className="flex min-h-9 cursor-pointer items-center gap-2.5 rounded-md px-1 text-sm hover:bg-accent/60">
             <Checkbox checked={слои[key]} onCheckedChange={value => переключитьСлой(key, value === true)} />
@@ -526,6 +641,38 @@ export function CalendarPage() {
           <Checkbox checked={showCancelled} onCheckedChange={value => переключитьОтменённые(value === true)} />
           <span className="min-w-0 flex-1 truncate">Прошедшие отменённые</span>
         </label>
+        </div>
+      </section>
+
+      {/* Мои теги — отбор встреч. Пусто — объясняем, где их ставят, а не прячем раздел. */}
+      <section aria-labelledby="calendar-tags-title" className="space-y-0.5">
+        <div className="flex min-h-8 items-center gap-2">
+          <h3 id="calendar-tags-title" className="flex-1">
+            <button type="button" aria-expanded={!тегиСвёрнуты} aria-controls="calendar-tags-list"
+              onClick={() => свернутьТеги(!тегиСвёрнуты)}
+              className="flex min-h-8 w-full items-center gap-1.5 rounded-md px-1 text-left text-xs font-medium text-muted-foreground hover:bg-accent/60">
+              <ChevronDown aria-hidden className={cn('h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none', тегиСвёрнуты && '-rotate-90')} />
+              <span className="flex-1">Мои теги</span>
+              {/* Свёрнутый раздел говорит, что отбор включён: иначе календарь
+                  «потерял» бы встречи без видимой причины. */}
+              {тегиСвёрнуты && <span className="tabular-nums">{отборТегов.length ? `отбор: ${отборТегов.length}` : моиТеги.length}</span>}
+            </button>
+          </h3>
+          {отборТегов.length > 0 && <button type="button" onClick={() => отобратьТег(null)}
+            className="shrink-0 rounded px-1 text-xs text-primary hover:underline">Показать все</button>}
+        </div>
+        <div id="calendar-tags-list" hidden={тегиСвёрнуты} className="space-y-0.5">
+        {моиТеги.length === 0
+          ? <p className="px-1 text-xs text-muted-foreground">Ставятся в карточке встречи: красят её в календаре, по ним отбирают. Видите только вы.</p>
+          : моиТеги.map(t => (
+            <label key={t.id} className="flex min-h-9 cursor-pointer items-center gap-2.5 rounded-md px-1 text-sm hover:bg-accent/60">
+              <Checkbox checked={отборТегов.includes(t.id)} onCheckedChange={value => отобратьТег(t.id, value === true)} />
+              <span className="min-w-0 flex-1 truncate">{t.name}</span>
+              <span aria-hidden className={cn('size-2.5 rounded-full', tagTone(t.color).dot)} />
+            </label>
+          ))}
+        </div>
+        {отборТегов.length > 0 && <p className="px-1 text-xs text-muted-foreground">Показаны только встречи с отмеченными тегами.</p>}
       </section>
 
       {/* Приглашения без ответа — отдельным списком: организатор ждёт ответа, а в
@@ -633,6 +780,12 @@ export function CalendarPage() {
       Весь день
     </label>
 
+    {/* Мои теги — рядом со временем, как у встречи. У повторяющегося дела задачи
+        ещё нет: её поставит расписание, и тег вешать не на что. */}
+    {deed?.repeat === 'none' && (
+      <TagPicker companyId={companyId} value={deed.tags} onChange={ids => setDeed(d => d && { ...d, tags: ids })} />
+    )}
+
     {!deed?.allDay && (
       <label className="flex flex-wrap items-center gap-2 text-sm">
         <span className="flex items-center gap-1.5"><Bell className="h-3.5 w-3.5 text-muted-foreground" />Напомнить</span>
@@ -693,6 +846,7 @@ export function CalendarPage() {
           <span className="w-16 shrink-0 text-sm tabular-nums text-muted-foreground">{event.all_day ? 'Весь день' : <>{companyTime(eventDaySegment(event, day)!.start)}<span className="block">{eventDaySegment(event, day)!.endMinute === 1440 ? '24:00' : companyTime(eventDaySegment(event, day)!.end)}</span></>}</span>
           <span className="min-w-0 flex-1">
             <span className={cn('block break-words text-sm font-medium', (event.status === 'cancelled' || event.my_response === 'declined') && 'text-muted-foreground line-through')}>{event.title}</span>
+            <TagChips tags={тегиВстречи(event)} className="mt-1" />
             <span className="mt-1 block break-words text-sm text-muted-foreground">{event.status === 'cancelled' ? `Отменена${event.cancel_reason ? ': ' + event.cancel_reason : ''}` : event.my_response === 'pending' ? 'Ждёт вашего ответа' : event.my_response === 'declined' ? 'Вы отказались' : event.location || (event.conference_url ? 'Видеовстреча' : eventDaySegment(event, day)?.continues ? 'Продолжение встречи' : foreign.has(event.id) ? 'Календарь компании' : '')}</span>
           </span>
           {event.conference_url && <Video className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />}
@@ -731,10 +885,12 @@ export function CalendarPage() {
   </div> : mode === 'year' ? <YearView anchor={anchor} busyDays={занятыеДни}
     onDay={day => openDay(day, 'day')} onMonth={day => openDay(day, 'month')} />
     : mode !== 'month' ? <div className="flex min-h-0 flex-1 overflow-x-auto">
-      <TimeGrid days={days} events={events} tasks={tasks} foreign={foreign} repeats={repeats} draft={newAt ? draft : null}
-        onEvent={open} onAdd={at => startMeeting(at)} onDay={day => openDay(day, mode === 'week' ? 'day' : 'agenda')} />
+      <TimeGrid days={days} events={наСетке} tasks={tasks} foreign={foreign} repeats={repeats} draft={newAt ? draft : null}
+        onEvent={open} onAdd={at => startMeeting(at)} onAddAllDay={day => startMeeting(companyDayTime(day, 0), false, true)} onDay={day => openDay(day, mode === 'week' ? 'day' : 'agenda')}
+        onMove={(e, start, end) => { void перенести(e, start, end) }} tagsOf={тегиВстречи}
+        canMove={e => e.is_organizer && e.status !== 'cancelled'} />
     </div> : <div ref={месяцRef} className="flex min-h-0 flex-1 flex-col overflow-auto rounded-xl border border-border bg-card">
-      <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-border bg-card">{days.slice(0, 7).map(day => <div key={day.toISOString()} className={cn('px-2 py-2 text-sm font-medium', day.getDay() % 6 === 0 ? 'text-muted-foreground/80' : 'text-muted-foreground')}>{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
+      <div className="sticky top-0 z-10 grid grid-cols-7 border-b border-border bg-card">{days.slice(0, 7).map(day => <div key={day.toISOString()} className="px-2 py-2 text-sm font-medium text-muted-foreground">{format(day, 'EEEEEE', { locale: ru })}</div>)}</div>
       {/* На телефоне в клетке только точки: высокие строки уводили текущую
           неделю под край экрана (QA 27.10.2026), шесть недель должны влезать. */}
       <div className={cn('grid flex-1 grid-cols-7', phone ? 'min-h-0 [grid-auto-rows:minmax(3rem,1fr)]' : '[grid-auto-rows:minmax(5.5rem,1fr)]')}>{days.map(day => {
@@ -809,8 +965,8 @@ export function CalendarPage() {
     </div>}
   </>
 
-  const встреча = meetingOpen && <EventDialog key={eventId || `${newAt?.toISOString()}-${companyDay}`} companyId={companyId}
-    event={newAt ? null : eventQ.data!} startAt={newAt} companyDay={!!newAt && companyDay} panel onDraft={setDraft}
+  const встреча = meetingOpen && <EventDialog key={eventId || `${newAt?.toISOString()}-${companyDay}-${newAllDay}`} companyId={companyId}
+    event={newAt ? null : eventQ.data!} startAt={newAt} companyDay={!!newAt && companyDay} allDay={!!newAt && newAllDay} panel onDraft={setDraft}
     onClose={() => { setNewAt(null); if (eventId) update({ event: null }) }} onChanged={changed} />
 
   // Нижний отступ на высоту плашки установки: иначе на столе она ложится на
@@ -859,6 +1015,7 @@ export function CalendarPage() {
       </DialogContent>
     </Dialog>
     {встреча}
+    {подтверждениеПереноса}
   </div>
 
   return <div className="relative flex h-full min-h-0 min-w-0" style={отступПлашки}>
@@ -876,6 +1033,7 @@ export function CalendarPage() {
       <div className="relative flex min-h-0 flex-1 flex-col">
         {сетка}
         {встреча}
+        {подтверждениеПереноса}
         {deed && (
           <aside role="dialog" aria-label="Дело себе"
             onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setDeed(null) } }}
@@ -925,7 +1083,7 @@ function MiniMonth({ value, mode, onPick }: { value: Date; mode: Mode; onPick: (
             className={cn('mx-auto grid size-8 place-items-center rounded-full text-xs tabular-nums hover:bg-accent',
               isCompanyToday(d) ? 'bg-primary font-semibold text-primary-foreground hover:bg-primary/90'
                 : выбранныйПериод(d) ? 'bg-primary/15 font-medium text-foreground'
-                  : !isSameMonth(d, месяц) ? 'text-muted-foreground/70' : 'text-foreground')}>
+                  : !isSameMonth(d, месяц) ? 'text-muted-foreground' : 'text-foreground')}>
             {format(d, 'd')}
           </button>
         ))}

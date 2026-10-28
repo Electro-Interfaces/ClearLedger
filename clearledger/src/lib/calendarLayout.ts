@@ -20,14 +20,28 @@ export function eventDaySegment(event: TimedEvent, day: Date) {
   }
 }
 
-export function layoutDayEvents<T extends TimedEvent>(events: T[], day: Date) {
+/**
+ * Колонки встреч одного дня.
+ *
+ * `minMinutes` — сколько минут занимает на экране самый короткий блок: встреча,
+ * завершённая через десять секунд, рисуется строкой текста, и для пересечений
+ * она такой же длины, иначе соседние строки ложатся одна на другую.
+ * `span` — сколько колонок встреча занимает вправо: колонки цепочки считаются по
+ * самому плотному месту, и без растяжения утренняя встреча делила ширину с
+ * вечерними, которых рядом с ней нет (QA 28.10.2026).
+ */
+export function layoutDayEvents<T extends TimedEvent>(events: T[], day: Date, minMinutes = 0) {
+  const minMs = minMinutes * 60_000
   const segments = events.flatMap(event => {
     const segment = eventDaySegment(event, day)
     // `group` — номер цепочки пересекающихся встреч. Нужен тому, кто рисует:
     // на узкой колонке показать все колонки нельзя, и свернуть лишнее в «+N»
     // можно только внутри одной цепочки, а не по дню целиком.
-    return segment ? [{ event, ...segment, column: 0, columns: 1, group: 0 }] : []
-  }).sort((a, b) => a.start.getTime() - b.start.getTime() || b.end.getTime() - a.end.getTime())
+    if (!segment) return []
+    const from = segment.start.getTime()
+    return [{ event, ...segment, from, to: Math.max(segment.end.getTime(), from + minMs),
+      column: 0, columns: 1, span: 1, group: 0 }]
+  }).sort((a, b) => a.from - b.from || b.to - a.to)
   let group: typeof segments = []
   let groupEnd = 0
   let groupIndex = 0
@@ -36,23 +50,25 @@ export function layoutDayEvents<T extends TimedEvent>(events: T[], day: Date) {
     for (const entry of group) {
       entry.columns = columns.length
       entry.group = groupIndex
+      let span = 1
+      while (entry.column + span < columns.length && !group.some(other => other.column === entry.column + span
+        && other.from < entry.to && entry.from < other.to)) span += 1
+      entry.span = span
     }
     if (group.length) groupIndex += 1
   }
   for (const entry of segments) {
-    const start = entry.start.getTime()
-    const end = entry.end.getTime()
-    if (start >= groupEnd) {
+    if (entry.from >= groupEnd) {
       finish()
       group = []
       columns = []
     }
-    let column = columns.findIndex(until => until <= start)
+    let column = columns.findIndex(until => until <= entry.from)
     if (column < 0) column = columns.length
-    columns[column] = end
+    columns[column] = entry.to
     entry.column = column
     group.push(entry)
-    groupEnd = Math.max(groupEnd, end)
+    groupEnd = Math.max(groupEnd, entry.to)
   }
   finish()
   return segments
@@ -77,4 +93,24 @@ export function recurrenceTimes(
       return companyDayTime(day, hour || 0, minute || 0)
     })
     .filter(at => at > after)
+}
+
+/**
+ * Новое время встречи, которую тянут мышью: минуты от начала дня.
+ *
+ * `move` — переносит, сохраняя длительность; `start` и `end` — тянут за край.
+ * Шаг — 15 минут по часам дня, а не по сдвигу: встреча с 09:04 встаёт на
+ * 09:00 или 09:15, как в настольных календарях. Встреча не выходит за сутки и
+ * не становится короче шага.
+ */
+export function dragTimes(mode: 'move' | 'start' | 'end', start: number, end: number,
+  deltaMinutes: number, step = 15) {
+  const snap = (m: number) => Math.round(m / step) * step
+  if (mode === 'move') {
+    const length = Math.max(end - start, step)
+    const from = Math.min(Math.max(snap(start + deltaMinutes), 0), 1440 - length)
+    return { start: from, end: from + length }
+  }
+  if (mode === 'start') return { start: Math.min(Math.max(snap(start + deltaMinutes), 0), end - step), end }
+  return { start, end: Math.max(Math.min(snap(end + deltaMinutes), 1440), start + step) }
 }

@@ -49,3 +49,36 @@ test('повторяющееся дело раскладывается впер�
   assert.equal(recurrenceTimes({ mode: 'monthly', day: 12 }, days, after).length, 0)
   assert.equal(recurrenceTimes({ mode: 'monthly', day: 18 }, days, after).length, 1)
 })
+
+test('Встреча растягивается на свободные колонки, а не делит ширину с чужим часом', () => {
+  // Сутки целиком — длинная (как отменённая «Продолжение» 28.10); вечером три встречи разом.
+  const result = layoutDayEvents([event('long', 0, 24), event('morning', 10, 11),
+    event('e1', 20, 21), event('e2', 20, 21), event('e3', 20, 21)], day)
+  const morning = result.find(row => row.event.id === 'morning')!
+  assert.equal(morning.columns, 4)
+  assert.equal(morning.column, 1)
+  assert.equal(morning.span, 3, 'утренняя занимает всё справа от длинной')
+  assert.deepEqual(result.filter(row => row.event.id.startsWith('e')).map(row => row.span), [1, 1, 1])
+})
+
+test('Короткие встречи не ложатся друг на друга: длина по высоте блока', () => {
+  const at = (h: number, m: number, s = 0) => new Date(2026, 8, 7, h, m, s).toISOString()
+  const short = (id: string, m: number) => ({ id, starts_at: at(9, m), ends_at: at(9, m, 13) })
+  const result = layoutDayEvents([short('a', 4), short('b', 9), short('c', 40)], day, 25)
+  assert.deepEqual(result.map(row => [row.event.id, row.column, row.columns]), [
+    ['a', 0, 2], ['b', 1, 2], ['c', 0, 1],
+  ])
+  // Без поправки на высоту все три в одной колонке — так было на снимке 28.10.
+  assert.deepEqual(layoutDayEvents([short('a', 4), short('b', 9)], day).map(row => row.column), [0, 0])
+})
+
+test('Перетаскивание: шаг 15 минут, длительность сохраняется, сутки не покидает', async () => {
+  const { dragTimes } = await import('./calendarLayout.ts')
+  assert.deepEqual(dragTimes('move', 600, 660, 37), { start: 630, end: 690 }, '10:00 +37 мин → 10:30')
+  assert.deepEqual(dragTimes('move', 544, 545, 0), { start: 540, end: 555 }, 'встреча на минуту встаёт на 09:00 и шаг длиной')
+  assert.deepEqual(dragTimes('move', 1380, 1440, 120), { start: 1380, end: 1440 }, 'за полночь не уезжает')
+  assert.deepEqual(dragTimes('end', 600, 660, 44), { start: 600, end: 705 }, 'конец 11:00 + 44 → 11:45')
+  assert.deepEqual(dragTimes('end', 600, 660, -300), { start: 600, end: 615 }, 'короче шага не бывает')
+  assert.deepEqual(dragTimes('start', 600, 660, -61), { start: 540, end: 660 }, 'начало раньше на час')
+  assert.deepEqual(dragTimes('start', 600, 660, 120), { start: 645, end: 660 })
+})

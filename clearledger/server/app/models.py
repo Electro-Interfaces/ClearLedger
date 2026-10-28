@@ -11734,6 +11734,57 @@ class PersonalMark(Base):
     )
 
 
+class PersonalTag(Base):
+    """Личный тег человека: «Клиент Х», «Бюджет», «Срочно мне» — цвет и имя.
+
+    Не подборка и не метка компании (решение МАГа 28.10.2026). Подборка — место,
+    где предмет лежит, одна на предмет; тег — цветная пометка поверх, их на
+    предмете сколько угодно, и по ним красят встречи в календаре, ищут и
+    фильтруют. Метку компании видят все и она меняет предмет для всех; тег видит
+    только хозяин, а предмет у других не меняется вовсе.
+
+    Цвет — имя тона палитры (`blue`, `amber`, …), а не hex: тон обязан читаться в
+    обеих темах, произвольный hex этого не гарантирует.
+    """
+    __tablename__ = "personal_tags"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(40), nullable=False)
+    color: Mapped[str] = mapped_column(String(20), nullable=False, default="blue")
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "company_id", "name", name="uq_personal_tags_name"),
+    )
+
+
+class PersonalTagLink(Base):
+    """Тег на предмете: `event:<uuid>`, `task:<uuid>`, `doc:<uuid>`, позже
+    `chat_msg:<uuid>` — тот же словарь `<вид>:<ключ>`, что у личной отметки.
+
+    Внешнего ключа на предмет нет и быть не может (предмет полиморфный), поэтому
+    строка переживает свой предмет; показывают её только рядом с живым предметом.
+    """
+    __tablename__ = "personal_tag_links"
+
+    tag_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("personal_tags.id", ondelete="CASCADE"),
+        primary_key=True)
+    target_ref: Mapped[str] = mapped_column(String(120), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("ix_personal_tag_links_target", "target_ref"),)
+
 
 class TaskView(Base):
     """Сохранённый отбор реестра: «Мои просрочки», «Работа по объекту 208».

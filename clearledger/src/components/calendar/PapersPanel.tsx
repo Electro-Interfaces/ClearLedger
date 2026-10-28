@@ -83,24 +83,14 @@ export function PapersPanel({ companyId, eventId, readOnly = false, onChanged }:
   const материалы = q.data?.papers ?? []
 
   return (
-    <div className="space-y-3 rounded-md border border-border p-3">
-      <div>
-        <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Материалы к встрече
-        </h3>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Повестка, документы и файлы для участников. Видят те же, кто видит встречу.
-        </p>
-      </div>
+    <div className="space-y-1.5 pt-1.5" title="Повестка, документы и файлы для участников. Видят те же, кто видит встречу.">
 
       {q.isLoading && <p role="status" className="text-xs text-muted-foreground">Загружаем…</p>}
       {q.isError && (
         <p role="alert" className="text-xs text-destructive">Материалы не загрузились.</p>
       )}
       {!q.isLoading && !q.isError && материалы.length === 0 && (
-        <p className="text-xs text-muted-foreground">
-          Пока ничего не приложено{readOnly ? '.' : ' — добавьте повестку или документ, который надо прочитать до встречи.'}
-        </p>
+        <p className="text-sm text-muted-foreground">Ничего не приложено</p>
       )}
 
       {материалы.length > 0 && (
@@ -146,7 +136,7 @@ export function PapersPanel({ companyId, eventId, readOnly = false, onChanged }:
       )}
 
       {!readOnly && (
-        <div className="space-y-2 border-t border-border pt-2">
+        <div className="space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
             <input ref={файл} type="file" className="hidden"
               onChange={(e) => {
