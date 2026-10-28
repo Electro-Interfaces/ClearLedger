@@ -11,12 +11,17 @@
 Отбор один на все ответы: плитки, список, карточка и выгрузка считаются из одного
 среза (`services/accounting_space.load_slice`), поэтому число в плитке и длина
 списка не могут разойтись.
+
+Та же механика отвечает на вопрос отдельной карточки — договора, контрагента или
+площадки: `link-summary` для одной и `link-summaries` для видимой страницы списка.
+Контракт и правила отметки — `docs/ACCOUNTING_SPACE_STATUS_API.md`.
 """
 from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import assert_company_member, get_current_user
@@ -30,6 +35,29 @@ router = APIRouter(prefix="/accounting/space", tags=["Бухгалтерия · 
 # `total` считается по всему отбору, а не по видимой порции.
 PAGE = 100
 PAGE_MAX = 1000
+
+# Сколько карточек можно спросить одним запросом. 500 — согласованный размер
+# порции интерфейса: в пространстве 901 договор, и при меньшем лимите первая же
+# порция списка получала бы 400. Ограничение не формальное: срез читается целиком
+# в память, и партия «на всю таблицу» была бы самым тяжёлым запросом экрана.
+SUMMARY_BATCH_MAX = 500
+
+
+class SummariesIn(BaseModel):
+    """Тело batch-запроса отметок: один тип карточки, список её id."""
+    entity_type: str = Field(..., description="contract | counterparty | location")
+    # Жёсткий потолок присланного списка — защита от разбора гигантского тела;
+    # сам лимит порции считается по уникальным id (`SUMMARY_BATCH_MAX`).
+    entity_ids: list[str] = Field(default_factory=list, max_length=5000)
+    organization_id: str | None = Field(
+        None, description="Своё юрлицо; действующий скоуп участника сильнее этого выбора")
+
+
+def _entity_type(value: str) -> str:
+    if value not in acct.ENTITY_TYPES:
+        raise HTTPException(status_code=400, detail="Неизвестный тип карточки: "
+                            + ", ".join(acct.ENTITY_TYPES))
+    return value
 
 
 def _matches(row: dict, needle: str) -> bool:
@@ -145,7 +173,7 @@ async def list_sources(
 @router.get("/links")
 async def list_links(
     company_id: str = Query(...),
-    entity_type: str = Query(..., description="contract (пока единственный тип в данных)"),
+    entity_type: str = Query(..., description="contract | counterparty | location"),
     entity_id: str = Query(...),
     organization_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -153,4 +181,62 @@ async def list_links(
 ):
     """Сопряжения одной карточки — для бейджа в её собственном экране."""
     sl = await _slice(company_id, organization_id, current_user, db)
-    return {"items": acct.entity_links(sl, entity_type, entity_id)}
+    return {"items": acct.entity_links(sl, _entity_type(entity_type), entity_id)}
+
+
+@router.get("/link-summary")
+async def get_link_summary(
+    company_id: str = Query(...),
+    entity_type: str = Query(..., description="contract | counterparty | location"),
+    entity_id: str = Query(...),
+    organization_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отметка сверки одной карточки: три оси, состав сверенного, сводка договоров.
+
+    Неизвестная и недоступная карточка отвечают одинаково — 404. Отличать «нет такой»
+    от «не ваша» нельзя: сама разница рассказывает о чужих данных.
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    kind = _entity_type(entity_type)
+    sl = await acct.load_slice(db, cid, organization_id)
+    items = await acct.entity_summaries(db, sl, cid, kind, [entity_id], organization_id)
+    if not items or not items[0]["exists"]:
+        raise HTTPException(status_code=404, detail="Карточка не найдена")
+    return items[0]
+
+
+@router.post("/link-summaries")
+async def post_link_summaries(
+    company_id: str = Query(...),
+    body: SummariesIn = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Отметки сверки для СПИСКА карточек — один запрос на видимую страницу.
+
+    POST, а не GET: триста UUID в строке запроса упираются в лимит заголовка nginx.
+    Чтения это не меняет — ни одна запись здесь не создаётся и не правится.
+
+    Ответ содержит элемент на КАЖДЫЙ запрошенный id в том же порядке: пропуск строка
+    списка прочитала бы как «ещё грузится» и осталась бы без отметки. Недоступная и
+    неизвестная карточка получают то же «нет данных для сравнения».
+    """
+    cid = await assert_company_member(company_id, current_user, db)
+    kind = _entity_type(body.entity_type)
+    # Дубли сворачиваем, порядок первого появления сохраняем: список рисует строки
+    # в своём порядке и сопоставляет отметки по id.
+    ids = [x for x in dict.fromkeys(str(raw or "").strip() for raw in body.entity_ids) if x]
+    # Лимит — по уникальным карточкам: повторённый id работы не добавляет, и
+    # отбивать из-за него порцию списка не за что.
+    if len(ids) > SUMMARY_BATCH_MAX:
+        raise HTTPException(status_code=400,
+                            detail=f"За один запрос не больше {SUMMARY_BATCH_MAX} карточек")
+    if not ids:
+        return {"entity_type": kind, "requested": 0, "items": [],
+                "disclaimer": acct.DISCLAIMER}
+    sl = await acct.load_slice(db, cid, body.organization_id)
+    items = await acct.entity_summaries(db, sl, cid, kind, ids, body.organization_id)
+    return {"entity_type": kind, "requested": len(ids), "items": items,
+            "disclaimer": acct.DISCLAIMER}

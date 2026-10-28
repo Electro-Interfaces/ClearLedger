@@ -20,6 +20,9 @@ import { useCompany } from '@/contexts/CompanyContext'
 import type { ServiceLocation } from '@/types/location'
 import { PAYMENT_META, ROLE_LABEL, paidThroughLabel, type SettlementRole } from '@/types/settlement'
 import { OpsTermsBlock } from '@/components/balance/OpsTermDialog'
+import { AccountingLinkBlock } from '@/components/reference/AccountingLinkBlock'
+import { AccountingMarkCell } from '@/components/reference/AccountingMark'
+import { useAccountingMarks } from '@/hooks/useAccountingMarks'
 import { Placeholder, ScrollTab } from './shared'
 
 /** Вид договора 1С кодом («СПоставщиком») → по-русски. */
@@ -44,6 +47,9 @@ export function ContractsTab({ location }: { location: ServiceLocation }) {
 
   const settleQ = useLocationSettlements(isEnergy ? location.id : null)
   const settlements = settleQ.data ?? []
+
+  // Сверка с бухгалтерией по всем договорам станции — одной сводкой, не строкой на строку.
+  const marks = useAccountingMarks('contract', contracts.map((c) => c.id), isEnergy)
 
   const empty = contracts.length === 0 && settlements.length === 0
     && !contractsQ.isLoading && !settleQ.isLoading
@@ -135,6 +141,7 @@ export function ContractsTab({ location }: { location: ServiceLocation }) {
                     <span className={contractStatus(c).cls}> · {contractStatus(c).label}</span>
                   </div>
                 </div>
+                {isEnergy && <div className="shrink-0"><AccountingMarkCell marks={marks} id={c.id} /></div>}
                 {c.companyWide
                   ? <Badge variant="secondary" className="shrink-0 gap-1 text-[10px]"><Building className="h-2.5 w-2.5" /> вся компания</Badge>
                   : <div className="flex shrink-0 items-center gap-1">
@@ -158,10 +165,11 @@ export function ContractsTab({ location }: { location: ServiceLocation }) {
                 Общие договоры компании ({common.length}) — действуют на все станции
               </summary>
               <ul className="mt-2 divide-y">{common.map((c) => (
-                <li key={c.id} className="py-1.5">
+                <li key={c.id} className="flex flex-wrap items-center gap-1.5 py-1.5">
                   <Link to={`/contractors?sub=contracts&contract=${c.id}`} className="text-primary hover:underline">{c.number}</Link>
-                  <span className="text-xs text-muted-foreground"> · {c.counterpartyName || c.counterpartyId}
+                  <span className="text-xs text-muted-foreground">· {c.counterpartyName || c.counterpartyId}
                     <span className={contractStatus(c).cls}> · {contractStatus(c).label}</span></span>
+                  {isEnergy && <AccountingMarkCell marks={marks} id={c.id} />}
                 </li>))}</ul>
             </details>
           )}
@@ -173,6 +181,10 @@ export function ContractsTab({ location }: { location: ServiceLocation }) {
           )}
         </div>
       )}
+
+      {/* Сверка с бухгалтерией по площадке — сводка по её договорам. Проверкой самого
+          объекта она не является: выгрузка говорит о договорах, не о станции. */}
+      {isEnergy && <AccountingLinkBlock entityType="location" id={location.id} />}
     </ScrollTab>
   )
 }

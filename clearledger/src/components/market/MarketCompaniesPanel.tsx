@@ -120,7 +120,7 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
         ['Модель', card.class ? `${card.class}${card.classChecked ? '' : ' (не проверено)'}` : null],
         ['Достоверность записи', card.dataLevel != null ? УРОВЕНЬ[card.dataLevel] : null],
         ['Сайт', card.siteUrl],
-        ['Штаб-квартира', card.baseCity],
+        ['Базовый город сети', card.baseCity],
         ['Городов', card.citiesCount],
         ['Округов', card.districts],
         ['Платформа', card.platformCode],
@@ -182,7 +182,7 @@ function CompanyCard({ card, onBack }: { card: MarketOperatorCard; onBack: () =>
             )}
             {card.baseCity && (
               <span className="text-muted-foreground">
-                штаб-квартира: <span className="text-foreground">{card.baseCity}</span>
+                базовый город: <span className="text-foreground">{card.baseCity}</span>
               </span>
             )}
             {card.citiesCount != null && (

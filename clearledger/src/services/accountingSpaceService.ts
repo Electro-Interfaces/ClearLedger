@@ -8,12 +8,28 @@
  * Статусы — две независимые оси (сопряжение и проверка), поэтому и в типах они
  * раздельные поля, а не один флаг «сверено».
  */
-import { get } from './apiClient'
+import { chunkIds } from '@/lib/accountingMark'
+import { get, post } from './apiClient'
 
 /** Опознана ли строка источника. */
 export type LinkStatus = 'matched' | 'related' | 'unmatched' | 'candidate'
 /** Что сверено. `stale` — карточка менялась после проверки. */
 export type VerificationStatus = 'verified' | 'partial' | 'differences' | 'not_checked' | 'stale'
+
+/**
+ * Состояние сверки карточки — считает СЕРВЕР, у всех экранов одна правда.
+ *
+ * `matched_checked` бывает только у договора; `contracts_checked` — у контрагента
+ * и площадки, и только если совпали все их доступные договоры. Это сводка по
+ * договорам, а не проверка самой карточки.
+ */
+export type AccountingState = 'differences' | 'stale' | 'needs_check'
+  | 'matched_checked' | 'contracts_checked' | 'no_source'
+
+/** Чья проверка показана: своя карточка или её договоры. */
+export type AccountingScope = 'self' | 'contracts_of_counterparty' | 'contracts_of_location'
+
+export type AccountingEntityType = 'contract' | 'counterparty' | 'location'
 
 export interface AccountingDifference {
   field: string
@@ -53,7 +69,16 @@ export interface AccountingLink {
   stale: boolean
   subject_status: string
   snapshot_at: string
+  /** Поля, реально сошедшиеся со значением источника. Не снимок. */
   checked_fields: string[]
+  /** Доказательства сверки: что с чем сравнивали и чем это кончилось. */
+  compared_fields: AccountingComparedField[]
+  /** Снимок наших полей на момент сверки — отвечает за устаревание, не за сверку. */
+  snapshot_fields: string[]
+  /** Почему реквизит не сверялся. */
+  unchecked_fields: AccountingUncheckedField[]
+  /** Повторная сверка этой связи, если проводилась. */
+  recheck: AccountingRecheck | null
   checked_values: Record<string, unknown>
   current_values: Record<string, unknown>
   checked_hash: string
@@ -88,12 +113,29 @@ export interface AccountingRecord {
   links_count: number
   differences_count: number
   stale_count: number
+  rechecked_at?: string | null
+  recheck_overall?: string | null
   location_ids: string[]
   cards: AccountingCard[]
   card_labels: string[]
 }
 
+export interface AccountingRecheckCandidate {
+  contract_id: string
+  number: string
+  date: string
+  counterparty: string
+  axis_date: 'match' | 'mismatch' | 'no_data'
+}
+
 export interface AccountingRecordCard extends AccountingRecord {
+  recheck?: {
+    run_id: string
+    checked_at: string | null
+    overall: string
+    public_note: string
+    candidates_in_registry: AccountingRecheckCandidate[] | null
+  } | null
   source_side: {
     counterparty: string
     contract: string
@@ -236,6 +278,179 @@ export const getAccountingSources = (companyId: string, organizationId?: string)
   get<{ items: AccountingSourceBatch[]; scope: string }>(`${base}/sources`, {
     company_id: companyId, organization_id: organizationId,
   })
+
+/**
+ * Сводка сверки одной карточки — общая отметка для всех экранов пространства.
+ *
+ * Оси раздельны и в одну галочку не сводятся: `matching` — опознана ли строка
+ * выгрузки, `verification` — какие именно реквизиты сверены (и какие нет),
+ * `freshness` — правили ли карточку после сверки. `state` — сводное состояние
+ * для подписи, считает его сервер.
+ */
+/** Исход сравнения одного поля. `unknown` — сравнивать было нечего, а не конфликт. */
+export type CompareResult = 'match' | 'difference' | 'unknown'
+
+export interface AccountingComparedField {
+  field: string
+  label: string
+  source: string
+  space: string
+  /** Основное значение исхода. */
+  result: CompareResult
+  /** Булев дубль `result` для простого связывания; `null` = `unknown`. */
+  equal: boolean | null
+  basis: string
+  /** Откуда взято значение: строка выгрузки или конверт повторной сверки. */
+  origin: 'row' | 'recheck'
+  /** Что о поле записал сам прогон. Свидетельство, а не отметка. */
+  claimed: CompareResult | null
+  claimed_basis: string
+  /** Где лежит значение источника — для подсказки. */
+  evidence: { file: string; sheet: string; rows: string } | null
+}
+
+/**
+ * Независимая повторная сверка (`metadata._accountingRecheck`).
+ *
+ * `applicable: false` значит, что прогон шёл по другой редакции файла и его
+ * свидетельство не принято. Это не отсутствие сверки — причина в
+ * `not_applicable_reason`, и показывать надо именно её.
+ */
+export interface AccountingRecheck {
+  schema_version: number
+  run_id: string
+  checked_at: string | null
+  overall: string
+  applicable: boolean
+  not_applicable_reason: string
+  /** `blocking` только у противоречия стороны и неоднозначности связывания. */
+  open_questions: { code: string; label: string; reason: string; blocking: boolean }[]
+  blocking_questions: string[]
+  claims: { field: string; result: CompareResult }[]
+  candidates_in_registry: AccountingRecheckCandidate[] | number | null
+}
+
+/** Почему реквизит не сверялся — показывается человеку, а не скрывается. */
+export interface AccountingUncheckedField {
+  field: string
+  label: string
+  reason: string
+}
+
+export interface AccountingSummarySource {
+  record_id: string; file: string; sheet: string; rows: string
+  period: string; as_of: string; batch_id: string
+  counterparty: string; contract: string; status: LinkStatus
+}
+
+export interface AccountingAggregateContract {
+  id: string; number: string; date: string; type_code: string | null
+  state: AccountingState; state_label: string; records: number
+}
+
+export interface AccountingLinkSummary {
+  entity_type: AccountingEntityType
+  entity_id: string
+  /** `false` в пачке значит «нет сведений и карточка недоступна» — это не ошибка. */
+  exists: boolean
+  scope: AccountingScope
+  scope_label: string
+  state: AccountingState
+  state_label: string
+  /** Готовый текст пояснения от сервера — показывается как есть. */
+  state_note: string
+  /** Сверена ли карточка целиком. Всегда `false`, включая договор. */
+  entity_verified: boolean
+  matching: {
+    by_status: Partial<Record<LinkStatus, number>>
+    labels: Partial<Record<LinkStatus, string>>
+  }
+  verification: {
+    status: VerificationStatus
+    label: string
+    /** Доказательства сверки: только номер и дата — других значений выгрузка не дала. */
+    compared_fields: AccountingComparedField[]
+    /** Поля, реально сошедшиеся со значением источника. Не снимок. */
+    checked_fields: string[]
+    /** Снимок наших полей на момент сверки. Отвечает за устаревание, сверкой НЕ является. */
+    snapshot_fields: string[]
+    snapshot_basis: string
+    unchecked_fields: AccountingUncheckedField[]
+    /** Независимая повторная сверка, если проводилась. */
+    recheck: AccountingRecheck | null
+  }
+  freshness: {
+    /** Выставляется параллельно состоянию, в том числе при расхождениях. */
+    stale: boolean
+    stale_records: number
+    checked_at: string | null
+    checked_at_basis: string
+    rechecked_at: string | null
+    baseline: string
+    checked_hash: string | null
+    current_hash: string | null
+  }
+  differences: AccountingDifference[]
+  sources: AccountingSummarySource[]
+  records: number
+  /** Разрез по договорам — обязателен у контрагента и площадки. */
+  aggregate: {
+    contracts_total: number
+    with_source: number
+    without_source: number
+    by_state: Partial<Record<AccountingState, number>>
+    contracts: AccountingAggregateContract[]
+  } | null
+  /** Чего выгрузка не содержит — словами от сервера, не догадкой экрана. */
+  disclaimer: string
+}
+
+/**
+ * Предел одного запроса сводок: 500 УНИКАЛЬНЫХ id, 501-й даёт 400.
+ *
+ * Повторённый id порцию не отбивает, но список всё равно приходит сюда уже без
+ * повторов — ключ кеша строится по составу, а не по порядку строк.
+ */
+export const SUMMARY_CHUNK = 500
+
+/**
+ * Сводки сверки для списка карточек — один запрос на экран, не на строку.
+ *
+ * Запрашиваются только отображаемые id: реестр из девятисот договоров иначе дал
+ * бы девятьсот обращений. Длинный список режется на части по пределу сервера.
+ *
+ * Успешный ответ обязан содержать элемент на КАЖДЫЙ запрошенный id. Пропуск —
+ * признак неверного ответа, а не доказательство отсутствия строки источника:
+ * молча показать «нет данных для сравнения» значило бы соврать человеку.
+ */
+export async function getAccountingLinkSummaries(
+  companyId: string, entityType: AccountingEntityType, entityIds: string[],
+  organizationId?: string | null,
+): Promise<Record<string, AccountingLinkSummary>> {
+  const map: Record<string, AccountingLinkSummary> = {}
+  for (const part of chunkIds(entityIds, SUMMARY_CHUNK)) {
+    const res = await post<{ entity_type: string; requested: number; items: AccountingLinkSummary[]; disclaimer: string }>(
+      `${base}/link-summaries?company_id=${encodeURIComponent(companyId)}`,
+      { entity_type: entityType, entity_ids: part, organization_id: organizationId ?? undefined },
+    )
+    for (const s of res.items ?? []) map[s.entity_id] = s
+    const пропущены = part.filter((id) => !map[id])
+    if (пропущены.length) {
+      throw new Error('Сервер вернул сводки не на все карточки (нет ' + пропущены.length
+        + ' из ' + part.length + '). Это неполный ответ, а не отсутствие сведений.')
+    }
+  }
+  return map
+}
+
+/** Сводка одной карточки — для её собственного экрана. */
+export const getAccountingLinkSummary = (
+  companyId: string, entityType: AccountingEntityType, entityId: string,
+  organizationId?: string | null,
+) => get<AccountingLinkSummary>(`${base}/link-summary`, {
+  company_id: companyId, entity_type: entityType, entity_id: entityId,
+  organization_id: organizationId ?? undefined,
+})
 
 /** Сопряжения одной карточки — для бейджа в её собственном экране. */
 export const getAccountingEntityLinks = (companyId: string, entityType: string, entityId: string) =>

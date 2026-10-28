@@ -9121,6 +9121,87 @@ class MarketNewsSettings(Base):
     updated_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
 
+class MarketActor(Base):
+    """Участник рынка, которого нет в реестрах сетей и приложений.
+
+    Реестры продукта покрывают две роли: `market_operators` — кто владеет и
+    эксплуатирует станции, `market_players` — чьё приложение стоит у водителя.
+    В новостях действуют и другие: производитель оборудования, сервисная
+    служба, ведомство. Поле `vendor` у точек рынка пустое у всех записей
+    (проверено 28.10.2026), то есть производителей мы не знаем вовсе — их имена
+    впервые появляются именно в новостях.
+
+    Третий реестр заведён, чтобы не растягивать первые два: у ведомства нет
+    станций и приложения, а у завода нет сети. Связь с рынком даёт не запись
+    сама по себе, а совместные упоминания — см. `MarketNewsMention`.
+    """
+    __tablename__ = "market_actors"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    # vendor (производитель оборудования) | service (сервис и монтаж) |
+    # state (ведомство, регулятор) | utility (сетевая, энергосбыт) | other
+    kind: Mapped[str] = mapped_column(String(12), nullable=False, default="vendor")
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Как его пишут в новостях: «Парус электро», «Парус-электро», «ПАРУС ЭЛЕКТРО».
+    aliases: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    site_url: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Заведён человеком или предложен разбором новостей и ещё не подтверждён.
+    confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_market_actor_name", "company_id", "name", unique=True),
+        Index("ix_market_actor_kind", "company_id", "kind", "confirmed"),
+    )
+
+
+class MarketNewsMention(Base):
+    """Кого новость упоминает и в какой роли.
+
+    Привязка «одна новость — один оператор» не отвечает на вопрос маркетинга:
+    рынок интересен связями, а они видны только когда в одном материале рядом
+    стоят производитель и сеть, сеть и ведомство, агрегатор и банк. Поэтому
+    упоминания — отдельные строки, и их у новости столько, сколько участников
+    в ней названо.
+
+    Пара упоминаний в одном материале и есть наблюдаемая связь: «Парус электро
+    поставит оборудование Росатому» — это завод и сеть в одной строке. Связь не
+    утверждается как факт отношений, она считается по частоте совместных
+    появлений, и человек видит, из каких материалов она собрана.
+    """
+    __tablename__ = "market_news_mentions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    news_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_news.id", ondelete="CASCADE"), nullable=False, index=True)
+    # operator | platform | vendor | aggregator | automaker | bank | service |
+    # state | utility | other — роль участника в раскладе рынка, а не в новости.
+    role: Mapped[str] = mapped_column(String(12), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    operator_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_operators.id", ondelete="CASCADE"), nullable=True)
+    player_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_players.id", ondelete="CASCADE"), nullable=True)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_actors.id", ondelete="CASCADE"), nullable=True)
+    # По какому написанию узнали: без этого подтверждать подсказку вслепую.
+    matched: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # auto — распознал разбор, human — поставил человек.
+    linked_by: Mapped[str] = mapped_column(String(8), nullable=False, default="auto")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("uq_market_mention", "news_id", "role", "name", unique=True),
+        Index("ix_market_mention_role", "company_id", "role", "name"),
+    )
+
+
 class MarketNews(Base):
     """Новость рынка: материал источника с происхождением и разбором.
 

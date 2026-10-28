@@ -59,6 +59,10 @@ import { useSearchParams } from 'react-router-dom'
 import { useHistoryViewState } from '@/hooks/useHistoryViewState'
 import { ContractDocumentsBlock } from '@/components/reference/ContractDocumentsBlock'
 import { AccountingLinkBlock } from '@/components/reference/AccountingLinkBlock'
+import {
+  AccountingMarkCell, AccountingMarkFor, AccountingMarkLabel,
+} from '@/components/reference/AccountingMark'
+import { useAccountingMarks } from '@/hooks/useAccountingMarks'
 import { ContractQualityPanel } from '@/components/reference/ContractQualityPanel'
 import { useStationContracts, stationHitLabel } from '@/components/reference/useStationContracts'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
@@ -241,9 +245,12 @@ function ContractDetailDialog({ contract: c, children }: { contract: Contract; c
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <DialogTitle className="flex flex-wrap items-center gap-2">
             <FileText className="size-5" /> Договор {c.number}
             {c.isClosed && <Badge variant="outline" className="text-muted-foreground">закрыт</Badge>}
+            {/* Состояние сверки видно в первом экране карточки, в том числе на
+                телефоне: подробности ниже, но ответ «сверено или нет» — сразу. */}
+            {isEnergy && <AccountingMarkFor entityType="contract" id={c.id} />}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-5">
@@ -719,6 +726,9 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
     for (const s of cpSettlements) if (s.contractId) m.set(s.contractId, [...(m.get(s.contractId) ?? []), s])
     return m
   }, [cpSettlements])
+  // Отметки договоров карточки — одной сводкой; состав меняется при смене контрагента.
+  const contractIds = useMemo(() => contracts.map((c) => c.id), [contracts])
+  const marks = useAccountingMarks('contract', contractIds, isEnergy)
 
   return (
     <div className="space-y-5">
@@ -732,6 +742,8 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
             {cp.externalRef && (
               <Badge variant="secondary" className="gap-1"><Database className="size-3" /> Из 1С</Badge>
             )}
+            {/* Сводка по договорам контрагента — рядом с именем, а не только внизу. */}
+            {isEnergy && <AccountingMarkFor entityType="counterparty" id={cp.id} />}
           </div>
           {isEnergy && <div className="mt-2"><WhereWorks counterpartyId={cp.id} /></div>}
         </div>
@@ -808,6 +820,7 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
               <p className="text-muted-foreground">Дата: {c.date || '—'}</p>
               <p className={contractStatus(c).cls}>{contractStatus(c).label}</p>
               <ContractKindBadge contract={c} />
+              {isEnergy && <div><AccountingMarkCell marks={marks} id={c.id} compact={false} /></div>}
               {isEnergy && <div><ContractScopeDialog contract={c}><Button variant="outline" size="sm" className="min-h-11">Охват: {ContractScopeBadgeLabel(c.scopeType, c.locationsCount)}</Button></ContractScopeDialog></div>}
               <ContractButtons contract={c} counterpartyId={cp.id} mobile />
             </div>)}
@@ -820,13 +833,14 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                 <TableHead className="w-[100px]">Дата</TableHead>
                 <TableHead>Вид</TableHead>
                 {isEnergy && <TableHead className="w-[160px]">Охват</TableHead>}
+                {isEnergy && <TableHead className="w-[200px]" title="Сверка конкретных реквизитов со сведениями бухгалтерии: номер, дата, контрагент, вид">Сверка с бухгалтерией</TableHead>}
                 <TableHead className="w-16" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {contracts.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={isEnergy ? 5 : 4} className="text-center h-24">
+                  <TableCell colSpan={isEnergy ? 6 : 4} className="text-center h-24">
                     <p className="text-sm text-muted-foreground">Договоров пока нет</p>
                     <p className="mt-0.5 text-xs text-muted-foreground/70">
                       Здесь появятся договоры контрагента — из 1С или добавленные вручную.
@@ -863,12 +877,15 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
                     </ContractScopeDialog>
                   </TableCell>
                   )}
+                  {isEnergy && <TableCell>
+                    <AccountingMarkCell marks={marks} id={c.id} />
+                  </TableCell>}
                   <TableCell>
                     <ContractButtons contract={c} counterpartyId={cp.id} />
                   </TableCell>
                 </TableRow>
                 {isEnergy && !!settlementsByContract.get(c.id)?.length &&
-                  <ContractStationsRow contract={c} rows={settlementsByContract.get(c.id)!} cols={isEnergy ? 5 : 4} />}
+                  <ContractStationsRow contract={c} rows={settlementsByContract.get(c.id)!} cols={isEnergy ? 6 : 4} />}
                 </Fragment>
               ))}
             </TableBody>
@@ -876,6 +893,11 @@ function ContractorDetail({ cp, all }: { cp: Counterparty; all: Counterparty[] }
           </div>
         </div>}
       </div>
+
+      {/* Сверка с бухгалтерией по контрагенту — сводка по его договорам. Проверкой
+          самой карточки контрагента она не является: это сказано в блоке словами,
+          а в отметке — приставкой «договоры». */}
+      {isEnergy && <AccountingLinkBlock entityType="counterparty" id={cp.id} />}
 
       {/* Связь со слоем данных: energy — платёжная дисциплина по станциям,
           fuel — документы БП, сопоставленные по ИНН */}
@@ -960,7 +982,7 @@ function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; child
   const [type, setType] = useState<CounterpartyType>(edit?.type ?? 'ЮЛ')
   const set = (k: CpField) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setF((s) => ({ ...s, [k]: e.target.value }))
-  const canSave = f.name.trim() !== '' && (f.inn.trim() !== '' || (!!edit && !edit.inn.trim()))
+  const canSave = f.name.trim() !== '' && (f.inn.trim() !== '' || (!!edit && !(edit.inn ?? '').trim()))
   const pending = create.isPending || update.isPending
   function save() {
     const c = (v: string) => v.trim() || undefined
@@ -1009,7 +1031,7 @@ function CounterpartyFormDialog({ edit, children }: { edit?: Counterparty; child
             </LField>
             <LField label="Краткое наименование" required><Input value={f.name} onChange={set('name')} placeholder="ООО …" /></LField>
             <LField label="Полное наименование" span><Input value={f.fullName} onChange={set('fullName')} /></LField>
-            <LField label="ИНН" required={!edit || !!edit.inn.trim()}><Input value={f.inn} onChange={set('inn')} placeholder="7800…" /></LField>
+            <LField label="ИНН" required={!edit || !!(edit.inn ?? '').trim()}><Input value={f.inn} onChange={set('inn')} placeholder="7800…" /></LField>
             <LField label="КПП"><Input value={f.kpp} onChange={set('kpp')} /></LField>
             <LField label="ОГРН / ОГРНИП"><Input value={f.ogrn} onChange={set('ogrn')} /></LField>
             <LField label="ОКПО"><Input value={f.okpo} onChange={set('okpo')} /></LField>
@@ -1532,7 +1554,13 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
   useEffect(() => { setLimit(100) }, [search, typeFilter, grouped, appFilter, projectFilter])
   const visible = grouped ? filtered.filter((c) => !collapsed.has(c.counterpartyId)) : filtered
   const shown = visible.slice(0, limit)
-  const cols = isEnergy ? 7 : 6
+  const cols = isEnergy ? 8 : 6
+  // Сверка с бухгалтерией — одной сводкой на показанные строки, не запросом на строку.
+  const rows = useMemo(() => grouped
+    ? withGroups(filtered, limit, collapsed)
+    : shown.map((c) => ({ c, head: null as string | null })), [grouped, filtered, limit, collapsed, shown])
+  const shownIds = useMemo(() => rows.map((r) => r.c?.id).filter((x): x is string => !!x), [rows])
+  const marks = useAccountingMarks('contract', shownIds, isEnergy)
 
   return (
     <Card className="lg:h-[calc(100vh-13rem)] flex flex-col">
@@ -1595,6 +1623,7 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
                 <TableHead className="w-[180px]">Тип</TableHead>
                 <TableHead>Контрагент</TableHead>
                 {isEnergy && <TableHead className="w-[150px]">Охват</TableHead>}
+                {isEnergy && <TableHead className="w-[210px]" title="Сверка конкретных реквизитов со сведениями бухгалтерии: номер, дата, контрагент, вид">Сверка с бухгалтерией</TableHead>}
                 <TableHead className="w-[120px] text-right">
                   <button onClick={() => toggleSort('amount')} className="inline-flex items-center gap-1 hover:text-foreground transition-colors ml-auto">
                     Сумма <SortIcon col="amount" />
@@ -1610,7 +1639,7 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
               {!isLoading && filtered.length === 0 && (
                 <TableRow><TableCell colSpan={cols} className="h-20 text-center text-muted-foreground">Договоры не найдены</TableCell></TableRow>
               )}
-              {(grouped ? withGroups(filtered, limit, collapsed) : shown.map((c) => ({ c, head: null as string | null }))).map(({ c, head }) => head ? (
+              {rows.map(({ c, head }) => head ? (
                 <TableRow key={`g-${head}`} className="bg-muted/40 hover:bg-muted/60">
                   <TableCell colSpan={cols - 1}>
                     <button type="button" className="flex items-center gap-2 text-left font-medium" onClick={() => setCollapsed((s) => { const n = new Set(s); n.has(head) ? n.delete(head) : n.add(head); return n })}>
@@ -1653,6 +1682,9 @@ function AllContractsView({ counterparties }: { counterparties: Counterparty[] }
                     </ContractScopeDialog>
                   </TableCell>
                   )}
+                  {isEnergy && <TableCell>
+                    <AccountingMarkCell marks={marks} id={c.id} />
+                  </TableCell>}
                   <TableCell className="text-right text-sm tabular-nums">
                     {c.amountLimit ? c.amountLimit.toLocaleString('ru-RU') : '—'}
                   </TableCell>
@@ -1803,7 +1835,8 @@ const CP_FLAGS = [
 type CpFlag = (typeof CP_FLAGS)[number]['key']
 
 export function ContractorsPage() {
-  const { companyId } = useCompany()
+  const { companyId, company } = useCompany()
+  const isEnergy = company.profileId === 'energy'
   const { data: counterparties = [], isLoading, isError: counterpartiesError, refetch: reloadCounterparties } = useCounterparties()
   const { data: allContracts = [], isError: contractsError, isPending: contractsLoading, refetch: reloadContracts } = useContracts()
   // Раздел страницы задаётся вертикальным меню (`?sub=`), а не своим
@@ -1917,6 +1950,10 @@ export function ContractorsPage() {
 
   const selected = counterparties.find((c) => c.id === selectedId) ?? null
   const chip = chipCls
+  // Отметки видимых строк списка — одной сводкой. Список контрагентов рисуется
+  // целиком, поэтому состав берётся из отбора, а не из первой сотни.
+  const cpMarks = useAccountingMarks('counterparty',
+    useMemo(() => filtered.map((c) => c.id), [filtered]), isEnergy)
 
   return (
     <div className="flex-1 min-w-0 p-4 lg:p-6">
@@ -2083,6 +2120,11 @@ export function ContractorsPage() {
                         только «такой контрагент есть» — по ней нельзя ни выбрать,
                         ни отсортировать. */}
                     <CounterpartyStatsLine st={stats.get(c.id)} />
+                    {/* Отметка — сводка по договорам контрагента, и так и подписана.
+                        Внутри кнопки списка своей кнопки быть не может: показываем
+                        тот же чип без раскрытия, основание открывается в карточке. */}
+                    {isEnergy && <AccountingMarkLabel compact className="mt-1"
+                      state={cpMarks.state(c.id)} summary={cpMarks.summary(c.id)} />}
                   </button>
                 )
               })}

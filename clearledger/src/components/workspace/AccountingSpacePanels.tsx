@@ -22,16 +22,13 @@ import {
 import { ExportButton } from './analytics/ExportButton'
 import { exportRows } from './analytics/exportRows'
 import { useCompany } from '@/contexts/CompanyContext'
+import { MARK_LABEL, MATCHING_LABEL, дата, type MarkState } from '@/lib/accountingMark'
+import { AccountingMark } from '@/components/reference/AccountingMark'
+import { useAccountingMarks } from '@/hooks/useAccountingMarks'
 import {
   getAccountingObjects, getAccountingSources, getAccountingSummary,
   type AccountingObject, type AccountingObjectContract,
 } from '@/services/accountingSpaceService'
-
-const дата = (iso: string | null) => {
-  if (!iso) return ''
-  const d = new Date(iso.length <= 10 ? iso + 'T12:00:00Z' : iso)
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })
-}
 
 function Загрузка() {
   return <div className="flex justify-center py-12"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
@@ -46,12 +43,14 @@ function Ошибка({ text, onRetry, busy }: { text: string; onRetry: () => vo
 // ── Объекты ──────────────────────────────────────────────────────────────────
 
 const О = { код: 0, площадка: 1, адрес: 2, договоров: 3, аренда: 4, энергия: 5,
-  сИсточником: 6, безИсточника: 7, непроверено: 8, состояние: 9 }
+  сИсточником: 6, безИсточника: 7, непроверено: 8, сверка: 9, состояние: 10 }
 const О_ШАПКА = ['Код', 'Площадка', 'Адрес', 'Договоров', 'Аренда земли',
-  'Получение э/э', 'Со сведениями бухгалтерии', 'Без сведений', 'Непроверенных', 'Состояние']
+  'Получение э/э', 'Со сведениями бухгалтерии', 'Без сведений', 'Непроверенных',
+  'Сверка с бухгалтерией', 'Состояние']
 const О_СКРЫТЫ = [О.состояние]
 const О_ШИРИНЫ = { [О.код]: 120, [О.площадка]: 260, [О.адрес]: 300, [О.договоров]: 110,
-  [О.аренда]: 120, [О.энергия]: 130, [О.сИсточником]: 200, [О.безИсточника]: 130, [О.непроверено]: 130 }
+  [О.аренда]: 120, [О.энергия]: 130, [О.сИсточником]: 200, [О.безИсточника]: 130,
+  [О.непроверено]: 130, [О.сверка]: 230 }
 
 export function AccountingObjectsPanel() {
   const { companyId } = useCompany()
@@ -73,12 +72,15 @@ export function AccountingObjectsPanel() {
     const игла = поиск.trim().toLowerCase()
     return !игла || [o.code, o.name, o.address].some((x) => (x || '').toLowerCase().includes(игла))
   }), [все, поиск, толькоПробелы])
+  // Общая отметка сверки площадок — одной сводкой на отбор, не запросом на строку.
+  const отметки = useAccountingMarks('location', useMemo(() => строки.map((o) => o.id), [строки]))
   const ячейки = useMemo<Cell[][]>(() => строки.map((o) => [
     o.code, o.name, o.address, o.contracts_count,
     o.has_rent ? 'есть' : 'нет', o.has_energy ? 'есть' : 'нет',
-    o.with_source, o.without_source, o.unchecked, o.status,
-  ]), [строки])
-  const набор = useReportKit({ id: 'acct-objects.v1', title: 'Объекты и основания',
+    o.with_source, o.without_source, o.unchecked,
+    MARK_LABEL[отметки.state(o.id) as MarkState], o.status,
+  ]), [строки, отметки])
+  const набор = useReportKit({ id: 'acct-objects.v2', title: 'Объекты и основания',
     head: О_ШАПКА, rows: ячейки, hide: О_СКРЫТЫ, ready: !!q.data, help: О_ПОМОЩЬ })
   const видимые = useMemo(() => {
     const { cols, head } = набор.table
@@ -116,13 +118,16 @@ export function AccountingObjectsPanel() {
       </div>
       <ToolStrip />
       <SheetTable {...набор.table} caption="Объекты и основания"
-        lines={['аренда земли и получение электроэнергии', 'техприсоединение — отдельное основание']}
+        lines={['аренда земли и получение электроэнергии', 'техприсоединение — отдельное основание',
+          'сверка площадки собрана из её договоров и проверкой самого объекта не является']}
         defaultWidths={О_ШИРИНЫ} onView={setПорядок}
         rowTitle={(i) => строки[i] ? строки[i].code + ' · ' + строки[i].name : ''}
         onRow={(order, pos) => setКарточка({ order, pos })}
         render={(i, c) => {
           const o = строки[i]
           if (!o) return undefined
+          if (c === О.сверка) return <AccountingMark state={отметки.state(o.id)}
+            summary={отметки.summary(o.id)} />
           if (c === О.аренда || c === О.энергия) {
             const есть = c === О.аренда ? o.has_rent : o.has_energy
             return <span className={есть ? '' : 'text-muted-foreground'}>{есть ? 'есть' : 'нет'}</span>
@@ -169,7 +174,7 @@ function Основания({ title, items }: { title: string; items: Accounting
             {i.contract.basis ? ' · ' + i.contract.basis : ''}</div>
           {i.source.length
             ? <ul className="mt-1.5 flex flex-col gap-1">{i.source.map((s) => <li key={s.record_id}>
-                {s.status_label} · {s.file || 'файл не указан'}
+                {MATCHING_LABEL[s.status] ?? s.status_label} · {s.file || 'файл не указан'}
                 {s.rows ? ' · строки ' + s.rows : ''}
                 {s.as_of ? ' · данные на ' + дата(s.as_of) : ''}
               </li>)}</ul>
@@ -186,7 +191,8 @@ function ОбъектРасшифровка({ kind, object, onClose }: {
   const head = ['Договор', 'Контрагент в бухгалтерии', 'Строка источника', 'Сопряжение', 'Файл', 'Строки', 'Данные на дату']
   const rows: Cell[][] = items.flatMap((i) => i.source.length
     ? i.source.map((s) => ['№ ' + (i.contract.number || '—') + ' от ' + (i.contract.date || '—'),
-        s.counterparty, s.contract_label, s.status_label, s.file, s.rows, дата(s.as_of)])
+        s.counterparty, s.contract_label, MATCHING_LABEL[s.status] ?? s.status_label,
+        s.file, s.rows, дата(s.as_of)])
     : [['№ ' + (i.contract.number || '—') + ' от ' + (i.contract.date || '—'),
         '', 'нет сведений для сравнения', '', '', '', '']])
   return <RelatedReport open={!!kind && !!object}
@@ -204,6 +210,11 @@ const О_ПОМОЩЬ = <div className="flex flex-col gap-3 text-sm leading-rela
   <p>«Непроверенных» считает основания, где сверка не проводилась, устарела или дала
     расхождения. Площадка не наследует проверку своего договора: сопряжён договор —
     это ещё не проверенная площадка.</p>
+  <p>«Сверка с бухгалтерией» — та же отметка, что в карточках договоров и контрагентов:
+    «Сверенные реквизиты совпадают», «Есть расхождения», «Нужна повторная сверка»,
+    «Требует сверки» или «Нет данных для сравнения». Сверено означает конкретные поля
+    (номер, дата, контрагент, вид), а не все реквизиты договора. У площадки отметка
+    собрана из её договоров и проверкой самого объекта не является.</p>
   <p>Карточка площадки показывает основания по видам и источник каждого.
     Расшифровки открываются окном поверх карточки.</p>
 </div>
