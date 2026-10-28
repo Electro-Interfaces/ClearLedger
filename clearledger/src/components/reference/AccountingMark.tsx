@@ -72,7 +72,7 @@ export function AccountingMark({ state, summary, compact, className }: {
         <Чип state={state} summary={summary} />
       </button>
     </PopoverTrigger>
-    <PopoverContent align="start" className="w-[min(92vw,26rem)] text-xs">
+    <PopoverContent align="start" className="max-h-[70dvh] w-[min(92vw,26rem)] overflow-y-auto overscroll-contain text-xs">
       <p className="mb-1.5 font-semibold">{(договоры ? 'Договоры: ' : '') + MARK_LABEL[state]}</p>
       <ul className="flex flex-col gap-1 text-muted-foreground">
         {lines.map((t, i) => <li key={i}>{t}</li>)}
