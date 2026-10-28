@@ -163,6 +163,13 @@ export function CalendarPage() {
   const [слоиСвёрнуты, setСлоиСвёрнуты] = useState(() => {
     try { return localStorage.getItem('calendar-layers-collapsed') !== '0' } catch { return true }
   })
+  const [тегиСвёрнуты, setТегиСвёрнуты] = useState(() => {
+    try { return localStorage.getItem('calendar-tags-collapsed') === '1' } catch { return false }
+  })
+  const свернутьТеги = (value: boolean) => {
+    setТегиСвёрнуты(value)
+    try { localStorage.setItem('calendar-tags-collapsed', value ? '1' : '0') } catch { /* пусто */ }
+  }
   const свернутьСлои = (value: boolean) => {
     setСлоиСвёрнуты(value)
     try { localStorage.setItem('calendar-layers-collapsed', value ? '1' : '0') } catch { /* пусто */ }
@@ -639,11 +646,22 @@ export function CalendarPage() {
 
       {/* Мои теги — отбор встреч. Пусто — объясняем, где их ставят, а не прячем раздел. */}
       <section aria-labelledby="calendar-tags-title" className="space-y-0.5">
-        <div className="flex min-h-8 items-center gap-2 px-1">
-          <h3 id="calendar-tags-title" className="flex-1 text-xs font-medium text-muted-foreground">Мои теги</h3>
+        <div className="flex min-h-8 items-center gap-2">
+          <h3 id="calendar-tags-title" className="flex-1">
+            <button type="button" aria-expanded={!тегиСвёрнуты} aria-controls="calendar-tags-list"
+              onClick={() => свернутьТеги(!тегиСвёрнуты)}
+              className="flex min-h-8 w-full items-center gap-1.5 rounded-md px-1 text-left text-xs font-medium text-muted-foreground hover:bg-accent/60">
+              <ChevronDown aria-hidden className={cn('h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none', тегиСвёрнуты && '-rotate-90')} />
+              <span className="flex-1">Мои теги</span>
+              {/* Свёрнутый раздел говорит, что отбор включён: иначе календарь
+                  «потерял» бы встречи без видимой причины. */}
+              {тегиСвёрнуты && <span className="tabular-nums">{отборТегов.length ? `отбор: ${отборТегов.length}` : моиТеги.length}</span>}
+            </button>
+          </h3>
           {отборТегов.length > 0 && <button type="button" onClick={() => отобратьТег(null)}
-            className="rounded px-1 text-xs text-primary hover:underline">Показать все</button>}
+            className="shrink-0 rounded px-1 text-xs text-primary hover:underline">Показать все</button>}
         </div>
+        <div id="calendar-tags-list" hidden={тегиСвёрнуты} className="space-y-0.5">
         {моиТеги.length === 0
           ? <p className="px-1 text-xs text-muted-foreground">Ставятся в карточке встречи: красят её в календаре, по ним отбирают. Видите только вы.</p>
           : моиТеги.map(t => (
@@ -653,6 +671,7 @@ export function CalendarPage() {
               <span aria-hidden className={cn('size-2.5 rounded-full', tagTone(t.color).dot)} />
             </label>
           ))}
+        </div>
         {отборТегов.length > 0 && <p className="px-1 text-xs text-muted-foreground">Показаны только встречи с отмеченными тегами.</p>}
       </section>
 
