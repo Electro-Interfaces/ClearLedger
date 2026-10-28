@@ -138,7 +138,7 @@ export function TimeGrid({ days, events, tasks, foreign, repeats = [], draft, on
               // Пустое место ряда — встреча на весь день, как клик по часу в сетке.
               onClick={(ev) => { if (ev.target === ev.currentTarget) onAddAllDay?.(d) }}
               title={onAddAllDay ? 'Нажмите на свободное место — встреча на весь день' : undefined}
-              className={cn('min-h-[1.75rem] flex-1 space-y-0.5 border-l border-border p-0.5',
+              className={cn('min-h-[1.75rem] min-w-0 flex-1 space-y-0.5 border-l border-border p-0.5',
                 onAddAllDay && 'cursor-pointer hover:bg-accent/40')}>
               {дневные.map((e) => (
                 <button key={e.id} onClick={() => onEvent(e)}
