@@ -77,6 +77,8 @@ export interface AccountingLink {
   snapshot_fields: string[]
   /** Почему реквизит не сверялся. */
   unchecked_fields: AccountingUncheckedField[]
+  /** Повторная сверка этой связи, если проводилась. */
+  recheck: AccountingRecheck | null
   checked_values: Record<string, unknown>
   current_values: Record<string, unknown>
   checked_hash: string
@@ -268,15 +270,47 @@ export const getAccountingSources = (companyId: string, organizationId?: string)
  * `freshness` — правили ли карточку после сверки. `state` — сводное состояние
  * для подписи, считает его сервер.
  */
+/** Исход сравнения одного поля. `unknown` — сравнивать было нечего, а не конфликт. */
+export type CompareResult = 'match' | 'difference' | 'unknown'
+
 export interface AccountingComparedField {
   field: string
   label: string
   source: string
   space: string
-  /** `null` — сравнивать было нечего; `basis` объясняет, почему. */
+  /** Основное значение исхода. */
+  result: CompareResult
+  /** Булев дубль `result` для простого связывания; `null` = `unknown`. */
   equal: boolean | null
   basis: string
-  recheck: boolean
+  /** Откуда взято значение: строка выгрузки или конверт повторной сверки. */
+  origin: 'row' | 'recheck'
+  /** Что о поле записал сам прогон. Свидетельство, а не отметка. */
+  claimed: CompareResult | null
+  claimed_basis: string
+  /** Где лежит значение источника — для подсказки. */
+  evidence: { file: string; sheet: string; rows: string } | null
+}
+
+/**
+ * Независимая повторная сверка (`metadata._accountingRecheck`).
+ *
+ * `applicable: false` значит, что прогон шёл по другой редакции файла и его
+ * свидетельство не принято. Это не отсутствие сверки — причина в
+ * `not_applicable_reason`, и показывать надо именно её.
+ */
+export interface AccountingRecheck {
+  schema_version: number
+  run_id: string
+  checked_at: string | null
+  overall: string
+  applicable: boolean
+  not_applicable_reason: string
+  /** `blocking` только у противоречия стороны и неоднозначности связывания. */
+  open_questions: { code: string; label: string; reason: string; blocking: boolean }[]
+  blocking_questions: string[]
+  claims: { field: string; result: CompareResult }[]
+  candidates_in_registry: number
 }
 
 /** Почему реквизит не сверялся — показывается человеку, а не скрывается. */
@@ -325,11 +359,8 @@ export interface AccountingLinkSummary {
     snapshot_fields: string[]
     snapshot_basis: string
     unchecked_fields: AccountingUncheckedField[]
-    /** Независимая повторная сверка (`metadata._accountingRecheck`), если проводилась. */
-    recheck: {
-      verdicts?: unknown[]; axes?: Record<string, unknown>; matched_fields?: string[]
-      reasons?: string[]; open_questions?: string[]
-    } | null
+    /** Независимая повторная сверка, если проводилась. */
+    recheck: AccountingRecheck | null
   }
   freshness: {
     /** Выставляется параллельно состоянию, в том числе при расхождениях. */
@@ -358,13 +389,12 @@ export interface AccountingLinkSummary {
 }
 
 /**
- * Предел одного запроса сводок.
+ * Предел одного запроса сводок: 500 УНИКАЛЬНЫХ id, 501-й даёт 400.
  *
- * Сервер принимает не больше 300 id и на большее отвечает 400. Части по 300
- * допустимы при любом пределе от 300 и выше, поэтому эта величина безопасна
- * независимо от того, поднимут предел до 500 или нет.
+ * Повторённый id порцию не отбивает, но список всё равно приходит сюда уже без
+ * повторов — ключ кеша строится по составу, а не по порядку строк.
  */
-export const SUMMARY_CHUNK = 300
+export const SUMMARY_CHUNK = 500
 
 /**
  * Сводки сверки для списка карточек — один запрос на экран, не на строку.

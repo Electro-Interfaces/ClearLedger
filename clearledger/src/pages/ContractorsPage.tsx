@@ -59,7 +59,10 @@ import { useSearchParams } from 'react-router-dom'
 import { useHistoryViewState } from '@/hooks/useHistoryViewState'
 import { ContractDocumentsBlock } from '@/components/reference/ContractDocumentsBlock'
 import { AccountingLinkBlock } from '@/components/reference/AccountingLinkBlock'
-import { AccountingMarkCell, AccountingMarkFor, useAccountingMarks } from '@/components/reference/AccountingMark'
+import {
+  AccountingMarkCell, AccountingMarkFor, AccountingMarkLabel,
+} from '@/components/reference/AccountingMark'
+import { useAccountingMarks } from '@/hooks/useAccountingMarks'
 import { ContractQualityPanel } from '@/components/reference/ContractQualityPanel'
 import { useStationContracts, stationHitLabel } from '@/components/reference/useStationContracts'
 import { AdvancedOnly, AdvancedHint } from '@/components/common/AdvancedOnly'
@@ -1832,7 +1835,8 @@ const CP_FLAGS = [
 type CpFlag = (typeof CP_FLAGS)[number]['key']
 
 export function ContractorsPage() {
-  const { companyId } = useCompany()
+  const { companyId, company } = useCompany()
+  const isEnergy = company.profileId === 'energy'
   const { data: counterparties = [], isLoading, isError: counterpartiesError, refetch: reloadCounterparties } = useCounterparties()
   const { data: allContracts = [], isError: contractsError, isPending: contractsLoading, refetch: reloadContracts } = useContracts()
   // Раздел страницы задаётся вертикальным меню (`?sub=`), а не своим
@@ -1946,6 +1950,10 @@ export function ContractorsPage() {
 
   const selected = counterparties.find((c) => c.id === selectedId) ?? null
   const chip = chipCls
+  // Отметки видимых строк списка — одной сводкой. Список контрагентов рисуется
+  // целиком, поэтому состав берётся из отбора, а не из первой сотни.
+  const cpMarks = useAccountingMarks('counterparty',
+    useMemo(() => filtered.map((c) => c.id), [filtered]), isEnergy)
 
   return (
     <div className="flex-1 min-w-0 p-4 lg:p-6">
@@ -2112,6 +2120,11 @@ export function ContractorsPage() {
                         только «такой контрагент есть» — по ней нельзя ни выбрать,
                         ни отсортировать. */}
                     <CounterpartyStatsLine st={stats.get(c.id)} />
+                    {/* Отметка — сводка по договорам контрагента, и так и подписана.
+                        Внутри кнопки списка своей кнопки быть не может: показываем
+                        тот же чип без раскрытия, основание открывается в карточке. */}
+                    {isEnergy && <AccountingMarkLabel compact className="mt-1"
+                      state={cpMarks.state(c.id)} summary={cpMarks.summary(c.id)} />}
                   </button>
                 )
               })}

@@ -5,8 +5,15 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   MARK_LABEL, MATCHING_LABEL, VERIFICATION_LABEL, chunkIds, isDerived, markHint,
-  markKey, markLines, markState, полеRU, ОТСУТСТВИЕ_ИСТОЧНИКА,
+  markKey, markLines, markState, recheckLine, полеRU, сравнение, ОТСУТСТВИЕ_ИСТОЧНИКА,
 } from './accountingMark.ts'
+
+const поле = (p: Record<string, unknown> = {}) => ({
+  field: 'number', label: 'Номер', source: 'ЭС-001', space: 'ЭС-001',
+  result: 'match', equal: true, basis: '', origin: 'row', claimed: 'match',
+  claimed_basis: '', evidence: null, ...p,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+}) as any
 
 const сводка = (p: Record<string, unknown> = {}) => ({
   entity_type: 'contract', entity_id: 'c1', exists: true, scope: 'self', scope_label: '',
@@ -15,10 +22,7 @@ const сводка = (p: Record<string, unknown> = {}) => ({
   matching: { by_status: { matched: 1 }, labels: { matched: 'Сопряжено' } },
   verification: {
     status: 'verified', label: 'Сверено',
-    compared_fields: [
-      { field: 'number', label: 'Номер', source: 'ЭС-001', space: 'ЭС-001', equal: true, basis: '', recheck: false },
-      { field: 'date', label: 'Дата', source: '15.01.2026', space: '15.01.2026', equal: true, basis: '', recheck: false },
-    ],
+    compared_fields: [поле(), поле({ field: 'date', label: 'Дата', source: '15.01.2026', space: '15.01.2026' })],
     checked_fields: ['number', 'date'],
     snapshot_fields: ['counterparty_id', 'date', 'number', 'type_code'],
     snapshot_basis: 'Снимок полей карточки отвечает за устаревание, сверкой не является.',
@@ -77,7 +81,7 @@ test('показываются доказательства сверки, а н�
   // ничего не подтверждает: выдать его за «сверено» значит соврать.
   const L = markLines(сводка(), 'matched_checked')
   const h = L.join(' · ')
-  assert.match(h, /Сверено с выгрузкой: Номер — совпадает; Дата — совпадает/)
+  assert.match(h, /Сверено с выгрузкой: Номер — совпадает\. Дата — совпадает\./)
   assert.doesNotMatch(h, /counterparty_id|type_code/)
   assert.match(h, /Не сверялись: ИНН \/ КПП \(источник значения не дал\)/)
   assert.match(h, /Снимок полей карточки отвечает за устаревание/)
@@ -104,13 +108,58 @@ test('несравнимое поле не выдаётся за совпаде�
   const h = markHint(сводка({
     verification: {
       status: 'partial', label: '', checked_fields: [], snapshot_fields: [], snapshot_basis: '',
-      compared_fields: [{ field: 'date', label: 'Дата', source: '', space: '15.01.2026',
-        equal: null, basis: 'в выгрузке значения нет', recheck: false }],
+      compared_fields: [поле({ field: 'date', label: 'Дата', source: '', result: 'unknown',
+        equal: null, basis: 'в выгрузке значения нет', claimed: 'unknown' })],
       unchecked_fields: [], recheck: null,
     },
   }), 'needs_check')
   assert.match(h, /Дата — сравнивать нечего: в выгрузке значения нет/)
   assert.doesNotMatch(h, /Дата — совпадает/)
+  // «Нечего сравнивать» — не конфликт: красным его красить нельзя.
+  assert.equal(сравнение(поле({ result: 'unknown', equal: null })).tone, 'none')
+  assert.equal(сравнение(поле({ result: 'difference', equal: false })).tone, 'bad')
+  assert.equal(сравнение(поле()).tone, 'ok')
+})
+
+test('утверждение прогона не выдаётся за отметку', () => {
+  // Название стороны прогон счёл совпавшим, пересчёт — нет: ИНН в выгрузке нет,
+  // и сверкой контрагента это не становится.
+  const и = сравнение(поле({
+    field: 'counterparty_name', label: 'Название стороны', result: 'unknown', equal: null,
+    basis: 'названия совместимы, но ИНН в выгрузке нет', origin: 'recheck',
+    claimed: 'match', claimed_basis: 'значимые слова названия совпали',
+  }))
+  assert.equal(и.tone, 'none')
+  assert.match(и.text, /сравнивать нечего: названия совместимы, но ИНН в выгрузке нет/)
+  assert.match(и.text, /Прогон записал «совпадает»: значимые слова названия совпали — это свидетельство, не отметка/)
+  // Совпадение без спора лишней оговорки не тянет.
+  assert.doesNotMatch(сравнение(поле()).text, /свидетельство/)
+})
+
+test('непринятая повторная сверка — не отсутствие сверки', () => {
+  assert.equal(recheckLine(null), null)
+  const нет = recheckLine({
+    schema_version: 1, run_id: 'r1', checked_at: '2026-10-26', overall: 'не принято',
+    applicable: false, not_applicable_reason: 'прогон шёл по другой редакции файла',
+    open_questions: [], blocking_questions: [], claims: [], candidates_in_registry: 0,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any)
+  assert.match(нет!, /Повторная сверка не принята: прогон шёл по другой редакции файла/)
+  assert.match(нет!, /Отсутствием сверки это не является/)
+  // Принятый прогон называет дату и только блокирующие вопросы.
+  const да = recheckLine({
+    schema_version: 1, run_id: 'r2', checked_at: '2026-10-27', overall: 'подтверждено',
+    applicable: true, not_applicable_reason: '',
+    open_questions: [
+      { code: 'party', label: 'противоречие стороны', reason: '', blocking: true },
+      { code: 'party_name_only', label: 'сверено только по названию', reason: '', blocking: false },
+    ],
+    blocking_questions: ['party'], claims: [], candidates_in_registry: 1,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any)
+  assert.match(да!, /Повторная сверка 27\.10\.2026: подтверждено/)
+  assert.match(да!, /Нерешённое: противоречие стороны/)
+  assert.doesNotMatch(да!, /сверено только по названию/)
 })
 
 test('ось свежести видна и при расхождениях, а не прячется за цветом', () => {
@@ -153,11 +202,11 @@ test('длинный отбор режется под предел сервер�
   // Реестр из девятисот договоров: запрос на строку был бы девятьюстами
   // обращениями, а один запрос целиком сервер отклонит по своему пределу.
   const ids = Array.from({ length: 901 }, (_, i) => 'c' + i)
-  const parts = chunkIds(ids, 300)
-  assert.equal(parts.length, 4)
-  assert.ok(parts.every((p) => p.length <= 300))
+  const parts = chunkIds(ids, 500)
+  assert.equal(parts.length, 2)
+  assert.ok(parts.every((p) => p.length <= 500))
   assert.deepEqual(parts.flat(), ids)
-  assert.deepEqual(chunkIds([], 300), [])
+  assert.deepEqual(chunkIds([], 500), [])
   assert.throws(() => chunkIds(ids, 0))
 })
 
