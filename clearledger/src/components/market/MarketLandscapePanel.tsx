@@ -195,7 +195,7 @@ export function MarketLandscapePanel() {
         <div className="min-h-0 flex-1 overflow-auto rounded-lg border border-border">
           <table className="w-full text-xs"
             {...exportRows('Расклад сил', [
-              'Сеть', 'Мы', 'Точек', 'Доля, %', 'Нас. пунктов', 'Округов', 'Модель', 'Штаб-квартира',
+              'Сеть', 'Мы', 'Точек', 'Доля, %', 'Нас. пунктов', 'Округов', 'Модель', 'Базовый город',
               'Средняя мощность, кВт', 'Медиана цены, ₽/кВт·ч',
             ], rows.map((r) => [
               r.name, r.isOurs ? 'мы' : null, r.sites, r.sharePct, r.citiesCount, r.districts,
@@ -209,7 +209,7 @@ export function MarketLandscapePanel() {
                 <SortTh sortKey="cities" sort={sort} onSort={toggle} align="right">Нас. пунктов</SortTh>
                 {!региональный && <SortTh sortKey="districts" sort={sort} onSort={toggle} align="right">Округов</SortTh>}
                 <SortTh sortKey="model" sort={sort} onSort={toggle}>Модель</SortTh>
-                {!региональный && <SortTh sortKey="base" sort={sort} onSort={toggle}>Штаб-квартира</SortTh>}
+                {!региональный && <SortTh sortKey="base" sort={sort} onSort={toggle}>Базовый город</SortTh>}
                 <SortTh sortKey="power" sort={sort} onSort={toggle} align="right">Средняя мощность</SortTh>
                 <SortTh sortKey="price" sort={sort} onSort={toggle} align="right">Медиана цены</SortTh>
               </tr>
@@ -326,7 +326,7 @@ export function MarketLandscapePanel() {
           <ReportPivot
             fields={['model', 'platform', 'roaming', 'base', 'ours', 'trusted',
                      'networks', 'sites', 'ports', 'alive', 'silent']}
-            columns={['Модель', 'Платформа', 'Роуминг', 'Штаб-квартира', 'Чья сеть', 'Реквизиты',
+            columns={['Модель', 'Платформа', 'Роуминг', 'Базовый город', 'Чья сеть', 'Реквизиты',
                       'Сетей', 'Точек', 'Портов', 'Живых', 'Молчат полгода']}
             rows={rows.map((r) => ({
               model: r.class ?? '— не определена —',

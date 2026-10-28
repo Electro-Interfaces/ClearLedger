@@ -60,6 +60,14 @@ async def database_startup_lock() -> AsyncIterator[None]:
 # «Конференции»: таблицы журнала заводятся create_all, но новые колонки в уже
 # созданную таблицу он не добавляет — на стенде, где журнал уже работал, статистика
 # падала с «column conf_sessions.close_reason does not exist».
+MARKET_NEWS_MIGRATION_DDL = (
+    "ALTER TABLE IF EXISTS market_news_sources "
+    "ADD COLUMN IF NOT EXISTS default_topic VARCHAR(12)",
+    # Вид источника стал длиннее на `search_wide`: в VARCHAR(10) он не влезает.
+    "ALTER TABLE IF EXISTS market_news_sources ALTER COLUMN kind TYPE VARCHAR(12)",
+    "ALTER TABLE IF EXISTS market_news ADD COLUMN IF NOT EXISTS image_url VARCHAR(900)",
+)
+
 CONF_MIGRATION_DDL = (
     "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS close_reason VARCHAR(10)",
     "ALTER TABLE IF EXISTS conf_sessions ADD COLUMN IF NOT EXISTS recording_file_id UUID",
@@ -3806,6 +3814,12 @@ async def create_all() -> None:
         # «Конференции»: журнал уже жил на стенде, когда у сессии появились
         # причина закрытия и запись, — create_all такие колонки не добавляет.
         for stmt in CONF_MIGRATION_DDL:
+            await conn.execute(_sa.text(stmt))
+
+        # «Новости рынка»: источники завелись раньше, чем у них появилась рубрика
+        # (28.10.2026, между выкатками одного дня). create_all колонку в готовую
+        # таблицу не добавляет — обход падал на `default_topic does not exist`.
+        for stmt in MARKET_NEWS_MIGRATION_DDL:
             await conn.execute(_sa.text(stmt))
 
         # v2.38: единый документ приёмки, идемпотентный downlink и неизменяемые

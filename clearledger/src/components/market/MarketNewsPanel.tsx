@@ -25,10 +25,13 @@
  */
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ExternalLink, Loader2, Newspaper, RefreshCw } from 'lucide-react'
+import {
+  ChevronDown, ChevronUp, ExternalLink, Loader2, Newspaper, RefreshCw, SlidersHorizontal,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useCompany } from '@/contexts/CompanyContext'
@@ -39,7 +42,13 @@ import {
   NewsBrief, NewsCard, NewsHero, NewsRow, StripTitle,
 } from './MarketNewsFeed'
 import {
-  createMarketNews, createMarketNewsSource, fetchMarketNews, getMarketNewsSettings,
+  ActorsAdmin, LinkRow, NoActors, ParticipantRow, RoleFilter,
+} from './MarketNewsActors'
+import {
+  createMarketActor, createMarketNews, createMarketNewsSource, fetchMarketNews,
+  getMarketLinks, getMarketNewsSettings, getMarketParticipants, listMarketActors,
+  patchMarketActor, rescanMarketMentions, importMarketNetwork,
+  ACTOR_KIND_LABEL,
   listMarketNews, listMarketNewsSources, listMarketOperators, patchMarketNews,
   patchMarketNewsSource, presetMarketNewsSources, putMarketNewsSettings,
   NEWS_CHANNEL_LABEL, NEWS_SOURCE_KIND_LABEL, NEWS_STATUS_LABEL, NEWS_TOPIC_LABEL,
@@ -48,6 +57,8 @@ import {
 
 const ВИДЫ = [
   { k: 'feed', label: 'Лента' },
+  { k: 'actors', label: 'Участники' },
+  { k: 'links', label: 'Связи' },
   { k: 'review', label: 'Разбор' },
   { k: 'admin', label: 'Управление' },
 ] as const
@@ -204,6 +215,15 @@ export function MarketNewsPanel() {
   const qc = useQueryClient()
   const экран = useRef<HTMLDivElement>(null)
   const [подача, setПодача] = useState<string>('feed')
+  // Свёрнутая панель отдаёт ленте весь экран. Выбор запоминается: человек,
+  // который читает ленту во весь экран, читает её так каждый раз.
+  const [панель, setПанель] = useState<boolean>(() => {
+    try { return localStorage.getItem('market-news-panel') !== 'off' } catch { return true }
+  })
+  const переключитьПанель = (открыта: boolean) => {
+    setПанель(открыта)
+    try { localStorage.setItem('market-news-panel', открыта ? 'on' : 'off') } catch { /* не критично */ }
+  }
   const [тема, setТема] = useState('all')
   const [оператор, setОператор] = useState('all')
   const [поиск, setПоиск] = useState('')
@@ -215,17 +235,29 @@ export function MarketNewsPanel() {
   const [адресИсточника, setАдресИсточника] = useState('')
   const [рубрикаИсточника, setРубрикаИсточника] = useState('auto')
   const [слова, setСлова] = useState<{ include: string; exclude: string } | null>(null)
+  // Разрезы по участникам: роль, выбранный участник и окно наблюдения.
+  const [роль, setРоль] = useState('all')
+  const [участник, setУчастник] = useState('')
+  const [окно, setОкно] = useState('180')
+  const [имяУчастника, setИмяУчастника] = useState('')
+  const [видУчастника, setВидУчастника] = useState('vendor')
+  const [псевдонимы, setПсевдонимы] = useState('')
+  // Карта сети оператора: адрес страницы с его точками и чья это сеть.
+  const [адресСети, setАдресСети] = useState('')
+  const [сетьОператора, setСетьОператора] = useState('')
 
   const лента = useQuery({
-    queryKey: ['market-news', companyId, подача, тема, оператор, поиск],
+    queryKey: ['market-news', companyId, подача, тема, оператор, поиск, участник, роль],
     queryFn: () => listMarketNews(companyId, {
       status: подача === 'review' ? 'new' : ('feed' as never),
       ...(тема === 'all' ? {} : { topic: тема }),
       ...(оператор === 'all' ? {} : { operator_id: оператор }),
       ...(поиск.trim() ? { q: поиск.trim() } : {}),
+      ...(участник ? { mention: участник } : {}),
+      ...(роль === 'all' ? {} : { role: роль }),
       limit: 100,
     }),
-    enabled: !!companyId && подача !== 'admin',
+    enabled: !!companyId && (подача === 'feed' || подача === 'review'),
   })
   const источники = useQuery({
     queryKey: ['market-news-sources', companyId],
@@ -235,6 +267,26 @@ export function MarketNewsPanel() {
   const настройки = useQuery({
     queryKey: ['market-news-settings', companyId],
     queryFn: () => getMarketNewsSettings(companyId),
+    enabled: !!companyId && подача === 'admin',
+  })
+  const участники = useQuery({
+    queryKey: ['market-news-participants', companyId, роль, окно],
+    queryFn: () => getMarketParticipants(companyId, {
+      ...(роль === 'all' ? {} : { role: роль }), days: Number(окно),
+    }),
+    enabled: !!companyId && подача === 'actors',
+  })
+  const связи = useQuery({
+    queryKey: ['market-news-links', companyId, роль, участник, окно],
+    queryFn: () => getMarketLinks(companyId, {
+      ...(роль === 'all' ? {} : { role: роль }),
+      ...(участник ? { name: участник } : {}), days: Number(окно),
+    }),
+    enabled: !!companyId && подача === 'links',
+  })
+  const справочник = useQuery({
+    queryKey: ['market-actors', companyId],
+    queryFn: () => listMarketActors(companyId),
     enabled: !!companyId && подача === 'admin',
   })
   const операторы = useQuery({
@@ -279,6 +331,34 @@ export function MarketNewsPanel() {
       patchMarketNewsSource(companyId, id, body),
     onSuccess: освежить,
   })
+  const освежитьРазрезы = () => {
+    qc.invalidateQueries({ queryKey: ['market-news-participants', companyId] })
+    qc.invalidateQueries({ queryKey: ['market-news-links', companyId] })
+    qc.invalidateQueries({ queryKey: ['market-actors', companyId] })
+  }
+  const датьУчастника = useMutation({
+    mutationFn: () => createMarketActor(companyId, {
+      name: имяУчастника, kind: видУчастника,
+      aliases: псевдонимы.split(',').map((w) => w.trim()).filter(Boolean),
+    }),
+    onSuccess: () => { setИмяУчастника(''); setПсевдонимы(''); освежитьРазрезы() },
+  })
+  const правкаУчастника = useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
+      patchMarketActor(companyId, id, body),
+    onSuccess: освежитьРазрезы,
+  })
+  const снятьСеть = useMutation({
+    mutationFn: () => importMarketNetwork(companyId, {
+      url: адресСети,
+      ...(сетьОператора.trim() ? { operator_name: сетьОператора.trim() } : {}),
+    }),
+    onSuccess: освежитьРазрезы,
+  })
+  const перечитать = useMutation({
+    mutationFn: () => rescanMarketMentions(companyId),
+    onSuccess: () => { освежитьРазрезы(); освежить() },
+  })
   const сохранитьСловарь = useMutation({
     mutationFn: () => putMarketNewsSettings(companyId, {
       include_words: (слова?.include ?? '').split('\n').map((w) => w.trim()).filter(Boolean),
@@ -305,6 +385,9 @@ export function MarketNewsPanel() {
   const ops = (операторы.data?.operators ?? []).map((o) => ({ id: o.id, name: o.name }))
   const byTopic = лента.data?.byTopic ?? {}
   const результат = обход.data
+  const связиРоли = Object.fromEntries(
+    (связи.data?.links ?? []).flatMap((l) => [l.a.role, l.b.role]).map((r) => [r, 1]))
+  const отборов = [тема !== 'all', оператор !== 'all', !!поиск.trim()].filter(Boolean).length
   const список = источники.data?.sources ?? []
   // Поля словаря показывают действующий отбор: свой, если он задан, иначе встроенный.
   // Пока человек их не трогал, сохранять нечего — кнопка недоступна.
@@ -317,6 +400,17 @@ export function MarketNewsPanel() {
 
   return (
     <div ref={экран} className="flex h-full min-h-0 flex-col gap-3 p-4">
+      {!панель && (
+        <div className="flex items-center justify-end gap-2" data-export-ignore>
+          <PanelViewTabs tabs={ВИДЫ} value={подача} onChange={setПодача} />
+          <Button size="sm" variant="ghost" className="h-7 text-xs"
+            onClick={() => переключитьПанель(true)}>
+            <ChevronDown className="mr-1.5 size-3.5" aria-hidden /> Панель
+          </Button>
+        </div>
+      )}
+
+      {панель && (
       <Card>
         <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 p-3">
           <span className="flex items-center gap-2 text-sm font-medium">
@@ -337,8 +431,59 @@ export function MarketNewsPanel() {
               ))}
             </span>
           )}
-          <span className="ml-auto" data-export-ignore>
+          <span className="ml-auto flex flex-wrap items-center gap-2" data-export-ignore>
+            {(подача === 'feed' || подача === 'review') && (
+              <>
+                {/* Поля отбора занимали полосу над лентой и отодвигали новости за
+                    край экрана: в свёрнутом виде кнопка называет число действующих
+                    отборов, развёрнутый вид — те же поля одной строкой. */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button size="sm" variant={отборов ? 'default' : 'outline'} className="h-7 text-xs">
+                      <SlidersHorizontal className="mr-1.5 size-3.5" aria-hidden />
+                      Отбор{отборов ? ` · ${отборов}` : ''}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-[320px] space-y-2">
+                    <Input value={поиск} onChange={(e) => setПоиск(e.target.value)}
+                      placeholder="Поиск по заголовку" className="h-8 text-xs" />
+                    <Select value={оператор} onValueChange={setОператор}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Любой оператор</SelectItem>
+                        {ops.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <Select value={срок} onValueChange={setСрок}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="7">за неделю</SelectItem>
+                        <SelectItem value="14">за две недели</SelectItem>
+                        <SelectItem value="30">за месяц</SelectItem>
+                        <SelectItem value="90">за три месяца</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {отборов > 0 && (
+                      <Button size="sm" variant="ghost" className="h-7 w-full text-xs"
+                        onClick={() => { setПоиск(''); setОператор('all'); setТема('all') }}>
+                        Сбросить отбор
+                      </Button>
+                    )}
+                  </PopoverContent>
+                </Popover>
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={обход.isPending}
+                  onClick={() => обход.mutate(undefined)}>
+                  {обход.isPending
+                    ? <><Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden />Обходим…</>
+                    : <><RefreshCw className="mr-1.5 size-3.5" aria-hidden />Обновить</>}
+                </Button>
+              </>
+            )}
             <PanelViewTabs tabs={ВИДЫ} value={подача} onChange={setПодача} />
+            <Button size="sm" variant="ghost" className="h-7 text-xs"
+              onClick={() => переключитьПанель(false)}>
+              <ChevronUp className="mr-1.5 size-3.5" aria-hidden /> Свернуть панель
+            </Button>
           </span>
           <span data-export-ignore>
             <ExportButton title="Новости рынка"
@@ -356,51 +501,83 @@ export function MarketNewsPanel() {
           ]))} />
         </CardContent>
       </Card>
+      )}
 
-      {подача !== 'admin' && (
+
+      {результат && подача !== 'admin' && (
+        <p className="-mt-1 px-1 text-xs text-muted-foreground">
+          {результат.note
+            ?? `принесено ${результат.added}`
+              + (результат.sources.some((s) => s.error)
+                ? `, с ошибкой источников: ${результат.sources.filter((s) => s.error).length}`
+                : '')
+              + (результат.pending
+                ? `, в эту порцию не вошло ${результат.pending} — нажмите ещё раз`
+                : '')}
+        </p>
+      )}
+
+      {(подача === 'actors' || подача === 'links') && (
         <Card>
-          <CardContent className="flex flex-wrap items-center gap-2 p-3">
-            <Input value={поиск} onChange={(e) => setПоиск(e.target.value)}
-              placeholder="Поиск по заголовку" className="h-8 w-[260px] text-xs" />
-            <Select value={оператор} onValueChange={setОператор}>
-              <SelectTrigger className="h-8 w-[240px] text-xs"><SelectValue /></SelectTrigger>
+          <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2 p-3">
+            <RoleFilter value={роль} counts={участники.data?.byRole ?? связиРоли}
+              onChange={setРоль} />
+            <Input value={участник} onChange={(e) => setУчастник(e.target.value)}
+              placeholder="Участник: «Парус электро»" className="h-8 w-[220px] text-xs" />
+            <Select value={окно} onValueChange={setОкно}>
+              <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Любой оператор</SelectItem>
-                {ops.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={срок} onValueChange={setСрок}>
-              <SelectTrigger className="h-8 w-[170px] text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="7">за неделю</SelectItem>
-                <SelectItem value="14">за две недели</SelectItem>
                 <SelectItem value="30">за месяц</SelectItem>
                 <SelectItem value="90">за три месяца</SelectItem>
+                <SelectItem value="180">за полгода</SelectItem>
+                <SelectItem value="365">за год</SelectItem>
               </SelectContent>
             </Select>
-            <Button size="sm" variant="outline" disabled={обход.isPending}
-              onClick={() => обход.mutate(undefined)}>
-              {обход.isPending
-                ? <><Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden />Обходим источники…</>
-                : <><RefreshCw className="mr-1.5 size-3.5" aria-hidden />Обновить из источников</>}
-            </Button>
-            {результат && (
-              <span className="text-xs text-muted-foreground">
-                {результат.note
-                  ?? `принесено ${результат.added}`
-                    + (результат.sources.some((s) => s.error)
-                      ? `, с ошибкой источников: ${результат.sources.filter((s) => s.error).length}`
-                      : '')
-                    + (результат.pending
-                      ? `, осталось обойти ${результат.pending} — нажмите ещё раз`
-                      : '')}
-              </span>
+            {(роль !== 'all' || участник) && (
+              <Button size="sm" variant="ghost" className="h-7 text-xs"
+                onClick={() => { setРоль('all'); setУчастник('') }}>Сбросить</Button>
             )}
           </CardContent>
         </Card>
       )}
 
-      {подача === 'admin' ? (
+      {подача === 'actors' ? (
+        <div className="min-h-0 flex-1 space-y-2 overflow-auto">
+          {участники.isLoading && (
+            <p className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" aria-hidden /> Считаем участников…
+            </p>
+          )}
+          {!участники.isLoading && (участники.data?.participants.length ?? 0) === 0 && (
+            <NoActors kind="participants" />
+          )}
+          {(участники.data?.participants ?? [])
+            .filter((p) => !участник || p.name.toLowerCase().includes(участник.toLowerCase()))
+            .map((p) => (
+              <ParticipantRow key={`${p.role}:${p.name}`} p={p}
+                onNews={(имя) => { setУчастник(имя); setПодача('feed') }}
+                onLinks={(имя) => { setУчастник(имя); setПодача('links') }} />
+            ))}
+        </div>
+      ) : подача === 'links' ? (
+        <div className="min-h-0 flex-1 space-y-2 overflow-auto">
+          {связи.isLoading && (
+            <p className="flex items-center gap-2 p-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" aria-hidden /> Ищем связи…
+            </p>
+          )}
+          {!связи.isLoading && (связи.data?.links.length ?? 0) === 0 && <NoActors kind="links" />}
+          {(связи.data?.links ?? []).map((l) => (
+            <LinkRow key={`${l.a.name}|${l.b.name}`} l={l}
+              onNews={(имя) => { setУчастник(имя); setПодача('feed') }} />
+          ))}
+          {(связи.data?.total ?? 0) > (связи.data?.links.length ?? 0) && (
+            <p className="p-2 text-xs text-muted-foreground">
+              Показаны первые {связи.data?.links.length} из {связи.data?.total} связей.
+            </p>
+          )}
+        </div>
+      ) : подача === 'admin' ? (
         <div className="min-h-0 flex-1 space-y-3 overflow-auto">
           <Card>
             <CardContent className="space-y-3 p-3">
@@ -451,7 +628,7 @@ export function MarketNewsPanel() {
               {результат && (
                 <p className="text-xs text-muted-foreground">
                   принесено {результат.added}
-                  {результат.pending ? `, осталось обойти ${результат.pending}` : ''}
+                  {результат.pending ? `, в эту порцию не вошло ${результат.pending}` : ''}
                 </p>
               )}
             </CardContent>
@@ -487,6 +664,74 @@ export function MarketNewsPanel() {
               </div>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardContent className="flex flex-wrap items-end gap-2 p-3">
+              <Input value={имяУчастника} onChange={(e) => setИмяУчастника(e.target.value)}
+                placeholder="Участник рынка: «Парус электро»" className="h-8 w-[260px] text-xs" />
+              <Select value={видУчастника} onValueChange={setВидУчастника}>
+                <SelectTrigger className="h-8 w-[240px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(ACTOR_KIND_LABEL).map(([k, label]) => (
+                    <SelectItem key={k} value={k}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input value={псевдонимы} onChange={(e) => setПсевдонимы(e.target.value)}
+                placeholder="Как ещё пишут, через запятую: Парус-электро, ПАРУС ЭЛЕКТРО"
+                className="h-8 w-[380px] text-xs" />
+              <Button size="sm" disabled={!имяУчастника || датьУчастника.isPending}
+                onClick={() => датьУчастника.mutate()}>Добавить участника</Button>
+              {датьУчастника.isError && (
+                <span role="alert" className="text-xs text-destructive">
+                  {(датьУчастника.error as Error).message}
+                </span>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="space-y-2 p-3">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span className="text-sm font-medium">Карта сети оператора</span>
+                <span className="text-xs text-muted-foreground">
+                  данные, которых нет в публичных реестрах: какие станции не работают
+                  сегодня и когда введена последняя
+                </span>
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <Input value={адресСети} onChange={(e) => setАдресСети(e.target.value)}
+                  placeholder="https://… страница карты сети оператора"
+                  className="h-8 w-[420px] text-xs" />
+                <Input value={сетьОператора} onChange={(e) => setСетьОператора(e.target.value)}
+                  placeholder="Чья сеть: «PUNKT E»" className="h-8 w-[220px] text-xs" />
+                <Button size="sm" disabled={!адресСети || снятьСеть.isPending}
+                  onClick={() => снятьСеть.mutate()}>
+                  {снятьСеть.isPending ? 'Снимаем…' : 'Снять слепок сети'}
+                </Button>
+              </div>
+              {снятьСеть.isError && (
+                <p role="alert" className="text-xs text-destructive">
+                  {(снятьСеть.error as Error).message}
+                </p>
+              )}
+              {снятьСеть.data && (
+                <p className="text-xs text-muted-foreground">
+                  снято {снятьСеть.data.locations} локаций и {снятьСеть.data.stations} станций
+                  в {снятьСеть.data.regions} регионах; не работает {снятьСеть.data.inactive},
+                  помечено новыми {снятьСеть.data.new}
+                  {снятьСеть.data.lastCommissioned
+                    ? `, последний ввод ${снятьСеть.data.lastCommissioned}` : ''}.
+                  Заведено точек {снятьСеть.data.created}, обновлено {снятьСеть.data.updated}.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <ActorsAdmin actors={справочник.data?.actors ?? []} loading={справочник.isLoading}
+            onPatch={(id, body) => правкаУчастника.mutate({ id, body })}
+            onRescan={() => перечитать.mutate()} rescanning={перечитать.isPending}
+            rescanResult={перечитать.data} />
 
           {список.length === 0 && !источники.isLoading && (
             <p className="p-2 text-sm text-muted-foreground">

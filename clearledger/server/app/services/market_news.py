@@ -41,7 +41,8 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import MarketNews, MarketNewsSource, MarketOperator, MarketPlayer, Region
+from app.models import (MarketActor, MarketNews, MarketNewsMention, MarketNewsSource,
+                        MarketOperator, MarketPlayer, Region)
 
 TIMEOUT = httpx.Timeout(25.0)
 UA = "ElsyPlusMarket/1.0 (+https://rushydro.dataworker.ru)"
@@ -105,7 +106,11 @@ DEFAULT_EXCLUDE = ("зарядное устройство для телефон"
                    # улицы» и «Топ-10 лучших зарядных станций»: это магазинный обзор
                    # бытовых устройств, а не событие рынка.
                    "рейтинг лучших", "топ-10", "топ 10", "как выбрать", "своими руками",
-                   "лучшие зарядные устройства", "обзор зарядных устройств")
+                   "лучшие зарядные устройства", "обзор зарядных устройств",
+                   # «Зарядная станция» бывает и для геймпада: 28.10.2026 в ленту
+                   # приехала док-станция 8BitDo — слово то же, рынок другой.
+                   "8bitdo", "геймпад", "консол", "док-станц", "докстанц", "наушник",
+                   "ноутбук", "пылесос", "для телефона", "для смартфона")
 
 
 def proxy() -> str | None:
@@ -161,8 +166,21 @@ def title_key(title: str) -> str:
     return re.sub(r"[^a-zа-я0-9 ]+", " ", t).strip()[:200]
 
 
+# Оператор OR обнуляет выдачу Bing: по запросу с ним приходит ноль элементов,
+# без него — девять-двенадцать (проверено 28.10.2026 на «Парус электро»).
+# Источник с таким запросом выглядит живым — отвечает без ошибки и приносит
+# пусто, то есть молчит громче, чем сломанный.
+OR_IN_QUERY = re.compile(r"\s+OR\s+")
+
+
+def clean_query(query: str) -> str:
+    """Запрос без того, что гасит поисковую ленту."""
+    return OR_IN_QUERY.sub(" ", query or "").strip()
+
+
 def search_url(query: str, kind: str = "search") -> str:
     """Адрес поисковой ленты по запросу: Bing для ленты, Google для широкого невода."""
+    query = clean_query(query)
     if kind == "search_wide":
         return f"{GOOGLE_BASE}?{urlencode({'q': query, 'hl': 'ru', 'gl': 'RU', 'ceid': 'RU:ru'})}"
     return f"{BING_BASE}?{urlencode({'q': query, 'format': 'RSS', 'setmkt': 'ru-RU'})}"
@@ -179,6 +197,22 @@ def site_query(site_url: str | None, name: str | None = None) -> str | None:
     if host:
         return f"site:{host}"
     return f'"{name.strip()}" зарядная станция' if name and name.strip() else None
+
+
+def _plain(raw: str) -> str:
+    """Человеческий текст из ленты: без тегов, лишних пробелов и сущностей.
+
+    Декодируем, пока меняется: часть лент экранирует текст дважды, и один проход
+    оставляет в карточке «&#34;электричек&#34;» вместо кавычек (видно на живой
+    ленте «Российской газеты» 28.10.2026).
+    """
+    t = re.sub(r"<[^>]+>", " ", raw or "")
+    for _ in range(3):
+        d = unescape(t)
+        if d == t:
+            break
+        t = d
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def _text(el: ET.Element | None) -> str:
@@ -229,7 +263,7 @@ def parse_feed(xml_text: str) -> list[dict[str, Any]]:
         snippet = _text(n.find("description")) or _text(n.find(f"{atom}summary"))
         if snippet.startswith("<a href") or snippet.lstrip().startswith("<"):
             snippet = re.sub(r"<[^>]+>", " ", snippet)
-        snippet = unescape(re.sub(r"\s+", " ", snippet)).strip()
+        snippet = _plain(snippet)
         # Поисковые ленты кладут в описание тот же заголовок со ссылкой: как лид это
         # пустая строка, занимающая место в карточке.
         if snippet and title_key(snippet).startswith(title_key(clean_title(title, src or None))[:60]):
@@ -312,9 +346,14 @@ def suggest_links(text: str, operators: list[MarketOperator],
                 break
     for r in regions:
         rl = (r or "").lower().replace("ё", "е")
-        # «Московская область» → ищем «московск»: в новостях пишут «в Московской области».
         stem = re.sub(r"\s+(область|край|республика|округ|автономн\w*)\s*$", "", rl).strip()
-        if len(stem) >= 5 and stem[:-2] in t:
+        if len(stem) < 5:
+            continue
+        # Рядом должно стоять слово уровня: справочник пространства держит и мусор
+        # («Большой», «Казань», «12»), а без указателя «Большой» ловился в любом
+        # тексте и подписывал новость чужим регионом (замечание МАГа 28.10.2026).
+        корень = re.escape(stem[:-2] if stem[-2:] in ("ая", "ий", "ой", "ый") else stem)
+        if re.search(rf"\b{корень}\w{{0,4}}\s+(?:област|кра[йяею]|республик|округ|ао\b)", t):
             found["region"] = r
             break
     return found
@@ -356,6 +395,9 @@ async def fetch_feed(url: str, client: httpx.AsyncClient,
     return parse_feed(r.text)
 
 
+# Адреса, за которыми стоит поисковик, а не издание: читать там нечего.
+SEARCH_HOSTS = re.compile(r"(news\.google\.com|bing\.com/news/apiclick|consent\.google\.com)", re.I)
+
 VIDEO_HOSTS = ("youtube.com", "youtu.be", "rutube.ru", "vk.com/video", "vkvideo.ru",
                "dzen.ru/video", "m24.ru/videos", "smotrim.ru")
 
@@ -366,7 +408,7 @@ def _meta(html: str, prop: str) -> str | None:
                     rf'<meta[^>]+content=["\']([^"\']*)["\'][^>]+(?:property|name)=["\']{prop}["\']'):
         m = re.search(pattern, html, re.I)
         if m and m.group(1).strip():
-            return unescape(m.group(1).strip())
+            return _plain(m.group(1))
     return None
 
 
@@ -447,6 +489,8 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
         MarketOperator.company_id == cid))).scalars().all())
     players = list((await db.execute(select(MarketPlayer).where(
         MarketPlayer.company_id == cid))).scalars().all())
+    actors = list((await db.execute(select(MarketActor).where(
+        MarketActor.company_id == cid))).scalars().all())
     regions = [r for (r,) in (await db.execute(select(Region.name).where(
         Region.company_id == cid))).all() if r]
 
@@ -525,6 +569,13 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
                     async with gate:
                         return await enrich(it, client, proxied)
                 кандидаты = list(await asyncio.gather(*(обогатить(i) for i in кандидаты)))
+                # Материал, у которого адрес так и остался на поисковике, в ленту не
+                # берём: его ссылка ведёт на редирект или страницу согласия, а не на
+                # публикацию. На живых данных 28.10.2026 такие записи дали ноль
+                # обложек из тридцати шести, тогда как прямые ссылки — тринадцать
+                # обложек из четырнадцати.
+                кандидаты = [i for i in кандидаты
+                             if not SEARCH_HOSTS.search(i.get("url") or "")]
 
             fresh = 0
             for it in кандидаты:
@@ -532,10 +583,15 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
                 key = it["key"] or normalize_url(it["url"])
                 text = f"{it['title']} {it.get('snippet') or ''}"
                 hints = suggest_links(text, operators, players, regions)
-                db.add(MarketNews(
+                новость = MarketNews(
                     company_id=cid, source_id=src.id,
                     title=it["title"][:500], url=it["url"][:900], url_key=key,
-                    snippet=it.get("snippet"), source_name=it.get("sourceName"),
+                    snippet=it.get("snippet"),
+                    # Имя издания — из ленты, из og:site_name или, на худой конец,
+                    # из домена: прочерк в карточке не говорит читателю ничего.
+                    source_name=(it.get("sourceName")
+                                 or (urlparse(it["url"]).hostname or "").removeprefix("www.")
+                                 or None),
                     image_url=(it.get("image") or None),
                     published_at=when, retrieved_at=now,
                     channel="search" if src.kind.startswith("search") else src.kind,
@@ -550,7 +606,19 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
                     suggested=hints or None, linked_by="auto",
                     raw={"guid": it.get("guid"), "rawTitle": it.get("raw_title"),
                          "feed": feed_url, "media": it.get("media") or "article"},
-                ))
+                )
+                db.add(новость)
+                # Идентификатор нужен сразу: упоминания пишутся той же сессией.
+                await db.flush()
+                # Состав участников материала — по нему строятся связи «кто с кем».
+                for м in actors_in_text(text, operators, players, actors):
+                    db.add(MarketNewsMention(
+                        company_id=cid, news_id=новость.id, role=м["role"],
+                        name=м["name"][:200], matched=(м["matched"] or "")[:200],
+                        operator_id=uuid.UUID(м["operator_id"]) if м.get("operator_id") else None,
+                        player_id=uuid.UUID(м["player_id"]) if м.get("player_id") else None,
+                        actor_id=uuid.UUID(м["actor_id"]) if м.get("actor_id") else None,
+                        linked_by="auto"))
                 added += 1
                 fresh += 1
             stat["added"] = fresh
@@ -558,3 +626,125 @@ async def collect(db: AsyncSession, cid: uuid.UUID, sources: list[MarketNewsSour
             per_source_stat.append(stat)
     await db.commit()
     return {"added": added, "sources": per_source_stat, "sinceDays": since_days}
+
+
+# ─────────────────── Участники рынка в тексте новости ───────────────────
+#
+# Маркетингу нужна не одна привязка «чья новость», а состав участников: рынок
+# читается связями — завод и сеть в одном материале, сеть и ведомство, агрегатор
+# и банк. Поэтому из текста достаются ВСЕ узнанные имена с их ролями.
+
+# Ведомства и регуляторы: список конечный и меняется редко, поэтому он в коде —
+# в отличие от производителей, которых ведёт человек в справочнике участников.
+STATE_ACTORS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Минэнерго России", ("минэнерго",)),
+    ("Минпромторг России", ("минпромторг",)),
+    ("Минтранс России", ("минтранс",)),
+    ("Минэкономразвития России", ("минэкономразвития",)),
+    ("Правительство России", ("правительство рф", "правительство россии",
+                              "кабмин", "постановление правительства")),
+    ("ФАС России", ("фас россии", "антимонопольн")),
+    ("Росстандарт", ("росстандарт",)),
+    ("Ростехнадзор", ("ростехнадзор",)),
+    ("Госдума", ("госдума", "государственная дума")),
+    ("Правительство Москвы", ("правительство москвы", "дептранс", "мэр москвы")),
+    ("Правительство Московской области", ("минэнерго подмосковья",
+                                          "правительство подмосковья")),
+)
+
+# Слова, по которым в тексте узнаётся роль неизвестного пока участника. Нужны не
+# для привязки, а для подсказки «заведите его в справочник»: производителей у нас
+# в реестре нет вовсе, и первыми их именами делятся именно новости.
+ROLE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("vendor", ("производител", "завод", "выпустил", "изготовител", "поставит оборудование",
+                "отечественн", "импортозамещ", "локализац")),
+    ("service", ("сервисн", "обслуживан", "монтаж", "подрядчик", "эксплуатирующ")),
+    ("state", ("министерств", "ведомств", "правительств", "регулятор", "надзор")),
+    ("utility", ("энергосбыт", "сетевая компания", "электросет", "энергосистем")),
+)
+
+# Класс игрока из реестра приложений → роль в раскладе рынка.
+PLAYER_ROLE = {
+    "зарядная сеть / агрегатор": "aggregator",
+    "поиск АЗС": "aggregator",
+    "сеть АЗС (своё приложение)": "aggregator",
+    "топливный процессинг": "platform",
+    "мойки и мультисервис": "other",
+    "автопроизводитель": "automaker",
+    "банк / финтех": "bank",
+}
+
+
+def _found(text: str, variants: Iterable[str]) -> str | None:
+    """Нашлось ли имя целым словом. Подстрока ловит «Волт» внутри «вольтаж»."""
+    for v in variants:
+        if len(v) < 4:
+            continue
+        if re.search(rf"(?<![а-яa-z0-9]){re.escape(v)}(?![а-яa-z0-9])", text):
+            return v
+    return None
+
+
+def actors_in_text(text: str, operators: list[Any], players: list[Any],
+                   actors: list[Any]) -> list[dict[str, Any]]:
+    """Все узнанные участники рынка с ролями — состав новости, а не одна привязка.
+
+    Роль берётся из реестра, а не из текста: оператор остаётся оператором, даже
+    если в материале он назван «компанией». Текст решает только одно — кто в нём
+    присутствует.
+    """
+    t = (text or "").lower().replace("ё", "е")
+    out: list[dict[str, Any]] = []
+    видели: set[str] = set()
+
+    def добавить(role: str, name: str, matched: str, **ids: Any) -> None:
+        ключ = f"{role}:{name.lower()}"
+        if ключ in видели:
+            return
+        видели.add(ключ)
+        out.append({"role": role, "name": name, "matched": matched, **ids})
+
+    for op in operators:
+        v = _found(t, _name_variants(op.name) | _name_variants(op.short_name or ""))
+        if v:
+            добавить("platform" if getattr(op, "is_platform", False) else "operator",
+                     op.name, v, operator_id=str(op.id))
+    # Оператор, уже найденный по сети, не повторяется приложением: «РусГидро» и
+    # «ЭЗС РусГидро» — одна компания в двух реестрах, и пара из них дала бы связь
+    # с самой собой (замечание на живых данных 28.10.2026).
+    свои_операторы = {m.get("operator_id") for m in out if m.get("operator_id")}
+    for pl in players:
+        if getattr(pl, "operator_id", None) and str(pl.operator_id) in свои_операторы:
+            continue
+        имя = pl.brand or pl.app
+        v = _found(t, _name_variants(имя or "") | _name_variants(pl.developer or ""))
+        if v:
+            добавить(PLAYER_ROLE.get(pl.player_class or "", "aggregator"),
+                     имя or pl.app, v, player_id=str(pl.id))
+    # Участник справочника не дублирует реестр: компанию, уже найденную как сеть
+    # или приложение, второй записью не заводим. Иначе «Мособлэнерго» приходит и
+    # сетью, и энергетикой, а связь с ним удваивается (видно на живых данных
+    # 28.10.2026). Справочник ведёт тех, кого в реестрах нет.
+    из_реестров = {m["name"].lower().replace("ё", "е") for m in out}
+    for ac in actors:
+        имя = ac.name.lower().replace("ё", "е")
+        if any(имя in r or r in имя for r in из_реестров):
+            continue
+        псевдонимы = set(ac.aliases or [])
+        v = _found(t, _name_variants(ac.name) | {a.lower() for a in псевдонимы})
+        if v:
+            добавить(ac.kind, ac.name, v, actor_id=str(ac.id))
+    for имя, варианты in STATE_ACTORS:
+        v = _found(t, варианты)
+        if v:
+            добавить("state", имя, v)
+    return out
+
+
+def role_hint(text: str) -> str | None:
+    """Какая роль звучит в тексте — подсказка для незаведённого участника."""
+    t = (text or "").lower().replace("ё", "е")
+    for role, words in ROLE_HINTS:
+        if any(w in t for w in words):
+            return role
+    return None
