@@ -170,3 +170,87 @@ async def test_прокси_подхватывает_только_упавшее
         # Прокси нет вовсе — причина отказа доходит до карточки источника.
         with pytest.raises(httpx.ConnectTimeout):
             await get_page("https://closed.example.ru/rss", direct, None)
+
+
+@pytest.mark.asyncio
+async def test_обогащение_раскрывает_издание_и_обложку():
+    """Карточка ленты строится из того, что издание само показывает при репосте.
+
+    Bing отдаёт ссылку через счётчик `apiclick.aspx`; без прохода по редиректу в
+    карточке остался бы адрес поисковика, без og-разметки — пустая строка вместо
+    лида и серое место вместо картинки.
+    """
+    import httpx
+    from app.services.market_news import enrich
+
+    СТРАНИЦА = """<html><head>
+      <meta property="og:image" content="https://izdanie.ru/img/cover.jpg">
+      <meta property="og:description" content="Станция открыта на трассе М-11">
+      <meta property="og:site_name" content="Издание">
+    </head><body>…</body></html>"""
+
+    def транспорт(request: httpx.Request) -> httpx.Response:
+        if "apiclick" in str(request.url):
+            return httpx.Response(302, headers={"location": "https://izdanie.ru/news/1"})
+        return httpx.Response(200, text=СТРАНИЦА)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(транспорт),
+                                 follow_redirects=True) as c:
+        it = {"title": "Открыта станция", "url": "http://www.bing.com/news/apiclick.aspx?x=1",
+              "key": "k", "snippet": None, "sourceName": None, "publishedAt": None,
+              "image": None, "media": "article"}
+        out = await enrich(it, c)
+    assert out["url"] == "https://izdanie.ru/news/1", "адрес издания, а не поисковика"
+    assert out["image"] == "https://izdanie.ru/img/cover.jpg"
+    assert out["snippet"] == "Станция открыта на трассе М-11"
+    assert out["sourceName"] == "Издание"
+    assert out["media"] == "article"
+
+
+@pytest.mark.asyncio
+async def test_видео_распознаётся_и_по_разметке_и_по_адресу():
+    """Материал с видео помечается: в ленте у него значок, а не тихая картинка."""
+    import httpx
+    from app.services.market_news import enrich
+
+    def видео_разметкой(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text='<meta property="og:video" content="https://v/1.mp4">')
+
+    def видео_адресом(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html><head></head></html>")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(видео_разметкой)) as c:
+        it = await enrich({"title": "t", "url": "https://izdanie.ru/a", "key": "k",
+                           "snippet": None, "sourceName": "И", "publishedAt": None,
+                           "image": None, "media": "article"}, c)
+        assert it["media"] == "video"
+    async with httpx.AsyncClient(transport=httpx.MockTransport(видео_адресом)) as c:
+        it = await enrich({"title": "t", "url": "https://www.m24.ru/videos/1", "key": "k",
+                           "snippet": None, "sourceName": "И", "publishedAt": None,
+                           "image": None, "media": "article"}, c)
+        assert it["media"] == "video", "видеохостинг узнаётся по адресу"
+
+
+@pytest.mark.asyncio
+async def test_недоступная_страница_не_теряет_материал():
+    """Обложка необязательна: материал попадает в ленту и без неё."""
+    import httpx
+    from app.services.market_news import enrich
+
+    def падает(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("нет связи", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(падает)) as c:
+        it = await enrich({"title": "Заголовок", "url": "https://izdanie.ru/a", "key": "k",
+                           "snippet": "лид из ленты", "sourceName": "И", "publishedAt": None,
+                           "image": None, "media": "article"}, c)
+    assert it["title"] == "Заголовок" and it["snippet"] == "лид из ленты"
+    assert it["image"] is None
+
+
+def test_поисковая_лента_с_обложками_и_широкий_невод_это_разные_адреса():
+    """Bing даёт прямые ссылки и обложки, Google — объём без адреса издания."""
+    from app.services.market_news import search_url
+    assert "bing.com/news/search" in search_url("зарядные станции")
+    assert "format=RSS" in search_url("зарядные станции")
+    assert "news.google.com" in search_url("зарядные станции", "search_wide")

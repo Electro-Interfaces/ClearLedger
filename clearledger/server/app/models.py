@@ -9070,9 +9070,12 @@ class MarketNewsSource(Base):
     company_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
-    # search | rss | page
-    kind: Mapped[str] = mapped_column(String(10), nullable=False, default="rss")
+    # search (лента с обложками) | search_wide (широкий невод) | rss | page
+    kind: Mapped[str] = mapped_column(String(12), nullable=False, default="rss")
     url: Mapped[str] = mapped_column(String(600), nullable=False)
+    # Рубрика источника: ленту заводят ради темы, и она сильнее словаря. Пусто —
+    # тема определяется по заголовку.
+    default_topic: Mapped[str | None] = mapped_column(String(12), nullable=True)
     # Чья это лента: оператор сети, игрок рынка (агрегатор, банк, автопроизводитель),
     # производитель оборудования. Привязка переносится на найденную новость.
     operator_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -9095,6 +9098,27 @@ class MarketNewsSource(Base):
         Index("uq_market_news_source_url", "company_id", "url", unique=True),
         Index("ix_market_news_source_active", "company_id", "active", "kind"),
     )
+
+
+class MarketNewsSettings(Base):
+    """Настройки новостного обхода пространства: словари тем и окно.
+
+    Словари живут настройкой, а не константой в образе: «Ангар» держит их в
+    `feeds.json` внутри контейнера бота, и чтобы добавить стоп-слово, нужна
+    выкатка. Здесь их правит маркетолог на административной странице раздела.
+
+    Пустые списки означают «берём встроенные»: пространство, которое ничего не
+    настраивало, должно работать, а не отбрасывать весь поток.
+    """
+    __tablename__ = "market_news_settings"
+
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True)
+    include_words: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    exclude_words: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    since_days: Mapped[int] = mapped_column(Integer, nullable=False, default=14)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
 
 class MarketNews(Base):
