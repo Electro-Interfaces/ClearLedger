@@ -5,7 +5,7 @@ import { authorizeApp } from './ssoService'
 export type ConnectionSource = 'connector' | 'config' | 'env' | 'environment' | 'missing'
 export interface ProviderConnection {
   id: string | null
-  provider: 'megafon' | 'asterisk'
+  provider: 'megafon' | 'mango' | 'asterisk'
   enabled: boolean
   status: string
   configured: boolean
@@ -25,7 +25,7 @@ function owned<T extends { company_id: string }>(data: T, companyId: string) {
 export const connections = async (cid: string) => owned(await get<{ company_id: string; connections: ProviderConnection[] }>('/api/voice/connections'), cid)
 export const checkProvider = async (cid: string, id: string | null) => owned(await post<{ company_id: string; ok: boolean; at: string; message: string }>('/api/voice/connections/check', { connector_id: id }), cid)
 
-export async function providerSettings(companyId: string, provider: 'megafon' | 'asterisk') {
+export async function providerSettings(companyId: string, provider: 'megafon' | 'mango' | 'asterisk') {
   const target = new URL(await authorizeApp('support', companyId), window.location.origin)
   // Токен остаётся во фрагменте штатного SSO; назначение выбирается из фиксированных путей.
   const hash = new URLSearchParams(target.hash.replace(/^#/, ''))

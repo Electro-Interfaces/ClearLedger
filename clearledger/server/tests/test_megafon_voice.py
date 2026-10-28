@@ -133,3 +133,53 @@ async def test_guards_and_input_validation(client, db, provider_db):
     await db.delete(provider_db["links"].pop(0))
     await db.commit()
     assert (await client.get(url, params=RANGE, headers=headers)).status_code == 404
+
+
+async def test_pbx_sources_do_not_mix_providers_or_companies(client, db, provider_db):
+    token = await _login(client, "admin@clearledger.ru", "admin123")
+    headers = {**_h(token), "X-Company-Id": str(provider_db["cid"])}
+    node_id = uuid.uuid4()
+    await db.execute(text(f"""INSERT INTO {SCHEMA}.call_records
+        (id,company_id,source,direction,missed,started_at,operator,group_name)
+        VALUES (:id,:cid,'asterisk_node','inbound',false,'2026-10-18T12:00:00Z','Node agent','Node group')"""),
+        {"id": node_id, "cid": provider_db["support_cid"]})
+    await db.execute(text(f"""INSERT INTO {SCHEMA}.connectors
+        (id,company_id,provider,type,enabled,status,config)
+        VALUES (:id,:cid,'asterisk','channel',true,'active','{{}}')"""),
+        {"id": uuid.uuid4(), "cid": provider_db["support_cid"]})
+    await db.commit()
+    for source, count in [('node', 1), ('mango', 1), ('megafon', 3)]:
+        response = await client.get('/api/voice/pbx', params={**RANGE, 'source': source}, headers=headers)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body['provider'] == source and body['summary']['total'] == count
+        assert sum(row['total'] for row in body['operators']) == count
+        assert 'private-recording' not in response.text and 'private-config-value' not in response.text
+        for row in body['calls']['items']:
+            detail = await client.get('/api/voice/pbx/calls/' + row['id'], params={'source': source}, headers=headers)
+            assert detail.status_code == 200
+        foreign = await client.get('/api/voice/pbx/calls/' + str(provider_db['ids'][3]), params={'source': source}, headers=headers)
+        assert foreign.status_code == 404
+    assert (await client.get('/api/voice/pbx', params={**RANGE, 'source': 'all'}, headers=headers)).status_code == 422
+    assert (await client.get('/api/voice/pbx/calls/' + str(node_id), params={'source': 'mango'}, headers=headers)).status_code == 404
+    default = await client.get('/api/voice/pbx', params=RANGE, headers=headers)
+    assert default.json()['provider'] == 'node' and default.json()['summary']['total'] == 1
+    sources = await client.get('/api/voice/pbx/sources', headers=headers)
+    assert sources.status_code == 200, sources.text
+    assert sources.json()['default_source'] == 'node'
+    assert {r['source'] for r in sources.json()['sources']} == {'node', 'mango', 'megafon'}
+    assert not any(k in sources.text for k in ['private-config-value','credentials','endpoint'])
+    assert (await client.get('/api/voice/pbx/sources')).status_code == 401
+
+
+async def test_pbx_readiness_distinguishes_permission_failure(db, provider_db, monkeypatch):
+    scalar = db.scalar
+    async def deny(statement, params=None, **kwargs):
+        if 'has_table_privilege' in str(statement): return False
+        return await scalar(statement, params, **kwargs)
+    monkeypatch.setattr(db, 'scalar', deny)
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as error:
+        await megafon_voice.ready(db)
+    assert error.value.status_code == 503
+    assert 'права чтения' in error.value.detail and 'схемы' not in error.value.detail

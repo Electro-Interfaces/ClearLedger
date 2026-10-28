@@ -1,4 +1,4 @@
-"""Читаем факты внешней ВАТС из Поддержки, отдельно от событий узла ContactHub."""
+"""Журнал АТС из Поддержки: узел и история провайдеров без смешивания источников."""
 from __future__ import annotations
 
 import uuid
@@ -12,6 +12,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # Схема приложения фиксирована; параметров SQL от пользователя в именах таблиц нет.
 _SCHEMA = "public"
+SOURCES = {
+    "node": ("asterisk_node",),
+    "mango": ("mango", "mango_api"),
+    "megafon": ("megafon", "megafon_api"),
+}
+PROVIDERS = {"node": "asterisk", "mango": "mango", "megafon": "megafon"}
+
+
+def source_predicate(source: str) -> str:
+    if source not in SOURCES:
+        raise HTTPException(422, "Неизвестный источник звонков")
+    return "c.source IN (" + ",".join("'" + value + "'" for value in SOURCES[source]) + ")"
 
 
 def period(start: datetime | None, end: datetime | None) -> tuple[datetime, datetime]:
@@ -25,11 +37,19 @@ def period(start: datetime | None, end: datetime | None) -> tuple[datetime, date
 
 
 async def ready(db: AsyncSession) -> None:
+    for table in ("call_records", "connectors", "cc_agent_identities"):
+        name = f"{_SCHEMA}.{table}"
+        exists = await db.scalar(text("SELECT to_regclass(:name) IS NOT NULL"), {"name": name})
+        if not exists:
+            raise HTTPException(503, "Журнал АТС ещё не установлен. Проверьте обновление Поддержки.")
+        allowed = await db.scalar(text("SELECT has_table_privilege(current_user, :name, 'SELECT')"), {"name": name})
+        if not allowed:
+            raise HTTPException(503, "Нет доступа к журналу АТС. Администратору нужно восстановить права чтения Телефонии.")
     found = await db.scalar(text("""SELECT EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_schema=:schema AND table_name='call_records' AND column_name='group_name')"""), {"schema": _SCHEMA})
     if not found:
-        raise HTTPException(503, "Журнал МегаФона ещё не подготовлен к обогащению")
+        raise HTTPException(503, "Журнал АТС требует обновления схемы Поддержки")
 
 
 def _columns() -> str:
@@ -41,15 +61,15 @@ def _columns() -> str:
         c.source, c.thread_id"""
 
 
-def _base() -> str:
-    return "c.company_id=CAST(:cid AS uuid) AND c.source IN ('megafon','megafon_api')"
+def _base(source: str = "megafon") -> str:
+    return "c.company_id=CAST(:cid AS uuid) AND " + source_predicate(source)
 
 
 def _where(start: datetime, end: datetime, cid: str, *, operator: str | None,
            group: str | None, line: str | None, missed: bool | None,
-           direction: str | None, search: str | None) -> tuple[str, dict]:
+           direction: str | None, search: str | None, source: str = "megafon") -> tuple[str, dict]:
     params: dict[str, Any] = {"cid": cid, "start": start, "end": end}
-    where = _base() + " AND c.started_at>=:start AND c.started_at<:end"
+    where = _base(source) + " AND c.started_at>=:start AND c.started_at<:end"
     for key, column, value in (("operator", "c.operator", operator), ("group", "c.group_name", group),
                                ("line", "c.via_number", line), ("direction", "c.direction", direction)):
         if value is not None:
@@ -72,16 +92,17 @@ async def overview(db: AsyncSession, support_cid: str, core_cid: uuid.UUID, *,
                    start: datetime, end: datetime, operator: str | None = None,
                    group: str | None = None, line: str | None = None,
                    missed: bool | None = None, direction: str | None = None,
-                   search: str | None = None, page: int = 1, page_size: int = 25) -> dict:
+                   search: str | None = None, page: int = 1, page_size: int = 25,
+                   source: str = "megafon") -> dict:
     await ready(db)
     where, params = _where(start, end, support_cid, operator=operator, group=group,
-                           line=line, missed=missed, direction=direction, search=search)
+                           line=line, missed=missed, direction=direction, search=search, source=source)
     table = f"{_SCHEMA}.call_records c"
     connector = (await db.execute(text(f"""SELECT id,label,endpoint,status,enabled,last_sync_at,
         (NULLIF(last_error,'') IS NOT NULL) AS has_error, config->'line_context' AS line_context
-        FROM {_SCHEMA}.connectors WHERE company_id=CAST(:cid AS uuid) AND provider='megafon'
+        FROM {_SCHEMA}.connectors WHERE company_id=CAST(:cid AS uuid) AND provider=:provider
         AND type='channel' AND enabled=true ORDER BY last_sync_at DESC NULLS LAST, id LIMIT 1"""),
-        {"cid": support_cid})).mappings().first()
+        {"cid": support_cid, "provider": PROVIDERS[source]})).mappings().first()
     summary = dict((await db.execute(text(f"""SELECT count(*)::int total,
         count(*) FILTER(WHERE c.direction='inbound')::int inbound,
         count(*) FILTER(WHERE c.direction='outbound')::int outbound,
@@ -106,7 +127,7 @@ async def overview(db: AsyncSession, support_cid: str, core_cid: uuid.UUID, *,
     operator_rows = [dict(x) for x in operators]
     directory = (await db.execute(text(f"""SELECT display_name,extension,user_id
         FROM {_SCHEMA}.cc_agent_identities WHERE company_id=CAST(:cid AS uuid)
-        AND provider='megafon' AND is_active=true"""), {"cid": support_cid})).mappings().all()
+        AND provider=:provider AND is_active=true"""), {"cid": support_cid, "provider": PROVIDERS[source]})).mappings().all()
     def name_key(value):
         return re.sub(r"^(дежурный|дежурная|дежурство)\s+", "", value or "", flags=re.I).strip().casefold()
     current_directory = {name_key(x["display_name"]): x for x in directory if x["display_name"]}
@@ -124,7 +145,7 @@ async def overview(db: AsyncSession, support_cid: str, core_cid: uuid.UUID, *,
         {**params, "limit": page_size, "offset": (page - 1) * page_size})).mappings().all()
     # Справочники фильтров берём до текущих фильтров, но внутри выбранного периода/компании.
     facets = (await db.execute(text(f"""SELECT DISTINCT c.operator,c.group_name,c.via_number,c.via_name
-        FROM {table} WHERE {_base()} AND c.started_at>=:start AND c.started_at<:end
+        FROM {table} WHERE {_base(source)} AND c.started_at>=:start AND c.started_at<:end
         ORDER BY c.operator,c.group_name,c.via_number,c.via_name"""),
         {"cid": support_cid, "start": start, "end": end})).mappings().all()
     ops: dict[str, str] = {}
@@ -138,13 +159,13 @@ async def overview(db: AsyncSession, support_cid: str, core_cid: uuid.UUID, *,
     context = (connector["line_context"] or {}) if connector else {}
     if not isinstance(context, dict):
         context = {}
-    return {"provider": "megafon", "company_id": str(core_cid),
+    return {"provider": source, "company_id": str(core_cid),
             "period": {"from": start, "to": end},
-            "connection": {"configured": bool(connector and connector["endpoint"]),
+            "connection": {"configured": bool(connector and (connector["endpoint"] or source == "node" and connector["enabled"])),
                            "status": connector["status"] if connector else "not_configured",
                            "last_sync_at": connector["last_sync_at"] if connector else None,
-                           "last_error": "Ошибка обмена с МегаФоном" if connector and connector["has_error"] else None,
-                           "mode": "history", "poll_interval_seconds": 300},
+                           "last_error": "Ошибка обмена с источником звонков" if connector and connector["has_error"] else None,
+                           "mode": "events" if source == "node" else "history", "poll_interval_seconds": 30 if source == "node" else 300},
             "line": {"name": context.get("name") or (next(iter(lines.values())) if len(lines) == 1 else None),
                      "public_number": context.get("public_number"),
                      "forwarding_number": context.get("forwarding_number"),
@@ -156,10 +177,31 @@ async def overview(db: AsyncSession, support_cid: str, core_cid: uuid.UUID, *,
             "calls": {"items": [dict(x) for x in rows], "total": summary["total"], "page": page, "page_size": page_size}}
 
 
-async def call_detail(db: AsyncSession, support_cid: str, call_id: uuid.UUID) -> dict:
+async def call_detail(db: AsyncSession, support_cid: str, call_id: uuid.UUID, *, source: str = "megafon") -> dict:
     await ready(db)
     row = (await db.execute(text(f"""SELECT {_columns()} FROM {_SCHEMA}.call_records c
-        WHERE {_base()} AND c.id=:id"""), {"cid": support_cid, "id": call_id})).mappings().first()
+        WHERE {_base(source)} AND c.id=:id"""), {"cid": support_cid, "id": call_id})).mappings().first()
     if row is None:
         raise HTTPException(404, "Звонок не найден")
     return dict(row)
+
+
+async def source_connections(db: AsyncSession, support_cid: str) -> dict:
+    await ready(db)
+    rows = (await db.execute(text(f"""SELECT id, provider, label, status, enabled, last_sync_at,
+        (NULLIF(last_error,'') IS NOT NULL) AS has_error
+        FROM {_SCHEMA}.connectors WHERE company_id=CAST(:cid AS uuid)
+        AND type='channel' AND provider IN ('asterisk','mango','megafon')
+        ORDER BY enabled DESC, last_sync_at DESC NULLS LAST, id LIMIT 100"""),
+        {"cid": support_cid})).mappings().all()
+    items = []
+    for source, provider in PROVIDERS.items():
+        row = next((r for r in rows if r['provider'] == provider), None)
+        items.append({"source": source, "provider": provider,
+                      "connector_id": str(row['id']) if row else None,
+                      "enabled": bool(row and row['enabled']),
+                      "status": row['status'] if row else 'not_configured',
+                      "last_sync_at": row['last_sync_at'] if row else None,
+                      "has_error": bool(row and row['has_error'])})
+    default = next((r['source'] for r in items if r['enabled']), 'node')
+    return {"default_source": default, "sources": items}

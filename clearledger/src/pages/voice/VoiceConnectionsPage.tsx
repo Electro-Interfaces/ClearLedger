@@ -12,6 +12,8 @@ import { useCompany } from '@/contexts/CompanyContext'
 import { ApiError } from '@/services/apiClient'
 import * as links from '@/services/voiceConnectionsService'
 import * as voice from '@/services/voiceService'
+import { getPbxSources, SOURCE_NAMES } from '@/services/pbxVoiceService'
+import { SipOperators } from './SipOperators'
 import { Heading } from './parts'
 
 const SOURCE: Record<links.ConnectionSource, string> = {
@@ -45,8 +47,13 @@ function Shell({ title, description, status, children, actions }: {
 
 export default function VoiceConnectionsPage() {
   const { companyId } = useCompany()
-  const [opening, setOpening] = useState<'megafon' | 'asterisk' | null>(null)
+  const [opening, setOpening] = useState<'megafon' | 'mango' | 'asterisk' | null>(null)
   const providers = useQuery({ queryKey: ['voice-connections', companyId], queryFn: () => links.connections(companyId), enabled: !!companyId, retry: false })
+  const sources = useQuery({ queryKey: ['voice-pbx-sources', companyId], queryFn: () => getPbxSources(companyId), enabled: !!companyId, retry: false })
+  const [pickedProvider, setPickedProvider] = useState<'mango' | 'megafon' | null>(null)
+  const enabledProvider = sources.data?.sources.find(item => item.source !== 'node' && item.enabled)?.source
+  const historyProvider: 'mango' | 'megafon' = pickedProvider ?? (enabledProvider === 'megafon' ? 'megafon' : 'mango')
+  const history = sources.data?.sources.find(item => item.source === historyProvider)
   const node = useQuery({ queryKey: ['voice-node-connections', companyId], queryFn: () => voice.nodeConnections(companyId), enabled: !!companyId, retry: false })
   const cc = useQuery({ queryKey: ['voice-cc', companyId], queryFn: () => voice.ccConnections(companyId), enabled: !!companyId, retry: false })
   const health = useQuery({ queryKey: ['voice-health', companyId], queryFn: () => voice.health(companyId), enabled: !!companyId, retry: false })
@@ -63,8 +70,8 @@ export default function VoiceConnectionsPage() {
     return links.checkProvider(companyId, megafon.id)
   } })
   const checkCore = useMutation({ mutationFn: () => voice.checkCoreConnection(companyId) })
-  const busy = providers.isFetching || node.isFetching || cc.isFetching || health.isFetching || webhooks.isFetching
-  async function settings(provider: 'megafon' | 'asterisk') {
+  const busy = providers.isFetching || sources.isFetching || node.isFetching || cc.isFetching || health.isFetching || webhooks.isFetching
+  async function settings(provider: 'megafon' | 'mango' | 'asterisk') {
     setOpening(provider)
     try { await links.providerSettings(companyId, provider) }
     catch (error) { toast.error(errorText(error)) }
@@ -72,7 +79,7 @@ export default function VoiceConnectionsPage() {
   }
   async function refresh() {
     checkHistory.reset(); checkCore.reset()
-    await Promise.all([providers.refetch(), node.refetch(), cc.refetch(), health.refetch(), webhooks.refetch()])
+    await Promise.all([providers.refetch(), sources.refetch(), node.refetch(), cc.refetch(), health.refetch(), webhooks.refetch()])
   }
   const forbidden = providers.error instanceof ApiError && [401, 403].includes(providers.error.status)
   if (!companyId) return <p className="p-4" role="alert">Выберите компанию</p>
@@ -80,13 +87,7 @@ export default function VoiceConnectionsPage() {
   const pending = (loading: boolean) => loading ? 'Проверяем…' : 'Нет данных'
   const configured = (value?: boolean) => value ? 'Параметры заданы' : 'Не настроено'
   const apiSource = megafon?.sources.api_key
-  const hookSource = megafon?.sources.crm_token
   const historyConfigured = megafon?.readiness.history?.configured === true
-  const historyEnabled = megafon?.readiness.history?.enabled === true
-  const staleHistory = megafon?.last_sync_at && Date.now() - Date.parse(megafon.last_sync_at) > 15 * 60_000
-  const historyStatus = providers.error ? 'Нет подтверждения' : !megafon ? pending(providers.isPending) : !historyEnabled ? 'Выгрузка выключена'
-    : megafon.last_error ? 'Ошибка обмена' : staleHistory ? 'Давно не обновлялось'
-    : megafon.last_sync_at ? 'История загружается' : configured(historyConfigured)
   const core = node.data?.core
   const space = node.data?.space
   const receiverUrl = support?.webhook_path ? new URL(`/support${support.webhook_path}`, window.location.origin).href : null
@@ -104,22 +105,29 @@ export default function VoiceConnectionsPage() {
       <Button variant="outline" size="sm" disabled={busy} onClick={() => void refresh()}><RefreshCw data-icon="inline-start" />Обновить состояния</Button>
     </Heading>
     <Alert><Cable /><AlertTitle>Данные и голосовая линия подключаются отдельно</AlertTitle>
-      <AlertDescription>История МегаФона может загружаться при неподключённой голосовой линии узла. Связь КЦ с узлом подтверждает обмен событий; приём звонков требует отдельной настройки линии.</AlertDescription></Alert>
+      <AlertDescription>История ВАТС может загружаться при неподключённой голосовой линии узла. Связь КЦ с узлом подтверждает обмен событий; приём звонков требует отдельной настройки линии.</AlertDescription></Alert>
+    <SipOperators key={companyId} companyId={companyId} openHistory={provider => void settings(provider)} />
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-      <Shell title="МегаФон → история звонков" description="Выгрузка истории по API ВАТС. Действующий маршрут звонков сохраняется." status={historyStatus}
-        actions={<><Button variant="outline" size="sm" onClick={() => void settings('megafon')} disabled={opening !== null}>Настроить МегаФон</Button>
-          <Button size="sm" variant="outline" disabled={!megafon || !historyConfigured || checkHistory.isPending} onClick={() => checkHistory.mutate()}>Проверить API истории</Button>
-          <Button asChild variant="ghost" size="sm"><Link to="/voice/megafon">Открыть историю</Link></Button></>}>
-        {providers.isPending ? <Skeleton className="h-16" /> : providers.error ? <QueryError error={providers.error} /> : <dl className="flex flex-col gap-2">
-          <Detail name="Адрес API">{megafon?.endpoint ?? 'Не задан'}</Detail>
-          <Detail name="Ключ API">{apiSource ? SOURCE[apiSource] : 'Не задан'}</Detail>
-          <Detail name="Последний обмен">{date(megafon?.last_sync_at)}</Detail>
-          <Detail name="Входящие события">{configured(megafon?.readiness.events?.configured)}{hookSource && hookSource !== 'missing' ? `, ключ ${SOURCE[hookSource]}` : ''}</Detail>
+      <Shell title="АТС · история провайдера" description="Подключение API Mango или МегаФона для загрузки истории ВАТС."
+        status={sources.error ? 'Нет подтверждения' : !history?.connector_id ? 'Подключение не создано' : !history.enabled ? 'Выключено' : history.has_error ? 'Ошибка обмена' : 'Подключение сохранено'}
+        actions={<><Button variant="outline" size="sm" onClick={() => void settings(historyProvider)} disabled={opening !== null}>Настроить {SOURCE_NAMES[historyProvider]}</Button>
+          {historyProvider === 'megafon' ? <Button size="sm" variant="outline" disabled={!megafon || !historyConfigured || checkHistory.isPending} onClick={() => checkHistory.mutate()}>Проверить API истории</Button> : null}
+          <Button asChild variant="ghost" size="sm"><Link to={`/voice/pbx?source=${historyProvider}`}>Открыть историю</Link></Button></>}>
+        <label className="flex flex-wrap items-center gap-2 text-sm">Провайдер ВАТС
+          <select aria-label="Провайдер ВАТС" value={historyProvider} onChange={event => { setPickedProvider(event.target.value as 'mango' | 'megafon'); checkHistory.reset() }}
+            className="min-h-9 max-w-full rounded-md border border-input bg-background px-2 text-sm">
+            <option value="mango">Mango</option><option value="megafon">МегаФон</option>
+          </select>
+        </label>
+        {sources.isPending ? <Skeleton className="h-16" /> : sources.error ? <QueryError error={sources.error} /> : <dl className="flex flex-col gap-2">
+          <Detail name="Провайдер">{SOURCE_NAMES[historyProvider]}</Detail>
+          <Detail name="История по API">{history?.enabled ? 'Загрузка включена' : 'Загрузка не включена'}</Detail>
+          <Detail name="Последний обмен">{date(history?.last_sync_at)}</Detail>
+          {historyProvider === 'megafon' ? <><Detail name="Адрес API">{megafon?.endpoint ?? 'Не задан'}</Detail><Detail name="Ключ API">{apiSource ? SOURCE[apiSource] : 'Не задан'}</Detail></> : null}
         </dl>}
-        {megafon?.last_error ? <p role="alert" className="text-destructive">{megafon.last_error}</p> : null}
-        <p className="text-xs text-muted-foreground">Проверка читает минимальный ответ API и не сохраняет звонки. Наличие ключа вебхука не подтверждает доставку событий МегаФона.</p>
-        {checkHistory.data ? <Result ok={checkHistory.data.ok}>{checkHistory.data.message} Проверено {date(checkHistory.data.at)}.</Result> : null}
-        {checkHistory.error ? <QueryError error={checkHistory.error} /> : null}
+        <p className="text-xs text-muted-foreground">API истории и голосовая линия SIP настраиваются отдельно. Секреты провайдера сохраняются в Поддержке.</p>
+        {historyProvider === 'megafon' && checkHistory.data ? <Result ok={checkHistory.data.ok}>{checkHistory.data.message} Проверено {date(checkHistory.data.at)}.</Result> : null}
+        {historyProvider === 'megafon' && checkHistory.error ? <QueryError error={checkHistory.error} /> : null}
       </Shell>
       <Shell title="Узел ↔ пространство" description="Вход администратора, карточки клиентов и доступ узла к Ядру." status={node.error ? 'Нет подтверждения' : node.data ? 'Настройки установки прочитаны' : pending(node.isPending)}
         actions={<><Button size="sm" variant="outline" disabled={!core?.keyConfigured || checkCore.isPending} onClick={() => checkCore.mutate()}>Проверить доступ к Ядру</Button>
@@ -158,14 +166,14 @@ export default function VoiceConnectionsPage() {
         {webhooks.error ? <QueryError error={webhooks.error} /> : null}
         <p className="text-xs text-muted-foreground">На узле и у получателя должен быть один секрет подписи. Изменить состав можно в разделе получателей. Фактическую доставку подтверждает журнал событий.</p>
       </Shell>
-      <Shell title="МегаФон → голосовая линия узла" description="Соединение, через которое реальные звонки могут попасть в новое приложение КЦ." status={voiceStatus}
+      <Shell title="Оператор связи → голосовая линия SIP" description="Соединение, через которое реальные звонки могут попасть в новое приложение КЦ." status={voiceStatus}
         actions={<Button asChild size="sm" variant="outline"><Link to="/voice/health">Состояние узла и транка</Link></Button>}>
         {node.error ? <QueryError error={node.error} /> : <dl className="flex flex-col gap-2">
           <Detail name="Настройка транка">{node.data ? node.data.trunkConfigured ? 'Задана' : 'Не задана' : 'Нет данных'}</Detail>
           <Detail name="Состояние транка">{health.data?.parts?.trunk?.state === 'up' ? 'На связи' : health.data?.parts?.trunk?.state === 'off' ? 'Выключен' : 'Не подтверждено'}</Detail>
         </dl>}
         {health.error ? <QueryError error={health.error} /> : null}
-        <p className="text-xs text-muted-foreground">Подключение транка и переключение номеров выполняются отдельным этапом. Этот экран показывает состояние; действующие настройки ВАТС МегаФона он не изменяет.</p>
+        <p className="text-xs text-muted-foreground">SIP-подключения настраиваются в разделе «Операторы связи» выше. Переключение входящих номеров выполняется также в кабинете оператора связи.</p>
       </Shell>
       <Shell title="Распознавание и подсказки" description="Обработка разговоров внутри узла компании." status={node.error ? 'Нет подтверждения' : node.data ? node.data.asr.ready ? 'Распознавание готово' : configured(node.data.asr.configured) : pending(node.isPending)}
         actions={<Button asChild size="sm" variant="outline"><Link to="/voice/enrichment">Настройки обработки</Link></Button>}>
@@ -173,7 +181,7 @@ export default function VoiceConnectionsPage() {
           <Detail name="Распознавание">{node.data?.asr.ready ? 'Готово' : node.data?.asr.configured ? 'Настроено, готовность не подтверждена' : 'Не подключено'}</Detail>
           <Detail name="Подсказки модели">{node.data?.llm.ready ? 'Готовы' : node.data?.llm.configured ? 'Настроены, готовность не подтверждена' : 'Выключены'}</Detail>
         </dl>}
-        <p className="text-xs text-muted-foreground">История МегаФона сама по себе не передаёт звук в распознавание. Записи и расшифровки остаются в узле компании.</p>
+        <p className="text-xs text-muted-foreground">История ВАТС сама по себе не передаёт звук в распознавание. Записи и расшифровки остаются в узле компании.</p>
       </Shell>
     </div>
   </div>
